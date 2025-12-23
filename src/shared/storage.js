@@ -1,0 +1,15 @@
+// Storage facade used across all platforms.
+//
+// In the Chrome extension we use chrome.storage.local.
+// In Tauri/web we fall back to localStorage.
+
+import { kv } from "../platform/storage.js";
+
+// Keep the existing name to avoid touching call sites.
+export const storage = kv;
+
+export const STORAGE_KEYS = {
+  VAULT: "dusk_vault_v1", // encrypted mnemonic
+  SETTINGS: "dusk_settings_v1",
+  PERMISSIONS: "dusk_permissions_v1", // { [origin]: { accountIndex, connectedAt } }
+};

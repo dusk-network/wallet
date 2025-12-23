@@ -1,0 +1,31 @@
+{
+  "name": "dusk-wallet",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "author": "Hein Dauven <hein@dusk.network> (https://x.com/HeinDauven)",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "build:extension": "vite build -c vite.config.js",
+    "build:tauri": "vite build -c vite.tauri.config.js",
+    "dev:tauri": "vite --config vite.tauri.config.js --host --port 5173",
+    "tauri:dev": "cd apps/tauri/src-tauri && cargo tauri dev",
+    "tauri:build": "cd apps/tauri/src-tauri && cargo tauri build"
+  },
+  "dependencies": {
+    "@dusk/w3sper": "npm:@jsr/dusk__w3sper@^1.4.0",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-fs": "^2.0.0",
+    "@tauri-apps/plugin-store": "^2.0.0",
+    "@tauri-apps/plugin-stronghold": "^2.0.0",
+    "bip39": "3.1.0",
+    "jsqr": "^1.4.0",
+    "qrcode-generator": "^2.0.4"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "vite": "^5.3.1",
+    "vite-plugin-node-polyfills": "^0.23.0"
+  }
+}

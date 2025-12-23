@@ -1,0 +1,35 @@
+import { defineConfig } from "vite";
+import { nodePolyfills } from "vite-plugin-node-polyfills";
+
+export default defineConfig({
+  plugins: [
+    // bip39 pulls in node shims, the web-wallet already uses this plugin.
+    nodePolyfills(),
+  ],
+  define: {
+    // Build-time constant used by src/wallet/bus.js to avoid bundling the
+    // local (Tauri/web) backend into the extension bundle.
+    __DUSK_BACKEND__: JSON.stringify("extension"),
+  },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    sourcemap: true,
+    // We use multiple JS entrypoints so the output file names are stable.
+    rollupOptions: {
+      input: {
+        background: "src/background.js",
+        contentScript: "src/contentScript.js",
+        inpage: "src/inpage.js",
+        offscreen: "src/offscreen.js",
+        popup: "src/popup.js",
+        notification: "src/notification.js",
+      },
+      output: {
+        entryFileNames: "[name].js",
+        chunkFileNames: "chunks/[name].js",
+        assetFileNames: "assets/[name][extname]",
+      },
+    },
+  },
+});

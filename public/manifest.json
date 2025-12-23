@@ -1,0 +1,79 @@
+{
+  "manifest_version": 3,
+  "name": "DuskDS Wallet Extension",
+  "version": "0.1.0",
+  "description": "Crypto wallet for the DuskDS network.",
+  "action": {
+    "default_title": "Dusk Wallet",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/dusk-16.png",
+      "32": "icons/dusk-32.png",
+      "48": "icons/dusk-48.png",
+      "128": "icons/dusk-128.png"
+    }
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "notifications",
+    "storage",
+    "tabs",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "ws://*/*",
+    "wss://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "inpage.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "contentScript.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "chunks/*",
+        "assets/*"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "ws://*/*",
+        "wss://*/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
+  "icons": {
+    "16": "icons/dusk-16.png",
+    "32": "icons/dusk-32.png",
+    "48": "icons/dusk-48.png",
+    "128": "icons/dusk-128.png"
+  }
+}

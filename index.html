@@ -1,0 +1,55 @@
+<!doctype html>
+<!--
+  Development entrypoint for the Tauri desktop/mobile app.
+
+  Why this file exists:
+  - Vite dev server serves `/` from the project root's index.html.
+  - The extension build uses HTML files in /public (popup.html/full.html/etc.)
+    which reference built JS filenames (popup.js) and are copied to dist.
+  - In dev mode, those built filenames don't exist; modules are served from /src.
+
+  So this file mirrors the production UI shell but loads /src/popup.js.
+
+  TODO: Find a way to mount this file in a nicer way
+-->
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Dusk Wallet</title>
+    <link rel="stylesheet" href="/ui.css" />
+  </head>
+
+  <body class="page--full">
+    <div class="full-wrap">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="brand">
+            <div class="brand-mark" aria-hidden="true">D</div>
+            <div class="brand-text">
+              <div class="panel-title">Dusk Wallet</div>
+            </div>
+            <button
+              class="panel-subtitle network-pill"
+              id="network-pill"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <span class="network-pill__label">Loading…</span>
+              <span class="network-pill__chev" aria-hidden="true">▾</span>
+            </button>
+          </div>
+
+          <div class="header-actions" id="header-actions"></div>
+        </div>
+
+        <div class="panel-content">
+          <div id="app"></div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/popup.js"></script>
+  </body>
+</html>

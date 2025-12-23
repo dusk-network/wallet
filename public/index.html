@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Dusk Wallet</title>
+    <link rel="stylesheet" href="ui.css" />
+  </head>
+
+  <body class="page--full">
+    <div class="full-wrap">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="brand">
+            <div class="brand-mark" aria-hidden="true">D</div>
+            <div class="brand-text">
+              <div class="panel-title">Dusk Wallet</div>
+            </div>
+            <button
+              class="panel-subtitle network-pill"
+              id="network-pill"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <span class="network-pill__label">Loading…</span>
+              <span class="network-pill__chev" aria-hidden="true">▾</span>
+            </button>
+          </div>
+
+          <div class="header-actions" id="header-actions"></div>
+        </div>
+
+        <div class="panel-content">
+          <div id="app"></div>
+        </div>
+      </div>
+    </div>
+
+    <!--
+      For the extension, this is also used by full.html/popup.html.
+      For Tauri desktop/mobile, it's convenient to have a default index.html.
+    -->
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
