@@ -10,6 +10,20 @@ import { subnav } from "../../components/Subnav.js";
 export function optionsView(ov, { state, actions } = {}) {
   const currentNodeUrl = String(ov?.nodeUrl ?? "").trim();
 
+  const lockBtn = ov?.isUnlocked
+    ? h("button", {
+        class: "btn-outline",
+        text: "Lock wallet",
+        onclick: async () => {
+          await actions?.send?.({ type: "DUSK_UI_LOCK" });
+          state.route = "home";
+          state.banner = null;
+          state.needsRefresh = true;
+          await actions?.render?.({ forceRefresh: true });
+        },
+      })
+    : null;
+
   const nodeUrlInput = h("input", {
     value: currentNodeUrl,
     placeholder: "https://nodes.dusk.network",
@@ -128,6 +142,7 @@ export function optionsView(ov, { state, actions } = {}) {
       },
     }),
     bannerView(state.banner),
+    lockBtn ? h("div", { class: "row" }, [h("div", { class: "btnrow" }, [lockBtn])]) : null,
     h("div", { class: "row" }, [
       h("label", { text: "Network" }),
       networkSelect,

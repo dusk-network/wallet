@@ -4,8 +4,7 @@ import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { bannerView } from "../../components/Banner.js";
-import { connectionPill } from "../../components/ConnectionPill.js";
-import { identiconEl } from "../../components/Identicon.js";
+import { platform } from "../../../platform/index.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -23,7 +22,6 @@ function timeAgo(ts) {
 }
 
 export function homeView(ov, { state, actions } = {}) {
-  const account = ov?.accounts?.[0] ?? "";
   const hasBalance = Boolean(ov?.balance?.value);
   const balFull = hasBalance ? formatLuxToDusk(ov.balance.value) : "—";
   const balDusk = hasBalance ? clampDecimals(balFull, 4) : "—";
@@ -38,85 +36,81 @@ export function homeView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  const accountCard = h("div", { class: "account-card" }, [
-    h("div", { class: "account-line" }, [
-      h("div", { class: "account-left" }, [
-        identiconEl(account || "dusk"),
-        h("div", { class: "account-meta" }, [
-          h("div", { class: "muted", text: "Account" }),
-          h("code", { text: truncateMiddle(account, 12, 10) || "(none)" }),
-        ]),
-      ]),
-      h("button", {
-        class: "icon-btn icon-only",
-        text: "⧉",
-        title: "Copy account",
-        onclick: async () => {
-          if (!account) return;
-          const ok = await copyToClipboard(account);
-          actions?.showToast?.(ok ? "Copied account" : "Copy failed");
-        },
-      }),
-    ]),
+  // Connected site label
+  let connHost = null;
+  let connConnected = false;
+  if (platform.capabilities.dapp) {
+    const origin = ov?.activeOrigin;
+    connConnected = Boolean(origin && ov?.activeConnected);
+    if (typeof origin === "string" && (origin.startsWith("https://") || origin.startsWith("http://"))) {
+      try {
+        connHost = new URL(origin).hostname;
+      } catch {
+        connHost = origin;
+      }
+    }
+  }
 
-    h("div", { class: "account-foot" }, [connectionPill(ov)]),
-  ]);
+  const connInline = connHost
+    ? h("div", { class: "balance-site", title: ov?.activeOrigin ?? "" }, [
+        h("div", {
+          class: [
+            "conn-dot",
+            connConnected ? "conn-dot--on" : "",
+            "conn-dot--sm",
+          ].filter(Boolean).join(" "),
+        }),
+        h("div", {
+          class: "balance-site-text",
+          text: `${connConnected ? "Connected" : "Site"}: ${connHost}`,
+        }),
+      ])
+    : null;
 
-  const balanceBox = h("div", { class: "home-balance" }, [
-    h("div", { class: "balance-amount", text: balDusk, title: balFull }),
-    h("div", { class: "balance-sub", text: "DUSK (public)" }),
-    ov?.balanceError
-      ? h("div", { class: "muted", text: `Balance error: ${ov.balanceError}` })
-      : h("div"),
-  ]);
+  const balanceSubRow = h(
+    "div",
+    { class: "balance-subrow" },
+    [
+      h("div", { class: "balance-sub", text: "DUSK (public)" }),
+      connInline,
+    ].filter(Boolean)
+  );
 
-  const actionsRow = h("div", { class: "actions" }, [
+  const actionBtn = (label, ico, onClick) =>
     h(
       "button",
       {
-        class: "action-card",
-        onclick: () => {
-          state.route = "send";
-          state.banner = null;
-          state.draft = null;
-          actions?.render?.().catch(() => {});
-        },
+        class: "action-btn",
+        onclick: onClick,
       },
       [
-        h("div", { class: "action-icon", text: "↗" }),
-        h("div", { class: "action-title", text: "Send" }),
+        h("div", { class: "action-btn-ico", text: ico }),
+        h("div", { class: "action-btn-label", text: label }),
       ]
-    ),
-    h(
-      "button",
-      {
-        class: "action-card",
-        onclick: () => {
-          state.route = "receive";
-          state.banner = null;
-          actions?.render?.().catch(() => {});
-        },
-      },
-      [
-        h("div", { class: "action-icon", text: "⤓" }),
-        h("div", { class: "action-title", text: "Receive" }),
-      ]
-    ),
-  ]);
+    );
 
-  const footerBtns = h("div", { class: "btnrow" }, [
-    h("button", {
-      class: "btn-outline",
-      text: "Lock",
-      onclick: async () => {
-        await actions?.send?.({ type: "DUSK_UI_LOCK" });
-        state.route = "home";
-        state.banner = null;
-        state.needsRefresh = true;
-        await actions?.render?.({ forceRefresh: true });
-      },
+  const actionBar = h("div", { class: "action-bar" }, [
+    actionBtn("Send", "↗", () => {
+      state.route = "send";
+      state.banner = null;
+      state.draft = null;
+      actions?.render?.().catch(() => {});
+    }),
+    actionBtn("Receive", "⤓", () => {
+      state.route = "receive";
+      state.banner = null;
+      actions?.render?.().catch(() => {});
     }),
   ]);
+
+  const hero = h("div", { class: "home-balance home-hero" }, [
+    h("div", { class: "balance-amount", text: balDusk, title: balFull }),
+    balanceSubRow,
+    ov?.balanceError
+      ? h("div", { class: "muted", text: `Balance error: ${ov.balanceError}` })
+      : null,
+    actionBar,
+  ].filter(Boolean));
 
   // Activity list
   const txs = Array.isArray(ov?.txs) ? ov.txs : [];
@@ -327,7 +321,7 @@ export function homeView(ov, { state, actions } = {}) {
       h("div", { class: "asset-ico", text: "D" }),
       h("div", { class: "asset-main" }, [
         h("div", { class: "asset-sym", text: "DUSK" }),
-        h("div", { class: "asset-name", text: "Dusk Network" }),
+        h("div", { class: "asset-name", text: "Dusk" }),
       ]),
       h("div", { class: "asset-bal" }, [
         h("div", { class: "asset-amt", text: balDusk, title: balFull }),
@@ -338,11 +332,8 @@ export function homeView(ov, { state, actions } = {}) {
 
   return [
     bannerView(state.banner),
-    accountCard,
-    balanceBox,
-    actionsRow,
+    hero,
     tabs,
     ...(activeTab === "activity" ? [activityFull] : [assetsCard, recentActivity]),
-    footerBtns,
   ].filter(Boolean);
 }

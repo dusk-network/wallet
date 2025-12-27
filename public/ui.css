@@ -481,12 +481,33 @@ button:disabled {
   overflow: hidden;
   border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
   flex: 0 0 auto;
+  position: relative;
 }
 
 .identicon svg {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* Small connection/status badge for header identicon */
+.identicon-badge {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in oklab, var(--card) 92%, var(--background));
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--muted) 25%, transparent);
+}
+
+.identicon-badge--on {
+  background: oklch(0.72 0.18 142);
+}
+
+.identicon-badge--off {
+  background: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
 }
 
 .account-card {
@@ -597,6 +618,100 @@ button:disabled {
   margin-top: 6px;
   font-size: 12px;
   color: var(--muted-foreground);
+}
+
+/* Compact one-line subrow under the main balance (label + connection) */
+.balance-subrow {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.balance-subrow .balance-sub {
+  margin-top: 0;
+}
+
+.conn-dot--sm {
+  width: 6px;
+  height: 6px;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--muted) 25%, transparent);
+}
+
+.balance-site {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 55%;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.balance-site-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Balance + actions are grouped into a single compact hero block */
+.home-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Compact action row */
+.action-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.action-btn {
+  height: 44px;
+  padding: 0 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 60%, transparent);
+  color: var(--foreground);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
+}
+
+.action-btn:hover {
+  background: color-mix(in oklab, var(--card) 75%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.action-btn:active {
+  transform: translateY(1px);
+}
+
+.action-btn-ico {
+  width: 28px;
+  height: 28px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+  background: color-mix(in oklab, var(--card) 80%, transparent);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.action-btn-label {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
 }
 
 .actions {
@@ -1137,8 +1252,26 @@ button.net-menu-item--active {
 }
 
 /* -------------------------------------------------------
-   Popup-only compact header (reduces crowding)
+   Popup-only compact header
    ------------------------------------------------------- */
+body.page--popup {
+  --panel-padding: 12px;
+  --section-gap: 10px;
+  --panel-min-height: 520px;
+}
+
+body.page--popup .home-balance {
+  padding: 14px 14px;
+}
+
+body.page--popup .balance-amount {
+  font-size: 26px;
+}
+
+body.page--popup .action-btn {
+  height: 42px;
+}
+
 body.page--popup .panel-header {
   padding: 12px 12px;
   gap: 10px;

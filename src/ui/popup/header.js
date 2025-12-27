@@ -2,6 +2,7 @@ import { h, setChildren } from "../lib/dom.js";
 import { accountChipEl } from "../components/AccountChip.js";
 import { isFullView, isPopupView } from "./env.js";
 import { isExtensionRuntime } from "../../platform/runtime.js";
+import { platform } from "../../platform/index.js";
 
 export function createHeaderRenderer({
   headerActionsHost,
@@ -67,7 +68,21 @@ export function createHeaderRenderer({
 
     const account = ov?.accounts?.[0];
     if (ov?.isUnlocked && typeof account === "string" && account.length) {
-      actions.push(accountChipEl(account, { onCopy: showToast }));
+      let host = null;
+      let connected = false;
+      if (platform.capabilities.dapp) {
+        const origin = ov?.activeOrigin;
+        connected = Boolean(origin && ov?.activeConnected);
+        if (origin) {
+          try {
+            host = new URL(origin).hostname;
+          } catch {
+            host = String(origin);
+          }
+        }
+      }
+
+      actions.push(accountChipEl(account, { onCopy: showToast, connected, host }));
     }
 
     if (expandBtn) actions.push(expandBtn);
