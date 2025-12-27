@@ -9,8 +9,26 @@ export const ONBOARD_ROUTES = new Set([
 ]);
 
 export const state = {
-  // home | send | confirm | receive | options | onboarding_*...
-  route: isOptionsPage ? "options" : "home",
+  // home | send | confirm | receive | activity | options | onboarding_*...
+  route: (() => {
+    if (isOptionsPage) return "options";
+    try {
+      const r = new URLSearchParams(location.search).get("route");
+      const allowed = new Set(["home", "send", "confirm", "receive", "activity", "options"]);
+      if (r && allowed.has(r)) return r;
+    } catch {
+      // ignore
+    }
+    return "home";
+  })(),
+  // Optional highlight for Activity screen (e.g. opened from notifications)
+  highlightTx: (() => {
+    try {
+      return new URLSearchParams(location.search).get("tx") || null;
+    } catch {
+      return null;
+    }
+  })(),
   overview: null,
   draft: null,
   banner: null,

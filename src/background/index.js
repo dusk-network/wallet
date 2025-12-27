@@ -23,7 +23,12 @@ import {
   registerStorageChangeForwarder,
 } from "./dappEvents.js";
 
-import { notifyTxSubmitted, registerTxNotificationHandlers } from "./txNotify.js";
+import {
+  notifyTxSubmitted,
+  notifyTxExecuted,
+  registerTxNotificationHandlers,
+} from "./txNotify.js";
+import { getTxMeta, patchTxMeta, putTxMeta, listTxs } from "../shared/txStore.js";
 
 registerTxNotificationHandlers();
 
@@ -81,6 +86,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const id = message.id;
         const result = await handleRpc(origin, message.request);
         sendResponse({ id, result });
+        return;
+      }
+
+      // Offscreen notifies us when a tx gets executed (best-effort).
+      if (message?.type === "DUSK_TX_EXECUTED") {
+        const hash = String(message.hash ?? "");
+        const ok = message.ok !== false; // default true
+        const error = message.error ? String(message.error) : "";
+
+        try {
+          const meta = await getTxMeta(hash);
+          const origin = meta?.origin ?? "Wallet";
+          const nodeUrl = meta?.nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
+
+          await patchTxMeta(hash, {
+            status: ok ? "executed" : "failed",
+            error: ok ? undefined : error || undefined,
+          });
+
+          notifyTxExecuted({ hash, origin, ok, error, nodeUrl }).catch(() => {});
+        } catch {
+          // Still notify even if metadata lookup fails.
+          notifyTxExecuted({ hash, origin: "Wallet", ok, error }).catch(() => {});
+        }
+
+        // Also broadcast to any open UI views so they can show a toast.
+        try {
+          chrome.runtime.sendMessage({
+            type: "DUSK_UI_TX_STATUS",
+            hash,
+            ok,
+            error,
+          });
+        } catch {
+          // ignore
+        }
+
+        sendResponse({ ok: true });
         return;
       }
 
@@ -215,6 +258,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let balance = null;
         let balanceError = null;
 
+        // Recent activity (transaction list). This is used by the Home +
+        // Activity screens to provide MetaMask-like feedback instead of
+        // ephemeral toasts.
+        let txs = [];
+        try {
+          txs = await listTxs({ nodeUrl: settings.nodeUrl });
+        } catch {
+          txs = [];
+        }
+
         if (status.isUnlocked) {
           try {
             await ensureEngineConfigured();
@@ -242,6 +295,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           activeOrigin,
           activeConnected,
+          txs,
         });
         return;
       }
@@ -256,10 +310,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Apply standard gas defaults for wallet initiated transactions.
         const baseParams = applyTxDefaults(message.params ?? {});
         const result = await engineCall("dusk_sendTransaction", baseParams);
+
+        // Persist metadata (see rpc.js comments).
+        const hash = result?.hash ?? "";
+        const kind = String(baseParams?.kind ?? "");
         try {
-          await notifyTxSubmitted({ hash: result?.hash ?? "", origin: "Wallet" });
+          const settings = await getSettings();
+          const nodeUrl = settings?.nodeUrl ?? "";
+
+          if (hash) {
+            await putTxMeta(hash, {
+              origin: "Wallet",
+              nodeUrl,
+              kind,
+              // Helpful fields for the Activity list UI
+              to: baseParams?.to ? String(baseParams.to) : undefined,
+              amount:
+                baseParams?.amount !== undefined && baseParams?.amount !== null
+                  ? String(baseParams.amount)
+                  : undefined,
+              deposit:
+                baseParams?.deposit !== undefined && baseParams?.deposit !== null
+                  ? String(baseParams.deposit)
+                  : undefined,
+              contractId:
+                kind === "contract_call" && baseParams?.contractId
+                  ? String(baseParams.contractId)
+                  : undefined,
+              fnName:
+                kind === "contract_call" && baseParams?.fnName
+                  ? String(baseParams.fnName)
+                  : undefined,
+              submittedAt: Date.now(),
+              status: "submitted",
+            });
+          }
+
+          await notifyTxSubmitted({ hash, origin: "Wallet", nodeUrl });
         } catch {
-          // ignore
+          notifyTxSubmitted({ hash, origin: "Wallet" }).catch(() => {});
         }
         sendResponse({ ok: true, result });
         return;

@@ -61,6 +61,78 @@ function showToast(text, ms = 1200) {
   render().catch(() => {});
 }
 
+// --- Tx status push (from background) --------------------------------------
+let txStatusListenerInstalled = false;
+function installTxStatusListener() {
+  if (txStatusListenerInstalled) return;
+  txStatusListenerInstalled = true;
+
+  try {
+    if (!chrome?.runtime?.onMessage) return;
+
+    chrome.runtime.onMessage.addListener((msg) => {
+      try {
+        if (msg?.type !== "DUSK_UI_TX_STATUS") return;
+
+        const hash = String(msg.hash ?? "");
+        const ok = msg.ok !== false;
+        const sh =
+          hash && hash.length > 18
+            ? `${hash.slice(0, 10)}…${hash.slice(-8)}`
+            : hash;
+
+        if (ok) {
+          showToast(sh ? `Transaction executed: ${sh}` : "Transaction executed", 2500);
+        } else {
+          showToast(sh ? `Transaction failed: ${sh}` : "Transaction failed", 3000);
+        }
+
+        // Best-effort immediate UI update so the Activity row can transition
+        // without waiting for the next overview refresh.
+        try {
+          const ov = state.overview;
+          if (ov && Array.isArray(ov.txs)) {
+            const item = ov.txs.find((t) => String(t?.hash ?? "") === hash);
+            if (item) {
+              item.status = ok ? "executed" : "failed";
+              if (!ok && msg?.error) item.error = String(msg.error);
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        // Pulse the activity row (pending -> executed/failed) for a short time.
+        state.txPulse = { hash, kind: ok ? "ok" : "bad", at: Date.now() };
+        setTimeout(() => {
+          try {
+            if (state.txPulse && state.txPulse.hash === hash) {
+              state.txPulse = null;
+              render().catch(() => {});
+            }
+          } catch {
+            // ignore
+          }
+        }, 2200);
+
+        // Trigger a refresh so balances/state update soon after execution.
+        state.needsRefresh = true;
+        setTimeout(() => {
+          refreshOverview(send, { force: true })
+            .then(() => render())
+            .catch(() => {});
+        }, 500);
+      } catch {
+        // ignore
+      }
+    });
+  } catch {
+    // ignore
+  }
+}
+
+installTxStatusListener();
+
 // --- Network menu --------------------------------------------------------
 const netMenu = createNetworkMenuController({
   onSelectPreset: async (preset) => {

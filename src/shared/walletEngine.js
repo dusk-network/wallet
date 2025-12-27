@@ -47,8 +47,7 @@ async function withTimeout(promise, ms, message, onTimeout) {
   }
 }
 
-
-let engineConfig = { nodeUrl: "https://testnet.nodes.dusk.network" };
+let engineConfig = { nodeUrl: "https://nodes.testnet.dusk.network" };
 
 export function configure(patch = {}) {
   if (patch.nodeUrl && typeof patch.nodeUrl === "string") {
@@ -485,4 +484,40 @@ export async function sendTransaction(params) {
   }
 
   throw new Error(`Unsupported transaction kind: ${params.kind}`);
+}
+
+/**
+ * Wait until a transaction becomes EXECUTED according to the node.
+ *
+ * @param {string} hash
+ * @param {{timeoutMs?: number}} [opts]
+ * @returns {Promise<any>} The executed event payload 
+ */
+export async function waitTxExecuted(hash, opts = {}) {
+  if (!hash || typeof hash !== "string") {
+    throw new Error("hash is required");
+  }
+
+  const timeoutMs = Number(opts.timeoutMs ?? 120_000);
+  const network = await ensureNetwork();
+
+  // w3sper provides a tx watcher interface.
+  const txs = network?.transactions;
+  const withId = txs?.withId?.bind(txs);
+  if (!withId) {
+    throw new Error("Transaction watcher not available on this Network instance");
+  }
+
+  const handle = withId(hash);
+  const once = handle?.once;
+  const executed = once?.executed?.bind(once);
+  if (!executed) {
+    throw new Error("Transaction executed watcher not available");
+  }
+
+  return await withTimeout(
+    Promise.resolve(executed()),
+    timeoutMs,
+    `Timed out waiting for transaction execution (${hash.slice(0, 12)}…)`
+  );
 }

@@ -7,6 +7,7 @@ import {
   lock,
   sendTransaction,
   transfer,
+  waitTxExecuted,
   unlockWithMnemonic,
 } from "./shared/walletEngine.js";
 
@@ -18,6 +19,71 @@ function serializeError(err) {
     message: err?.message ?? String(err),
     data: err?.data,
   };
+}
+
+const activeTxWatches = new Set();
+
+function inferTxOk(executedEvent) {
+  try {
+    if (!executedEvent || typeof executedEvent !== "object") return true;
+    if (executedEvent.success === false) return false;
+    if (executedEvent.err) return false;
+    if (executedEvent.error) return false;
+    if (executedEvent.result?.err) return false;
+    if (executedEvent.result?.error) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function inferTxError(executedEvent) {
+  try {
+    if (!executedEvent || typeof executedEvent !== "object") return "";
+    const err = executedEvent.err ?? executedEvent.error ?? executedEvent.result?.err ?? executedEvent.result?.error;
+    if (!err) return "";
+    if (typeof err === "string") return err;
+    if (typeof err?.message === "string") return err.message;
+    return JSON.stringify(err);
+  } catch {
+    return "";
+  }
+}
+
+async function watchTxExecuted(hash) {
+  if (!hash || typeof hash !== "string") return;
+  if (activeTxWatches.has(hash)) return;
+  activeTxWatches.add(hash);
+
+  try {
+    const executedEvent = await waitTxExecuted(hash, { timeoutMs: 180_000 });
+    const ok = inferTxOk(executedEvent);
+    const error = ok ? "" : inferTxError(executedEvent);
+
+    try {
+      chrome.runtime.sendMessage({
+        type: "DUSK_TX_EXECUTED",
+        hash,
+        ok,
+        error,
+      });
+    } catch {
+      // ignore
+    }
+  } catch (e) {
+    try {
+      chrome.runtime.sendMessage({
+        type: "DUSK_TX_EXECUTED",
+        hash,
+        ok: false,
+        error: e?.message ?? String(e),
+      });
+    } catch {
+      // ignore
+    }
+  } finally {
+    activeTxWatches.delete(hash);
+  }
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -82,6 +148,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               nonce: result.nonce?.toString?.() ?? String(result.nonce),
             },
           });
+
+          watchTxExecuted(result?.hash).catch(() => {});
           return;
         }
 

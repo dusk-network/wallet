@@ -1,4 +1,5 @@
-import { clampDecimals, formatLuxToDusk } from "../../../shared/amount.js";
+import { clampDecimals, formatLuxToDusk, formatLuxShort, safeBigInt } from "../../../shared/amount.js";
+import { explorerTxUrl } from "../../../shared/explorer.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
@@ -6,11 +7,36 @@ import { bannerView } from "../../components/Banner.js";
 import { connectionPill } from "../../components/ConnectionPill.js";
 import { identiconEl } from "../../components/Identicon.js";
 
+function timeAgo(ts) {
+  const t = Number(ts || 0);
+  if (!t) return "";
+  const ms = Date.now() - t;
+  if (ms < 0) return "";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${Math.max(1, s)}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const hhr = Math.floor(m / 60);
+  if (hhr < 24) return `${hhr}h`;
+  const d = Math.floor(hhr / 24);
+  return `${d}d`;
+}
+
 export function homeView(ov, { state, actions } = {}) {
   const account = ov?.accounts?.[0] ?? "";
   const hasBalance = Boolean(ov?.balance?.value);
   const balFull = hasBalance ? formatLuxToDusk(ov.balance.value) : "—";
   const balDusk = hasBalance ? clampDecimals(balFull, 4) : "—";
+
+  // MetaMask-like main tabs. We keep the route as the source of truth so
+  // deep-links like `?route=activity&tx=...` continue to work.
+  const activeTab = state?.route === "activity" ? "activity" : "assets";
+  const switchTab = (tab) => {
+    if (!state) return;
+    state.highlightTx = null;
+    state.route = tab === "activity" ? "activity" : "home";
+    actions?.render?.().catch(() => {});
+  };
 
   const accountCard = h("div", { class: "account-card" }, [
     h("div", { class: "account-line" }, [
@@ -92,5 +118,231 @@ export function homeView(ov, { state, actions } = {}) {
     }),
   ]);
 
-  return [bannerView(state.banner), accountCard, balanceBox, actionsRow, footerBtns].filter(Boolean);
+  // Activity list
+  const txs = Array.isArray(ov?.txs) ? ov.txs : [];
+  const nodeUrl = String(ov?.nodeUrl ?? "");
+
+  const openExplorer = async (hash) => {
+    const url = explorerTxUrl(nodeUrl, hash);
+    if (url) {
+      try {
+        if (chrome?.tabs?.create) {
+          await chrome.tabs.create({ url });
+          return true;
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return true;
+      } catch {
+        // ignore
+      }
+    }
+    return false;
+  };
+
+  const statusClass = (status) => {
+    const s = String(status ?? "").toLowerCase();
+    if (s === "executed") return "status-dot status-dot--ok";
+    if (s === "failed") return "status-dot status-dot--bad";
+    return "status-dot status-dot--pending";
+  };
+
+  const describe = (tx) => {
+    const kind = String(tx?.kind ?? "").toLowerCase();
+    if (kind === "transfer") {
+      const amt = tx?.amount != null ? formatLuxShort(tx.amount, 6) : "";
+      return {
+        title: amt ? `Send ${amt} DUSK` : "Send",
+        sub: tx?.to ? truncateMiddle(String(tx.to), 10, 8) : "",
+        icon: "↗",
+      };
+    }
+    if (kind === "contract_call") {
+      const fn = tx?.fnName ? String(tx.fnName) : "contract call";
+      const dep = safeBigInt(tx?.deposit, 0n);
+      const depS = dep > 0n ? formatLuxShort(dep, 6) : "";
+      return {
+        title: `Call ${fn}`,
+        sub: depS ? `deposit ${depS} DUSK` : "",
+        icon: "⬡",
+      };
+    }
+    return { title: "Transaction", sub: "", icon: "•" };
+  };
+
+  const pulseClassFor = (hash) => {
+    try {
+      const p = state?.txPulse;
+      if (!p || !hash) return "";
+      if (String(p.hash) !== String(hash)) return "";
+      if (Date.now() - Number(p.at || 0) > 2500) return "";
+      return p.kind === "bad" ? "is-pulse-bad" : "is-pulse-ok";
+    } catch {
+      return "";
+    }
+  };
+
+  const txRow = (tx) => {
+    const { title, sub, icon } = describe(tx);
+    const hash = String(tx?.hash ?? "");
+    const st = String(tx?.status ?? "submitted");
+    const isHighlight = state?.highlightTx && String(state.highlightTx) === hash;
+    const pulse = pulseClassFor(hash);
+
+    const left = h("div", { class: "activity-left" }, [
+      h("div", { class: statusClass(st), title: st }),
+      h("div", { class: "activity-ico", text: icon }),
+    ]);
+
+    const main = h("div", { class: "activity-main" }, [
+      h("div", { class: "activity-title" }, [
+        h("span", { text: title }),
+        tx?.submittedAt ? h("span", { class: "activity-time", text: timeAgo(tx.submittedAt) }) : null,
+      ].filter(Boolean)),
+      h("div", { class: "activity-sub" }, [
+        h("span", { text: sub || (hash ? truncateMiddle(hash, 10, 8) : "") }),
+        st === "failed" && tx?.error
+          ? h("span", { class: "activity-err", text: ` • ${String(tx.error).slice(0, 80)}` })
+          : null,
+      ].filter(Boolean)),
+    ]);
+
+    const btnCopy = h("button", {
+      class: "icon-btn icon-only",
+      text: "⧉",
+      title: "Copy tx hash",
+      onclick: async (e) => {
+        e?.stopPropagation?.();
+        const ok = await copyToClipboard(hash);
+        actions?.showToast?.(ok ? "Copied tx hash" : "Copy failed");
+      },
+    });
+
+    const btnOpen = h("button", {
+      class: "icon-btn icon-only",
+      text: "↗",
+      title: "View in Explorer",
+      onclick: async (e) => {
+        e?.stopPropagation?.();
+        const ok = await openExplorer(hash);
+        if (!ok) actions?.showToast?.("No explorer available for this network");
+      },
+    });
+
+    const right = h("div", { class: "activity-right" }, [btnOpen, btnCopy]);
+
+    const cls = ["activity-item", isHighlight ? "is-highlight" : "", pulse].filter(Boolean).join(" ");
+
+    return h(
+      "button",
+      {
+        class: cls,
+        onclick: async () => {
+          const ok = await openExplorer(hash);
+          if (!ok) {
+            const copied = await copyToClipboard(hash);
+            actions?.showToast?.(copied ? "Copied tx hash" : "No explorer available");
+          }
+        },
+      },
+      [left, main, right]
+    );
+  };
+
+  const recentActivity = h("div", { class: "activity-card" }, [
+    h("div", { class: "activity-head" }, [
+      h("div", { class: "activity-h", text: "Recent activity" }),
+      h("button", {
+        class: "link-btn",
+        text: "All",
+        onclick: () => switchTab("activity"),
+      }),
+    ]),
+    txs.length
+      ? h("div", { class: "activity-list" }, txs.slice(0, 3).map((tx) => {
+          // Compact rows without right-side buttons.
+          const { title, sub, icon } = describe(tx);
+          const hash = String(tx.hash ?? "");
+          const st = String(tx?.status ?? "submitted");
+          const isHighlight = state?.highlightTx && String(state.highlightTx) === hash;
+          const pulse = pulseClassFor(hash);
+          const cls = [
+            "activity-item",
+            "activity-item--compact",
+            isHighlight ? "is-highlight" : "",
+            pulse,
+          ].filter(Boolean).join(" ");
+
+          return h(
+            "button",
+            {
+              class: cls,
+              onclick: async () => {
+                const ok = await openExplorer(hash);
+                if (!ok) {
+                  const copied = await copyToClipboard(hash);
+                  actions?.showToast?.(copied ? "Copied tx hash" : "No explorer available");
+                }
+              },
+            },
+            [
+              h("div", { class: "activity-left" }, [
+                h("div", { class: statusClass(st) }),
+                h("div", { class: "activity-ico", text: icon }),
+              ]),
+              h("div", { class: "activity-main" }, [
+                h("div", { class: "activity-title", text: title }),
+                h("div", { class: "activity-sub", text: sub || (hash ? truncateMiddle(hash, 10, 8) : "") }),
+              ]),
+            ]
+          );
+        }))
+      : h("div", { class: "muted", text: "No activity yet." }),
+  ]);
+
+  const activityFull = h("div", { class: "activity-card" }, [
+    txs.length
+      ? h("div", { class: "activity-list" }, txs.map((tx) => txRow(tx)))
+      : h("div", { class: "muted", text: "No activity yet." }),
+  ]);
+
+  const tabs = h("div", { class: "tabs" }, [
+    h("button", {
+      class: activeTab === "assets" ? "tab is-active" : "tab",
+      text: "Assets",
+      onclick: () => switchTab("assets"),
+    }),
+    h("button", {
+      class: activeTab === "activity" ? "tab is-active" : "tab",
+      text: "Activity",
+      onclick: () => switchTab("activity"),
+    }),
+  ]);
+
+  const assetsCard = h("div", { class: "box assets-card" }, [
+    h("div", { class: "asset-row" }, [
+      h("div", { class: "asset-ico", text: "D" }),
+      h("div", { class: "asset-main" }, [
+        h("div", { class: "asset-sym", text: "DUSK" }),
+        h("div", { class: "asset-name", text: "Dusk Network" }),
+      ]),
+      h("div", { class: "asset-bal" }, [
+        h("div", { class: "asset-amt", text: balDusk, title: balFull }),
+        h("div", { class: "asset-sub", text: "Public" }),
+      ]),
+    ]),
+  ]);
+
+  return [
+    bannerView(state.banner),
+    accountCard,
+    balanceBox,
+    actionsRow,
+    tabs,
+    ...(activeTab === "activity" ? [activityFull] : [assetsCard, recentActivity]),
+    footerBtns,
+  ].filter(Boolean);
 }

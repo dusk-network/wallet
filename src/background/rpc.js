@@ -18,6 +18,7 @@ import {
 } from "./offscreen.js";
 import { requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
+import { putTxMeta } from "../shared/txStore.js";
 import {
   broadcastAccountsChangedForOrigin,
   broadcastChainChangedAll,
@@ -295,8 +296,46 @@ export async function handleRpc(origin, request) {
 
       await ensureEngineConfigured();
       const result = await engineCall("dusk_sendTransaction", finalParams);
-      // Best-effort system notification (extension).
-      notifyTxSubmitted({ hash: result?.hash ?? "", origin }).catch(() => {});
+      const hash = result?.hash ?? "";
+
+      // Persist minimal metadata so we can later show an "executed" notification
+      // and link to the right explorer even if the user switches networks.
+      try {
+        const settings = await getSettings();
+        const nodeUrl = settings?.nodeUrl ?? "";
+        if (hash) {
+          await putTxMeta(hash, {
+            origin,
+            nodeUrl,
+            kind,
+            // Helpful fields for the Activity list UI
+            to: finalParams?.to ? String(finalParams.to) : undefined,
+            amount:
+              finalParams?.amount !== undefined && finalParams?.amount !== null
+                ? String(finalParams.amount)
+                : undefined,
+            deposit:
+              finalParams?.deposit !== undefined && finalParams?.deposit !== null
+                ? String(finalParams.deposit)
+                : undefined,
+            contractId:
+              kind === "contract_call" && finalParams?.contractId
+                ? String(finalParams.contractId)
+                : undefined,
+            fnName:
+              kind === "contract_call" && finalParams?.fnName
+                ? String(finalParams.fnName)
+                : undefined,
+            submittedAt: Date.now(),
+            status: "submitted",
+          });
+        }
+
+        // Best-effort system notification (extension).
+        notifyTxSubmitted({ hash, origin, nodeUrl }).catch(() => {});
+      } catch {
+        notifyTxSubmitted({ hash, origin }).catch(() => {});
+      }
       return result;
     }
 

@@ -408,7 +408,8 @@ button:disabled {
 .box,
 .account-card,
 .home-balance,
-.action-card {
+.action-card,
+.activity-card {
   background: color-mix(in oklab, var(--card) 84%, var(--background));
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) + 4px);
@@ -604,6 +605,109 @@ button:disabled {
   gap: 12px;
 }
 
+/* ---- Main tabs (Assets / Activity) ----------------------------------- */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 70%, transparent);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
+}
+
+.tab {
+  flex: 1;
+  height: 34px;
+  border-radius: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+  transition: background 120ms ease, transform 120ms ease, color 120ms ease;
+}
+
+.tab:hover {
+  background: color-mix(in oklab, var(--card) 80%, transparent);
+}
+
+.tab:active {
+  transform: translateY(1px);
+}
+
+.tab.is-active {
+  background: color-mix(in oklab, var(--card) 90%, var(--background));
+  color: var(--foreground);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
+}
+
+/* ---- Assets list (simple, future-proof) ------------------------------ */
+.assets-card {
+  padding: 10px 12px;
+}
+
+.asset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.asset-ico {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--primary) 26%, var(--border));
+  background: color-mix(in oklab, var(--primary) 12%, transparent);
+  font-size: 13px;
+  font-weight: 900;
+  flex: 0 0 auto;
+}
+
+.asset-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.asset-sym {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.asset-name {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asset-bal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.asset-amt {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.asset-sub {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
 .action-card {
   padding: 16px 12px;
   color: var(--foreground);
@@ -635,6 +739,203 @@ button:disabled {
 .action-title {
   font-size: 13px;
   font-weight: 850;
+}
+
+/* ---- Activity (Home + Activity screen) -------------------------------- */
+.activity-card {
+  padding: 12px 12px;
+}
+
+.activity-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.activity-h {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-item {
+  appearance: none;
+  text-align: left;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--card) 55%, transparent);
+  color: var(--foreground);
+  padding: 10px 10px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.activity-item:hover {
+  background: color-mix(in oklab, var(--card) 70%, transparent);
+}
+
+.activity-item:active {
+  transform: translateY(1px);
+}
+
+.activity-item.is-highlight {
+  border-color: color-mix(in oklab, var(--ring) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent);
+}
+
+@keyframes txPulseOk {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, oklch(0.72 0.18 142) 0%, transparent);
+  }
+  35% {
+    box-shadow: 0 0 0 6px color-mix(in oklab, oklch(0.72 0.18 142) 22%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, oklch(0.72 0.18 142) 0%, transparent);
+  }
+}
+
+@keyframes txPulseBad {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--destructive) 0%, transparent);
+  }
+  35% {
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--destructive) 18%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--destructive) 0%, transparent);
+  }
+}
+
+@keyframes dotPop {
+  0% {
+    transform: scale(0.85);
+  }
+  45% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.activity-item.is-pulse-ok {
+  border-color: color-mix(in oklab, oklch(0.72 0.18 142) 38%, var(--border));
+  animation: txPulseOk 900ms ease-out;
+}
+
+.activity-item.is-pulse-bad {
+  border-color: color-mix(in oklab, var(--destructive) 38%, var(--border));
+  animation: txPulseBad 900ms ease-out;
+}
+
+.activity-item.is-pulse-ok .status-dot,
+.activity-item.is-pulse-bad .status-dot {
+  animation: dotPop 600ms ease-out;
+}
+
+.activity-item--compact {
+  grid-template-columns: auto 1fr;
+}
+
+.activity-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--muted) 25%, transparent);
+  background: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
+}
+
+.status-dot--pending {
+  background: color-mix(in oklab, var(--primary) 90%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 18%, transparent);
+}
+
+.status-dot--ok {
+  background: oklch(0.72 0.18 142);
+  box-shadow: 0 0 0 3px color-mix(in oklab, oklch(0.72 0.18 142) 18%, transparent);
+}
+
+.status-dot--bad {
+  background: var(--destructive);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--destructive) 18%, transparent);
+}
+
+.activity-ico {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--primary) 26%, var(--border));
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  font-size: 13px;
+}
+
+.activity-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.activity-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.activity-title span {
+  min-width: 0;
+}
+
+.activity-time {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-foreground);
+  flex: 0 0 auto;
+}
+
+.activity-sub {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-err {
+  color: color-mix(in oklab, var(--destructive) 70%, var(--muted-foreground));
+}
+
+.activity-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .subnav {
