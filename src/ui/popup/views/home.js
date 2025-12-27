@@ -26,6 +26,12 @@ export function homeView(ov, { state, actions } = {}) {
   const balFull = hasBalance ? formatLuxToDusk(ov.balance.value) : "—";
   const balDusk = hasBalance ? clampDecimals(balFull, 4) : "—";
 
+  // Optional shielded balance (not available in this MVP).
+  const shieldLux = ov?.shieldedBalance?.value ?? ov?.shieldedBalance;
+  const hasShielded = shieldLux !== undefined && shieldLux !== null;
+  const shieldFull = hasShielded ? formatLuxToDusk(shieldLux) : "—";
+  const shieldDusk = hasShielded ? clampDecimals(shieldFull, 4) : "—";
+
   // MetaMask-like main tabs. We keep the route as the source of truth so
   // deep-links like `?route=activity&tx=...` continue to work.
   const activeTab = state?.route === "activity" ? "activity" : "assets";
@@ -36,7 +42,7 @@ export function homeView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  // Connected site label
+  // Connected site label (compact).
   let connHost = null;
   let connConnected = false;
   if (platform.capabilities.dapp) {
@@ -115,6 +121,12 @@ export function homeView(ov, { state, actions } = {}) {
   // Activity list
   const txs = Array.isArray(ov?.txs) ? ov.txs : [];
   const nodeUrl = String(ov?.nodeUrl ?? "");
+
+  const pendingCount = txs.reduce((n, tx) => {
+    const s = String(tx?.status ?? "submitted").toLowerCase();
+    if (s === "executed" || s === "failed") return n;
+    return n + 1;
+  }, 0);
 
   const openExplorer = async (hash) => {
     const url = explorerTxUrl(nodeUrl, hash);
@@ -246,57 +258,6 @@ export function homeView(ov, { state, actions } = {}) {
     );
   };
 
-  const recentActivity = h("div", { class: "activity-card" }, [
-    h("div", { class: "activity-head" }, [
-      h("div", { class: "activity-h", text: "Recent activity" }),
-      h("button", {
-        class: "link-btn",
-        text: "All",
-        onclick: () => switchTab("activity"),
-      }),
-    ]),
-    txs.length
-      ? h("div", { class: "activity-list" }, txs.slice(0, 3).map((tx) => {
-          // Compact rows without right-side buttons.
-          const { title, sub, icon } = describe(tx);
-          const hash = String(tx.hash ?? "");
-          const st = String(tx?.status ?? "submitted");
-          const isHighlight = state?.highlightTx && String(state.highlightTx) === hash;
-          const pulse = pulseClassFor(hash);
-          const cls = [
-            "activity-item",
-            "activity-item--compact",
-            isHighlight ? "is-highlight" : "",
-            pulse,
-          ].filter(Boolean).join(" ");
-
-          return h(
-            "button",
-            {
-              class: cls,
-              onclick: async () => {
-                const ok = await openExplorer(hash);
-                if (!ok) {
-                  const copied = await copyToClipboard(hash);
-                  actions?.showToast?.(copied ? "Copied tx hash" : "No explorer available");
-                }
-              },
-            },
-            [
-              h("div", { class: "activity-left" }, [
-                h("div", { class: statusClass(st) }),
-                h("div", { class: "activity-ico", text: icon }),
-              ]),
-              h("div", { class: "activity-main" }, [
-                h("div", { class: "activity-title", text: title }),
-                h("div", { class: "activity-sub", text: sub || (hash ? truncateMiddle(hash, 10, 8) : "") }),
-              ]),
-            ]
-          );
-        }))
-      : h("div", { class: "muted", text: "No activity yet." }),
-  ]);
-
   const activityFull = h("div", { class: "activity-card" }, [
     txs.length
       ? h("div", { class: "activity-list" }, txs.map((tx) => txRow(tx)))
@@ -304,16 +265,31 @@ export function homeView(ov, { state, actions } = {}) {
   ]);
 
   const tabs = h("div", { class: "tabs" }, [
-    h("button", {
-      class: activeTab === "assets" ? "tab is-active" : "tab",
-      text: "Assets",
-      onclick: () => switchTab("assets"),
-    }),
-    h("button", {
-      class: activeTab === "activity" ? "tab is-active" : "tab",
-      text: "Activity",
-      onclick: () => switchTab("activity"),
-    }),
+    h(
+      "button",
+      {
+        class: activeTab === "assets" ? "tab is-active" : "tab",
+        onclick: () => switchTab("assets"),
+      },
+      [h("span", { text: "Assets" })]
+    ),
+    h(
+      "button",
+      {
+        class: activeTab === "activity" ? "tab is-active" : "tab",
+        onclick: () => switchTab("activity"),
+      },
+      [
+        h("span", { text: "Activity" }),
+        pendingCount > 0
+          ? h("span", {
+              class: "tab-badge",
+              text: pendingCount > 9 ? "9+" : String(pendingCount),
+              title: `${pendingCount} pending`,
+            })
+          : null,
+      ].filter(Boolean)
+    ),
   ]);
 
   const assetsCard = h("div", { class: "box assets-card" }, [
@@ -328,12 +304,25 @@ export function homeView(ov, { state, actions } = {}) {
         h("div", { class: "asset-sub", text: "Public" }),
       ]),
     ]),
+    hasShielded
+      ? h("div", { class: "asset-row" }, [
+          h("div", { class: "asset-ico", text: "◈" }),
+          h("div", { class: "asset-main" }, [
+            h("div", { class: "asset-sym", text: "DUSK" }),
+            h("div", { class: "asset-name", text: "Shielded" }),
+          ]),
+          h("div", { class: "asset-bal" }, [
+            h("div", { class: "asset-amt", text: shieldDusk, title: shieldFull }),
+            h("div", { class: "asset-sub", text: "Shielded" }),
+          ]),
+        ])
+      : null,
   ]);
 
   return [
     bannerView(state.banner),
     hero,
     tabs,
-    ...(activeTab === "activity" ? [activityFull] : [assetsCard, recentActivity]),
+    ...(activeTab === "activity" ? [activityFull] : [assetsCard]),
   ].filter(Boolean);
 }

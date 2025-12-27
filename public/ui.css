@@ -664,7 +664,7 @@ button:disabled {
   gap: 12px;
 }
 
-/* Compact action row */
+/* Compact action row (future-proof: can be extended to 4 items later) */
 .action-bar {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -735,6 +735,10 @@ button:disabled {
 .tab {
   flex: 1;
   height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border-radius: 12px;
   border: 0;
   background: transparent;
@@ -757,6 +761,28 @@ button:disabled {
   background: color-mix(in oklab, var(--card) 90%, var(--background));
   color: var(--foreground);
   box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 86%, var(--background));
+  color: var(--foreground);
+}
+
+.tab.is-active .tab-badge {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: transparent;
 }
 
 /* ---- Assets list (simple, future-proof) ------------------------------ */
@@ -1252,7 +1278,7 @@ button.net-menu-item--active {
 }
 
 /* -------------------------------------------------------
-   Popup-only compact header
+   Popup-only compact header (reduces crowding)
    ------------------------------------------------------- */
 body.page--popup {
   --panel-padding: 12px;
