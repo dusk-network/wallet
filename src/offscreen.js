@@ -82,6 +82,10 @@ async function watchTxExecuted(hash) {
     } catch {
       // ignore
     }
+
+    // After a tx is processed, reconcile shielded state so pending phoenix
+    // nullifiers get cleared/marked spent and balances update quickly.
+    startShieldedSync({ force: false }).catch(() => {});
   } catch (e) {
     // Still send a best-effort message so the UI can react.
     try {
@@ -189,12 +193,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         case "dusk_sendTransaction": {
           const result = await sendTransaction(params ?? {});
+
+          // Keep the provider response simple, always return the tx hash,
+          // and only include a nonce when it exists (public tx).
+          const resp = { hash: result.hash };
+          if (result.nonce !== undefined && result.nonce !== null) {
+            resp.nonce = result.nonce?.toString?.() ?? String(result.nonce);
+          }
           sendResponse({
             id,
-            result: {
-              hash: result.hash,
-              nonce: result.nonce?.toString?.() ?? String(result.nonce),
-            },
+            result: resp,
           });
 
           // Fire-and-forget: wait for EXECUTED and notify background so it can

@@ -7,14 +7,21 @@ import {
   AddressSyncer,
   useAsProtocolDriver,
 } from "@dusk/w3sper";
-import { hexToBytes, toBytes } from "./bytes.js";
+import { bytesToHex, hexToBytes, toBytes } from "./bytes.js";
 import { assetUrl } from "../platform/assets.js";
 
 import {
   clearNotes,
   countNotes,
   ensureShieldedMeta,
-  getNotesMap,
+  getSpendableNotesMap,
+  getUnspentNullifiers,
+  getSpentNullifiers,
+  putPendingNullifiers,
+  getPendingNullifiersForTx,
+  clearPendingNullifiers,
+  markNullifiersSpent,
+  unspendNullifiers,
   metaCursor,
   putNotesMap,
   putShieldedMeta,
@@ -291,7 +298,9 @@ class RemoteTreasury {
       const netKey = getNetworkKey();
       const walletId = getWalletId();
       if (!walletId) return new Map();
-      return await getNotesMap(netKey, walletId, idx);
+      // Exclude locally pending nullifiers so Bookkeeper won't accidentally
+      // reuse notes already reserved by an in-flight phoenix transaction.
+      return await getSpendableNotesMap(netKey, walletId, idx);
     } catch {
       return new Map();
     }
@@ -617,6 +626,70 @@ function broadcastShieldedStatus(reason = "") {
   }
 }
 
+function toU8(val) {
+  if (val instanceof Uint8Array) return val;
+  if (val instanceof ArrayBuffer) return new Uint8Array(val);
+  if (ArrayBuffer.isView(val)) {
+    return new Uint8Array(val.buffer, val.byteOffset, val.byteLength);
+  }
+  // last resort
+  try {
+    return new Uint8Array(val);
+  } catch {
+    return new Uint8Array();
+  }
+}
+
+function normalizeNullifierList(list) {
+  const out = [];
+  for (const v of list || []) {
+    const u = toU8(v);
+    if (u && u.length) out.push(u);
+  }
+  return out;
+}
+
+/**
+ * Reconcile spent/unspent state for cached shielded notes.
+ *
+ * This is separate from note scanning:
+ * - note scanning discovers owned notes
+ * - spent reconciliation checks which cached nullifiers are now spent on chain
+ *   (and can also "unspend" on reorg).
+ */
+async function reconcileSpentNotes(syncer, { netKey, walletId, profileIndex }) {
+  try {
+    const idx = Number(profileIndex) || 0;
+
+    const unspent = await getUnspentNullifiers(netKey, walletId, idx).catch(() => []);
+    if (unspent.length) {
+      const spentBufs = await syncer.spent(unspent);
+      const spent = normalizeNullifierList(spentBufs);
+      if (spent.length) {
+        await markNullifiersSpent(netKey, walletId, idx, spent);
+      }
+    }
+
+    const spentCached = await getSpentNullifiers(netKey, walletId, idx).catch(() => []);
+    if (spentCached.length) {
+      const stillSpentBufs = await syncer.spent(spentCached);
+      const stillSpent = normalizeNullifierList(stillSpentBufs);
+      const stillSet = new Set(stillSpent.map((u8) => bytesToHex(u8)));
+
+      const toRestore = [];
+      for (const n of spentCached) {
+        const hex = bytesToHex(n);
+        if (!stillSet.has(hex)) toRestore.push(n);
+      }
+      if (toRestore.length) {
+        await unspendNullifiers(netKey, walletId, idx, toRestore);
+      }
+    }
+  } catch {
+    // best-effort; we don't want spent reconciliation to break the whole sync
+  }
+}
+
 export function getShieldedStatus() {
   // Return a plain clone so callers can't mutate engine state.
   return { ...state.shielded.status };
@@ -721,13 +794,24 @@ export async function startShieldedSync({ force = false } = {}) {
 
     // Fast-path: if we are already caught up (cursor bookmark >= current
     // transfer-contract bookmark), do NOT flip the UI back into a "syncing 0%"
-    // state.
+    // state. This fixes a UX issue where the background overview handler calls
+    // `dusk_syncShielded` frequently.
     if (!force) {
       try {
         await ensureNetwork();
         const tipBookmark = await readTransferContractBookmark(state.network);
 
         if (typeof tipBookmark === "bigint" && cursor.bookmark >= tipBookmark) {
+          // Even if we are caught up on discovery, we still want to reconcile
+          // spent/unspent state (e.g. after submitting a phoenix tx that spends
+          // our notes, the cursor may remain at tip but nullifiers will change).
+          try {
+            const syncer = new AddressSyncer(state.network);
+            await reconcileSpentNotes(syncer, { netKey, walletId, profileIndex: idx });
+          } catch {
+            // ignore
+          }
+
           const n = await countNotes(netKey, walletId, idx);
           setShieldedStatus({
             state: "done",
@@ -756,7 +840,7 @@ export async function startShieldedSync({ force = false } = {}) {
     const startBlock = cursor.block;
 
     // Snapshot the current tip bookmark; we'll sync up to this point and then
-    // stop. New notes after this will be picked up by the next sync.
+    // stop (new notes after this will be picked up by the next sync).
     let targetBookmark = null;
     try {
       if (state.network?.connected) {
@@ -878,7 +962,7 @@ export async function startShieldedSync({ force = false } = {}) {
 
         const isStale = () => epoch !== state.shielded.epoch;
 
-        // Prefer the reader API if available.
+        // Prefer the reader API if available (ReadableStream).
         if (notesStream && typeof notesStream.getReader === "function") {
           const reader = notesStream.getReader();
           try {
@@ -933,6 +1017,9 @@ export async function startShieldedSync({ force = false } = {}) {
           throw new Error("AddressSyncer.notes() did not return a stream");
         }
 
+        // After discovery, reconcile spent/unspent state.
+        await reconcileSpentNotes(syncer, { netKey, walletId, profileIndex: idx });
+
         const n = await countNotes(netKey, walletId, idx);
         setShieldedStatus({
           state: "done",
@@ -957,6 +1044,7 @@ export async function startShieldedSync({ force = false } = {}) {
       }
     };
 
+    // Fire-and-forget.
     state.shielded.syncPromise = run();
 
     return { started: true, status: getShieldedStatus() };
@@ -991,7 +1079,10 @@ function normalizeGas(gas) {
 }
 
 /**
- * Public account transfer (account -> account) MVP.
+ * Transfer funds.
+ *
+ * - account -> account: public transfer
+ * - shielded -> shielded: shielded transfer
  * @param {{to:string, amount:string|bigint, memo?:string, gas?:{limit?:string|bigint, price?:string|bigint}}} params
  */
 export async function transfer(params) {
@@ -1000,15 +1091,45 @@ export async function transfer(params) {
 
   const amount = typeof params.amount === "bigint" ? params.amount : BigInt(params.amount);
 
-  // MVP: only allow public account destination
-  if (ProfileGenerator.typeOf(to) !== "account") {
-    throw new Error(
-      "MVP only supports public account transfers. Shielded address transfers are not implemented yet."
-    );
+  const toType = ProfileGenerator.typeOf(to);
+  if (toType !== "account" && toType !== "address") {
+    throw new Error("Invalid recipient: expected a Dusk account or shielded address");
   }
 
   const network = await ensureNetwork();
   const profile = getCurrentProfile();
+
+  // Shielded transfers spend from the local note cache.
+  // We avoid blocking the UX on a full sync here.
+  // If the cache is empty, we kick off a background sync and fail fast with
+  // a clear message.
+  if (toType === "address") {
+    await ensureShieldedMetaForCurrent();
+
+    try {
+      const netKey = getNetworkKey();
+      const walletId = getWalletId();
+      const idx = state.currentIndex || 0;
+
+      if (walletId) {
+        const n = await countNotes(netKey, walletId, idx);
+        if (!n) {
+          // Fire-and-forget: start scanning for owned notes, but don't block.
+          startShieldedSync({ force: false }).catch(() => {});
+          throw new Error(
+            "Shielded wallet is still syncing. Please wait for shielded sync to complete before sending."
+          );
+        }
+      }
+    } catch (e) {
+      // If we explicitly raised the "still syncing" message, surface it.
+      const msg = e?.message ? String(e.message) : String(e);
+      if (msg.includes("Shielded wallet is still syncing")) {
+        throw e;
+      }
+      // Otherwise ignore and attempt to build the tx with current cache.
+    }
+  }
 
   let tx = state.bookkeeper.as(profile).transfer(amount).to(to);
 
@@ -1019,9 +1140,34 @@ export async function transfer(params) {
   const gas = normalizeGas(params.gas);
   if (gas) tx = tx.gas(gas);
 
+  // Default to obfuscated Phoenix transfers for privacy.
+  if (toType === "address" && typeof tx?.obfuscated === "function") {
+    try {
+      tx.obfuscated();
+    } catch {
+      // ignore
+    }
+  }
+
   const result = await network.execute(tx);
+
+  // If this is a shielded spend, reserve the nullifiers locally to prevent
+  // double-spend before we observe them as spent on chain.
+  try {
+    if (Array.isArray(result?.nullifiers) && result.nullifiers.length) {
+      const netKey = getNetworkKey();
+      const walletId = getWalletId();
+      const idx = state.currentIndex || 0;
+      if (walletId) {
+        await putPendingNullifiers(netKey, walletId, idx, result.nullifiers, result.hash);
+      }
+    }
+  } catch {
+    // best-effort
+  }
+
   // network.execute returns the tx object returned by tx.build, frozen
-  return { hash: result.hash, nonce: result.nonce };
+  return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
 }
 
 // ----------------------------------------------------------------------------

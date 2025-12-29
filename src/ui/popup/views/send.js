@@ -9,7 +9,7 @@ export function sendFormView(_ov, { state, actions } = {}) {
   const draft = state.draft || {};
 
   const to = h("input", {
-    placeholder: "Recipient account (base58)",
+    placeholder: "Recipient (public account or shielded address)",
     value: typeof draft.to === "string" ? draft.to : "",
   });
   const amount = h("input", {

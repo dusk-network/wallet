@@ -7,10 +7,12 @@
 import { bytesToHex, hexToBytes } from "./bytes.js";
 
 const DB_NAME = "dusk_shielded_v1";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORE_META = "meta";
 const STORE_NOTES = "notes";
+const STORE_SPENT = "spent";
+const STORE_PENDING = "pending";
 
 /** @type {Promise<IDBDatabase> | null} */
 let dbPromise = null;
@@ -39,6 +41,22 @@ function openDb() {
       if (!db.objectStoreNames.contains(STORE_NOTES)) {
         const notes = db.createObjectStore(STORE_NOTES, { keyPath: "id" });
         notes.createIndex("byOwner", "ownerKey", { unique: false });
+      }
+
+      // spent: one row per spent note (kept so we can "unspend" on reorg)
+      if (!db.objectStoreNames.contains(STORE_SPENT)) {
+        const spent = db.createObjectStore(STORE_SPENT, { keyPath: "id" });
+        spent.createIndex("byOwner", "ownerKey", { unique: false });
+      }
+
+      // pending: nullifiers reserved by locally submitted phoenix txs
+      // (prevents double-spend before the chain marks them as spent)
+      if (!db.objectStoreNames.contains(STORE_PENDING)) {
+        const pending = db.createObjectStore(STORE_PENDING, { keyPath: "id" });
+        pending.createIndex("byOwner", "ownerKey", { unique: false });
+        // Query pending nullifiers by tx hash for a given owner.
+        // IndexedDB supports compound index keys.
+        pending.createIndex("byOwnerTx", ["ownerKey", "txHash"], { unique: false });
       }
     };
 
@@ -164,15 +182,12 @@ export function metaCursor(meta) {
 // Notes
 // ---------------------------------------------------------------------------
 
-export async function clearNotes(networkKey, walletId, profileIndex = 0) {
-  const db = await openDb();
-  const ok = ownerKey(networkKey, walletId, profileIndex);
-
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction([STORE_NOTES], "readwrite");
-    const store = tx.objectStore(STORE_NOTES);
+async function clearStoreByOwner(db, storeName, ownerKeyStr) {
+  return await new Promise((resolve, reject) => {
+    const tx = db.transaction([storeName], "readwrite");
+    const store = tx.objectStore(storeName);
     const index = store.index("byOwner");
-    const req = index.openCursor(IDBKeyRange.only(ok));
+    const req = index.openCursor(IDBKeyRange.only(ownerKeyStr));
     req.onsuccess = () => {
       const cursor = req.result;
       if (!cursor) return;
@@ -180,8 +195,18 @@ export async function clearNotes(networkKey, walletId, profileIndex = 0) {
       cursor.continue();
     };
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to clear notes"));
+    tx.onerror = () => reject(tx.error || new Error(`Failed to clear ${storeName}`));
   });
+}
+
+export async function clearNotes(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+
+  // Clear all shielded caches for this owner (unspent, spent, pending).
+  await clearStoreByOwner(db, STORE_PENDING, ok).catch(() => {});
+  await clearStoreByOwner(db, STORE_SPENT, ok).catch(() => {});
+  await clearStoreByOwner(db, STORE_NOTES, ok).catch(() => {});
 }
 
 export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) {
@@ -255,6 +280,342 @@ export async function getNotesMap(networkKey, walletId, profileIndex = 0) {
   }
 
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// helpers (spent/pending tracking)
+// ---------------------------------------------------------------------------
+
+function makeId(ownerKeyStr, nullifierHex) {
+  return noteId(ownerKeyStr, nullifierHex);
+}
+
+async function getPendingRows(db, ok) {
+  return await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PENDING], "readonly");
+    const store = tx.objectStore(STORE_PENDING);
+    const index = store.index("byOwner");
+    const req = index.getAll(IDBKeyRange.only(ok));
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error || new Error("Failed to read pending"));
+  });
+}
+
+/**
+ * Returns a Map of spendable notes (unspent notes minus locally pending nullifiers).
+ */
+export async function getSpendableNotesMap(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+
+  const [rows, pendingRows] = await Promise.all([
+    new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE_NOTES], "readonly");
+      const store = tx.objectStore(STORE_NOTES);
+      const index = store.index("byOwner");
+      const req = index.getAll(IDBKeyRange.only(ok));
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error || new Error("Failed to read notes"));
+    }),
+    getPendingRows(db, ok).catch(() => []),
+  ]);
+
+  const pending = new Set();
+  for (const r of pendingRows) {
+    const h = String(r?.nullifier ?? r?.noteKey ?? "");
+    if (h) pending.add(h);
+  }
+
+  const out = new Map();
+  for (const r of rows) {
+    try {
+      const keyHex = String(r.noteKey || "");
+      if (keyHex && pending.has(keyHex)) continue;
+      const k = hexToBytes(keyHex);
+      const v = r.noteValue instanceof ArrayBuffer ? new Uint8Array(r.noteValue) : new Uint8Array(r.noteValue || []);
+      out.set(k, v);
+    } catch {
+      // ignore bad rows
+    }
+  }
+
+  return out;
+}
+
+/**
+ * List all currently cached unspent nullifiers for this owner.
+ * @returns {Promise<Uint8Array[]>}
+ */
+export async function getUnspentNullifiers(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+
+  const rows = await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_NOTES], "readonly");
+    const store = tx.objectStore(STORE_NOTES);
+    const index = store.index("byOwner");
+    const req = index.getAll(IDBKeyRange.only(ok));
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error || new Error("Failed to read notes"));
+  });
+
+  const out = [];
+  for (const r of rows) {
+    try {
+      out.push(hexToBytes(r.noteKey));
+    } catch {
+      // ignore
+    }
+  }
+  return out;
+}
+
+/**
+ * List all cached spent nullifiers for this owner.
+ * @returns {Promise<Uint8Array[]>}
+ */
+export async function getSpentNullifiers(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+
+  const rows = await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_SPENT], "readonly");
+    const store = tx.objectStore(STORE_SPENT);
+    const index = store.index("byOwner");
+    const req = index.getAll(IDBKeyRange.only(ok));
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error || new Error("Failed to read spent"));
+  });
+
+  const out = [];
+  for (const r of rows) {
+    try {
+      out.push(hexToBytes(r.nullifier));
+    } catch {
+      // ignore
+    }
+  }
+  return out;
+}
+
+/**
+ * Store locally pending nullifiers for a submitted phoenix tx.
+ * These are filtered out from spendable notes until they become spent on chain.
+ */
+export async function putPendingNullifiers(networkKey, walletId, profileIndex, nullifiers, txHash) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+  const hash = String(txHash || "");
+  if (!hash) return 0;
+
+  const rows = [];
+  for (const n of nullifiers || []) {
+    try {
+      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+      const hex = bytesToHex(u8);
+      if (!hex) continue;
+      rows.push({
+        id: makeId(ok, hex),
+        ownerKey: ok,
+        networkKey: String(networkKey),
+        walletId: String(walletId || ""),
+        profileIndex: Number(profileIndex),
+        nullifier: hex,
+        txHash: hash,
+        createdAt: Date.now(),
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!rows.length) return 0;
+
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PENDING], "readwrite");
+    const store = tx.objectStore(STORE_PENDING);
+    for (const r of rows) store.put(r);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to write pending"));
+  });
+
+  return rows.length;
+}
+
+/**
+ * Return pending nullifiers for a given tx hash.
+ * @returns {Promise<Uint8Array[]>}
+ */
+export async function getPendingNullifiersForTx(networkKey, walletId, profileIndex, txHash) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+  const hash = String(txHash || "");
+  if (!hash) return [];
+
+  const rows = await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PENDING], "readonly");
+    const store = tx.objectStore(STORE_PENDING);
+    const index = store.index("byOwnerTx");
+    const req = index.getAll(IDBKeyRange.only([ok, hash]));
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error || new Error("Failed to read pending by tx"));
+  });
+
+  const out = [];
+  for (const r of rows) {
+    try {
+      out.push(hexToBytes(r.nullifier));
+    } catch {
+      // ignore
+    }
+  }
+  return out;
+}
+
+/**
+ * Clear pending entries for the given nullifiers.
+ */
+export async function clearPendingNullifiers(networkKey, walletId, profileIndex, nullifiers) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+
+  const ids = [];
+  for (const n of nullifiers || []) {
+    try {
+      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+      const hex = bytesToHex(u8);
+      if (!hex) continue;
+      ids.push(makeId(ok, hex));
+    } catch {
+      // ignore
+    }
+  }
+  if (!ids.length) return 0;
+
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PENDING], "readwrite");
+    const store = tx.objectStore(STORE_PENDING);
+    for (const id of ids) store.delete(id);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to clear pending"));
+  });
+
+  return ids.length;
+}
+
+/**
+ * Move notes from unspent -> spent for the provided nullifiers, and clear any
+ * pending reservation for them.
+ */
+export async function markNullifiersSpent(networkKey, walletId, profileIndex, nullifiers) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+
+  const hexes = [];
+  for (const n of nullifiers || []) {
+    try {
+      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+      const hex = bytesToHex(u8);
+      if (hex) hexes.push(hex);
+    } catch {
+      // ignore
+    }
+  }
+  if (!hexes.length) return 0;
+
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_NOTES, STORE_SPENT, STORE_PENDING], "readwrite");
+    const notes = tx.objectStore(STORE_NOTES);
+    const spent = tx.objectStore(STORE_SPENT);
+    const pending = tx.objectStore(STORE_PENDING);
+
+    for (const hex of hexes) {
+      const id = makeId(ok, hex);
+      const req = notes.get(id);
+      req.onsuccess = () => {
+        const row = req.result;
+        if (row) {
+          spent.put({
+            id,
+            ownerKey: ok,
+            networkKey: String(networkKey),
+            walletId: String(walletId || ""),
+            profileIndex: Number(profileIndex),
+            nullifier: hex,
+            noteKey: row.noteKey,
+            noteValue: row.noteValue,
+            spentAt: Date.now(),
+          });
+          notes.delete(id);
+        }
+        // Always clear pending reservation if present.
+        pending.delete(id);
+      };
+      req.onerror = () => {
+        // still clear pending best-effort
+        try {
+          pending.delete(id);
+        } catch {}
+      };
+    }
+
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to mark spent"));
+  });
+
+  return hexes.length;
+}
+
+/**
+ * Move notes from spent -> unspent.
+ */
+export async function unspendNullifiers(networkKey, walletId, profileIndex, nullifiers) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+
+  const hexes = [];
+  for (const n of nullifiers || []) {
+    try {
+      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+      const hex = bytesToHex(u8);
+      if (hex) hexes.push(hex);
+    } catch {
+      // ignore
+    }
+  }
+  if (!hexes.length) return 0;
+
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_SPENT, STORE_NOTES], "readwrite");
+    const spent = tx.objectStore(STORE_SPENT);
+    const notes = tx.objectStore(STORE_NOTES);
+
+    for (const hex of hexes) {
+      const id = makeId(ok, hex);
+      const req = spent.get(id);
+      req.onsuccess = () => {
+        const row = req.result;
+        if (row) {
+          notes.put({
+            id,
+            ownerKey: ok,
+            networkKey: String(networkKey),
+            walletId: String(walletId || ""),
+            profileIndex: Number(profileIndex),
+            noteKey: row.noteKey ?? hex,
+            noteValue: row.noteValue,
+            updatedAt: Date.now(),
+          });
+          spent.delete(id);
+        }
+      };
+    }
+
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to unspend"));
+  });
+
+  return hexes.length;
 }
 
 export async function countNotes(networkKey, walletId, profileIndex = 0) {
