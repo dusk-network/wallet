@@ -61,6 +61,38 @@ function showToast(text, ms = 1200) {
   render().catch(() => {});
 }
 
+// --- Shielded sync UI polling ----------------------------------------------
+// Shielded note scanning can take some time, and we don't have a push channel
+// for progress yet. While the user is on the Home/Activity tabs, we lightly
+// poll overview so the Shielded row can show "Syncing 12%" style feedback.
+let shieldedPollTimer = null;
+function scheduleShieldedPoll(ov) {
+  try {
+    if (shieldedPollTimer) {
+      clearTimeout(shieldedPollTimer);
+      shieldedPollTimer = null;
+    }
+
+    if (!ov?.isUnlocked) return;
+    if (state.route !== "home" && state.route !== "activity") return;
+
+    const st = ov?.shieldedSync?.state;
+    if (st !== "syncing") return;
+
+    shieldedPollTimer = setTimeout(() => {
+      try {
+        if (state.route !== "home" && state.route !== "activity") return;
+        // Force refresh so we see latest cursor/progress.
+        render({ forceRefresh: true }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    }, 1200);
+  } catch {
+    // ignore
+  }
+}
+
 // --- Tx status push (from background) --------------------------------------
 let txStatusListenerInstalled = false;
 function installTxStatusListener() {
@@ -72,6 +104,29 @@ function installTxStatusListener() {
 
     chrome.runtime.onMessage.addListener((msg) => {
       try {
+        if (msg?.type === "DUSK_UI_SHIELDED_STATUS") {
+          // Shielded sync finished (or status changed) in offscreen.
+          // Trigger an overview refresh so the UI updates without requiring
+          // manual reload.
+          state.needsRefresh = true;
+
+          try {
+            if (state.overview && msg.status) {
+              state.overview.shieldedSync = msg.status;
+            }
+          } catch {
+            // ignore
+          }
+
+          setTimeout(() => {
+            refreshOverview(send, { force: true })
+              .then(() => render())
+              .catch(() => {});
+          }, 150);
+
+          return;
+        }
+
         if (msg?.type !== "DUSK_UI_TX_STATUS") return;
 
         const hash = String(msg.hash ?? "");
@@ -208,6 +263,9 @@ export async function render({ forceRefresh = false } = {}) {
 
   // Always render header actions based on latest overview
   renderHeader(ov);
+
+  // Keep shielded sync progress visible while on home/activity.
+  scheduleShieldedPoll(ov);
 
   const actions = { send, render, showToast };
 

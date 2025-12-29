@@ -14,9 +14,13 @@ import {
   getAccounts,
   getAddresses,
   getPublicBalance,
+  getShieldedBalance,
+  getShieldedStatus,
   isUnlocked,
   lock,
   sendTransaction,
+  setShieldedCheckpointNow,
+  startShieldedSync,
   unlockWithMnemonic,
 } from "../shared/walletEngine.js";
 
@@ -116,6 +120,17 @@ export async function localSend(message) {
       }
     }
 
+    // Optional: set a shielded checkpoint to "now" after creating a fresh wallet.
+    if (message?.type === "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const res = await setShieldedCheckpointNow({ profileIndex: 0 });
+      return { ok: true, result: { bookmark: res.bookmark, block: res.block } };
+    }
+
     // UI checks status
     if (message?.type === "DUSK_UI_STATUS") {
       const vault = await loadVault();
@@ -161,6 +176,10 @@ export async function localSend(message) {
       let balance = null;
       let balanceError = null;
 
+      let shieldedBalance = null;
+      let shieldedSync = null;
+      let shieldedError = null;
+
       if (status.isUnlocked) {
         try {
           addresses = getAddresses() ?? [];
@@ -174,6 +193,29 @@ export async function localSend(message) {
         } catch (e) {
           balanceError = e?.message ?? String(e);
         }
+
+        try {
+          // Kick off incremental note sync (non-blocking)
+          await startShieldedSync({ force: false });
+        } catch {
+          // ignore
+        }
+
+        try {
+          shieldedSync = getShieldedStatus();
+        } catch {
+          shieldedSync = null;
+        }
+
+        try {
+          const sb = await getShieldedBalance();
+          shieldedBalance = {
+            value: sb.value?.toString?.() ?? String(sb.value),
+            spendable: sb.spendable?.toString?.() ?? String(sb.spendable),
+          };
+        } catch (e) {
+          shieldedError = e?.message ?? String(e);
+        }
       }
 
       return {
@@ -183,6 +225,9 @@ export async function localSend(message) {
         addresses,
         balance,
         balanceError,
+        shieldedBalance,
+        shieldedSync,
+        shieldedError,
         nodeUrl: settings.nodeUrl,
         networkName: networkNameFromNodeUrl(settings.nodeUrl),
         activeOrigin,

@@ -3,10 +3,13 @@ import {
   getAccounts,
   getAddresses,
   getPublicBalance,
+  getShieldedBalance,
+  getShieldedStatus,
   isUnlocked,
   lock,
   sendTransaction,
-  transfer,
+  setShieldedCheckpointNow,
+  startShieldedSync,
   waitTxExecuted,
   unlockWithMnemonic,
 } from "./shared/walletEngine.js";
@@ -21,9 +24,18 @@ function serializeError(err) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Tx tracking (MetaMask-style)
+// ---------------------------------------------------------------------------
+
 const activeTxWatches = new Set();
 
 function inferTxOk(executedEvent) {
+  // The exact shape depends on w3sper/node versions.
+  // Common patterns:
+  // - { err: ... }
+  // - { error: ... }
+  // - { success: false }
   try {
     if (!executedEvent || typeof executedEvent !== "object") return true;
     if (executedEvent.success === false) return false;
@@ -71,6 +83,7 @@ async function watchTxExecuted(hash) {
       // ignore
     }
   } catch (e) {
+    // Still send a best-effort message so the UI can react.
     try {
       chrome.runtime.sendMessage({
         type: "DUSK_TX_EXECUTED",
@@ -118,6 +131,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           }
           await unlockWithMnemonic(mnemonic);
           sendResponse({ id, result: { accounts: getAccounts() } });
+
+          // Fire-and-forget: start shielded sync in the background.
+          startShieldedSync().catch(() => {});
           return;
         }
 
@@ -139,6 +155,38 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
         }
 
+        case "dusk_getShieldedStatus": {
+          sendResponse({ id, result: getShieldedStatus() });
+          return;
+        }
+
+        case "dusk_syncShielded": {
+          const res = await startShieldedSync(params ?? {});
+          sendResponse({ id, result: res });
+          return;
+        }
+
+        case "dusk_setShieldedCheckpointNow": {
+          const res = await setShieldedCheckpointNow(params ?? {});
+          sendResponse({ id, result: res });
+          return;
+        }
+
+        case "dusk_getShieldedBalance": {
+          const bal = await getShieldedBalance();
+          // The address-balance shape is { value, spendable }.
+          const value = bal?.value ?? 0n;
+          const spendable = bal?.spendable ?? value;
+          sendResponse({
+            id,
+            result: {
+              value: value.toString(),
+              spendable: spendable.toString(),
+            },
+          });
+          return;
+        }
+
         case "dusk_sendTransaction": {
           const result = await sendTransaction(params ?? {});
           sendResponse({
@@ -149,6 +197,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             },
           });
 
+          // Fire-and-forget: wait for EXECUTED and notify background so it can
+          // show a final notification + explorer link.
           watchTxExecuted(result?.hash).catch(() => {});
           return;
         }

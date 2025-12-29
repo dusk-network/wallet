@@ -23,14 +23,45 @@ function timeAgo(ts) {
 
 export function homeView(ov, { state, actions } = {}) {
   const hasBalance = Boolean(ov?.balance?.value);
-  const balFull = hasBalance ? formatLuxToDusk(ov.balance.value) : "—";
+  const pubLux = safeBigInt(ov?.balance?.value, 0n);
+  const balFull = hasBalance ? formatLuxToDusk(pubLux) : "—";
   const balDusk = hasBalance ? clampDecimals(balFull, 4) : "—";
 
-  // Optional shielded balance (not available in this MVP).
+  // If we can't compute shielded balance yet (sync in progress), we
+  // still show the row and surface progress in the subtitle.
+  const shieldedSync = ov?.shieldedSync || null;
+  const shieldedError = ov?.shieldedError ? String(ov.shieldedError) : "";
   const shieldLux = ov?.shieldedBalance?.value ?? ov?.shieldedBalance;
-  const hasShielded = shieldLux !== undefined && shieldLux !== null;
-  const shieldFull = hasShielded ? formatLuxToDusk(shieldLux) : "—";
-  const shieldDusk = hasShielded ? clampDecimals(shieldFull, 4) : "—";
+  const hasShieldValue = shieldLux !== undefined && shieldLux !== null;
+  const showShielded = true;
+  const shieldFull = hasShieldValue ? formatLuxToDusk(shieldLux) : "—";
+  const shieldDusk = hasShieldValue ? clampDecimals(shieldFull, 4) : "—";
+
+  // Total (public + shielded) is only meaningful once shielded value is known.
+  const shieldLuxBI = hasShieldValue ? safeBigInt(shieldLux, 0n) : null;
+  const hasTotal = hasBalance && typeof shieldLuxBI === "bigint";
+  const totalLux = hasTotal ? pubLux + shieldLuxBI : null;
+  const totalFull = hasTotal ? formatLuxToDusk(totalLux) : null;
+  const totalDusk = hasTotal ? clampDecimals(totalFull, 4) : null;
+
+  let shieldSub = "Shielded";
+  if (shieldedSync?.state === "idle") {
+    const n = Number(shieldedSync?.notes ?? 0);
+    shieldSub = n > 0 ? "Shielded" : "Not synced";
+  } else if (shieldedSync?.state === "syncing") {
+    const p = Number(shieldedSync.progress ?? 0);
+    const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
+    // Avoid UX trap where we show a hard "0%" for a long time.
+    shieldSub = pct === 0 && p > 0 ? "Syncing <1%" : `Syncing ${pct}%`;
+  } else if (shieldedSync?.state === "error") {
+    shieldSub = "Sync failed";
+  } else if (shieldedSync?.state === "done") {
+    shieldSub = "Shielded";
+  }
+
+  if (shieldedError && shieldedSync?.state !== "syncing") {
+    shieldSub = "Unavailable";
+  }
 
   // MetaMask-like main tabs. We keep the route as the source of truth so
   // deep-links like `?route=activity&tx=...` continue to work.
@@ -42,7 +73,7 @@ export function homeView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  // Connected site label (compact).
+  // Connected site label.
   let connHost = null;
   let connConnected = false;
   if (platform.capabilities.dapp) {
@@ -73,14 +104,18 @@ export function homeView(ov, { state, actions } = {}) {
       ])
     : null;
 
-  const balanceSubRow = h(
-    "div",
-    { class: "balance-subrow" },
-    [
-      h("div", { class: "balance-sub", text: "DUSK (public)" }),
-      connInline,
-    ].filter(Boolean)
-  );
+  const balanceLabel = h("div", { class: "balance-sub" }, [
+    h("span", { text: "Public" }),
+    hasTotal
+      ? h("span", {
+          class: "balance-total-inline",
+          text: `• Total ${totalDusk}`,
+          title: `Total ${totalFull} DUSK`,
+        })
+      : null,
+  ].filter(Boolean));
+
+  const balanceSubRow = h("div", { class: "balance-subrow" }, [balanceLabel, connInline].filter(Boolean));
 
   const actionBtn = (label, ico, onClick) =>
     h(
@@ -122,6 +157,8 @@ export function homeView(ov, { state, actions } = {}) {
   const txs = Array.isArray(ov?.txs) ? ov.txs : [];
   const nodeUrl = String(ov?.nodeUrl ?? "");
 
+  // Pending count (for a small Activity tab badge). We consider any
+  // non-executed/non-failed tx as pending.
   const pendingCount = txs.reduce((n, tx) => {
     const s = String(tx?.status ?? "submitted").toLowerCase();
     if (s === "executed" || s === "failed") return n;
@@ -293,30 +330,42 @@ export function homeView(ov, { state, actions } = {}) {
   ]);
 
   const assetsCard = h("div", { class: "box assets-card" }, [
-    h("div", { class: "asset-row" }, [
+    h("div", { class: "asset-row asset-row--main" }, [
       h("div", { class: "asset-ico", text: "D" }),
       h("div", { class: "asset-main" }, [
         h("div", { class: "asset-sym", text: "DUSK" }),
-        h("div", { class: "asset-name", text: "Dusk" }),
+        h("div", { class: "asset-name", text: "Native token" }),
       ]),
       h("div", { class: "asset-bal" }, [
-        h("div", { class: "asset-amt", text: balDusk, title: balFull }),
-        h("div", { class: "asset-sub", text: "Public" }),
+        h("div", {
+          class: "asset-amt",
+          text: hasTotal ? totalDusk : balDusk,
+          title: hasTotal ? totalFull : balFull,
+        }),
+        h("div", { class: "asset-sub", text: hasTotal ? "Total" : "Public" }),
       ]),
     ]),
-    hasShielded
-      ? h("div", { class: "asset-row" }, [
-          h("div", { class: "asset-ico", text: "◈" }),
-          h("div", { class: "asset-main" }, [
-            h("div", { class: "asset-sym", text: "DUSK" }),
-            h("div", { class: "asset-name", text: "Shielded" }),
-          ]),
-          h("div", { class: "asset-bal" }, [
-            h("div", { class: "asset-amt", text: shieldDusk, title: shieldFull }),
-            h("div", { class: "asset-sub", text: "Shielded" }),
-          ]),
-        ])
-      : null,
+    h("div", { class: "asset-breakdown" }, [
+      h("div", { class: "asset-break-row" }, [
+        h("div", { class: "asset-break-label" }, [
+          h("span", { text: "Public" }),
+        ]),
+        h("div", { class: "asset-break-amt", text: balDusk, title: balFull }),
+      ]),
+      showShielded
+        ? h("div", { class: "asset-break-row" }, [
+            h("div", { class: "asset-break-label" }, [
+              h("span", { text: "Shielded" }),
+              h("span", {
+                class: "asset-break-status",
+                text: shieldSub ? `• ${shieldSub}` : "",
+                title: shieldedError || shieldedSync?.lastError || undefined,
+              }),
+            ]),
+            h("div", { class: "asset-break-amt", text: shieldDusk, title: shieldFull }),
+          ])
+        : null,
+    ].filter(Boolean)),
   ]);
 
   return [

@@ -1,12 +1,153 @@
 import { mnemonicToSeedSync } from "bip39";
 import {
   Bookkeeper,
+  Bookmark,
   Network,
   ProfileGenerator,
+  AddressSyncer,
   useAsProtocolDriver,
 } from "@dusk/w3sper";
 import { hexToBytes, toBytes } from "./bytes.js";
 import { assetUrl } from "../platform/assets.js";
+
+import {
+  clearNotes,
+  countNotes,
+  ensureShieldedMeta,
+  getNotesMap,
+  metaCursor,
+  putNotesMap,
+  putShieldedMeta,
+} from "./shieldedStore.js";
+
+// Read the current Transfer Contract note-tree size (bookmark) from the node.
+//
+// IMPORTANT:
+// The return type of `contract.call.*()` in w3sper is not consistent across
+// methods/targets (some return numbers/bigints directly, others return byte
+// buffers). The web wallet uses direct numeric returns for calls like
+// `finalization_period()`, so `num_notes()` may return a `bigint` or `number`
+// rather than an object with `arrayBuffer()`.
+//
+// This helper accepts several shapes to be robust across versions:
+// - bigint / number
+// - Bookmark-like objects with `asUint()`
+// - Uint8Array / ArrayBuffer
+// - Response-like objects with `arrayBuffer()`
+async function readTransferContractBookmark(network) {
+  try {
+    const res = await network.contracts.transferContract.call.num_notes();
+
+    if (typeof res === "bigint") return res;
+
+    if (typeof res === "number" && Number.isFinite(res)) {
+      // NOTE: If w3sper ever returns very large u64 values as `number`, this
+      // would lose precision. In practice `num_notes()` should be a `bigint`.
+      return BigInt(res);
+    }
+
+    // Some versions may return a Bookmark instance.
+    if (res && typeof res.asUint === "function") {
+      const v = res.asUint();
+      if (typeof v === "bigint") return v;
+      if (typeof v === "number" && Number.isFinite(v)) return BigInt(v);
+    }
+
+    // Raw bytes.
+    if (res instanceof Uint8Array) {
+      if (res.byteLength < 8) return null;
+      return new DataView(res.buffer, res.byteOffset, res.byteLength).getBigUint64(0, true);
+    }
+    if (res instanceof ArrayBuffer) {
+      const u8 = new Uint8Array(res);
+      if (u8.byteLength < 8) return null;
+      return new DataView(u8.buffer, u8.byteOffset, u8.byteLength).getBigUint64(0, true);
+    }
+
+    // Response-like.
+    if (res && typeof res.arrayBuffer === "function") {
+      const buf = await res.arrayBuffer();
+      const u8 = new Uint8Array(buf);
+      if (u8.byteLength < 8) return null;
+      return new DataView(u8.buffer, u8.byteOffset, u8.byteLength).getBigUint64(0, true);
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function toBigIntLike(v) {
+  try {
+    if (typeof v === "bigint") return v;
+    if (typeof v === "number" && Number.isFinite(v)) return BigInt(v);
+    if (typeof v === "string" && v.length) return BigInt(v);
+
+    // Bookmark-like (and some other u64 wrappers in w3sper)
+    if (v && typeof v.asUint === "function") {
+      const u = v.asUint();
+      if (typeof u === "bigint") return u;
+      if (typeof u === "number" && Number.isFinite(u)) return BigInt(u);
+      if (typeof u === "string" && u.length) return BigInt(u);
+    }
+
+    if (v instanceof Uint8Array) {
+      if (v.byteLength < 8) return null;
+      return new DataView(v.buffer, v.byteOffset, v.byteLength).getBigUint64(0, true);
+    }
+    if (v instanceof ArrayBuffer) {
+      const u8 = new Uint8Array(v);
+      if (u8.byteLength < 8) return null;
+      return new DataView(u8.buffer, u8.byteOffset, u8.byteLength).getBigUint64(0, true);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function toProgress01(v) {
+  // Convert common shapes (number/string/bigint) into a 0..1 float.
+  // Returns null when unknown.
+  try {
+    if (typeof v === "number" && Number.isFinite(v)) {
+      if (v > 1 && v <= 100) return v / 100;
+      if (v > 100 && v <= 10000) return v / 10000;
+      return v;
+    }
+    if (typeof v === "bigint") {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return null;
+      if (n > 1 && n <= 100) return n / 100;
+      if (n > 100 && n <= 10000) return n / 10000;
+      return n;
+    }
+    if (typeof v === "string") {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return null;
+      if (n > 1 && n <= 100) return n / 100;
+      if (n > 100 && n <= 10000) return n / 10000;
+      return n;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+
+function ratioBigInt(num, den) {
+  try {
+    if (den <= 0n) return 1;
+    if (num <= 0n) return 0;
+    if (num >= den) return 1;
+    const scaled = (num * 10_000n) / den; // 0..10000
+    return Number(scaled) / 10_000;
+  } catch {
+    return 0;
+  }
+}
 
 
 // ----------------------------------------------------------------------------
@@ -47,7 +188,7 @@ async function withTimeout(promise, ms, message, onTimeout) {
   }
 }
 
-let engineConfig = { nodeUrl: "https://nodes.testnet.dusk.network" };
+let engineConfig = { nodeUrl: "https://testnet.nodes.dusk.network" };
 
 export function configure(patch = {}) {
   if (patch.nodeUrl && typeof patch.nodeUrl === "string") {
@@ -71,8 +212,28 @@ export function configure(patch = {}) {
       state.network = null;
       state.treasury = null;
       state.bookkeeper = null;
+
+      // Network changed -> shielded state must be reloaded for the new network.
+      try {
+        state.shielded.epoch++;
+      } catch {}
+      state.shielded.syncPromise = null;
+      state.shielded.status = {
+        state: "idle",
+        progress: 0,
+        notes: 0,
+        cursorBookmark: "0",
+        cursorBlock: "0",
+        lastError: "",
+        updatedAt: Date.now(),
+      };
     }
   }
+}
+
+function getNetworkKey() {
+  // Use a stable string for per-network persistence keys.
+  return String(engineConfig.nodeUrl || "").trim().replace(/\/+$/, "");
 }
 
 // --- Treasury (MVP) ---------------------------------------------------------
@@ -115,10 +276,25 @@ class RemoteTreasury {
   }
 
   /**
-   * Shielded notes are not supported in this MVP.
+   * Shielded note set for the given profile.
    */
   async address(_identifier) {
-    return new Map();
+    // Shielded notes are stored per-network + per-profile in IndexedDB.
+    // The identifier carries the profile index (ProfileGenerator encodes it),
+    // so `+identifier` gives us the same index we use for account().
+    try {
+      const rawIdx = +_identifier;
+      const idx = Number.isFinite(rawIdx) ? rawIdx : 0;
+      const profile = this.#profiles.at(idx) || this.#profiles.at(0);
+      if (!profile) return new Map();
+
+      const netKey = getNetworkKey();
+      const walletId = getWalletId();
+      if (!walletId) return new Map();
+      return await getNotesMap(netKey, walletId, idx);
+    } catch {
+      return new Map();
+    }
   }
 
   /**
@@ -145,6 +321,7 @@ const state = {
   unlocked: false,
   mnemonic: null,
   seed: null,
+  walletId: "",
   profiles: [],
   currentIndex: 0,
   profileGenerator: null,
@@ -152,7 +329,29 @@ const state = {
   treasury: null,
   bookkeeper: null,
   protocolLoaded: false,
+
+  // Shielded sync/balance
+  shielded: {
+    // Incremented whenever we should cancel/ignore in-flight work.
+    epoch: 0,
+    syncPromise: null,
+    starting: false,
+    status: {
+      state: "idle", // idle | syncing | done | error
+      progress: 0, // 0..1 (matches w3sper's AddressSyncer event)
+      notes: 0,
+      cursorBookmark: "0",
+      cursorBlock: "0",
+      lastError: "",
+      updatedAt: 0,
+    },
+  },
 };
+
+function getWalletId() {
+  // Empty when locked.
+  return String(state.walletId || "").trim();
+}
 
 export function isUnlocked() {
   return state.unlocked;
@@ -167,6 +366,7 @@ export function hasWallet() {
 export function lock() {
   state.unlocked = false;
   state.mnemonic = null;
+  state.walletId = "";
   if (state.seed) {
     try {
       state.seed.fill(0);
@@ -176,7 +376,26 @@ export function lock() {
   state.profiles = [];
   state.profileGenerator = null;
   state.currentIndex = 0;
-  // we keep network instance around, it holds no secrets
+
+  // Cancel/clear shielded state.
+  try {
+    state.shielded.epoch++;
+  } catch {}
+  state.shielded.syncPromise = null;
+  state.shielded.status = {
+    state: "idle",
+    progress: 0,
+    notes: 0,
+    cursorBookmark: "0",
+    cursorBlock: "0",
+    lastError: "",
+    updatedAt: Date.now(),
+  };
+  // Reset derived helpers (they don't hold secrets, but can hold stale profile refs).
+  state.treasury = null;
+  state.bookkeeper = null;
+
+  // We keep the Network instance around, it holds no secrets and can stay connected.
 }
 
 /**
@@ -185,6 +404,17 @@ export function lock() {
  */
 export async function unlockWithMnemonic(mnemonic) {
   await ensureProtocolDriverLoaded();
+
+  // If the engine was already unlocked, wipe previous secret state first.
+  // This prevents confusing cross-wallet caching effects.
+  if (state.unlocked) {
+    try {
+      lock();
+    } catch {
+      // ignore
+    }
+  }
+
   mnemonic = mnemonic.trim().replace(/\s+/g, " ");
   const seed = Uint8Array.from(mnemonicToSeedSync(mnemonic));
 
@@ -198,9 +428,18 @@ export async function unlockWithMnemonic(mnemonic) {
   state.unlocked = true;
   state.mnemonic = mnemonic;
   state.seed = seed;
+  state.walletId = p0?.account?.toString?.() ?? "";
   state.profileGenerator = pg;
   state.profiles = [p0];
   state.currentIndex = 0;
+
+  // Prepare shielded meta for this wallet+network so UI can show sync state.
+  // NOTE: this does not connect to the network.
+  try {
+    await ensureShieldedMetaForCurrent();
+  } catch {
+    // Non-fatal, shielded sync can be retried later.
+  }
 
   return p0;
 }
@@ -231,25 +470,59 @@ async function ensureProtocolDriverLoaded() {
 }
 
 export async function ensureNetwork() {
-  if (state.network?.connected) return state.network;
-
   const url = new URL(engineConfig.nodeUrl);
 
+  // Always load the protocol driver first. Even if the network is already
+  // connected, Bookkeeper operations (shielded balance, tx building, etc.)
+  // rely on it being available.
   await ensureProtocolDriverLoaded();
 
+  // Lazily create the Network instance.
   state.network = state.network ?? new Network(url);
 
-  try {
-    // NOTE: Some WebViews do not reliably abort a hanging WebSocket connect.
-    // We therefore always enforce a timeout via Promise.race.
-    const controller = new AbortController();
+  // Connect only if we aren't already connected.
+  if (!state.network.connected) {
+    try {
+      // NOTE: Some WebViews do not reliably abort a hanging WebSocket connect.
+      // We therefore always enforce a timeout via Promise.race.
+      const controller = new AbortController();
 
-    const abortAndTearDown = () => {
+      const abortAndTearDown = () => {
+        try {
+          controller.abort();
+        } catch {
+          // ignore
+        }
+        try {
+          state.network?.disconnect?.();
+        } catch {
+          // ignore
+        }
+        try {
+          state.network?.close?.();
+        } catch {
+          // ignore
+        }
+      };
+
+      // Some versions of w3sper accept an options bag with a signal, others do not.
+      // Try the signal form, then fall back to the no-arg signature.
+      let connectPromise;
       try {
-        controller.abort();
+        connectPromise = state.network.connect({ signal: controller.signal });
       } catch {
-        // ignore
+        connectPromise = state.network.connect();
       }
+
+      await withTimeout(
+        connectPromise,
+        10_000,
+        `Timed out connecting to node ${url.toString()}`,
+        abortAndTearDown
+      );
+    } catch (err) {
+      // Drop the cached network/bookkeeper objects so a retry starts from a
+      // clean state.
       try {
         state.network?.disconnect?.();
       } catch {
@@ -260,43 +533,19 @@ export async function ensureNetwork() {
       } catch {
         // ignore
       }
-    };
+      state.network = null;
+      state.treasury = null;
+      state.bookkeeper = null;
 
-    // Some versions of w3sper accept an options bag with a signal, others do not.
-    // Try the signal form, then fall back to the no-arg signature.
-    let connectPromise;
-    try {
-      connectPromise = state.network.connect({ signal: controller.signal });
-    } catch {
-      connectPromise = state.network.connect();
+      throw new Error(formatWsError(err, url.toString()));
     }
-
-    await withTimeout(
-      connectPromise,
-      10_000,
-      `Timed out connecting to node ${url.toString()}`,
-      abortAndTearDown
-    );
-  } catch (err) {
-    // Drop the cached network/bookkeeper objects so a retry starts from a
-    // clean state.
-    try {
-      state.network?.disconnect?.();
-    } catch {
-      // ignore
-    }
-    try {
-      state.network?.close?.();
-    } catch {
-      // ignore
-    }
-    state.network = null;
-    state.treasury = null;
-    state.bookkeeper = null;
-
-    throw new Error(formatWsError(err, url.toString()));
   }
 
+  // IMPORTANT:
+  // If the engine stays alive (offscreen doc) and the user imports/creates a
+  // new wallet, the network can remain connected. We must still ensure the
+  // treasury/bookkeeper are bound to the current profiles, otherwise we end
+  // up showing the old wallet's balances.
   state.treasury = state.treasury ?? new RemoteTreasury(state.network, state.profiles);
   state.treasury.setProfiles(state.profiles);
   state.bookkeeper = state.bookkeeper ?? new Bookkeeper(state.treasury);
@@ -333,6 +582,399 @@ export async function getPublicBalance() {
     state.bookkeeper.balance(profile.account),
     12_000,
     "Balance request timed out"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shielded
+// ---------------------------------------------------------------------------
+
+function setShieldedStatus(patch = {}) {
+  state.shielded.status = {
+    ...state.shielded.status,
+    ...patch,
+    updatedAt: Date.now(),
+  };
+  return state.shielded.status;
+}
+
+function broadcastShieldedStatus(reason = "") {
+  // Best-effort UI push for extension pages (popup/full view).
+  // In non-extension runtimes, `chrome` is not available.
+  try {
+    const rt = globalThis?.chrome?.runtime;
+    if (!rt?.sendMessage) return;
+    rt.sendMessage({
+      type: "DUSK_UI_SHIELDED_STATUS",
+      reason,
+      status: getShieldedStatus(),
+      walletId: getWalletId(),
+      networkKey: getNetworkKey(),
+      profileIndex: state.currentIndex || 0,
+    });
+  } catch {
+    // ignore
+  }
+}
+
+export function getShieldedStatus() {
+  // Return a plain clone so callers can't mutate engine state.
+  return { ...state.shielded.status };
+}
+
+async function ensureShieldedMetaForCurrent() {
+  const netKey = getNetworkKey();
+  const walletId = getWalletId();
+  if (!walletId) throw new Error("No walletId (wallet locked?)");
+  const idx = state.currentIndex || 0;
+  const meta = await ensureShieldedMeta(netKey, walletId, idx, {
+    checkpointBookmark: 0n,
+    checkpointBlock: 0n,
+    cursorBookmark: 0n,
+    cursorBlock: 0n,
+  });
+
+  const cursor = metaCursor(meta);
+  const n = await countNotes(netKey, walletId, idx);
+
+  setShieldedStatus({
+    cursorBookmark: cursor.bookmark.toString(),
+    cursorBlock: cursor.block.toString(),
+    notes: n,
+  });
+
+  return meta;
+}
+
+export async function setShieldedCheckpointNow({ profileIndex = 0 } = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  await ensureNetwork();
+
+  const netKey = getNetworkKey();
+  const walletId = getWalletId();
+  if (!walletId) throw new Error("No walletId (wallet locked?)");
+  const idx = Number(profileIndex) || 0;
+
+  // num_notes() returns the current size of the note tree.
+  // In w3sper this may be returned as a bigint/number directly.
+  const bookmark = await readTransferContractBookmark(state.network);
+  if (typeof bookmark !== "bigint") {
+    throw new Error("Failed to read transfer contract num_notes() bookmark");
+  }
+  const block = await state.network.blockHeight;
+
+  // Starting from a checkpoint implies ignoring any historical shielded notes.
+  // This is ideal for newly created wallets.
+  await clearNotes(netKey, walletId, idx);
+
+  await putShieldedMeta(netKey, walletId, idx, {
+    checkpointBookmark: bookmark.toString(),
+    checkpointBlock: block.toString(),
+    cursorBookmark: bookmark.toString(),
+    cursorBlock: block.toString(),
+  });
+
+  setShieldedStatus({
+    state: "idle",
+    progress: 0,
+    notes: 0,
+    cursorBookmark: bookmark.toString(),
+    cursorBlock: block.toString(),
+    lastError: "",
+  });
+
+  return { bookmark: bookmark.toString(), block: block.toString() };
+}
+
+export async function startShieldedSync({ force = false } = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+
+  // Prevent races where both the popup and the full view trigger an overview
+  // refresh at the same time. Without this, both calls can pass the "not
+  // syncing" check before `syncPromise` is assigned, starting 2 sync loops.
+  if (!force) {
+    if (state.shielded.syncPromise) {
+      return { started: false, status: getShieldedStatus() };
+    }
+    if (state.shielded.starting) {
+      return { started: false, status: getShieldedStatus() };
+    }
+  }
+
+  state.shielded.starting = true;
+  try {
+    await ensureShieldedMetaForCurrent();
+
+    const walletId = getWalletId();
+    if (!walletId) throw new Error("No walletId (wallet locked?)");
+
+    const netKey = getNetworkKey();
+    const idx = state.currentIndex || 0;
+
+    const meta = await ensureShieldedMeta(netKey, walletId, idx);
+    const cursor = metaCursor(meta);
+
+    // If a sync started while we were awaiting meta, don't start another.
+    if (state.shielded.syncPromise && !force) {
+      return { started: false, status: getShieldedStatus() };
+    }
+
+    // Fast-path: if we are already caught up (cursor bookmark >= current
+    // transfer-contract bookmark), do NOT flip the UI back into a "syncing 0%"
+    // state.
+    if (!force) {
+      try {
+        await ensureNetwork();
+        const tipBookmark = await readTransferContractBookmark(state.network);
+
+        if (typeof tipBookmark === "bigint" && cursor.bookmark >= tipBookmark) {
+          const n = await countNotes(netKey, walletId, idx);
+          setShieldedStatus({
+            state: "done",
+            progress: 1,
+            notes: n,
+            cursorBookmark: cursor.bookmark.toString(),
+            cursorBlock: cursor.block.toString(),
+            lastError: "",
+          });
+          broadcastShieldedStatus("up_to_date");
+          state.shielded.syncPromise = null;
+          return { started: false, status: getShieldedStatus() };
+        }
+      } catch {
+        // ignore, we'll attempt a normal sync below
+      }
+    }
+
+    // Cancel/ignore any in-flight sync and start a new one.
+    state.shielded.epoch++;
+    const epoch = state.shielded.epoch;
+
+    // Snapshot the start cursor so we can compute progress even if the
+    // `synciteration` event doesn't provide it.
+    const startBookmark = cursor.bookmark;
+    const startBlock = cursor.block;
+
+    // Snapshot the current tip bookmark; we'll sync up to this point and then
+    // stop. New notes after this will be picked up by the next sync.
+    let targetBookmark = null;
+    try {
+      if (state.network?.connected) {
+        targetBookmark = await readTransferContractBookmark(state.network);
+      }
+    } catch {
+      targetBookmark = null;
+    }
+
+    setShieldedStatus({
+      state: "syncing",
+      progress: 0,
+      cursorBookmark: startBookmark.toString(),
+      cursorBlock: startBlock.toString(),
+      lastError: "",
+    });
+
+    const run = async () => {
+      await ensureNetwork();
+      const syncer = new AddressSyncer(state.network);
+
+      let shouldStop = false;
+
+      const onIter = (ev) => {
+        if (epoch !== state.shielded.epoch) return;
+        const d = ev?.detail || {};
+
+        const evProg = toProgress01(d.progress);
+        const curB = toBigIntLike(d.bookmarks?.current);
+        const curH = toBigIntLike(d.blocks?.current);
+
+        // Compute progress from bookmarks if needed.
+        let prog = evProg;
+        if (
+          (prog === null || prog <= 0) &&
+          typeof targetBookmark === "bigint" &&
+          targetBookmark > startBookmark &&
+          typeof curB === "bigint"
+        ) {
+          prog = ratioBigInt(curB - startBookmark, targetBookmark - startBookmark);
+        }
+
+        if (prog === null) prog = 0;
+
+        // If we've reached the snapshot target, request stop.
+        if (typeof targetBookmark === "bigint" && typeof curB === "bigint" && curB >= targetBookmark) {
+          shouldStop = true;
+        }
+
+        setShieldedStatus({
+          state: "syncing",
+          progress: Math.max(0, Math.min(1, prog)),
+          cursorBookmark: typeof curB === "bigint" ? curB.toString() : state.shielded.status.cursorBookmark,
+          cursorBlock: typeof curH === "bigint" ? curH.toString() : state.shielded.status.cursorBlock,
+        });
+      };
+
+      syncer.addEventListener("synciteration", onIter);
+
+      try {
+        // Refresh target bookmark after we have a connected network (in case it
+        // was null during the pre-connect snapshot).
+        if (targetBookmark === null) {
+          targetBookmark = await readTransferContractBookmark(state.network);
+        }
+
+        const from = Bookmark.from(startBookmark);
+
+        // w3sper's AddressSyncer.notes() can be either a ReadableStream or an
+        // async iterable depending on runtime/version.
+        const controller = new AbortController();
+
+        let notesStream;
+        try {
+          notesStream = await syncer.notes(state.profiles, { from, signal: controller.signal });
+        } catch {
+          notesStream = await syncer.notes(state.profiles, { from });
+        }
+
+        const processChunk = async (value) => {
+          const owned = value?.[0];
+          const syncInfo = value?.[1];
+
+          // owned is an array of Maps (one per profile)
+          if (Array.isArray(owned)) {
+            for (let i = 0; i < owned.length; i++) {
+              const m = owned[i];
+              if (m && typeof m.size === "number" && m.size > 0) {
+                await putNotesMap(netKey, walletId, i, m);
+              }
+            }
+          }
+
+          const b = toBigIntLike(syncInfo?.bookmark);
+          const h = toBigIntLike(syncInfo?.blockHeight);
+
+          if (typeof b === "bigint" && typeof h === "bigint") {
+            await putShieldedMeta(netKey, walletId, idx, {
+              cursorBookmark: b.toString(),
+              cursorBlock: h.toString(),
+            });
+
+            // Update progress even if the event-based `detail.progress` isn't provided.
+            if (typeof targetBookmark === "bigint" && targetBookmark > startBookmark) {
+              const p = ratioBigInt(b - startBookmark, targetBookmark - startBookmark);
+              setShieldedStatus({ progress: Math.max(state.shielded.status.progress || 0, p) });
+            }
+
+            setShieldedStatus({
+              cursorBookmark: b.toString(),
+              cursorBlock: h.toString(),
+            });
+
+            if (typeof targetBookmark === "bigint" && b >= targetBookmark) {
+              shouldStop = true;
+            }
+          }
+        };
+
+        const isStale = () => epoch !== state.shielded.epoch;
+
+        // Prefer the reader API if available.
+        if (notesStream && typeof notesStream.getReader === "function") {
+          const reader = notesStream.getReader();
+          try {
+            while (true) {
+              if (isStale()) {
+                try {
+                  controller.abort();
+                } catch {}
+                try {
+                  await reader.cancel();
+                } catch {}
+                return;
+              }
+
+              const { done, value } = await reader.read();
+              if (done) break;
+              await processChunk(value);
+
+              if (shouldStop) {
+                try {
+                  controller.abort();
+                } catch {}
+                try {
+                  await reader.cancel();
+                } catch {}
+                break;
+              }
+            }
+          } finally {
+            try {
+              reader.releaseLock?.();
+            } catch {}
+          }
+        } else if (notesStream && typeof notesStream?.[Symbol.asyncIterator] === "function") {
+          for await (const value of notesStream) {
+            if (isStale()) {
+              try {
+                controller.abort();
+              } catch {}
+              break;
+            }
+            await processChunk(value);
+
+            if (shouldStop) {
+              try {
+                controller.abort();
+              } catch {}
+              break;
+            }
+          }
+        } else {
+          throw new Error("AddressSyncer.notes() did not return a stream");
+        }
+
+        const n = await countNotes(netKey, walletId, idx);
+        setShieldedStatus({
+          state: "done",
+          progress: 1,
+          notes: n,
+          lastError: "",
+        });
+        broadcastShieldedStatus("done");
+      } catch (e) {
+        setShieldedStatus({
+          state: "error",
+          lastError: e?.message ? String(e.message) : String(e),
+        });
+        broadcastShieldedStatus("error");
+      } finally {
+        try {
+          syncer.removeEventListener("synciteration", onIter);
+        } catch {}
+        if (epoch === state.shielded.epoch) {
+          state.shielded.syncPromise = null;
+        }
+      }
+    };
+
+    state.shielded.syncPromise = run();
+
+    return { started: true, status: getShieldedStatus() };
+  } finally {
+    state.shielded.starting = false;
+  }
+}
+
+export async function getShieldedBalance() {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  await ensureNetwork();
+  await ensureShieldedMetaForCurrent();
+
+  const profile = getCurrentProfile();
+  return await withTimeout(
+    state.bookkeeper.balance(profile.address),
+    15_000,
+    "Shielded balance request timed out"
   );
 }
 
@@ -491,7 +1133,7 @@ export async function sendTransaction(params) {
  *
  * @param {string} hash
  * @param {{timeoutMs?: number}} [opts]
- * @returns {Promise<any>} The executed event payload 
+ * @returns {Promise<any>} The executed event payload.
  */
 export async function waitTxExecuted(hash, opts = {}) {
   if (!hash || typeof hash !== "string") {

@@ -194,6 +194,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // After creating a brand new wallet, set a shielded checkpoint
+      // to "now" so we don't sync from genesis for shielded notes.
+      if (message?.type === "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW") {
+        const status = await getEngineStatus();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+        await ensureEngineConfigured();
+        const res = await engineCall("dusk_setShieldedCheckpointNow", {
+          profileIndex: 0,
+        });
+        sendResponse({ ok: true, result: res });
+        return;
+      }
+
       // UI checks status
       if (message?.type === "DUSK_UI_STATUS") {
         const vault = await loadVault();
@@ -258,6 +273,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let balance = null;
         let balanceError = null;
 
+        let shieldedBalance = null;
+        let shieldedSync = null;
+        let shieldedError = null;
+
         // Recent activity (transaction list). This is used by the Home +
         // Activity screens to provide MetaMask-like feedback instead of
         // ephemeral toasts.
@@ -282,6 +301,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } catch (e) {
             balanceError = e?.message ?? String(e);
           }
+          // surface status + kick off an incremental sync.
+          const fallbackShieldedStatus = {
+            state: "idle",
+            progress: 0,
+            notes: 0,
+            cursorBookmark: "0",
+            cursorBlock: "0",
+            lastError: "",
+            updatedAt: 0,
+          };
+
+          try {
+            await ensureEngineConfigured();
+            shieldedSync = await engineCall("dusk_getShieldedStatus");
+          } catch {
+            shieldedSync = fallbackShieldedStatus;
+          }
+
+          try {
+            await ensureEngineConfigured();
+            const st = shieldedSync?.state;
+            const age = Date.now() - Number(shieldedSync?.updatedAt || 0);
+            const shouldAuto =
+              st === "idle" ||
+              st === "error" ||
+              (st === "done" && age > 30_000);
+
+            if (shouldAuto) {
+              // Fire-and-forget: don't await, avoid slowing down overview.
+              engineCall("dusk_syncShielded", { force: false }).catch(() => {});
+            }
+          } catch {
+            // ignore
+          }
+
+          try {
+            await ensureEngineConfigured();
+            shieldedBalance = await engineCall("dusk_getShieldedBalance");
+          } catch (e) {
+            shieldedError = e?.message ?? String(e);
+          }
         }
 
         sendResponse({
@@ -291,6 +351,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           addresses,
           balance,
           balanceError,
+          shieldedBalance,
+          shieldedSync,
+          shieldedError,
           nodeUrl: settings.nodeUrl,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           activeOrigin,

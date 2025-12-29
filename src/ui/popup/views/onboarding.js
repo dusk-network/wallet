@@ -309,6 +309,15 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
         const unlockRes = await actions?.send?.({ type: "DUSK_UI_UNLOCK", password });
         if (unlockRes?.error) throw new Error(unlockRes.error.message ?? "Unlock failed");
 
+        // Fresh wallet: set a shielded checkpoint to "now" so we don't have to
+        // sync shielded notes from genesis. This is best-effort.
+        try {
+          busyBody.textContent = "Setting shielded checkpoint…";
+          await actions?.send?.({ type: "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW" });
+        } catch {
+          // ignore
+        }
+
         busyBody.textContent = "Finalizing…";
         state.banner = null;
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };

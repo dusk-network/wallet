@@ -33,6 +33,8 @@ export const state = {
   draft: null,
   banner: null,
   toast: null,
+  // { hash: string, kind: "ok"|"bad", at: number }
+  txPulse: null,
   onboard: {
     // mode: "create" | "import"
     mode: null,

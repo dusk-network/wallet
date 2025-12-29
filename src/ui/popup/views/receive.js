@@ -268,7 +268,7 @@ export function receiveView(ov, { state, actions } = {}) {
     tab === "shielded"
       ? h("div", {
           class: "muted",
-          text: "Note: shielded sync/spend is not implemented in this MVP yet.",
+          text: "Note: shielded syncing runs automatically. Spending shielded notes isn't supported yet.",
         })
       : null;
 

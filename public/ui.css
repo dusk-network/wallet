@@ -633,6 +633,13 @@ button:disabled {
   margin-top: 0;
 }
 
+.balance-total-inline {
+  margin-left: 6px;
+  color: var(--muted-foreground);
+  font-weight: 850;
+  letter-spacing: -0.01em;
+}
+
 .conn-dot--sm {
   width: 6px;
   height: 6px;
@@ -788,6 +795,51 @@ button:disabled {
 /* ---- Assets list (simple, future-proof) ------------------------------ */
 .assets-card {
   padding: 10px 12px;
+}
+
+.asset-row--main {
+  padding-bottom: 8px;
+}
+
+.asset-breakdown {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-left: 46px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.asset-break-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.asset-break-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 850;
+  color: var(--muted-foreground);
+  min-width: 0;
+}
+
+.asset-break-status {
+  font-weight: 750;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.asset-break-amt {
+  font-size: 12px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 .asset-row {
