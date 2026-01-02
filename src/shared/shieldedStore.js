@@ -443,36 +443,6 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
 }
 
 /**
- * Return pending nullifiers for a given tx hash.
- * @returns {Promise<Uint8Array[]>}
- */
-export async function getPendingNullifiersForTx(networkKey, walletId, profileIndex, txHash) {
-  const db = await openDb();
-  const ok = ownerKey(networkKey, walletId, profileIndex);
-  const hash = String(txHash || "");
-  if (!hash) return [];
-
-  const rows = await new Promise((resolve, reject) => {
-    const tx = db.transaction([STORE_PENDING], "readonly");
-    const store = tx.objectStore(STORE_PENDING);
-    const index = store.index("byOwnerTx");
-    const req = index.getAll(IDBKeyRange.only([ok, hash]));
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => reject(req.error || new Error("Failed to read pending by tx"));
-  });
-
-  const out = [];
-  for (const r of rows) {
-    try {
-      out.push(hexToBytes(r.nullifier));
-    } catch {
-      // ignore
-    }
-  }
-  return out;
-}
-
-/**
  * Clear pending entries for the given nullifiers.
  */
 export async function clearPendingNullifiers(networkKey, walletId, profileIndex, nullifiers) {

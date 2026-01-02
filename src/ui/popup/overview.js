@@ -21,7 +21,7 @@ export async function refreshOverview(send, { force = false } = {}) {
     return;
   }
 
-  state.overview = await send({ type: "DUSK_UI_OVERVIEW", origin });
+  state.overview = await send({ type: "DUSK_UI_OVERVIEW", origin, route: state.route });
   state.lastOrigin = origin;
   state.needsRefresh = false;
 }

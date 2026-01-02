@@ -9,6 +9,8 @@ import { subnav } from "../../components/Subnav.js";
 
 export function optionsView(ov, { state, actions } = {}) {
   const currentNodeUrl = String(ov?.nodeUrl ?? "").trim();
+  const currentProverUrl = String(ov?.proverUrl ?? "").trim();
+  const currentArchiverUrl = String(ov?.archiverUrl ?? "").trim();
 
   const lockBtn = ov?.isUnlocked
     ? h("button", {
@@ -26,6 +28,16 @@ export function optionsView(ov, { state, actions } = {}) {
 
   const nodeUrlInput = h("input", {
     value: currentNodeUrl,
+    placeholder: "https://nodes.dusk.network",
+  });
+
+  const proverUrlInput = h("input", {
+    value: currentProverUrl,
+    placeholder: "https://provers.dusk.network",
+  });
+
+  const archiverUrlInput = h("input", {
+    value: currentArchiverUrl,
     placeholder: "https://nodes.dusk.network",
   });
 
@@ -48,6 +60,9 @@ export function optionsView(ov, { state, actions } = {}) {
     if (!preset) return;
     if (preset.id !== "custom" && preset.nodeUrl) {
       nodeUrlInput.value = preset.nodeUrl;
+      // Keep prover/archiver aligned with known presets.
+      if (preset.proverUrl) proverUrlInput.value = preset.proverUrl;
+      if (preset.archiverUrl) archiverUrlInput.value = preset.archiverUrl;
     }
     networkHint.textContent = preset.hint ?? "";
   }
@@ -57,6 +72,12 @@ export function optionsView(ov, { state, actions } = {}) {
     networkSelect.value = presetId;
     const preset = NETWORK_PRESETS.find((p) => p.id === presetId);
     networkHint.textContent = preset?.hint ?? "";
+
+    // If the node URL matches a known preset, keep prover/archiver aligned.
+    if (preset && preset.id !== "custom") {
+      proverUrlInput.value = preset.proverUrl || nodeUrlInput.value.trim();
+      archiverUrlInput.value = preset.archiverUrl || nodeUrlInput.value.trim();
+    }
   }
 
   networkSelect.addEventListener("change", syncFromSelect);
@@ -68,10 +89,26 @@ export function optionsView(ov, { state, actions } = {}) {
     onclick: async () => {
       try {
         const v = nodeUrlInput.value.trim();
+        const pv = proverUrlInput.value.trim();
+        const av = archiverUrlInput.value.trim();
         // eslint-disable-next-line no-new
         new URL(v);
 
-        const resp = await actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: v });
+        if (pv) {
+          // eslint-disable-next-line no-new
+          new URL(pv);
+        }
+        if (av) {
+          // eslint-disable-next-line no-new
+          new URL(av);
+        }
+
+        const resp = await actions?.send?.({
+          type: "DUSK_UI_SET_NODE_URL",
+          nodeUrl: v,
+          proverUrl: pv,
+          archiverUrl: av,
+        });
         if (resp?.error)
           throw new Error(resp.error.message ?? "Failed to save settings");
 
@@ -158,6 +195,24 @@ export function optionsView(ov, { state, actions } = {}) {
       h("div", { class: "muted" }, [
         "This must be the base http(s) URL of a Rusk/RUES-enabled node. Example: ",
         h("code", { text: "https://nodes.dusk.network" }),
+      ]),
+    ]),
+
+    h("div", { class: "row" }, [
+      h("label", { text: "Prover URL" }),
+      proverUrlInput,
+      h("div", { class: "muted" }, [
+        "Optional. Used for shielded transaction proving. Example: ",
+        h("code", { text: "https://testnet.provers.dusk.network" }),
+      ]),
+    ]),
+
+    h("div", { class: "row" }, [
+      h("label", { text: "Archiver URL" }),
+      archiverUrlInput,
+      h("div", { class: "muted" }, [
+        "Optional. Used for note discovery/sync. Example: ",
+        h("code", { text: "https://testnet.nodes.dusk.network" }),
       ]),
     ]),
     h("div", { class: "row" }, [h("div", { class: "btnrow" }, [saveBtn])]),

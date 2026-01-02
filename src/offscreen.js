@@ -16,6 +16,89 @@ import {
 
 import { ERROR_CODES } from "./shared/errors.js";
 
+// ---------------------------------------------------------------------------
+// Debug: fetch tracer (offscreen)
+// ---------------------------------------------------------------------------
+const DEBUG_NET = true;
+
+// We do NOT log request bodies (prover payloads can be sensitive).
+function installFetchTracer() {
+  if (globalThis.__DUSK_FETCH_TRACER_INSTALLED__) return;
+  globalThis.__DUSK_FETCH_TRACER_INSTALLED__ = true;
+
+  const origFetch = globalThis.fetch?.bind(globalThis);
+  if (!origFetch) return;
+
+  let seq = 0;
+
+  globalThis.fetch = async (input, init = {}) => {
+    const id = ++seq;
+
+    const url = typeof input === "string" ? input : input?.url;
+    const method =
+      init?.method ||
+      (typeof input === "object" && input && "method" in input ? input.method : "GET") ||
+      "GET";
+
+    const signal =
+      init?.signal ||
+      (typeof input === "object" && input && "signal" in input ? input.signal : undefined);
+
+    const body = init && "body" in init ? init.body : undefined;
+    const bodySize =
+      typeof body === "string"
+        ? body.length
+        : body instanceof ArrayBuffer
+          ? body.byteLength
+          : body && typeof body === "object" && "byteLength" in body
+            ? body.byteLength
+            : null;
+
+    const started = performance.now();
+
+    console.groupCollapsed(`[fetch #${id}] ${method} ${url}`);
+    console.log("request", { method, url, bodySize, aborted: !!signal?.aborted });
+
+    try {
+      const res = await origFetch(input, init);
+      const durMs = Math.round(performance.now() - started);
+      const ct = res.headers?.get?.("content-type") || "";
+
+      console.log("response", { status: res.status, ok: res.ok, durMs, ct });
+
+      // If not OK, try to show a small preview
+      if (!res.ok) {
+        try {
+          if (ct.includes("json") || ct.includes("text")) {
+            const preview = await res.clone().text();
+            console.warn("error preview", preview.slice(0, 1200));
+          }
+        } catch (e) {
+          console.warn("could not read error body", e);
+        }
+      }
+
+      console.groupEnd();
+      return res;
+    } catch (e) {
+      const durMs = Math.round(performance.now() - started);
+      console.error("fetch threw", {
+        durMs,
+        name: e?.name,
+        message: e?.message,
+        aborted: !!signal?.aborted,
+      });
+      console.error(e);
+      console.groupEnd();
+      throw e;
+    }
+  };
+}
+
+if (DEBUG_NET) {
+  try { installFetchTracer(); } catch (e) { console.warn("Fetch tracer install failed", e); }
+}
+
 function serializeError(err) {
   return {
     code: err?.code ?? ERROR_CODES.INTERNAL,

@@ -110,6 +110,7 @@ function installTxStatusListener() {
           // manual reload.
           state.needsRefresh = true;
 
+          // Best-effort local patch to avoid showing stale state.
           try {
             if (state.overview && msg.status) {
               state.overview.shieldedSync = msg.status;
@@ -205,6 +206,8 @@ const netMenu = createNetworkMenuController({
       const resp = await send({
         type: "DUSK_UI_SET_NODE_URL",
         nodeUrl: preset.nodeUrl,
+        proverUrl: preset.proverUrl,
+        archiverUrl: preset.archiverUrl,
       });
 
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to switch network");

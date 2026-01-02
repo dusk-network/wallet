@@ -1,5 +1,6 @@
 import { formatLuxToDusk, parseDuskToLux, safeBigInt } from "../../../shared/amount.js";
 import { getDefaultGas } from "../../../shared/txDefaults.js";
+import { ProfileGenerator } from "@dusk/w3sper";
 import { h } from "../../lib/dom.js";
 import { bannerView } from "../../components/Banner.js";
 import { subnav } from "../../components/Subnav.js";
@@ -9,7 +10,7 @@ export function sendFormView(_ov, { state, actions } = {}) {
   const draft = state.draft || {};
 
   const to = h("input", {
-    placeholder: "Recipient (public account or shielded address)",
+    placeholder: "Recipient (account or shielded address)",
     value: typeof draft.to === "string" ? draft.to : "",
   });
   const amount = h("input", {
@@ -20,6 +21,29 @@ export function sendFormView(_ov, { state, actions } = {}) {
     placeholder: "Memo (optional)",
     value: typeof draft.memo === "string" ? draft.memo : "",
   });
+
+  // Lightweight recipient-type detection (public account vs shielded address)
+  // so the user understands what kind of transfer they'll create.
+  const toTypePill = h("div", { class: "meta-pill", style: "display:none" });
+  const updateToType = () => {
+    const v = String(to.value || "").trim();
+    if (!v) {
+      toTypePill.style.display = "none";
+      toTypePill.textContent = "";
+      return;
+    }
+    const t = ProfileGenerator.typeOf(v);
+    toTypePill.style.display = "inline-flex";
+    if (t === "account") {
+      toTypePill.textContent = "Detected: Public account";
+    } else if (t === "address") {
+      toTypePill.textContent = "Detected: Shielded address";
+    } else {
+      toTypePill.textContent = "Detected: Unknown address format";
+    }
+  };
+  to.addEventListener("input", updateToType);
+  updateToType();
 
   const errBox = h("div", { class: "err", style: "display:none" });
   const setErr = (txt) => {
@@ -75,6 +99,7 @@ export function sendFormView(_ov, { state, actions } = {}) {
     h("div", { class: "row" }, [
       h("label", { text: "To" }),
       to,
+      toTypePill,
       h("label", { text: "Amount" }),
       amount,
       h("label", { text: "Memo" }),
@@ -91,6 +116,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     state.route = "send";
     return sendFormView(ov, { state, actions });
   }
+
+  const recType = ProfileGenerator.typeOf(String(d.to || "").trim());
+  const txTypeLabel = recType === "address" ? "Shielded transfer" : "Public transfer";
 
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
   const cancelBtn = h("button", {
@@ -173,6 +201,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     bannerView(state.banner),
     h("div", { class: "row" }, [
       h("div", { class: "muted", text: "You are about to send" }),
+      h("div", { class: "meta-pill", text: `Type: ${txTypeLabel}` }),
       h("div", { class: "home-balance" }, [
         h("div", {
           class: "balance-amount",

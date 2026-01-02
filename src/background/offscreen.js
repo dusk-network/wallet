@@ -14,7 +14,7 @@ let offscreenCreating = null;
 
 /**
  * Cache the last config we pushed into the engine.
- * @type {{ nodeUrl: string } | null}
+ * @type {{ nodeUrl: string, proverUrl?: string, archiverUrl?: string } | null}
  */
 let lastEngineConfig = null;
 
@@ -137,9 +137,19 @@ export async function ensureEngineConfigured() {
   const nodeUrl = settings?.nodeUrl;
   if (!nodeUrl) return;
 
-  if (!lastEngineConfig || lastEngineConfig.nodeUrl !== nodeUrl) {
-    lastEngineConfig = { nodeUrl };
-    await engineCall("engine_config", { nodeUrl });
+  const proverUrl = settings?.proverUrl;
+  const archiverUrl = settings?.archiverUrl;
+
+  const next = { nodeUrl, proverUrl, archiverUrl };
+
+  if (
+    !lastEngineConfig ||
+    lastEngineConfig.nodeUrl !== next.nodeUrl ||
+    lastEngineConfig.proverUrl !== next.proverUrl ||
+    lastEngineConfig.archiverUrl !== next.archiverUrl
+  ) {
+    lastEngineConfig = next;
+    await engineCall("engine_config", next);
   }
 }
 

@@ -194,7 +194,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      // After creating a brand new wallet, set a shielded checkpoint
+      // Optional: after creating a brand new wallet, set a shielded checkpoint
       // to "now" so we don't sync from genesis for shielded notes.
       if (message?.type === "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW") {
         const status = await getEngineStatus();
@@ -224,6 +224,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // UI switches network by setting a new node URL
       if (message?.type === "DUSK_UI_SET_NODE_URL") {
         const nodeUrl = String(message?.nodeUrl ?? "").trim();
+        const proverUrl =
+          message?.proverUrl !== undefined && message?.proverUrl !== null
+            ? String(message.proverUrl).trim()
+            : "";
+        const archiverUrl =
+          message?.archiverUrl !== undefined && message?.archiverUrl !== null
+            ? String(message.archiverUrl).trim()
+            : "";
         try {
           // eslint-disable-next-line no-new
           new URL(nodeUrl);
@@ -231,7 +239,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid node URL");
         }
 
-        await setSettings({ nodeUrl });
+        // Optional validation for explicit prover/archiver URLs.
+        if (proverUrl) {
+          try {
+            // eslint-disable-next-line no-new
+            new URL(proverUrl);
+          } catch {
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid prover URL");
+          }
+        }
+        if (archiverUrl) {
+          try {
+            // eslint-disable-next-line no-new
+            new URL(archiverUrl);
+          } catch {
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid archiver URL");
+          }
+        }
+
+        // Store endpoints (prover/archiver may be inferred inside setSettings
+        // when omitted).
+        const nextSettings = await setSettings({
+          nodeUrl,
+          ...(proverUrl ? { proverUrl } : {}),
+          ...(archiverUrl ? { archiverUrl } : {}),
+        });
 
         // Force the engine to pick up the new config immediately.
         invalidateEngineConfig();
@@ -242,8 +274,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         sendResponse({
           ok: true,
-          nodeUrl,
-          networkName: networkNameFromNodeUrl(nodeUrl),
+          nodeUrl: nextSettings.nodeUrl,
+          proverUrl: nextSettings.proverUrl,
+          archiverUrl: nextSettings.archiverUrl,
+          networkName: networkNameFromNodeUrl(nextSettings.nodeUrl),
         });
         return;
       }
@@ -301,7 +335,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } catch (e) {
             balanceError = e?.message ?? String(e);
           }
-          // surface status + kick off an incremental sync.
+          // Shielded Phase 1: surface status + (optionally) kick off an incremental sync.
           const fallbackShieldedStatus = {
             state: "idle",
             progress: 0,
@@ -355,6 +389,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           shieldedSync,
           shieldedError,
           nodeUrl: settings.nodeUrl,
+          proverUrl: settings.proverUrl,
+          archiverUrl: settings.archiverUrl,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           activeOrigin,
           activeConnected,

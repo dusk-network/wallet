@@ -27,40 +27,66 @@ export function homeView(ov, { state, actions } = {}) {
   const balFull = hasBalance ? formatLuxToDusk(pubLux) : "—";
   const balDusk = hasBalance ? clampDecimals(balFull, 4) : "—";
 
-  // If we can't compute shielded balance yet (sync in progress), we
-  // still show the row and surface progress in the subtitle.
+  // Shielded balance
+  // If we can't compute it yet (sync in progress), we still show the row
+  // and surface progress in the subtitle.
   const shieldedSync = ov?.shieldedSync || null;
   const shieldedError = ov?.shieldedError ? String(ov.shieldedError) : "";
   const shieldLux = ov?.shieldedBalance?.value ?? ov?.shieldedBalance;
   const hasShieldValue = shieldLux !== undefined && shieldLux !== null;
+  // Always show the shielded row for Dusk. If values aren't available yet,
+  // we show placeholders + sync state.
   const showShielded = true;
   const shieldFull = hasShieldValue ? formatLuxToDusk(shieldLux) : "—";
   const shieldDusk = hasShieldValue ? clampDecimals(shieldFull, 4) : "—";
 
   // Total (public + shielded) is only meaningful once shielded value is known.
   const shieldLuxBI = hasShieldValue ? safeBigInt(shieldLux, 0n) : null;
+
+  // When a shielded tx is pending we reserve notes locally to prevent
+  // double-spends. That can make the available shielded balance drop to 0
+  // until the change note is discovered. We keep the hero/asset amount based
+  // on the total (value), and show a small "Pending" hint when applicable.
+  const shieldSpendLux = ov?.shieldedBalance?.spendable;
+  const hasShieldSpendable = shieldSpendLux !== undefined && shieldSpendLux !== null;
+  const shieldSpendBI = hasShieldSpendable ? safeBigInt(shieldSpendLux, 0n) : null;
+  const reservedLux =
+    typeof shieldLuxBI === "bigint" && typeof shieldSpendBI === "bigint"
+      ? shieldLuxBI > shieldSpendBI
+        ? shieldLuxBI - shieldSpendBI
+        : 0n
+      : 0n;
   const hasTotal = hasBalance && typeof shieldLuxBI === "bigint";
   const totalLux = hasTotal ? pubLux + shieldLuxBI : null;
   const totalFull = hasTotal ? formatLuxToDusk(totalLux) : null;
   const totalDusk = hasTotal ? clampDecimals(totalFull, 4) : null;
 
-  let shieldSub = "Shielded";
+  // Shielded status suffix shown in Assets breakdown.
+  let shieldStatus = null;
+  let shieldStatusTitle = shieldedError || shieldedSync?.lastError || undefined;
   if (shieldedSync?.state === "idle") {
     const n = Number(shieldedSync?.notes ?? 0);
-    shieldSub = n > 0 ? "Shielded" : "Not synced";
+    if (n <= 0) shieldStatus = "Not synced";
   } else if (shieldedSync?.state === "syncing") {
     const p = Number(shieldedSync.progress ?? 0);
     const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
-    // Avoid UX trap where we show a hard "0%" for a long time.
-    shieldSub = pct === 0 && p > 0 ? "Syncing <1%" : `Syncing ${pct}%`;
+    // Avoid the UX trap where we show a hard "0%" for a long time.
+    // If progress is >0 but rounds to 0, display "<1%" instead.
+    shieldStatus = pct === 0 && p > 0 ? "Syncing <1%" : `Syncing ${pct}%`;
   } else if (shieldedSync?.state === "error") {
-    shieldSub = "Sync failed";
-  } else if (shieldedSync?.state === "done") {
-    shieldSub = "Shielded";
+    shieldStatus = "Sync failed";
   }
 
   if (shieldedError && shieldedSync?.state !== "syncing") {
-    shieldSub = "Unavailable";
+    shieldStatus = "Unavailable";
+  }
+
+  // If everything is synced and error-free but we have locally reserved notes,
+  // show a small hint.
+  if (!shieldStatus && reservedLux > 0n) {
+    shieldStatus = "Pending";
+    const rFull = formatLuxToDusk(reservedLux);
+    shieldStatusTitle = `Reserved ${clampDecimals(rFull, 4)} DUSK`;
   }
 
   // MetaMask-like main tabs. We keep the route as the source of truth so
@@ -73,7 +99,9 @@ export function homeView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  // Connected site label.
+  // Connected site label (compact). We intentionally don't spend a full card
+  // on this; the account chip already signals the account, and connection is
+  // shown as a small inline label.
   let connHost = null;
   let connConnected = false;
   if (platform.capabilities.dapp) {
@@ -104,16 +132,12 @@ export function homeView(ov, { state, actions } = {}) {
       ])
     : null;
 
-  const balanceLabel = h("div", { class: "balance-sub" }, [
-    h("span", { text: "Public" }),
-    hasTotal
-      ? h("span", {
-          class: "balance-total-inline",
-          text: `• Total ${totalDusk}`,
-          title: `Total ${totalFull} DUSK`,
-        })
-      : null,
-  ].filter(Boolean));
+  // Home hero shows the total once shielded is available.
+  const heroAmt = hasTotal ? totalDusk : balDusk;
+  const heroAmtTitle = hasTotal ? totalFull : balFull;
+  const heroLabel = hasTotal ? "Total" : "Public";
+
+  const balanceLabel = h("div", { class: "balance-sub" }, [h("span", { text: heroLabel })]);
 
   const balanceSubRow = h("div", { class: "balance-subrow" }, [balanceLabel, connInline].filter(Boolean));
 
@@ -145,7 +169,7 @@ export function homeView(ov, { state, actions } = {}) {
   ]);
 
   const hero = h("div", { class: "home-balance home-hero" }, [
-    h("div", { class: "balance-amount", text: balDusk, title: balFull }),
+    h("div", { class: "balance-amount", text: heroAmt, title: heroAmtTitle }),
     balanceSubRow,
     ov?.balanceError
       ? h("div", { class: "muted", text: `Balance error: ${ov.balanceError}` })
@@ -358,8 +382,8 @@ export function homeView(ov, { state, actions } = {}) {
               h("span", { text: "Shielded" }),
               h("span", {
                 class: "asset-break-status",
-                text: shieldSub ? `• ${shieldSub}` : "",
-                title: shieldedError || shieldedSync?.lastError || undefined,
+                text: shieldStatus ? `• ${shieldStatus}` : "",
+                title: shieldStatusTitle,
               }),
             ]),
             h("div", { class: "asset-break-amt", text: shieldDusk, title: shieldFull }),
@@ -368,6 +392,8 @@ export function homeView(ov, { state, actions } = {}) {
     ].filter(Boolean)),
   ]);
 
+  // Assets tab: keep it focused on balances. Activity lives exclusively
+  // in the Activity tab to avoid duplication and keep the popup compact.
   return [
     bannerView(state.banner),
     hero,

@@ -14,12 +14,11 @@ import {
   clearNotes,
   countNotes,
   ensureShieldedMeta,
+  getNotesMap,
   getSpendableNotesMap,
   getUnspentNullifiers,
   getSpentNullifiers,
   putPendingNullifiers,
-  getPendingNullifiersForTx,
-  clearPendingNullifiers,
   markNullifiersSpent,
   unspendNullifiers,
   metaCursor,
@@ -30,7 +29,7 @@ import {
 // Read the current Transfer Contract note-tree size (bookmark) from the node.
 //
 // IMPORTANT:
-// The return type of `contract.call.*()` in w3sper is not consistent across
+// The return type of `contract.call.*()` in w3sper is *not* consistent across
 // methods/targets (some return numbers/bigints directly, others return byte
 // buffers). The web wallet uses direct numeric returns for calls like
 // `finalization_period()`, so `num_notes()` may return a `bigint` or `number`
@@ -195,18 +194,29 @@ async function withTimeout(promise, ms, message, onTimeout) {
   }
 }
 
-let engineConfig = { nodeUrl: "https://testnet.nodes.dusk.network" };
+// Engine configuration is pushed in from background/offscreen via engine_config.
+// We keep it in a small mutable object so we can reconfigure network routing
+// without restarting the whole engine.
+let engineConfig = {
+  nodeUrl: "https://testnet.nodes.dusk.network",
+  proverUrl: "https://testnet.provers.dusk.network",
+  archiverUrl: "https://testnet.nodes.dusk.network",
+};
 
 export function configure(patch = {}) {
+  let changedNode = false;
+  let changedProver = false;
+  let changedArchiver = false;
+
   if (patch.nodeUrl && typeof patch.nodeUrl === "string") {
     const next = patch.nodeUrl;
-    const changed = next !== engineConfig.nodeUrl;
+    changedNode = next !== engineConfig.nodeUrl;
     engineConfig.nodeUrl = next;
 
     // IMPORTANT: allow switching networks/nodes at runtime.
     // If we already have a connected Network instance, we must drop it so the next
     // call reconnects to the new node URL.
-    if (changed) {
+    if (changedNode) {
       try {
         // w3sper's Network exposes connect(); disconnect() exists in newer versions.
         state.network?.disconnect?.();
@@ -219,6 +229,10 @@ export function configure(patch = {}) {
       state.network = null;
       state.treasury = null;
       state.bookkeeper = null;
+      state.treasuryAll = null;
+      state.bookkeeperAll = null;
+      state.treasuryAll = null;
+      state.bookkeeperAll = null;
 
       // Network changed -> shielded state must be reloaded for the new network.
       try {
@@ -234,6 +248,29 @@ export function configure(patch = {}) {
         lastError: "",
         updatedAt: Date.now(),
       };
+    }
+  }
+
+  if (patch.proverUrl && typeof patch.proverUrl === "string") {
+    const next = patch.proverUrl;
+    changedProver = next !== engineConfig.proverUrl;
+    engineConfig.proverUrl = next;
+  }
+
+  if (patch.archiverUrl && typeof patch.archiverUrl === "string") {
+    const next = patch.archiverUrl;
+    changedArchiver = next !== engineConfig.archiverUrl;
+    engineConfig.archiverUrl = next;
+  }
+
+  // Prover/archiver can change without switching the node URL (custom setups).
+  // Ensure the current Network instance picks up the new routing.
+  if (!changedNode && (changedProver || changedArchiver)) {
+    try {
+      // Force re-patching of endpoints on next ensureNetwork().
+      if (state.network) state.network.__duskPatchedEndpoints = false;
+    } catch {
+      // ignore
     }
   }
 }
@@ -253,10 +290,12 @@ import { AccountSyncer } from "@dusk/w3sper";
 class RemoteTreasury {
   #network;
   #profiles = [];
+  #includePending = false;
 
-  constructor(network, profiles = []) {
+  constructor(network, profiles = [], opts = {}) {
     this.#network = network;
     this.#profiles = profiles;
+    this.#includePending = Boolean(opts?.includePending);
   }
 
   setProfiles(profiles) {
@@ -284,6 +323,10 @@ class RemoteTreasury {
 
   /**
    * Shielded note set for the given profile.
+   *
+   * We persist notes in IndexedDB (per network) and expose them
+   * via the Treasury interface so Bookkeeper.balance(profile.address) can
+   * compute shielded balances.
    */
   async address(_identifier) {
     // Shielded notes are stored per-network + per-profile in IndexedDB.
@@ -298,9 +341,12 @@ class RemoteTreasury {
       const netKey = getNetworkKey();
       const walletId = getWalletId();
       if (!walletId) return new Map();
-      // Exclude locally pending nullifiers so Bookkeeper won't accidentally
-      // reuse notes already reserved by an in-flight phoenix transaction.
-      return await getSpendableNotesMap(netKey, walletId, idx);
+      // For transaction building we must exclude locally pending nullifiers
+      // to prevent double-spend. For balance display we include them so the
+      // wallet doesn't show a misleading drop to zero while a tx is pending.
+      return this.#includePending
+        ? await getNotesMap(netKey, walletId, idx)
+        : await getSpendableNotesMap(netKey, walletId, idx);
     } catch {
       return new Map();
     }
@@ -337,6 +383,8 @@ const state = {
   network: null,
   treasury: null,
   bookkeeper: null,
+  treasuryAll: null,
+  bookkeeperAll: null,
   protocolLoaded: false,
 
   // Shielded sync/balance
@@ -345,9 +393,10 @@ const state = {
     epoch: 0,
     syncPromise: null,
     starting: false,
+    // Current live status exposed to UI.
     status: {
       state: "idle", // idle | syncing | done | error
-      progress: 0, // 0..1 (matches w3sper's AddressSyncer event)
+      progress: 0,
       notes: 0,
       cursorBookmark: "0",
       cursorBlock: "0",
@@ -403,8 +452,10 @@ export function lock() {
   // Reset derived helpers (they don't hold secrets, but can hold stale profile refs).
   state.treasury = null;
   state.bookkeeper = null;
+  state.treasuryAll = null;
+  state.bookkeeperAll = null;
 
-  // We keep the Network instance around, it holds no secrets and can stay connected.
+  // We keep the Network instance around; it holds no secrets and can stay connected.
 }
 
 /**
@@ -447,7 +498,7 @@ export async function unlockWithMnemonic(mnemonic) {
   try {
     await ensureShieldedMetaForCurrent();
   } catch {
-    // Non-fatal, shielded sync can be retried later.
+    // Non-fatal; shielded sync can be retried later.
   }
 
   return p0;
@@ -489,6 +540,10 @@ export async function ensureNetwork() {
   // Lazily create the Network instance.
   state.network = state.network ?? new Network(url);
 
+  // Patch network methods that need to hit different services (prover/archiver)
+  // than the base node URL. Public endpoints often run these on separate hosts.
+  patchNetworkEndpoints(state.network);
+
   // Connect only if we aren't already connected.
   if (!state.network.connected) {
     try {
@@ -529,6 +584,10 @@ export async function ensureNetwork() {
         `Timed out connecting to node ${url.toString()}`,
         abortAndTearDown
       );
+
+      // Some w3sper versions may mutate internal callables during connect().
+      // Re-apply endpoint patching after the websocket handshake.
+      patchNetworkEndpoints(state.network);
     } catch (err) {
       // Drop the cached network/bookkeeper objects so a retry starts from a
       // clean state.
@@ -545,6 +604,8 @@ export async function ensureNetwork() {
       state.network = null;
       state.treasury = null;
       state.bookkeeper = null;
+      state.treasuryAll = null;
+      state.bookkeeperAll = null;
 
       throw new Error(formatWsError(err, url.toString()));
     }
@@ -555,11 +616,82 @@ export async function ensureNetwork() {
   // new wallet, the network can remain connected. We must still ensure the
   // treasury/bookkeeper are bound to the current profiles, otherwise we end
   // up showing the old wallet's balances.
-  state.treasury = state.treasury ?? new RemoteTreasury(state.network, state.profiles);
+  state.treasury = state.treasury ?? new RemoteTreasury(state.network, state.profiles, {
+    includePending: false,
+  });
+  state.treasuryAll = state.treasuryAll ?? new RemoteTreasury(state.network, state.profiles, {
+    includePending: true,
+  });
+
   state.treasury.setProfiles(state.profiles);
+  state.treasuryAll.setProfiles(state.profiles);
+
   state.bookkeeper = state.bookkeeper ?? new Bookkeeper(state.treasury);
+  state.bookkeeperAll = state.bookkeeperAll ?? new Bookkeeper(state.treasuryAll);
 
   return state.network;
+}
+
+function patchNetworkEndpoints(network) {
+  try {
+    if (!network || typeof network !== "object") return;
+
+    const nodeBase = String(engineConfig.nodeUrl || "").trim();
+    const proverBase = String(engineConfig.proverUrl || "").trim() || nodeBase;
+    if (!proverBase) return;
+
+    let proveUrl = "";
+    try {
+      proveUrl = new URL("/on/prover/prove", proverBase).toString();
+    } catch {
+      return;
+    }
+
+    // Avoid re-patching if nothing changed.
+    if (network.__duskPatchedEndpoints && network.__duskProveUrl === proveUrl) {
+      return;
+    }
+
+    // Keep a reference to the original prove implementation for debugging.
+    if (!network.__duskOrigProve && typeof network.prove === "function") {
+      try {
+        network.__duskOrigProve = network.prove.bind(network);
+      } catch {
+        network.__duskOrigProve = network.prove;
+      }
+    }
+
+    // Override prove() so shielded tx building hits the prover host.
+    network.prove = async (circuits) => {
+      const res = await fetch(proveUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+        },
+        body: circuits,
+      });
+
+      if (!res.ok) {
+        let detail = "";
+        try {
+          // Prover errors are often text/JSON, but don't assume.
+          detail = await res.text();
+        } catch {
+          detail = "";
+        }
+        throw new Error(
+          `Prover request failed (${res.status}): ${detail || res.statusText}`
+        );
+      }
+
+      return await res.arrayBuffer();
+    };
+
+    network.__duskProveUrl = proveUrl;
+    network.__duskPatchedEndpoints = true;
+  } catch {
+    // Never block normal wallet operation if patching fails.
+  }
 }
 
 function formatWsError(err, nodeUrl) {
@@ -826,11 +958,11 @@ export async function startShieldedSync({ force = false } = {}) {
           return { started: false, status: getShieldedStatus() };
         }
       } catch {
-        // ignore, we'll attempt a normal sync below
+        // ignore; we'll attempt a normal sync below
       }
     }
 
-    // Cancel/ignore any in-flight sync and start a new one.
+    // Cancel/ignore any in-flight sync (force) and start a new one.
     state.shielded.epoch++;
     const epoch = state.shielded.epoch;
 
@@ -1060,7 +1192,17 @@ export async function getShieldedBalance() {
 
   const profile = getCurrentProfile();
   return await withTimeout(
-    state.bookkeeper.balance(profile.address),
+    (async () => {
+      // We return both:
+      // - value: total (includes locally pending nullifiers)
+      // - spendable: available (excludes locally pending nullifiers)
+      const total = await state.bookkeeperAll.balance(profile.address);
+      const available = await state.bookkeeper.balance(profile.address);
+
+      const value = total?.value ?? total;
+      const spendable = available?.value ?? available;
+      return { value, spendable };
+    })(),
     15_000,
     "Shielded balance request timed out"
   );
@@ -1081,8 +1223,6 @@ function normalizeGas(gas) {
 /**
  * Transfer funds.
  *
- * - account -> account: public transfer
- * - shielded -> shielded: shielded transfer
  * @param {{to:string, amount:string|bigint, memo?:string, gas?:{limit?:string|bigint, price?:string|bigint}}} params
  */
 export async function transfer(params) {
@@ -1100,7 +1240,7 @@ export async function transfer(params) {
   const profile = getCurrentProfile();
 
   // Shielded transfers spend from the local note cache.
-  // We avoid blocking the UX on a full sync here.
+  // We avoid blocking the UX on a full sync here (MetaMask-style).
   // If the cache is empty, we kick off a background sync and fail fast with
   // a clear message.
   if (toType === "address") {
