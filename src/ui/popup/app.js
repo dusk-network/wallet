@@ -11,6 +11,7 @@ import { send } from "../../wallet/bus.js";
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
 import { sendFormView, sendConfirmView } from "./views/send.js";
+import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { optionsView } from "./views/options.js";
 import {
   onboardingWelcomeView,
@@ -323,6 +324,14 @@ export async function render({ forceRefresh = false } = {}) {
   }
   if (state.route === "confirm") {
     setApp(sendConfirmView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "convert") {
+    setApp(convertFormView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "convert_confirm") {
+    setApp(convertConfirmView(ov, { state, actions }));
     return;
   }
   if (state.route === "receive") {

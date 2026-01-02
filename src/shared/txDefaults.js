@@ -24,6 +24,14 @@ export const DEFAULT_GAS_BY_KIND = Object.freeze({
     limit: "10000000",
     price: "1",
   }),
+  shield: Object.freeze({
+    limit: "50000000",
+    price: "1",
+  }),
+  unshield: Object.freeze({
+    limit: "50000000",
+    price: "1",
+  }),
   contract_call: Object.freeze({
     limit: "500000000",
     price: "1",

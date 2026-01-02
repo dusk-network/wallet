@@ -66,7 +66,7 @@ function installFetchTracer() {
 
       console.log("response", { status: res.status, ok: res.ok, durMs, ct });
 
-      // If not OK, try to show a small preview
+      // If not OK, try to show a small preview (clone to avoid consuming the body)
       if (!res.ok) {
         try {
           if (ct.includes("json") || ct.includes("text")) {

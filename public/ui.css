@@ -671,14 +671,15 @@ button:disabled {
   gap: 12px;
 }
 
-/* Compact action row (future-proof: can be extended to 4 items later) */
+/* Compact action row */
 .action-bar {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   gap: 10px;
 }
 
 .action-btn {
+  flex: 1 1 0;
+  min-width: 0;
   height: 44px;
   padding: 0 10px;
   border-radius: 14px;
@@ -1348,6 +1349,17 @@ body.page--popup .balance-amount {
 
 body.page--popup .action-btn {
   height: 42px;
+  padding: 0 8px;
+}
+
+body.page--popup .action-btn-ico {
+  width: 24px;
+  height: 24px;
+  border-radius: 10px;
+}
+
+body.page--popup .action-btn-label {
+  font-size: 12px;
 }
 
 body.page--popup .panel-header {

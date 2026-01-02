@@ -44,7 +44,7 @@ export function homeView(ov, { state, actions } = {}) {
   const shieldLuxBI = hasShieldValue ? safeBigInt(shieldLux, 0n) : null;
 
   // When a shielded tx is pending we reserve notes locally to prevent
-  // double-spends. That can make the available shielded balance drop to 0
+  // double-spends. That can make the *available* shielded balance drop to 0
   // until the change note is discovered. We keep the hero/asset amount based
   // on the total (value), and show a small "Pending" hint when applicable.
   const shieldSpendLux = ov?.shieldedBalance?.spendable;
@@ -62,6 +62,7 @@ export function homeView(ov, { state, actions } = {}) {
   const totalDusk = hasTotal ? clampDecimals(totalFull, 4) : null;
 
   // Shielded status suffix shown in Assets breakdown.
+  // We only show a suffix when *not* fully healthy, to avoid "Shielded • Shielded".
   let shieldStatus = null;
   let shieldStatusTitle = shieldedError || shieldedSync?.lastError || undefined;
   if (shieldedSync?.state === "idle") {
@@ -166,6 +167,13 @@ export function homeView(ov, { state, actions } = {}) {
       state.banner = null;
       actions?.render?.().catch(() => {});
     }),
+    actionBtn("Convert", "⇄", () => {
+      state.route = "convert";
+      state.banner = null;
+      // Initialize convert draft.
+      state.draft = { kind: "shield", amountDusk: "", amountLux: "" };
+      actions?.render?.().catch(() => {});
+    }),
   ]);
 
   const hero = h("div", { class: "home-balance home-hero" }, [
@@ -225,6 +233,22 @@ export function homeView(ov, { state, actions } = {}) {
         title: amt ? `Send ${amt} DUSK` : "Send",
         sub: tx?.to ? truncateMiddle(String(tx.to), 10, 8) : "",
         icon: "↗",
+      };
+    }
+    if (kind === "shield") {
+      const amt = tx?.amount != null ? formatLuxShort(tx.amount, 6) : "";
+      return {
+        title: amt ? `Shield ${amt} DUSK` : "Shield",
+        sub: "Public → Shielded",
+        icon: "⇢",
+      };
+    }
+    if (kind === "unshield") {
+      const amt = tx?.amount != null ? formatLuxShort(tx.amount, 6) : "";
+      return {
+        title: amt ? `Unshield ${amt} DUSK` : "Unshield",
+        sub: "Shielded → Public",
+        icon: "⇠",
       };
     }
     if (kind === "contract_call") {

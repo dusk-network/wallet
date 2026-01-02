@@ -1348,6 +1348,8 @@ function toContractIdBytes(contractId) {
  *
  * Supported kinds:
  * - { kind: 'transfer', to, amount, memo?, gas? }
+ * - { kind: 'shield', amount, gas? }
+ * - { kind: 'unshield', amount, gas? }
  * - { kind: 'contract_call', contractId, fnName, fnArgs, to?, amount?, deposit?, gas? }
  */
 export async function sendTransaction(params) {
@@ -1366,6 +1368,81 @@ export async function sendTransaction(params) {
   if (kind === "transfer") {
     // Reuse existing transfer logic for now.
     return await transfer(params);
+  }
+
+  if (kind === "shield") {
+    if ("to" in params && params.to) {
+      throw new Error("Shield does not accept a 'to' field (it always targets your shielded address)");
+    }
+    if ("memo" in params && params.memo) {
+      throw new Error("Shield cannot include a memo payload");
+    }
+
+    const amount = toU64(params.amount, { name: "amount" });
+    if (amount <= 0n) throw new Error("amount must be > 0");
+
+    let tx = state.bookkeeper.as(profile).shield(amount);
+    const gas = normalizeGas(params.gas);
+    if (gas) tx = tx.gas(gas);
+
+    const result = await network.execute(tx);
+    return { hash: result.hash, nonce: result.nonce };
+  }
+
+  if (kind === "unshield") {
+    if ("to" in params && params.to) {
+      throw new Error("Unshield does not accept a 'to' field (it always targets your public account)");
+    }
+    if ("memo" in params && params.memo) {
+      throw new Error("Unshield cannot include a memo payload");
+    }
+
+    const amount = toU64(params.amount, { name: "amount" });
+    if (amount <= 0n) throw new Error("amount must be > 0");
+
+    // Spending shielded notes requires the local note cache. If the cache is
+    // empty, kick off a background sync and fail fast with a clear message.
+    await ensureShieldedMetaForCurrent();
+    try {
+      const netKey = getNetworkKey();
+      const walletId = getWalletId();
+      const idx = state.currentIndex || 0;
+      if (walletId) {
+        const n = await countNotes(netKey, walletId, idx);
+        if (!n) {
+          startShieldedSync({ force: false }).catch(() => {});
+          throw new Error(
+            "Shielded wallet is still syncing. Please wait for shielded sync to complete before unshielding."
+          );
+        }
+      }
+    } catch (e) {
+      const msg = e?.message ? String(e.message) : String(e);
+      if (msg.includes("Shielded wallet is still syncing")) throw e;
+    }
+
+    let tx = state.bookkeeper.as(profile).unshield(amount);
+    const gas = normalizeGas(params.gas);
+    if (gas) tx = tx.gas(gas);
+
+    const result = await network.execute(tx);
+
+    // Reserve nullifiers locally to prevent double-spend before we observe them
+    // as spent on chain.
+    try {
+      if (Array.isArray(result?.nullifiers) && result.nullifiers.length) {
+        const netKey = getNetworkKey();
+        const walletId = getWalletId();
+        const idx = state.currentIndex || 0;
+        if (walletId) {
+          await putPendingNullifiers(netKey, walletId, idx, result.nullifiers, result.hash);
+        }
+      }
+    } catch {
+      // best-effort
+    }
+
+    return { hash: result.hash, nullifiers: result.nullifiers };
   }
 
   if (kind === "contract_call") {

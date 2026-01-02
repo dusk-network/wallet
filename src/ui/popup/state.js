@@ -9,12 +9,21 @@ export const ONBOARD_ROUTES = new Set([
 ]);
 
 export const state = {
-  // home | send | confirm | receive | activity | options | onboarding_*...
+  // home | send | confirm | convert | convert_confirm | receive | activity | options | onboarding_*...
   route: (() => {
     if (isOptionsPage) return "options";
     try {
       const r = new URLSearchParams(location.search).get("route");
-      const allowed = new Set(["home", "send", "confirm", "receive", "activity", "options"]);
+      const allowed = new Set([
+        "home",
+        "send",
+        "confirm",
+        "convert",
+        "convert_confirm",
+        "receive",
+        "activity",
+        "options",
+      ]);
       if (r && allowed.has(r)) return r;
     } catch {
       // ignore

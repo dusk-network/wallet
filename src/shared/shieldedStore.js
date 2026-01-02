@@ -443,37 +443,6 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
 }
 
 /**
- * Clear pending entries for the given nullifiers.
- */
-export async function clearPendingNullifiers(networkKey, walletId, profileIndex, nullifiers) {
-  const db = await openDb();
-  const ok = ownerKey(networkKey, walletId, profileIndex);
-
-  const ids = [];
-  for (const n of nullifiers || []) {
-    try {
-      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
-      const hex = bytesToHex(u8);
-      if (!hex) continue;
-      ids.push(makeId(ok, hex));
-    } catch {
-      // ignore
-    }
-  }
-  if (!ids.length) return 0;
-
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction([STORE_PENDING], "readwrite");
-    const store = tx.objectStore(STORE_PENDING);
-    for (const id of ids) store.delete(id);
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to clear pending"));
-  });
-
-  return ids.length;
-}
-
-/**
  * Move notes from unspent -> spent for the provided nullifiers, and clear any
  * pending reservation for them.
  */
