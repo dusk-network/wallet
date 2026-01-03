@@ -13,6 +13,7 @@ import { receiveView } from "./views/receive.js";
 import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { optionsView } from "./views/options.js";
+import { txDetailsView } from "./views/txDetails.js";
 import {
   onboardingWelcomeView,
   onboardingCreatePasswordView,
@@ -336,6 +337,10 @@ export async function render({ forceRefresh = false } = {}) {
   }
   if (state.route === "receive") {
     setApp(receiveView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "tx") {
+    setApp(txDetailsView(ov, { state, actions }));
     return;
   }
 

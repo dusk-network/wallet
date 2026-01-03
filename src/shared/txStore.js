@@ -10,6 +10,8 @@ import { storage, STORAGE_KEYS } from "./storage.js";
  * @property {string=} deposit
  * @property {string=} contractId
  * @property {string=} fnName
+ * @property {string=} gasLimit
+ * @property {string=} gasPrice
  * @property {number} submittedAt
  * @property {"submitted"|"executed"|"failed"} status
  * @property {string=} error

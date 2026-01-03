@@ -9,7 +9,7 @@ export const ONBOARD_ROUTES = new Set([
 ]);
 
 export const state = {
-  // home | send | confirm | convert | convert_confirm | receive | activity | options | onboarding_*...
+  // home | send | confirm | convert | convert_confirm | receive | activity | tx | options | onboarding_*...
   route: (() => {
     if (isOptionsPage) return "options";
     try {
@@ -22,6 +22,7 @@ export const state = {
         "convert_confirm",
         "receive",
         "activity",
+        "tx",
         "options",
       ]);
       if (r && allowed.has(r)) return r;
@@ -38,6 +39,15 @@ export const state = {
       return null;
     }
   })(),
+  // Selected tx hash for the Tx details view
+  txDetailHash: (() => {
+    try {
+      return new URLSearchParams(location.search).get("hash") || null;
+    } catch {
+      return null;
+    }
+  })(),
+  txDetailFrom: null,
   overview: null,
   draft: null,
   banner: null,

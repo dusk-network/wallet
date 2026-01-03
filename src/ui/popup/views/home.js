@@ -167,10 +167,9 @@ export function homeView(ov, { state, actions } = {}) {
       state.banner = null;
       actions?.render?.().catch(() => {});
     }),
-    actionBtn("Convert", "⇄", () => {
+    actionBtn("Shield", "🛡", () => {
       state.route = "convert";
       state.banner = null;
-      // Initialize convert draft.
       state.draft = { kind: "shield", amountDusk: "", amountLux: "" };
       actions?.render?.().catch(() => {});
     }),
@@ -332,6 +331,20 @@ export function homeView(ov, { state, actions } = {}) {
       {
         class: cls,
         onclick: async () => {
+          // Open in-app TX details view.
+          try {
+            if (state) {
+              state.txDetailHash = hash;
+              state.txDetailFrom = state.route || "activity";
+              state.route = "tx";
+              actions?.render?.().catch(() => {});
+              return;
+            }
+          } catch {
+            // ignore
+          }
+
+          // Fallback: open explorer (or copy hash) if we can't navigate.
           const ok = await openExplorer(hash);
           if (!ok) {
             const copied = await copyToClipboard(hash);

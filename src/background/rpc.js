@@ -326,6 +326,8 @@ export async function handleRpc(origin, request) {
               kind === "contract_call" && finalParams?.fnName
                 ? String(finalParams.fnName)
                 : undefined,
+            gasLimit: finalParams?.gas?.limit != null ? String(finalParams.gas.limit) : undefined,
+            gasPrice: finalParams?.gas?.price != null ? String(finalParams.gas.price) : undefined,
             submittedAt: Date.now(),
             status: "submitted",
           });

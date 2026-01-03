@@ -34,7 +34,7 @@ function installFetchTracer() {
   globalThis.fetch = async (input, init = {}) => {
     const id = ++seq;
 
-    const url = typeof input === "string" ? input : input?.url;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input?.url;
     const method =
       init?.method ||
       (typeof input === "object" && input && "method" in input ? input.method : "GET") ||

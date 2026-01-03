@@ -440,6 +440,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 kind === "contract_call" && baseParams?.fnName
                   ? String(baseParams.fnName)
                   : undefined,
+              gasLimit: baseParams?.gas?.limit != null ? String(baseParams.gas.limit) : undefined,
+              gasPrice: baseParams?.gas?.price != null ? String(baseParams.gas.price) : undefined,
               submittedAt: Date.now(),
               status: "submitted",
             });

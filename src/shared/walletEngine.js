@@ -155,7 +155,6 @@ function ratioBigInt(num, den) {
   }
 }
 
-
 // ----------------------------------------------------------------------------
 // Utilities
 // ----------------------------------------------------------------------------
@@ -226,6 +225,7 @@ export function configure(patch = {}) {
         state.network?.close?.();
       } catch {}
 
+      state.networkConnectPromise = null;
       state.network = null;
       state.treasury = null;
       state.bookkeeper = null;
@@ -381,6 +381,7 @@ const state = {
   currentIndex: 0,
   profileGenerator: null,
   network: null,
+  networkConnectPromise: null,
   treasury: null,
   bookkeeper: null,
   treasuryAll: null,
@@ -546,69 +547,76 @@ export async function ensureNetwork() {
 
   // Connect only if we aren't already connected.
   if (!state.network.connected) {
-    try {
-      // NOTE: Some WebViews do not reliably abort a hanging WebSocket connect.
-      // We therefore always enforce a timeout via Promise.race.
-      const controller = new AbortController();
-
-      const abortAndTearDown = () => {
+    // Avoid concurrent connects (w3sper prints warnings and can end up in a bad state).
+    if (!state.networkConnectPromise) {
+      state.networkConnectPromise = (async () => {
         try {
-          controller.abort();
-        } catch {
-          // ignore
+          // NOTE: Some WebViews do not reliably abort a hanging WebSocket connect.
+          // We therefore always enforce a timeout via Promise.race.
+          const controller = new AbortController();
+
+          const abortAndTearDown = () => {
+            try {
+              controller.abort();
+            } catch {
+              // ignore
+            }
+            try {
+              state.network?.disconnect?.();
+            } catch {
+              // ignore
+            }
+            try {
+              state.network?.close?.();
+            } catch {
+              // ignore
+            }
+          };
+
+          // Some versions of w3sper accept an options bag with a signal, others do not.
+          let connectPromise;
+          try {
+            connectPromise = state.network.connect({ signal: controller.signal });
+          } catch {
+            connectPromise = state.network.connect();
+          }
+
+          await withTimeout(
+            connectPromise,
+            10_000,
+            `Timed out connecting to node ${url.toString()}`,
+            abortAndTearDown
+          );
+
+          // Some w3sper versions may mutate internal callables during connect().
+          patchNetworkEndpoints(state.network);
+        } catch (err) {
+          // Drop the cached network/bookkeeper objects so a retry starts from a
+          // clean state.
+          try {
+            state.network?.disconnect?.();
+          } catch {
+            // ignore
+          }
+          try {
+            state.network?.close?.();
+          } catch {
+            // ignore
+          }
+          state.network = null;
+          state.treasury = null;
+          state.bookkeeper = null;
+          state.treasuryAll = null;
+          state.bookkeeperAll = null;
+
+          throw new Error(formatWsError(err, url.toString()));
+        } finally {
+          state.networkConnectPromise = null;
         }
-        try {
-          state.network?.disconnect?.();
-        } catch {
-          // ignore
-        }
-        try {
-          state.network?.close?.();
-        } catch {
-          // ignore
-        }
-      };
-
-      // Some versions of w3sper accept an options bag with a signal, others do not.
-      // Try the signal form, then fall back to the no-arg signature.
-      let connectPromise;
-      try {
-        connectPromise = state.network.connect({ signal: controller.signal });
-      } catch {
-        connectPromise = state.network.connect();
-      }
-
-      await withTimeout(
-        connectPromise,
-        10_000,
-        `Timed out connecting to node ${url.toString()}`,
-        abortAndTearDown
-      );
-
-      // Some w3sper versions may mutate internal callables during connect().
-      // Re-apply endpoint patching after the websocket handshake.
-      patchNetworkEndpoints(state.network);
-    } catch (err) {
-      // Drop the cached network/bookkeeper objects so a retry starts from a
-      // clean state.
-      try {
-        state.network?.disconnect?.();
-      } catch {
-        // ignore
-      }
-      try {
-        state.network?.close?.();
-      } catch {
-        // ignore
-      }
-      state.network = null;
-      state.treasury = null;
-      state.bookkeeper = null;
-      state.treasuryAll = null;
-      state.bookkeeperAll = null;
-
-      throw new Error(formatWsError(err, url.toString()));
+      })();
     }
+
+    await state.networkConnectPromise;
   }
 
   // IMPORTANT:
@@ -640,15 +648,23 @@ function patchNetworkEndpoints(network) {
     const proverBase = String(engineConfig.proverUrl || "").trim() || nodeBase;
     if (!proverBase) return;
 
-    let proveUrl = "";
-    try {
-      proveUrl = new URL("/on/prover/prove", proverBase).toString();
-    } catch {
-      return;
-    }
+    const mkProveUrl = (base) => {
+      try {
+        return new URL("/on/prover/prove", base).toString();
+      } catch {
+        return "";
+      }
+    };
+
+    const primary = mkProveUrl(proverBase);
+    if (!primary) return;
+
+    const fallback = nodeBase && proverBase !== nodeBase ? mkProveUrl(nodeBase) : "";
+    const proveUrls = [primary, fallback].filter(Boolean);
+    const proveKey = proveUrls.join("|");
 
     // Avoid re-patching if nothing changed.
-    if (network.__duskPatchedEndpoints && network.__duskProveUrl === proveUrl) {
+    if (network.__duskPatchedEndpoints && network.__duskProveKey === proveKey) {
       return;
     }
 
@@ -661,33 +677,116 @@ function patchNetworkEndpoints(network) {
       }
     }
 
-    // Override prove() so shielded tx building hits the prover host.
-    network.prove = async (circuits) => {
-      const res = await fetch(proveUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/octet-stream",
-        },
-        body: circuits,
-      });
+    const PROVE_TIMEOUT_MS = 180_000;
+    const MAX_RETRIES = 1;
 
-      if (!res.ok) {
-        let detail = "";
-        try {
-          // Prover errors are often text/JSON, but don't assume.
-          detail = await res.text();
-        } catch {
-          detail = "";
+    const hostOf = (u) => {
+      try {
+        return new URL(u).host;
+      } catch {
+        return String(u);
+      }
+    };
+
+    const hint = () => "Shielded transactions need a prover. Check Options → Prover URL.";
+
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    async function doProve(url, circuits) {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), PROVE_TIMEOUT_MS);
+
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: circuits,
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          let detail = "";
+          try {
+            detail = String(await res.text()).trim();
+          } catch {
+            detail = "";
+          }
+          if (detail && detail.length > 280) detail = detail.slice(0, 280) + "…";
+
+          const err = new Error(
+            `Prover error (${res.status}) from ${hostOf(url)}${detail ? `: ${detail}` : ""}`
+          );
+          err.__duskHttpStatus = res.status;
+          throw err;
         }
+
+        return await res.arrayBuffer();
+      } finally {
+        clearTimeout(t);
+      }
+    }
+
+    function shouldRetry(e) {
+      const st = e && typeof e === "object" ? e.__duskHttpStatus : 0;
+      if (typeof st === "number" && st >= 500) return true;
+      const name = e?.name;
+      if (name === "AbortError") return true;
+      // Network errors are usually surfaced as TypeError in browsers.
+      if (name === "TypeError") return true;
+      return false;
+    }
+
+    // Override prove() so Phoenix/shielded tx building hits the prover host.
+    // If the prover host is flaky, we retry once and then fall back to node URL.
+    network.prove = async (circuits) => {
+      let lastErr = null;
+
+      for (let i = 0; i < proveUrls.length; i++) {
+        const url = proveUrls[i];
+
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            return await doProve(url, circuits);
+          } catch (e) {
+            lastErr = e;
+
+            // Retry once on transient errors (timeouts, network, 5xx)
+            if (attempt < MAX_RETRIES && shouldRetry(e)) {
+              await sleep(300 + Math.random() * 350);
+              continue;
+            }
+            break;
+          }
+        }
+      }
+
+      const primaryHost = hostOf(primary);
+
+      if (lastErr?.name === "AbortError") {
         throw new Error(
-          `Prover request failed (${res.status}): ${detail || res.statusText}`
+          `Prover timed out after ${Math.round(PROVE_TIMEOUT_MS / 1000)}s (${primaryHost}). ${hint()}`
         );
       }
 
-      return await res.arrayBuffer();
+      if (lastErr?.name === "TypeError" || /failed to fetch/i.test(String(lastErr?.message ?? ""))) {
+        throw new Error(
+          `Could not reach prover (${primaryHost}). The prover may be down or dropped the connection. ${hint()}`
+        );
+      }
+
+      // Preserve useful HTTP errors produced by doProve()
+      if (
+        lastErr &&
+        typeof lastErr?.message === "string" &&
+        lastErr.message.startsWith("Prover error")
+      ) {
+        throw lastErr;
+      }
+
+      throw new Error(`Prover request failed (${primaryHost}). ${hint()}`);
     };
 
-    network.__duskProveUrl = proveUrl;
+    network.__duskProveKey = proveKey;
     network.__duskPatchedEndpoints = true;
   } catch {
     // Never block normal wallet operation if patching fails.
@@ -1280,7 +1379,7 @@ export async function transfer(params) {
   const gas = normalizeGas(params.gas);
   if (gas) tx = tx.gas(gas);
 
-  // Default to obfuscated Phoenix transfers for privacy.
+  // Default to obfuscated transfers for privacy.
   if (toType === "address" && typeof tx?.obfuscated === "function") {
     try {
       tx.obfuscated();

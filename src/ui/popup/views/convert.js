@@ -50,7 +50,7 @@ export function convertFormView(ov, { state, actions } = {}) {
   const avail = kind === "shield" ? pubLux : shSpendLux;
 
   const info = h("div", { class: "box" }, [
-    h("div", { class: "muted", text: "Convert" }),
+    h("div", { class: "muted", text: "Shield" }),
     h("div", { class: "meta-pill", text: `${fromLabel} → ${toLabel}` }),
     h("div", { class: "muted", style: "margin-top:6px", text: `Available (${fromLabel}): ${fmtAvail(avail)} DUSK` }),
   ]);
@@ -107,7 +107,7 @@ export function convertFormView(ov, { state, actions } = {}) {
 
   return [
     subnav({
-      title: "Convert",
+      title: "Shield",
       onBack: () => {
         state.route = "home";
         state.draft = null;
@@ -212,7 +212,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
     }),
     bannerView(state.banner),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "You are about to convert" }),
+      h("div", { class: "muted", text: kind === "shield" ? "You are about to shield" : "You are about to unshield" }),
       h("div", { class: "meta-pill", text: `${fromLabel} → ${toLabel}` }),
       h("div", { class: "home-balance" }, [
         h("div", {
