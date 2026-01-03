@@ -185,8 +185,6 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
       }
 
       try {
-        // Prefer back camera on mobile.
-        // Some WebViews ignore `ideal`, so we attempt `exact` first and fall back otherwise.
         const baseVideo = {
           width: { ideal: 1280 },
           height: { ideal: 720 },
@@ -206,11 +204,10 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
         }
 
         video.srcObject = stream;
-        // iOS/Safari/WebView friendliness (no-op elsewhere)
         video.setAttribute("playsinline", "true");
         video.setAttribute("webkit-playsinline", "true");
         await video.play();
-      } catch (e) {
+      } catch {
         setErr("Camera permission denied or unavailable. You can still choose an image.");
         return;
       }
@@ -225,7 +222,7 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
       const tick = (now) => {
         if (done) return;
 
-        // Limit scan rate for performance (about ~12fps)
+        // Limit scan rate for performance (~12fps)
         if (now - lastScan < 80) {
           raf = requestAnimationFrame(tick);
           return;
@@ -235,7 +232,6 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
         const vw = video.videoWidth;
         const vh = video.videoHeight;
         if (vw && vh) {
-          // Downscale so the largest side is <= 900px for decode speed
           const vMax = Math.max(vw, vh);
           const targetMax = clamp(vMax, 320, 900);
           const scale = targetMax / vMax;
@@ -258,6 +254,8 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
       raf = requestAnimationFrame(tick);
     }
 
-    startCamera().catch(() => {});
+    startCamera().catch(() => {
+      setErr("Camera not available. You can still choose an image.");
+    });
   });
 }

@@ -304,6 +304,32 @@ input:focus, textarea:focus, select:focus {
   border-color: var(--ring);
 }
 
+/* Input row with a trailing icon button (e.g. QR scan) */
+.input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.input-row > input,
+.input-row > textarea,
+.input-row > select {
+  flex: 1;
+}
+
+.input-row > .icon-btn {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+body.page--popup .input-row > .icon-btn {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+}
+
 ::placeholder {
   color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
 }

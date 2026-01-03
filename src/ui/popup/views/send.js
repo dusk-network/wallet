@@ -4,8 +4,14 @@ import { ProfileGenerator } from "@dusk/w3sper";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
+import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
+import {
+  chainIdFromNodeUrlDecimal,
+  chainLabel,
+  normalizeChainId,
+} from "../../../shared/duskUri.js";
 
-export function sendFormView(_ov, { state, actions } = {}) {
+export function sendFormView(ov, { state, actions } = {}) {
   const draft = state.draft || {};
 
   const to = h("input", {
@@ -21,6 +27,68 @@ export function sendFormView(_ov, { state, actions } = {}) {
     value: typeof draft.memo === "string" ? draft.memo : "",
   });
 
+  const currentChain = normalizeChainId(chainIdFromNodeUrlDecimal(ov?.nodeUrl ?? ""));
+
+  const warnChainMismatch = (reqChain) => {
+    const want = normalizeChainId(reqChain);
+    if (!want || !currentChain || want === currentChain) return;
+    const wantLabel = chainLabel(want) || `Chain ${want}`;
+    const curLabel = chainLabel(currentChain) || `Chain ${currentChain}`;
+    actions?.showToast?.(`Request is for ${wantLabel}. You are on ${curLabel}.`, 4000);
+  };
+
+  const applyRequest = (req, { source = "request" } = {}) => {
+    if (!req?.to) return false;
+
+    const isDuskReq = req.kind === "public" || req.kind === "shielded";
+
+    // Update DOM values
+    to.value = req.to;
+
+    if (isDuskReq) {
+      // A full dusk: request link should define the form values.
+      amount.value = req.amountDusk || "";
+      memo.value = req.memo || "";
+    } else {
+      if (req.amountDusk) amount.value = req.amountDusk;
+      if (req.memo) memo.value = req.memo;
+    }
+
+    // Persist into draft so any toast-triggered render doesn't wipe the fields.
+    const nextDraft = { ...(state.draft || {}) };
+    nextDraft.to = to.value;
+
+    if (isDuskReq) {
+      nextDraft.amountDusk = amount.value;
+      nextDraft.memo = memo.value;
+    } else {
+      if (req.amountDusk) nextDraft.amountDusk = amount.value;
+      if (req.memo) nextDraft.memo = memo.value;
+    }
+
+    state.draft = nextDraft;
+
+    warnChainMismatch(req.chainId);
+    updateToType();
+
+    // Show a small hint toast so user understands it worked.
+    try {
+      actions?.showToast?.(source === "qr" ? "Filled from QR" : "Request decoded", 1800);
+    } catch {
+      // ignore
+    }
+
+    return true;
+  };
+
+  const maybeDecodeRequest = (raw, { source = "request" } = {}) => {
+    const s = String(raw || "").trim();
+    if (!s) return false;
+    const req = parseDuskQrPayload(s);
+    if (!req) return false;
+    return applyRequest(req, { source });
+  };
+
   // Lightweight recipient-type detection (public account vs shielded address)
   // so the user understands what kind of transfer they'll create.
   const toTypePill = h("div", { class: "meta-pill", style: "display:none" });
@@ -29,6 +97,13 @@ export function sendFormView(_ov, { state, actions } = {}) {
     if (!v) {
       toTypePill.style.display = "none";
       toTypePill.textContent = "";
+      return;
+    }
+
+    // Give quick feedback when the user pastes a dusk: request link.
+    if (/^dusk:/i.test(v)) {
+      toTypePill.style.display = "inline-flex";
+      toTypePill.textContent = "Detected: Dusk request link";
       return;
     }
     const t = ProfileGenerator.typeOf(v);
@@ -41,8 +116,67 @@ export function sendFormView(_ov, { state, actions } = {}) {
       toTypePill.textContent = "Detected: Unknown address format";
     }
   };
-  to.addEventListener("input", updateToType);
+    const syncDraft = () => {
+    // Keep draft in sync so any toast-triggered re-render doesn't wipe inputs.
+    state.draft = {
+      ...(state.draft || {}),
+      to: String(to.value || ""),
+      amountDusk: String(amount.value || ""),
+      memo: String(memo.value || ""),
+      // preserve any gas edits the user may have made on the confirm screen
+      gas: state.draft?.gas,
+    };
+  };
+
+  to.addEventListener("input", () => {
+    updateToType();
+    syncDraft();
+  });
+  amount.addEventListener("input", syncDraft);
+  memo.addEventListener("input", syncDraft);
+  to.addEventListener("paste", (e) => {
+    try {
+      const txt = e?.clipboardData?.getData?.("text") ?? "";
+      if (txt && /^dusk:/i.test(txt)) {
+        e.preventDefault();
+        if (!maybeDecodeRequest(txt, { source: "request" })) {
+          // Fall back to normal paste
+          to.value = txt;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  });
+  to.addEventListener("blur", () => {
+    const v = String(to.value || "").trim();
+    if (/^dusk:/i.test(v)) {
+      maybeDecodeRequest(v, { source: "request" });
+    }
+  });
   updateToType();
+
+  const scanBtn = h("button", {
+    class: "icon-btn icon-only",
+    type: "button",
+    text: "▦",
+    title: "Scan QR",
+    onclick: async () => {
+      try {
+        const payload = await openQrScanModal({
+          title: "Scan request",
+          hint: "Scan a Dusk request QR (or choose an image)",
+        });
+        if (!payload) return;
+        const ok = maybeDecodeRequest(payload, { source: "qr" });
+        if (!ok) actions?.showToast?.("Unrecognized QR code", 2500);
+      } catch (e) {
+        actions?.showToast?.(e?.message ?? String(e), 3000);
+      }
+    },
+  });
+
+  const toRow = h("div", { class: "input-row" }, [to, scanBtn]);
 
   const errBox = h("div", { class: "err", style: "display:none" });
   const setErr = (txt) => {
@@ -61,6 +195,12 @@ export function sendFormView(_ov, { state, actions } = {}) {
     onclick: async () => {
       try {
         setErr("");
+        // Allow a dusk: request link to be pasted directly into the recipient field.
+        const rawTo = to.value.trim();
+        if (/^dusk:/i.test(rawTo)) {
+          maybeDecodeRequest(rawTo, { source: "request" });
+        }
+
         const toVal = to.value.trim();
         if (!toVal) throw new Error("Recipient is required");
 
@@ -96,7 +236,7 @@ export function sendFormView(_ov, { state, actions } = {}) {
     }),
     h("div", { class: "row" }, [
       h("label", { text: "To" }),
-      to,
+      toRow,
       toTypePill,
       h("label", { text: "Amount" }),
       amount,

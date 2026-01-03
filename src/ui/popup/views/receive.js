@@ -263,13 +263,10 @@ export function receiveView(ov, { state, actions } = {}) {
   updateRequest();
 
   const recipientLabel = tab === "public" ? "Public account" : "Shielded address";
-  const note =
-    tab === "shielded"
-      ? h("div", {
-          class: "muted",
-          text: "Note: shielded syncing runs automatically. Spending shielded notes isn't supported yet.",
-        })
-      : null;
+  const note = h("div", {
+    class: "muted",
+    text: "Tip: the sender can paste a dusk: request link into Send (or scan the QR) to prefill the transfer.",
+  });
 
   return [
     subnav({
