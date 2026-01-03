@@ -144,12 +144,13 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const { kindLabel, title, subtitle } = describeTx(tx);
 
   const status = statusLabel(tx?.status);
+  const s = String(tx?.status ?? "").toLowerCase();
   const statusPillClass =
-    String(tx?.status ?? "").toLowerCase() === "executed"
-      ? "meta-pill"
-      : String(tx?.status ?? "").toLowerCase() === "failed"
-      ? "meta-pill"
-      : "meta-pill";
+    s === "executed"
+      ? "meta-pill meta-pill--ok"
+      : s === "failed"
+      ? "meta-pill meta-pill--bad"
+      : "meta-pill meta-pill--pending";
 
   const gasLimit = tx?.gasLimit != null ? safeBigInt(tx.gasLimit, 0n) : null;
   const gasPrice = tx?.gasPrice != null ? safeBigInt(tx.gasPrice, 0n) : null;
@@ -177,84 +178,65 @@ export function txDetailsView(ov, { state, actions } = {}) {
     }),
   ]);
 
-  const kv = (label, valueNode) =>
-    h("div", { class: "row" }, [
-      h("div", { class: "muted", text: label }),
-      valueNode,
-    ]);
+  const kvRow = (label, value, { mono = false, title } = {}) => {
+    if (value == null) return null;
+    const text = String(value);
+    if (!text) return null;
 
-  const chips = h(
-    "div",
-    { style: "display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 10px;" },
-    [
-      h("div", { class: "meta-pill", text: `Status: ${status}` }),
-      h("div", { class: "meta-pill", text: `Type: ${kindLabel}` }),
-      h("div", { class: "meta-pill", text: `Network: ${netName}` }),
-    ]
-  );
+    return h("div", { class: "tx-kv-row" }, [
+      h("div", { class: "tx-kv-label", text: label }),
+      h(
+        "div",
+        { class: mono ? "tx-kv-value tx-kv-value--mono" : "tx-kv-value" },
+        [mono ? h("code", { text, title: title || text }) : h("span", { text, title: title || text })]
+      ),
+    ]);
+  };
+
+  const chips = h("div", { class: "tx-chips" }, [
+    h("div", { class: statusPillClass, text: `Status: ${status}` }),
+    h("div", { class: "meta-pill", text: `Type: ${kindLabel}` }),
+    h("div", { class: "meta-pill", text: `Network: ${netName}` }),
+  ]);
 
   const errorBox =
     String(tx?.status ?? "").toLowerCase() === "failed" && tx?.error
       ? h("div", { class: "err", text: String(tx.error) })
       : null;
 
+  const detailsRows = [
+    kvRow("Tx hash", hash, { mono: true }),
+    tx?.origin ? kvRow("Origin", String(tx.origin), { mono: true }) : null,
+    tx?.to ? kvRow("To", String(tx.to), { mono: true }) : null,
+    tx?.contractId ? kvRow("Contract", String(tx.contractId), { mono: true }) : null,
+    tx?.fnName ? kvRow("Method", String(tx.fnName), { mono: true }) : null,
+    tx?.deposit != null ? kvRow("Deposit", `${formatLuxShort(tx.deposit, 6)} DUSK`) : null,
+    tx?.amount != null ? kvRow("Amount", `${formatLuxShort(tx.amount, 6)} DUSK`) : null,
+    maxFeeLux != null
+      ? kvRow("Max fee", `${formatLuxShort(maxFeeLux, 6)} DUSK`)
+      : gasLimit != null || gasPrice != null
+      ? kvRow(
+          "Gas",
+          `limit ${gasLimit != null ? String(gasLimit) : "—"} · price ${gasPrice != null ? String(gasPrice) : "—"} LUX`,
+          { mono: true }
+        )
+      : null,
+    tx?.submittedAt ? kvRow("Submitted", fmtDate(tx.submittedAt)) : null,
+  ].filter(Boolean);
+
+  const detailsCard = detailsRows.length ? h("div", { class: "box tx-kv-card" }, detailsRows) : null;
+
   return [
     subnav({ title: "Transaction", onBack, backText: "← Activity" }),
     h("div", { class: "row" }, [
       chips,
       errorBox,
-      h("div", { class: "box" }, [
+      h("div", { class: "box tx-summary" }, [
         h("div", { class: "muted", text: kindLabel }),
         h("div", { class: "balance-amount", text: title }),
         subtitle ? h("div", { class: "muted", text: subtitle }) : null,
       ].filter(Boolean)),
-      kv("Tx hash", h("div", { class: "box" }, [h("code", { text: hash })])),
-      tx?.origin ? kv("Origin", h("div", { class: "box" }, [h("code", { text: String(tx.origin) })])) : null,
-      tx?.to ? kv("To", h("div", { class: "box" }, [h("code", { text: String(tx.to) })])) : null,
-      tx?.contractId
-        ? kv("Contract", h("div", { class: "box" }, [h("code", { text: String(tx.contractId) })]))
-        : null,
-      tx?.fnName ? kv("Method", h("div", { class: "box" }, [h("code", { text: String(tx.fnName) })])) : null,
-      tx?.deposit != null
-        ? kv(
-            "Deposit",
-            h("div", { class: "box" }, [
-              h("code", {
-                text: `${formatLuxShort(tx.deposit, 6)} DUSK`,
-              }),
-            ])
-          )
-        : null,
-      tx?.amount != null
-        ? kv(
-            "Amount",
-            h("div", { class: "box" }, [
-              h("code", {
-                text: `${formatLuxShort(tx.amount, 6)} DUSK`,
-              }),
-            ])
-          )
-        : null,
-      maxFeeLux != null
-        ? kv(
-            "Max fee",
-            h("div", { class: "box" }, [
-              h("code", { text: `${formatLuxShort(maxFeeLux, 6)} DUSK` }),
-            ])
-          )
-        : gasLimit != null || gasPrice != null
-        ? kv(
-            "Gas",
-            h("div", { class: "box" }, [
-              h("code", {
-                text: `limit ${gasLimit != null ? String(gasLimit) : "—"} · price ${
-                  gasPrice != null ? String(gasPrice) : "—"
-                } (LUX)`,
-              }),
-            ])
-          )
-        : null,
-      tx?.submittedAt ? kv("Submitted", h("div", { class: "box" }, [h("code", { text: fmtDate(tx.submittedAt) })])) : null,
+      detailsCard,
       btnRow,
     ].filter(Boolean)),
   ].filter(Boolean);

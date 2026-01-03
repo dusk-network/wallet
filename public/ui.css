@@ -592,7 +592,86 @@ button:disabled {
   background: color-mix(in oklab, var(--card) 35%, transparent);
   color: var(--muted-foreground);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 750;
+}
+
+/* Meta pills with intent (status chips in Tx details) */
+.meta-pill--pending {
+  background: color-mix(in oklab, var(--primary) 18%, transparent);
+  border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
+  color: var(--foreground);
+}
+
+.meta-pill--ok {
+  background: color-mix(in oklab, oklch(0.72 0.18 142) 16%, transparent);
+  border-color: color-mix(in oklab, oklch(0.72 0.18 142) 38%, var(--border));
+  color: var(--foreground);
+}
+
+.meta-pill--bad {
+  background: color-mix(in oklab, var(--destructive) 14%, transparent);
+  border-color: color-mix(in oklab, var(--destructive) 40%, var(--border));
+  color: var(--foreground);
+}
+
+/* Tx details (Activity -> details view) */
+.tx-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.tx-summary {
+  padding: 14px 12px;
+}
+
+.tx-summary .balance-amount {
+  font-size: 22px;
+}
+
+.tx-summary .muted {
+  margin-top: 4px;
+}
+
+/* Tx details key/value block (avoid input-like boxes) */
+.tx-kv-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.tx-kv-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  padding: 10px 12px;
+  align-items: start;
+}
+
+.tx-kv-row + .tx-kv-row {
+  border-top: 1px solid color-mix(in oklab, var(--border) 75%, transparent);
+}
+
+.tx-kv-label {
+  font-size: 11px;
+  font-weight: 750;
+  color: var(--muted-foreground);
+}
+
+.tx-kv-value {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--foreground);
+  min-width: 0;
+  word-break: break-word;
+}
+
+.tx-kv-value code {
+  font-size: 12px;
+}
+
+.tx-kv-value--mono {
+  word-break: break-all;
 }
 
 .account-line {
@@ -604,6 +683,11 @@ button:disabled {
 
 .home-balance {
   padding: 16px 16px;
+
+  /* Give the hero a bit more depth without introducing another container. */
+  background:
+    radial-gradient(560px 220px at 18% -10%, color-mix(in oklab, var(--primary) 18%, transparent), transparent 62%),
+    color-mix(in oklab, var(--card) 84%, var(--background));
 }
 
 .balance-amount {
@@ -655,6 +739,12 @@ button:disabled {
   color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 750;
+
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 34%, transparent);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
 }
 
 .balance-site-text {
@@ -664,7 +754,7 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
-/* Balance + actions are grouped into a single compact hero block */
+/* Hero block */
 .home-hero {
   display: flex;
   flex-direction: column;
@@ -684,7 +774,7 @@ button:disabled {
   padding: 0 10px;
   border-radius: 14px;
   border: 1px solid var(--border);
-  background: color-mix(in oklab, var(--card) 60%, transparent);
+  background: color-mix(in oklab, var(--card) 52%, transparent);
   color: var(--foreground);
 
   display: inline-flex;
@@ -710,8 +800,10 @@ button:disabled {
   border-radius: 12px;
   display: grid;
   place-items: center;
-  border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
-  background: color-mix(in oklab, var(--card) 80%, transparent);
+  border: 1px solid color-mix(in oklab, var(--primary) 26%, var(--border));
+  background:
+    radial-gradient(14px 14px at 35% 30%, color-mix(in oklab, white 14%, transparent), transparent 70%),
+    color-mix(in oklab, var(--primary) 16%, transparent);
   font-size: 14px;
   line-height: 1;
 }
@@ -766,7 +858,9 @@ button:disabled {
 }
 
 .tab.is-active {
-  background: color-mix(in oklab, var(--card) 90%, var(--background));
+  background:
+    radial-gradient(260px 120px at 50% 0%, color-mix(in oklab, var(--primary) 14%, transparent), transparent 70%),
+    color-mix(in oklab, var(--card) 90%, var(--background));
   color: var(--foreground);
   box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
 }
@@ -1132,11 +1226,34 @@ button:disabled {
   gap: 6px;
 }
 
+.activity-chevron {
+  pointer-events: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--muted-foreground);
+  opacity: 0.35;
+  transform: translateX(-1px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.activity-item:hover .activity-chevron {
+  opacity: 0.85;
+  transform: translateX(1px);
+}
+
 .subnav {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.subnav-title {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  color: var(--foreground);
+  opacity: 0.95;
 }
 
 /* Small temporary message */

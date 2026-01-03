@@ -321,7 +321,8 @@ export function homeView(ov, { state, actions } = {}) {
       },
     });
 
-    const right = h("div", { class: "activity-right" }, [btnOpen, btnCopy]);
+    const chevron = h("div", { class: "activity-chevron", text: "›" });
+    const right = h("div", { class: "activity-right" }, [btnOpen, btnCopy, chevron]);
 
     const cls = ["activity-item", isHighlight ? "is-highlight" : "", pulse].filter(Boolean).join(" ");
 
