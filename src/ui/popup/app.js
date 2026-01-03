@@ -38,8 +38,41 @@ try {
 const app = document.getElementById("app");
 const headerActionsHost = document.getElementById("header-actions");
 
+// view transitions: animate route changes only.
+let lastAnimatedRoute = null;
+let viewAnimTimer = null;
+function pulseViewAnimation() {
+  try {
+    if (!app) return;
+    app.classList.remove("view-animate");
+    // Force reflow so the animation can replay.
+    void app.offsetWidth;
+    app.classList.add("view-animate");
+    if (viewAnimTimer) clearTimeout(viewAnimTimer);
+    viewAnimTimer = setTimeout(() => {
+      try {
+        app.classList.remove("view-animate");
+      } catch {}
+    }, 260);
+  } catch {
+    // ignore
+  }
+}
+
 function setApp(children) {
   if (!app) return;
+
+  // Trigger a small transition only when the route changes.
+  try {
+    const r = state?.route;
+    if (r && r !== lastAnimatedRoute) {
+      lastAnimatedRoute = r;
+      pulseViewAnimation();
+    }
+  } catch {
+    // ignore
+  }
+
   app.innerHTML = "";
   const toast = toastView(state.toast);
   if (toast) app.appendChild(toast);
