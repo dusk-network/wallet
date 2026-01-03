@@ -1,5 +1,4 @@
 import { h } from "../../lib/dom.js";
-import { bannerView } from "../../components/Banner.js";
 
 export function lockedView({ state, actions } = {}) {
   const pwd = h("input", { type: "password", placeholder: "Password" });
@@ -25,26 +24,23 @@ export function lockedView({ state, actions } = {}) {
 
       const res = await actions?.send?.({ type: "DUSK_UI_UNLOCK", password: pwd.value });
       if (res?.error) {
-        // Re-enable UI and show error banner.
+        // Re-enable UI and show error toast.
         busy = false;
         btn.disabled = false;
         pwd.disabled = false;
         btn.textContent = "Unlock";
         busyCallout.style.display = "none";
 
-        state.banner = { kind: "error", text: res.error.message };
-        await actions?.render?.();
+        actions?.showToast?.(res.error.message ?? "Unlock failed", 2500);
         return;
       }
 
-      state.banner = null;
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
     },
   });
 
   return [
-    bannerView(state.banner),
     h("div", { class: "muted", text: "Wallet is locked." }),
     h("div", { class: "row" }, [h("label", { text: "Password" }), pwd]),
     busyCallout,

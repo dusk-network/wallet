@@ -4,7 +4,6 @@ import { clearPermissions } from "../../../shared/permissions.js";
 import { clearVault } from "../../../shared/vault.js";
 import { platform } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
-import { bannerView } from "../../components/Banner.js";
 import { subnav } from "../../components/Subnav.js";
 
 export function optionsView(ov, { state, actions } = {}) {
@@ -19,7 +18,6 @@ export function optionsView(ov, { state, actions } = {}) {
         onclick: async () => {
           await actions?.send?.({ type: "DUSK_UI_LOCK" });
           state.route = "home";
-          state.banner = null;
           state.needsRefresh = true;
           await actions?.render?.({ forceRefresh: true });
         },
@@ -112,12 +110,11 @@ export function optionsView(ov, { state, actions } = {}) {
         if (resp?.error)
           throw new Error(resp.error.message ?? "Failed to save settings");
 
-        state.banner = { kind: "ok", text: "Saved settings." };
+        actions?.showToast?.("Saved settings.");
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
-        state.banner = { kind: "error", text: e?.message ?? String(e) };
-        await actions?.render?.();
+        actions?.showToast?.(e?.message ?? String(e), 2500);
       }
     },
   });
@@ -128,12 +125,11 @@ export function optionsView(ov, { state, actions } = {}) {
     onclick: async () => {
       try {
         await clearPermissions();
-        state.banner = { kind: "ok", text: "Cleared connected sites." };
+        actions?.showToast?.("Cleared connected sites.");
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
-        state.banner = { kind: "error", text: e?.message ?? String(e) };
-        await actions?.render?.();
+        actions?.showToast?.(e?.message ?? String(e), 2500);
       }
     },
   });
@@ -158,13 +154,12 @@ export function optionsView(ov, { state, actions } = {}) {
         await clearPermissions();
         await clearVault();
 
-        state.banner = { kind: "ok", text: "Vault removed. You must import again." };
+        actions?.showToast?.("Vault removed. Please import again.", 2500);
         state.route = "home";
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
-        state.banner = { kind: "error", text: e?.message ?? String(e) };
-        await actions?.render?.();
+        actions?.showToast?.(e?.message ?? String(e), 2500);
       }
     },
   });
@@ -174,11 +169,9 @@ export function optionsView(ov, { state, actions } = {}) {
       title: "Settings",
       onBack: () => {
         state.route = "home";
-        state.banner = null;
         actions?.render?.().catch(() => {});
       },
     }),
-    bannerView(state.banner),
     lockBtn ? h("div", { class: "row" }, [h("div", { class: "btnrow" }, [lockBtn])]) : null,
     h("div", { class: "row" }, [
       h("label", { text: "Network" }),

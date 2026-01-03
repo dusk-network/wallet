@@ -1,7 +1,6 @@
 import { formatLuxToDusk, parseDuskToLux, safeBigInt } from "../../../shared/amount.js";
 import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
-import { bannerView } from "../../components/Banner.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 
@@ -114,7 +113,6 @@ export function convertFormView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       modeTabs,
       info,
@@ -159,7 +157,6 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   confirmBtn.addEventListener("click", async () => {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Sending…";
-    state.banner = null;
 
     try {
       const gas = gasEditor.readFinalGas();
@@ -178,11 +175,6 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       if (!res?.ok) throw new Error("Transaction failed");
 
       const hash = res.result?.hash ?? "";
-      state.banner = {
-        kind: "ok",
-        text: hash ? `Submitted!\nTx hash: ${hash}` : "Submitted!",
-      };
-
       try {
         const shortHash = hash && hash.length > 18 ? `${hash.slice(0, 10)}…${hash.slice(-8)}` : hash;
         actions?.showToast?.(shortHash ? `Transaction submitted: ${shortHash}` : "Transaction submitted", 2500);
@@ -195,10 +187,13 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
     } catch (e) {
-      state.banner = { kind: "error", text: e?.message ?? String(e) };
+      try {
+        actions?.showToast?.(e?.message ?? String(e), 3000);
+      } catch {
+        // ignore
+      }
       confirmBtn.disabled = false;
       confirmBtn.textContent = "Confirm";
-      await actions?.render?.();
     }
   });
 
@@ -210,7 +205,6 @@ export function convertConfirmView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       h("div", { class: "muted", text: kind === "shield" ? "You are about to shield" : "You are about to unshield" }),
       h("div", { class: "meta-pill", text: `${fromLabel} → ${toLabel}` }),

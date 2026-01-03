@@ -1,6 +1,5 @@
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { bannerView } from "../../components/Banner.js";
 import { subnav } from "../../components/Subnav.js";
 import { qrCodeEl } from "../../components/QrCode.js";
 import { parseDuskToLux } from "../../../shared/amount.js";
@@ -280,7 +279,6 @@ export function receiveView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       h("div", { class: "srp-toggle" }, [btnShielded, btnPublic]),
       tabHelp,

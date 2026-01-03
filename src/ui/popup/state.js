@@ -50,7 +50,6 @@ export const state = {
   txDetailFrom: null,
   overview: null,
   draft: null,
-  banner: null,
   toast: null,
   // { hash: string, kind: "ok"|"bad", at: number }
   txPulse: null,

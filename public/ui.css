@@ -595,7 +595,7 @@ button:disabled {
   font-weight: 750;
 }
 
-/* Meta pills with intent (status chips in Tx details) */
+/* Meta pills with intent */
 .meta-pill--pending {
   background: color-mix(in oklab, var(--primary) 18%, transparent);
   border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
@@ -634,7 +634,7 @@ button:disabled {
   margin-top: 4px;
 }
 
-/* Tx details key/value block (avoid input-like boxes) */
+/* Tx details key/value block */
 .tx-kv-card {
   padding: 0;
   overflow: hidden;
@@ -683,8 +683,6 @@ button:disabled {
 
 .home-balance {
   padding: 16px 16px;
-
-  /* Give the hero a bit more depth without introducing another container. */
   background:
     radial-gradient(560px 220px at 18% -10%, color-mix(in oklab, var(--primary) 18%, transparent), transparent 62%),
     color-mix(in oklab, var(--card) 84%, var(--background));
@@ -739,7 +737,6 @@ button:disabled {
   color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 750;
-
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);

@@ -3,7 +3,6 @@ import { explorerTxUrl } from "../../../shared/explorer.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
-import { bannerView } from "../../components/Banner.js";
 import { platform } from "../../../platform/index.js";
 
 function timeAgo(ts) {
@@ -158,18 +157,15 @@ export function homeView(ov, { state, actions } = {}) {
   const actionBar = h("div", { class: "action-bar" }, [
     actionBtn("Send", "↗", () => {
       state.route = "send";
-      state.banner = null;
       state.draft = null;
       actions?.render?.().catch(() => {});
     }),
     actionBtn("Receive", "⤓", () => {
       state.route = "receive";
-      state.banner = null;
       actions?.render?.().catch(() => {});
     }),
     actionBtn("Shield", "🛡", () => {
       state.route = "convert";
-      state.banner = null;
       state.draft = { kind: "shield", amountDusk: "", amountLux: "" };
       actions?.render?.().catch(() => {});
     }),
@@ -432,7 +428,6 @@ export function homeView(ov, { state, actions } = {}) {
   // Assets tab: keep it focused on balances. Activity lives exclusively
   // in the Activity tab to avoid duplication and keep the popup compact.
   return [
-    bannerView(state.banner),
     hero,
     actionBar,
     tabs,

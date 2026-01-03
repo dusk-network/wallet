@@ -200,7 +200,6 @@ const netMenu = createNetworkMenuController({
       if (preset.id === "custom") {
         // Keep navigation consistent: open the in-app Settings screen.
         state.route = "options";
-        state.banner = null;
         await render();
         return;
       }
@@ -226,7 +225,6 @@ const netMenu = createNetworkMenuController({
 // --- Header actions -------------------------------------------------------
 async function onRefresh() {
   netMenu.close();
-  state.banner = null;
   state.needsRefresh = true;
   await render({ forceRefresh: true });
 }
@@ -234,7 +232,6 @@ async function onRefresh() {
 async function onOpenOptions() {
   netMenu.close();
   state.route = "options";
-  state.banner = null;
   await render();
 }
 

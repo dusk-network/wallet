@@ -3,7 +3,6 @@ import { bytesToHex } from "../../../shared/bytes.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
-import { bannerView } from "../../components/Banner.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 
@@ -72,7 +71,6 @@ export function onboardingWelcomeView({ state, actions } = {}) {
   );
 
   return [
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       h("div", { class: "hero-title", text: "Set up your Dusk Wallet" }),
       h("div", {
@@ -135,7 +133,6 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       h("div", {
         class: "muted",
@@ -204,7 +201,6 @@ export function onboardingCreatePhraseView({ state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       h("div", {
         class: "muted",
@@ -319,7 +315,6 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
         }
 
         busyBody.textContent = "Finalizing…";
-        state.banner = null;
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
         state.route = "home";
         state.needsRefresh = true;
@@ -333,7 +328,6 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
 
   return [
     nav,
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       h("div", {
         class: "muted",
@@ -431,7 +425,6 @@ export function onboardingImportView({ state, actions } = {}) {
         if (unlockRes?.error) throw new Error(unlockRes.error.message ?? "Unlock failed");
 
         busyBody.textContent = "Finalizing…";
-        state.banner = null;
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
         state.route = "home";
         state.needsRefresh = true;
@@ -445,7 +438,6 @@ export function onboardingImportView({ state, actions } = {}) {
 
   return [
     nav,
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       h("div", {
         class: "muted",

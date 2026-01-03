@@ -2,7 +2,6 @@ import { formatLuxToDusk, parseDuskToLux, safeBigInt } from "../../../shared/amo
 import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h } from "../../lib/dom.js";
-import { bannerView } from "../../components/Banner.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 
@@ -95,7 +94,6 @@ export function sendFormView(_ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       h("label", { text: "To" }),
       to,
@@ -145,7 +143,6 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   confirmBtn.addEventListener("click", async () => {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Sending…";
-    state.banner = null;
 
     try {
       const gas = gasEditor.readFinalGas();
@@ -168,10 +165,6 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       if (!res?.ok) throw new Error("Transfer failed");
 
       const hash = res.result?.hash ?? "";
-      state.banner = {
-        kind: "ok",
-        text: hash ? `Sent!\nTx hash: ${hash}` : "Sent!",
-      };
       try {
         const shortHash = hash && hash.length > 18 ? `${hash.slice(0, 10)}…${hash.slice(-8)}` : hash;
         actions?.showToast?.(shortHash ? `Transaction submitted: ${shortHash}` : "Transaction submitted", 2500);
@@ -183,10 +176,13 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
     } catch (e) {
-      state.banner = { kind: "error", text: e?.message ?? String(e) };
+      try {
+        actions?.showToast?.(e?.message ?? String(e), 3000);
+      } catch {
+        // ignore
+      }
       confirmBtn.disabled = false;
       confirmBtn.textContent = "Confirm";
-      await actions?.render?.();
     }
   });
 
@@ -198,7 +194,6 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    bannerView(state.banner),
     h("div", { class: "row" }, [
       h("div", { class: "muted", text: "You are about to send" }),
       h("div", { class: "meta-pill", text: `Type: ${txTypeLabel}` }),
