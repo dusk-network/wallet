@@ -181,7 +181,6 @@ export function homeView(ov, { state, actions } = {}) {
     ov?.balanceError
       ? h("div", { class: "muted", text: `Balance error: ${ov.balanceError}` })
       : null,
-    actionBar,
   ].filter(Boolean));
 
   // Activity list
@@ -331,7 +330,7 @@ export function homeView(ov, { state, actions } = {}) {
       {
         class: cls,
         onclick: async () => {
-          // Open in-app TX details view.
+          // Open in-app details view instead of forcing an explorer tab.
           try {
             if (state) {
               state.txDetailHash = hash;
@@ -434,6 +433,7 @@ export function homeView(ov, { state, actions } = {}) {
   return [
     bannerView(state.banner),
     hero,
+    actionBar,
     tabs,
     ...(activeTab === "activity" ? [activityFull] : [assetsCard]),
   ].filter(Boolean);
