@@ -390,20 +390,6 @@ button:disabled {
   background: color-mix(in oklab, var(--card) 70%, transparent);
 }
 
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: color-mix(in oklab, var(--card) 55%, transparent);
-  color: var(--foreground);
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
-}
-
 /* ---- Surface blocks ---- */
 .box,
 .account-card,
@@ -1266,23 +1252,14 @@ button:disabled {
 }
 
 /* ---- Alerts ---- */
-.err, .ok {
+.err {
   border-radius: 14px;
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.35;
-  border: 1px solid var(--border);
-  white-space: pre-wrap;
-}
-
-.err {
-  border-color: color-mix(in oklab, var(--destructive) 35%, var(--border));
+  border: 1px solid color-mix(in oklab, var(--destructive) 35%, var(--border));
   background: color-mix(in oklab, var(--destructive) 10%, transparent);
-}
-
-.ok {
-  border-color: color-mix(in oklab, oklch(0.72 0.18 142) 35%, var(--border));
-  background: color-mix(in oklab, oklch(0.72 0.18 142) 10%, transparent);
+  white-space: pre-wrap;
 }
 
 /* Options layout */
