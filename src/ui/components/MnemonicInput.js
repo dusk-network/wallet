@@ -43,20 +43,29 @@ export function createMnemonicInput({
 
   // Toggle buttons (optional)
   const btn12 = allowWordCountToggle
-    ? h("button", { class: "btn-outline", type: "button", text: label12 })
+    ? h("button", { class: "tab", type: "button", text: label12 })
     : null;
   const btn24 = allowWordCountToggle
-    ? h("button", { class: "btn-outline", type: "button", text: label24 })
+    ? h("button", { class: "tab", type: "button", text: label24 })
     : null;
 
   const toggleRow = allowWordCountToggle
-    ? h("div", { class: "srp-toggle" }, [btn12, btn24])
+    ? h("div", { class: "tabs tabs--mini srp-toggle" }, [btn12, btn24])
     : null;
 
   function updateToggle() {
     if (!btn12 || !btn24) return;
     btn12.classList.toggle("is-active", count === 12);
     btn24.classList.toggle("is-active", count === 24);
+
+    // Sliding indicator for the segmented toggle.
+    try {
+      if (toggleRow) {
+        toggleRow.style.setProperty("--seg-index", count === 24 ? "1" : "0");
+      }
+    } catch {
+      // ignore
+    }
   }
 
   function setCount(next) {

@@ -1,4 +1,5 @@
 :root {
+  /* Neobank / Revolut-ish dark theme */
   --radius: 14px;
 
   --background: #05070c;
@@ -10,7 +11,7 @@
   --popover: rgba(0,0,0,0.18);
   --popover-foreground: rgba(255,255,255,0.92);
 
-  --primary: #7aa2ff;
+  --primary: #7aa2ff;      /* Revolut-ish accent */
   --primary-foreground: rgba(255,255,255,0.94);
 
   --secondary: rgba(0,0,0,0.16);
@@ -41,6 +42,7 @@
   --panel-padding: 16px;
   --section-gap: 14px;
 }
+
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -284,6 +286,22 @@ code {
   flex-wrap: wrap;
 }
 
+/* Button rows that should align as a neat 2-column grid (e.g. Receive actions) */
+.btnrow--grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  justify-content: stretch;
+}
+
+.btnrow--grid > button {
+  width: 100%;
+}
+
+.btnrow--grid > button:nth-child(3) {
+  grid-column: 1 / -1;
+}
+
 label {
   font-size: 12px;
   font-weight: 700;
@@ -357,6 +375,7 @@ button {
   cursor: pointer;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+
   background: rgba(0,0,0,0.16);
   color: var(--secondary-foreground);
 
@@ -366,6 +385,7 @@ button {
     border-color 160ms ease,
     box-shadow 160ms ease;
 }
+
 
 button:hover {
   background: rgba(255,255,255,0.06);
@@ -427,6 +447,8 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
+  transition: background 140ms ease, transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .icon-btn.icon-only {
@@ -436,6 +458,13 @@ button:disabled {
 
 .icon-btn:hover {
   background: rgba(255,255,255,0.06);
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--primary) 16%, var(--border));
+  box-shadow: 0 10px 22px rgba(0,0,0,0.26);
+}
+
+.icon-btn:active {
+  transform: translateY(1px);
 }
 
 /* ---- Surface blocks ---- */
@@ -450,11 +479,27 @@ button:disabled {
   box-shadow:
     0 1px 0 rgba(255,255,255,0.06) inset,
     0 14px 34px rgba(0,0,0,0.22);
+
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
 }
+
 
 .box {
   padding: 10px 12px;
   border-radius: 14px;
+}
+
+.box:hover,
+.account-card:hover,
+.home-balance:hover,
+.action-card:hover,
+.activity-card:hover {
+  border-color: color-mix(in oklab, var(--primary) 20%, var(--border));
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.06) inset,
+    0 18px 44px rgba(0,0,0,0.28),
+    0 0 0 1px color-mix(in oklab, var(--primary) 14%, transparent),
+    0 0 28px color-mix(in oklab, var(--primary) 10%, transparent);
 }
 
 /* ---- Home view ---- */
@@ -594,6 +639,16 @@ button:disabled {
   font-size: 12px;
   font-weight: 800;
   max-width: 100%;
+
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.conn-pill:hover {
+  border-color: color-mix(in oklab, var(--primary) 18%, var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 12%, transparent),
+    0 16px 40px rgba(0,0,0,0.24);
+  background: color-mix(in oklab, var(--card) 70%, transparent);
 }
 
 .conn-dot {
@@ -627,9 +682,17 @@ button:disabled {
   color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 750;
+
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
 }
 
-/* Meta pills with intent */
+.meta-pill:hover {
+  border-color: color-mix(in oklab, var(--primary) 18%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 10%, transparent);
+  background: color-mix(in oklab, var(--card) 52%, transparent);
+}
+
+/* Meta pills with intent (status chips in Tx details) */
 .meta-pill--pending {
   background: color-mix(in oklab, var(--primary) 18%, transparent);
   border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
@@ -668,7 +731,7 @@ button:disabled {
   margin-top: 4px;
 }
 
-/* Tx details key/value block */
+/* Tx details key/value block (avoid input-like boxes) */
 .tx-kv-card {
   padding: 0;
   overflow: hidden;
@@ -717,6 +780,8 @@ button:disabled {
 
 .home-balance {
   padding: 16px 16px;
+
+  /* Give the hero a bit more depth without introducing another container. */
   background:
     radial-gradient(560px 220px at 18% -10%, color-mix(in oklab, var(--primary) 18%, transparent), transparent 62%),
     color-mix(in oklab, var(--card) 84%, var(--background));
@@ -771,6 +836,7 @@ button:disabled {
   color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 750;
+
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -837,6 +903,13 @@ button:disabled {
     color-mix(in oklab, var(--primary) 16%, transparent);
   font-size: 14px;
   line-height: 1;
+
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.action-btn:hover .action-btn-ico {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 38px rgba(0,0,0,0.28);
 }
 
 .action-btn-label {
@@ -853,14 +926,74 @@ button:disabled {
 
 /* ---- Main tabs (Assets / Activity) ----------------------------------- */
 .tabs {
+  --seg-count: 2;
+  --seg-index: 0;
+  --seg-gap: 4px;
+  --seg-pad: 4px;
+
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px;
+  gap: var(--seg-gap);
+  padding: var(--seg-pad);
   border-radius: 16px;
   border: 1px solid var(--border);
   background: rgba(0,0,0,0.18);
   box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
+
+  overflow: hidden;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+/* Sliding indicator (segmented toggle feel) */
+.tabs::before {
+  content: "";
+  position: absolute;
+  top: var(--seg-pad);
+  bottom: var(--seg-pad);
+  left: var(--seg-pad);
+  width: calc(
+    (100% - (var(--seg-pad) * 2) - (var(--seg-gap) * (var(--seg-count) - 1))) / var(--seg-count)
+  );
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklab, var(--primary) 22%, transparent),
+      color-mix(in oklab, var(--primary) 10%, transparent)
+    );
+  box-shadow:
+    0 14px 30px rgba(0,0,0,0.28),
+    0 0 0 1px color-mix(in oklab, var(--primary) 26%, transparent);
+  transform: translateX(calc(var(--seg-index) * (100% + var(--seg-gap))));
+  transition: transform 220ms cubic-bezier(.2,.8,.2,1), box-shadow 180ms ease;
+  pointer-events: none;
+}
+
+.tabs:hover {
+  border-color: color-mix(in oklab, var(--primary) 22%, var(--border));
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset,
+    0 0 0 1px color-mix(in oklab, var(--primary) 16%, transparent),
+    0 16px 40px rgba(0,0,0,0.26);
+}
+
+.tabs.tabs--mini {
+  border-radius: 14px;
+}
+
+.tabs.tabs--mini .tab {
+  height: 30px;
+  font-size: 11px;
+}
+
+/* Non-interactive segmented indicator (auto-detected) */
+.detect-toggle {
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.detect-toggle .tab {
+  cursor: default;
 }
 
 .tab {
@@ -878,9 +1011,12 @@ button:disabled {
   font-weight: 850;
   letter-spacing: -0.01em;
   transition: background 120ms ease, transform 120ms ease, color 120ms ease;
+
+  position: relative;
+  z-index: 1;
 }
 
-.tab:hover {
+.tab:not(.is-active):hover {
   background: rgba(255,255,255,0.06);
 }
 
@@ -889,9 +1025,9 @@ button:disabled {
 }
 
 .tab.is-active {
-  background: rgba(122,162,255,0.18);
   color: var(--foreground);
-  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
+  background: transparent;
+  box-shadow: none;
 }
 
 .tab-badge {
@@ -1099,6 +1235,35 @@ button:disabled {
   transition: background 120ms ease, transform 120ms ease;
 }
 
+/* Pending shimmer (neobank loading feel) */
+.activity-item.is-pending {
+  position: relative;
+  overflow: hidden;
+}
+
+@keyframes pendingShimmer {
+  0%   { transform: translateX(-70%); opacity: 0; }
+  15%  { opacity: 0.55; }
+  55%  { opacity: 0.25; }
+  100% { transform: translateX(140%); opacity: 0; }
+}
+
+.activity-item.is-pending::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--primary) 22%, transparent),
+    transparent
+  );
+  transform: translateX(-70%);
+  animation: pendingShimmer 1.8s ease-in-out infinite;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
 .activity-item:hover {
   background: rgba(255,255,255,0.06);
 }
@@ -1182,9 +1347,15 @@ button:disabled {
   background: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
 }
 
+@keyframes pendingDotPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+
 .status-dot--pending {
   background: color-mix(in oklab, var(--primary) 90%, transparent);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 18%, transparent);
+  animation: pendingDotPulse 1.5s ease-in-out infinite;
 }
 
 .status-dot--ok {
@@ -1206,6 +1377,13 @@ button:disabled {
   border: 1px solid color-mix(in oklab, var(--primary) 26%, var(--border));
   background: color-mix(in oklab, var(--primary) 10%, transparent);
   font-size: 13px;
+
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.activity-item:hover .activity-ico {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 38px rgba(0,0,0,0.28);
 }
 
 .activity-main {
@@ -1631,18 +1809,11 @@ body.page--popup .brand-mark {
 
 /* Mnemonic input (12/24 word slots) */
 .srp-toggle {
-  display: flex;
-  gap: 8px;
   margin-bottom: 10px;
 }
 
-.srp-toggle button {
+.srp-toggle .tab {
   flex: 1;
-}
-
-.srp-toggle button.is-active {
-  background: color-mix(in oklab, var(--card) 70%, transparent);
-  border-color: color-mix(in oklab, var(--foreground) 22%, var(--border));
 }
 
 .srp-word-input {
@@ -1813,6 +1984,108 @@ body[data-runtime="tauri"].page--full .panel {
   height: auto;
 }
 
+/* -------------------------------------------------------
+   Receive: neobank-style layout (QR + address first)
+   ------------------------------------------------------- */
+.receive-qr-card {
+  padding: 12px;
+}
+
+.receive-chip {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.18);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
+}
+
+.receive-chip:hover {
+  border-color: color-mix(in oklab, var(--primary) 22%, var(--border));
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset,
+    0 0 0 1px color-mix(in oklab, var(--primary) 14%, transparent),
+    0 18px 46px rgba(0,0,0,0.30);
+}
+
+.receive-chip-icon .identicon {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.10);
+}
+
+.receive-chip-text {
+  flex: 1;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  font-size: 12.5px;
+}
+
+.receive-chip-copy {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.receive-accordion {
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.16);
+  overflow: hidden;
+}
+
+.receive-accordion > summary {
+  list-style: none;
+}
+
+.receive-accordion > summary::-webkit-details-marker {
+  display: none;
+}
+
+.receive-accordion__summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px;
+}
+
+.receive-accordion__title {
+  font-weight: 950;
+  letter-spacing: -0.01em;
+}
+
+.receive-accordion__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.accordion-chev {
+  opacity: 0.7;
+  transition: transform 200ms cubic-bezier(.2,.8,.2,1);
+}
+
+.receive-accordion[open] .accordion-chev {
+  transform: rotate(180deg);
+}
+
+.receive-accordion[open] .receive-accordion__summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.receive-accordion__body {
+  padding: 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: viewIn 180ms ease both;
+}
+
 @media (max-width: 420px) {
   .qr-inner .qr-svg {
     width: 200px;
@@ -1929,7 +2202,7 @@ body[data-runtime="tauri"] .qrscan-overlay {
 
 
 /* -------------------------------------------------------
-   Subtle view transitions
+   Subtle view transitions (neobank feel)
    ------------------------------------------------------- */
 #app.view-animate > :not(.toast) {
   animation: viewIn 220ms ease both;
@@ -1946,5 +2219,8 @@ body[data-runtime="tauri"] .qrscan-overlay {
   .net-menu { animation: none !important; }
   .qrscan-overlay { animation: none !important; }
   .qrscan-modal { animation: none !important; }
+  .activity-item.is-pending::after { animation: none !important; }
+  .status-dot--pending { animation: none !important; }
+  .tabs::before { transition: none !important; }
   button, .action-btn, .activity-item, .tab { transition: none !important; }
 }

@@ -38,7 +38,7 @@ try {
 const app = document.getElementById("app");
 const headerActionsHost = document.getElementById("header-actions");
 
-// view transitions: animate route changes only.
+// View transitions: animate route changes only.
 let lastAnimatedRoute = null;
 let viewAnimTimer = null;
 function pulseViewAnimation() {
@@ -66,8 +66,12 @@ function setApp(children) {
   try {
     const r = state?.route;
     if (r && r !== lastAnimatedRoute) {
+      const prev = lastAnimatedRoute;
       lastAnimatedRoute = r;
-      pulseViewAnimation();
+      const isHomeTab = (x) => x === "home" || x === "activity";
+      if (!(isHomeTab(prev) && isHomeTab(r))) {
+        pulseViewAnimation();
+      }
     }
   } catch {
     // ignore

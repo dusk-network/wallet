@@ -274,6 +274,8 @@ export function homeView(ov, { state, actions } = {}) {
     const { title, sub, icon } = describe(tx);
     const hash = String(tx?.hash ?? "");
     const st = String(tx?.status ?? "submitted");
+    const stLower = st.toLowerCase();
+    const isPending = stLower !== "executed" && stLower !== "failed";
     const isHighlight = state?.highlightTx && String(state.highlightTx) === hash;
     const pulse = pulseClassFor(hash);
 
@@ -320,7 +322,14 @@ export function homeView(ov, { state, actions } = {}) {
     const chevron = h("div", { class: "activity-chevron", text: "›" });
     const right = h("div", { class: "activity-right" }, [btnOpen, btnCopy, chevron]);
 
-    const cls = ["activity-item", isHighlight ? "is-highlight" : "", pulse].filter(Boolean).join(" ");
+    const cls = [
+      "activity-item",
+      isPending ? "is-pending" : "",
+      isHighlight ? "is-highlight" : "",
+      pulse,
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     return h(
       "button",
@@ -358,7 +367,13 @@ export function homeView(ov, { state, actions } = {}) {
       : h("div", { class: "muted", text: "No activity yet." }),
   ]);
 
-  const tabs = h("div", { class: "tabs" }, [
+  const tabs = h(
+    "div",
+    {
+      class: "tabs",
+      style: `--seg-index: ${activeTab === "assets" ? 0 : 1};`,
+    },
+    [
     h(
       "button",
       {
@@ -384,7 +399,8 @@ export function homeView(ov, { state, actions } = {}) {
           : null,
       ].filter(Boolean)
     ),
-  ]);
+    ]
+  );
 
   const assetsCard = h("div", { class: "box assets-card" }, [
     h("div", { class: "asset-row asset-row--main" }, [

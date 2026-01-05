@@ -50,6 +50,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       amount.value = req.amountDusk || "";
       memo.value = req.memo || "";
     } else {
+      // A raw recipient QR should not clobber what the user already typed.
       if (req.amountDusk) amount.value = req.amountDusk;
       if (req.memo) memo.value = req.memo;
     }
@@ -72,6 +73,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     updateToType();
 
     // Show a small hint toast so user understands it worked.
+    // (Toast triggers a render, hence why we persist draft first.)
     try {
       actions?.showToast?.(source === "qr" ? "Filled from QR" : "Request decoded", 1800);
     } catch {
@@ -107,16 +109,19 @@ export function sendFormView(ov, { state, actions } = {}) {
       return;
     }
     const t = ProfileGenerator.typeOf(v);
-    toTypePill.style.display = "inline-flex";
-    if (t === "account") {
-      toTypePill.textContent = "Detected: Public account";
-    } else if (t === "address") {
-      toTypePill.textContent = "Detected: Shielded address";
-    } else {
-      toTypePill.textContent = "Detected: Unknown address format";
+
+    if (t === "account" || t === "address") {
+      toTypePill.style.display = "inline-flex";
+      toTypePill.textContent = t === "address" ? "Detected: Shielded address" : "Detected: Public account";
+      return;
     }
+
+    // Fallback: unknown format
+    toTypePill.style.display = "inline-flex";
+    toTypePill.textContent = "Detected: Unknown address format";
   };
-    const syncDraft = () => {
+
+  const syncDraft = () => {
     // Keep draft in sync so any toast-triggered re-render doesn't wipe inputs.
     state.draft = {
       ...(state.draft || {}),

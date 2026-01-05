@@ -85,7 +85,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     },
   });
 
-  const modeTabs = h("div", { class: "tabs" }, [
+  const modeTabs = h("div", { class: "tabs", style: `--seg-index: ${kind === "shield" ? 0 : 1};` }, [
     h(
       "button",
       {

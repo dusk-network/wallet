@@ -2,11 +2,12 @@ import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
 import { qrCodeEl } from "../../components/QrCode.js";
+import { identiconEl } from "../../components/Identicon.js";
+import { truncateMiddle } from "../../lib/strings.js";
 import { parseDuskToLux } from "../../../shared/amount.js";
 import {
   buildDuskUri,
   chainIdFromNodeUrlDecimal,
-  chainLabel,
 } from "../../../shared/duskUri.js";
 
 function normalizeRequestAmount(amountStr) {
@@ -53,15 +54,23 @@ export function receiveView(ov, { state, actions } = {}) {
   const address = ov?.addresses?.[0] ?? "";
 
   const chainId = chainIdFromNodeUrlDecimal(ov?.nodeUrl ?? "");
-  const netLabel = chainLabel(chainId) || (chainId ? `Chain ${chainId}` : "");
 
   // Persist request fields while the user navigates around.
-  const r = (state.receive ??= { tab: "shielded", amountDusk: "", memo: "" });
+  const r = (state.receive ??= {
+    tab: "shielded",
+    requestOpen: false,
+    amountDusk: "",
+    memo: "",
+  });
   const tab = r.tab === "public" ? "public" : "shielded";
 
-  // --- Public/Shielded toggle ----------------------------------------
-  const btnShielded = h("button", {
-    class: "btn-outline",
+  // Current recipient string
+  const recipient = tab === "public" ? account : address;
+  const recipientLabel = tab === "public" ? "account" : "address";
+
+  // --- Public/Shielded toggle (segmented) -----------------------------
+  const tabShielded = h("button", {
+    class: "tab",
     type: "button",
     text: "Shielded",
     onclick: () => {
@@ -72,8 +81,8 @@ export function receiveView(ov, { state, actions } = {}) {
       actions?.render?.().catch(() => {});
     },
   });
-  const btnPublic = h("button", {
-    class: "btn-outline",
+  const tabPublicBtn = h("button", {
+    class: "tab",
     type: "button",
     text: "Public",
     onclick: () => {
@@ -83,18 +92,43 @@ export function receiveView(ov, { state, actions } = {}) {
       actions?.render?.().catch(() => {});
     },
   });
-  btnShielded.classList.toggle("is-active", tab === "shielded");
-  btnPublic.classList.toggle("is-active", tab === "public");
 
-  const tabHelp = h("div", {
-    class: "muted",
-    text:
-      tab === "shielded"
-        ? "Shielded is recommended for private receiving."
-        : "Public is compatible with dApps and transparent transfers.",
-  });
+  const segIndex = tab === "public" ? 1 : 0;
+  tabShielded.classList.toggle("is-active", segIndex === 0);
+  tabPublicBtn.classList.toggle("is-active", segIndex === 1);
 
-  // --- Inputs: amount + memo ------------------------------------------
+  const tabToggle = h(
+    "div",
+    {
+      class: "tabs tabs--mini",
+      style: `--seg-index:${segIndex}; --seg-count:2;`,
+      title: "Choose the receiving address type",
+    },
+    [tabShielded, tabPublicBtn]
+  );
+
+  // --- QR + chip -------------------------------------------------------
+  const qrCard = h("div", { class: "box qr-box receive-qr-card" });
+
+  const chipIcon = h("div", { class: "receive-chip-icon" });
+  const chipText = h("div", { class: "receive-chip-text" });
+  const chipCopy = h("div", { class: "receive-chip-copy", text: "⧉" });
+  const addressChip = h(
+    "button",
+    {
+      class: "receive-chip",
+      type: "button",
+      title: recipient ? `${recipient}` : "",
+      onclick: async () => {
+        if (!curRecipient) return;
+        const ok = await copyToClipboard(curRecipient);
+        actions?.showToast?.(ok ? `Copied ${recipientLabel}` : "Copy failed");
+      },
+    },
+    [chipIcon, chipText, chipCopy]
+  );
+
+  // --- Request payment (progressive disclosure) -----------------------
   const amountInput = h("input", {
     placeholder: "Amount (optional, DUSK — e.g. 1.25)",
     value: typeof r.amountDusk === "string" ? r.amountDusk : "",
@@ -106,6 +140,40 @@ export function receiveView(ov, { state, actions } = {}) {
   });
   const amountErr = h("div", { class: "err", style: "display:none" });
 
+  const summaryMeta = h("span", { class: "muted", text: "Optional" });
+  const summaryChev = h("span", { class: "accordion-chev", text: "▾", "aria-hidden": "true" });
+
+  const requestDetails = h(
+    "details",
+    { class: "receive-accordion", open: !!r.requestOpen },
+    [
+      h(
+        "summary",
+        { class: "receive-accordion__summary" },
+        [
+          h("span", { class: "receive-accordion__title", text: "Request payment" }),
+          h("span", { class: "receive-accordion__meta" }, [summaryMeta, summaryChev]),
+        ]
+      ),
+      h("div", { class: "receive-accordion__body" }, [
+        h("label", { text: "Amount (optional)" }),
+        amountInput,
+        amountErr,
+        h("label", { text: "Memo (optional)" }),
+        memoInput,
+        h("div", {
+          class: "muted",
+          text: "When a request is set, the QR encodes a dusk: link so Send can auto‑fill.",
+        }),
+      ]),
+    ]
+  );
+
+  requestDetails.addEventListener("toggle", () => {
+    r.requestOpen = requestDetails.open;
+    update();
+  });
+
   const setAmountErr = (txt) => {
     if (!txt) {
       amountErr.style.display = "none";
@@ -116,32 +184,20 @@ export function receiveView(ov, { state, actions } = {}) {
     amountErr.textContent = String(txt);
   };
 
-  // --- Preview ----------------------------------------------------------
-  const previewMain = h("div", { class: "receive-preview-main" });
-  const previewSub = h("div", { class: "muted" });
-  const previewMemo = h("div", { class: "muted", style: "display:none" });
-  const previewBox = h("div", { class: "box receive-preview" }, [
-    h("div", { class: "muted", text: "Preview" }),
-    previewMain,
-    previewSub,
-    previewMemo,
-  ]);
-
-  // --- QR / Link / Copy actions ----------------------------------------
-  const qrBox = h("div", { class: "box qr-box" });
-  const codeEl = h("code", { text: tab === "public" ? account : address });
-  const rawBox = h("div", { class: "box" }, [codeEl]);
-
+  // --- Actions ---------------------------------------------------------
+  let curRecipient = recipient || "";
   let curUri = "";
-  let curRecipient = "";
+  let curCopyValue = recipient || "";
+  let curCopyToast = tab === "public" ? "Copied account" : "Copied address";
+  let wantRequest = false;
 
-  const copyLinkBtn = h("button", {
-    class: "btn-outline",
-    text: "Copy request link",
+  const copyBtn = h("button", {
+    class: "btn-primary",
+    text: tab === "public" ? "Copy account" : "Copy address",
     onclick: async () => {
-      if (!curUri) return;
-      const ok = await copyToClipboard(curUri);
-      actions?.showToast?.(ok ? "Copied request link" : "Copy failed");
+      if (!curCopyValue) return;
+      const ok = await copyToClipboard(curCopyValue);
+      actions?.showToast?.(ok ? curCopyToast : "Copy failed");
     },
   });
 
@@ -150,122 +206,125 @@ export function receiveView(ov, { state, actions } = {}) {
         class: "btn-outline",
         text: "Share",
         onclick: async () => {
-          if (!curUri) return;
-
-          const parts = [previewMain.textContent, previewSub.textContent];
-          if (previewMemo.style.display !== "none" && previewMemo.textContent) {
-            parts.push(previewMemo.textContent);
-          }
-          parts.push(curUri);
-          const shareText = parts.filter(Boolean).join("\n");
+          const shareValue = wantRequest && curUri ? curUri : curRecipient;
+          if (!shareValue) return;
 
           // Prefer native share sheet when available.
           if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
             try {
               await navigator.share({
-                title: "Dusk request",
-                text: shareText,
+                title: "Mochavi request",
+                text: shareValue,
               });
-              // Some platforms resolve even when user cancels.
               actions?.showToast?.("Shared");
               return;
             } catch (e) {
-              // AbortError = user cancelled share sheet.
               if (e?.name === "AbortError") return;
-              // Fall back to copy.
             }
           }
 
-          const ok = await copyToClipboard(curUri);
-          actions?.showToast?.(ok ? "Share not available — link copied" : "Copy failed");
+          const ok = await copyToClipboard(shareValue);
+          actions?.showToast?.(ok ? "Share not available — copied" : "Copy failed");
         },
       })
     : null;
 
-  const copyRawBtn = h("button", {
-    class: "btn-outline",
-    text: tab === "public" ? "Copy account" : "Copy address",
-    onclick: async () => {
-      if (!curRecipient) return;
-      const ok = await copyToClipboard(curRecipient);
-      actions?.showToast?.(ok ? "Copied" : "Copy failed");
-    },
-  });
+  const btnRow = h(
+    "div",
+    { class: shareBtn ? "btnrow btnrow--grid" : "btnrow" },
+    shareBtn ? [copyBtn, shareBtn] : [copyBtn]
+  );
 
-  const btnRow = h("div", { class: "btnrow" }, [copyLinkBtn, shareBtn, copyRawBtn].filter(Boolean));
-
-  const updateRequest = () => {
-    // Persist raw input.
-    r.amountDusk = amountInput.value;
-    r.memo = memoInput.value;
-
-    const norm = normalizeRequestAmount(amountInput.value);
-    const valid = norm !== null;
-
-    if (!valid) {
-      setAmountErr("Invalid amount. Use e.g. 1 or 0.123 (max 9 decimals)");
-    } else {
-      setAmountErr("");
-    }
-
-    const amountForUri = valid ? norm : "";
-    const memoVal = String(memoInput.value ?? "").trim();
-
-    curRecipient = tab === "public" ? account : address;
-    curUri = buildDuskUri({
-      kind: tab,
-      recipient: curRecipient,
-      chainId,
-      amountDusk: amountForUri || "",
-      memo: memoVal || "",
-    });
-
-    // Update QR code in-place.
-    // If the amount is invalid, show the raw recipient QR so scanning still works.
-    qrBox.replaceChildren(qrCodeEl(valid && curUri ? curUri : curRecipient));
-    codeEl.textContent = curRecipient || "(none)";
-
-    // Preview message
-    const kindLabel = tab === "public" ? "Public" : "Shielded";
-    if (amountForUri) {
-      previewMain.textContent = `Request ${amountForUri} DUSK`;
-    } else {
-      previewMain.textContent = "Request any amount";
-    }
-    previewSub.textContent = `${kindLabel}${netLabel ? ` • ${netLabel}` : ""}`;
-    if (memoVal) {
-      previewMemo.style.display = "";
-      previewMemo.textContent = `Memo: ${memoVal}`;
-    } else {
-      previewMemo.style.display = "none";
-      previewMemo.textContent = "";
-    }
-
-    // Disable request-link actions if invalid amount or no recipient.
-    copyLinkBtn.disabled = !valid || !curUri;
-    if (shareBtn) shareBtn.disabled = !valid || !curUri;
-    copyRawBtn.disabled = !curRecipient;
-  };
-
-  // Debounce updates so typing feels smooth on mobile.
+  // --- Live update -----------------------------------------------------
   let t = 0;
   const schedule = () => {
     if (t) clearTimeout(t);
     t = setTimeout(() => {
       t = 0;
-      updateRequest();
-    }, 120);
+      update();
+    }, 100);
   };
-  amountInput.addEventListener("input", schedule);
-  memoInput.addEventListener("input", schedule);
 
-  // Initial render
-  updateRequest();
+  amountInput.addEventListener("input", () => {
+    r.amountDusk = amountInput.value;
+    schedule();
+  });
 
-  const recipientLabel = tab === "public" ? "Public account" : "Shielded address";
+  memoInput.addEventListener("input", () => {
+    r.memo = memoInput.value;
+    schedule();
+  });
+
+  function update() {
+    curRecipient = (r.tab === "public" ? account : address) || "";
+    wantRequest = false;
+
+    // Update chip
+    chipIcon.replaceChildren(identiconEl(curRecipient || "dusk"));
+    chipText.textContent = curRecipient
+      ? truncateMiddle(curRecipient, 10, 8)
+      : "—";
+    addressChip.title = curRecipient || "";
+
+    // Validate request fields
+    const norm = normalizeRequestAmount(amountInput.value);
+    const amountValid = norm !== null;
+    const memoVal = String(memoInput.value ?? "").trim();
+
+    // Only show amount errors when the request panel is open and the user typed something.
+    if (requestDetails.open && norm === null) {
+      setAmountErr("Invalid amount (max 9 decimals)");
+    } else {
+      setAmountErr("");
+    }
+
+    const amountForUri = amountValid ? norm : "";
+    const hasReq = !!memoVal || !!amountForUri;
+
+    curUri = amountValid
+      ? buildDuskUri({
+          kind: r.tab === "public" ? "public" : "shielded",
+          recipient: curRecipient,
+          chainId,
+          amountDusk: amountForUri || "",
+          memo: memoVal || "",
+        })
+      : "";
+
+    wantRequest = !!(requestDetails.open && amountValid && hasReq && curUri);
+
+    // QR encodes the request only when the request panel is open and has content.
+    const qrValue = wantRequest ? curUri : curRecipient;
+    qrCard.replaceChildren(qrCodeEl(qrValue || ""));
+
+    // Copy button is smart: address by default, request when configured.
+    if (wantRequest) {
+      copyBtn.textContent = "Copy request link";
+      curCopyValue = curUri;
+      curCopyToast = "Copied request link";
+      summaryMeta.textContent = amountForUri
+        ? `${amountForUri} DUSK`
+        : memoVal
+          ? "With memo"
+          : "Optional";
+    } else {
+      copyBtn.textContent = r.tab === "public" ? "Copy account" : "Copy address";
+      curCopyValue = curRecipient;
+      curCopyToast = r.tab === "public" ? "Copied account" : "Copied address";
+      summaryMeta.textContent = hasReq ? "Configured" : "Optional";
+    }
+
+    copyBtn.disabled = !curCopyValue;
+    addressChip.disabled = !curRecipient;
+    if (shareBtn) shareBtn.disabled = !curRecipient;
+  }
+
+  // Initial
+  update();
+
   const note = h("div", {
     class: "muted",
-    text: "Tip: the sender can paste a dusk: request link into Send (or scan the QR) to prefill the transfer.",
+    text: "Tip: paste or scan the QR in Send to auto‑fill the transaction.",
   });
 
   return [
@@ -277,23 +336,11 @@ export function receiveView(ov, { state, actions } = {}) {
       },
     }),
     h("div", { class: "row" }, [
-      h("div", { class: "srp-toggle" }, [btnShielded, btnPublic]),
-      tabHelp,
-
-      h("label", { text: "Request amount (optional)" }),
-      amountInput,
-      amountErr,
-
-      h("label", { text: "Memo / message (optional)" }),
-      memoInput,
-
-      previewBox,
-
-      h("div", { class: "divider" }),
-      h("div", { class: "muted", text: recipientLabel }),
-      qrBox,
-      rawBox,
+      tabToggle,
+      qrCard,
+      addressChip,
       btnRow,
+      requestDetails,
       note,
     ]),
   ].filter(Boolean);
