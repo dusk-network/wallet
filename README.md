@@ -1,8 +1,8 @@
-# Dusk Wallet
+# Mochavi Wallet
 
 This is a minimal shared wallet design that can be used as a Chromium extension, desktop app and mobile app.
 
-The Chromium extension injects a `window.dusk` provider into any webpage, so dApps can talk to the Dusk wallet without users importing a private key/mnemonic into the dApp.
+The Chromium extension injects a `window.dusk` provider into any webpage, so dApps can talk to the wallet without users importing a private key/mnemonic into the dApp.
 
 The provider is EIP-1193-like (request + events) and mirrors the UX patterns
 developers expect from MetaMask (without pretending Dusk is EVM).
@@ -34,7 +34,7 @@ And one Dusk-specific helper event:
 Notes:
 
 - `accountsChanged([])` is emitted when the wallet locks or the site's permission is revoked.
-- `chainChanged` uses a Dusk wallet chain identifier, not an Ethereum chain id.
+- `chainChanged` uses a Dusk chain identifier, not an Ethereum chain id.
   Known presets map to fixed ids; for custom nodes we derive a stable-ish id from the
   node URL origin (scheme+host+port) using a small FNV-1a hash.
 

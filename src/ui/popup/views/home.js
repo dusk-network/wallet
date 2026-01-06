@@ -171,6 +171,8 @@ export function homeView(ov, { state, actions } = {}) {
     }),
   ]);
 
+  // Balance hero is a single surface block. Action buttons are intentionally
+  // rendered *outside* this container (more MetaMask-like, less "card-in-card").
   const hero = h("div", { class: "home-balance home-hero" }, [
     h("div", { class: "balance-amount", text: heroAmt, title: heroAmtTitle }),
     balanceSubRow,
@@ -336,7 +338,7 @@ export function homeView(ov, { state, actions } = {}) {
       {
         class: cls,
         onclick: async () => {
-          // Open in-app details view instead of forcing an explorer tab.
+          // Open in-app details view (MetaMask-like) instead of forcing an explorer tab.
           try {
             if (state) {
               state.txDetailHash = hash;
@@ -404,7 +406,14 @@ export function homeView(ov, { state, actions } = {}) {
 
   const assetsCard = h("div", { class: "box assets-card" }, [
     h("div", { class: "asset-row asset-row--main" }, [
-      h("div", { class: "asset-ico", text: "D" }),
+      h("div", { class: "asset-ico" }, [
+        h("img", {
+          class: "asset-ico-img",
+          src: "icons/dusk-32.png",
+          alt: "DUSK",
+          draggable: false,
+        }),
+      ]),
       h("div", { class: "asset-main" }, [
         h("div", { class: "asset-sym", text: "DUSK" }),
         h("div", { class: "asset-name", text: "Native token" }),

@@ -1,7 +1,7 @@
 {
-  "productName": "Dusk Wallet",
+  "productName": "Mochavi Wallet",
   "version": "0.0.1",
-  "identifier": "network.dusk.wallet",
+  "identifier": "wallet.mochavi.app",
   "build": {
     "beforeDevCommand": "node -e \"const {spawnSync}=require('child_process');const fs=require('fs');const path=require('path');let d=process.cwd();while(!fs.existsSync(path.join(d,'package.json'))){const p=path.dirname(d);if(p===d){console.error('package.json not found (cannot start frontend)');process.exit(1);}d=p;}const npm=process.platform==='win32'?'npm.cmd':'npm';const r=spawnSync(npm,['run','dev:tauri'],{cwd:d,stdio:'inherit'});process.exit(r.status??1);\"",
     "beforeBuildCommand": "node -e \"const {spawnSync}=require('child_process');const fs=require('fs');const path=require('path');let d=process.cwd();while(!fs.existsSync(path.join(d,'package.json'))){const p=path.dirname(d);if(p===d){console.error('package.json not found (cannot build frontend)');process.exit(1);}d=p;}const npm=process.platform==='win32'?'npm.cmd':'npm';const r=spawnSync(npm,['run','build:tauri'],{cwd:d,stdio:'inherit'});process.exit(r.status??1);\"",
@@ -16,7 +16,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Dusk Wallet",
+        "title": "Mochavi Wallet",
         "width": 420,
         "height": 650,
         "resizable": true

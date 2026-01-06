@@ -1,16 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "DuskDS Wallet Extension",
+  "name": "Mochavi Wallet",
   "version": "0.1.0",
-  "description": "Crypto wallet for the DuskDS network.",
+  "description": "Crypto wallet for the Dusk network.",
   "action": {
-    "default_title": "Dusk Wallet",
+    "default_title": "Mochavi Wallet",
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icons/dusk-16.png",
-      "32": "icons/dusk-32.png",
-      "48": "icons/dusk-48.png",
-      "128": "icons/dusk-128.png"
+      "16": "icons/mochavi-16.png",
+      "32": "icons/mochavi-32.png",
+      "48": "icons/mochavi-48.png",
+      "128": "icons/mochavi-128.png"
     }
   },
   "options_page": "options.html",
@@ -71,9 +71,9 @@
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
   },
   "icons": {
-    "16": "icons/dusk-16.png",
-    "32": "icons/dusk-32.png",
-    "48": "icons/dusk-48.png",
-    "128": "icons/dusk-128.png"
+    "16": "icons/mochavi-16.png",
+    "32": "icons/mochavi-32.png",
+    "48": "icons/mochavi-48.png",
+    "128": "icons/mochavi-128.png"
   }
 }

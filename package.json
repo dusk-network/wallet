@@ -1,9 +1,9 @@
 {
-  "name": "dusk-wallet",
+  "name": "@mochavi/wallet",
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "author": "Hein Dauven <hein@dusk.network> (https://x.com/HeinDauven)",
+  "author": "Hein Dauven <heindauven@gmail.com> (https://x.com/HeinDauven)",
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",

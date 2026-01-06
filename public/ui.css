@@ -1,5 +1,4 @@
 :root {
-  /* Neobank / Revolut-ish dark theme */
   --radius: 14px;
 
   --background: #05070c;
@@ -11,7 +10,7 @@
   --popover: rgba(0,0,0,0.18);
   --popover-foreground: rgba(255,255,255,0.92);
 
-  --primary: #7aa2ff;      /* Revolut-ish accent */
+  --primary: #7aa2ff;
   --primary-foreground: rgba(255,255,255,0.94);
 
   --secondary: rgba(0,0,0,0.16);
@@ -198,6 +197,12 @@ body[data-runtime="tauri"].page--full .panel {
   flex: 0 0 auto;
 
   box-shadow: 0 14px 32px color-mix(in oklab, var(--primary) 35%, transparent);
+}
+
+.brand-mark__glyph {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .brand-text { min-width: 0; }
@@ -1052,7 +1057,7 @@ button:disabled {
   border-color: transparent;
 }
 
-/* ---- Assets list (simple, future-proof) ------------------------------ */
+/* ---- Assets list ------------------------------ */
 .assets-card {
   padding: 10px 12px;
 }
@@ -1120,6 +1125,12 @@ button:disabled {
   font-size: 13px;
   font-weight: 900;
   flex: 0 0 auto;
+}
+
+.asset-ico-img {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .asset-main {
@@ -1235,7 +1246,7 @@ button:disabled {
   transition: background 120ms ease, transform 120ms ease;
 }
 
-/* Pending shimmer (neobank loading feel) */
+/* Pending shimmer */
 .activity-item.is-pending {
   position: relative;
   overflow: hidden;
@@ -1985,7 +1996,7 @@ body[data-runtime="tauri"].page--full .panel {
 }
 
 /* -------------------------------------------------------
-   Receive: neobank-style layout (QR + address first)
+   Receive: QR + address first
    ------------------------------------------------------- */
 .receive-qr-card {
   padding: 12px;
@@ -2202,7 +2213,7 @@ body[data-runtime="tauri"] .qrscan-overlay {
 
 
 /* -------------------------------------------------------
-   Subtle view transitions (neobank feel)
+   Subtle view transitions
    ------------------------------------------------------- */
 #app.view-animate > :not(.toast) {
   animation: viewIn 220ms ease both;
