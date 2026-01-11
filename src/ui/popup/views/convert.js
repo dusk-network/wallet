@@ -9,6 +9,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
+import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
 
 function fmtAvail(lux) {
   try {
@@ -28,13 +29,21 @@ export function convertFormView(ov, { state, actions } = {}) {
       ? safeBigInt(defaultGas.limit, 0n) * safeBigInt(defaultGas.price, 0n)
       : 0n;
 
-  const amount = h("input", {
-    class: "amount-input",
+  // Assigned later (we want to pass it into components as a live closure).
+  let syncDraft = () => {};
+
+  const amountCtl = createAmountSliderCard({
+    initialAmountDusk: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
     placeholder: "Amount (DUSK, e.g. 1.25)",
-    value: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
+    actions,
+    onAmountInput: () => syncDraft(),
+    onAmountChange: () => syncDraft(),
   });
 
-  const syncDraft = () => {
+  const amount = amountCtl.amountInput;
+  const amountCard = amountCtl.el;
+
+  syncDraft = () => {
     state.draft = {
       ...(state.draft || {}),
       kind,
@@ -74,152 +83,8 @@ export function convertFormView(ov, { state, actions } = {}) {
   const availRaw = kind === "shield" ? pubLux : shSpendLux;
   const avail = availRaw > feeLux ? availRaw - feeLux : 0n;
 
-  const maxBtn = h("button", {
-    class: "icon-btn max-btn",
-    type: "button",
-    text: "MAX",
-    title: "Use maximum amount",
-    disabled: avail <= 0n,
-    onclick: () => {
-      amount.value = formatLuxShort(avail, UI_DISPLAY_DECIMALS);
-      setSliderRaw(SLIDER_MAX);
-      syncDraft();
-    },
-  });
-
-  const amountRow = h("div", { class: "input-row" }, [amount, maxBtn]);
-
-  const SLIDER_MAX = 1000; // 0.1% steps
-  const SNAP_PCTS = [0, 25, 50, 75, 100];
-  const SNAP_THRESHOLD_PCT = 0.9; // subtle magnet effect
-
-  const maybeSnapRaw = (raw) => {
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return 0;
-    const pct = (n * 100) / SLIDER_MAX;
-    let best = null;
-    let bestDist = Infinity;
-    for (const p of SNAP_PCTS) {
-      const d = Math.abs(pct - p);
-      if (d < bestDist) {
-        bestDist = d;
-        best = p;
-      }
-    }
-    if (best != null && bestDist <= SNAP_THRESHOLD_PCT) {
-      return Math.round((best * SLIDER_MAX) / 100);
-    }
-    return Math.max(0, Math.min(SLIDER_MAX, n));
-  };
-
-  const slider = h("input", {
-    type: "range",
-    class: "amount-range",
-    min: "0",
-    max: String(SLIDER_MAX),
-    value: "0",
-    disabled: avail <= 0n,
-  });
-  slider.style.setProperty("--range-pct", "0%");
-
-  const sliderPct = h("div", { class: "amount-range__pct", text: "0%" });
-
-  const ticks = h(
-    "div",
-    { class: "amount-range__ticks", "aria-hidden": "true" },
-    [0, 25, 50, 75, 100].map((p) =>
-      h("span", {
-        class: "amount-range__tick" + (p === 0 || p === 100 ? " is-edge" : ""),
-        style:
-          p === 0
-            ? "left:0%"
-            : p === 100
-              ? "left:100%; transform: translateX(-100%)"
-              : `left:${p}%; transform: translateX(-50%)`,
-      })
-    )
-  );
-
-  const sliderTrack = h("div", { class: "amount-range__track" }, [slider, ticks]);
-
-  const sliderWrap = h(
-    "div",
-    { class: "amount-range-wrap", style: avail <= 0n ? "display:none" : "" },
-    [sliderTrack, sliderPct]
-  );
-
-  const amountCard = h("div", { class: "amount-card" }, [amountRow, sliderWrap]);
-
-  function setSliderRaw(raw) {
-    const n0 = Number(raw);
-    const n = Number.isFinite(n0) ? Math.max(0, Math.min(SLIDER_MAX, n0)) : 0;
-    slider.value = String(n);
-
-    const pctExact = (n * 100) / SLIDER_MAX;
-    slider.style.setProperty("--range-pct", `${pctExact}%`);
-
-    const pctInt = Math.round(pctExact);
-    if (n > 0 && pctInt === 0) {
-      sliderPct.textContent = "<1%";
-    } else if (pctInt >= 100) {
-      sliderPct.textContent = "100%";
-    } else {
-      sliderPct.textContent = `${pctInt}%`;
-    }
-  }
-
-  function setAmountLux(lux) {
-    amount.value = formatLuxShort(lux, UI_DISPLAY_DECIMALS);
-    syncDraft();
-  }
-
-  function syncSliderToAmount() {
-    if (avail <= 0n) {
-      setSliderRaw(0);
-      return;
-    }
-
-    const raw = String(amount.value || "").trim();
-    if (!raw) {
-      setSliderRaw(0);
-      return;
-    }
-
-    let amtLux = 0n;
-    try {
-      amtLux = BigInt(parseDuskToLux(raw));
-    } catch {
-      return;
-    }
-
-    if (amtLux <= 0n) {
-      setSliderRaw(0);
-      return;
-    }
-
-    let n = Number((amtLux * BigInt(SLIDER_MAX)) / avail);
-    if (!Number.isFinite(n)) return;
-    if (n < 0) n = 0;
-    if (n > SLIDER_MAX) n = SLIDER_MAX;
-    setSliderRaw(n);
-  }
-
-  slider.addEventListener("input", () => {
-    if (avail <= 0n) return;
-    const n0 = Math.max(0, Math.min(SLIDER_MAX, Number(slider.value) || 0));
-    const n = maybeSnapRaw(n0);
-    const amtLux = (avail * BigInt(n)) / BigInt(SLIDER_MAX);
-    setSliderRaw(n);
-    setAmountLux(amtLux);
-  });
-
-  amount.addEventListener("input", () => {
-    syncDraft();
-    syncSliderToAmount();
-  });
-
-  // Initialize slider from any persisted draft amount.
-  if (avail > 0n) syncSliderToAmount();
+  // Wire the shared MAX + slider component against the calculated maximum.
+  amountCtl.setMaxLux(avail);
 
   const info = h("div", { class: "box" }, [
     h("div", { class: "meta-pill", text: `${fromLabel} → ${toLabel}` }),
