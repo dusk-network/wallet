@@ -5,7 +5,8 @@ import { getPermissionForOrigin } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
-import { networkNameFromNodeUrl } from "../shared/network.js";
+import { detectPresetIdFromNodeUrl, networkNameFromNodeUrl } from "../shared/network.js";
+import { NETWORK_PRESETS } from "../shared/networkPresets.js";
 
 import {
   engineCall,
@@ -61,6 +62,235 @@ function getOriginFromSender(sender) {
     // ignore
   }
   return "";
+}
+
+// ------------------------------
+// Endpoint validation
+// ------------------------------
+
+function inferEndpointsFromNodeUrl(nodeUrl) {
+  const id = detectPresetIdFromNodeUrl(nodeUrl);
+  const preset = NETWORK_PRESETS.find((p) => p.id === id) ?? null;
+  if (preset && preset.id !== "custom") {
+    return {
+      proverUrl: preset.proverUrl || nodeUrl,
+      archiverUrl: preset.archiverUrl || nodeUrl,
+    };
+  }
+  return {
+    proverUrl: nodeUrl,
+    archiverUrl: nodeUrl,
+  };
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function probeNodeInfo(baseUrl, label = "Endpoint") {
+  const u = new URL(baseUrl);
+  const infoUrl = new URL("/on/node/info", u.origin).toString();
+
+  let resp;
+  try {
+    resp = await fetchWithTimeout(
+      infoUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          Accept: "application/json",
+        },
+        // Some servers reject missing bodies on POST.
+        body: new Uint8Array(0),
+      },
+      6000
+    );
+  } catch (e) {
+    throw new Error(
+      `${label} is not reachable (${e?.message ?? String(e)})`
+    );
+  }
+
+  const text = await resp.text().catch(() => "");
+  if (!resp.ok) {
+    // Rusk can return 400/424 when Rusk-Version / Rusk-Session-Id headers are
+    // missing or mismatched. For a reachability probe we still treat these
+    // as "alive" (the engine will establish a proper session).
+    if (resp.status === 400 || resp.status === 424) {
+      return { reachable: true, status: resp.status };
+    }
+
+    const extra = text ? `: ${text.slice(0, 160)}` : "";
+    throw new Error(
+      `${label} returned HTTP ${resp.status} ${resp.statusText}${extra}`
+    );
+  }
+
+  try {
+    const json = JSON.parse(text);
+    if (
+      json &&
+      (typeof json.chain_id === "number" || typeof json.chain_id === "string")
+    ) {
+      return json;
+    }
+  } catch {
+    // fallthrough
+  }
+
+  throw new Error(`${label} did not return valid JSON for /on/node/info`);
+}
+
+async function probeGraphQL(baseUrl, query, label = "GraphQL") {
+  const u = new URL(baseUrl);
+  // Dusk nodes expose GraphQL-style queries via RUES dispatch.
+  // Docs: /on/graphql/query
+  const gqlUrl = new URL("/on/graphql/query", u.origin).toString();
+
+  let resp;
+  try {
+    resp = await fetchWithTimeout(
+      gqlUrl,
+      {
+        method: "POST",
+        headers: {
+          // Rusk expects the query as the raw request body.
+          "Content-Type": "text/plain",
+          Accept: "application/json",
+        },
+        body: query,
+      },
+      7000
+    );
+  } catch (e) {
+    throw new Error(
+      `${label} is not reachable (${e?.message ?? String(e)})`
+    );
+  }
+
+  const text = await resp.text().catch(() => "");
+  return { resp, text };
+}
+
+async function probeArchiver(baseUrl) {
+  // Archive nodes must support contractEvents queries.
+  // We intentionally omit a selection set so we don't depend on the return type.
+  // If the field exists but needs subfields, the server will respond with a
+  // validation error (which we treat as success). If the field doesn't exist,
+  // we'll see "Unknown field \"contractEvents\"".
+  const query = "query { contractEvents(height: 0) }";
+  const { resp, text } = await probeGraphQL(baseUrl, query, "Archiver URL");
+
+  // Endpoint missing
+  if (resp.status === 404) {
+    throw new Error("Archiver GraphQL endpoint not found at /on/graphql/query");
+  }
+
+  // If the node is not an archive node, GraphQL validation will complain.
+  // Example: "Unknown field \"contractEvents\" on type \"Query\"."
+  if (
+    text.includes('Unknown field "contractEvents"') ||
+    text.includes("Unknown field 'contractEvents'") ||
+    text.includes("Unknown field contractEvents")
+  ) {
+    throw new Error(
+      "Archiver URL does not support contractEvents (not an archive node)"
+    );
+  }
+
+  // Otherwise treat as alive. We accept non-2xx because the probe query might
+  // be rejected for other reasons (e.g. selection set required).
+  if (resp.ok) return;
+
+  // If we got a 400/424 due to missing headers, this is still a useful signal
+  // that the endpoint is a Rusk node; the engine will negotiate proper headers.
+  if (resp.status === 400 || resp.status === 424) return;
+
+  // For any other error, surface a short snippet for debugging.
+  const extra = text ? `: ${text.slice(0, 160)}` : "";
+  throw new Error(
+    `Archiver URL returned HTTP ${resp.status} ${resp.statusText}${extra}`
+  );
+}
+
+async function probeProver(baseUrl) {
+  const u = new URL(baseUrl);
+  const proveUrl = new URL("/on/prover/prove", u.origin).toString();
+
+  // We send an 8-byte dummy payload. A real prover typically responds with
+  // a Dusk-Core error like BadLength(...) when the payload is invalid.
+  // That is a good signal that the endpoint exists and is a prover.
+  const dummy = new TextEncoder().encode("MOCHAVI!"); // 8 bytes
+
+  let resp;
+  let text = "";
+  try {
+    resp = await fetchWithTimeout(
+      proveUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          Accept: "application/octet-stream",
+        },
+        body: dummy,
+      },
+      10000
+    );
+    // Prover errors often come back as text/json.
+    text = await resp.text().catch(() => "");
+  } catch (e) {
+    throw new Error(`Prover is not reachable (${e?.message ?? String(e)})`);
+  }
+
+  if (resp.status === 404) {
+    throw new Error("Prover endpoint not found at /on/prover/prove");
+  }
+
+  if (resp.ok) {
+    return;
+  }
+
+  // Accept the common "BadLength" / "Dusk-Core Error" responses as evidence
+  // that we hit a real prover.
+  if (
+    text.includes("Dusk-Core Error") ||
+    text.includes("BadLength") ||
+    text.includes("Bad length")
+  ) {
+    return;
+  }
+
+  // Also accept Rusk header mismatch codes for reachability.
+  if (resp.status === 400 || resp.status === 424) {
+    return;
+  }
+
+  const extra = text ? `: ${text.slice(0, 160)}` : "";
+  throw new Error(
+    `Prover returned HTTP ${resp.status} ${resp.statusText}${extra}`
+  );
+}
+
+async function validateEndpointSet({ nodeUrl, proverUrl, archiverUrl }) {
+  // Node is always required.
+  await probeNodeInfo(nodeUrl, "Node URL");
+
+  // Prover and archiver must be validated for capability, even if they share
+  // the same hostname as the node.
+  if (proverUrl) {
+    await probeProver(proverUrl);
+  }
+  if (archiverUrl) {
+    await probeArchiver(archiverUrl);
+  }
 }
 
 // ------------------------------
@@ -232,6 +462,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           message?.archiverUrl !== undefined && message?.archiverUrl !== null
             ? String(message.archiverUrl).trim()
             : "";
+
+        // Compute the effective endpoints the engine will use (mirrors the
+        // inference logic in shared/settings.js). We validate these before
+        // persisting so a bad URL can't brick the wallet.
+        const inferred = inferEndpointsFromNodeUrl(nodeUrl);
+        const effectiveProverUrl = proverUrl || inferred.proverUrl;
+        const effectiveArchiverUrl = archiverUrl || inferred.archiverUrl;
         try {
           // eslint-disable-next-line no-new
           new URL(nodeUrl);
@@ -257,6 +494,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
 
+        try {
+          await validateEndpointSet({
+            nodeUrl,
+            proverUrl: effectiveProverUrl,
+            archiverUrl: effectiveArchiverUrl,
+          });
+        } catch (e) {
+          throw rpcError(
+            ERROR_CODES.INVALID_PARAMS,
+            e?.message ?? String(e)
+          );
+        }
+
+        const prevSettings = await getSettings();
+
         // Store endpoints (prover/archiver may be inferred inside setSettings
         // when omitted).
         const nextSettings = await setSettings({
@@ -265,9 +517,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ...(archiverUrl ? { archiverUrl } : {}),
         });
 
-        // Force the engine to pick up the new config immediately.
-        invalidateEngineConfig();
-        await ensureEngineConfigured();
+        // Force the engine to pick up the new config immediately. If this
+        // fails for any reason, roll back so the wallet doesn't get stuck on a
+        // broken URL.
+        try {
+          invalidateEngineConfig();
+          await ensureEngineConfigured();
+        } catch (e) {
+          try {
+            await setSettings({
+              nodeUrl: prevSettings.nodeUrl,
+              proverUrl: prevSettings.proverUrl,
+              archiverUrl: prevSettings.archiverUrl,
+            });
+          } catch {
+            // ignore
+          }
+          invalidateEngineConfig();
+          try {
+            await ensureEngineConfigured();
+          } catch {
+            // ignore
+          }
+
+          throw rpcError(
+            ERROR_CODES.INTERNAL,
+            `Could not apply endpoints: ${e?.message ?? String(e)}`
+          );
+        }
 
         // Notify dApps that the chain has changed.
         broadcastChainChangedAll().catch(() => {});

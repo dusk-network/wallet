@@ -85,7 +85,10 @@ export function optionsView(ov, { state, actions } = {}) {
     class: "btn-primary",
     text: "Save",
     onclick: async () => {
+      const prevText = saveBtn.textContent;
       try {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Testing...";
         const v = nodeUrlInput.value.trim();
         const pv = proverUrlInput.value.trim();
         const av = archiverUrlInput.value.trim();
@@ -115,6 +118,9 @@ export function optionsView(ov, { state, actions } = {}) {
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
         actions?.showToast?.(e?.message ?? String(e), 2500);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = prevText;
       }
     },
   });
