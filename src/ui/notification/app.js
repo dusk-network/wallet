@@ -1,4 +1,4 @@
-import { formatLuxShort, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { h } from "../lib/dom.js";
 import "../components/GasEditor.js";
@@ -75,7 +75,7 @@ export async function renderNotification() {
     setApp([
       header,
       h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Your Dusk Wallet is not set up yet." }),
+        h("div", { class: "muted", text: "Your Mochavi Wallet is not set up yet." }),
         h("div", { class: "muted", text: "Create or import a recovery phrase to continue." }),
         h("div", { class: "btnrow" }, [openBtn]),
       ]),
@@ -199,11 +199,11 @@ export async function renderNotification() {
       const gas = params?.gas ?? null;
 
       const amountLuxStr = prettyAmount(amount);
-      const amountDuskStr = formatLuxShort(amountLuxStr, 6);
+      const amountDuskStr = formatLuxShort(amountLuxStr, UI_DISPLAY_DECIMALS);
 
       const gasEditor = document.createElement("dusk-gas-editor");
       gasEditor.amountLux = amountLuxStr;
-      gasEditor.maxDecimals = 6;
+      gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
       gasEditor.helpText =
         "Max fee shown is limit × price. If left blank, the protocol/node may choose defaults.";
       gasEditor.setGas(gas);
@@ -241,13 +241,13 @@ export async function renderNotification() {
 
       const amountLuxStr = prettyAmount(amount);
       const depositLuxStr = prettyAmount(deposit);
-      const amountDuskStr = formatLuxShort(amountLuxStr, 6);
-      const depositDuskStr = formatLuxShort(depositLuxStr, 6);
+      const amountDuskStr = formatLuxShort(amountLuxStr, UI_DISPLAY_DECIMALS);
+      const depositDuskStr = formatLuxShort(depositLuxStr, UI_DISPLAY_DECIMALS);
 
       const gasEditor = document.createElement("dusk-gas-editor");
       gasEditor.amountLux = amountLuxStr;
       gasEditor.extraLux = [depositLuxStr];
-      gasEditor.maxDecimals = 6;
+      gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
       gasEditor.helpText =
         "Max fee shown is limit × price. If left blank, the protocol/node may choose defaults.";
       gasEditor.setGas(gas);

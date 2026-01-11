@@ -1,4 +1,9 @@
-import { clampDecimals, formatLuxToDusk, formatLuxShort, safeBigInt } from "../../../shared/amount.js";
+import {
+  UI_DISPLAY_DECIMALS,
+  formatLuxToDusk,
+  formatLuxShort,
+  safeBigInt,
+} from "../../../shared/amount.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
@@ -24,7 +29,7 @@ export function homeView(ov, { state, actions } = {}) {
   const hasBalance = Boolean(ov?.balance?.value);
   const pubLux = safeBigInt(ov?.balance?.value, 0n);
   const balFull = hasBalance ? formatLuxToDusk(pubLux) : "—";
-  const balDusk = hasBalance ? clampDecimals(balFull, 4) : "—";
+  const balDusk = hasBalance ? formatLuxShort(pubLux, UI_DISPLAY_DECIMALS) : "—";
 
   // Shielded balance
   // If we can't compute it yet (sync in progress), we still show the row
@@ -37,7 +42,7 @@ export function homeView(ov, { state, actions } = {}) {
   // we show placeholders + sync state.
   const showShielded = true;
   const shieldFull = hasShieldValue ? formatLuxToDusk(shieldLux) : "—";
-  const shieldDusk = hasShieldValue ? clampDecimals(shieldFull, 4) : "—";
+  const shieldDusk = hasShieldValue ? formatLuxShort(shieldLux, UI_DISPLAY_DECIMALS) : "—";
 
   // Total (public + shielded) is only meaningful once shielded value is known.
   const shieldLuxBI = hasShieldValue ? safeBigInt(shieldLux, 0n) : null;
@@ -58,7 +63,7 @@ export function homeView(ov, { state, actions } = {}) {
   const hasTotal = hasBalance && typeof shieldLuxBI === "bigint";
   const totalLux = hasTotal ? pubLux + shieldLuxBI : null;
   const totalFull = hasTotal ? formatLuxToDusk(totalLux) : null;
-  const totalDusk = hasTotal ? clampDecimals(totalFull, 4) : null;
+  const totalDusk = hasTotal ? formatLuxShort(totalLux, UI_DISPLAY_DECIMALS) : null;
 
   // Shielded status suffix shown in Assets breakdown.
   // We only show a suffix when *not* fully healthy, to avoid "Shielded • Shielded".
@@ -85,8 +90,7 @@ export function homeView(ov, { state, actions } = {}) {
   // show a small hint.
   if (!shieldStatus && reservedLux > 0n) {
     shieldStatus = "Pending";
-    const rFull = formatLuxToDusk(reservedLux);
-    shieldStatusTitle = `Reserved ${clampDecimals(rFull, 4)} DUSK`;
+    shieldStatusTitle = `Reserved ${formatLuxShort(reservedLux, UI_DISPLAY_DECIMALS)} DUSK`;
   }
 
   // MetaMask-like main tabs. We keep the route as the source of truth so
@@ -224,7 +228,7 @@ export function homeView(ov, { state, actions } = {}) {
   const describe = (tx) => {
     const kind = String(tx?.kind ?? "").toLowerCase();
     if (kind === "transfer") {
-      const amt = tx?.amount != null ? formatLuxShort(tx.amount, 6) : "";
+      const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
         title: amt ? `Send ${amt} DUSK` : "Send",
         sub: tx?.to ? truncateMiddle(String(tx.to), 10, 8) : "",
@@ -232,7 +236,7 @@ export function homeView(ov, { state, actions } = {}) {
       };
     }
     if (kind === "shield") {
-      const amt = tx?.amount != null ? formatLuxShort(tx.amount, 6) : "";
+      const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
         title: amt ? `Shield ${amt} DUSK` : "Shield",
         sub: "Public → Shielded",
@@ -240,7 +244,7 @@ export function homeView(ov, { state, actions } = {}) {
       };
     }
     if (kind === "unshield") {
-      const amt = tx?.amount != null ? formatLuxShort(tx.amount, 6) : "";
+      const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
         title: amt ? `Unshield ${amt} DUSK` : "Unshield",
         sub: "Shielded → Public",
@@ -250,7 +254,7 @@ export function homeView(ov, { state, actions } = {}) {
     if (kind === "contract_call") {
       const fn = tx?.fnName ? String(tx.fnName) : "contract call";
       const dep = safeBigInt(tx?.deposit, 0n);
-      const depS = dep > 0n ? formatLuxShort(dep, 6) : "";
+      const depS = dep > 0n ? formatLuxShort(dep, UI_DISPLAY_DECIMALS) : "";
       return {
         title: `Call ${fn}`,
         sub: depS ? `deposit ${depS} DUSK` : "",

@@ -1,9 +1,16 @@
-import { formatLuxToDusk, parseDuskToLux, safeBigInt } from "../../../shared/amount.js";
+import {
+  UI_DISPLAY_DECIMALS,
+  formatLuxShort,
+  formatLuxToDusk,
+  parseDuskToLux,
+  safeBigInt,
+} from "../../../shared/amount.js";
 import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
+
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
 import {
   chainIdFromNodeUrlDecimal,
@@ -19,6 +26,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     value: typeof draft.to === "string" ? draft.to : "",
   });
   const amount = h("input", {
+    class: "amount-input",
     placeholder: "Amount (DUSK, e.g. 1.25)",
     value: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
   });
@@ -26,6 +34,246 @@ export function sendFormView(ov, { state, actions } = {}) {
     placeholder: "Memo (optional)",
     value: typeof draft.memo === "string" ? draft.memo : "",
   });
+
+  // ------------------------------------------------------------
+  // Amount helpers (MAX + slider)
+  // ------------------------------------------------------------
+  // The send screen doesn't expose gas settings yet. We base MAX calculations
+  // on the wallet's safe defaults for transfers.
+  const defaultGas = getDefaultGas("transfer");
+  const feeLux =
+    defaultGas && defaultGas.limit != null && defaultGas.price != null
+      ? safeBigInt(defaultGas.limit, 0n) * safeBigInt(defaultGas.price, 0n)
+      : 0n;
+
+  // Balances from overview.
+  const pubBalLux = safeBigInt(ov?.balance?.value, 0n);
+  const shValueLux = safeBigInt(ov?.shieldedBalance?.value, 0n);
+  const shSpendLux =
+    ov?.shieldedBalance?.spendable != null
+      ? safeBigInt(ov.shieldedBalance.spendable, 0n)
+      : null;
+
+  let detectedRecipientType = null; // "account" | "address" | null
+
+  const amountMetaMain = h("div", { class: "amount-meta__main", text: "" });
+  const amountMetaSub = h("div", { class: "amount-meta__sub", text: "" });
+  const amountMeta = h(
+    "div",
+    { class: "amount-meta", style: "display:none" },
+    [h("div", { class: "amount-meta__stack" }, [amountMetaMain, amountMetaSub])]
+  );
+
+  const SLIDER_MAX = 1000; // 0.1% steps
+  const SNAP_PCTS = [0, 25, 50, 75, 100];
+  const SNAP_THRESHOLD_PCT = 0.9; // subtle magnet effect
+
+  const maybeSnapRaw = (raw) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return 0;
+    const pct = (n * 100) / SLIDER_MAX;
+    let best = null;
+    let bestDist = Infinity;
+    for (const p of SNAP_PCTS) {
+      const d = Math.abs(pct - p);
+      if (d < bestDist) {
+        bestDist = d;
+        best = p;
+      }
+    }
+    if (best != null && bestDist <= SNAP_THRESHOLD_PCT) {
+      return Math.round((best * SLIDER_MAX) / 100);
+    }
+    return Math.max(0, Math.min(SLIDER_MAX, n));
+  };
+
+  const maxBtn = h("button", {
+    class: "icon-btn max-btn",
+    type: "button",
+    text: "MAX",
+    title: "Use maximum amount",
+    disabled: true,
+    onclick: () => {
+      const maxLux = getMaxAmountLux();
+      if (maxLux == null) {
+        try {
+          actions?.showToast?.("Enter a valid recipient to calculate max", 2000);
+        } catch {
+          // ignore
+        }
+        return;
+      }
+      setAmountLux(maxLux);
+      setSliderRaw(SLIDER_MAX);
+    },
+  });
+  const amountRow = h("div", { class: "input-row" }, [amount, maxBtn]);
+
+  const slider = h("input", {
+    type: "range",
+    class: "amount-range",
+    min: "0",
+    max: String(SLIDER_MAX),
+    value: "0",
+    disabled: true,
+  });
+  slider.style.setProperty("--range-pct", "0%");
+
+  const sliderPct = h("div", { class: "amount-range__pct", text: "0%" });
+
+  const ticks = h(
+    "div",
+    { class: "amount-range__ticks", "aria-hidden": "true" },
+    [0, 25, 50, 75, 100].map((p) =>
+      h("span", {
+        class: "amount-range__tick" + (p === 0 || p === 100 ? " is-edge" : ""),
+        style:
+          p === 0
+            ? "left:0%"
+            : p === 100
+              ? "left:100%; transform: translateX(-100%)"
+              : `left:${p}%; transform: translateX(-50%)`,
+      })
+    )
+  );
+
+  const sliderTrack = h("div", { class: "amount-range__track" }, [slider, ticks]);
+
+  const sliderWrap = h("div", { class: "amount-range-wrap", style: "display:none" }, [
+    sliderTrack,
+    sliderPct,
+  ]);
+
+  // Amount module groups input + helpers as one cohesive component.
+  const amountCard = h("div", { class: "amount-card" }, [amountRow, amountMeta, sliderWrap]);
+
+  const clamp0 = (v) => (v > 0n ? v : 0n);
+
+  function getMaxAmountLux() {
+    if (detectedRecipientType === "address") {
+      if (shSpendLux == null) return null;
+      return clamp0(shSpendLux - feeLux);
+    }
+    if (detectedRecipientType === "account") {
+      // Public transfers are limited by the Moonlight account balance.
+      if (ov?.balance?.value == null) return null;
+      return clamp0(pubBalLux - feeLux);
+    }
+    return null;
+  }
+
+  function setSliderRaw(raw) {
+    const n0 = Number(raw);
+    const n = Number.isFinite(n0) ? Math.max(0, Math.min(SLIDER_MAX, n0)) : 0;
+    slider.value = String(n);
+
+    const pctExact = (n * 100) / SLIDER_MAX;
+    slider.style.setProperty("--range-pct", `${pctExact}%`);
+
+    const pctInt = Math.round(pctExact);
+    if (n > 0 && pctInt === 0) {
+      sliderPct.textContent = "<1%";
+    } else if (pctInt >= 100) {
+      sliderPct.textContent = "100%";
+    } else {
+      sliderPct.textContent = `${pctInt}%`;
+    }
+  }
+
+  function setAmountLux(lux) {
+    amount.value = formatLuxShort(lux, UI_DISPLAY_DECIMALS);
+    // Keep draft in sync so toast-triggered re-renders don't wipe the value.
+    try {
+      syncDraft();
+    } catch {
+      // ignore
+    }
+  }
+
+  function syncSliderToAmount() {
+    const maxLux = getMaxAmountLux();
+    if (maxLux == null || maxLux <= 0n) {
+      setSliderRaw(0);
+      return;
+    }
+
+    const raw = String(amount.value || "").trim();
+    if (!raw) {
+      setSliderRaw(0);
+      return;
+    }
+
+    let amtLux = 0n;
+    try {
+      amtLux = BigInt(parseDuskToLux(raw));
+    } catch {
+      // Don't fight the user's typing (e.g. "1."), just keep slider as-is.
+      return;
+    }
+
+    if (amtLux <= 0n) {
+      setSliderRaw(0);
+      return;
+    }
+
+    let n = Number((amtLux * BigInt(SLIDER_MAX)) / maxLux);
+    if (!Number.isFinite(n)) return;
+    if (n < 0) n = 0;
+    if (n > SLIDER_MAX) n = SLIDER_MAX;
+    setSliderRaw(n);
+  }
+
+  slider.addEventListener("input", () => {
+    const maxLux = getMaxAmountLux();
+    if (maxLux == null || maxLux <= 0n) return;
+
+    const n0 = Math.max(0, Math.min(SLIDER_MAX, Number(slider.value) || 0));
+    const n = maybeSnapRaw(n0);
+    const amtLux = (maxLux * BigInt(n)) / BigInt(SLIDER_MAX);
+    setSliderRaw(n);
+    setAmountLux(amtLux);
+  });
+
+  function updateAmountHelpers() {
+    const maxLux = getMaxAmountLux();
+
+    if (maxLux == null) {
+      amountMeta.style.display = "none";
+      sliderWrap.style.display = "none";
+      maxBtn.disabled = true;
+      slider.disabled = true;
+      setSliderRaw(0);
+      return;
+    }
+
+    amountMeta.style.display = "flex";
+    sliderWrap.style.display = "flex";
+    maxBtn.disabled = maxLux <= 0n;
+    slider.disabled = maxLux <= 0n;
+
+    if (detectedRecipientType === "address") {
+      amountMetaMain.textContent = `Spendable (shielded): ${formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)} DUSK`;
+
+      const parts = [];
+      if (shSpendLux != null && shValueLux > shSpendLux) {
+        parts.push(`Total shielded: ${formatLuxShort(shValueLux, UI_DISPLAY_DECIMALS)} DUSK`);
+      }
+      if (feeLux > 0n) {
+        parts.push(`Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK`);
+      }
+      amountMetaSub.textContent = parts.join(" · ");
+    } else {
+      amountMetaMain.textContent = `Available (public): ${formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)} DUSK`;
+      amountMetaSub.textContent = feeLux > 0n ? `Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK` : "";
+    }
+
+    // Keep slider in sync with whatever is in the input.
+    if (maxLux <= 0n) {
+      setSliderRaw(0);
+    } else {
+      syncSliderToAmount();
+    }
+  }
 
   const currentChain = normalizeChainId(chainIdFromNodeUrlDecimal(ov?.nodeUrl ?? ""));
 
@@ -99,6 +347,8 @@ export function sendFormView(ov, { state, actions } = {}) {
     if (!v) {
       toTypePill.style.display = "none";
       toTypePill.textContent = "";
+      detectedRecipientType = null;
+      updateAmountHelpers();
       return;
     }
 
@@ -106,6 +356,8 @@ export function sendFormView(ov, { state, actions } = {}) {
     if (/^dusk:/i.test(v)) {
       toTypePill.style.display = "inline-flex";
       toTypePill.textContent = "Detected: Dusk request link";
+      detectedRecipientType = null;
+      updateAmountHelpers();
       return;
     }
     const t = ProfileGenerator.typeOf(v);
@@ -113,12 +365,16 @@ export function sendFormView(ov, { state, actions } = {}) {
     if (t === "account" || t === "address") {
       toTypePill.style.display = "inline-flex";
       toTypePill.textContent = t === "address" ? "Detected: Shielded address" : "Detected: Public account";
+      detectedRecipientType = t;
+      updateAmountHelpers();
       return;
     }
 
     // Fallback: unknown format
     toTypePill.style.display = "inline-flex";
     toTypePill.textContent = "Detected: Unknown address format";
+    detectedRecipientType = null;
+    updateAmountHelpers();
   };
 
   const syncDraft = () => {
@@ -137,7 +393,10 @@ export function sendFormView(ov, { state, actions } = {}) {
     updateToType();
     syncDraft();
   });
-  amount.addEventListener("input", syncDraft);
+  amount.addEventListener("input", () => {
+    syncDraft();
+    syncSliderToAmount();
+  });
   memo.addEventListener("input", syncDraft);
   to.addEventListener("paste", (e) => {
     try {
@@ -244,7 +503,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       toRow,
       toTypePill,
       h("label", { text: "Amount" }),
-      amount,
+      amountCard,
       h("label", { text: "Memo" }),
       memo,
       errBox,
@@ -277,7 +536,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const defaultGas = getDefaultGas("transfer");
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.amountLux = d.amountLux;
-  gasEditor.maxDecimals = 6;
+  gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
   gasEditor.helpText = defaultGas
     ? `Default gas: ${defaultGas.limit} limit · ${defaultGas.price} price (LUX). Max fee shown is limit × price. Clear both to use node defaults.`
     : "Max fee shown is limit × price. Clear both to use node defaults.";

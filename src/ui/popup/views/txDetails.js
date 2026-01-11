@@ -1,5 +1,5 @@
 import { ProfileGenerator } from "@dusk/w3sper";
-import { formatLuxShort, safeBigInt } from "../../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../../shared/amount.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { networkNameFromNodeUrl } from "../../../shared/network.js";
 import { h } from "../../lib/dom.js";
@@ -41,7 +41,7 @@ function describeTx(tx) {
       toType === "address" ? "Shielded transfer" : toType === "account" ? "Public transfer" : "Transfer";
 
     const amountLux = tx?.amount;
-    const amt = amountLux != null ? formatLuxShort(amountLux, 6) : "";
+    const amt = amountLux != null ? formatLuxShort(amountLux, UI_DISPLAY_DECIMALS) : "";
 
     return {
       kindLabel: transferType,
@@ -52,7 +52,7 @@ function describeTx(tx) {
 
   if (kind === "shield") {
     const amountLux = tx?.amount;
-    const amt = amountLux != null ? formatLuxShort(amountLux, 6) : "";
+    const amt = amountLux != null ? formatLuxShort(amountLux, UI_DISPLAY_DECIMALS) : "";
     return {
       kindLabel: "Shield",
       title: amt ? `${amt} DUSK` : "—",
@@ -62,7 +62,7 @@ function describeTx(tx) {
 
   if (kind === "unshield") {
     const amountLux = tx?.amount;
-    const amt = amountLux != null ? formatLuxShort(amountLux, 6) : "";
+    const amt = amountLux != null ? formatLuxShort(amountLux, UI_DISPLAY_DECIMALS) : "";
     return {
       kindLabel: "Unshield",
       title: amt ? `${amt} DUSK` : "—",
@@ -74,7 +74,7 @@ function describeTx(tx) {
     const fnName = tx?.fnName ? String(tx.fnName) : "contract call";
     const contractId = tx?.contractId ? String(tx.contractId) : "";
     const depositLux = safeBigInt(tx?.deposit, 0n);
-    const dep = depositLux > 0n ? formatLuxShort(depositLux, 6) : "";
+    const dep = depositLux > 0n ? formatLuxShort(depositLux, UI_DISPLAY_DECIMALS) : "";
 
     return {
       kindLabel: "Contract call",
@@ -210,10 +210,10 @@ export function txDetailsView(ov, { state, actions } = {}) {
     tx?.to ? kvRow("To", String(tx.to), { mono: true }) : null,
     tx?.contractId ? kvRow("Contract", String(tx.contractId), { mono: true }) : null,
     tx?.fnName ? kvRow("Method", String(tx.fnName), { mono: true }) : null,
-    tx?.deposit != null ? kvRow("Deposit", `${formatLuxShort(tx.deposit, 6)} DUSK`) : null,
-    tx?.amount != null ? kvRow("Amount", `${formatLuxShort(tx.amount, 6)} DUSK`) : null,
+    tx?.deposit != null ? kvRow("Deposit", `${formatLuxShort(tx.deposit, UI_DISPLAY_DECIMALS)} DUSK`) : null,
+    tx?.amount != null ? kvRow("Amount", `${formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS)} DUSK`) : null,
     maxFeeLux != null
-      ? kvRow("Max fee", `${formatLuxShort(maxFeeLux, 6)} DUSK`)
+      ? kvRow("Max fee", `${formatLuxShort(maxFeeLux, UI_DISPLAY_DECIMALS)} DUSK`)
       : gasLimit != null || gasPrice != null
       ? kvRow(
           "Gas",

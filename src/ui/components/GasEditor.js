@@ -1,4 +1,4 @@
-import { formatLuxShort, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { h } from "../lib/dom.js";
 
 function maxFeeFromGasStrings(limitStr, priceStr) {
@@ -18,7 +18,7 @@ export class DuskGasEditor extends HTMLElement {
 
   #amountLux = 0n;
   #extraLux = [];
-  #maxDecimals = 6;
+  #maxDecimals = UI_DISPLAY_DECIMALS;
   #helpText = "";
 
   // Allows setGas() before the element is connected/rendered.

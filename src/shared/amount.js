@@ -6,6 +6,10 @@
 export const LUX_DECIMALS = 9;
 export const LUX_SCALE = 10n ** 9n;
 
+// UI formatting: keep a consistent decimal width across the app.
+// Full precision is still available in tooltips/titles.
+export const UI_DISPLAY_DECIMALS = 4;
+
 /**
  * Best-effort BigInt conversion.
  * @param {any} v
@@ -44,7 +48,10 @@ export function formatLuxToDusk(luxStr) {
 }
 
 /**
- * Clamp a decimal string to `maxDecimals`, trimming trailing zeroes for readability.
+ * Clamp a decimal string to `maxDecimals`.
+ *
+ * Note: we intentionally keep trailing zeros introduced by clamping to avoid
+ * inconsistent widths like `1.123` vs `1.1230` across screens.
  * @param {string} numStr
  * @param {number} maxDecimals
  */
@@ -52,7 +59,7 @@ export function clampDecimals(numStr, maxDecimals = 4) {
   const s = String(numStr ?? "");
   if (!s.includes(".")) return s;
   const [u, d] = s.split(".");
-  const short = d.slice(0, maxDecimals).replace(/0+$/, "");
+  const short = d.slice(0, maxDecimals);
   return short ? `${u}.${short}` : u;
 }
 
@@ -68,9 +75,9 @@ export function formatLuxShort(luxStr, maxDecimals = 6) {
   // If clamping would hide a non-zero value (e.g. very small Lux amounts)
   // we fall back to the full (up to 9 decimals) representation.
   const lux = safeBigInt(luxStr);
-  if (lux !== 0n && (clamped === "0" || clamped === "0.0")) {
-    return full;
-  }
+  // Avoid hiding non-zero values when clamping would produce something
+  // that looks like 0 (e.g. 0.0000).
+  if (lux !== 0n && /^0(\.0+)?$/.test(clamped)) return full;
 
   return clamped;
 }
