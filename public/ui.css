@@ -330,6 +330,34 @@ input, textarea, select {
 select {
   appearance: none;
   cursor: pointer;
+  color-scheme: dark;
+}
+
+/* Native select dropdown affordance */
+.select-wrap {
+  position: relative;
+}
+
+.select-wrap::after {
+  content: "▾";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  font-size: 12px;
+  color: color-mix(in oklab, var(--foreground) 70%, transparent);
+  opacity: 0.9;
+}
+
+.select-wrap > select {
+  padding-right: 34px;
+}
+
+select option,
+select optgroup {
+  background: #0b1220;
+  color: var(--foreground);
 }
 
 textarea { min-height: 84px; resize: vertical; }
@@ -351,7 +379,7 @@ input:focus, textarea:focus, select:focus {
     0 0 0 2px color-mix(in oklab, var(--ring) 18%, transparent),
     0 0 0 1px color-mix(in oklab, var(--primary) 10%, transparent),
     0 0 22px color-mix(in oklab, var(--primary) 7%, transparent);
-  border-color: var(--ring);
+  border-color: color-mix(in oklab, var(--ring) 62%, rgba(255,255,255,0.12));
 }
 
 /* Input row with a trailing icon button (e.g. QR scan) */
@@ -422,7 +450,7 @@ body.page--popup .amount-card {
     0 0 0 2px color-mix(in oklab, var(--ring) 18%, transparent),
     0 0 0 1px color-mix(in oklab, var(--primary) 10%, transparent),
     0 0 22px color-mix(in oklab, var(--primary) 7%, transparent);
-  border-color: var(--ring);
+  border-color: color-mix(in oklab, var(--ring) 62%, rgba(255,255,255,0.12));
 }
 
 .amount-card .input-row {

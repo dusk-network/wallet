@@ -181,7 +181,7 @@ export function optionsView(ov, { state, actions } = {}) {
     lockBtn ? h("div", { class: "row" }, [h("div", { class: "btnrow" }, [lockBtn])]) : null,
     h("div", { class: "row" }, [
       h("label", { text: "Network" }),
-      networkSelect,
+      h("div", { class: "select-wrap" }, [networkSelect]),
       networkHint,
       h("div", {
         class: "muted",
