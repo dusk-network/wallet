@@ -213,7 +213,7 @@ export function receiveView(ov, { state, actions } = {}) {
           if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
             try {
               await navigator.share({
-                title: "Mochavi request",
+                title: "Dusk request",
                 text: shareValue,
               });
               actions?.showToast?.("Shared");

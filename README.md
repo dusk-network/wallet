@@ -1,4 +1,4 @@
-# Mochavi Wallet
+# Dusk Wallet
 
 A non-custodial wallet for [Dusk](https://dusk.network). Browser extension, desktop, and mobile—one codebase.
 
