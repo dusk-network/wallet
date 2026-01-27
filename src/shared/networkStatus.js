@@ -1,9 +1,11 @@
 /**
- * Network status polling module.
+ * Network status and endpoint probing module.
  *
- * This provides a lightweight mechanism to check endpoint reachability in the
- * background without blocking settings changes. The UI can display online/offline
- * status based on the last poll result.
+ * This is the single source of truth for all network endpoint probing logic.
+ * It provides:
+ * - Reusable probe functions for node, prover, and archiver endpoints
+ * - Background status polling with storage persistence
+ * - UI status display helpers
  *
  * Design (similar to MetaMask's approach):
  * - Accept any URL the user enters
@@ -13,6 +15,10 @@
  */
 
 import { storage, STORAGE_KEYS } from "./storage.js";
+
+// ============================================================================
+// Types
+// ============================================================================
 
 /**
  * @typedef {"online"|"offline"|"checking"|"unknown"} EndpointStatus
@@ -28,6 +34,203 @@ import { storage, STORAGE_KEYS } from "./storage.js";
  * @property {string|null} proverError - Last error message for prover
  * @property {string|null} archiverError - Last error message for archiver
  */
+
+/**
+ * @typedef {Object} ProbeResult
+ * @property {boolean} ok - Whether the endpoint is reachable
+ * @property {string} [error] - Error message if not reachable
+ */
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+/**
+ * Fetch with timeout helper.
+ * Exported for reuse in other modules that need timeout-aware fetching.
+ * @param {string} url
+ * @param {RequestInit} options
+ * @param {number} timeoutMs
+ * @returns {Promise<Response>}
+ */
+export async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ============================================================================
+// Endpoint Probes
+// ============================================================================
+
+/**
+ * Probe a node endpoint for reachability.
+ * Tests the /on/node/info endpoint.
+ * @param {string} baseUrl - Base URL of the node
+ * @param {number} [timeoutMs=6000] - Request timeout in milliseconds
+ * @returns {Promise<ProbeResult>}
+ */
+export async function probeNode(baseUrl, timeoutMs = 6000) {
+  try {
+    const u = new URL(baseUrl);
+    const infoUrl = new URL("/on/node/info", u.origin).toString();
+
+    const resp = await fetchWithTimeout(
+      infoUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          Accept: "application/json",
+        },
+        body: new Uint8Array(0),
+      },
+      timeoutMs
+    );
+
+    // Rusk can return 400/424 when Rusk-Version/Rusk-Session-Id headers are
+    // missing or mismatched. Still means the node is alive.
+    if (resp.ok || resp.status === 400 || resp.status === 424) {
+      return { ok: true };
+    }
+
+    return { ok: false, error: `HTTP ${resp.status}` };
+  } catch (e) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+/**
+ * Probe a prover endpoint for reachability.
+ * Sends a dummy payload to /on/prover/prove and checks for known error signatures.
+ * @param {string} baseUrl - Base URL of the prover
+ * @param {number} [timeoutMs=10000] - Request timeout in milliseconds
+ * @returns {Promise<ProbeResult>}
+ */
+export async function probeProver(baseUrl, timeoutMs = 10000) {
+  try {
+    const u = new URL(baseUrl);
+    const proveUrl = new URL("/on/prover/prove", u.origin).toString();
+
+    const resp = await fetchWithTimeout(
+      proveUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          Accept: "application/octet-stream",
+        },
+        body: new Uint8Array(8), // dummy 8-byte payload
+      },
+      timeoutMs
+    );
+
+    // 404 means endpoint doesn't exist
+    if (resp.status === 404) {
+      return { ok: false, error: "Prover endpoint not found" };
+    }
+
+    // Success or Rusk header mismatch codes mean it's alive
+    if (resp.ok || resp.status === 400 || resp.status === 424) {
+      return { ok: true };
+    }
+
+    // Check for known prover error signatures (HTTP 500 with recognizable errors).
+    // These indicate the prover is alive but rejected our dummy payload.
+    const text = await resp.text().catch(() => "");
+    if (
+      text.includes("Dusk-Core Error") ||
+      text.includes("Execution-Core Error") ||
+      text.includes("BadLength") ||
+      text.includes("Bad length")
+    ) {
+      return { ok: true };
+    }
+
+    return { ok: false, error: `HTTP ${resp.status}` };
+  } catch (e) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+/**
+ * Probe an archiver endpoint for reachability.
+ * Tests the /on/graphql/query endpoint with a contractEvents query.
+ * @param {string} baseUrl - Base URL of the archiver
+ * @param {number} [timeoutMs=7000] - Request timeout in milliseconds
+ * @returns {Promise<ProbeResult>}
+ */
+export async function probeArchiver(baseUrl, timeoutMs = 7000) {
+  try {
+    const u = new URL(baseUrl);
+    const gqlUrl = new URL("/on/graphql/query", u.origin).toString();
+
+    const resp = await fetchWithTimeout(
+      gqlUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain",
+          Accept: "application/json",
+        },
+        // Intentionally omit selection set to probe for field existence
+        body: "query { contractEvents(height: 0) }",
+      },
+      timeoutMs
+    );
+
+    if (resp.status === 404) {
+      return { ok: false, error: "GraphQL endpoint not found" };
+    }
+
+    const text = await resp.text().catch(() => "");
+
+    // Check if this node doesn't support archive queries (not an archive node)
+    if (
+      text.includes('Unknown field "contractEvents"') ||
+      text.includes("Unknown field 'contractEvents'") ||
+      text.includes("Unknown field contractEvents")
+    ) {
+      return { ok: false, error: "Not an archive node" };
+    }
+
+    // GraphQL validation errors about missing selection sets mean the field EXISTS
+    // and the endpoint is working - our query just needs subfields.
+    if (
+      text.includes("must have a selection") ||
+      text.includes("selection of subfields")
+    ) {
+      return { ok: true };
+    }
+
+    // Any valid response (2xx) means archiver is reachable
+    if (resp.ok) {
+      return { ok: true };
+    }
+
+    // HTTP 500 with a GraphQL error mentioning contractEvents is still "alive"
+    if (resp.status === 500 && text.includes("contractEvents")) {
+      return { ok: true };
+    }
+
+    // Rusk header mismatch codes are still "alive"
+    if (resp.status === 400 || resp.status === 424) {
+      return { ok: true };
+    }
+
+    return { ok: false, error: `HTTP ${resp.status}` };
+  } catch (e) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+// ============================================================================
+// Network Status Storage
+// ============================================================================
 
 const DEFAULT_STATUS = {
   nodeStatus: "unknown",
@@ -70,177 +273,9 @@ export async function resetNetworkStatus() {
   return DEFAULT_STATUS;
 }
 
-/**
- * Fetch with timeout helper.
- * @param {string} url
- * @param {RequestInit} options
- * @param {number} timeoutMs
- * @returns {Promise<Response>}
- */
-async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-/**
- * Light probe for node reachability.
- * Returns { ok: true } if reachable, { ok: false, error: string } otherwise.
- * @param {string} baseUrl
- * @returns {Promise<{ok: boolean, error?: string}>}
- */
-export async function probeNode(baseUrl) {
-  try {
-    const u = new URL(baseUrl);
-    const infoUrl = new URL("/on/node/info", u.origin).toString();
-
-    const resp = await fetchWithTimeout(
-      infoUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/octet-stream",
-          Accept: "application/json",
-        },
-        body: new Uint8Array(0),
-      },
-      5000
-    );
-
-    // Rusk can return 400/424 when headers are missing; still means it's alive.
-    if (resp.ok || resp.status === 400 || resp.status === 424) {
-      return { ok: true };
-    }
-
-    return { ok: false, error: `HTTP ${resp.status}` };
-  } catch (e) {
-    return { ok: false, error: e?.message ?? String(e) };
-  }
-}
-
-/**
- * Light probe for prover reachability.
- * @param {string} baseUrl
- * @returns {Promise<{ok: boolean, error?: string}>}
- */
-export async function probeProver(baseUrl) {
-  try {
-    const u = new URL(baseUrl);
-    const proveUrl = new URL("/on/prover/prove", u.origin).toString();
-
-    const resp = await fetchWithTimeout(
-      proveUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/octet-stream",
-          Accept: "application/octet-stream",
-        },
-        body: new Uint8Array(8), // dummy payload
-      },
-      5000
-    );
-
-    // 404 means endpoint doesn't exist
-    if (resp.status === 404) {
-      return { ok: false, error: "Prover endpoint not found" };
-    }
-
-    // Any response (including errors for bad payload) means prover is reachable
-    if (resp.ok || resp.status === 400 || resp.status === 424) {
-      return { ok: true };
-    }
-
-    // Check for known prover error signatures (HTTP 500 with recognizable errors)
-    // These indicate the prover is alive but rejected our dummy payload.
-    const text = await resp.text().catch(() => "");
-    if (
-      text.includes("Dusk-Core Error") ||
-      text.includes("Execution-Core Error") ||
-      text.includes("BadLength") ||
-      text.includes("Bad length")
-    ) {
-      return { ok: true };
-    }
-
-    return { ok: false, error: `HTTP ${resp.status}` };
-  } catch (e) {
-    return { ok: false, error: e?.message ?? String(e) };
-  }
-}
-
-/**
- * Light probe for archiver reachability.
- * @param {string} baseUrl
- * @returns {Promise<{ok: boolean, error?: string}>}
- */
-export async function probeArchiver(baseUrl) {
-  try {
-    const u = new URL(baseUrl);
-    const gqlUrl = new URL("/on/graphql/query", u.origin).toString();
-
-    const resp = await fetchWithTimeout(
-      gqlUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain",
-          Accept: "application/json",
-        },
-        body: "query { contractEvents(height: 0) }",
-      },
-      5000
-    );
-
-    if (resp.status === 404) {
-      return { ok: false, error: "GraphQL endpoint not found" };
-    }
-
-    const text = await resp.text().catch(() => "");
-
-    // Check if this node doesn't support archive queries (not an archive node)
-    if (
-      text.includes('Unknown field "contractEvents"') ||
-      text.includes("Unknown field 'contractEvents'") ||
-      text.includes("Unknown field contractEvents")
-    ) {
-      return { ok: false, error: "Not an archive node" };
-    }
-
-    // GraphQL validation errors about missing selection sets mean the field EXISTS
-    // and the endpoint is working - our query just needs subfields.
-    // Example: 'Field "contractEvents" of type "ContractEvents" must have a selection'
-    if (
-      text.includes("must have a selection") ||
-      text.includes("selection of subfields")
-    ) {
-      return { ok: true };
-    }
-
-    // Any valid response (2xx) means archiver is reachable
-    if (resp.ok) {
-      return { ok: true };
-    }
-
-    // HTTP 500 with a GraphQL error about selection sets is still "alive"
-    if (resp.status === 500 && text.includes("contractEvents")) {
-      return { ok: true };
-    }
-
-    // Rusk header mismatch codes are still "alive"
-    if (resp.status === 400 || resp.status === 424) {
-      return { ok: true };
-    }
-
-    return { ok: false, error: `HTTP ${resp.status}` };
-  } catch (e) {
-    return { ok: false, error: e?.message ?? String(e) };
-  }
-}
+// ============================================================================
+// Polling & Helpers
+// ============================================================================
 
 /**
  * Check all endpoints and update status in storage.
@@ -258,7 +293,7 @@ export async function checkAllEndpoints({ nodeUrl, proverUrl, archiverUrl }) {
     archiverStatus: "checking",
   });
 
-  // Wrap each probe with individual error handling and timeout
+  // Wrap each probe with individual error handling
   const safeProbe = async (probeFn, url, label) => {
     if (!url) {
       return { ok: false, error: "No URL configured" };
@@ -291,15 +326,11 @@ export async function checkAllEndpoints({ nodeUrl, proverUrl, archiverUrl }) {
 
 /**
  * Get a combined status for display purposes.
- * "online" if node is online (prover/archiver issues shown separately).
- * "offline" if node is offline.
- * "checking" if currently checking.
- * "unknown" if never checked.
+ * Uses node status as the primary indicator.
  * @param {NetworkStatusState} status
  * @returns {EndpointStatus}
  */
 export function getCombinedStatus(status) {
-  // Node status is the primary indicator
   return status?.nodeStatus ?? "unknown";
 }
 
