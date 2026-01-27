@@ -13,6 +13,7 @@ import { receiveView } from "./views/receive.js";
 import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { optionsView } from "./views/options.js";
+import { addressBookView } from "./views/addressbook.js";
 import { txDetailsView } from "./views/txDetails.js";
 import {
   onboardingWelcomeView,
@@ -38,7 +39,7 @@ try {
 const app = document.getElementById("app");
 const headerActionsHost = document.getElementById("header-actions");
 
-// View transitions: animate route changes only.
+// Animate route changes only.
 let lastAnimatedRoute = null;
 let viewAnimTimer = null;
 function pulseViewAnimation() {
@@ -67,7 +68,12 @@ function setApp(children) {
     const r = state?.route;
     if (r && r !== lastAnimatedRoute) {
       const prev = lastAnimatedRoute;
+      // Keep lastAnimatedRoute in sync even if we skip animation.
       lastAnimatedRoute = r;
+
+      // Assets/Activity are tabs inside the same "home" surface.
+      // Switching between them should feel like a segmented toggle, not a
+      // full view transition.
       const isHomeTab = (x) => x === "home" || x === "activity";
       if (!(isHomeTab(prev) && isHomeTab(r))) {
         pulseViewAnimation();
@@ -312,6 +318,12 @@ export async function render({ forceRefresh = false } = {}) {
   // TODO: Reconsider?
   if (state.route === "options") {
     setApp(optionsView(ov, { state, actions }));
+    return;
+  }
+
+  // Contacts are also safe to show without unlocking.
+  if (state.route === "contacts") {
+    setApp(addressBookView(ov, { state, actions }));
     return;
   }
 

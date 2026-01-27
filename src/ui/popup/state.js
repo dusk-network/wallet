@@ -9,7 +9,7 @@ export const ONBOARD_ROUTES = new Set([
 ]);
 
 export const state = {
-  // home | send | confirm | convert | convert_confirm | receive | activity | tx | options | onboarding_*...
+  // home | send | confirm | convert | convert_confirm | receive | activity | tx | options | contacts | onboarding_*...
   route: (() => {
     if (isOptionsPage) return "options";
     try {
@@ -24,6 +24,7 @@ export const state = {
         "activity",
         "tx",
         "options",
+        "contacts",
       ]);
       if (r && allowed.has(r)) return r;
     } catch {
@@ -65,6 +66,27 @@ export const state = {
     tab: "shielded", // "shielded" | "public"
     amountDusk: "", // Optional amount encoded into receive QR / request link
     memo: "", // Optional memo/message included in request link
+  },
+  addressBook: {
+    // "manage" | "pick"
+    mode: "manage",
+    // route to return to when exiting contacts
+    fromRoute: null,
+    // When picking, which route to return to after selecting
+    pickReturnRoute: null,
+    // Prefill value when adding a new contact
+    prefillAddress: "",
+    // UI state
+    view: "list", // "list" | "edit"
+    query: "",
+    loaded: false,
+    loading: false,
+    error: null,
+    items: null,
+    // edit form
+    editId: null,
+    editName: "",
+    editAddress: "",
   },
   needsRefresh: true,
   lastOrigin: null,

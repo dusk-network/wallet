@@ -170,6 +170,31 @@ export function optionsView(ov, { state, actions } = {}) {
     },
   });
 
+  const addressBookBtn = h("button", {
+    class: "btn-outline",
+    text: "Contacts",
+    onclick: async () => {
+      state.addressBook = {
+        ...(state.addressBook || {}),
+        mode: "manage",
+        fromRoute: "options",
+        pickReturnRoute: null,
+        prefillAddress: "",
+        view: "list",
+        query: "",
+        loaded: false,
+        loading: false,
+        error: null,
+        items: null,
+        editId: null,
+        editName: "",
+        editAddress: "",
+      };
+      state.route = "contacts";
+      await actions?.render?.();
+    },
+  });
+
   return [
     subnav({
       title: "Settings",
@@ -215,6 +240,10 @@ export function optionsView(ov, { state, actions } = {}) {
       ]),
     ]),
     h("div", { class: "row" }, [h("div", { class: "btnrow" }, [saveBtn])]),
+    h("div", { class: "row" }, [
+      h("div", { class: "muted", text: "Manage saved recipients for quick sending." }),
+      h("div", { class: "btnrow" }, [addressBookBtn]),
+    ]),
     h("div", { class: "divider" }),
     h("div", { class: "row" }, [
       h(

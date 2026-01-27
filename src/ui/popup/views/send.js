@@ -11,6 +11,9 @@ import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
+import { identiconEl } from "../../components/Identicon.js";
+
+import { listAddressBook } from "../../../shared/addressBook.js";
 
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
 import {
@@ -26,6 +29,16 @@ export function sendFormView(ov, { state, actions } = {}) {
     placeholder: "Recipient (account or shielded address)",
     value: typeof draft.to === "string" ? draft.to : "",
   });
+
+  // Optional inline contact chip (shown when the recipient matches a saved contact).
+  const toChipIco = h("span", { class: "to-chip__ico" });
+  const toChipName = h("span", { class: "to-chip__name", text: "" });
+  const toChip = h(
+    "div",
+    { class: "to-chip", style: "display:none" },
+    [toChipIco, toChipName]
+  );
+  const toWrap = h("div", { class: "to-input-wrap" }, [toChip, to]);
   const memo = h("input", {
     placeholder: "Memo (optional)",
     value: typeof draft.memo === "string" ? draft.memo : "",
@@ -191,12 +204,118 @@ export function sendFormView(ov, { state, actions } = {}) {
   // Lightweight recipient-type detection (public account vs shielded address)
   // so the user understands what kind of transfer they'll create.
   const toTypePill = h("div", { class: "meta-pill", style: "display:none" });
+
+  // If the recipient matches a saved contact, show it inline in the recipient field.
+  let contactsIndex = null; // Map<lowercase address, entry>
+  let contactsLoading = false;
+
+  const rebuildContactsIndex = (items) => {
+    try {
+      const map = new Map();
+      for (const e of Array.isArray(items) ? items : []) {
+        const addr = String(e?.address ?? "").trim();
+        if (!addr) continue;
+        map.set(addr.toLowerCase(), e);
+      }
+      contactsIndex = map;
+    } catch {
+      contactsIndex = new Map();
+    }
+  };
+
+  const ensureContactsLoaded = () => {
+    try {
+      const ab = state.addressBook;
+      if (ab?.loaded && Array.isArray(ab.items)) {
+        rebuildContactsIndex(ab.items);
+        return;
+      }
+      if (contactsLoading) return;
+      contactsLoading = true;
+      listAddressBook()
+        .then((items) => {
+          contactsLoading = false;
+          try {
+            // Cache in shared state so other views (review, contacts picker) can reuse.
+            state.addressBook = {
+              ...(state.addressBook || {}),
+              loaded: true,
+              loading: false,
+              error: null,
+              items,
+            };
+          } catch {
+            // ignore
+          }
+          rebuildContactsIndex(items);
+          // Update pills without forcing a full render.
+          updateToType();
+        })
+        .catch(() => {
+          contactsLoading = false;
+          contactsIndex = new Map();
+        });
+    } catch {
+      // ignore
+    }
+  };
+
+  ensureContactsLoaded();
+
+  const updateContactMatch = (addr, typ) => {
+    try {
+      if (!addr || (typ !== "account" && typ !== "address")) {
+        toChip.style.display = "none";
+        toChipName.textContent = "";
+        toChipIco.innerHTML = "";
+        toWrap.classList.remove("has-chip");
+        toWrap.style.removeProperty("--chip-w");
+        return;
+      }
+
+      if (!contactsIndex) rebuildContactsIndex(state.addressBook?.items);
+      const hit = contactsIndex?.get(String(addr).toLowerCase());
+      const name = String(hit?.name ?? "").trim();
+      if (!name) {
+        toChip.style.display = "none";
+        toChipName.textContent = "";
+        toChipIco.innerHTML = "";
+        toWrap.classList.remove("has-chip");
+        toWrap.style.removeProperty("--chip-w");
+        return;
+      }
+
+      // Render chip
+      toChipName.textContent = name;
+      toChipIco.innerHTML = "";
+      toChipIco.appendChild(identiconEl(addr));
+      toChip.style.display = "flex";
+      toWrap.classList.add("has-chip");
+
+      // Measure and shift input text so it doesn't overlap the chip.
+      requestAnimationFrame(() => {
+        try {
+          const w = Math.ceil(toChip.getBoundingClientRect().width);
+          if (w > 0) toWrap.style.setProperty("--chip-w", `${w}px`);
+        } catch {
+          // ignore
+        }
+      });
+    } catch {
+      toChip.style.display = "none";
+      toChipName.textContent = "";
+      toChipIco.innerHTML = "";
+      toWrap.classList.remove("has-chip");
+      toWrap.style.removeProperty("--chip-w");
+    }
+  };
   const updateToType = () => {
     const v = String(to.value || "").trim();
     if (!v) {
       toTypePill.style.display = "none";
       toTypePill.textContent = "";
       detectedRecipientType = null;
+      updateContactMatch("", null);
       updateAmountHelpers();
       return;
     }
@@ -206,6 +325,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       toTypePill.style.display = "inline-flex";
       toTypePill.textContent = "Detected: Dusk request link";
       detectedRecipientType = null;
+      updateContactMatch("", null);
       updateAmountHelpers();
       return;
     }
@@ -215,6 +335,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       toTypePill.style.display = "inline-flex";
       toTypePill.textContent = t === "address" ? "Detected: Shielded address" : "Detected: Public account";
       detectedRecipientType = t;
+      updateContactMatch(v, t);
       updateAmountHelpers();
       return;
     }
@@ -223,6 +344,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     toTypePill.style.display = "inline-flex";
     toTypePill.textContent = "Detected: Unknown address format";
     detectedRecipientType = null;
+    updateContactMatch("", null);
     updateAmountHelpers();
   };
 
@@ -286,7 +408,42 @@ export function sendFormView(ov, { state, actions } = {}) {
     },
   });
 
-  const toRow = h("div", { class: "input-row" }, [to, scanBtn]);
+  const bookBtn = h("button", {
+    class: "icon-btn icon-only",
+    type: "button",
+    text: "★",
+    title: "Contacts",
+    onclick: async () => {
+      try {
+        // Ensure the current form state is preserved before navigating.
+        syncDraft();
+
+        state.addressBook = {
+          ...(state.addressBook || {}),
+          mode: "pick",
+          fromRoute: "send",
+          pickReturnRoute: "send",
+          prefillAddress: String(to.value || "").trim(),
+          view: "list",
+          query: "",
+          loaded: false,
+          loading: false,
+          error: null,
+          items: null,
+          editId: null,
+          editName: "",
+          editAddress: "",
+        };
+
+        state.route = "contacts";
+        await actions?.render?.();
+      } catch (e) {
+        actions?.showToast?.(e?.message ?? String(e), 2500);
+      }
+    },
+  });
+
+  const toRow = h("div", { class: "input-row" }, [toWrap, scanBtn, bookBtn]);
 
   const errBox = h("div", { class: "err", style: "display:none" });
   const setErr = (txt) => {
@@ -367,6 +524,105 @@ export function sendConfirmView(ov, { state, actions } = {}) {
 
   const recType = ProfileGenerator.typeOf(String(d.to || "").trim());
   const txTypeLabel = recType === "address" ? "Shielded transfer" : "Public transfer";
+
+  // ------------------------------------------------------------
+  // Contacts helper (show contact name or allow saving recipient)
+  // ------------------------------------------------------------
+  const toAddr = String(d.to || "").trim();
+
+  const contactPill = h("div", { class: "meta-pill", style: "display:none" });
+  const saveContactBtn = h("button", {
+    class: "btn-outline",
+    type: "button",
+    text: "Save to Contacts",
+    onclick: async () => {
+      try {
+        // Open Contacts in a flow that returns back to this review screen.
+        state.addressBook = {
+          ...(state.addressBook || {}),
+          mode: "pick",
+          fromRoute: "confirm",
+          pickReturnRoute: "confirm",
+          prefillAddress: toAddr,
+          view: "edit",
+          query: "",
+          // keep any cached items so we can detect instantly on return
+          loaded: !!state.addressBook?.loaded,
+          loading: false,
+          error: null,
+          items: state.addressBook?.items ?? null,
+          editId: null,
+          editName: "",
+          editAddress: toAddr,
+        };
+        state.route = "contacts";
+        await actions?.render?.();
+      } catch (e) {
+        actions?.showToast?.(e?.message ?? String(e), 2500);
+      }
+    },
+  });
+
+  const contactLine = h(
+    "div",
+    {
+      style:
+        "display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px;",
+    },
+    [contactPill, saveContactBtn]
+  );
+
+  const findContactName = (items) => {
+    const arr = Array.isArray(items) ? items : [];
+    const key = toAddr.toLowerCase();
+    for (const e of arr) {
+      const addr = String(e?.address ?? "").trim().toLowerCase();
+      if (addr && addr === key) return String(e?.name ?? "").trim();
+    }
+    return "";
+  };
+
+  const refreshContactUI = (items) => {
+    const name = findContactName(items);
+    if (name) {
+      contactPill.style.display = "inline-flex";
+      contactPill.textContent = `Contact: ${name}`;
+      saveContactBtn.style.display = "none";
+    } else {
+      contactPill.style.display = "none";
+      contactPill.textContent = "";
+      saveContactBtn.style.display = "inline-flex";
+    }
+  };
+
+  // Initial best-effort check from cached state.
+  refreshContactUI(state.addressBook?.items);
+
+  // If not loaded yet, load once and patch the UI without forcing a re-render.
+  try {
+    if (!state.addressBook?.loaded && toAddr) {
+      listAddressBook()
+        .then((items) => {
+          try {
+            state.addressBook = {
+              ...(state.addressBook || {}),
+              loaded: true,
+              loading: false,
+              error: null,
+              items,
+            };
+          } catch {
+            // ignore
+          }
+          refreshContactUI(items);
+        })
+        .catch(() => {
+          // ignore
+        });
+    }
+  } catch {
+    // ignore
+  }
 
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
   const cancelBtn = h("button", {
@@ -456,6 +712,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       ]),
       h("div", { class: "muted", text: "To" }),
       h("div", { class: "box" }, [h("code", { text: d.to })]),
+      contactLine,
       d.memo
         ? h("div", { class: "row" }, [
             h("div", { class: "muted", text: "Memo" }),

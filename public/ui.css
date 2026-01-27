@@ -395,6 +395,54 @@ input:focus, textarea:focus, select:focus {
   flex: 1;
 }
 
+/* Recipient field with an inline contact chip */
+.input-row > .to-input-wrap {
+  flex: 1;
+}
+
+.to-input-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.to-input-wrap.has-chip > input {
+  padding-left: calc(12px + var(--chip-w, 0px) + 10px);
+}
+
+.to-chip {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0,0,0,0.26);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset;
+  max-width: 170px;
+  pointer-events: none;
+}
+
+.to-chip__ico .identicon {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.to-chip__name {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 130px;
+}
+
 .input-row > .icon-btn {
   width: 44px;
   min-width: 44px;

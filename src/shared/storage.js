@@ -13,4 +13,5 @@ export const STORAGE_KEYS = {
   SETTINGS: "dusk_settings_v1",
   PERMISSIONS: "dusk_permissions_v1", // { [origin]: { accountIndex, connectedAt } }
   TXS: "dusk_txs_v1", // { [hash]: { origin, nodeUrl, kind, submittedAt, status, error? } }
+  ADDRESS_BOOK: "dusk_addressbook_v1", // { [id]: { id, name, address, type, createdAt, updatedAt } }
 };
