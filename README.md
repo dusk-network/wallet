@@ -1,160 +1,93 @@
 # Mochavi Wallet
 
-This is a minimal shared wallet design that can be used as a Chromium extension, desktop app and mobile app.
+A non-custodial wallet for [Dusk](https://dusk.network). Browser extension, desktop, and mobile—one codebase.
 
-The Chromium extension injects a `window.dusk` provider into any webpage, so dApps can talk to the wallet without users importing a private key/mnemonic into the dApp.
+**Your keys. Your DUSK. No middleman.**
 
-The provider is EIP-1193-like (request + events) and mirrors the UX patterns
-developers expect from MetaMask (without pretending Dusk is EVM).
+## Features
 
-### Supported RPC methods
+🔐 **Self-custody** — Your mnemonic never leaves your device. Encrypted at rest.
 
-- `dusk_requestAccounts`
-- `dusk_accounts`
-- `dusk_chainId`
-- `dusk_switchNetwork`
-- `dusk_getPublicBalance`
-- `dusk_sendTransaction` (send API: transfer + contract call)
-- `dusk_disconnect`
-- `dusk_getAddresses`
+⚡ **Public & Shielded** — Send from your public account or shield funds for privacy.
 
-### Provider events (push)
+🌐 **dApp Ready** — Connect to any Dusk dApp. MetaMask-style `window.dusk` provider.
 
-The extension pushes MetaMask-style events to connected sites:
+🔄 **Multi-network** — Switch between mainnet, testnet, devnet, or custom nodes.
 
-- `accountsChanged: string[]`
-- `chainChanged: string` (hex string like `0x1`)
-- `connect: { chainId: string }`
-- `disconnect: { code: number, message: string }`
+📱 **Cross-platform** — Chrome extension today. Desktop and mobile via Tauri.
 
-And one Dusk-specific helper event:
+## Install
 
-- `duskNodeChanged: { chainId: string, nodeUrl: string, networkName: string }`
-
-Notes:
-
-- `accountsChanged([])` is emitted when the wallet locks or the site's permission is revoked.
-- `chainChanged` uses a Dusk chain identifier, not an Ethereum chain id.
-  Known presets map to fixed ids; for custom nodes we derive a stable-ish id from the
-  node URL origin (scheme+host+port) using a small FNV-1a hash.
-
-> Shielded transactions are not implemented yet.
-
-## Build
+### Chrome Extension
 
 ```bash
 npm install
-npm run build
+npm run build:extension
 ```
 
-This produces a `dist/` folder.
+Then load `dist/` as an unpacked extension in `chrome://extensions` (Developer mode).
 
-### Multi-platform (Extension + Tauri) builds
-
-This codebase is structured so the same wallet UI can run:
-
-- as a Chrome extension (MV3)
-- as a Tauri desktop app
-- as a Tauri mobile app
-
-The browser dApp injection/connection pieces remain extension-only.
-
-Build commands:
+### Desktop / Mobile (Tauri)
 
 ```bash
-npm run build:extension   # -> dist/
-npm run build:tauri       # -> dist-tauri/
-```
-
-To run the Tauri desktop app wrapper (added under `apps/tauri/`):
-
-```bash
-npm run dev:tauri
+npm run build:tauri
 npm run tauri:dev
 ```
 
-See `apps/tauri/README.md` for more info.
+See [apps/tauri/README.md](apps/tauri/README.md) for platform-specific setup.
 
-The Tauri build generates a simple web bundle (with `public/index.html`) that you can
-point a Tauri project at. The wallet core wasm is still served from `public/` and loaded
-via a platform-safe `assetUrl()` helper.
+## For dApp Developers
 
-## Load in Chrome
-
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked** and select the `dist/` folder.
-
-## Test in a dApp
-
-In any webpage console:
+The extension injects `window.dusk`—an EIP-1193-style provider. Dusk isn't EVM, but the patterns are familiar.
 
 ```js
-// Optional: subscribe to provider events
-window.dusk.on("connect", (info) => console.log("connect", info));
-window.dusk.on("disconnect", (err) => console.log("disconnect", err));
-window.dusk.on("accountsChanged", (a) => console.log("accountsChanged", a));
-window.dusk.on("chainChanged", (c) => console.log("chainChanged", c));
-window.dusk.on("duskNodeChanged", (n) => console.log("duskNodeChanged", n));
+// Connect
+const [account] = await dusk.request({ method: "dusk_requestAccounts" });
 
-await window.dusk.request({ method: "dusk_requestAccounts" })
-// => ["<base58-account>"]
-
-await window.dusk.request({ method: "dusk_getPublicBalance" })
-
-// Transfer request
-await window.dusk.request({
+// Send DUSK
+await dusk.request({
   method: "dusk_sendTransaction",
   params: {
     kind: "transfer",
-    to: "ugiaM55iFtPRSMhRRSkq5EuNZRzREx9TxfGaxZV4W4XFjayTmTMEtQrFc95qTURnFHB7rrbW4XqKQCcPG4HUU5sQ36YFmmms1y8ovjFtjWTuW645Asn8v25adkaDQoh8bzE",
-    amount: "1", // u64 string (Lux)
-    memo: "hello",
-    // gas is optional; the wallet applies defaults (limit=10,000,000, price=1)
-    // gas: { limit: "10000000", price: "1" }
+    to: account,
+    amount: "1000000000"  // 1 DUSK
   }
-})
+});
 
-// Contract call (opaque args bytes)
-await window.dusk.request({
-  method: "dusk_sendTransaction",
-  params: {
-    kind: "contract_call",
-    contractId: "0x0200000000000000000000000000000000000000000000000000000000000000", // 32 bytes
-    fnName: "get_version",
-    fnArgs: "0x", // rkyv-encoded bytes, hex/base64/number[] supported
-
-    // optional value movement
-    amount: "0",  // transfer_value in Lux
-    deposit: "0", // deposit in Lux
-    // optional; default is your own selected account
-    // to: "<base58-account>",
-
-    // gas is optional; the wallet applies defaults (contract_call: limit=500,000,000, price=1)
-    // gas: { limit: "500000000", price: "1" },
-    display: { contractName: "Example", methodSig: "get_version()" }
-  }
-})
-
-// Request to switch network
-await window.dusk.request({ method: "dusk_switchNetwork", params: [{ chainId: "0x1" }] });
+// Listen for changes
+dusk.on("accountsChanged", console.log);
+dusk.on("chainChanged", console.log);
 ```
 
-### Provider surface
+Full API reference: [docs/provider-api.md](docs/provider-api.md)
 
-`window.dusk` implements a minimal EIP-1193-like interface:
+## Architecture
 
-```js
-await window.dusk.request({ method: "dusk_accounts" });
-
-window.dusk.on("accountsChanged", (accounts) => {});
-window.dusk.once("disconnect", (err) => {});
-window.dusk.off("chainChanged", handler);
-
-window.dusk.chainId;          // "0x..."
-window.dusk.selectedAddress;  // first account or null
-window.dusk.isAuthorized;     // whether the origin is connected
-
-// Legacy convenience (calls dusk_requestAccounts)
-await window.dusk.enable();
 ```
+src/
+├── background/      # Extension service worker
+├── ui/              # Popup, full view, notifications
+├── shared/          # Wallet logic (works everywhere)
+├── platform/        # Platform abstraction (extension vs tauri)
+└── wallet/          # Engine interface
+```
+
+The wallet engine runs in an offscreen document (extension) or directly in-process (Tauri). Same cryptographic core either way.
+
+## Development
+
+```bash
+npm run build:extension   # Build extension → dist/
+npm run build:tauri       # Build Tauri bundle → dist-tauri/
+npm run dev:tauri         # Run Tauri dev server
+```
+
+## Security
+
+- Mnemonic encrypted with user password (PBKDF2 + AES-GCM)
+- Tauri uses OS keychain via Stronghold
+- No analytics, no tracking, no remote calls except to your chosen node
+
+## License
+
+MIT
