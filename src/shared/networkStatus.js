@@ -245,6 +245,8 @@ export async function probeArchiver(baseUrl) {
 /**
  * Check all endpoints and update status in storage.
  * This is designed to be called periodically from the background.
+ * Each probe is wrapped in its own try/catch to ensure one failure
+ * doesn't block the others.
  * @param {{nodeUrl: string, proverUrl: string, archiverUrl: string}} endpoints
  * @returns {Promise<NetworkStatusState>}
  */
@@ -256,11 +258,23 @@ export async function checkAllEndpoints({ nodeUrl, proverUrl, archiverUrl }) {
     archiverStatus: "checking",
   });
 
-  // Run all probes in parallel
+  // Wrap each probe with individual error handling and timeout
+  const safeProbe = async (probeFn, url, label) => {
+    if (!url) {
+      return { ok: false, error: "No URL configured" };
+    }
+    try {
+      return await probeFn(url);
+    } catch (e) {
+      return { ok: false, error: `${label} check failed: ${e?.message ?? String(e)}` };
+    }
+  };
+
+  // Run all probes in parallel with individual safety wrappers
   const [nodeResult, proverResult, archiverResult] = await Promise.all([
-    nodeUrl ? probeNode(nodeUrl) : Promise.resolve({ ok: false, error: "No URL configured" }),
-    proverUrl ? probeProver(proverUrl) : Promise.resolve({ ok: false, error: "No URL configured" }),
-    archiverUrl ? probeArchiver(archiverUrl) : Promise.resolve({ ok: false, error: "No URL configured" }),
+    safeProbe(probeNode, nodeUrl, "Node"),
+    safeProbe(probeProver, proverUrl, "Prover"),
+    safeProbe(probeArchiver, archiverUrl, "Archiver"),
   ]);
 
   // Update status

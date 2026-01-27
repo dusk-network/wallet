@@ -6,43 +6,10 @@ import { platform } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 
-/**
- * Get status indicator element for an endpoint.
- * @param {"online"|"offline"|"checking"|"unknown"} status
- * @param {string|null} error
- * @returns {HTMLElement}
- */
-function statusIndicator(status, error) {
-  const labels = {
-    online: "Online",
-    offline: "Offline",
-    checking: "Checking...",
-    unknown: "Not checked",
-  };
-  const classes = {
-    online: "endpoint-status--online",
-    offline: "endpoint-status--offline",
-    checking: "endpoint-status--checking",
-    unknown: "endpoint-status--unknown",
-  };
-
-  const label = labels[status] ?? labels.unknown;
-  const cls = classes[status] ?? classes.unknown;
-  const title = error && status === "offline" ? error : label;
-
-  return h("span", { class: `endpoint-status ${cls}`, title, text: label });
-}
-
 export function optionsView(ov, { state, actions } = {}) {
   const currentNodeUrl = String(ov?.nodeUrl ?? "").trim();
   const currentProverUrl = String(ov?.proverUrl ?? "").trim();
   const currentArchiverUrl = String(ov?.archiverUrl ?? "").trim();
-
-  // Network status from background polling
-  const networkStatus = ov?.networkStatus ?? {};
-  const nodeStatus = networkStatus.nodeStatus ?? "unknown";
-  const proverStatus = networkStatus.proverStatus ?? "unknown";
-  const archiverStatus = networkStatus.archiverStatus ?? "unknown";
 
   const lockBtn = ov?.isUnlocked
     ? h("button", {
@@ -160,7 +127,7 @@ export function optionsView(ov, { state, actions } = {}) {
         if (resp?.error)
           throw new Error(resp.error.message ?? "Failed to save settings");
 
-        actions?.showToast?.("Settings saved. Checking network status...");
+        actions?.showToast?.("Settings saved.");
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
@@ -168,27 +135,6 @@ export function optionsView(ov, { state, actions } = {}) {
       } finally {
         saveBtn.disabled = false;
         saveBtn.textContent = prevText;
-      }
-    },
-  });
-
-  const checkStatusBtn = h("button", {
-    class: "btn-outline",
-    text: "Check Status",
-    onclick: async () => {
-      const prevText = checkStatusBtn.textContent;
-      try {
-        checkStatusBtn.disabled = true;
-        checkStatusBtn.textContent = "Checking...";
-        await actions?.send?.({ type: "DUSK_UI_CHECK_NETWORK" });
-        actions?.showToast?.("Network status updated.");
-        state.needsRefresh = true;
-        await actions?.render?.({ forceRefresh: true });
-      } catch (e) {
-        actions?.showToast?.(e?.message ?? String(e), 2500);
-      } finally {
-        checkStatusBtn.disabled = false;
-        checkStatusBtn.textContent = prevText;
       }
     },
   });
@@ -282,10 +228,7 @@ export function optionsView(ov, { state, actions } = {}) {
       }),
     ]),
     h("div", { class: "row" }, [
-      h("div", { class: "label-row" }, [
-        h("label", { text: "Node URL" }),
-        statusIndicator(nodeStatus, networkStatus.nodeError),
-      ]),
+      h("label", { text: "Node URL" }),
       nodeUrlInput,
       h("div", { class: "muted" }, [
         "This must be the base http(s) URL of a Rusk/RUES-enabled node. Example: ",
@@ -294,10 +237,7 @@ export function optionsView(ov, { state, actions } = {}) {
     ]),
 
     h("div", { class: "row" }, [
-      h("div", { class: "label-row" }, [
-        h("label", { text: "Prover URL" }),
-        statusIndicator(proverStatus, networkStatus.proverError),
-      ]),
+      h("label", { text: "Prover URL" }),
       proverUrlInput,
       h("div", { class: "muted" }, [
         "Optional. Used for shielded transaction proving. Example: ",
@@ -306,17 +246,14 @@ export function optionsView(ov, { state, actions } = {}) {
     ]),
 
     h("div", { class: "row" }, [
-      h("div", { class: "label-row" }, [
-        h("label", { text: "Archiver URL" }),
-        statusIndicator(archiverStatus, networkStatus.archiverError),
-      ]),
+      h("label", { text: "Archiver URL" }),
       archiverUrlInput,
       h("div", { class: "muted" }, [
         "Optional. Used for note discovery/sync. Example: ",
         h("code", { text: "https://testnet.nodes.dusk.network" }),
       ]),
     ]),
-    h("div", { class: "row" }, [h("div", { class: "btnrow" }, [saveBtn, checkStatusBtn])]),
+    h("div", { class: "row" }, [h("div", { class: "btnrow" }, [saveBtn])]),
     h("div", { class: "row" }, [
       h("div", { class: "muted", text: "Manage saved recipients for quick sending." }),
       h("div", { class: "btnrow" }, [addressBookBtn]),
