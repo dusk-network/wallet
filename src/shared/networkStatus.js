@@ -155,10 +155,12 @@ export async function probeProver(baseUrl) {
       return { ok: true };
     }
 
-    // Check for known prover error signatures
+    // Check for known prover error signatures (HTTP 500 with recognizable errors)
+    // These indicate the prover is alive but rejected our dummy payload.
     const text = await resp.text().catch(() => "");
     if (
       text.includes("Dusk-Core Error") ||
+      text.includes("Execution-Core Error") ||
       text.includes("BadLength") ||
       text.includes("Bad length")
     ) {
@@ -200,7 +202,7 @@ export async function probeArchiver(baseUrl) {
 
     const text = await resp.text().catch(() => "");
 
-    // Check if this node doesn't support archive queries
+    // Check if this node doesn't support archive queries (not an archive node)
     if (
       text.includes('Unknown field "contractEvents"') ||
       text.includes("Unknown field 'contractEvents'") ||
@@ -209,8 +211,28 @@ export async function probeArchiver(baseUrl) {
       return { ok: false, error: "Not an archive node" };
     }
 
-    // Any valid response means archiver is reachable
-    if (resp.ok || resp.status === 400 || resp.status === 424) {
+    // GraphQL validation errors about missing selection sets mean the field EXISTS
+    // and the endpoint is working - our query just needs subfields.
+    // Example: 'Field "contractEvents" of type "ContractEvents" must have a selection'
+    if (
+      text.includes("must have a selection") ||
+      text.includes("selection of subfields")
+    ) {
+      return { ok: true };
+    }
+
+    // Any valid response (2xx) means archiver is reachable
+    if (resp.ok) {
+      return { ok: true };
+    }
+
+    // HTTP 500 with a GraphQL error about selection sets is still "alive"
+    if (resp.status === 500 && text.includes("contractEvents")) {
+      return { ok: true };
+    }
+
+    // Rusk header mismatch codes are still "alive"
+    if (resp.status === 400 || resp.status === 424) {
       return { ok: true };
     }
 
