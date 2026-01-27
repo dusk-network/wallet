@@ -2,17 +2,11 @@ import { ProfileGenerator } from "@dusk/w3sper";
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../../shared/amount.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { networkNameFromNodeUrl } from "../../../shared/network.js";
+import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { shortHash, truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
-
-function shortHash(hash) {
-  const hsh = String(hash ?? "");
-  if (!hsh) return "";
-  if (hsh.length <= 18) return hsh;
-  return `${hsh.slice(0, 10)}…${hsh.slice(-8)}`;
-}
 
 function fmtDate(ts) {
   const n = Number(ts || 0);
@@ -90,25 +84,6 @@ function describeTx(tx) {
   return { kindLabel: kind ? kind : "Transaction", title: shortHash(tx?.hash), subtitle: "" };
 }
 
-async function openExplorer(nodeUrl, hash) {
-  const url = explorerTxUrl(nodeUrl, hash);
-  if (!url) return false;
-  try {
-    if (chrome?.tabs?.create) {
-      await chrome.tabs.create({ url });
-      return true;
-    }
-  } catch {
-    // ignore
-  }
-  try {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function txDetailsView(ov, { state, actions } = {}) {
   const hash = String(state?.txDetailHash ?? "");
   const txs = Array.isArray(ov?.txs) ? ov.txs : [];
@@ -172,7 +147,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
       class: "btn-primary",
       text: "View in Explorer",
       onclick: async () => {
-        const ok = await openExplorer(nodeUrl, hash);
+        const url = explorerTxUrl(nodeUrl, hash);
+        const ok = url ? await openUrl(url) : false;
         if (!ok) actions?.showToast?.("No explorer available for this network");
       },
     }),
