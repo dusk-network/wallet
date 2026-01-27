@@ -88,20 +88,34 @@ export function optionsView(ov, { state, actions } = {}) {
       const prevText = saveBtn.textContent;
       try {
         saveBtn.disabled = true;
-        saveBtn.textContent = "Testing...";
+        saveBtn.textContent = "Saving...";
         const v = nodeUrlInput.value.trim();
         const pv = proverUrlInput.value.trim();
         const av = archiverUrlInput.value.trim();
-        // eslint-disable-next-line no-new
-        new URL(v);
+
+        // Only validate URL format (not reachability)
+        try {
+          // eslint-disable-next-line no-new
+          new URL(v);
+        } catch {
+          throw new Error("Invalid node URL format");
+        }
 
         if (pv) {
-          // eslint-disable-next-line no-new
-          new URL(pv);
+          try {
+            // eslint-disable-next-line no-new
+            new URL(pv);
+          } catch {
+            throw new Error("Invalid prover URL format");
+          }
         }
         if (av) {
-          // eslint-disable-next-line no-new
-          new URL(av);
+          try {
+            // eslint-disable-next-line no-new
+            new URL(av);
+          } catch {
+            throw new Error("Invalid archiver URL format");
+          }
         }
 
         const resp = await actions?.send?.({
@@ -113,7 +127,7 @@ export function optionsView(ov, { state, actions } = {}) {
         if (resp?.error)
           throw new Error(resp.error.message ?? "Failed to save settings");
 
-        actions?.showToast?.("Saved settings.");
+        actions?.showToast?.("Settings saved.");
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {

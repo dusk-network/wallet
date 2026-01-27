@@ -30,6 +30,12 @@ import {
   registerTxNotificationHandlers,
 } from "./txNotify.js";
 import { getTxMeta, patchTxMeta, putTxMeta, listTxs } from "../shared/txStore.js";
+import {
+  getNetworkStatus,
+  checkAllEndpoints,
+  resetNetworkStatus,
+  isStatusStale,
+} from "../shared/networkStatus.js";
 
 registerTxNotificationHandlers();
 
@@ -464,16 +470,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             : "";
 
         // Compute the effective endpoints the engine will use (mirrors the
-        // inference logic in shared/settings.js). We validate these before
-        // persisting so a bad URL can't brick the wallet.
+        // inference logic in shared/settings.js).
         const inferred = inferEndpointsFromNodeUrl(nodeUrl);
         const effectiveProverUrl = proverUrl || inferred.proverUrl;
         const effectiveArchiverUrl = archiverUrl || inferred.archiverUrl;
+
+        // Only validate URL format (not reachability) - we accept any URL
+        // and do background polling for status.
         try {
           // eslint-disable-next-line no-new
           new URL(nodeUrl);
         } catch {
-          throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid node URL");
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid node URL format");
         }
 
         // Optional validation for explicit prover/archiver URLs.
@@ -482,7 +490,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // eslint-disable-next-line no-new
             new URL(proverUrl);
           } catch {
-            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid prover URL");
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid prover URL format");
           }
         }
         if (archiverUrl) {
@@ -490,24 +498,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // eslint-disable-next-line no-new
             new URL(archiverUrl);
           } catch {
-            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid archiver URL");
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid archiver URL format");
           }
         }
 
-        try {
-          await validateEndpointSet({
-            nodeUrl,
-            proverUrl: effectiveProverUrl,
-            archiverUrl: effectiveArchiverUrl,
-          });
-        } catch (e) {
-          throw rpcError(
-            ERROR_CODES.INVALID_PARAMS,
-            e?.message ?? String(e)
-          );
-        }
-
-        const prevSettings = await getSettings();
+        // Reset network status when endpoints change (will be checked in background)
+        await resetNetworkStatus();
 
         // Store endpoints (prover/archiver may be inferred inside setSettings
         // when omitted).
@@ -517,37 +513,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ...(archiverUrl ? { archiverUrl } : {}),
         });
 
-        // Force the engine to pick up the new config immediately. If this
-        // fails for any reason, roll back so the wallet doesn't get stuck on a
-        // broken URL.
+        // Force the engine to pick up the new config immediately.
+        // We no longer roll back on failure - the UI will show offline status.
         try {
           invalidateEngineConfig();
           await ensureEngineConfigured();
-        } catch (e) {
-          try {
-            await setSettings({
-              nodeUrl: prevSettings.nodeUrl,
-              proverUrl: prevSettings.proverUrl,
-              archiverUrl: prevSettings.archiverUrl,
-            });
-          } catch {
-            // ignore
-          }
-          invalidateEngineConfig();
-          try {
-            await ensureEngineConfigured();
-          } catch {
-            // ignore
-          }
-
-          throw rpcError(
-            ERROR_CODES.INTERNAL,
-            `Could not apply endpoints: ${e?.message ?? String(e)}`
-          );
+        } catch {
+          // Engine config failed, but we still save the settings.
+          // The UI will show offline status via polling.
         }
 
         // Notify dApps that the chain has changed.
         broadcastChainChangedAll().catch(() => {});
+
+        // Kick off a background status check (don't await).
+        checkAllEndpoints({
+          nodeUrl: nextSettings.nodeUrl,
+          proverUrl: nextSettings.proverUrl,
+          archiverUrl: nextSettings.archiverUrl,
+        }).catch(() => {});
 
         sendResponse({
           ok: true,
@@ -596,6 +580,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           txs = await listTxs({ nodeUrl: settings.nodeUrl });
         } catch {
           txs = [];
+        }
+
+        // Get network status and check if we need to refresh it
+        let networkStatus = await getNetworkStatus();
+        if (isStatusStale(networkStatus, 30000)) {
+          // Kick off a background check (don't await)
+          checkAllEndpoints({
+            nodeUrl: settings.nodeUrl,
+            proverUrl: settings.proverUrl,
+            archiverUrl: settings.archiverUrl,
+          }).catch(() => {});
         }
 
         if (status.isUnlocked) {
@@ -669,10 +664,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           proverUrl: settings.proverUrl,
           archiverUrl: settings.archiverUrl,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
+          networkStatus,
           activeOrigin,
           activeConnected,
           txs,
         });
+        return;
+      }
+
+      // UI requests a network status check
+      if (message?.type === "DUSK_UI_CHECK_NETWORK") {
+        const settings = await getSettings();
+        const status = await checkAllEndpoints({
+          nodeUrl: settings.nodeUrl,
+          proverUrl: settings.proverUrl,
+          archiverUrl: settings.archiverUrl,
+        });
+        sendResponse({ ok: true, networkStatus: status });
         return;
       }
 
