@@ -1,12 +1,12 @@
 [package]
-name = "mochavi-wallet-tauri"
+name = "dusk-wallet-tauri"
 version = "0.1.0"
-description = "Mochavi Wallet"
-authors = ["Mochavi"]
+description = "Dusk Wallet"
+authors = ["Dusk"]
 edition = "2021"
 
 [lib]
-name = "mochavi_wallet_tauri"
+name = "dusk_wallet_tauri"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

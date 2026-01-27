@@ -75,7 +75,7 @@ export async function renderNotification() {
     setApp([
       header,
       h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Your Mochavi Wallet is not set up yet." }),
+        h("div", { class: "muted", text: "Your Dusk Wallet is not set up yet." }),
         h("div", { class: "muted", text: "Create or import a recovery phrase to continue." }),
         h("div", { class: "btnrow" }, [openBtn]),
       ]),
