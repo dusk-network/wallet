@@ -5,17 +5,11 @@ import { getSettings } from "../shared/settings.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { explorerTxUrl } from "../shared/explorer.js";
 import { getTxMeta } from "../shared/txStore.js";
+import { shortHash } from "../ui/lib/strings.js";
 
 const ICON_PATH = "icons/dusk-128.png";
 
 let handlersInstalled = false;
-
-function shortHash(hash) {
-  const h = String(hash ?? "");
-  if (!h) return "";
-  if (h.length <= 18) return h;
-  return h.slice(0, 10) + "…" + h.slice(-8);
-}
 
 export function registerTxNotificationHandlers() {
   if (handlersInstalled) return;

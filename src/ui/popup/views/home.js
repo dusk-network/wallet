@@ -8,7 +8,7 @@ import { explorerTxUrl } from "../../../shared/explorer.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
-import { platform } from "../../../platform/index.js";
+import { openUrl, platform } from "../../../platform/index.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -197,27 +197,6 @@ export function homeView(ov, { state, actions } = {}) {
     return n + 1;
   }, 0);
 
-  const openExplorer = async (hash) => {
-    const url = explorerTxUrl(nodeUrl, hash);
-    if (url) {
-      try {
-        if (chrome?.tabs?.create) {
-          await chrome.tabs.create({ url });
-          return true;
-        }
-      } catch {
-        // ignore
-      }
-      try {
-        window.open(url, "_blank", "noopener,noreferrer");
-        return true;
-      } catch {
-        // ignore
-      }
-    }
-    return false;
-  };
-
   const statusClass = (status) => {
     const s = String(status ?? "").toLowerCase();
     if (s === "executed") return "status-dot status-dot--ok";
@@ -320,7 +299,8 @@ export function homeView(ov, { state, actions } = {}) {
       title: "View in Explorer",
       onclick: async (e) => {
         e?.stopPropagation?.();
-        const ok = await openExplorer(hash);
+        const url = explorerTxUrl(nodeUrl, hash);
+        const ok = url ? await openUrl(url) : false;
         if (!ok) actions?.showToast?.("No explorer available for this network");
       },
     });
@@ -356,7 +336,8 @@ export function homeView(ov, { state, actions } = {}) {
           }
 
           // Fallback: open explorer (or copy hash) if we can't navigate.
-          const ok = await openExplorer(hash);
+          const url = explorerTxUrl(nodeUrl, hash);
+          const ok = url ? await openUrl(url) : false;
           if (!ok) {
             const copied = await copyToClipboard(hash);
             actions?.showToast?.(copied ? "Copied tx hash" : "No explorer available");
