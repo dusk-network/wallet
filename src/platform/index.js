@@ -13,7 +13,7 @@ const kind = getRuntimeKind();
 export async function openUrl(url) {
   if (!url) return false;
   try {
-    if (typeof chrome !== "undefined" && chrome?.tabs?.create) {
+    if (chrome?.tabs?.create) {
       await chrome.tabs.create({ url });
       return true;
     }
