@@ -4,6 +4,24 @@ import { isFullView, isPopupView } from "./env.js";
 import { isExtensionRuntime } from "../../platform/runtime.js";
 import { platform } from "../../platform/index.js";
 
+/**
+ * Get a CSS class for network status indicator.
+ * @param {"online"|"offline"|"checking"|"unknown"} status
+ * @returns {string}
+ */
+function networkStatusClass(status) {
+  switch (status) {
+    case "online":
+      return "net-status--online";
+    case "offline":
+      return "net-status--offline";
+    case "checking":
+      return "net-status--checking";
+    default:
+      return "net-status--unknown";
+  }
+}
+
 export function createHeaderRenderer({
   headerActionsHost,
   netMenu,
@@ -26,6 +44,38 @@ export function createHeaderRenderer({
     if (networkLabel) {
       networkLabel.textContent = ov?.networkName ?? "Network";
     }
+
+    // Update network status indicator
+    const nodeStatus = ov?.networkStatus?.nodeStatus ?? "unknown";
+    let statusDot = networkPill?.querySelector(".net-status-dot");
+    if (networkPill && !statusDot) {
+      // Create status dot if it doesn't exist
+      statusDot = document.createElement("span");
+      statusDot.className = "net-status-dot";
+      networkPill.insertBefore(statusDot, networkPill.firstChild);
+    }
+    if (statusDot) {
+      // Remove old status classes
+      statusDot.classList.remove(
+        "net-status--online",
+        "net-status--offline",
+        "net-status--checking",
+        "net-status--unknown"
+      );
+      statusDot.classList.add(networkStatusClass(nodeStatus));
+
+      // Set title for tooltip
+      const statusTitles = {
+        online: "Network online",
+        offline: ov?.networkStatus?.nodeError
+          ? `Network offline: ${ov.networkStatus.nodeError}`
+          : "Network offline",
+        checking: "Checking network...",
+        unknown: "Network status unknown",
+      };
+      statusDot.title = statusTitles[nodeStatus] ?? statusTitles.unknown;
+    }
+
     if (networkPill) {
       // Disable the pill (and close any open menu) until the wallet is unlocked.
       networkPill.disabled = !walletReady;
