@@ -234,6 +234,45 @@ function installTxStatusListener() {
 
 installTxStatusListener();
 
+// --- Auto-lock activity heartbeat ------------------------------------------
+// Send activity pings to background while the popup is visible/focused.
+// This prevents auto-lock from triggering while the user is actively using
+// the wallet UI.
+let activityHeartbeatTimer = null;
+
+function startActivityHeartbeat() {
+  if (activityHeartbeatTimer) return;
+  // Immediately ping once, then every 30s.
+  send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
+  activityHeartbeatTimer = setInterval(() => {
+    send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
+  }, 30_000);
+}
+
+function stopActivityHeartbeat() {
+  if (activityHeartbeatTimer) {
+    clearInterval(activityHeartbeatTimer);
+    activityHeartbeatTimer = null;
+  }
+}
+
+// Start heartbeat immediately when popup opens.
+startActivityHeartbeat();
+
+// Pause when tab/window is hidden, resume when visible.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    stopActivityHeartbeat();
+  } else {
+    startActivityHeartbeat();
+  }
+});
+
+// Also ping on any user interaction to be extra safe.
+document.addEventListener("click", () => {
+  send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
+}, { passive: true });
+
 // --- Network menu --------------------------------------------------------
 const netMenu = createNetworkMenuController({
   onSelectPreset: async (preset) => {

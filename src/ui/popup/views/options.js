@@ -2,6 +2,7 @@ import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
 import { clearPermissions } from "../../../shared/permissions.js";
 import { clearVault } from "../../../shared/vault.js";
+import { AUTO_LOCK_OPTIONS } from "../../../shared/settings.js";
 import { platform } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
@@ -10,6 +11,7 @@ export function optionsView(ov, { state, actions } = {}) {
   const currentNodeUrl = String(ov?.nodeUrl ?? "").trim();
   const currentProverUrl = String(ov?.proverUrl ?? "").trim();
   const currentArchiverUrl = String(ov?.archiverUrl ?? "").trim();
+  const currentAutoLock = Number(ov?.autoLockTimeoutMinutes ?? 5);
 
   const lockBtn = ov?.isUnlocked
     ? h("button", {
@@ -23,6 +25,33 @@ export function optionsView(ov, { state, actions } = {}) {
         },
       })
     : null;
+
+  // Auto-lock timeout selector.
+  const autoLockSelect = h(
+    "select",
+    { id: "auto-lock" },
+    AUTO_LOCK_OPTIONS.map((opt) =>
+      h("option", { value: String(opt.value), text: opt.label })
+    )
+  );
+  autoLockSelect.value = String(currentAutoLock);
+
+  autoLockSelect.addEventListener("change", async () => {
+    const timeout = Number(autoLockSelect.value);
+    try {
+      await actions?.send?.({
+        type: "DUSK_UI_SET_AUTO_LOCK",
+        autoLockTimeoutMinutes: timeout,
+      });
+      actions?.showToast?.(
+        timeout > 0
+          ? `Auto-lock set to ${AUTO_LOCK_OPTIONS.find((o) => o.value === timeout)?.label ?? timeout + " min"}.`
+          : "Auto-lock disabled."
+      );
+    } catch (e) {
+      actions?.showToast?.(e?.message ?? String(e), 2500);
+    }
+  });
 
   const nodeUrlInput = h("input", {
     value: currentNodeUrl,
@@ -218,6 +247,15 @@ export function optionsView(ov, { state, actions } = {}) {
       },
     }),
     lockBtn ? h("div", { class: "row" }, [h("div", { class: "btnrow" }, [lockBtn])]) : null,
+    h("div", { class: "row" }, [
+      h("label", { text: "Auto-lock" }),
+      h("div", { class: "select-wrap" }, [autoLockSelect]),
+      h("div", {
+        class: "muted",
+        text: "Automatically lock the wallet after a period of inactivity.",
+      }),
+    ]),
+    h("div", { class: "divider" }),
     h("div", { class: "row" }, [
       h("label", { text: "Network" }),
       h("div", { class: "select-wrap" }, [networkSelect]),
