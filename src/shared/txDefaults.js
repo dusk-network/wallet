@@ -59,8 +59,10 @@ export function getDefaultGas(kind) {
  *
  * @param {string} kind
  * @param {any} gas
+ * @param {Object} [opts]
+ * @param {string} [opts.dynamicPrice] - Override default price with live network value.
  */
-export function applyGasDefaults(kind, gas) {
+export function applyGasDefaults(kind, gas, { dynamicPrice } = {}) {
   const def = getDefaultGas(kind);
   if (!def) return gas === undefined ? undefined : gas;
 
@@ -74,7 +76,8 @@ export function applyGasDefaults(kind, gas) {
     out.limit = def.limit;
   }
   if (out.price === undefined || out.price === null || out.price === "") {
-    out.price = def.price;
+    // Use dynamic price if provided, otherwise fall back to static default
+    out.price = dynamicPrice ?? def.price;
   }
 
   return out;
@@ -83,13 +86,15 @@ export function applyGasDefaults(kind, gas) {
 /**
  * Apply defaults to a tx params object.
  * @param {any} params
+ * @param {Object} [opts]
+ * @param {string} [opts.dynamicPrice] - Override default gas price with live network value.
  */
-export function applyTxDefaults(params) {
+export function applyTxDefaults(params, { dynamicPrice } = {}) {
   if (!params || typeof params !== "object") return params;
   const kind = String(params.kind || "").toLowerCase();
   if (!kind) return params;
 
-  const gas = applyGasDefaults(kind, params.gas);
+  const gas = applyGasDefaults(kind, params.gas, { dynamicPrice });
   const out = { ...params };
 
   if (gas === undefined) {

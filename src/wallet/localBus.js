@@ -13,6 +13,7 @@ import {
   configure,
   getAccounts,
   getAddresses,
+  getCachedGasPrice,
   getPublicBalance,
   getShieldedBalance,
   getShieldedStatus,
@@ -284,7 +285,15 @@ export async function localSend(message) {
       }
 
       await ensureEngineConfigured();
-      const baseParams = applyTxDefaults(message.params ?? {});
+      // Fetch live gas price from node (cached for 30s) to use as default.
+      let dynamicPrice;
+      try {
+        const gasData = await getCachedGasPrice();
+        dynamicPrice = gasData?.median;
+      } catch {
+        // Ignore errors, will fall back to static default
+      }
+      const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
       const result = await sendTransaction(baseParams);
       return {
         ok: true,

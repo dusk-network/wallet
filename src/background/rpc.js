@@ -294,7 +294,17 @@ export async function handleRpc(origin, request) {
 
       // Fill wallet defaults (standard gas settings) so the user always sees a fee.
       // NOTE: We do this BEFORE approval, so the approval UI can display max fee and total.
-      const baseParams = applyTxDefaults(params);
+      // Fetch live gas price from node (cached for 30s) to use as default.
+      await ensureEngineConfigured();
+      let dynamicPrice;
+      try {
+        const gasData = await engineCall("dusk_getCachedGasPrice");
+        // Use median as a balanced default - not too aggressive, not too cheap
+        dynamicPrice = gasData?.median;
+      } catch {
+        // Ignore errors, will fall back to static default
+      }
+      const baseParams = applyTxDefaults(params, { dynamicPrice });
 
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
@@ -304,7 +314,6 @@ export async function handleRpc(origin, request) {
       const { isUnlocked } = await getEngineStatus();
       if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 
-      await ensureEngineConfigured();
       const result = await engineCall("dusk_sendTransaction", finalParams);
       const hash = result?.hash ?? "";
 
