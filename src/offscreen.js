@@ -2,6 +2,7 @@ import {
   configure,
   getAccounts,
   getAddresses,
+  getGasPrice,
   getPublicBalance,
   getShieldedBalance,
   getShieldedStatus,
@@ -156,6 +157,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             id,
             result: { nonce: bal.nonce.toString(), value: bal.value.toString() },
           });
+          return;
+        }
+
+        case "dusk_estimateGas": {
+          const result = await getGasPrice(params ?? {});
+          sendResponse({ id, result });
           return;
         }
 
