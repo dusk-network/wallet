@@ -11,7 +11,10 @@
     "build:tauri": "vite build -c vite.tauri.config.js",
     "dev:tauri": "vite --config vite.tauri.config.js --host --port 5173",
     "tauri:dev": "cd apps/tauri/src-tauri && cargo tauri dev",
-    "tauri:build": "cd apps/tauri/src-tauri && cargo tauri build"
+    "tauri:build": "cd apps/tauri/src-tauri && cargo tauri build",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@dusk/w3sper": "npm:@jsr/dusk__w3sper@^1.4.0",
@@ -25,7 +28,9 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "vite": "^5.3.1",
-    "vite-plugin-node-polyfills": "^0.23.0"
+    "vite-plugin-node-polyfills": "^0.23.0",
+    "vitest": "^4.0.18"
   }
 }
