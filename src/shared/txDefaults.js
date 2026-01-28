@@ -6,6 +6,8 @@
 //
 // Values are expressed in LUX (1 LUX = 10^-9 DUSK) as decimal strings.
 
+import { TX_KIND } from "./constants.js";
+
 /**
  * Default gas settings by transaction kind.
  *
@@ -20,19 +22,19 @@
  * - 500,000,000 for contract_call is a conservative default safety cap.
  */
 export const DEFAULT_GAS_BY_KIND = Object.freeze({
-  transfer: Object.freeze({
+  [TX_KIND.TRANSFER]: Object.freeze({
     limit: "10000000",
     price: "1",
   }),
-  shield: Object.freeze({
+  [TX_KIND.SHIELD]: Object.freeze({
     limit: "50000000",
     price: "1",
   }),
-  unshield: Object.freeze({
+  [TX_KIND.UNSHIELD]: Object.freeze({
     limit: "50000000",
     price: "1",
   }),
-  contract_call: Object.freeze({
+  [TX_KIND.CONTRACT_CALL]: Object.freeze({
     limit: "500000000",
     price: "1",
   }),

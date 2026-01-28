@@ -4,6 +4,7 @@ import {
   formatLuxShort,
   safeBigInt,
 } from "../../../shared/amount.js";
+import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
@@ -170,7 +171,7 @@ export function homeView(ov, { state, actions } = {}) {
     }),
     actionBtn("Shield", "🛡", () => {
       state.route = "convert";
-      state.draft = { kind: "shield", amountDusk: "", amountLux: "" };
+      state.draft = { kind: TX_KIND.SHIELD, amountDusk: "", amountLux: "" };
       actions?.render?.().catch(() => {});
     }),
   ]);
@@ -206,7 +207,7 @@ export function homeView(ov, { state, actions } = {}) {
 
   const describe = (tx) => {
     const kind = String(tx?.kind ?? "").toLowerCase();
-    if (kind === "transfer") {
+    if (kind === TX_KIND.TRANSFER) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
         title: amt ? `Send ${amt} DUSK` : "Send",
@@ -214,7 +215,7 @@ export function homeView(ov, { state, actions } = {}) {
         icon: "↗",
       };
     }
-    if (kind === "shield") {
+    if (kind === TX_KIND.SHIELD) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
         title: amt ? `Shield ${amt} DUSK` : "Shield",
@@ -222,7 +223,7 @@ export function homeView(ov, { state, actions } = {}) {
         icon: "⇢",
       };
     }
-    if (kind === "unshield") {
+    if (kind === TX_KIND.UNSHIELD) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
         title: amt ? `Unshield ${amt} DUSK` : "Unshield",
@@ -230,7 +231,7 @@ export function homeView(ov, { state, actions } = {}) {
         icon: "⇠",
       };
     }
-    if (kind === "contract_call") {
+    if (kind === TX_KIND.CONTRACT_CALL) {
       const fn = tx?.fnName ? String(tx.fnName) : "contract call";
       const dep = safeBigInt(tx?.deposit, 0n);
       const depS = dep > 0n ? formatLuxShort(dep, UI_DISPLAY_DECIMALS) : "";

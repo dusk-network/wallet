@@ -6,6 +6,7 @@ import {
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
+import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
 import { chainIdFromNodeUrl } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
@@ -265,7 +266,7 @@ export async function handleRpc(origin, request) {
         throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.kind is required");
       }
 
-      if (kind === "contract_call") {
+      if (kind === TX_KIND.CONTRACT_CALL) {
         if (params.memo) {
           throw rpcError(
             ERROR_CODES.INVALID_PARAMS,
@@ -319,11 +320,11 @@ export async function handleRpc(origin, request) {
                 ? String(finalParams.deposit)
                 : undefined,
             contractId:
-              kind === "contract_call" && finalParams?.contractId
+              kind === TX_KIND.CONTRACT_CALL && finalParams?.contractId
                 ? String(finalParams.contractId)
                 : undefined,
             fnName:
-              kind === "contract_call" && finalParams?.fnName
+              kind === TX_KIND.CONTRACT_CALL && finalParams?.fnName
                 ? String(finalParams.fnName)
                 : undefined,
             gasLimit: finalParams?.gas?.limit != null ? String(finalParams.gas.limit) : undefined,

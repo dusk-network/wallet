@@ -8,6 +8,7 @@ import {
   useAsProtocolDriver,
 } from "@dusk/w3sper";
 import { bytesToHex, hexToBytes, toBytes } from "./bytes.js";
+import { TX_KIND } from "./constants.js";
 import { assetUrl } from "../platform/assets.js";
 
 import {
@@ -1464,12 +1465,12 @@ export async function sendTransaction(params) {
   const network = await ensureNetwork();
   const profile = getCurrentProfile();
 
-  if (kind === "transfer") {
+  if (kind === TX_KIND.TRANSFER) {
     // Reuse existing transfer logic for now.
     return await transfer(params);
   }
 
-  if (kind === "shield") {
+  if (kind === TX_KIND.SHIELD) {
     if ("to" in params && params.to) {
       throw new Error("Shield does not accept a 'to' field (it always targets your shielded address)");
     }
@@ -1488,7 +1489,7 @@ export async function sendTransaction(params) {
     return { hash: result.hash, nonce: result.nonce };
   }
 
-  if (kind === "unshield") {
+  if (kind === TX_KIND.UNSHIELD) {
     if ("to" in params && params.to) {
       throw new Error("Unshield does not accept a 'to' field (it always targets your public account)");
     }
@@ -1544,7 +1545,7 @@ export async function sendTransaction(params) {
     return { hash: result.hash, nullifiers: result.nullifiers };
   }
 
-  if (kind === "contract_call") {
+  if (kind === TX_KIND.CONTRACT_CALL) {
     if ("memo" in params && params.memo) {
       throw new Error("Contract calls cannot include a memo payload");
     }

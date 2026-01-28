@@ -1,5 +1,6 @@
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
+import { TX_KIND } from "../../shared/constants.js";
 import { h } from "../lib/dom.js";
 import "../components/GasEditor.js";
 
@@ -192,7 +193,7 @@ export async function renderNotification() {
   if (kindNorm === "send_tx") {
     const txKind = String(params?.kind ?? "").toLowerCase();
 
-    if (txKind === "transfer") {
+    if (txKind === TX_KIND.TRANSFER) {
       const to = params?.to ?? "";
       const amount = params?.amount ?? "0";
       const memo = params?.memo ?? "";
@@ -233,7 +234,7 @@ export async function renderNotification() {
       return;
     }
 
-    if (txKind === "contract_call") {
+    if (txKind === TX_KIND.CONTRACT_CALL) {
       const to = params?.to ?? accounts?.[0] ?? "";
       const amount = params?.amount ?? "0";
       const deposit = params?.deposit ?? "0";

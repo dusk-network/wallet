@@ -1,19 +1,9 @@
 import { h } from "../lib/dom.js";
+import { fnv1a32 } from "../../shared/chain.js";
 
 // Identicon (no deps)
 // A tiny deterministic "blockies"-style identicon so accounts feel like MetaMask.
 // TODO: Consider using a tiny library or online API.
-
-// TODO: Dedup, exists in `./src/shared/chain.js`.
-function fnv1a32(str) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    // 32-bit FNV-1a prime
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
 
 function mulberry32(seed) {
   let a = seed >>> 0;
