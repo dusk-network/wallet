@@ -3,6 +3,7 @@ import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import { identiconEl } from "../../components/Identicon.js";
 import { truncateMiddle } from "../../lib/strings.js";
+import { TX_KIND } from "../../../shared/constants.js";
 
 import {
   clearAddressBook,
@@ -154,7 +155,7 @@ export function addressBookView(ov, { state, actions } = {}) {
         const txs = Array.isArray(ov?.txs) ? ov.txs : [];
         for (const t of txs) {
           if (recent.length >= 6) break;
-          if (String(t?.kind ?? "") !== "transfer") continue;
+          if (String(t?.kind ?? "") !== TX_KIND.TRANSFER) continue;
           const addr = String(t?.to ?? "").trim();
           if (!addr) continue;
           const key = addr.toLowerCase();

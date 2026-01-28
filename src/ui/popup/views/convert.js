@@ -5,6 +5,7 @@ import {
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
+import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
@@ -21,7 +22,7 @@ function fmtAvail(lux) {
 
 export function convertFormView(ov, { state, actions } = {}) {
   const draft = state.draft || {};
-  const kind = (draft.kind === "unshield" ? "unshield" : "shield");
+  const kind = draft.kind === TX_KIND.UNSHIELD ? TX_KIND.UNSHIELD : TX_KIND.SHIELD;
 
   const defaultGas = getDefaultGas(kind);
   const feeLux =
@@ -77,10 +78,10 @@ export function convertFormView(ov, { state, actions } = {}) {
     ov?.shieldedBalance?.spendable != null
       ? safeBigInt(ov.shieldedBalance.spendable, 0n)
       : safeBigInt(ov?.shieldedBalance?.value, 0n);
-  const fromLabel = kind === "shield" ? "Public" : "Shielded";
-  const toLabel = kind === "shield" ? "Shielded" : "Public";
+  const fromLabel = kind === TX_KIND.SHIELD ? "Public" : "Shielded";
+  const toLabel = kind === TX_KIND.SHIELD ? "Shielded" : "Public";
 
-  const availRaw = kind === "shield" ? pubLux : shSpendLux;
+  const availRaw = kind === TX_KIND.SHIELD ? pubLux : shSpendLux;
   const avail = availRaw > feeLux ? availRaw - feeLux : 0n;
 
   // Wire the shared MAX + slider component against the calculated maximum.
@@ -128,20 +129,20 @@ export function convertFormView(ov, { state, actions } = {}) {
     },
   });
 
-  const modeTabs = h("div", { class: "tabs", style: `--seg-index: ${kind === "shield" ? 0 : 1};` }, [
+  const modeTabs = h("div", { class: "tabs", style: `--seg-index: ${kind === TX_KIND.SHIELD ? 0 : 1};` }, [
     h(
       "button",
       {
-        class: kind === "shield" ? "tab is-active" : "tab",
-        onclick: () => setKind("shield"),
+        class: kind === TX_KIND.SHIELD ? "tab is-active" : "tab",
+        onclick: () => setKind(TX_KIND.SHIELD),
       },
       [h("span", { text: "Shield" })]
     ),
     h(
       "button",
       {
-        class: kind === "unshield" ? "tab is-active" : "tab",
-        onclick: () => setKind("unshield"),
+        class: kind === TX_KIND.UNSHIELD ? "tab is-active" : "tab",
+        onclick: () => setKind(TX_KIND.UNSHIELD),
       },
       [h("span", { text: "Unshield" })]
     ),
@@ -174,9 +175,9 @@ export function convertConfirmView(ov, { state, actions } = {}) {
     return convertFormView(ov, { state, actions });
   }
 
-  const kind = d.kind === "unshield" ? "unshield" : "shield";
-  const fromLabel = kind === "shield" ? "Public" : "Shielded";
-  const toLabel = kind === "shield" ? "Shielded" : "Public";
+  const kind = d.kind === TX_KIND.UNSHIELD ? TX_KIND.UNSHIELD : TX_KIND.SHIELD;
+  const fromLabel = kind === TX_KIND.SHIELD ? "Public" : "Shielded";
+  const toLabel = kind === TX_KIND.SHIELD ? "Shielded" : "Public";
 
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
   const cancelBtn = h("button", {
@@ -249,7 +250,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       },
     }),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: kind === "shield" ? "You are about to shield" : "You are about to unshield" }),
+      h("div", { class: "muted", text: kind === TX_KIND.SHIELD ? "You are about to shield" : "You are about to unshield" }),
       h("div", { class: "meta-pill", text: `${fromLabel} → ${toLabel}` }),
       h("div", { class: "home-balance" }, [
         h("div", {

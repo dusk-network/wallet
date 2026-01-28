@@ -4,6 +4,7 @@ import { createVault, loadVault, unlockVault } from "../shared/vault.js";
 import { getPermissionForOrigin } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
+import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { detectPresetIdFromNodeUrl, networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
@@ -508,11 +509,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   ? String(baseParams.deposit)
                   : undefined,
               contractId:
-                kind === "contract_call" && baseParams?.contractId
+                kind === TX_KIND.CONTRACT_CALL && baseParams?.contractId
                   ? String(baseParams.contractId)
                   : undefined,
               fnName:
-                kind === "contract_call" && baseParams?.fnName
+                kind === TX_KIND.CONTRACT_CALL && baseParams?.fnName
                   ? String(baseParams.fnName)
                   : undefined,
               gasLimit: baseParams?.gas?.limit != null ? String(baseParams.gas.limit) : undefined,

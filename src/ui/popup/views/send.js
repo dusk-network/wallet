@@ -5,6 +5,7 @@ import {
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
+import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h } from "../../lib/dom.js";
@@ -52,7 +53,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   // ------------------------------------------------------------
   // The send screen doesn't expose gas settings yet. We base MAX calculations
   // on the wallet's safe defaults for transfers.
-  const defaultGas = getDefaultGas("transfer");
+  const defaultGas = getDefaultGas(TX_KIND.TRANSFER);
   const feeLux =
     defaultGas && defaultGas.limit != null && defaultGas.price != null
       ? safeBigInt(defaultGas.limit, 0n) * safeBigInt(defaultGas.price, 0n)
@@ -526,7 +527,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const txTypeLabel = recType === "address" ? "Shielded transfer" : "Public transfer";
 
   // ------------------------------------------------------------
-  // Contacts helper (show contact name or allow saving recipient)
+  // Contacts helper
   // ------------------------------------------------------------
   const toAddr = String(d.to || "").trim();
 
@@ -635,7 +636,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   });
 
   // Gas editor (collapsed by default)
-  const defaultGas = getDefaultGas("transfer");
+  const defaultGas = getDefaultGas(TX_KIND.TRANSFER);
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.amountLux = d.amountLux;
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
@@ -659,7 +660,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       const res = await actions?.send?.({
         type: "DUSK_UI_SEND_TX",
         params: {
-          kind: "transfer",
+          kind: TX_KIND.TRANSFER,
           to: d.to,
           amount: d.amountLux,
           memo: d.memo || undefined,

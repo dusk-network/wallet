@@ -45,7 +45,7 @@ export function chainIdFromNodeUrl(nodeUrl) {
  * @param {string} str
  * @returns {number} unsigned 32-bit
  */
-function fnv1a32(str) {
+export function fnv1a32(str) {
   let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
     h ^= str.charCodeAt(i);

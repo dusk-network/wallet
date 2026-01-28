@@ -1,5 +1,6 @@
 import { ProfileGenerator } from "@dusk/w3sper";
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../../shared/amount.js";
+import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { networkNameFromNodeUrl } from "../../../shared/network.js";
 import { openUrl } from "../../../platform/index.js";
@@ -28,7 +29,7 @@ function statusLabel(status) {
 function describeTx(tx) {
   const kind = String(tx?.kind ?? "").toLowerCase();
 
-  if (kind === "transfer") {
+  if (kind === TX_KIND.TRANSFER) {
     const to = tx?.to ? String(tx.to) : "";
     const toType = to ? ProfileGenerator.typeOf(to) : "unknown";
     const transferType =
@@ -44,7 +45,7 @@ function describeTx(tx) {
     };
   }
 
-  if (kind === "shield") {
+  if (kind === TX_KIND.SHIELD) {
     const amountLux = tx?.amount;
     const amt = amountLux != null ? formatLuxShort(amountLux, UI_DISPLAY_DECIMALS) : "";
     return {
@@ -54,7 +55,7 @@ function describeTx(tx) {
     };
   }
 
-  if (kind === "unshield") {
+  if (kind === TX_KIND.UNSHIELD) {
     const amountLux = tx?.amount;
     const amt = amountLux != null ? formatLuxShort(amountLux, UI_DISPLAY_DECIMALS) : "";
     return {
@@ -64,7 +65,7 @@ function describeTx(tx) {
     };
   }
 
-  if (kind === "contract_call") {
+  if (kind === TX_KIND.CONTRACT_CALL) {
     const fnName = tx?.fnName ? String(tx.fnName) : "contract call";
     const contractId = tx?.contractId ? String(tx.contractId) : "";
     const depositLux = safeBigInt(tx?.deposit, 0n);
