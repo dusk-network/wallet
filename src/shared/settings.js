@@ -2,11 +2,26 @@ import { storage, STORAGE_KEYS } from "./storage.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
 
+/**
+ * Auto-lock timeout options in minutes.
+ * 0 = disabled.
+ */
+export const AUTO_LOCK_OPTIONS = [
+  { value: 0, label: "Off" },
+  { value: 1, label: "1 minute" },
+  { value: 5, label: "5 minutes" },
+  { value: 15, label: "15 minutes" },
+  { value: 30, label: "30 minutes" },
+  { value: 60, label: "1 hour" },
+];
+
 export const DEFAULT_SETTINGS = {
   // Default to Testnet.
   nodeUrl: "https://testnet.nodes.dusk.network",
   proverUrl: "https://testnet.provers.dusk.network",
   archiverUrl: "https://testnet.nodes.dusk.network",
+  /** Auto-lock timeout in minutes (0 = disabled) */
+  autoLockTimeoutMinutes: 5,
 };
 
 function normalizeBaseUrl(v) {

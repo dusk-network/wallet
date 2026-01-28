@@ -40,6 +40,68 @@ import {
 
 registerTxNotificationHandlers();
 
+// ------------------------------
+// Auto-lock timer
+// ------------------------------
+const AUTO_LOCK_ALARM_NAME = "dusk_auto_lock_check";
+
+/** Last activity timestamp in memory (reset on unlock, updated on activity). */
+let lastActivityTimestamp = 0;
+
+/** Update activity timestamp to prevent auto-lock. */
+function updateActivity() {
+  lastActivityTimestamp = Date.now();
+}
+
+/** Start or restart the auto-lock alarm based on current settings. */
+async function setupAutoLockAlarm() {
+  const settings = await getSettings();
+  const timeout = settings.autoLockTimeoutMinutes ?? 0;
+
+  // Clear any existing alarm first.
+  await chrome.alarms.clear(AUTO_LOCK_ALARM_NAME);
+
+  if (timeout > 0) {
+    // Check every minute (or half the timeout if smaller).
+    const periodInMinutes = Math.max(0.5, Math.min(1, timeout / 2));
+    chrome.alarms.create(AUTO_LOCK_ALARM_NAME, { periodInMinutes });
+  }
+}
+
+/** Handle auto-lock alarm: check if wallet should be locked due to inactivity. */
+async function handleAutoLockAlarm() {
+  const settings = await getSettings();
+  const timeout = settings.autoLockTimeoutMinutes ?? 0;
+
+  if (timeout <= 0) return; // Auto-lock disabled.
+
+  const status = await getEngineStatus();
+  if (!status?.isUnlocked) return; // Already locked.
+
+  const elapsed = Date.now() - lastActivityTimestamp;
+  const timeoutMs = timeout * 60 * 1000;
+
+  if (elapsed >= timeoutMs) {
+    console.log("[Dusk] Auto-locking wallet due to inactivity.");
+    try {
+      await engineCall("engine_lock");
+      broadcastAccountsChangedAll().catch(() => {});
+    } catch (e) {
+      console.error("[Dusk] Auto-lock failed:", e);
+    }
+  }
+}
+
+// Listen for alarms.
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === AUTO_LOCK_ALARM_NAME) {
+    handleAutoLockAlarm().catch(console.error);
+  }
+});
+
+// Initialize auto-lock alarm on startup.
+setupAutoLockAlarm().catch(console.error);
+
 // Open the full wallet view on first install (MetaMask-style onboarding).
 chrome.runtime.onInstalled.addListener((details) => {
   if (details?.reason !== "install") return;
@@ -101,9 +163,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   (async () => {
     try {
+      // UI heartbeat to reset auto-lock timer.
+      if (message?.type === "DUSK_UI_ACTIVITY") {
+        updateActivity();
+        sendResponse({ ok: true });
+        return;
+      }
+
       // RPC messages from contentScript
       if (message?.type === "DUSK_RPC_REQUEST") {
         const origin = message.origin || getOriginFromSender(sender);
+
+        // User-initiated dApp interaction counts as activity.
+        updateActivity();
 
         // Ensure any dApp port(s) opened from this tab are bound to the same
         // origin so provider push events (connect/chainChanged/...) work
@@ -188,6 +260,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const accounts = Array.isArray(result?.accounts)
           ? result.accounts
           : (await getEngineStatus()).accounts;
+
+        // Reset activity timer and ensure auto-lock alarm is running.
+        updateActivity();
+        setupAutoLockAlarm().catch(console.error);
 
         // Notify dApps that accounts are now available.
         broadcastAccountsChangedAll().catch(() => {});
@@ -334,6 +410,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // UI sets auto-lock timeout
+      if (message?.type === "DUSK_UI_SET_AUTO_LOCK") {
+        const timeout = Number(message.autoLockTimeoutMinutes ?? 0);
+        await setSettings({ autoLockTimeoutMinutes: timeout });
+        await setupAutoLockAlarm();
+        sendResponse({ ok: true, autoLockTimeoutMinutes: timeout });
+        return;
+      }
+
       // UI approves or rejects a pending request
       if (message?.type === "DUSK_PENDING_DECISION") {
         const res = resolvePendingDecision(message);
@@ -454,6 +539,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           nodeUrl: settings.nodeUrl,
           proverUrl: settings.proverUrl,
           archiverUrl: settings.archiverUrl,
+          autoLockTimeoutMinutes: settings.autoLockTimeoutMinutes ?? 5,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           networkStatus,
           activeOrigin,
