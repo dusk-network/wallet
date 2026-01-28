@@ -876,6 +876,50 @@ export async function getGasPrice({ maxTransactions = 100 } = {}) {
   }
 }
 
+// --- Cached gas price ---
+// Cache gas prices to avoid hammering the node on every tx.
+const gasPriceCache = {
+  data: null,
+  nodeUrl: "",
+  fetchedAt: 0,
+};
+const GAS_PRICE_CACHE_TTL_MS = 30_000; // 30 seconds
+
+/**
+ * Get gas price with caching. Returns cached value if fresh, otherwise fetches.
+ * Falls back to { average: "1", ... } on error to avoid blocking transactions.
+ *
+ * @param {Object} [opts]
+ * @param {boolean} [opts.forceRefresh=false] - Bypass cache and fetch fresh data.
+ * @returns {Promise<{average: string, max: string, median: string, min: string}>}
+ */
+export async function getCachedGasPrice({ forceRefresh = false } = {}) {
+  const nodeUrl = String(engineConfig.nodeUrl || "").trim();
+  const now = Date.now();
+
+  // Return cached if still fresh and same node
+  if (
+    !forceRefresh &&
+    gasPriceCache.data &&
+    gasPriceCache.nodeUrl === nodeUrl &&
+    now - gasPriceCache.fetchedAt < GAS_PRICE_CACHE_TTL_MS
+  ) {
+    return gasPriceCache.data;
+  }
+
+  try {
+    const data = await getGasPrice();
+    gasPriceCache.data = data;
+    gasPriceCache.nodeUrl = nodeUrl;
+    gasPriceCache.fetchedAt = now;
+    return data;
+  } catch {
+    // On error, return cached if available, otherwise safe fallback
+    if (gasPriceCache.data) return gasPriceCache.data;
+    return { average: "1", max: "1", median: "1", min: "1" };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Shielded
 // ---------------------------------------------------------------------------

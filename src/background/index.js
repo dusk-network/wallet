@@ -568,8 +568,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
         }
         await ensureEngineConfigured();
+        // Fetch live gas price from node (cached for 30s) to use as default.
+        let dynamicPrice;
+        try {
+          const gasData = await engineCall("dusk_getCachedGasPrice");
+          dynamicPrice = gasData?.median;
+        } catch {
+          // Ignore errors, will fall back to static default
+        }
         // Apply standard gas defaults for wallet initiated transactions.
-        const baseParams = applyTxDefaults(message.params ?? {});
+        const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
         const result = await engineCall("dusk_sendTransaction", baseParams);
 
         // Persist metadata (see rpc.js comments).
