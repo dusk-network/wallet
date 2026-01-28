@@ -11,17 +11,32 @@ export default defineConfig({
     // Coverage configuration
     coverage: {
       provider: "v8",
-      reporter: ["text", "html"],
-      include: ["src/**/*.js"],
+      reporter: ["text", "text-summary", "html", "lcov"],
+      reportsDirectory: "./coverage",
+      include: [
+        // Only measure coverage for pure utility modules (testable without mocks)
+        "src/shared/amount.js",
+        "src/shared/bytes.js",
+        "src/shared/chain.js",
+        "src/shared/constants.js",
+        "src/shared/duskUri.js",
+        "src/shared/explorer.js",
+        "src/shared/network.js",
+        "src/shared/networkPresets.js",
+        "src/shared/txDefaults.js",
+        "src/shared/addressBook.js",
+        "src/ui/lib/strings.js",
+      ],
       exclude: [
         "src/**/*.test.js",
-        "src/background.js",
-        "src/contentScript.js",
-        "src/inpage.js",
-        "src/notification.js",
-        "src/offscreen.js",
-        "src/popup.js",
       ],
+      // Coverage thresholds for tested modules
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 70,
+        statements: 80,
+      },
     },
   },
 });
