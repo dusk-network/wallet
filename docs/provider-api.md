@@ -138,6 +138,22 @@ const bal = await dusk.request({ method: "dusk_getPublicBalance" });
 
 ---
 
+### `dusk_estimateGas`
+
+Get current gas price statistics from the node's mempool. Requires connection.
+
+```js
+const gas = await dusk.request({
+  method: "dusk_estimateGas",
+  params: { maxTransactions: 100 }  // optional, defaults to 100
+});
+// → { average: "1", max: "1", median: "1", min: "1" }
+```
+
+Returns gas prices in Lux (1 Lux = 10⁻⁹ DUSK). Values default to `"1"` when the mempool is empty.
+
+---
+
 ### `dusk_sendTransaction`
 
 Send a transaction. The wallet shows an approval prompt where users can adjust gas.

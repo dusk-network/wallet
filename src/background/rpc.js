@@ -253,6 +253,15 @@ export async function handleRpc(origin, request) {
       return await engineCall("dusk_getPublicBalance");
     }
 
+    case "dusk_estimateGas": {
+      // Gas estimation is public info, but still require connection.
+      const perm = await getPermissionForOrigin(origin);
+      if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
+
+      await ensureEngineConfigured();
+      return await engineCall("dusk_estimateGas", params ?? {});
+    }
+
     case "dusk_sendTransaction": {
       const perm = await getPermissionForOrigin(origin);
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");

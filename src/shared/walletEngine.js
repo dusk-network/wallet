@@ -826,6 +826,56 @@ export async function getPublicBalance() {
   );
 }
 
+/**
+ * Fetch current gas price stats from the Rusk node's mempool.
+ * @param {Object} [opts]
+ * @param {number} [opts.maxTransactions=100] - Max mempool txs to sample.
+ * @returns {Promise<{average: string, max: string, median: string, min: string}>}
+ *          All values are stringified u64 (Lux, i.e. 1e-9 DUSK).
+ *          Returns { average: "1", max: "1", median: "1", min: "1" } when mempool is empty.
+ */
+export async function getGasPrice({ maxTransactions = 100 } = {}) {
+  await ensureNetwork();
+
+  const nodeBase = String(engineConfig.nodeUrl || "").trim();
+  if (!nodeBase) throw new Error("No node URL configured");
+
+  const url = new URL("/on/node/gas_price", nodeBase);
+  url.searchParams.set("max_transactions", String(maxTransactions));
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Gas price fetch failed (${res.status}): ${text.slice(0, 200)}`);
+    }
+
+    const data = await res.json();
+    // Rusk returns { average: u64, max: u64, median: u64, min: u64 }
+    return {
+      average: String(data.average ?? 1),
+      max: String(data.max ?? 1),
+      median: String(data.median ?? 1),
+      min: String(data.min ?? 1),
+    };
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      throw new Error("Gas price request timed out");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Shielded
 // ---------------------------------------------------------------------------
