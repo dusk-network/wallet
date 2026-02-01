@@ -182,7 +182,7 @@ export function parseDuskUri(input) {
 
 /**
  * Best-effort normalization for comparing chain ids.
- * Accepts decimal ("2") or hex ("0x2").
+ * Accepts CAIP-2 `dusk:<id>`.
  *
  * @param {string} chain
  * @returns {string} decimal string or ""
@@ -192,8 +192,7 @@ export function normalizeChainId(chain) {
 }
 
 export function chainLabel(chainDec) {
-  const raw = String(chainDec ?? "").trim();
-  const c = /^\d+$/.test(raw) ? raw : normalizeChainId(raw);
+  const c = normalizeChainId(chainDec);
   if (c === "1") return "Mainnet";
   if (c === "2") return "Testnet";
   if (c === "3") return "Devnet";

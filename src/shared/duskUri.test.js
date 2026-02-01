@@ -175,20 +175,15 @@ describe("normalizeChainId", () => {
 
 describe("chainLabel", () => {
   it("returns known network names", () => {
-    expect(chainLabel("1")).toBe("Mainnet");
-    expect(chainLabel("2")).toBe("Testnet");
-    expect(chainLabel("3")).toBe("Devnet");
-    expect(chainLabel("0")).toBe("Local");
-  });
-
-  it("handles CAIP-2 input", () => {
     expect(chainLabel("dusk:1")).toBe("Mainnet");
     expect(chainLabel("dusk:2")).toBe("Testnet");
+    expect(chainLabel("dusk:3")).toBe("Devnet");
+    expect(chainLabel("dusk:0")).toBe("Local");
   });
 
   it("returns generic label for unknown chains", () => {
-    expect(chainLabel("42")).toBe("Chain 42");
-    expect(chainLabel("1337")).toBe("Chain 1337");
+    expect(chainLabel("dusk:42")).toBe("Chain 42");
+    expect(chainLabel("dusk:1337")).toBe("Chain 1337");
   });
 
   it("returns empty for invalid input", () => {
