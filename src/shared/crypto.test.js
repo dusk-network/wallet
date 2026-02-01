@@ -10,7 +10,7 @@ const hasWebCrypto = typeof globalThis.crypto?.subtle !== "undefined";
 
     const enc = await encryptMnemonic(mnemonic, pwd);
     expect(typeof enc.iterations).toBe("number");
-    expect(enc.iterations).toBeGreaterThanOrEqual(100_000);
+    expect(enc.iterations).toBeGreaterThanOrEqual(900_000);
 
     const serial = serializeEncryptInfo(enc);
     const deserial = deserializeEncryptInfo(serial);

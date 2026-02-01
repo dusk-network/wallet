@@ -55,7 +55,7 @@ async function getKeyMaterial(pwd) {
   );
 }
 
-const DEFAULT_PBKDF2_ITERATIONS = 100_000;
+const DEFAULT_PBKDF2_ITERATIONS = 900_000;
 
 /**
  * @param {string} pwd

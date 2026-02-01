@@ -19,17 +19,19 @@
 **Priority: Critical**
 
 ### 1.1 Cryptographic Improvements
-- [ ] Increase PBKDF2 iterations from 10,000 → 100,000+
-- [ ] Add rate limiting on vault unlock (exponential backoff)
+- [x] Increase PBKDF2 iterations from 10,000 → 900,000
+- [x] Add rate limiting on vault unlock (exponential backoff)
+- [x] Audit mnemonic memory lifecycle
+- [x] Remove legacy vault format support
 - [ ] Consider Argon2id for browser vault (WebAssembly)
-- [ ] Audit mnemonic memory lifecycle
 
 ### 1.2 Content Security Policy
 - [ ] Define strict CSP for Tauri (`"csp": null` currently)
 - [ ] Ensure extension CSP blocks inline scripts
 
 ### 1.3 Security Testing
-- [ ] Unit tests for `vault.js` and `crypto.js`
+- [x] Unit tests for `crypto.js`
+- [ ] Unit tests for `vault.js`
 - [ ] Integration tests for `shieldedStore.js`
 - [ ] Document threat model in `SECURITY.md`
 
