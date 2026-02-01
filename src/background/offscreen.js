@@ -90,18 +90,29 @@ async function ensureOffscreenDocument() {
   }
 }
 
-export async function engineCall(method, params) {
+function withTimeout(promise, timeoutMs, label = "Engine call timed out") {
+  if (!timeoutMs) return promise;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(label)), timeoutMs);
+    }),
+  ]);
+}
+
+export async function engineCall(method, params, options = {}) {
   await ensureOffscreenDocument();
 
   const id = `${Date.now()}_${++engineMsgSeq}`;
   const payload = { type: "DUSK_ENGINE_CALL", id, method, params };
+  const timeoutMs = Number(options?.timeoutMs || 0);
 
   // Right after createDocument(), the offscreen page can be in the middle of loading.
   // A short retry loop makes this much less flaky.
   let lastErr = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const resp = await runtimeSendMessage(payload);
+      const resp = await withTimeout(runtimeSendMessage(payload), timeoutMs);
 
       if (!resp) throw new Error("No response from offscreen engine");
       if (resp.error) throw resp.error;

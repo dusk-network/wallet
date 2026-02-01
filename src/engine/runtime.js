@@ -112,7 +112,14 @@ async function watchTxExecuted(hash) {
 }
 
 ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
-  if (!message || message.type !== "DUSK_ENGINE_CALL") return;
+  if (!message) return;
+
+  if (message.type === "DUSK_ENGINE_PING") {
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message.type !== "DUSK_ENGINE_CALL") return;
 
   (async () => {
     try {
@@ -243,3 +250,8 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
 
   return true;
 });
+
+// Notify background that the engine page is ready to accept calls.
+runtimeSendMessage({ type: "DUSK_ENGINE_READY" }, { allowLastError: true }).catch(
+  () => {}
+);

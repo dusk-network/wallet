@@ -11,3 +11,7 @@ export const ensureEngineConfigured = (...args) => host.ensureEngineConfigured(.
 export const getEngineStatus = (...args) => host.getEngineStatus(...args);
 export const invalidateEngineConfig = (...args) =>
   host.invalidateEngineConfig(...args);
+export const handleEngineReady = (...args) =>
+  typeof host.handleEngineReady === "function"
+    ? host.handleEngineReady(...args)
+    : undefined;

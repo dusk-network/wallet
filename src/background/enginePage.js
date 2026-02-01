@@ -33,6 +33,9 @@ let lastEngineConfig = null;
 let engineMsgSeq = 0;
 let engineTabId = null;
 const ext = getExtensionApi();
+let engineReady = false;
+let engineReadyPromise = null;
+let engineReadyResolve = null;
 
 function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -70,6 +73,9 @@ async function ensureEnginePage() {
   if (engineTabId != null) {
     try {
       await tabsGet(engineTabId);
+      if (!engineReady) {
+        await waitForEngineReady();
+      }
       return;
     } catch {
       engineTabId = null;
@@ -79,7 +85,10 @@ async function ensureEnginePage() {
   const existing = await findExistingEngineTab();
   if (existing?.id != null) {
     engineTabId = existing.id;
+    engineReady = false;
+    engineReadyPromise = null;
     await hideEngineTab(engineTabId);
+    await waitForEngineReady();
     return;
   }
 
@@ -91,7 +100,10 @@ async function ensureEnginePage() {
 
     const tab = await tabsCreate({ url, active: false });
     engineTabId = tab?.id ?? null;
+    engineReady = false;
+    engineReadyPromise = null;
     await hideEngineTab(engineTabId);
+    await waitForEngineReady();
   })();
 
   try {
@@ -106,6 +118,8 @@ if (ext?.tabs?.onRemoved) {
     ext.tabs.onRemoved.addListener((tabId) => {
       if (tabId === engineTabId) {
         engineTabId = null;
+        engineReady = false;
+        engineReadyPromise = null;
       }
     });
   } catch {
@@ -113,16 +127,63 @@ if (ext?.tabs?.onRemoved) {
   }
 }
 
-export async function engineCall(method, params) {
+function waitForEngineReady(timeoutMs = 5000) {
+  if (engineReady) return Promise.resolve();
+
+  if (!engineReadyPromise) {
+    engineReadyPromise = new Promise((resolve) => {
+      engineReadyResolve = resolve;
+    });
+  }
+
+  if (engineTabId != null) {
+    withTimeout(runtimeSendMessage({ type: "DUSK_ENGINE_PING" }), 2000).then(
+      () => handleEngineReady(),
+      () => {}
+    );
+  }
+
+  if (!timeoutMs) return engineReadyPromise;
+
+  return Promise.race([
+    engineReadyPromise,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error("Engine page did not become ready in time"));
+      }, timeoutMs);
+    }),
+  ]);
+}
+
+export function handleEngineReady() {
+  engineReady = true;
+  if (engineReadyResolve) {
+    engineReadyResolve();
+    engineReadyResolve = null;
+  }
+}
+
+function withTimeout(promise, timeoutMs, label = "Engine call timed out") {
+  if (!timeoutMs) return promise;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(label)), timeoutMs);
+    }),
+  ]);
+}
+
+export async function engineCall(method, params, options = {}) {
   await ensureEnginePage();
 
   const id = `${Date.now()}_${++engineMsgSeq}`;
   const payload = { type: "DUSK_ENGINE_CALL", id, method, params };
+  const timeoutMs = Number(options?.timeoutMs || 0);
 
   let lastErr = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const resp = await runtimeSendMessage(payload);
+      const resp = await withTimeout(runtimeSendMessage(payload), timeoutMs);
 
       if (!resp) throw new Error("No response from engine page");
       if (resp.error) throw resp.error;

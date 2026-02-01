@@ -14,6 +14,7 @@ import {
   ensureEngineConfigured,
   getEngineStatus,
   invalidateEngineConfig,
+  handleEngineReady,
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
 import { getPending, resolvePendingDecision } from "./pending.js";
@@ -170,6 +171,16 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message?.type === "DUSK_ENGINE_READY") {
+    handleEngineReady?.(message);
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message?.type === "DUSK_ENGINE_PING") {
+    return false;
+  }
+
   (async () => {
     try {
       // UI heartbeat to reset auto-lock timer.
@@ -263,7 +274,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const mnemonic = await unlockVault(password);
 
         await ensureEngineConfigured();
-        const result = await engineCall("engine_unlock", { mnemonic });
+        const result = await engineCall("engine_unlock", { mnemonic }, { timeoutMs: 15000 });
 
         // result is expected to contain accounts, if not, ask status.
         const accounts = Array.isArray(result?.accounts)
