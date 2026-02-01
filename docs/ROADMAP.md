@@ -121,7 +121,7 @@ Current: 93% on shared utilities, core engine untested.
 
 ### 5.3 CI/CD
 - [x] GitHub Actions (test, build)
-- [ ] Automated releases on tags
+- [x] Automated releases on tags
 - [ ] Coverage badges in README
 
 ---

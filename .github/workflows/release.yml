@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Build Chrome extension
+        run: npm run build:chrome
+
+      - name: Build Firefox extension
+        run: npm run build:firefox
+
+      - name: Build Tauri web assets
+        run: npm run build:tauri
+
+      - name: Package artifacts
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          zip -r "dusk-wallet-chrome-${VERSION}.zip" dist
+          zip -r "dusk-wallet-firefox-${VERSION}.zip" dist-firefox
+          zip -r "dusk-wallet-tauri-web-${VERSION}.zip" dist-tauri
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dusk-wallet-chrome-${{ github.ref_name }}.zip
+            dusk-wallet-firefox-${{ github.ref_name }}.zip
+            dusk-wallet-tauri-web-${{ github.ref_name }}.zip
