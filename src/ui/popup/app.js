@@ -24,6 +24,11 @@ import {
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
 import { getRuntimeKind } from "../../platform/runtime.js";
+import {
+  getExtensionApi,
+  runtimeGetURL,
+  tabsCreate,
+} from "../../platform/extensionApi.js";
 
 // Keep everything in dark mode for now.
 document.documentElement.classList.add("dark");
@@ -38,6 +43,7 @@ try {
 
 const app = document.getElementById("app");
 const headerActionsHost = document.getElementById("header-actions");
+const ext = getExtensionApi();
 
 // Animate route changes only.
 let lastAnimatedRoute = null;
@@ -145,9 +151,9 @@ function installTxStatusListener() {
   txStatusListenerInstalled = true;
 
   try {
-    if (!chrome?.runtime?.onMessage) return;
+    if (!ext?.runtime?.onMessage) return;
 
-    chrome.runtime.onMessage.addListener((msg) => {
+    ext.runtime.onMessage.addListener((msg) => {
       try {
         if (msg?.type === "DUSK_UI_SHIELDED_STATUS") {
           // Shielded sync finished (or status changed) in offscreen.
@@ -321,10 +327,10 @@ async function onExpand() {
   try {
     netMenu.close();
     const origin = await getActiveOrigin();
-    const url = chrome.runtime.getURL(
+    const url = runtimeGetURL(
       `full.html${origin ? `?origin=${encodeURIComponent(origin)}` : ""}`
     );
-    await chrome.tabs.create({ url });
+    await tabsCreate({ url });
     if (isPopupView) window.close();
   } catch (e) {
     showToast(e?.message ?? String(e));

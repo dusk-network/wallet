@@ -1,4 +1,5 @@
 import { isExtensionRuntime } from "./runtime.js";
+import { runtimeGetURL } from "./extensionApi.js";
 
 /**
  * Return a URL that can be used with fetch() to load a bundled static asset.
@@ -13,7 +14,8 @@ export function assetUrl(path) {
 
   if (isExtensionRuntime()) {
     try {
-      if (chrome?.runtime?.getURL) return chrome.runtime.getURL(p);
+      const url = runtimeGetURL(p);
+      if (url) return url;
     } catch {
       // ignore
     }

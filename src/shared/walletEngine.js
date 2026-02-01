@@ -10,6 +10,7 @@ import {
 import { bytesToHex, hexToBytes, toBytes } from "./bytes.js";
 import { TX_KIND } from "./constants.js";
 import { assetUrl } from "../platform/assets.js";
+import { runtimeSendMessage } from "../platform/extensionApi.js";
 
 import {
   clearNotes,
@@ -935,18 +936,18 @@ function setShieldedStatus(patch = {}) {
 
 function broadcastShieldedStatus(reason = "") {
   // Best-effort UI push for extension pages (popup/full view).
-  // In non-extension runtimes, `chrome` is not available.
   try {
-    const rt = globalThis?.chrome?.runtime;
-    if (!rt?.sendMessage) return;
-    rt.sendMessage({
+    runtimeSendMessage(
+      {
       type: "DUSK_UI_SHIELDED_STATUS",
       reason,
       status: getShieldedStatus(),
       walletId: getWalletId(),
       networkKey: getNetworkKey(),
       profileIndex: state.currentIndex || 0,
-    });
+      },
+      { allowLastError: true }
+    ).catch(() => {});
   } catch {
     // ignore
   }

@@ -1,4 +1,10 @@
 import { isExtensionRuntime, isTauriRuntime } from "./runtime.js";
+import {
+  storageLocalClear,
+  storageLocalGet,
+  storageLocalRemove,
+  storageLocalSet,
+} from "./extensionApi.js";
 
 // Promise-based storage adapter with a chrome.storage-like surface:
 // - get(keys)
@@ -118,29 +124,21 @@ const localStorageAdapter = {
 const chromeStorageAdapter = {
   /** @param {string|string[]|Object|null} keys */
   get(keys) {
-    return new Promise((resolve) => {
-      chrome.storage.local.get(keys ?? null, (items) => resolve(items));
-    });
+    return storageLocalGet(keys ?? null);
   },
 
   /** @param {Object} items */
   set(items) {
-    return new Promise((resolve) => {
-      chrome.storage.local.set(items, () => resolve());
-    });
+    return storageLocalSet(items);
   },
 
   /** @param {string|string[]} keys */
   remove(keys) {
-    return new Promise((resolve) => {
-      chrome.storage.local.remove(keys, () => resolve());
-    });
+    return storageLocalRemove(keys);
   },
 
   clear() {
-    return new Promise((resolve) => {
-      chrome.storage.local.clear(() => resolve());
-    });
+    return storageLocalClear();
   },
 };
 

@@ -1,10 +1,11 @@
 import { fixedOrigin } from "./env.js";
 import { state } from "./state.js";
+import { tabsQuery } from "../../platform/extensionApi.js";
 
 export async function getActiveOrigin() {
   if (fixedOrigin) return fixedOrigin;
   try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabs = await tabsQuery({ active: true, currentWindow: true });
     const url = tabs?.[0]?.url;
     if (!url) return null;
     return new URL(url).origin;

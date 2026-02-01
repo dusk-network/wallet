@@ -1,23 +1,28 @@
-// Offscreen engine bridge.
-// Splits out the offscreen-document lifecycle + message retries from background/index.
+// Engine page bridge for Firefox.
+//
+// Firefox MV3 does not support chrome.offscreen. We host the wallet engine
+// inside a hidden extension page (engine.html) and communicate via runtime
+// messages (same protocol as offscreen).
 
 import { getSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import {
   getExtensionApi,
-  offscreenCreateDocument,
-  runtimeGetContexts,
   runtimeGetURL,
   runtimeSendMessage,
+  tabsCreate,
+  tabsGet,
+  tabsHide,
+  tabsQuery,
 } from "../platform/extensionApi.js";
 
-const OFFSCREEN_PATH = "offscreen.html";
+const ENGINE_PAGE_PATH = "engine.html";
 
 /**
- * Prevent multiple concurrent createDocument() calls.
+ * Prevent multiple concurrent engine page creations.
  * @type {Promise<void> | null}
  */
-let offscreenCreating = null;
+let engineCreating = null;
 
 /**
  * Cache the last config we pushed into the engine.
@@ -26,91 +31,106 @@ let offscreenCreating = null;
 let lastEngineConfig = null;
 
 let engineMsgSeq = 0;
+let engineTabId = null;
 const ext = getExtensionApi();
 
 function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function hasOffscreenDocument() {
-  const offscreenUrl = runtimeGetURL(OFFSCREEN_PATH);
-
-  // Chrome 114+ has runtime.getContexts() which can detect OFFSCREEN_DOCUMENT.
+async function hideEngineTab(tabId) {
+  if (tabId == null) return;
   try {
-    const contexts = await runtimeGetContexts({
-      contextTypes: ["OFFSCREEN_DOCUMENT"],
-      documentUrls: [offscreenUrl],
-    });
-    return Array.isArray(contexts) && contexts.length > 0;
+    if (ext?.tabs?.hide) {
+      await tabsHide([tabId]);
+    }
   } catch {
-    // ignore and fall back
-  }
-
-  // Fallback for older Chrome versions: use Service Worker Clients API.
-  // (Not perfect, but works in practice)
-  try {
-    const matchedClients = await clients.matchAll({
-      type: "window",
-      includeUncontrolled: true,
-    });
-    return matchedClients.some((c) => c.url === offscreenUrl);
-  } catch {
-    return false;
+    // ignore
   }
 }
 
-async function ensureOffscreenDocument() {
-  if (!ext?.offscreen?.createDocument) {
-    throw rpcError(
-      ERROR_CODES.UNSUPPORTED,
-      "chrome.offscreen API is not available. Use Chrome/Chromium 109+ (MV3)."
-    );
+async function findExistingEngineTab() {
+  const url = runtimeGetURL(ENGINE_PAGE_PATH);
+  if (!url) return null;
+  try {
+    const tabs = await tabsQuery({ url: [url] });
+    if (Array.isArray(tabs) && tabs.length) return tabs[0];
+  } catch {
+    // ignore
   }
+  return null;
+}
 
-  if (await hasOffscreenDocument()) return;
-
-  if (offscreenCreating) {
-    await offscreenCreating;
+async function ensureEnginePage() {
+  if (engineCreating) {
+    await engineCreating;
     return;
   }
 
-  offscreenCreating = (async () => {
-    await offscreenCreateDocument({
-      url: OFFSCREEN_PATH,
-      reasons: ["BLOBS"],
-      justification:
-        "Run Dusk wallet engine that requires Blob URLs (URL.createObjectURL) for sandbox worker.",
-    });
+  if (engineTabId != null) {
+    try {
+      await tabsGet(engineTabId);
+      return;
+    } catch {
+      engineTabId = null;
+    }
+  }
+
+  const existing = await findExistingEngineTab();
+  if (existing?.id != null) {
+    engineTabId = existing.id;
+    await hideEngineTab(engineTabId);
+    return;
+  }
+
+  engineCreating = (async () => {
+    const url = runtimeGetURL(ENGINE_PAGE_PATH);
+    if (!url) {
+      throw rpcError(ERROR_CODES.INTERNAL, "Engine page URL not available");
+    }
+
+    const tab = await tabsCreate({ url, active: false });
+    engineTabId = tab?.id ?? null;
+    await hideEngineTab(engineTabId);
   })();
 
   try {
-    await offscreenCreating;
+    await engineCreating;
   } finally {
-    offscreenCreating = null;
+    engineCreating = null;
+  }
+}
+
+if (ext?.tabs?.onRemoved) {
+  try {
+    ext.tabs.onRemoved.addListener((tabId) => {
+      if (tabId === engineTabId) {
+        engineTabId = null;
+      }
+    });
+  } catch {
+    // ignore
   }
 }
 
 export async function engineCall(method, params) {
-  await ensureOffscreenDocument();
+  await ensureEnginePage();
 
   const id = `${Date.now()}_${++engineMsgSeq}`;
   const payload = { type: "DUSK_ENGINE_CALL", id, method, params };
 
-  // Right after createDocument(), the offscreen page can be in the middle of loading.
-  // A short retry loop makes this much less flaky.
   let lastErr = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const resp = await runtimeSendMessage(payload);
 
-      if (!resp) throw new Error("No response from offscreen engine");
+      if (!resp) throw new Error("No response from engine page");
       if (resp.error) throw resp.error;
       return resp.result;
     } catch (e) {
       lastErr = e;
       const msg = e?.message ?? String(e);
 
-      // Common transient errors while the offscreen doc is starting.
       const transient =
         msg.includes("Receiving end does not exist") ||
         msg.includes("Could not establish connection") ||

@@ -16,7 +16,7 @@ import {
   ensureEngineConfigured,
   getEngineStatus,
   invalidateEngineConfig,
-} from "./offscreen.js";
+} from "./engineHost.js";
 import { requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { putTxMeta } from "../shared/txStore.js";
@@ -25,6 +25,7 @@ import {
   broadcastChainChangedAll,
   broadcastToOrigin,
 } from "./dappEvents.js";
+import { runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
 export async function handleRpc(origin, request) {
@@ -95,8 +96,8 @@ export async function handleRpc(origin, request) {
       const vault = await loadVault();
       if (!vault) {
         try {
-          const url = chrome.runtime.getURL("full.html");
-          chrome.tabs.create({ url });
+          const url = runtimeGetURL("full.html");
+          tabsCreate({ url }).catch(() => {});
         } catch {
           // ignore
         }

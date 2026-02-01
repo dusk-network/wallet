@@ -6,21 +6,28 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { explorerTxUrl } from "../shared/explorer.js";
 import { getTxMeta } from "../shared/txStore.js";
 import { shortHash } from "../ui/lib/strings.js";
+import {
+  getExtensionApi,
+  notificationsCreate,
+  runtimeGetURL,
+  tabsCreate,
+} from "../platform/extensionApi.js";
 
 const ICON_PATH = "icons/dusk-128.png";
 
 let handlersInstalled = false;
+const ext = getExtensionApi();
 
 export function registerTxNotificationHandlers() {
   if (handlersInstalled) return;
   handlersInstalled = true;
 
   try {
-    if (!chrome?.notifications) return;
+    if (!ext?.notifications) return;
 
     // Clicking the notification opens the explorer (when possible), otherwise
     // falls back to the wallet full view.
-    chrome.notifications.onClicked.addListener(async (notificationId) => {
+    ext.notifications.onClicked?.addListener(async (notificationId) => {
       try {
         const id = String(notificationId ?? "");
         if (!id.startsWith("dusk_tx_")) return;
@@ -35,22 +42,22 @@ export function registerTxNotificationHandlers() {
           const nodeUrl = meta?.nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
           const url = explorerTxUrl(nodeUrl, hash);
           if (url) {
-            chrome.tabs.create({ url });
+            tabsCreate({ url }).catch(() => {});
             return;
           }
         }
 
-        const walletUrl = chrome.runtime.getURL(
+        const walletUrl = runtimeGetURL(
           `full.html?route=activity${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`
         );
-        chrome.tabs.create({ url: walletUrl });
+        tabsCreate({ url: walletUrl }).catch(() => {});
       } catch {
         // ignore
       }
     });
 
     // Optional buttons: 0 => explorer, 1 => open wallet.
-    chrome.notifications.onButtonClicked.addListener(
+    ext.notifications.onButtonClicked?.addListener(
       async (notificationId, buttonIndex) => {
         try {
           const id = String(notificationId ?? "");
@@ -67,16 +74,16 @@ export function registerTxNotificationHandlers() {
           if (buttonIndex === 0 && (status === "executed" || status === "failed")) {
             const url = explorerTxUrl(nodeUrl, hash);
             if (url) {
-              chrome.tabs.create({ url });
+              tabsCreate({ url }).catch(() => {});
               return;
             }
           }
 
           // Fallback: open wallet (activity) so the user can see the tx.
-          const walletUrl = chrome.runtime.getURL(
+          const walletUrl = runtimeGetURL(
             `full.html?route=activity${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`
           );
-          chrome.tabs.create({ url: walletUrl });
+          tabsCreate({ url: walletUrl }).catch(() => {});
         } catch {
           // ignore
         }
@@ -94,7 +101,7 @@ export function registerTxNotificationHandlers() {
  */
 export async function notifyTxSubmitted({ hash, origin, title, nodeUrl } = {}) {
   try {
-    if (!chrome?.notifications) return;
+    if (!ext?.notifications) return;
 
     const resolvedNodeUrl =
       nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
@@ -109,7 +116,7 @@ export async function notifyTxSubmitted({ hash, origin, title, nodeUrl } = {}) {
     /** @type {chrome.notifications.NotificationOptions<true>} */
     const opts = {
       type: "basic",
-      iconUrl: chrome.runtime.getURL(ICON_PATH),
+      iconUrl: runtimeGetURL(ICON_PATH),
       title: title || "Transaction submitted",
       message: msgLines.length ? msgLines.join("\n") : "Transaction submitted",
     };
@@ -122,9 +129,7 @@ export async function notifyTxSubmitted({ hash, origin, title, nodeUrl } = {}) {
 
     const id = `dusk_tx_${hash}_submitted_${Date.now()}`;
 
-    chrome.notifications.create(id, opts, () => {
-      // ignore
-    });
+    await notificationsCreate(id, opts);
   } catch {
     // ignore
   }
@@ -143,7 +148,7 @@ export async function notifyTxExecuted({
   nodeUrl,
 } = {}) {
   try {
-    if (!chrome?.notifications) return;
+    if (!ext?.notifications) return;
     if (!hash) return;
 
     const resolvedNodeUrl =
@@ -161,7 +166,7 @@ export async function notifyTxExecuted({
     /** @type {chrome.notifications.NotificationOptions<true>} */
     const opts = {
       type: "basic",
-      iconUrl: chrome.runtime.getURL(ICON_PATH),
+      iconUrl: runtimeGetURL(ICON_PATH),
       title: ok ? "Transaction executed" : "Transaction failed",
       message: msgLines.length ? msgLines.join("\n") : ok ? "Transaction executed" : "Transaction failed",
     };
@@ -182,9 +187,7 @@ export async function notifyTxExecuted({
 
     const id = `dusk_tx_${hash}_${ok ? "executed" : "failed"}_${Date.now()}`;
 
-    chrome.notifications.create(id, opts, () => {
-      // ignore
-    });
+    await notificationsCreate(id, opts);
   } catch {
     // ignore
   }

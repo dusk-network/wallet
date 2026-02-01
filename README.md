@@ -27,6 +27,14 @@ npm run build:extension
 
 Then load `dist/` as an unpacked extension in `chrome://extensions` (Developer mode).
 
+### Firefox Extension
+
+```bash
+npm run build:firefox
+```
+
+Then load `dist-firefox/` as a temporary add-on in `about:debugging`.
+
 ### Desktop / Mobile (Tauri)
 
 ```bash
@@ -78,6 +86,7 @@ The wallet engine runs in an offscreen document (extension) or directly in-proce
 
 ```bash
 npm run build:extension   # Build extension → dist/
+npm run build:firefox     # Build Firefox extension → dist-firefox/
 npm run build:tauri       # Build Tauri bundle → dist-tauri/
 npm run dev:tauri         # Run Tauri dev server
 ```

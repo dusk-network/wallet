@@ -1,23 +1,35 @@
+import fs from "node:fs";
+import path from "node:path";
 import { defineConfig } from "vite";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 
+const MANIFEST_PATH = path.resolve("config/manifest.firefox.json");
+
+function manifestPlugin() {
+  let outDir = "dist-firefox";
+  return {
+    name: "dusk-firefox-manifest",
+    apply: "build",
+    configResolved(config) {
+      outDir = config.build.outDir;
+    },
+    closeBundle() {
+      fs.copyFileSync(MANIFEST_PATH, path.join(outDir, "manifest.json"));
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [
-    // bip39 pulls in node shims, the web-wallet already uses this plugin.
-    nodePolyfills(),
-  ],
+  plugins: [nodePolyfills(), manifestPlugin()],
   define: {
-    // Build-time constant used by src/wallet/bus.js to avoid bundling the
-    // local (Tauri/web) backend into the extension bundle.
     __DUSK_BACKEND__: JSON.stringify("extension"),
-    __DUSK_TARGET__: JSON.stringify("chrome"),
-    __DUSK_ENGINE_HOST__: JSON.stringify("offscreen"),
+    __DUSK_TARGET__: JSON.stringify("firefox"),
+    __DUSK_ENGINE_HOST__: JSON.stringify("enginePage"),
   },
   build: {
-    outDir: "dist",
+    outDir: "dist-firefox",
     emptyOutDir: true,
     sourcemap: true,
-    // We use multiple JS entrypoints so the output file names are stable.
     rollupOptions: {
       input: {
         background: "src/background.js",
