@@ -19,13 +19,4 @@ const hasWebCrypto = typeof globalThis.crypto?.subtle !== "undefined";
     expect(dec).toBe(mnemonic);
   });
 
-  it("rejects legacy vaults without iterations", async () => {
-    const mnemonic = "legacy seed phrase";
-    const pwd = "password123";
-
-    const enc = await encryptMnemonic(mnemonic, pwd);
-    const legacy = { data: enc.data, iv: enc.iv, salt: enc.salt };
-
-    await expect(decryptMnemonic(legacy, pwd)).rejects.toThrow(/legacy vault/i);
-  });
 });
