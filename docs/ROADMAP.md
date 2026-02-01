@@ -23,11 +23,10 @@
 - [x] Add rate limiting on vault unlock (exponential backoff)
 - [x] Audit mnemonic memory lifecycle
 - [x] Remove legacy vault format support
-- [ ] Consider Argon2id for browser vault (WebAssembly)
 
 ### 1.2 Content Security Policy
-- [ ] Define strict CSP for Tauri (`"csp": null` currently)
-- [ ] Ensure extension CSP blocks inline scripts
+- [x] Define strict CSP for Tauri (`"csp": null` currently)
+- [x] Ensure extension CSP blocks inline scripts
 
 ### 1.3 Security Testing
 - [x] Unit tests for `crypto.js`

@@ -38,13 +38,13 @@ Dusk Wallet is a self-custody wallet — users control their own keys. This docu
 
 | Platform | Algorithm | Parameters |
 |----------|-----------|------------|
-| Extension | PBKDF2 + AES-GCM-256 | 10,000 iterations (TODO: increase) |
+| Extension | PBKDF2 + AES-GCM-256 | 900,000 iterations |
 | Tauri | Stronghold + Argon2 | OS-level encrypted storage |
 
 ```js
 // Extension vault encryption
 const key = await crypto.subtle.deriveKey(
-  { name: "PBKDF2", salt, iterations: 10000, hash: "SHA-256" },
+  { name: "PBKDF2", salt, iterations: 900000, hash: "SHA-256" },
   passwordKey,
   { name: "AES-GCM", length: 256 },
   false,
@@ -60,9 +60,8 @@ const key = await crypto.subtle.deriveKey(
 
 #### Recommendations
 
-- [ ] Increase PBKDF2 iterations to 100,000+
-- [ ] Consider WebAssembly Argon2 for browser
-- [ ] Add rate limiting on unlock attempts
+- Keep PBKDF2 iterations aligned with industry guidance (currently 900,000)
+- Keep rate limiting on unlock attempts (exponential backoff)
 
 ### 2. Auto-Lock
 
@@ -122,12 +121,11 @@ Manifest V3 enforces strict CSP by default:
 
 #### Tauri
 
-**Current state**: `"csp": null` (disabled)
+**Current state**: strict CSP enabled.
 
-**TODO**: Define strict CSP:
 ```json
 {
-  "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+  "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http: wss: ws:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 }
 ```
 
@@ -187,11 +185,11 @@ Shielded notes are stored in IndexedDB without encryption.
 
 ### 4. PBKDF2 Iteration Count
 
-Current iteration count (10,000) is below modern recommendations.
+Current iteration count is 900,000.
 
-**Risk**: Faster brute-force attacks on weak passwords.
+**Risk**: Brute-force resistance still depends on password strength.
 
-**TODO**: Increase to 100,000+ iterations; consider Argon2.
+**Mitigation**: Maintain a high iteration count and monitor guidance for updates.
 
 ### 5. No Hardware Wallet Support
 

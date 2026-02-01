@@ -63,7 +63,7 @@ Types:
 Examples:
 ```
 feat(rpc): add dusk_estimateGas method
-fix(vault): increase PBKDF2 iterations to 100k
+fix(vault): increase PBKDF2 iterations to 900k
 docs: add security threat model
 test(txDefaults): add coverage for edge cases
 ```

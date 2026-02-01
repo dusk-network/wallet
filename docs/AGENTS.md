@@ -127,7 +127,7 @@ const finalParams = applyTxDefaults(params, { dynamicPrice: livePrice.median });
 
 | Platform | Method |
 |----------|--------|
-| Extension | PBKDF2 (100k iter) + AES-GCM-256 → chrome.storage.local |
+| Extension | PBKDF2 (900k iter) + AES-GCM-256 → chrome.storage.local |
 | Tauri | Stronghold plugin with Argon2 salt file |
 
 ### Error Handling
