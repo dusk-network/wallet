@@ -16,6 +16,37 @@ const STRONGHOLD_SNAPSHOT_FILE = "dusk-wallet.hold";
 const STRONGHOLD_CLIENT_PATH = "dusk-wallet";
 const STRONGHOLD_STORE_KEY_MNEMONIC = "mnemonic";
 
+const UNLOCK_BACKOFF_BASE_MS = 1_000;
+const UNLOCK_BACKOFF_MAX_MS = 60_000;
+
+const unlockGuard = {
+  failures: 0,
+  nextAllowedAt: 0,
+};
+
+function checkUnlockRateLimit() {
+  const now = Date.now();
+  if (unlockGuard.nextAllowedAt && now < unlockGuard.nextAllowedAt) {
+    const waitMs = unlockGuard.nextAllowedAt - now;
+    const waitSec = Math.max(1, Math.ceil(waitMs / 1000));
+    throw new Error(`Too many attempts. Try again in ${waitSec}s.`);
+  }
+}
+
+function recordUnlockFailure() {
+  unlockGuard.failures += 1;
+  const delay = Math.min(
+    UNLOCK_BACKOFF_MAX_MS,
+    UNLOCK_BACKOFF_BASE_MS * 2 ** (unlockGuard.failures - 1)
+  );
+  unlockGuard.nextAllowedAt = Date.now() + delay;
+}
+
+function resetUnlockFailures() {
+  unlockGuard.failures = 0;
+  unlockGuard.nextAllowedAt = 0;
+}
+
 function isBadFileKeyError(err) {
   const msg = String(err?.message ?? err ?? "");
   return msg.includes("BadFileKey") || msg.includes("invalid file");
@@ -150,11 +181,19 @@ export async function unlockVault(password) {
   const p = String(password ?? "");
 
   if (isTauriRuntime()) {
+    const exists = await tauriVaultExists().catch(() => false);
+    if (!exists) {
+      throw new Error("No wallet vault found. Import a mnemonic first.");
+    }
+
+    checkUnlockRateLimit();
+
     let stronghold;
     try {
       stronghold = await tauriLoadStronghold(p);
     } catch {
       // If a snapshot exists but loading fails, it's almost always a wrong password.
+      recordUnlockFailure();
       throw new Error("Incorrect password");
     }
 
@@ -172,7 +211,9 @@ export async function unlockVault(password) {
         throw new Error("No wallet vault found. Import a mnemonic first.");
       }
       // store.get returns number[]
-      return new TextDecoder().decode(new Uint8Array(bytes));
+      const mnemonic = new TextDecoder().decode(new Uint8Array(bytes));
+      resetUnlockFailures();
+      return mnemonic;
     } finally {
       try {
         await stronghold.unload();
@@ -203,7 +244,16 @@ export async function unlockVault(password) {
   }
 
   const enc = deserializeEncryptInfo(serial);
-  return await decryptMnemonic(enc, p);
+  checkUnlockRateLimit();
+
+  try {
+    const mnemonic = await decryptMnemonic(enc, p);
+    resetUnlockFailures();
+    return mnemonic;
+  } catch {
+    recordUnlockFailure();
+    throw new Error("Incorrect password");
+  }
 }
 
 export async function clearVault() {

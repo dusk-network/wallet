@@ -55,16 +55,20 @@ async function getKeyMaterial(pwd) {
   );
 }
 
+const LEGACY_PBKDF2_ITERATIONS = 10_000;
+const DEFAULT_PBKDF2_ITERATIONS = 100_000;
+
 /**
  * @param {string} pwd
  * @param {Uint8Array} salt
+ * @param {number} iterations
  */
-async function getDerivedKey(pwd, salt) {
+async function getDerivedKey(pwd, salt, iterations = DEFAULT_PBKDF2_ITERATIONS) {
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
       salt,
-      iterations: 10000,
+      iterations,
       hash: "SHA-256",
     },
     await getKeyMaterial(pwd),
@@ -77,25 +81,28 @@ async function getDerivedKey(pwd, salt) {
 /**
  * @param {BufferSource} buffer
  * @param {string} pwd
- * @returns {Promise<{data:Uint8Array, iv:Uint8Array, salt:Uint8Array}>}
+ * @returns {Promise<{data:Uint8Array, iv:Uint8Array, salt:Uint8Array, iterations:number}>}
  */
 export async function encryptBuffer(buffer, pwd) {
   const salt = crypto.getRandomValues(new Uint8Array(32));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await getDerivedKey(pwd, salt);
+  const key = await getDerivedKey(pwd, salt, DEFAULT_PBKDF2_ITERATIONS);
   const data = new Uint8Array(
     await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, buffer)
   );
-  return { data, iv, salt };
+  return { data, iv, salt, iterations: DEFAULT_PBKDF2_ITERATIONS };
 }
 
 /**
- * @param {{data:Uint8Array, iv:Uint8Array, salt:Uint8Array}} encryptInfo
+ * @param {{data:Uint8Array, iv:Uint8Array, salt:Uint8Array, iterations?:number}} encryptInfo
  * @param {string} pwd
  */
 export async function decryptBuffer(encryptInfo, pwd) {
   const { data, iv, salt } = encryptInfo;
-  const key = await getDerivedKey(pwd, salt);
+  const iterRaw = Number(encryptInfo?.iterations);
+  const iterations =
+    Number.isFinite(iterRaw) && iterRaw > 0 ? iterRaw : LEGACY_PBKDF2_ITERATIONS;
+  const key = await getDerivedKey(pwd, salt, iterations);
   return crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
 }
 
@@ -104,7 +111,16 @@ export async function decryptBuffer(encryptInfo, pwd) {
  * @param {string} pwd
  */
 export async function encryptMnemonic(mnemonic, pwd) {
-  return encryptBuffer(utf8ToBytes(mnemonic), pwd);
+  const bytes = utf8ToBytes(mnemonic);
+  try {
+    return await encryptBuffer(bytes, pwd);
+  } finally {
+    try {
+      bytes.fill(0);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 /**
@@ -113,7 +129,16 @@ export async function encryptMnemonic(mnemonic, pwd) {
  */
 export async function decryptMnemonic(encryptInfo, pwd) {
   const buffer = await decryptBuffer(encryptInfo, pwd);
-  return bytesToUtf8(new Uint8Array(buffer));
+  const bytes = new Uint8Array(buffer);
+  try {
+    return bytesToUtf8(bytes);
+  } finally {
+    try {
+      bytes.fill(0);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 /**
@@ -124,6 +149,7 @@ export function serializeEncryptInfo(info) {
     data: bytesToBase64(info.data),
     iv: bytesToBase64(info.iv),
     salt: bytesToBase64(info.salt),
+    iterations: Number(info.iterations) || DEFAULT_PBKDF2_ITERATIONS,
   };
 }
 
@@ -135,5 +161,6 @@ export function deserializeEncryptInfo(serialized) {
     data: base64ToBytes(serialized.data),
     iv: base64ToBytes(serialized.iv),
     salt: base64ToBytes(serialized.salt),
+    iterations: serialized?.iterations,
   };
 }
