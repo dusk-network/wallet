@@ -55,7 +55,6 @@ async function getKeyMaterial(pwd) {
   );
 }
 
-const LEGACY_PBKDF2_ITERATIONS = 10_000;
 const DEFAULT_PBKDF2_ITERATIONS = 100_000;
 
 /**
@@ -100,9 +99,10 @@ export async function encryptBuffer(buffer, pwd) {
 export async function decryptBuffer(encryptInfo, pwd) {
   const { data, iv, salt } = encryptInfo;
   const iterRaw = Number(encryptInfo?.iterations);
-  const iterations =
-    Number.isFinite(iterRaw) && iterRaw > 0 ? iterRaw : LEGACY_PBKDF2_ITERATIONS;
-  const key = await getDerivedKey(pwd, salt, iterations);
+  if (!Number.isFinite(iterRaw) || iterRaw < DEFAULT_PBKDF2_ITERATIONS) {
+    throw new Error("Legacy vault format not supported");
+  }
+  const key = await getDerivedKey(pwd, salt, iterRaw);
   return crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
 }
 

@@ -228,22 +228,13 @@ export async function unlockVault(password) {
     throw new Error("No wallet vault found. Import a mnemonic first.");
   }
 
-  // Backward compatible:
-  // - older builds stored a JSON string
-  // - current build stores an object in chrome.storage/tauri-store
-  let serial = vault;
-  if (typeof vault === "string") {
-    try {
-      serial = JSON.parse(vault);
-    } catch {
-      throw new Error("Invalid vault format");
-    }
-  }
-  if (!serial || typeof serial !== "object") {
-    throw new Error("No wallet vault found. Import a mnemonic first.");
+  // Legacy vault formats are no longer supported.
+  if (!vault || typeof vault !== "object" || !vault.iterations) {
+    await clearVault();
+    throw new Error("Legacy vault removed. Please import your mnemonic again.");
   }
 
-  const enc = deserializeEncryptInfo(serial);
+  const enc = deserializeEncryptInfo(vault);
   checkUnlockRateLimit();
 
   try {
