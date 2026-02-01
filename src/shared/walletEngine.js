@@ -466,7 +466,11 @@ export function lock() {
  * @param {string} mnemonic
  */
 export async function unlockWithMnemonic(mnemonic) {
-  await ensureProtocolDriverLoaded();
+  await withTimeout(
+    ensureProtocolDriverLoaded(),
+    120_000,
+    "Timed out loading protocol driver"
+  );
 
   // If the engine was already unlocked, wipe previous secret state first.
   // This prevents confusing cross-wallet caching effects.
@@ -498,11 +502,23 @@ export async function unlockWithMnemonic(mnemonic) {
 
   // Prepare shielded meta for this wallet+network so UI can show sync state.
   // NOTE: this does not connect to the network.
-  try {
-    await ensureShieldedMetaForCurrent();
-  } catch {
-    // Non-fatal; shielded sync can be retried later.
-  }
+  // Shielded meta initialization should never block unlock. It can be slow or
+  // hang in some environments (IndexedDB). Run it in the background with a
+  // hard timeout and surface errors via status.
+  withTimeout(
+    ensureShieldedMetaForCurrent(),
+    10_000,
+    "Shielded metadata initialization timed out"
+  )
+    .catch((err) => {
+      setShieldedStatus({
+        state: "error",
+        lastError: err?.message ?? String(err),
+      });
+    })
+    .finally(() => {
+      broadcastShieldedStatus("shielded_meta_ready");
+    });
 
   return p0;
 }
