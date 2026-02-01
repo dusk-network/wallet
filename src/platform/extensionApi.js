@@ -115,7 +115,8 @@ export function windowsCreate(options) {
 }
 
 export function alarmsClear(name) {
-  return callApi(raw?.alarms?.clear, [name], raw?.alarms);
+  if (!raw?.alarms?.clear) return Promise.resolve(false);
+  return callApi(raw.alarms.clear, [name], raw.alarms);
 }
 
 export function notificationsCreate(id, options) {

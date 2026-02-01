@@ -19,6 +19,7 @@
     "type": "module"
   },
   "permissions": [
+    "alarms",
     "notifications",
     "storage",
     "tabs",
