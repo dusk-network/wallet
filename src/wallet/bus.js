@@ -9,6 +9,7 @@
 // build can tree-shake it away.
 
 import { isExtensionRuntime } from "../platform/runtime.js";
+import { runtimeSendMessage } from "../platform/extensionApi.js";
 
 // Set by Vite configs:
 // - vite.config.js -> "extension"
@@ -28,7 +29,7 @@ export async function send(message) {
   if (BACKEND === "extension") {
     // Preserve the current extension semantics: resolve with the response object
     // (including {error} fields) and do not throw on chrome.runtime.lastError.
-    return new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
+    return runtimeSendMessage(message, { allowLastError: true });
   }
 
   const mod = await import("./localBus.js");

@@ -186,6 +186,11 @@ async function engineCall(method, params) {
 
 The offscreen document (`src/offscreen.js`) receives these messages and calls the wallet engine directly.
 
+### Firefox Engine Page (MV3)
+
+Firefox does not support the offscreen document API. The Firefox build hosts the engine in
+`engine.html` (a hidden extension page) and reuses the same `DUSK_ENGINE_CALL` message protocol.
+
 ### Message Flow
 
 ```

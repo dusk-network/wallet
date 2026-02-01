@@ -10,6 +10,7 @@ import {
 import { bytesToHex, hexToBytes, toBytes } from "./bytes.js";
 import { TX_KIND } from "./constants.js";
 import { assetUrl } from "../platform/assets.js";
+import { runtimeSendMessage } from "../platform/extensionApi.js";
 
 import {
   clearNotes,
@@ -202,6 +203,37 @@ let engineConfig = {
   proverUrl: "https://testnet.provers.dusk.network",
   archiverUrl: "https://testnet.nodes.dusk.network",
 };
+
+let engineDebugHook = null;
+
+function engineNow() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function engineSince(start) {
+  const now = engineNow();
+  return Math.max(0, now - start);
+}
+
+export function setEngineDebugHook(fn) {
+  engineDebugHook = typeof fn === "function" ? fn : null;
+}
+
+function debugEngine(event, payload = {}) {
+  if (!engineDebugHook) return;
+  try {
+    engineDebugHook({
+      event: String(event || ""),
+      ts: Date.now(),
+      ...payload,
+    });
+  } catch {
+    // ignore
+  }
+}
 
 export function configure(patch = {}) {
   let changedNode = false;
@@ -465,7 +497,24 @@ export function lock() {
  * @param {string} mnemonic
  */
 export async function unlockWithMnemonic(mnemonic) {
-  await ensureProtocolDriverLoaded();
+  const unlockStart = engineNow();
+  debugEngine("unlock_start");
+  try {
+    await withTimeout(
+      ensureProtocolDriverLoaded(),
+      120_000,
+      "Timed out loading protocol driver"
+    );
+    debugEngine("unlock_protocol_loaded", {
+      totalMs: engineSince(unlockStart),
+    });
+  } catch (err) {
+    debugEngine("unlock_protocol_error", {
+      totalMs: engineSince(unlockStart),
+      error: err?.message ?? String(err),
+    });
+    throw err;
+  }
 
   // If the engine was already unlocked, wipe previous secret state first.
   // This prevents confusing cross-wallet caching effects.
@@ -475,17 +524,41 @@ export async function unlockWithMnemonic(mnemonic) {
     } catch {
       // ignore
     }
+    debugEngine("unlock_state_reset", {
+      totalMs: engineSince(unlockStart),
+    });
   }
 
+  const normalizeStart = engineNow();
   mnemonic = mnemonic.trim().replace(/\s+/g, " ");
+  debugEngine("unlock_mnemonic_normalized", {
+    ms: engineSince(normalizeStart),
+    totalMs: engineSince(unlockStart),
+  });
+
+  const seedStart = engineNow();
   const seed = Uint8Array.from(mnemonicToSeedSync(mnemonic));
+  debugEngine("unlock_seed_ready", {
+    ms: engineSince(seedStart),
+    totalMs: engineSince(unlockStart),
+  });
 
   // ProfileGenerator needs a seeder fn; return a copy each time.
+  const profileGenStart = engineNow();
   const seeder = async () => seed.slice();
   const pg = new ProfileGenerator(seeder);
+  debugEngine("unlock_profile_generator_ready", {
+    ms: engineSince(profileGenStart),
+    totalMs: engineSince(unlockStart),
+  });
 
   // Generate default profile (index 0)
+  const profileStart = engineNow();
   const p0 = await pg.default;
+  debugEngine("unlock_profile_default_ready", {
+    ms: engineSince(profileStart),
+    totalMs: engineSince(unlockStart),
+  });
 
   state.unlocked = true;
   state.mnemonic = mnemonic;
@@ -494,14 +567,44 @@ export async function unlockWithMnemonic(mnemonic) {
   state.profileGenerator = pg;
   state.profiles = [p0];
   state.currentIndex = 0;
+  debugEngine("unlock_state_set", {
+    totalMs: engineSince(unlockStart),
+  });
 
   // Prepare shielded meta for this wallet+network so UI can show sync state.
   // NOTE: this does not connect to the network.
-  try {
-    await ensureShieldedMetaForCurrent();
-  } catch {
-    // Non-fatal; shielded sync can be retried later.
-  }
+  // Shielded meta initialization should never block unlock. It can be slow or
+  // hang in some environments (IndexedDB). Run it in the background with a
+  // hard timeout and surface errors via status.
+  const shieldedStart = engineNow();
+  debugEngine("shielded_meta_init_start", {
+    totalMs: engineSince(unlockStart),
+  });
+  withTimeout(
+    ensureShieldedMetaForCurrent(),
+    10_000,
+    "Shielded metadata initialization timed out"
+  )
+    .then(() => {
+      debugEngine("shielded_meta_init_ok", {
+        ms: engineSince(shieldedStart),
+        totalMs: engineSince(unlockStart),
+      });
+    })
+    .catch((err) => {
+      debugEngine("shielded_meta_init_error", {
+        ms: engineSince(shieldedStart),
+        totalMs: engineSince(unlockStart),
+        error: err?.message ?? String(err),
+      });
+      setShieldedStatus({
+        state: "error",
+        lastError: err?.message ?? String(err),
+      });
+    })
+    .finally(() => {
+      broadcastShieldedStatus("shielded_meta_ready");
+    });
 
   return p0;
 }
@@ -525,10 +628,31 @@ async function ensureProtocolDriverLoaded() {
   if (state.protocolLoaded) return;
 
   // Load wasm bytes packaged with the extension, or from web/tauri assets.
+  const loadStart = engineNow();
   const wasmUrl = assetUrl("wallet_core-1.3.0.wasm");
+  debugEngine("protocol_driver_load_start", { wasmUrl });
+  const fetchStart = engineNow();
   const buffer = await fetch(wasmUrl).then((r) => r.arrayBuffer());
+  debugEngine("protocol_driver_fetch_done", {
+    ms: engineSince(fetchStart),
+    totalMs: engineSince(loadStart),
+    bytes: buffer?.byteLength ?? 0,
+  });
+  const useStart = engineNow();
   useAsProtocolDriver(new Uint8Array(buffer));
+  debugEngine("protocol_driver_use_done", {
+    ms: engineSince(useStart),
+    totalMs: engineSince(loadStart),
+  });
   state.protocolLoaded = true;
+  debugEngine("protocol_driver_loaded", {
+    totalMs: engineSince(loadStart),
+  });
+}
+
+// Exposed for extension engine preloading.
+export async function preloadProtocolDriver() {
+  await ensureProtocolDriverLoaded();
 }
 
 export async function ensureNetwork() {
@@ -935,18 +1059,18 @@ function setShieldedStatus(patch = {}) {
 
 function broadcastShieldedStatus(reason = "") {
   // Best-effort UI push for extension pages (popup/full view).
-  // In non-extension runtimes, `chrome` is not available.
   try {
-    const rt = globalThis?.chrome?.runtime;
-    if (!rt?.sendMessage) return;
-    rt.sendMessage({
+    runtimeSendMessage(
+      {
       type: "DUSK_UI_SHIELDED_STATUS",
       reason,
       status: getShieldedStatus(),
       walletId: getWalletId(),
       networkKey: getNetworkKey(),
       profileIndex: state.currentIndex || 0,
-    });
+      },
+      { allowLastError: true }
+    ).catch(() => {});
   } catch {
     // ignore
   }

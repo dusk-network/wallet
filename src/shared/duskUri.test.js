@@ -8,26 +8,16 @@ import {
 } from "./duskUri.js";
 
 describe("chainIdHexToDecimal", () => {
-  it("converts hex to decimal", () => {
-    expect(chainIdHexToDecimal("0x1")).toBe("1");
-    expect(chainIdHexToDecimal("0x2")).toBe("2");
-    expect(chainIdHexToDecimal("0xff")).toBe("255");
-    expect(chainIdHexToDecimal("0x539")).toBe("1337");
-  });
-
-  it("passes through decimal strings", () => {
-    expect(chainIdHexToDecimal("1")).toBe("1");
-    expect(chainIdHexToDecimal("1337")).toBe("1337");
+  it("converts CAIP-2 to decimal", () => {
+    expect(chainIdHexToDecimal("dusk:1")).toBe("1");
+    expect(chainIdHexToDecimal("dusk:2")).toBe("2");
   });
 
   it("returns empty string for invalid input", () => {
     expect(chainIdHexToDecimal("")).toBe("");
     expect(chainIdHexToDecimal(null)).toBe("");
     expect(chainIdHexToDecimal("not-a-number")).toBe("");
-  });
-
-  it("handles whitespace", () => {
-    expect(chainIdHexToDecimal("  0x1  ")).toBe("1");
+    expect(chainIdHexToDecimal("eip155:1")).toBe("");
   });
 });
 
@@ -43,8 +33,8 @@ describe("buildDuskUri", () => {
   });
 
   it("includes chain ID when provided", () => {
-    const uri = buildDuskUri({ kind: "public", recipient: "abc123", chainId: "2" });
-    expect(uri).toBe("dusk:public-abc123@2");
+    const uri = buildDuskUri({ kind: "public", recipient: "abc123", chainId: "dusk:2" });
+    expect(uri).toBe("dusk:public-abc123@dusk:2");
   });
 
   it("includes amount in DUSK", () => {
@@ -110,11 +100,11 @@ describe("parseDuskUri", () => {
   });
 
   it("parses chain ID", () => {
-    const result = parseDuskUri("dusk:public-abc@2");
+    const result = parseDuskUri("dusk:public-abc@dusk:2");
     expect(result).toMatchObject({
       kind: "public",
       to: "abc",
-      chainId: "2",
+      chainId: "dusk:2",
     });
   });
 
@@ -171,15 +161,9 @@ describe("parseDuskUri", () => {
 });
 
 describe("normalizeChainId", () => {
-  it("normalizes hex to decimal", () => {
-    expect(normalizeChainId("0x1")).toBe("1");
-    expect(normalizeChainId("0x2")).toBe("2");
-    expect(normalizeChainId("0xff")).toBe("255");
-  });
-
-  it("passes through decimal strings", () => {
-    expect(normalizeChainId("1")).toBe("1");
-    expect(normalizeChainId("1337")).toBe("1337");
+  it("normalizes CAIP-2 to decimal", () => {
+    expect(normalizeChainId("dusk:1")).toBe("1");
+    expect(normalizeChainId("dusk:2")).toBe("2");
   });
 
   it("returns empty for invalid input", () => {
@@ -191,20 +175,15 @@ describe("normalizeChainId", () => {
 
 describe("chainLabel", () => {
   it("returns known network names", () => {
-    expect(chainLabel("1")).toBe("Mainnet");
-    expect(chainLabel("2")).toBe("Testnet");
-    expect(chainLabel("3")).toBe("Devnet");
-    expect(chainLabel("0")).toBe("Local");
-  });
-
-  it("handles hex input", () => {
-    expect(chainLabel("0x1")).toBe("Mainnet");
-    expect(chainLabel("0x2")).toBe("Testnet");
+    expect(chainLabel("dusk:1")).toBe("Mainnet");
+    expect(chainLabel("dusk:2")).toBe("Testnet");
+    expect(chainLabel("dusk:3")).toBe("Devnet");
+    expect(chainLabel("dusk:0")).toBe("Local");
   });
 
   it("returns generic label for unknown chains", () => {
-    expect(chainLabel("42")).toBe("Chain 42");
-    expect(chainLabel("1337")).toBe("Chain 1337");
+    expect(chainLabel("dusk:42")).toBe("Chain 42");
+    expect(chainLabel("dusk:1337")).toBe("Chain 1337");
   });
 
   it("returns empty for invalid input", () => {

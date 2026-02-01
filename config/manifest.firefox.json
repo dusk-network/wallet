@@ -15,7 +15,9 @@
   },
   "options_page": "options.html",
   "background": {
-    "service_worker": "background.js",
+    "scripts": [
+      "background.js"
+    ],
     "type": "module"
   },
   "permissions": [
@@ -23,7 +25,7 @@
     "notifications",
     "storage",
     "tabs",
-    "offscreen"
+    "tabHide"
   ],
   "host_permissions": [
     "http://*/*",
@@ -38,17 +40,6 @@
         "https://*/*"
       ],
       "js": [
-        "inpage.js"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
         "contentScript.js"
       ],
       "run_at": "document_start"
@@ -57,6 +48,7 @@
   "web_accessible_resources": [
     {
       "resources": [
+        "inpage.js",
         "chunks/*",
         "assets/*"
       ],
@@ -69,7 +61,7 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self';"
   },
   "icons": {
     "16": "icons/dusk-16.png",

@@ -8,7 +8,7 @@ import { getSettings, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
-import { chainIdFromNodeUrl } from "../shared/chain.js";
+import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
 import {
@@ -16,7 +16,7 @@ import {
   ensureEngineConfigured,
   getEngineStatus,
   invalidateEngineConfig,
-} from "./offscreen.js";
+} from "./engineHost.js";
 import { requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { putTxMeta } from "../shared/txStore.js";
@@ -25,6 +25,7 @@ import {
   broadcastChainChangedAll,
   broadcastToOrigin,
 } from "./dappEvents.js";
+import { runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
 export async function handleRpc(origin, request) {
@@ -95,8 +96,8 @@ export async function handleRpc(origin, request) {
       const vault = await loadVault();
       if (!vault) {
         try {
-          const url = chrome.runtime.getURL("full.html");
-          chrome.tabs.create({ url });
+          const url = runtimeGetURL("full.html");
+          tabsCreate({ url }).catch(() => {});
         } catch {
           // ignore
         }
@@ -181,22 +182,22 @@ export async function handleRpc(origin, request) {
 
       // Map known chain IDs to presets.
       if (!targetNodeUrl) {
-        const cid = requestedChainId.toLowerCase();
+        const ref = chainReferenceFromChainId(requestedChainId);
         const presetId =
-          cid === "0x1"
+          ref === "1"
             ? "mainnet"
-            : cid === "0x2"
+            : ref === "2"
             ? "testnet"
-            : cid === "0x3"
+            : ref === "3"
             ? "devnet"
-            : cid === "0x0"
+            : ref === "0"
             ? "local"
             : "";
 
         if (!presetId) {
           throw rpcError(
             ERROR_CODES.INVALID_PARAMS,
-            "Unknown chainId. Provide { nodeUrl } for custom networks."
+            "Unknown chainId. Use CAIP-2 (dusk:1) or provide { nodeUrl } for custom networks."
           );
         }
 

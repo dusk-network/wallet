@@ -1,4 +1,9 @@
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
+import {
+  getExtensionApi,
+  runtimeGetURL,
+  windowsCreate,
+} from "../platform/extensionApi.js";
 
 /**
  * Pending approval requests.
@@ -27,21 +32,16 @@ export async function requestUserApproval(kind, origin, params) {
     });
   });
 
-  const url = chrome.runtime.getURL(
+  const url = runtimeGetURL(
     `notification.html?rid=${encodeURIComponent(rid)}`
   );
 
   // Best effort: open a popup-style window.
-  const win = await new Promise((resolve) => {
-    chrome.windows.create(
-      {
-        url,
-        type: "popup",
-        width: 380,
-        height: 620,
-      },
-      resolve
-    );
+  const win = await windowsCreate({
+    url,
+    type: "popup",
+    width: 380,
+    height: 620,
   });
 
   // If the user closes the approval window, reject the pending request.
@@ -53,7 +53,9 @@ export async function requestUserApproval(kind, origin, params) {
   return promise;
 }
 
-chrome.windows.onRemoved.addListener((windowId) => {
+const ext = getExtensionApi();
+
+ext?.windows?.onRemoved?.addListener((windowId) => {
   for (const [rid, entry] of pendingApprovals.entries()) {
     if (entry.windowId === windowId) {
       pendingApprovals.delete(rid);

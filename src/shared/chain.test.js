@@ -1,27 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { chainIdFromNodeUrl, fnv1a32 } from "./chain.js";
+import { chainIdFromNodeUrl, chainReferenceFromChainId, fnv1a32 } from "./chain.js";
 
 describe("chainIdFromNodeUrl", () => {
-  it("returns 0x1 for mainnet", () => {
-    expect(chainIdFromNodeUrl("https://nodes.dusk.network")).toBe("0x1");
+  it("returns dusk:1 for mainnet", () => {
+    expect(chainIdFromNodeUrl("https://nodes.dusk.network")).toBe("dusk:1");
   });
 
-  it("returns 0x2 for testnet", () => {
-    expect(chainIdFromNodeUrl("https://testnet.nodes.dusk.network")).toBe("0x2");
+  it("returns dusk:2 for testnet", () => {
+    expect(chainIdFromNodeUrl("https://testnet.nodes.dusk.network")).toBe("dusk:2");
   });
 
-  it("returns 0x3 for devnet", () => {
-    expect(chainIdFromNodeUrl("https://devnet.nodes.dusk.network")).toBe("0x3");
+  it("returns dusk:3 for devnet", () => {
+    expect(chainIdFromNodeUrl("https://devnet.nodes.dusk.network")).toBe("dusk:3");
   });
 
-  it("returns 0x0 for local", () => {
-    expect(chainIdFromNodeUrl("http://localhost:8080")).toBe("0x0");
-    expect(chainIdFromNodeUrl("http://127.0.0.1:8080")).toBe("0x0");
+  it("returns dusk:0 for local", () => {
+    expect(chainIdFromNodeUrl("http://localhost:8080")).toBe("dusk:0");
+    expect(chainIdFromNodeUrl("http://127.0.0.1:8080")).toBe("dusk:0");
   });
 
   it("returns derived hash for custom URLs", () => {
     const result = chainIdFromNodeUrl("https://my-custom-node.example.com");
-    expect(result).toMatch(/^0x[0-9a-f]{8}$/);
+    expect(result).toMatch(/^dusk:\d+$/);
     // Should be consistent
     expect(chainIdFromNodeUrl("https://my-custom-node.example.com")).toBe(result);
   });
@@ -34,8 +34,24 @@ describe("chainIdFromNodeUrl", () => {
 
   it("handles empty input", () => {
     const result = chainIdFromNodeUrl("");
-    // Should still return a valid hex string (hash of empty string)
-    expect(result).toMatch(/^0x[0-9a-f]{8}$/);
+    // Should still return a valid CAIP-2 string (hash of empty string)
+    expect(result).toMatch(/^dusk:\d+$/);
+  });
+});
+
+describe("chainReferenceFromChainId", () => {
+  it("parses CAIP-2 ids", () => {
+    expect(chainReferenceFromChainId("dusk:1")).toBe("1");
+    expect(chainReferenceFromChainId("dusk:0")).toBe("0");
+  });
+
+  it("rejects non-dusk namespaces", () => {
+    expect(chainReferenceFromChainId("eip155:1")).toBe("");
+  });
+
+  it("rejects legacy hex/decimal inputs", () => {
+    expect(chainReferenceFromChainId("0x1")).toBe("");
+    expect(chainReferenceFromChainId("2")).toBe("");
   });
 });
 

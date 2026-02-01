@@ -14,7 +14,8 @@ import {
   ensureEngineConfigured,
   getEngineStatus,
   invalidateEngineConfig,
-} from "./offscreen.js";
+  handleEngineReady,
+} from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
 import { getPending, resolvePendingDecision } from "./pending.js";
 import {
@@ -37,8 +38,17 @@ import {
   resetNetworkStatus,
   isStatusStale,
 } from "../shared/networkStatus.js";
+import {
+  alarmsClear,
+  getExtensionApi,
+  runtimeGetURL,
+  runtimeSendMessage,
+  tabsCreate,
+} from "../platform/extensionApi.js";
 
 registerTxNotificationHandlers();
+
+const ext = getExtensionApi();
 
 // ------------------------------
 // Auto-lock timer
@@ -59,12 +69,12 @@ async function setupAutoLockAlarm() {
   const timeout = settings.autoLockTimeoutMinutes ?? 0;
 
   // Clear any existing alarm first.
-  await chrome.alarms.clear(AUTO_LOCK_ALARM_NAME);
+  await alarmsClear(AUTO_LOCK_ALARM_NAME);
 
   if (timeout > 0) {
     // Check every minute (or half the timeout if smaller).
     const periodInMinutes = Math.max(0.5, Math.min(1, timeout / 2));
-    chrome.alarms.create(AUTO_LOCK_ALARM_NAME, { periodInMinutes });
+    ext?.alarms?.create(AUTO_LOCK_ALARM_NAME, { periodInMinutes });
   }
 }
 
@@ -93,7 +103,7 @@ async function handleAutoLockAlarm() {
 }
 
 // Listen for alarms.
-chrome.alarms.onAlarm.addListener((alarm) => {
+ext?.alarms?.onAlarm?.addListener((alarm) => {
   if (alarm.name === AUTO_LOCK_ALARM_NAME) {
     handleAutoLockAlarm().catch(console.error);
   }
@@ -103,18 +113,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 setupAutoLockAlarm().catch(console.error);
 
 // Open the full wallet view on first install (MetaMask-style onboarding).
-chrome.runtime.onInstalled.addListener((details) => {
+ext?.runtime?.onInstalled?.addListener((details) => {
   if (details?.reason !== "install") return;
   try {
-    const url = chrome.runtime.getURL("full.html");
-    chrome.tabs.create({ url });
+    const url = runtimeGetURL("full.html");
+    tabsCreate({ url }).catch(() => {});
   } catch {
     // ignore
   }
 });
 
 // Dapp provider ports (push events: accountsChanged, chainChanged, ...).
-chrome.runtime.onConnect.addListener((port) => {
+ext?.runtime?.onConnect?.addListener((port) => {
   if (port?.name === "DUSK_DAPP_PORT") {
     registerDappPort(port);
   }
@@ -155,9 +165,29 @@ function inferEndpointsFromNodeUrl(nodeUrl) {
 // ------------------------------
 // Message bus
 // ------------------------------
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
   // Engine calls are handled by offscreen.js. Do not respond here.
   if (message?.type === "DUSK_ENGINE_CALL") {
+    return false;
+  }
+
+  if (message?.type === "DUSK_ENGINE_READY") {
+    handleEngineReady?.(message);
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message?.type === "DUSK_ENGINE_PROGRESS") {
+    try {
+      console.log("[engine]", message.payload);
+    } catch {
+      // ignore
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message?.type === "DUSK_ENGINE_PING") {
     return false;
   }
 
@@ -212,12 +242,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         // Also broadcast to any open UI views so they can show a toast.
         try {
-          chrome.runtime.sendMessage({
+          runtimeSendMessage({
             type: "DUSK_UI_TX_STATUS",
             hash,
             ok,
             error,
-          });
+          }).catch(() => {});
         } catch {
           // ignore
         }
@@ -254,7 +284,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const mnemonic = await unlockVault(password);
 
         await ensureEngineConfigured();
-        const result = await engineCall("engine_unlock", { mnemonic });
+        const result = await engineCall(
+          "engine_unlock",
+          { mnemonic },
+          { timeoutMs: 120_000 }
+        );
 
         // result is expected to contain accounts, if not, ask status.
         const accounts = Array.isArray(result?.accounts)

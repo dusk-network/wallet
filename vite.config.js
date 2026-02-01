@@ -10,6 +10,8 @@ export default defineConfig({
     // Build-time constant used by src/wallet/bus.js to avoid bundling the
     // local (Tauri/web) backend into the extension bundle.
     __DUSK_BACKEND__: JSON.stringify("extension"),
+    __DUSK_TARGET__: JSON.stringify("chrome"),
+    __DUSK_ENGINE_HOST__: JSON.stringify("offscreen"),
   },
   build: {
     outDir: "dist",
@@ -22,6 +24,7 @@ export default defineConfig({
         contentScript: "src/contentScript.js",
         inpage: "src/inpage.js",
         offscreen: "src/offscreen.js",
+        engine: "src/engine.js",
         popup: "src/popup.js",
         notification: "src/notification.js",
       },

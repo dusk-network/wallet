@@ -8,7 +8,8 @@ import { getPermissions } from "../shared/permissions.js";
 import { STORAGE_KEYS } from "../shared/storage.js";
 import { chainIdFromNodeUrl } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
-import { getEngineStatus } from "./offscreen.js";
+import { getEngineStatus } from "./engineHost.js";
+import { getExtensionApi } from "../platform/extensionApi.js";
 
 /**
  * @typedef {{ origin: string }} PortMeta
@@ -31,6 +32,7 @@ const portsByOrigin = new Map();
  * @type {Map<number, Set<chrome.runtime.Port>>}
  */
 const portsByTabId = new Map();
+const ext = getExtensionApi();
 
 // ---------------------------------------------------------------------------
 // Chain / node change event de-duplication
@@ -434,9 +436,9 @@ export async function handleSettingsDiff(oldSettings, newSettings) {
  * other extension contexts mutate storage directly.
  */
 export function registerStorageChangeForwarder() {
-  if (!chrome?.storage?.onChanged) return;
+  if (!ext?.storage?.onChanged) return;
 
-  chrome.storage.onChanged.addListener((changes, areaName) => {
+  ext?.storage?.onChanged?.addListener((changes, areaName) => {
     if (areaName !== "local") return;
 
     // Permissions updates

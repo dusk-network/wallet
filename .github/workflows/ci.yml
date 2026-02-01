@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Build Chrome extension
+        run: npm run build:chrome
+
+      - name: Build Firefox extension
+        run: npm run build:firefox
+
+      - name: Build Tauri web assets
+        run: npm run build:tauri

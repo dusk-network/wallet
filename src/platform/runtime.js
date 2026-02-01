@@ -9,12 +9,16 @@
 
 export function isExtensionRuntime() {
   try {
-    // In normal Chrome webpages, `window.chrome` may exist, but
-    // `chrome.runtime.id` and `chrome.runtime.sendMessage` are extension-only!
+    const ext =
+      typeof globalThis !== "undefined"
+        ? globalThis.browser ?? globalThis.chrome ?? null
+        : null;
+
+    // In normal webpages, a `chrome` object may exist, but
+    // `runtime.id` and `runtime.sendMessage` are extension-only!
     return (
-      typeof chrome !== "undefined" &&
-      !!chrome?.runtime?.id &&
-      typeof chrome?.runtime?.sendMessage === "function"
+      !!ext?.runtime?.id &&
+      typeof ext?.runtime?.sendMessage === "function"
     );
   } catch {
     return false;

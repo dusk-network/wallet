@@ -1,6 +1,7 @@
 import { getRuntimeKind, isExtensionRuntime, isTauriRuntime } from "./runtime.js";
 import { kv } from "./storage.js";
 import { assetUrl } from "./assets.js";
+import { tabsCreate } from "./extensionApi.js";
 
 const kind = getRuntimeKind();
 
@@ -13,8 +14,8 @@ const kind = getRuntimeKind();
 export async function openUrl(url) {
   if (!url) return false;
   try {
-    if (chrome?.tabs?.create) {
-      await chrome.tabs.create({ url });
+    await tabsCreate({ url });
+    if (isExtensionRuntime()) {
       return true;
     }
   } catch {

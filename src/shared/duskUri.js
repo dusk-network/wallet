@@ -9,7 +9,7 @@
 // Where:
 // - prefix: "public" | "shielded"
 // - recipient: base58 string (public account OR shielded address)
-// - chain_id: integer (decimal) chain id (mainnet=1, testnet=2, local=1337)
+// - chain_id: CAIP-2 chain id (e.g. "dusk:1", "dusk:2")
 //
 // Query params (optional):
 // - amount: decimal DUSK string (e.g. "1.25")
@@ -20,37 +20,17 @@
 // Parsing intentionally supports ONLY the canonical v1 form above (plus an
 // optional raw recipient string).
 
-import { chainIdFromNodeUrl } from "./chain.js";
+import { chainIdFromNodeUrl, chainReferenceFromChainId } from "./chain.js";
 import { formatLuxToDusk } from "./amount.js";
 
 /**
- * Convert a hex chainId ("0x...") to a decimal string.
+ * Convert a chain id (CAIP-2) to a decimal string.
  *
  * @param {string} chainIdHex
  * @returns {string} decimal string ("" on failure)
  */
 export function chainIdHexToDecimal(chainIdHex) {
-  const s = String(chainIdHex ?? "").trim();
-  if (!s) return "";
-  try {
-    // BigInt understands 0x-prefixed strings.
-    return BigInt(s).toString(10);
-  } catch {
-    // Also accept decimal inputs already.
-    if (/^\d+$/.test(s)) return s;
-    return "";
-  }
-}
-
-/**
- * Compute the current chain id (decimal string) from a node URL.
- *
- * @param {string} nodeUrl
- * @returns {string}
- */
-export function chainIdFromNodeUrlDecimal(nodeUrl) {
-  const hex = chainIdFromNodeUrl(nodeUrl);
-  return chainIdHexToDecimal(hex);
+  return chainReferenceFromChainId(chainIdHex);
 }
 
 /**
@@ -73,9 +53,10 @@ export function buildDuskUri(opts) {
   if (!recipient) return "";
 
   // Prefer explicit chainId, otherwise derive from nodeUrl.
+  const providedChainId = String(opts?.chainId ?? "").trim();
   const chainId =
-    String(opts?.chainId ?? "").trim() ||
-    (opts?.nodeUrl ? chainIdFromNodeUrlDecimal(opts.nodeUrl) : "");
+    (providedChainId && chainReferenceFromChainId(providedChainId) ? providedChainId : "") ||
+    (opts?.nodeUrl ? chainIdFromNodeUrl(opts.nodeUrl) : "");
 
   let head = `${kind}-${encodeURIComponent(recipient)}`;
   if (chainId) head += `@${chainId}`;
@@ -151,6 +132,9 @@ export function parseDuskUri(input) {
     chainId = head.slice(at + 1).trim();
     head = head.slice(0, at).trim();
   }
+  if (chainId && !chainReferenceFromChainId(chainId)) {
+    return null;
+  }
 
   // Determine kind + strip canonical prefixes
   let kind = "unknown";
@@ -198,25 +182,13 @@ export function parseDuskUri(input) {
 
 /**
  * Best-effort normalization for comparing chain ids.
- * Accepts decimal ("2") or hex ("0x2").
+ * Accepts CAIP-2 `dusk:<id>`.
  *
  * @param {string} chain
  * @returns {string} decimal string or ""
  */
 export function normalizeChainId(chain) {
-  const s = String(chain ?? "").trim();
-  if (!s) return "";
-  // Hex form
-  if (/^0x[0-9a-f]+$/i.test(s)) {
-    try {
-      return BigInt(s).toString(10);
-    } catch {
-      return "";
-    }
-  }
-  // Decimal form
-  if (/^\d+$/.test(s)) return s;
-  return "";
+  return chainReferenceFromChainId(chain);
 }
 
 export function chainLabel(chainDec) {

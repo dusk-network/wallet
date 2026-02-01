@@ -3,6 +3,11 @@ import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { h } from "../lib/dom.js";
 import "../components/GasEditor.js";
+import {
+  runtimeGetURL,
+  runtimeSendMessage,
+  tabsCreate,
+} from "../../platform/extensionApi.js";
 
 const app = document.getElementById("app");
 
@@ -12,7 +17,7 @@ function setApp(children) {
 }
 
 async function send(msg) {
-  return new Promise((resolve) => chrome.runtime.sendMessage(msg, resolve));
+  return runtimeSendMessage(msg, { allowLastError: true });
 }
 
 function getRid() {
@@ -64,8 +69,8 @@ export async function renderNotification() {
       text: "Set up wallet",
       onclick: async () => {
         try {
-          const url = chrome.runtime.getURL("full.html");
-          await chrome.tabs.create({ url });
+          const url = runtimeGetURL("full.html");
+          await tabsCreate({ url });
         } catch {
           // ignore
         }

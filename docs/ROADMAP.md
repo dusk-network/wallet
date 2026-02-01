@@ -7,7 +7,7 @@
 | Platform | Status | Notes |
 |----------|--------|-------|
 | Chrome Extension | ✅ Ready | MV3, full feature set |
-| Firefox Extension | 🟡 Planned | MV3 compat work needed |
+| Firefox Extension | 🟡 In Progress | Engine page + static worker landed; QA pending |
 | Desktop (Tauri) | 🟡 Tested | Works, needs final polish |
 | Android (Tauri) | 🟡 Tested | Works, needs final polish |
 | iOS (Tauri) | 🟡 Scaffold | Needs device testing |
@@ -62,9 +62,10 @@ Current: 93% on shared utilities, core engine untested.
 **Priority: High**
 
 ### 3.1 Firefox Extension
-- [ ] Audit MV3 compatibility (service worker differences)
-- [ ] Test `browser.*` vs `chrome.*` API usage
-- [ ] Offscreen document alternative (Firefox doesn't support it)
+- [x] MV3 compatibility pass (background scripts, API adapter)
+- [x] Offscreen alternative via `engine.html` page host
+- [x] Static EXU sandbox worker (avoid blob worker CSP)
+- [ ] QA unlock/import/tx flows on Firefox stable
 - [ ] Submit to Firefox Add-ons
 
 ### 3.2 Desktop (Tauri)
@@ -119,8 +120,8 @@ Current: 93% on shared utilities, core engine untested.
 - [ ] E2E test harness (Playwright)
 
 ### 5.3 CI/CD
-- [ ] GitHub Actions (lint, test, build)
-- [ ] Automated releases on tags
+- [x] GitHub Actions (test, build)
+- [x] Automated releases on tags
 - [ ] Coverage badges in README
 
 ---
@@ -141,7 +142,6 @@ Current: 93% on shared utilities, core engine untested.
 | Location | Issue | Effort |
 |----------|-------|--------|
 | `Identicon.js` | TODO: Consider library | Low |
-| `chain.js` | TODO: CAIP-2 chain IDs | Medium |
 | `shieldedStore.js` | Abstract for Tauri SQLite | High |
 
 ---

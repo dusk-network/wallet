@@ -1,11 +1,47 @@
 // Bridge messages between the inpage provider (window) and the extension background.
 //
 // This file implements two flows:
-// 1) Request/response RPC (`window.postMessage` -> `chrome.runtime.sendMessage`)
+// 1) Request/response RPC (`window.postMessage` -> `runtime.sendMessage`)
 // 2) Provider event push via a long-lived `Port` (accountsChanged, chainChanged, ...)
 
-/** @type {chrome.runtime.Port | null} */
+import {
+  getExtensionApi,
+  runtimeGetURL,
+  runtimeSendMessage,
+} from "./platform/extensionApi.js";
+import { IS_FIREFOX } from "./platform/targets.js";
+
+/** @type {any | null} */
 let dappPort = null;
+
+const ext = getExtensionApi();
+
+function injectInpageIfNeeded() {
+  if (!IS_FIREFOX) return;
+  if (!ext?.runtime?.getURL) return;
+
+  try {
+    const existing = document.getElementById("dusk-inpage");
+    if (existing) return;
+
+    const script = document.createElement("script");
+    script.id = "dusk-inpage";
+    script.type = "module";
+    script.src = runtimeGetURL("inpage.js");
+    (document.head || document.documentElement).appendChild(script);
+    script.addEventListener("load", () => {
+      try {
+        script.remove();
+      } catch {
+        // ignore
+      }
+    });
+  } catch {
+    // ignore
+  }
+}
+
+injectInpageIfNeeded();
 
 function sendHello(port) {
   // Best-effort hello used to bind the port to a web origin.
@@ -36,7 +72,8 @@ function ensurePort() {
   }
 
   try {
-    dappPort = chrome.runtime.connect({ name: "DUSK_DAPP_PORT" });
+    if (!ext?.runtime?.connect) return null;
+    dappPort = ext.runtime.connect({ name: "DUSK_DAPP_PORT" });
   } catch {
     dappPort = null;
     return null;
@@ -86,25 +123,30 @@ window.addEventListener("message", (event) => {
   const id = msg.id;
   const request = msg.request;
 
-  chrome.runtime.sendMessage(
-    {
-      type: "DUSK_RPC_REQUEST",
-      id,
-      origin: window.location.origin,
-      request,
-    },
-    (response) => {
-      const le = chrome.runtime.lastError;
+  runtimeSendMessage({
+    type: "DUSK_RPC_REQUEST",
+    id,
+    origin: window.location.origin,
+    request,
+  })
+    .then((response) => {
       const payload = {
         target: "DUSK_EXTENSION",
         type: "DUSK_RPC_RESPONSE",
         id,
-        response: le
-          ? { error: { code: 4900, message: le.message } }
-          : response,
+        response,
       };
 
       window.postMessage(payload, window.location.origin);
-    }
-  );
+    })
+    .catch((err) => {
+      const payload = {
+        target: "DUSK_EXTENSION",
+        type: "DUSK_RPC_RESPONSE",
+        id,
+        response: { error: { code: 4900, message: err?.message ?? String(err) } },
+      };
+
+      window.postMessage(payload, window.location.origin);
+    });
 });
