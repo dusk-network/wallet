@@ -15,6 +15,7 @@ import {
   waitTxExecuted,
   unlockWithMnemonic,
   preloadProtocolDriver,
+  setEngineDebugHook,
 } from "../shared/walletEngine.js";
 
 import { ERROR_CODES } from "../shared/errors.js";
@@ -36,6 +37,20 @@ const activeTxWatches = new Set();
 const ext = getExtensionApi();
 let enginePreloadError = null;
 let enginePreloadDone = false;
+
+setEngineDebugHook((payload) => {
+  try {
+    runtimeSendMessage(
+      {
+        type: "DUSK_ENGINE_PROGRESS",
+        payload,
+      },
+      { allowLastError: true }
+    ).catch(() => {});
+  } catch {
+    // ignore
+  }
+});
 
 function inferTxOk(executedEvent) {
   // The exact shape depends on w3sper/node versions.

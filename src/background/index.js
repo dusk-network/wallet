@@ -177,6 +177,16 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message?.type === "DUSK_ENGINE_PROGRESS") {
+    try {
+      console.log("[engine]", message.payload);
+    } catch {
+      // ignore
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message?.type === "DUSK_ENGINE_PING") {
     return false;
   }
