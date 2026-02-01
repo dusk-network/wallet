@@ -5,9 +5,9 @@ import { qrCodeEl } from "../../components/QrCode.js";
 import { identiconEl } from "../../components/Identicon.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { parseDuskToLux } from "../../../shared/amount.js";
+import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import {
   buildDuskUri,
-  chainIdFromNodeUrlDecimal,
 } from "../../../shared/duskUri.js";
 
 function normalizeRequestAmount(amountStr) {
@@ -53,7 +53,7 @@ export function receiveView(ov, { state, actions } = {}) {
   const account = ov?.accounts?.[0] ?? "";
   const address = ov?.addresses?.[0] ?? "";
 
-  const chainId = chainIdFromNodeUrlDecimal(ov?.nodeUrl ?? "");
+  const chainId = chainIdFromNodeUrl(ov?.nodeUrl ?? "");
 
   // Persist request fields while the user navigates around.
   const r = (state.receive ??= {

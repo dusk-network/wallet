@@ -45,17 +45,13 @@ describe("chainReferenceFromChainId", () => {
     expect(chainReferenceFromChainId("dusk:0")).toBe("0");
   });
 
-  it("parses hex chain ids", () => {
-    expect(chainReferenceFromChainId("0x1")).toBe("1");
-    expect(chainReferenceFromChainId("0xff")).toBe("255");
-  });
-
-  it("parses decimal chain ids", () => {
-    expect(chainReferenceFromChainId("2")).toBe("2");
-  });
-
   it("rejects non-dusk namespaces", () => {
     expect(chainReferenceFromChainId("eip155:1")).toBe("");
+  });
+
+  it("rejects legacy hex/decimal inputs", () => {
+    expect(chainReferenceFromChainId("0x1")).toBe("");
+    expect(chainReferenceFromChainId("2")).toBe("");
   });
 });
 

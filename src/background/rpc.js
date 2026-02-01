@@ -197,7 +197,7 @@ export async function handleRpc(origin, request) {
         if (!presetId) {
           throw rpcError(
             ERROR_CODES.INVALID_PARAMS,
-            "Unknown chainId. Provide { nodeUrl } for custom networks."
+            "Unknown chainId. Use CAIP-2 (dusk:1) or provide { nodeUrl } for custom networks."
           );
         }
 

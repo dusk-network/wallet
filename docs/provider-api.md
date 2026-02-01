@@ -125,7 +125,7 @@ await dusk.request({
 
 Returns `null`. Emits `chainChanged` and `duskNodeChanged` on success.
 
-> Note: `chainId` accepts CAIP-2 (`dusk:<id>`) and legacy hex/decimal inputs for compatibility.
+> Note: `chainId` must be CAIP-2 (`dusk:<id>`).
 
 ---
 

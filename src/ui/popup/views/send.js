@@ -17,11 +17,8 @@ import { identiconEl } from "../../components/Identicon.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
 
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
-import {
-  chainIdFromNodeUrlDecimal,
-  chainLabel,
-  normalizeChainId,
-} from "../../../shared/duskUri.js";
+import { chainIdFromNodeUrl } from "../../../shared/chain.js";
+import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
 
 export function sendFormView(ov, { state, actions } = {}) {
   const draft = state.draft || {};
@@ -138,7 +135,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     // (amountCtl.setMaxLux already syncs when maxLux is usable)
   }
 
-  const currentChain = normalizeChainId(chainIdFromNodeUrlDecimal(ov?.nodeUrl ?? ""));
+  const currentChain = normalizeChainId(chainIdFromNodeUrl(ov?.nodeUrl ?? ""));
 
   const warnChainMismatch = (reqChain) => {
     const want = normalizeChainId(reqChain);

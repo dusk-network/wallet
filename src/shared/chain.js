@@ -72,18 +72,10 @@ export function chainReferenceFromChainId(chainId) {
   const caip = parseCaip2(s);
   if (caip) {
     if (caip.namespace !== CAIP2_NAMESPACE) return "";
+    if (!/^\d+$/.test(caip.reference)) return "";
     return caip.reference;
   }
 
-  if (/^0x[0-9a-f]+$/i.test(s)) {
-    try {
-      return BigInt(s).toString(10);
-    } catch {
-      return "";
-    }
-  }
-
-  if (/^\d+$/.test(s)) return s;
   return "";
 }
 
