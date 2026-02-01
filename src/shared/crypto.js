@@ -100,7 +100,7 @@ export async function decryptBuffer(encryptInfo, pwd) {
   const { data, iv, salt } = encryptInfo;
   const iterRaw = Number(encryptInfo?.iterations);
   if (!Number.isFinite(iterRaw) || iterRaw < DEFAULT_PBKDF2_ITERATIONS) {
-    throw new Error("Legacy vault format not supported");
+    throw new Error("Vault format not supported");
   }
   const key = await getDerivedKey(pwd, salt, iterRaw);
   return crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);

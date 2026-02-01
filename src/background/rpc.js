@@ -78,7 +78,7 @@ export async function handleRpc(origin, request) {
   function mergeTxParams(base, override) {
     // Approvals may return:
     // - null/undefined: no overrides
-    // - true: legacy approve value
+    // - true: approve value
     // - object: overrides
     if (!override || override === true || typeof override !== "object") {
       return base;

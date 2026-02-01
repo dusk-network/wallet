@@ -228,10 +228,10 @@ export async function unlockVault(password) {
     throw new Error("No wallet vault found. Import a mnemonic first.");
   }
 
-  // Legacy vault formats are no longer supported.
+  // Unsupported vault formats are removed.
   if (!vault || typeof vault !== "object" || !vault.iterations) {
     await clearVault();
-    throw new Error("Legacy vault removed. Please import your mnemonic again.");
+    throw new Error("Unsupported vault format. Please import your mnemonic again.");
   }
 
   const enc = deserializeEncryptInfo(vault);
@@ -250,7 +250,7 @@ export async function unlockVault(password) {
 export async function clearVault() {
   if (isTauriRuntime()) {
     await tauriDeleteVaultSnapshot();
-    // Also clear any legacy storage key, if present from a previous web run.
+    // Also clear any previous storage key, if present from a web run.
     await storage.remove(STORAGE_KEYS.VAULT);
     return;
   }

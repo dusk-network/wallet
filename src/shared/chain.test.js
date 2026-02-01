@@ -49,7 +49,7 @@ describe("chainReferenceFromChainId", () => {
     expect(chainReferenceFromChainId("eip155:1")).toBe("");
   });
 
-  it("rejects legacy hex/decimal inputs", () => {
+  it("rejects hex/decimal inputs", () => {
     expect(chainReferenceFromChainId("0x1")).toBe("");
     expect(chainReferenceFromChainId("2")).toBe("");
   });

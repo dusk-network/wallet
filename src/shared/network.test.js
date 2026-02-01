@@ -52,7 +52,7 @@ describe("networkNameFromNodeUrl", () => {
     expect(networkNameFromNodeUrl("https://nodes.dusk.network")).toBe("Mainnet");
   });
 
-  it("returns Mainnet for unknown URLs (legacy behavior)", () => {
+  it("returns Mainnet for unknown URLs", () => {
     expect(networkNameFromNodeUrl("https://example.com")).toBe("Mainnet");
   });
 
