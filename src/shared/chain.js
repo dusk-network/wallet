@@ -1,30 +1,100 @@
 // Chain identity helpers.
 //
-// Dusk isn't EVM, but dApps often want a MetaMask/EIP-1193-style `chainId`
-// and a `chainChanged` event.
-//
-// We expose a stable-ish hex string with a 0x prefix.
-// - Known presets map to fixed IDs.
-// - Custom nodes derive a 32-bit ID from the node URL origin.
+// We expose a CAIP-2 compatible chain id string:
+//   dusk:<reference>
+// where <reference> is a stable decimal string for known presets and
+// a deterministic 32-bit hash for custom nodes.
 
 import { detectPresetIdFromNodeUrl } from "./network.js";
 
+export const CAIP2_NAMESPACE = "dusk";
+
+const PRESET_CHAIN_REFERENCES = {
+  mainnet: "1",
+  testnet: "2",
+  devnet: "3",
+  local: "0",
+};
+
 /**
- * Compute an EIP-1193-style chainId string from the currently selected node URL.
+ * Compute a CAIP-2 chain id from the currently selected node URL.
  *
  * @param {string} nodeUrl
- * @returns {string} hex string with 0x prefix
+ * @returns {string} CAIP-2 chain id (e.g. "dusk:1")
  */
 export function chainIdFromNodeUrl(nodeUrl) {
+  const ref = chainReferenceFromNodeUrl(nodeUrl);
+  return chainIdFromReference(ref);
+}
+
+/**
+ * Build a CAIP-2 chain id from a reference string.
+ *
+ * @param {string} reference
+ * @param {string} [namespace]
+ * @returns {string}
+ */
+export function chainIdFromReference(reference, namespace = CAIP2_NAMESPACE) {
+  const ns = String(namespace ?? "").trim();
+  const ref = String(reference ?? "").trim();
+  if (!ns || !ref) return "";
+  return `${ns}:${ref}`;
+}
+
+/**
+ * Parse a CAIP-2 chain id into its namespace and reference.
+ *
+ * @param {string} chainId
+ * @returns {{ namespace: string, reference: string } | null}
+ */
+export function parseCaip2(chainId) {
+  const s = String(chainId ?? "").trim();
+  const idx = s.indexOf(":");
+  if (idx <= 0) return null;
+  const ns = s.slice(0, idx);
+  const ref = s.slice(idx + 1);
+  if (!/^[-a-z0-9]{3,8}$/i.test(ns)) return null;
+  if (!/^[-_a-zA-Z0-9]{1,32}$/.test(ref)) return null;
+  return { namespace: ns.toLowerCase(), reference: ref };
+}
+
+/**
+ * Normalize a chain id (CAIP-2, hex, or decimal) to a decimal reference string.
+ * Returns "" when invalid or when the CAIP-2 namespace is not dusk.
+ *
+ * @param {string} chainId
+ * @returns {string}
+ */
+export function chainReferenceFromChainId(chainId) {
+  const s = String(chainId ?? "").trim();
+  if (!s) return "";
+
+  const caip = parseCaip2(s);
+  if (caip) {
+    if (caip.namespace !== CAIP2_NAMESPACE) return "";
+    return caip.reference;
+  }
+
+  if (/^0x[0-9a-f]+$/i.test(s)) {
+    try {
+      return BigInt(s).toString(10);
+    } catch {
+      return "";
+    }
+  }
+
+  if (/^\d+$/.test(s)) return s;
+  return "";
+}
+
+function chainReferenceFromNodeUrl(nodeUrl) {
   const url = String(nodeUrl ?? "").trim();
   const preset = detectPresetIdFromNodeUrl(url);
 
   // Fixed IDs for known networks.
-  // NOTE: These are NOT Ethereum chain IDs; they are Dusk wallet identifiers.
-  if (preset === "mainnet") return "0x1";
-  if (preset === "testnet") return "0x2";
-  if (preset === "devnet") return "0x3";
-  if (preset === "local") return "0x0";
+  if (preset && PRESET_CHAIN_REFERENCES[preset]) {
+    return PRESET_CHAIN_REFERENCES[preset];
+  }
 
   // For custom nodes, derive a stable ID from the URL origin.
   let basis = url;
@@ -36,12 +106,11 @@ export function chainIdFromNodeUrl(nodeUrl) {
   }
 
   const h = fnv1a32(basis);
-  return "0x" + h.toString(16).padStart(8, "0");
+  return String(h);
 }
 
 /**
  * 32-bit FNV-1a hash (deterministic, fast, no crypto dependency).
- * TODO: Find EVM equivalent, or use CAIP-2
  * @param {string} str
  * @returns {number} unsigned 32-bit
  */

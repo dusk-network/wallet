@@ -142,7 +142,6 @@ Current: 93% on shared utilities, core engine untested.
 | Location | Issue | Effort |
 |----------|-------|--------|
 | `Identicon.js` | TODO: Consider library | Low |
-| `chain.js` | TODO: CAIP-2 chain IDs | Medium |
 | `shieldedStore.js` | Abstract for Tauri SQLite | High |
 
 ---

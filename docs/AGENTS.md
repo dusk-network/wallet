@@ -149,7 +149,7 @@ sendResponse({ error: serializeError(err) });
 | Convention | Format | Example |
 |------------|--------|---------|
 | Transaction kinds | lowercase string | `transfer`, `shield`, `unshield`, `contract_call` |
-| Chain IDs | hex with 0x | `"0x1"` (mainnet), `"0x2"` (testnet) |
+| Chain IDs | CAIP-2 `dusk:<id>` | `"dusk:1"` (mainnet), `"dusk:2"` (testnet) |
 | Amounts | LUX string (u64) | `"1000000000"` = 1 DUSK |
 | Addresses | Base58 | Account: `"2Z8m..."`, Shielded: `"4Kp9..."` |
 | Gas | object or null | `{ limit: "10000000", price: "1" }` or `null` (auto) |

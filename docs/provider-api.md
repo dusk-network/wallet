@@ -60,9 +60,9 @@ The provider starts emitting events after the first `request()` call or `on()` s
 | `AccountId` | Base58 public account | `"2Z8m..."` |
 | `Address` | Base58 shielded address | `"4Kp9..."` |
 | `LuxString` | Decimal string (u64) | `"1000000000"` (= 1 DUSK) |
-| `ChainId` | Hex with `0x` prefix | `"0x1"` (mainnet) |
+| `ChainId` | CAIP-2 `dusk:<id>` | `"dusk:1"` (mainnet) |
 
-**Chain IDs:** `0x1` mainnet, `0x2` testnet, `0x3` devnet, `0x0` local. Custom nodes get `0x` + FNV-1a32 hash of origin.
+**Chain IDs:** `dusk:1` mainnet, `dusk:2` testnet, `dusk:3` devnet, `dusk:0` local. Custom nodes get `dusk:` + FNV-1a32 hash of origin (decimal).
 
 **Gas:** `{ limit: LuxString, price: LuxString }` or omit for wallet defaults.
 
@@ -96,11 +96,11 @@ const accounts = await dusk.request({ method: "dusk_accounts" });
 
 ### `dusk_chainId`
 
-Get current chain ID.
+Get current chain ID (CAIP-2, `dusk:<id>`).
 
 ```js
 const chainId = await dusk.request({ method: "dusk_chainId" });
-// → "0x2" (testnet)
+// → "dusk:2" (testnet)
 ```
 
 ---
@@ -110,10 +110,10 @@ const chainId = await dusk.request({ method: "dusk_chainId" });
 Ask user to switch networks. Requires prior connection.
 
 ```js
-// By preset
+// By preset (CAIP-2)
 await dusk.request({
   method: "dusk_switchNetwork",
-  params: { chainId: "0x1" }
+  params: { chainId: "dusk:1" }
 });
 
 // By URL
@@ -124,6 +124,8 @@ await dusk.request({
 ```
 
 Returns `null`. Emits `chainChanged` and `duskNodeChanged` on success.
+
+> Note: `chainId` accepts CAIP-2 (`dusk:<id>`) and legacy hex/decimal inputs for compatibility.
 
 ---
 

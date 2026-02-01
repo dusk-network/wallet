@@ -8,7 +8,7 @@ import { getSettings, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
-import { chainIdFromNodeUrl } from "../shared/chain.js";
+import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
 import {
@@ -182,15 +182,15 @@ export async function handleRpc(origin, request) {
 
       // Map known chain IDs to presets.
       if (!targetNodeUrl) {
-        const cid = requestedChainId.toLowerCase();
+        const ref = chainReferenceFromChainId(requestedChainId);
         const presetId =
-          cid === "0x1"
+          ref === "1"
             ? "mainnet"
-            : cid === "0x2"
+            : ref === "2"
             ? "testnet"
-            : cid === "0x3"
+            : ref === "3"
             ? "devnet"
-            : cid === "0x0"
+            : ref === "0"
             ? "local"
             : "";
 

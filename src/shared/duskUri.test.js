@@ -15,6 +15,11 @@ describe("chainIdHexToDecimal", () => {
     expect(chainIdHexToDecimal("0x539")).toBe("1337");
   });
 
+  it("converts CAIP-2 to decimal", () => {
+    expect(chainIdHexToDecimal("dusk:1")).toBe("1");
+    expect(chainIdHexToDecimal("dusk:2")).toBe("2");
+  });
+
   it("passes through decimal strings", () => {
     expect(chainIdHexToDecimal("1")).toBe("1");
     expect(chainIdHexToDecimal("1337")).toBe("1337");
@@ -24,6 +29,7 @@ describe("chainIdHexToDecimal", () => {
     expect(chainIdHexToDecimal("")).toBe("");
     expect(chainIdHexToDecimal(null)).toBe("");
     expect(chainIdHexToDecimal("not-a-number")).toBe("");
+    expect(chainIdHexToDecimal("eip155:1")).toBe("");
   });
 
   it("handles whitespace", () => {
@@ -177,6 +183,11 @@ describe("normalizeChainId", () => {
     expect(normalizeChainId("0xff")).toBe("255");
   });
 
+  it("normalizes CAIP-2 to decimal", () => {
+    expect(normalizeChainId("dusk:1")).toBe("1");
+    expect(normalizeChainId("dusk:2")).toBe("2");
+  });
+
   it("passes through decimal strings", () => {
     expect(normalizeChainId("1")).toBe("1");
     expect(normalizeChainId("1337")).toBe("1337");
@@ -200,6 +211,11 @@ describe("chainLabel", () => {
   it("handles hex input", () => {
     expect(chainLabel("0x1")).toBe("Mainnet");
     expect(chainLabel("0x2")).toBe("Testnet");
+  });
+
+  it("handles CAIP-2 input", () => {
+    expect(chainLabel("dusk:1")).toBe("Mainnet");
+    expect(chainLabel("dusk:2")).toBe("Testnet");
   });
 
   it("returns generic label for unknown chains", () => {

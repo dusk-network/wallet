@@ -20,26 +20,17 @@
 // Parsing intentionally supports ONLY the canonical v1 form above (plus an
 // optional raw recipient string).
 
-import { chainIdFromNodeUrl } from "./chain.js";
+import { chainIdFromNodeUrl, chainReferenceFromChainId } from "./chain.js";
 import { formatLuxToDusk } from "./amount.js";
 
 /**
- * Convert a hex chainId ("0x...") to a decimal string.
+ * Convert a chain id (CAIP-2, hex, or decimal) to a decimal string.
  *
  * @param {string} chainIdHex
  * @returns {string} decimal string ("" on failure)
  */
 export function chainIdHexToDecimal(chainIdHex) {
-  const s = String(chainIdHex ?? "").trim();
-  if (!s) return "";
-  try {
-    // BigInt understands 0x-prefixed strings.
-    return BigInt(s).toString(10);
-  } catch {
-    // Also accept decimal inputs already.
-    if (/^\d+$/.test(s)) return s;
-    return "";
-  }
+  return chainReferenceFromChainId(chainIdHex);
 }
 
 /**
@@ -204,19 +195,7 @@ export function parseDuskUri(input) {
  * @returns {string} decimal string or ""
  */
 export function normalizeChainId(chain) {
-  const s = String(chain ?? "").trim();
-  if (!s) return "";
-  // Hex form
-  if (/^0x[0-9a-f]+$/i.test(s)) {
-    try {
-      return BigInt(s).toString(10);
-    } catch {
-      return "";
-    }
-  }
-  // Decimal form
-  if (/^\d+$/.test(s)) return s;
-  return "";
+  return chainReferenceFromChainId(chain);
 }
 
 export function chainLabel(chainDec) {
