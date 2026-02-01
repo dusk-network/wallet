@@ -134,9 +134,13 @@ export async function engineCall(method, params) {
       const transient =
         msg.includes("Receiving end does not exist") ||
         msg.includes("Could not establish connection") ||
-        msg.includes("The message port closed");
+        msg.includes("The message port closed") ||
+        msg.includes("Promised response from onMessage listener went out of scope");
 
-      if (transient && attempt < 4) {
+      const canRetry =
+        transient && attempt < 4 && String(method) !== "dusk_sendTransaction";
+
+      if (canRetry) {
         await delay(50 * (attempt + 1));
         continue;
       }
