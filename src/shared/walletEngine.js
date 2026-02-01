@@ -532,6 +532,11 @@ async function ensureProtocolDriverLoaded() {
   state.protocolLoaded = true;
 }
 
+// Exposed for extension engine preloading.
+export async function preloadProtocolDriver() {
+  await ensureProtocolDriverLoaded();
+}
+
 export async function ensureNetwork() {
   const url = new URL(engineConfig.nodeUrl);
 

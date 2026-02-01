@@ -14,6 +14,7 @@ import {
   startShieldedSync,
   waitTxExecuted,
   unlockWithMnemonic,
+  preloadProtocolDriver,
 } from "../shared/walletEngine.js";
 
 import { ERROR_CODES } from "../shared/errors.js";
@@ -33,6 +34,8 @@ function serializeError(err) {
 
 const activeTxWatches = new Set();
 const ext = getExtensionApi();
+let enginePreloadError = null;
+let enginePreloadDone = false;
 
 function inferTxOk(executedEvent) {
   // The exact shape depends on w3sper/node versions.
@@ -115,7 +118,11 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
   if (!message) return;
 
   if (message.type === "DUSK_ENGINE_PING") {
-    sendResponse({ ok: true });
+    sendResponse({
+      ok: true,
+      ready: enginePreloadDone && !enginePreloadError,
+      error: enginePreloadError?.message ?? "",
+    });
     return true;
   }
 
@@ -252,6 +259,21 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
 });
 
 // Notify background that the engine page is ready to accept calls.
-runtimeSendMessage({ type: "DUSK_ENGINE_READY" }, { allowLastError: true }).catch(
-  () => {}
-);
+(async () => {
+  try {
+    await preloadProtocolDriver();
+  } catch (err) {
+    enginePreloadError = err;
+  } finally {
+    enginePreloadDone = true;
+  }
+
+  runtimeSendMessage(
+    {
+      type: "DUSK_ENGINE_READY",
+      ok: !enginePreloadError,
+      error: enginePreloadError?.message ?? "",
+    },
+    { allowLastError: true }
+  ).catch(() => {});
+})();

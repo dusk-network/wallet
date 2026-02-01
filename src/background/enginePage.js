@@ -36,6 +36,7 @@ const ext = getExtensionApi();
 let engineReady = false;
 let engineReadyPromise = null;
 let engineReadyResolve = null;
+let engineReadyError = null;
 
 function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -86,6 +87,7 @@ async function ensureEnginePage() {
   if (existing?.id != null) {
     engineTabId = existing.id;
     engineReady = false;
+    engineReadyError = null;
     engineReadyPromise = null;
     await hideEngineTab(engineTabId);
     await waitForEngineReady();
@@ -101,6 +103,7 @@ async function ensureEnginePage() {
     const tab = await tabsCreate({ url, active: false });
     engineTabId = tab?.id ?? null;
     engineReady = false;
+    engineReadyError = null;
     engineReadyPromise = null;
     await hideEngineTab(engineTabId);
     await waitForEngineReady();
@@ -119,6 +122,7 @@ if (ext?.tabs?.onRemoved) {
       if (tabId === engineTabId) {
         engineTabId = null;
         engineReady = false;
+        engineReadyError = null;
         engineReadyPromise = null;
       }
     });
@@ -127,7 +131,7 @@ if (ext?.tabs?.onRemoved) {
   }
 }
 
-function waitForEngineReady(timeoutMs = 5000) {
+function waitForEngineReady(timeoutMs = 120_000) {
   if (engineReady) return Promise.resolve();
 
   if (!engineReadyPromise) {
@@ -138,7 +142,9 @@ function waitForEngineReady(timeoutMs = 5000) {
 
   if (engineTabId != null) {
     withTimeout(runtimeSendMessage({ type: "DUSK_ENGINE_PING" }), 2000).then(
-      () => handleEngineReady(),
+      (resp) => {
+        if (resp?.ready) handleEngineReady(resp);
+      },
       () => {}
     );
   }
@@ -155,8 +161,13 @@ function waitForEngineReady(timeoutMs = 5000) {
   ]);
 }
 
-export function handleEngineReady() {
+export function handleEngineReady(message) {
   engineReady = true;
+  if (message?.ok === false) {
+    engineReadyError = new Error(
+      message.error || "Engine preload failed"
+    );
+  }
   if (engineReadyResolve) {
     engineReadyResolve();
     engineReadyResolve = null;
@@ -175,6 +186,9 @@ function withTimeout(promise, timeoutMs, label = "Engine call timed out") {
 
 export async function engineCall(method, params, options = {}) {
   await ensureEnginePage();
+  if (engineReadyError) {
+    throw engineReadyError;
+  }
 
   const id = `${Date.now()}_${++engineMsgSeq}`;
   const payload = { type: "DUSK_ENGINE_CALL", id, method, params };
