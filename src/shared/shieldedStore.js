@@ -5,8 +5,6 @@
 // We intentionally use IndexedDB because chrome.storage is size-limited.
 
 import { bytesToHex, hexToBytes } from "./bytes.js";
-import { storage } from "./storage.js";
-import { isExtensionRuntime, isTauriRuntime } from "../platform/runtime.js";
 
 const DB_NAME = "dusk_shielded_v1";
 const DB_VERSION = 2;
@@ -16,158 +14,8 @@ const STORE_NOTES = "notes";
 const STORE_SPENT = "spent";
 const STORE_PENDING = "pending";
 
-const KV_PREFIX = "dusk_shielded_kv_v1";
-const KV_META = "meta";
-const KV_NOTES = "notes";
-const KV_SPENT = "spent";
-const KV_PENDING = "pending";
-
-const BACKEND = {
-  IDB: "idb",
-  KV: "kv",
-  MEM: "mem",
-};
-
 /** @type {Promise<IDBDatabase> | null} */
 let dbPromise = null;
-let backend = null;
-let backendPromise = null;
-let backendError = null;
-
-const memoryStore = {
-  [KV_META]: new Map(),
-  [KV_NOTES]: new Map(),
-  [KV_SPENT]: new Map(),
-  [KV_PENDING]: new Map(),
-};
-
-function bytesToBase64(bytes) {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-}
-
-function base64ToBytes(base64) {
-  if (!base64) return new Uint8Array();
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-function kvKey(prefix, ownerKeyStr) {
-  return `${KV_PREFIX}::${prefix}::${ownerKeyStr}`;
-}
-
-async function kvGet(prefix, ownerKeyStr, fallback) {
-  if (backend === BACKEND.MEM) {
-    return memoryStore[prefix].get(ownerKeyStr) ?? fallback;
-  }
-
-  const key = kvKey(prefix, ownerKeyStr);
-  try {
-    const out = await storage.get(key);
-    const val = out[key];
-    return val === undefined ? fallback : val;
-  } catch (err) {
-    backend = BACKEND.MEM;
-    backendError = err;
-    console.warn(
-      "Shielded KV storage unavailable; falling back to memory:",
-      err?.message ?? String(err)
-    );
-    return memoryStore[prefix].get(ownerKeyStr) ?? fallback;
-  }
-}
-
-async function kvSet(prefix, ownerKeyStr, value) {
-  if (backend === BACKEND.MEM) {
-    memoryStore[prefix].set(ownerKeyStr, value);
-    return;
-  }
-
-  const key = kvKey(prefix, ownerKeyStr);
-  try {
-    await storage.set({ [key]: value });
-  } catch (err) {
-    backend = BACKEND.MEM;
-    backendError = err;
-    console.warn(
-      "Shielded KV storage unavailable; falling back to memory:",
-      err?.message ?? String(err)
-    );
-    memoryStore[prefix].set(ownerKeyStr, value);
-  }
-}
-
-async function kvRemove(prefix, ownerKeyStr) {
-  if (backend === BACKEND.MEM) {
-    memoryStore[prefix].delete(ownerKeyStr);
-    return;
-  }
-
-  const key = kvKey(prefix, ownerKeyStr);
-  try {
-    await storage.remove(key);
-  } catch (err) {
-    backend = BACKEND.MEM;
-    backendError = err;
-    console.warn(
-      "Shielded KV storage unavailable; falling back to memory:",
-      err?.message ?? String(err)
-    );
-    memoryStore[prefix].delete(ownerKeyStr);
-  }
-}
-
-async function resolveBackend() {
-  if (backend) return backend;
-  if (backendPromise) return backendPromise;
-
-  backendPromise = (async () => {
-    if (isTauriRuntime()) {
-      backend = BACKEND.KV;
-      return backend;
-    }
-
-    if (typeof indexedDB !== "undefined") {
-      try {
-        await openDb();
-        backend = BACKEND.IDB;
-        return backend;
-      } catch (err) {
-        // IndexedDB should exist in extensions; fallback only for Tauri/web.
-        if (isExtensionRuntime()) {
-          throw err;
-        }
-        backend = BACKEND.KV;
-        console.warn(
-          "IndexedDB unavailable; falling back to KV shielded storage:",
-          err?.message ?? String(err)
-        );
-        return backend;
-      }
-    }
-
-    backend = BACKEND.KV;
-    return backend;
-  })();
-
-  return backendPromise;
-}
-
-async function useKvBackend() {
-  // Prefer KV on Tauri if IndexedDB is missing or fails to open.
-  if (backend === BACKEND.KV || backend === BACKEND.MEM) return true;
-  const b = await resolveBackend();
-  return b === BACKEND.KV || b === BACKEND.MEM;
-}
 
 function openDb() {
   if (dbPromise) return dbPromise;
@@ -213,10 +61,7 @@ function openDb() {
     };
 
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => {
-      dbPromise = null;
-      reject(req.error || new Error("Failed to open IndexedDB"));
-    };
+    req.onerror = () => reject(req.error || new Error("Failed to open IndexedDB"));
   });
 
   return dbPromise;
@@ -254,13 +99,9 @@ function parseBigIntString(s, fallback = 0n) {
 // ---------------------------------------------------------------------------
 
 export async function getShieldedMeta(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
   const key = ownerKey(networkKey, walletId, profileIndex);
 
-  if (await useKvBackend()) {
-    return await kvGet(KV_META, key, null);
-  }
-
-  const db = await openDb();
   return await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_META], "readonly");
     const store = tx.objectStore(STORE_META);
@@ -271,6 +112,7 @@ export async function getShieldedMeta(networkKey, walletId, profileIndex = 0) {
 }
 
 export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPatch) {
+  const db = await openDb();
   const key = ownerKey(networkKey, walletId, profileIndex);
 
   const prev = (await getShieldedMeta(networkKey, walletId, profileIndex)) || {
@@ -290,12 +132,6 @@ export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPa
     updatedAt: Date.now(),
   };
 
-  if (await useKvBackend()) {
-    await kvSet(KV_META, key, next);
-    return next;
-  }
-
-  const db = await openDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_META], "readwrite");
     tx.oncomplete = () => resolve(true);
@@ -325,17 +161,13 @@ export async function ensureShieldedMeta(networkKey, walletId, profileIndex = 0,
     updatedAt: Date.now(),
   };
 
-  if (await useKvBackend()) {
-    await kvSet(KV_META, created.ownerKey, created);
-  } else {
-    const db = await openDb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction([STORE_META], "readwrite");
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => reject(tx.error || new Error("Failed to create meta"));
-      tx.objectStore(STORE_META).put(created);
-    });
-  }
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_META], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to create meta"));
+    tx.objectStore(STORE_META).put(created);
+  });
   return created;
 }
 
@@ -368,23 +200,17 @@ async function clearStoreByOwner(db, storeName, ownerKeyStr) {
 }
 
 export async function clearNotes(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   // Clear all shielded caches for this owner (unspent, spent, pending).
-  if (await useKvBackend()) {
-    await kvRemove(KV_PENDING, ok).catch(() => {});
-    await kvRemove(KV_SPENT, ok).catch(() => {});
-    await kvRemove(KV_NOTES, ok).catch(() => {});
-    return;
-  }
-
-  const db = await openDb();
   await clearStoreByOwner(db, STORE_PENDING, ok).catch(() => {});
   await clearStoreByOwner(db, STORE_SPENT, ok).catch(() => {});
   await clearStoreByOwner(db, STORE_NOTES, ok).catch(() => {});
 }
 
 export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   // notesMap is Map<Uint8Array, Uint8Array>
@@ -407,17 +233,6 @@ export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) 
 
   if (!entries.length) return 0;
 
-  if (await useKvBackend()) {
-    const existing = (await kvGet(KV_NOTES, ok, {})) || {};
-    for (const e of entries) {
-      const bytes = e.buf instanceof ArrayBuffer ? new Uint8Array(e.buf) : new Uint8Array(e.buf || []);
-      existing[e.keyHex] = bytesToBase64(bytes);
-    }
-    await kvSet(KV_NOTES, ok, existing);
-    return entries.length;
-  }
-
-  const db = await openDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NOTES], "readwrite");
     const store = tx.objectStore(STORE_NOTES);
@@ -441,24 +256,9 @@ export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) 
 }
 
 export async function getNotesMap(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
-  if (await useKvBackend()) {
-    const data = (await kvGet(KV_NOTES, ok, {})) || {};
-    const out = new Map();
-    for (const [hex, b64] of Object.entries(data)) {
-      try {
-        const k = hexToBytes(hex);
-        const v = base64ToBytes(b64);
-        out.set(k, v);
-      } catch {
-        // ignore bad rows
-      }
-    }
-    return out;
-  }
-
-  const db = await openDb();
   const rows = await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NOTES], "readonly");
     const store = tx.objectStore(STORE_NOTES);
@@ -505,28 +305,9 @@ async function getPendingRows(db, ok) {
  * Returns a Map of spendable notes (unspent notes minus locally pending nullifiers).
  */
 export async function getSpendableNotesMap(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
-  if (await useKvBackend()) {
-    const notes = (await kvGet(KV_NOTES, ok, {})) || {};
-    const pending = (await kvGet(KV_PENDING, ok, {})) || {};
-    const pendingSet = new Set(Object.keys(pending));
-
-    const out = new Map();
-    for (const [hex, b64] of Object.entries(notes)) {
-      if (pendingSet.has(hex)) continue;
-      try {
-        const k = hexToBytes(hex);
-        const v = base64ToBytes(b64);
-        out.set(k, v);
-      } catch {
-        // ignore
-      }
-    }
-    return out;
-  }
-
-  const db = await openDb();
   const [rows, pendingRows] = await Promise.all([
     new Promise((resolve, reject) => {
       const tx = db.transaction([STORE_NOTES], "readonly");
@@ -566,22 +347,9 @@ export async function getSpendableNotesMap(networkKey, walletId, profileIndex = 
  * @returns {Promise<Uint8Array[]>}
  */
 export async function getUnspentNullifiers(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
-  if (await useKvBackend()) {
-    const notes = (await kvGet(KV_NOTES, ok, {})) || {};
-    const out = [];
-    for (const hex of Object.keys(notes)) {
-      try {
-        out.push(hexToBytes(hex));
-      } catch {
-        // ignore
-      }
-    }
-    return out;
-  }
-
-  const db = await openDb();
   const rows = await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NOTES], "readonly");
     const store = tx.objectStore(STORE_NOTES);
@@ -607,22 +375,9 @@ export async function getUnspentNullifiers(networkKey, walletId, profileIndex = 
  * @returns {Promise<Uint8Array[]>}
  */
 export async function getSpentNullifiers(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
-  if (await useKvBackend()) {
-    const spent = (await kvGet(KV_SPENT, ok, {})) || {};
-    const out = [];
-    for (const hex of Object.keys(spent)) {
-      try {
-        out.push(hexToBytes(hex));
-      } catch {
-        // ignore
-      }
-    }
-    return out;
-  }
-
-  const db = await openDb();
   const rows = await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_SPENT], "readonly");
     const store = tx.objectStore(STORE_SPENT);
@@ -648,6 +403,7 @@ export async function getSpentNullifiers(networkKey, walletId, profileIndex = 0)
  * These are filtered out from spendable notes until they become spent on chain.
  */
 export async function putPendingNullifiers(networkKey, walletId, profileIndex, nullifiers, txHash) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
   const hash = String(txHash || "");
   if (!hash) return 0;
@@ -675,19 +431,6 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
 
   if (!rows.length) return 0;
 
-  if (await useKvBackend()) {
-    const pending = (await kvGet(KV_PENDING, ok, {})) || {};
-    for (const r of rows) {
-      pending[r.nullifier] = {
-        txHash: r.txHash,
-        createdAt: r.createdAt,
-      };
-    }
-    await kvSet(KV_PENDING, ok, pending);
-    return rows.length;
-  }
-
-  const db = await openDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");
     const store = tx.objectStore(STORE_PENDING);
@@ -704,6 +447,7 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
  * pending reservation for them.
  */
 export async function markNullifiersSpent(networkKey, walletId, profileIndex, nullifiers) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   const hexes = [];
@@ -718,31 +462,6 @@ export async function markNullifiersSpent(networkKey, walletId, profileIndex, nu
   }
   if (!hexes.length) return 0;
 
-  if (await useKvBackend()) {
-    const notes = (await kvGet(KV_NOTES, ok, {})) || {};
-    const spent = (await kvGet(KV_SPENT, ok, {})) || {};
-    const pending = (await kvGet(KV_PENDING, ok, {})) || {};
-
-    for (const hex of hexes) {
-      if (notes[hex] !== undefined) {
-        spent[hex] = {
-          nullifier: hex,
-          noteKey: hex,
-          noteValue: notes[hex],
-          spentAt: Date.now(),
-        };
-        delete notes[hex];
-      }
-      delete pending[hex];
-    }
-
-    await kvSet(KV_NOTES, ok, notes);
-    await kvSet(KV_SPENT, ok, spent);
-    await kvSet(KV_PENDING, ok, pending);
-    return hexes.length;
-  }
-
-  const db = await openDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NOTES, STORE_SPENT, STORE_PENDING], "readwrite");
     const notes = tx.objectStore(STORE_NOTES);
@@ -790,6 +509,7 @@ export async function markNullifiersSpent(networkKey, walletId, profileIndex, nu
  * Move notes from spent -> unspent.
  */
 export async function unspendNullifiers(networkKey, walletId, profileIndex, nullifiers) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   const hexes = [];
@@ -804,24 +524,6 @@ export async function unspendNullifiers(networkKey, walletId, profileIndex, null
   }
   if (!hexes.length) return 0;
 
-  if (await useKvBackend()) {
-    const notes = (await kvGet(KV_NOTES, ok, {})) || {};
-    const spent = (await kvGet(KV_SPENT, ok, {})) || {};
-
-    for (const hex of hexes) {
-      const row = spent[hex];
-      if (row) {
-        notes[hex] = row.noteValue ?? notes[hex];
-        delete spent[hex];
-      }
-    }
-
-    await kvSet(KV_NOTES, ok, notes);
-    await kvSet(KV_SPENT, ok, spent);
-    return hexes.length;
-  }
-
-  const db = await openDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_SPENT, STORE_NOTES], "readwrite");
     const spent = tx.objectStore(STORE_SPENT);
@@ -856,14 +558,9 @@ export async function unspendNullifiers(networkKey, walletId, profileIndex, null
 }
 
 export async function countNotes(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
-  if (await useKvBackend()) {
-    const notes = (await kvGet(KV_NOTES, ok, {})) || {};
-    return Object.keys(notes).length;
-  }
-
-  const db = await openDb();
   const n = await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NOTES], "readonly");
     const store = tx.objectStore(STORE_NOTES);
