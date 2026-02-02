@@ -121,13 +121,9 @@ Manifest V3 enforces strict CSP by default:
 
 #### Tauri
 
-**Current state**: strict CSP enabled.
+**Current state**: `"csp": null` (disabled)
 
-```json
-{
-  "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http: wss: ws:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
-}
-```
+**TODO**: Re-enable strict CSP once Tauri issues are resolved.
 
 ### 5. Network Security
 
