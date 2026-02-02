@@ -30,7 +30,7 @@
 
 ### 1.3 Security Testing
 - [x] Unit tests for `crypto.js`
-- [ ] Unit tests for `vault.js`
+- [x] Unit tests for `vault.js`
 - [ ] Integration tests for `shieldedStore.js`
 - [ ] Document threat model in `SECURITY.md`
 
@@ -45,7 +45,7 @@ Current: 93% on shared utilities, core engine untested.
 ### 2.1 Core Engine Tests
 - [ ] `walletEngine.js` (1700+ lines) — Mock w3sper, test tx flows
 - [ ] `shieldedStore.js` — IndexedDB operations
-- [ ] `permissions.js` — Origin-based access control
+- [x] `permissions.js` — Origin-based access control
 
 ### 2.2 Background Tests
 - [ ] `rpc.js` — dApp RPC handler
