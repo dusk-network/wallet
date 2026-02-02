@@ -25,12 +25,21 @@ const KV_PENDING = "pending";
 const BACKEND = {
   IDB: "idb",
   KV: "kv",
+  MEM: "mem",
 };
 
 /** @type {Promise<IDBDatabase> | null} */
 let dbPromise = null;
 let backend = null;
 let backendPromise = null;
+let backendError = null;
+
+const memoryStore = {
+  [KV_META]: new Map(),
+  [KV_NOTES]: new Map(),
+  [KV_SPENT]: new Map(),
+  [KV_PENDING]: new Map(),
+};
 
 function bytesToBase64(bytes) {
   let binary = "";
@@ -57,20 +66,64 @@ function kvKey(prefix, ownerKeyStr) {
 }
 
 async function kvGet(prefix, ownerKeyStr, fallback) {
+  if (backend === BACKEND.MEM) {
+    return memoryStore[prefix].get(ownerKeyStr) ?? fallback;
+  }
+
   const key = kvKey(prefix, ownerKeyStr);
-  const out = await storage.get(key);
-  const val = out[key];
-  return val === undefined ? fallback : val;
+  try {
+    const out = await storage.get(key);
+    const val = out[key];
+    return val === undefined ? fallback : val;
+  } catch (err) {
+    backend = BACKEND.MEM;
+    backendError = err;
+    console.warn(
+      "Shielded KV storage unavailable; falling back to memory:",
+      err?.message ?? String(err)
+    );
+    return memoryStore[prefix].get(ownerKeyStr) ?? fallback;
+  }
 }
 
 async function kvSet(prefix, ownerKeyStr, value) {
+  if (backend === BACKEND.MEM) {
+    memoryStore[prefix].set(ownerKeyStr, value);
+    return;
+  }
+
   const key = kvKey(prefix, ownerKeyStr);
-  await storage.set({ [key]: value });
+  try {
+    await storage.set({ [key]: value });
+  } catch (err) {
+    backend = BACKEND.MEM;
+    backendError = err;
+    console.warn(
+      "Shielded KV storage unavailable; falling back to memory:",
+      err?.message ?? String(err)
+    );
+    memoryStore[prefix].set(ownerKeyStr, value);
+  }
 }
 
 async function kvRemove(prefix, ownerKeyStr) {
+  if (backend === BACKEND.MEM) {
+    memoryStore[prefix].delete(ownerKeyStr);
+    return;
+  }
+
   const key = kvKey(prefix, ownerKeyStr);
-  await storage.remove(key);
+  try {
+    await storage.remove(key);
+  } catch (err) {
+    backend = BACKEND.MEM;
+    backendError = err;
+    console.warn(
+      "Shielded KV storage unavailable; falling back to memory:",
+      err?.message ?? String(err)
+    );
+    memoryStore[prefix].delete(ownerKeyStr);
+  }
 }
 
 async function resolveBackend() {
@@ -111,9 +164,9 @@ async function resolveBackend() {
 
 async function useKvBackend() {
   // Prefer KV on Tauri if IndexedDB is missing or fails to open.
-  if (backend === BACKEND.KV) return true;
+  if (backend === BACKEND.KV || backend === BACKEND.MEM) return true;
   const b = await resolveBackend();
-  return b === BACKEND.KV;
+  return b === BACKEND.KV || b === BACKEND.MEM;
 }
 
 function openDb() {

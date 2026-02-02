@@ -1150,15 +1150,30 @@ async function ensureShieldedMetaForCurrent() {
   const walletId = getWalletId();
   if (!walletId) throw new Error("No walletId (wallet locked?)");
   const idx = state.currentIndex || 0;
-  const meta = await ensureShieldedMeta(netKey, walletId, idx, {
-    checkpointBookmark: 0n,
-    checkpointBlock: 0n,
-    cursorBookmark: 0n,
-    cursorBlock: 0n,
-  });
+  let meta;
+  try {
+    meta = await ensureShieldedMeta(netKey, walletId, idx, {
+      checkpointBookmark: 0n,
+      checkpointBlock: 0n,
+      cursorBookmark: 0n,
+      cursorBlock: 0n,
+    });
+  } catch (err) {
+    // Surface meta init failures explicitly; they otherwise get swallowed by callers.
+    setShieldedStatus({
+      state: "error",
+      lastError: err?.message ?? String(err),
+    });
+    throw err;
+  }
 
   const cursor = metaCursor(meta);
-  const n = await countNotes(netKey, walletId, idx);
+  let n = 0;
+  try {
+    n = await countNotes(netKey, walletId, idx);
+  } catch {
+    n = 0;
+  }
 
   setShieldedStatus({
     cursorBookmark: cursor.bookmark.toString(),
@@ -1226,7 +1241,12 @@ export async function startShieldedSync({ force = false } = {}) {
 
   state.shielded.starting = true;
   try {
-    await ensureShieldedMetaForCurrent();
+    try {
+      await ensureShieldedMetaForCurrent();
+    } catch {
+      broadcastShieldedStatus("error");
+      return { started: false, status: getShieldedStatus() };
+    }
 
     const walletId = getWalletId();
     if (!walletId) throw new Error("No walletId (wallet locked?)");
