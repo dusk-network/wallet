@@ -327,9 +327,30 @@ async function onExpand() {
   try {
     netMenu.close();
     const origin = await getActiveOrigin();
-    const url = runtimeGetURL(
-      `full.html${origin ? `?origin=${encodeURIComponent(origin)}` : ""}`
-    );
+    const qs = new URLSearchParams();
+    if (origin) qs.set("origin", origin);
+
+    // Preserve the current in-app route when expanding popup -> full view.
+    // This keeps Settings/Activity/etc. consistent and avoids surprising jumps.
+    try {
+      const r = String(state?.route ?? "");
+      if (r) qs.set("route", r);
+
+      // Preserve tx details if we're currently looking at a tx.
+      if (r === "tx" && state?.txDetailHash) {
+        qs.set("hash", String(state.txDetailHash));
+      }
+
+      // Preserve Activity highlight (used when opened from a notification).
+      if (r === "activity" && state?.highlightTx) {
+        qs.set("tx", String(state.highlightTx));
+      }
+    } catch {
+      // ignore
+    }
+
+    const suffix = qs.toString();
+    const url = runtimeGetURL(`full.html${suffix ? `?${suffix}` : ""}`);
     await tabsCreate({ url });
     if (isPopupView) window.close();
   } catch (e) {
