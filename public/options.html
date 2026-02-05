@@ -6,23 +6,36 @@
     <title>Dusk Wallet</title>
     <link rel="stylesheet" href="ui.css" />
   </head>
-  <body class="page--popup">
-    <div class="panel">
-      <div class="panel-header">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true">
-            <img class="brand-mark__glyph" src="icons/dusk-glyph.svg" alt="" />
-          </div>
-          <button class="panel-subtitle network-pill" id="network-pill" type="button" aria-haspopup="menu" aria-expanded="false">
-            <span class="network-pill__label">Testnet</span>
-            <span class="network-pill__chev" aria-hidden="true">▾</span>
-          </button>
-        </div>
-        <div class="header-actions" id="header-actions"></div>
-      </div>
 
-      <div class="panel-content">
-        <div id="app"></div>
+  <body class="page--full page--options">
+    <div class="full-wrap">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="brand">
+            <div class="brand-mark" aria-hidden="true">
+              <img class="brand-mark__glyph" src="icons/dusk-glyph.svg" alt="" />
+            </div>
+            <div class="brand-text">
+              <div class="panel-title">Dusk Wallet</div>
+            </div>
+            <button
+              class="panel-subtitle network-pill"
+              id="network-pill"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <span class="network-pill__label">Loading…</span>
+              <span class="network-pill__chev" aria-hidden="true">▾</span>
+            </button>
+          </div>
+
+          <div class="header-actions" id="header-actions"></div>
+        </div>
+
+        <div class="panel-content">
+          <div id="app"></div>
+        </div>
       </div>
     </div>
 
