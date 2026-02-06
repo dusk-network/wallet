@@ -32,7 +32,7 @@ test("import wallet, add second account, name + switch accounts", async ({ page 
   await expect(page.getByText("Import an existing recovery phrase")).toBeVisible();
 
   // Paste full phrase into first slot (MnemonicInput distributes it).
-  await page.getByLabel("Word 1").fill(MNEMONIC_12);
+  await page.getByLabel("Word 1", { exact: true }).fill(MNEMONIC_12);
   await page.getByPlaceholder("Create password (min 8 chars)").fill(PASSWORD);
   await page.getByPlaceholder("Confirm password").fill(PASSWORD);
   await page.getByRole("button", { name: "Import wallet" }).click();
@@ -74,4 +74,3 @@ test("import wallet, add second account, name + switch accounts", async ({ page 
   await page.getByTitle("Options").click();
   await expect(page.locator("select#account")).toHaveValue("1");
 });
-
