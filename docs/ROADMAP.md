@@ -95,6 +95,17 @@ Current: 93% on shared utilities, core engine untested.
 ### 4.2 Transactions (Core UX)
 - [ ] Better gas estimation UI (quick win, see Phase 5; use Rusk gas price stats endpoint)
 
+### 4.3 Assets (DRC20 / DRC721)
+
+Goal: users should be able to manage common on-chain assets (tokens + NFTs) in-wallet, similar to the "Tokens" / "NFTs" tabs in Ethereum wallets.
+
+- [ ] **DRC20 (tokens):** add a wallet UI to "watch/import" a token by `contractId` (per-network), fetch `{ name, symbol, decimals }`, and display balance (public only).
+- [ ] **DRC20 (send):** add a send flow that builds `contract_call` transactions for `transfer(TransferCall)` using a canonical DRC20 data-driver for encoding.
+- [ ] **DRC20 (approvals):** add an approval flow for `approve(ApproveCall)` with safer defaults (exact amount), plus clear warnings (spender, amount, token).
+- [ ] **DRC721 (NFTs):** add an "Import NFT" flow by `{ contractId, token_id }` (MetaMask-style), verify ownership via `owner_of`, and display metadata using `token_uri`.
+- [ ] **NFT privacy controls:** setting to disable remote metadata/image fetches (token URI may be HTTP/IPFS and can leak usage patterns).
+- [ ] **Activity UX:** label locally-submitted DRC20/DRC721 actions in the activity feed (even without full inbound history/indexing).
+
 ---
 
 ## Phase 5: Developer Experience 🟡
@@ -161,6 +172,23 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 - [x] Activity view: polish the existing activity feed (local submitted/executed statuses, explorer links)
 - [x] Transactions: better gas estimation UI (use Rusk gas price stats, show recommended + range)
 
+### 5.5 Token Standards (DRC20 / DRC721) via Data-Drivers
+
+Goal: for token/NFT contracts that follow the DRC standards, dApp developers should get ERC20/ERC721-like ergonomics in the SDK, and users should see verified, human-readable approvals in the wallet (not just opaque bytes).
+
+- [ ] **Provider:** implement an EIP-747-like "watch asset" request so dApps can prompt users to add a token/NFT to the wallet UI (approval required).
+  - Proposed RPC: `wallet_watchAsset` (Ethereum-compatible name) with `type: "DRC20" | "DRC721"` and options like `{ contractId, symbol?, decimals?, image?, tokenId? }`.
+  - Wallet must verify on-chain metadata (via contract views) before persisting.
+- [ ] **Wallet approvals (verified decode):** for DRC20/DRC721 calls (`transfer`, `approve`, `transfer_from`, `set_approval_for_all`), decode args using a canonical data-driver and show a specialized approval screen (amount formatted with decimals, token symbol, spender/to/from, high-risk warnings).
+- [ ] **SDK wrappers:** add `drc20` / `drc721` helper modules built on `createDuskContract()`:
+  - typed `read` (`name/symbol/decimals/balance_of/allowance/...`)
+  - typed `write` (`transfer/approve/transfer_from/...`)
+  - standardized `display` builders so approvals stay consistent across dApps.
+- [ ] **SDK examples:** add `examples/drc20-demo` and `examples/drc721-demo` consuming the canonical `data_driver.wasm` artifacts.
+- [ ] **Conformance tests:** add tests that assert the canonical drivers can:
+  - encode inputs that the chain accepts, and
+  - decode outputs/events for the standard methods.
+
 ---
 
 ## Phase 6: Large / Risky Projects 🟢
@@ -182,6 +210,7 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 
 ### 6.4 History (Archive Node)
 - [ ] Full transaction history via archive node (GraphQL) with filtering/pagination
+- [ ] Token/NFT indexing on top of archive history (inbound/outbound transfers, NFT galleries, allowance/approval discovery)
 
 ---
 
