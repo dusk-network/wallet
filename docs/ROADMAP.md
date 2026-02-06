@@ -155,11 +155,11 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 - [ ] Coverage badges in README
 
 ### 5.4 Wallet UX Quick Wins
-- [ ] Multi-account: account switching UI in the main wallet UI (not only in Settings/Options)
+- [x] Multi-account: account switching UI in the main wallet UI (not only in Settings/Options)
 - [x] Multi-account: enforce Dusk standard max of 2 profiles (note scanning cost scales with profiles)
-- [ ] Multi-account: per-account naming (persisted per `walletId`)
-- [ ] Activity view: polish the existing activity feed (local submitted/executed statuses, explorer links)
-- [ ] Transactions: better gas estimation UI (use Rusk gas price stats, show recommended + range)
+- [x] Multi-account: per-account naming (persisted per `walletId`)
+- [x] Activity view: polish the existing activity feed (local submitted/executed statuses, explorer links)
+- [x] Transactions: better gas estimation UI (use Rusk gas price stats, show recommended + range)
 
 ---
 
