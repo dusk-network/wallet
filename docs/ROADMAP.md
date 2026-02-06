@@ -93,8 +93,7 @@ Current: 93% on shared utilities, core engine untested.
 - [ ] Validator selection (TBD: if this is actually meaningful in Dusk; today it is mostly "your stake keys" rather than delegation)
 
 ### 4.2 Transactions (Core UX)
-- [ ] History with filtering (quick win, see Phase 5)
-- [ ] Better gas estimation UI (quick win, see Phase 5)
+- [ ] Better gas estimation UI (quick win, see Phase 5; use Rusk gas price stats endpoint)
 
 ---
 
@@ -146,7 +145,7 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 - [x] `provider-api.md` — Keep in lockstep with `src/background/rpc.js` + Dusk Connect SDK
 
 ### 5.2 Tooling
-- [ ] Mock Rusk node for testing
+- [ ] Integration test node via Docker image (`dusknode/rusk`) instead of mocking
 - [ ] Storybook for UI components
 - [ ] E2E test harness (Playwright)
 
@@ -157,10 +156,10 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 
 ### 5.4 Wallet UX Quick Wins
 - [ ] Multi-account: account switching UI in the main wallet UI (not only in Settings/Options)
+- [ ] Multi-account: enforce Dusk standard max of 2 profiles (note scanning cost scales with profiles)
 - [ ] Multi-account: per-account naming (persisted per `walletId`)
-- [ ] Multi-account: account-specific history views
-- [ ] Transactions: history with filtering (public + shielded where applicable)
-- [ ] Transactions: better gas estimation UI (fee floor, min limits, "what you pay" display)
+- [ ] Activity view: polish the existing activity feed (local submitted/executed statuses, explorer links)
+- [ ] Transactions: better gas estimation UI (use Rusk gas price stats, show recommended + range)
 
 ---
 
@@ -180,6 +179,9 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 ### 6.3 Advanced Transactions (Protocol Dependent)
 - [ ] Cancel/speed-up pending tx (only if Dusk supports replace-by-nonce semantics)
 - [ ] Batch transactions (only if Dusk supports an atomic batch mechanism)
+
+### 6.4 History (Archive Node)
+- [ ] Full transaction history via archive node (GraphQL) with filtering/pagination
 
 ---
 
