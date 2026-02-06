@@ -10,6 +10,8 @@ import {
   isUnlocked,
   lock,
   sendTransaction,
+  signAuth,
+  signMessage,
   setShieldedCheckpointNow,
   startShieldedSync,
   waitTxExecuted,
@@ -257,6 +259,18 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
           // Fire-and-forget: wait for EXECUTED and notify background so it can
           // show a final notification + explorer link.
           watchTxExecuted(result?.hash).catch(() => {});
+          return;
+        }
+
+        case "dusk_signMessage": {
+          const result = await signMessage(params ?? {});
+          sendResponse({ id, result });
+          return;
+        }
+
+        case "dusk_signAuth": {
+          const result = await signAuth(params ?? {});
+          sendResponse({ id, result });
           return;
         }
 

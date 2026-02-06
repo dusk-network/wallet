@@ -195,6 +195,80 @@ export async function renderNotification() {
     return;
   }
 
+  if (kindNorm === "sign_message") {
+    const chainId = String(params?.chainId ?? "");
+    const messageHash = String(params?.messageHash ?? "");
+    const messageLen = Number(params?.messageLen ?? 0) || 0;
+
+    setApp([
+      header,
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Approve message signature" }),
+      ]),
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Account" }),
+        h("div", { class: "box" }, [h("code", { text: accounts?.[0] ?? "(none)" })]),
+      ]),
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Chain ID" }),
+        h("div", { class: "box" }, [h("code", { text: chainId || "—" })]),
+      ]),
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Message (hashed)" }),
+        h("div", { class: "box" }, [
+          h("code", {
+            text: messageHash
+              ? `${messageLen} bytes · sha256=${messageHash.slice(0, 12)}…${messageHash.slice(-8)}`
+              : `${messageLen} bytes`,
+          }),
+        ]),
+      ]),
+      h("div", {
+        class: "muted",
+        text: "This request does not submit a transaction. It signs a domain-separated hash for off-chain use.",
+      }),
+      decisionButtons("Sign"),
+    ]);
+    return;
+  }
+
+  if (kindNorm === "sign_auth") {
+    const chainId = String(params?.chainId ?? "");
+    const nonce = String(params?.nonce ?? "");
+    const statement = String(params?.statement ?? "").trim();
+
+    setApp([
+      header,
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Approve sign-in" }),
+      ]),
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Account" }),
+        h("div", { class: "box" }, [h("code", { text: accounts?.[0] ?? "(none)" })]),
+      ]),
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Chain ID" }),
+        h("div", { class: "box" }, [h("code", { text: chainId || "—" })]),
+      ]),
+      statement
+        ? h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Statement" }),
+            h("div", { class: "box" }, [h("code", { text: statement })]),
+          ])
+        : h("div"),
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Nonce" }),
+        h("div", { class: "box" }, [h("code", { text: nonce || "—" })]),
+      ]),
+      h("div", {
+        class: "muted",
+        text: "Only sign in if you trust this site.",
+      }),
+      decisionButtons("Sign in"),
+    ]);
+    return;
+  }
+
   if (kindNorm === "send_tx") {
     const txKind = String(params?.kind ?? "").toLowerCase();
 
@@ -218,7 +292,7 @@ export async function renderNotification() {
         header,
         h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve transfer" })]),
         h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "To (account)" }),
+          h("div", { class: "muted", text: "To" }),
           h("div", { class: "box" }, [h("code", { text: to })]),
         ]),
         h("div", { class: "row" }, [
@@ -240,10 +314,10 @@ export async function renderNotification() {
     }
 
     if (txKind === TX_KIND.CONTRACT_CALL) {
-      const to = params?.to ?? accounts?.[0] ?? "";
       const amount = params?.amount ?? "0";
       const deposit = params?.deposit ?? "0";
       const gas = params?.gas ?? null;
+      const privacy = String(params?.privacy ?? "public").trim().toLowerCase();
 
       const amountLuxStr = prettyAmount(amount);
       const depositLuxStr = prettyAmount(deposit);
@@ -293,6 +367,14 @@ export async function renderNotification() {
           h("div", { class: "box" }, [h("code", { text: contractIdHex })]),
         ]),
         h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Privacy" }),
+          h("div", { class: "box" }, [
+            h("code", {
+              text: privacy === "shielded" ? "Shielded" : "Public",
+            }),
+          ]),
+        ]),
+        h("div", { class: "row" }, [
           h("div", { class: "muted", text: "Function" }),
           h("div", { class: "box" }, [h("code", { text: fnName || "(none)" })]),
         ]),
@@ -306,10 +388,6 @@ export async function renderNotification() {
                   : String(params?.fnArgs ?? ""),
             }),
           ]),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "To (account)" }),
-          h("div", { class: "box" }, [h("code", { text: to })]),
         ]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "Amount" }),

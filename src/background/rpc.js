@@ -11,6 +11,8 @@ import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
+import { sha256Hex, toBytes } from "../shared/bytes.js";
+import { DAPP_LIMITS, DAPP_RPC_METHODS, DAPP_TX_KINDS } from "../shared/providerSurface.js";
 import {
   engineCall,
   ensureEngineConfigured,
@@ -25,13 +27,13 @@ import {
   broadcastChainChangedAll,
   broadcastToOrigin,
 } from "./dappEvents.js";
-import { runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
+import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
 export async function handleRpc(origin, request) {
   const { method, params } = request || {};
 
-  const MAX_CALLDATA_BYTES = 64 * 1024;
+  const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
 
   function estimateBytes(v) {
     if (v == null) return 0;
@@ -90,6 +92,42 @@ export async function handleRpc(origin, request) {
   }
 
   switch (method) {
+    case "dusk_getCapabilities": {
+      const settings = await getSettings();
+      const nodeUrl = String(settings?.nodeUrl ?? "");
+      const chainId = chainIdFromNodeUrl(nodeUrl);
+      const networkName = networkNameFromNodeUrl(nodeUrl);
+
+      let walletVersion = "";
+      try {
+        const ext = getExtensionApi();
+        walletVersion = String(ext?.runtime?.getManifest?.()?.version ?? "");
+      } catch {
+        walletVersion = "";
+      }
+
+      // Capabilities are public (no permission required).
+      return Object.freeze({
+        provider: "dusk-wallet",
+        walletVersion,
+        chainId,
+        nodeUrl,
+        networkName,
+        methods: [...DAPP_RPC_METHODS],
+        txKinds: [...DAPP_TX_KINDS],
+        limits: { ...DAPP_LIMITS },
+        features: {
+          // dApps must not read shielded state (addresses/balances/sync).
+          shieldedRead: false,
+          // Transfers *to* shielded recipients are supported.
+          shieldedRecipients: true,
+          signMessage: true,
+          signAuth: true,
+          contractCallPrivacy: true,
+        },
+      });
+    }
+
     case "dusk_requestAccounts": {
       // If the wallet isn't set up yet, don't even show a connect prompt.
       // MetaMask forces onboarding first, so we do the same.
@@ -278,7 +316,7 @@ export async function handleRpc(origin, request) {
 
       // dApps are only allowed to request a limited set of tx kinds.
       // Shielded conversion and staking flows are wallet-internal.
-      if (kind !== TX_KIND.TRANSFER && kind !== TX_KIND.CONTRACT_CALL) {
+      if (!DAPP_TX_KINDS.includes(kind)) {
         throw rpcError(
           ERROR_CODES.UNSUPPORTED,
           `Unsupported transaction kind for dApps: ${kind}`
@@ -290,6 +328,14 @@ export async function handleRpc(origin, request) {
           throw rpcError(
             ERROR_CODES.INVALID_PARAMS,
             "memo is not allowed for contract_call (payload is either memo OR contract call)"
+          );
+        }
+
+        const privacy = String(params.privacy ?? "public").trim().toLowerCase();
+        if (privacy !== "public" && privacy !== "shielded") {
+          throw rpcError(
+            ERROR_CODES.INVALID_PARAMS,
+            "privacy must be \"public\" or \"shielded\""
           );
         }
 
@@ -368,6 +414,83 @@ export async function handleRpc(origin, request) {
         notifyTxSubmitted({ hash, origin }).catch(() => {});
       }
       return result;
+    }
+
+    case "dusk_signMessage": {
+      const perm = await getPermissionForOrigin(origin);
+      if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
+
+      if (!params || typeof params !== "object") {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "params must be an object");
+      }
+
+      // Compute a stable message hash for the approval UI.
+      let messageLen = 0;
+      let messageHash = "";
+      try {
+        const msgBytes = toBytes(params.message);
+        messageLen = msgBytes.length;
+        messageHash = await sha256Hex(msgBytes);
+      } catch {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          "params.message must be bytes (hex string, base64 string, Uint8Array, ArrayBuffer, or number[])"
+        );
+      }
+
+      const settings = await getSettings();
+      const chainId = chainIdFromNodeUrl(settings?.nodeUrl ?? "");
+
+      await requestUserApproval("sign_message", origin, {
+        chainId,
+        messageHash: `0x${messageHash}`,
+        messageLen,
+      });
+
+      const { isUnlocked } = await getEngineStatus();
+      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+
+      await ensureEngineConfigured();
+      return await engineCall("dusk_signMessage", {
+        origin,
+        chainId,
+        message: params.message,
+      });
+    }
+
+    case "dusk_signAuth": {
+      const perm = await getPermissionForOrigin(origin);
+      if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
+
+      if (!params || typeof params !== "object") {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "params must be an object");
+      }
+
+      const nonce = String(params.nonce ?? "").trim();
+      if (!nonce) {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.nonce is required");
+      }
+
+      const settings = await getSettings();
+      const chainId = chainIdFromNodeUrl(settings?.nodeUrl ?? "");
+
+      await requestUserApproval("sign_auth", origin, {
+        chainId,
+        nonce,
+        statement: params.statement ?? "",
+      });
+
+      const { isUnlocked } = await getEngineStatus();
+      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+
+      await ensureEngineConfigured();
+      return await engineCall("dusk_signAuth", {
+        origin,
+        chainId,
+        nonce,
+        statement: params.statement ?? "",
+        expiresAt: params.expiresAt ?? "",
+      });
     }
 
     case "dusk_disconnect": {

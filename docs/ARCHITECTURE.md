@@ -308,6 +308,7 @@ window.dusk = {
 
 | Method | Description |
 |--------|-------------|
+| `dusk_getCapabilities` | Get supported methods/limits |
 | `dusk_requestAccounts` | Request connection |
 | `dusk_accounts` | Get connected accounts |
 | `dusk_chainId` | Get current chain ID |
@@ -315,6 +316,8 @@ window.dusk = {
 | `dusk_getPublicBalance` | Get balance |
 | `dusk_estimateGas` | Get gas prices |
 | `dusk_sendTransaction` | Send transaction |
+| `dusk_signMessage` | Sign an off-chain message |
+| `dusk_signAuth` | Sign a login/auth envelope |
 | `dusk_disconnect` | Revoke permission |
 
 See [provider-api.md](provider-api.md) for full documentation.

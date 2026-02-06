@@ -7,7 +7,7 @@ import {
   AddressSyncer,
   useAsProtocolDriver,
 } from "@dusk/w3sper";
-import { bytesToHex, hexToBytes, toBytes } from "./bytes.js";
+import { bytesToHex, hexToBytes, sha256Hex, toBytes } from "./bytes.js";
 import { TX_KIND } from "./constants.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
@@ -1788,6 +1788,12 @@ export async function sendTransaction(params) {
       throw new Error("Contract calls cannot include a memo payload");
     }
 
+    const privacy = String(params.privacy ?? "public").trim().toLowerCase();
+    const isShielded = privacy === "shielded";
+    if (privacy !== "public" && privacy !== "shielded") {
+      throw new Error("Invalid privacy: expected \"public\" or \"shielded\"");
+    }
+
     const contractIdBytes = toContractIdBytes(params.contractId);
     const fnName = String(params.fnName ?? "").trim();
     if (!fnName) throw new Error("fnName is required");
@@ -1798,9 +1804,45 @@ export async function sendTransaction(params) {
       throw new Error("fnArgs too large (max 64KB)");
     }
 
-    const to = params.to ? String(params.to) : profile.account.toString();
-    if (ProfileGenerator.typeOf(to) !== "account") {
-      throw new Error("Contract calls currently require an account 'to' (base58)" );
+    // Contract calls target a contract id (not an account/address). Internally we
+    // still route the call via a transfer tx, so we choose a deterministic
+    // self-recipient based on the requested privacy.
+    const to = params.to
+      ? String(params.to)
+      : isShielded
+      ? profile.address.toString()
+      : profile.account.toString();
+
+    const toType = ProfileGenerator.typeOf(to);
+    if (isShielded && toType !== "address") {
+      throw new Error("Shielded contract_call requires a shielded recipient (base58 address)");
+    }
+    if (!isShielded && toType !== "account") {
+      throw new Error("Public contract_call requires a public recipient (base58 account)");
+    }
+
+    // Shielded contract calls spend from the local note cache (Phoenix tx).
+    // If the cache is empty, fail fast and trigger a background sync.
+    if (isShielded) {
+      await ensureShieldedMetaForCurrent();
+      try {
+        const netKey = getNetworkKey();
+        const walletId = getWalletId();
+        const idx = state.currentIndex || 0;
+
+        if (walletId) {
+          const n = await countNotes(netKey, walletId, idx);
+          if (!n) {
+            startShieldedSync({ force: false }).catch(() => {});
+            throw new Error(
+              "Shielded wallet is still syncing. Please wait for shielded sync to complete before calling contracts privately."
+            );
+          }
+        }
+      } catch (e) {
+        const msg = e?.message ? String(e.message) : String(e);
+        if (msg.includes("Shielded wallet is still syncing")) throw e;
+      }
     }
 
     const amount = toU64(params.amount, { name: "amount" });
@@ -1822,11 +1864,217 @@ export async function sendTransaction(params) {
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
 
+    // Default to obfuscated phoenix contract calls for privacy.
+    if (isShielded && typeof tx?.obfuscated === "function") {
+      try {
+        tx.obfuscated();
+      } catch {
+        // ignore
+      }
+    }
+
     const result = await network.execute(tx);
     return { hash: result.hash, nonce: result.nonce };
   }
 
   throw new Error(`Unsupported transaction kind: ${params.kind}`);
+}
+
+// ----------------------------------------------------------------------------
+// Signing (dusk_signMessage / dusk_signAuth)
+// ----------------------------------------------------------------------------
+
+function u64le(v) {
+  const out = new Uint8Array(8);
+  new DataView(out.buffer).setBigUint64(0, BigInt(v), true);
+  return out;
+}
+
+function concatBytes(chunks) {
+  const parts = chunks.filter(Boolean);
+  const total = parts.reduce((n, b) => n + b.byteLength, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const b of parts) {
+    out.set(b, o);
+    o += b.byteLength;
+  }
+  return out;
+}
+
+function extractMoonlightSignature(txBytes) {
+  const buf = txBytes instanceof Uint8Array ? txBytes : new Uint8Array(txBytes || []);
+  if (buf.length < 1 + 8) throw new Error("Invalid signed buffer");
+  const variant = buf[0];
+  if (variant !== 1) {
+    // dusk_core::transfer::Transaction enum: 1 => Moonlight
+    throw new Error("Expected a Moonlight signature payload");
+  }
+  let off = 1;
+  const payloadLen = Number(new DataView(buf.buffer, buf.byteOffset + off, 8).getBigUint64(0, true));
+  off += 8;
+  if (payloadLen < 0 || off + payloadLen > buf.length) throw new Error("Invalid Moonlight payload length");
+  off += payloadLen;
+  const sig = buf.slice(off);
+  if (sig.length < 32) throw new Error("Invalid Moonlight signature length");
+  return sig;
+}
+
+async function signMemoAsMoonlight(profile, memoText) {
+  await ensureProtocolDriverLoaded();
+
+  const memoBytes = new TextEncoder().encode(String(memoText ?? ""));
+  if (memoBytes.length > 512) {
+    throw new Error(`Signing message too large (max 512 bytes, got ${memoBytes.length})`);
+  }
+
+  // Build a deterministic Moonlight tx locally and extract its signature.
+  // We intentionally use "dummy" fields so the produced signature cannot be
+  // replayed as a valid on-chain transfer:
+  // - nonce=0 (invalid, because on-chain nonces start at 1)
+  // - chainId=0 (local)
+  // - value=0, deposit=0
+  // - gas limit/price kept tiny but non-zero (w3sper defaults otherwise)
+  const bk =
+    state.bookkeeper ??
+    new Bookkeeper({
+      // Should never be called because we set nonce/chain explicitly.
+      account: async () => ({ nonce: 0n, value: 0n }),
+      address: async () => new Map(),
+      stakeInfo: async () => ({}),
+    });
+
+  let tx = bk.as(profile).transfer(0n).memo(memoText).to(profile.account.toString());
+  if (typeof tx?.chain === "function") tx = tx.chain(0);
+  if (typeof tx?.nonce === "function") tx = tx.nonce(-1n); // build() adds +1 => 0
+  tx = tx.gas({ limit: 1n, price: 1n });
+
+  const built = await tx.build();
+  const txBytes = built?.buffer;
+  const sigBytes = extractMoonlightSignature(txBytes);
+
+  // Return the canonical signature-message bytes (what is actually signed).
+  const signingPayload = concatBytes([
+    Uint8Array.from([0]), // chain_id
+    profile.account.valueOf(),
+    u64le(0n), // value
+    u64le(0n), // deposit
+    u64le(1n), // gas_limit
+    u64le(1n), // gas_price
+    u64le(0n), // nonce
+    memoBytes, // TransactionData::Memo bytes
+  ]);
+
+  return {
+    account: profile.account.toString(),
+    memo: memoText,
+    signature: `0x${bytesToHex(sigBytes)}`,
+    payload: `0x${bytesToHex(signingPayload)}`,
+  };
+}
+
+/**
+ * Sign an arbitrary message (bytes) for off-chain use.
+ *
+ * NOTE:
+ * The wallet signs a domain-separated envelope that includes a SHA-256 hash of
+ * the provided message bytes (not the full message), so large messages do not
+ * inflate the on-chain memo format size.
+ *
+ * @param {{ origin: string, chainId: string, message: any }} params
+ * @returns {Promise<{account:string, origin:string, chainId:string, messageHash:string, messageLen:number, signature:string, payload:string}>}
+ */
+export async function signMessage(params) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  if (!params || typeof params !== "object") throw new Error("Invalid params: object required");
+
+  const origin = String(params.origin ?? "").trim();
+  const chainId = String(params.chainId ?? "").trim();
+  if (!origin) throw new Error("origin is required");
+  if (!chainId) throw new Error("chainId is required");
+
+  const messageBytes = toBytes(params.message);
+  const messageLen = messageBytes.length;
+  const messageHash = await sha256Hex(messageBytes);
+
+  const profile = getCurrentProfile();
+  const memo = [
+    "Dusk Connect SignMessage v1",
+    `Origin: ${origin}`,
+    `Chain ID: ${chainId}`,
+    `Account: ${profile.account.toString()}`,
+    `Message Hash: 0x${messageHash}`,
+    `Message Len: ${messageLen}`,
+  ].join("\n");
+
+  const signed = await signMemoAsMoonlight(profile, memo);
+  return Object.freeze({
+    account: signed.account,
+    origin,
+    chainId,
+    messageHash: `0x${messageHash}`,
+    messageLen,
+    signature: signed.signature,
+    payload: signed.payload,
+  });
+}
+
+/**
+ * Sign a canonical login/auth envelope.
+ *
+ * @param {{ origin: string, chainId: string, nonce: string, statement?: string, expiresAt?: string }} params
+ * @returns {Promise<{account:string, origin:string, chainId:string, nonce:string, issuedAt:string, expiresAt:string, message:string, signature:string, payload:string}>}
+ */
+export async function signAuth(params) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  if (!params || typeof params !== "object") throw new Error("Invalid params: object required");
+
+  const origin = String(params.origin ?? "").trim();
+  const chainId = String(params.chainId ?? "").trim();
+  const nonce = String(params.nonce ?? "").trim();
+  const statement = params.statement != null ? String(params.statement).trim() : "";
+
+  if (!origin) throw new Error("origin is required");
+  if (!chainId) throw new Error("chainId is required");
+  if (!nonce) throw new Error("nonce is required");
+  if (nonce.length > 128) throw new Error("nonce too long");
+  if (statement.length > 280) throw new Error("statement too long (max 280 chars)");
+
+  const issuedAt = new Date().toISOString();
+  let expiresAt = "";
+  if (params.expiresAt != null && String(params.expiresAt).trim()) {
+    const t = Date.parse(String(params.expiresAt));
+    if (!Number.isFinite(t)) throw new Error("expiresAt must be an ISO timestamp");
+    expiresAt = new Date(t).toISOString();
+  } else {
+    expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  }
+
+  const profile = getCurrentProfile();
+  const lines = [
+    "Dusk Connect SignAuth v1",
+    `Account: ${profile.account.toString()}`,
+    statement ? `Statement: ${statement}` : null,
+    `URI: ${origin}`,
+    `Chain ID: ${chainId}`,
+    `Nonce: ${nonce}`,
+    `Issued At: ${issuedAt}`,
+    `Expiration Time: ${expiresAt}`,
+  ].filter(Boolean);
+  const message = lines.join("\n");
+
+  const signed = await signMemoAsMoonlight(profile, message);
+  return Object.freeze({
+    account: signed.account,
+    origin,
+    chainId,
+    nonce,
+    issuedAt,
+    expiresAt,
+    message,
+    signature: signed.signature,
+    payload: signed.payload,
+  });
 }
 
 /**

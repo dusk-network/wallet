@@ -70,6 +70,17 @@ The provider starts emitting events after the first `request()` call or `on()` s
 
 ## Methods
 
+### `dusk_getCapabilities`
+
+Get a machine-readable description of the provider surface (supported methods, tx kinds, limits).
+
+This method does **not** require connection permission.
+
+```js
+const caps = await dusk.request({ method: "dusk_getCapabilities" });
+// → { methods: [...], txKinds: [...], limits: { maxFnArgsBytes: 65536, ... }, ... }
+```
+
 ### `dusk_requestAccounts`
 
 Connect the site to the wallet. Opens approval prompt.
@@ -183,6 +194,7 @@ const tx = await dusk.request({
   method: "dusk_sendTransaction",
   params: {
     kind: "contract_call",
+    privacy: "public",        // "public" | "shielded"
     contractId: "0x02000...",  // 32 bytes
     fnName: "stake",
     fnArgs: "0x...",           // bytes (hex, array, or Uint8Array)
@@ -195,6 +207,40 @@ const tx = await dusk.request({
 ```
 
 `fnArgs` max: 64 KiB. Memo not allowed for contract calls.
+
+---
+
+### `dusk_signMessage`
+
+Sign an arbitrary **message** for off-chain use (auth, session binding, etc).
+
+Requires connection + unlocked wallet.
+
+> Note: The wallet signs a **domain-separated SHA-256 hash** of your message (origin + chainId are included in the signed envelope). The approval UI shows the hash and message length.
+
+```js
+const sig = await dusk.request({
+  method: "dusk_signMessage",
+  params: { message: "0x..." } // bytes (hex/base64/Uint8Array/ArrayBuffer/number[])
+});
+// → { account, origin, chainId, messageHash, messageLen, signature, payload }
+```
+
+---
+
+### `dusk_signAuth`
+
+Sign a canonical login envelope (origin + chainId + nonce + timestamps).
+
+Requires connection + unlocked wallet.
+
+```js
+const auth = await dusk.request({
+  method: "dusk_signAuth",
+  params: { nonce: "server-provided-nonce", statement: "optional" }
+});
+// → { account, origin, chainId, nonce, issuedAt, expiresAt, message, signature, payload }
+```
 
 ---
 
