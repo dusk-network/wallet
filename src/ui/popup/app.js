@@ -13,6 +13,7 @@ import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
 import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
+import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { optionsView } from "./views/options.js";
 import { addressBookView } from "./views/addressbook.js";
 import { txDetailsView } from "./views/txDetails.js";
@@ -525,6 +526,14 @@ export async function render({ forceRefresh = false } = {}) {
   }
   if (state.route === "convert_confirm") {
     setApp(convertConfirmView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "stake") {
+    setApp(stakeFormView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "stake_confirm") {
+    setApp(stakeConfirmView(ov, { state, actions }));
     return;
   }
   if (state.route === "receive") {

@@ -9,7 +9,7 @@ export const ONBOARD_ROUTES = new Set([
 ]);
 
 export const state = {
-  // home | send | confirm | convert | convert_confirm | receive | activity | tx | options | contacts | onboarding_*...
+  // home | send | confirm | convert | convert_confirm | stake | stake_confirm | receive | activity | tx | options | contacts | onboarding_*...
   route: (() => {
     if (isOptionsPage) return "options";
     try {
@@ -20,6 +20,8 @@ export const state = {
         "confirm",
         "convert",
         "convert_confirm",
+        "stake",
+        "stake_confirm",
         "receive",
         "activity",
         "tx",

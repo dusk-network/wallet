@@ -82,6 +82,36 @@ function describeTx(tx) {
     };
   }
 
+  if (kind === TX_KIND.STAKE) {
+    const amountLux = tx?.amount;
+    const amt = amountLux != null ? formatLuxShort(amountLux, UI_DISPLAY_DECIMALS) : "";
+    return {
+      kindLabel: "Stake",
+      title: amt ? `${amt} DUSK` : "—",
+      subtitle: "Staking",
+    };
+  }
+
+  if (kind === TX_KIND.UNSTAKE) {
+    const amountLux = tx?.amount;
+    const amt = amountLux != null ? formatLuxShort(amountLux, UI_DISPLAY_DECIMALS) : "";
+    return {
+      kindLabel: "Unstake",
+      title: amt ? `${amt} DUSK` : "All stake",
+      subtitle: "Staking",
+    };
+  }
+
+  if (kind === TX_KIND.WITHDRAW_REWARD) {
+    const amountLux = tx?.amount;
+    const amt = amountLux != null ? formatLuxShort(amountLux, UI_DISPLAY_DECIMALS) : "";
+    return {
+      kindLabel: "Withdraw rewards",
+      title: amt ? `${amt} DUSK` : "All rewards",
+      subtitle: "Rewards",
+    };
+  }
+
   return { kindLabel: kind ? kind : "Transaction", title: shortHash(tx?.hash), subtitle: "" };
 }
 

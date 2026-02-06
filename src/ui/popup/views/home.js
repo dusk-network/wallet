@@ -174,6 +174,10 @@ export function homeView(ov, { state, actions } = {}) {
       state.draft = { kind: TX_KIND.SHIELD, amountDusk: "", amountLux: "" };
       actions?.render?.().catch(() => {});
     }),
+    actionBtn("Stake", "⛓", () => {
+      state.route = "stake";
+      actions?.render?.().catch(() => {});
+    }),
   ]);
 
   // Balance hero is a single surface block. Action buttons are intentionally
@@ -239,6 +243,30 @@ export function homeView(ov, { state, actions } = {}) {
         title: `Call ${fn}`,
         sub: depS ? `deposit ${depS} DUSK` : "",
         icon: "⬡",
+      };
+    }
+    if (kind === TX_KIND.STAKE) {
+      const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
+      return {
+        title: amt ? `Stake ${amt} DUSK` : "Stake",
+        sub: "Staking",
+        icon: "⛓",
+      };
+    }
+    if (kind === TX_KIND.UNSTAKE) {
+      const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
+      return {
+        title: amt ? `Unstake ${amt} DUSK` : "Unstake",
+        sub: tx?.amount != null ? "Staking" : "All stake",
+        icon: "⛓",
+      };
+    }
+    if (kind === TX_KIND.WITHDRAW_REWARD) {
+      const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
+      return {
+        title: amt ? `Withdraw ${amt} DUSK` : "Withdraw rewards",
+        sub: tx?.amount != null ? "Rewards" : "All rewards",
+        icon: "⛓",
       };
     }
     return { title: "Transaction", sub: "", icon: "•" };
