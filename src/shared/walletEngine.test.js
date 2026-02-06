@@ -289,13 +289,13 @@ describe("walletEngine", () => {
   });
 
   it("restores multiple derived accounts on unlock", async () => {
-    engine.configure({ accountCount: 3, selectedAccountIndex: 2 });
+    engine.configure({ accountCount: 2, selectedAccountIndex: 1 });
     await engine.unlockWithMnemonic(MNEMONIC);
 
     expect(engine.isUnlocked()).toBe(true);
-    expect(engine.getAccounts()).toEqual(["acct0", "acct1", "acct2"]);
-    expect(engine.getAddresses()).toEqual(["addr0", "addr1", "addr2"]);
-    expect(engine.getSelectedAccountIndex()).toBe(2);
+    expect(engine.getAccounts()).toEqual(["acct0", "acct1"]);
+    expect(engine.getAddresses()).toEqual(["addr0", "addr1"]);
+    expect(engine.getSelectedAccountIndex()).toBe(1);
   });
 
   it("selectAccountIndex derives missing profiles sequentially", async () => {
@@ -304,10 +304,10 @@ describe("walletEngine", () => {
 
     expect(engine.getAccounts()).toEqual(["acct0"]);
 
-    const res = await engine.selectAccountIndex({ index: 2 });
-    expect(res.selectedAccountIndex).toBe(2);
-    expect(res.accounts).toEqual(["acct0", "acct1", "acct2"]);
-    expect(engine.getSelectedAccountIndex()).toBe(2);
+    const res = await engine.selectAccountIndex({ index: 1 });
+    expect(res.selectedAccountIndex).toBe(1);
+    expect(res.accounts).toEqual(["acct0", "acct1"]);
+    expect(engine.getSelectedAccountIndex()).toBe(1);
   });
 
   it("addAccount derives the next profile and selects it", async () => {
@@ -318,9 +318,7 @@ describe("walletEngine", () => {
     expect(res1.selectedAccountIndex).toBe(1);
     expect(res1.accounts).toEqual(["acct0", "acct1"]);
 
-    const res2 = await engine.addAccount();
-    expect(res2.selectedAccountIndex).toBe(2);
-    expect(res2.accounts).toEqual(["acct0", "acct1", "acct2"]);
+    await expect(engine.addAccount()).rejects.toThrow(/Only 2 accounts/i);
   });
 
   it("signMessage signs a domain-separated envelope (uses selected profileIndex)", async () => {
@@ -419,4 +417,3 @@ describe("walletEngine", () => {
     expect(tx.memoValue).toBe("hi");
   });
 });
-

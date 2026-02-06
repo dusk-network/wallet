@@ -1,6 +1,7 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
+import { MAX_ACCOUNT_COUNT } from "./constants.js";
 
 /**
  * Auto-lock timeout options in minutes.
@@ -80,6 +81,7 @@ export async function getSettings() {
   let accountCount = Number(merged.accountCount ?? 1);
   if (!Number.isFinite(accountCount) || accountCount < 1) accountCount = 1;
   accountCount = Math.floor(accountCount);
+  accountCount = Math.min(accountCount, MAX_ACCOUNT_COUNT);
 
   let selectedAccountIndex = Number(merged.selectedAccountIndex ?? 0);
   if (!Number.isFinite(selectedAccountIndex) || selectedAccountIndex < 0) {
@@ -128,6 +130,19 @@ export async function setSettings(patch) {
     ) {
       next.archiverUrl = normalizeBaseUrl(inferred.archiverUrl);
     }
+  }
+
+  // Clamp account settings on write as well (avoid persisting invalid values).
+  if ("accountCount" in patch) {
+    let n = Number(next.accountCount ?? 1);
+    if (!Number.isFinite(n) || n < 1) n = 1;
+    next.accountCount = Math.min(Math.floor(n), MAX_ACCOUNT_COUNT);
+  }
+  if ("selectedAccountIndex" in patch || "accountCount" in patch) {
+    let n = Number(next.selectedAccountIndex ?? 0);
+    if (!Number.isFinite(n) || n < 0) n = 0;
+    const maxIdx = Math.max(0, Number(next.accountCount ?? 1) - 1);
+    next.selectedAccountIndex = Math.min(Math.floor(n), maxIdx);
   }
 
   await storage.set({ [STORAGE_KEYS.SETTINGS]: next });

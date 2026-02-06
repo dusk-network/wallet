@@ -8,7 +8,7 @@ import {
   useAsProtocolDriver,
 } from "@dusk/w3sper";
 import { bytesToHex, hexToBytes, sha256Hex, toBytes } from "./bytes.js";
-import { TX_KIND } from "./constants.js";
+import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
 
@@ -303,7 +303,7 @@ export function configure(patch = {}) {
   if (patch.accountCount !== undefined) {
     const n = Number(patch.accountCount);
     if (Number.isFinite(n) && n >= 1) {
-      engineConfig.accountCount = Math.floor(n);
+      engineConfig.accountCount = Math.min(Math.floor(n), MAX_ACCOUNT_COUNT);
     }
   }
 
@@ -312,6 +312,17 @@ export function configure(patch = {}) {
     if (Number.isFinite(n) && n >= 0) {
       engineConfig.selectedAccountIndex = Math.floor(n);
     }
+  }
+
+  // Clamp selected index to the (possibly updated) accountCount.
+  try {
+    const maxIdx = Math.max(0, Number(engineConfig.accountCount ?? 1) - 1);
+    engineConfig.selectedAccountIndex = Math.min(
+      Math.max(0, Number(engineConfig.selectedAccountIndex ?? 0) || 0),
+      maxIdx
+    );
+  } catch {
+    // ignore
   }
 
   // Prover/archiver can change without switching the node URL (custom setups).
@@ -590,9 +601,10 @@ export async function unlockWithMnemonic(mnemonic) {
     Number.isFinite(targetCountRaw) && targetCountRaw >= 1
       ? Math.floor(targetCountRaw)
       : 1;
+  const cappedCount = Math.min(targetCount, MAX_ACCOUNT_COUNT);
 
   const profiles = [p0];
-  for (let i = 1; i < targetCount; i++) {
+  for (let i = 1; i < cappedCount; i++) {
     // ProfileGenerator.next() skips default and generates sequential indices.
     profiles.push(await pg.next());
   }
@@ -664,6 +676,9 @@ function normalizeProfileIndex(v, fallback = 0) {
 async function ensureProfileIndex(idx) {
   if (!state.unlocked) throw new Error("Wallet locked");
   const i = normalizeProfileIndex(idx, state.currentIndex || 0);
+  if (i >= MAX_ACCOUNT_COUNT) {
+    throw new Error(`Only ${MAX_ACCOUNT_COUNT} accounts are supported right now`);
+  }
   if (state.profiles[i]) return state.profiles[i];
   if (!state.profileGenerator) throw new Error("No profile generator (wallet not unlocked?)");
 
@@ -677,6 +692,9 @@ async function ensureProfileIndex(idx) {
 export async function selectAccountIndex({ index } = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   const idx = normalizeProfileIndex(index, 0);
+  if (idx >= MAX_ACCOUNT_COUNT) {
+    throw new Error(`Only ${MAX_ACCOUNT_COUNT} accounts are supported right now`);
+  }
   await ensureProfileIndex(idx);
   state.currentIndex = idx;
   return {
@@ -689,6 +707,9 @@ export async function selectAccountIndex({ index } = {}) {
 export async function addAccount() {
   if (!state.unlocked) throw new Error("Wallet locked");
   if (!state.profileGenerator) throw new Error("No profile generator (wallet not unlocked?)");
+  if (state.profiles.length >= MAX_ACCOUNT_COUNT) {
+    throw new Error(`Only ${MAX_ACCOUNT_COUNT} accounts are supported right now`);
+  }
   const p = await state.profileGenerator.next();
   state.profiles.push(p);
   state.currentIndex = state.profiles.length - 1;
@@ -1045,27 +1066,18 @@ export async function getPublicBalance({ profileIndex } = {}) {
 export async function getGasPrice({ maxTransactions = 100 } = {}) {
   await ensureNetwork();
 
-  const nodeBase = String(engineConfig.nodeUrl || "").trim();
-  if (!nodeBase) throw new Error("No node URL configured");
-
-  const url = new URL("/on/node/gas_price", nodeBase);
-  url.searchParams.set("max_transactions", String(maxTransactions));
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    const res = await fetch(url.toString(), {
-      method: "GET",
+    // Rusk endpoint: POST /on/blocks/gas-price with body "<max_transactions>".
+    // w3sper exposes it via network.blocks.call["gas-price"]().
+    let n = Number(maxTransactions ?? 100);
+    if (!Number.isFinite(n) || n <= 0) n = 100;
+    const res = await state.network.blocks.call["gas-price"](String(Math.floor(n)), {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Gas price fetch failed (${res.status}): ${text.slice(0, 200)}`);
-    }
-
     const data = await res.json();
     // Rusk returns { average: u64, max: u64, median: u64, min: u64 }
     return {

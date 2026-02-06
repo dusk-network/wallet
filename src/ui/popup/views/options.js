@@ -3,6 +3,7 @@ import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
 import { clearPermissions } from "../../../shared/permissions.js";
 import { clearVault } from "../../../shared/vault.js";
 import { AUTO_LOCK_OPTIONS } from "../../../shared/settings.js";
+import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { platform } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
@@ -30,9 +31,9 @@ export function optionsView(ov, { state, actions } = {}) {
   // Account selector (multi-account)
   const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
   const selectedAccountIndex = Number(ov?.selectedAccountIndex ?? 0) || 0;
-  const accountCount = Math.max(
-    1,
-    Number(ov?.accountCount ?? (accounts.length || 1)) || 1
+  const accountCount = Math.min(
+    MAX_ACCOUNT_COUNT,
+    Math.max(1, Number(ov?.accountCount ?? (accounts.length || 1)) || 1)
   );
   const displayAccounts = accounts.length
     ? accounts
@@ -68,7 +69,8 @@ export function optionsView(ov, { state, actions } = {}) {
     }
   });
 
-  const addAccountBtn = ov?.isUnlocked
+  const canAddAccount = displayAccounts.length < MAX_ACCOUNT_COUNT;
+  const addAccountBtn = ov?.isUnlocked && canAddAccount
     ? h("button", {
         class: "btn-outline",
         text: "Add account",
