@@ -80,13 +80,13 @@ Implementation uses `chrome.alarms` API for reliable timing even when service wo
 
 - Each origin must explicitly request connection
 - User approves via popup before granting access
-- Permissions stored per-origin with connected accounts
+- Permissions stored per-origin with the selected public account index
 
 ```js
 // Permission record
 {
   "https://dapp.example.com": {
-    accounts: ["2Z8m..."],
+    accountIndex: 0,
     connectedAt: 1706400000000,
   }
 }
@@ -94,14 +94,19 @@ Implementation uses `chrome.alarms` API for reliable timing even when service wo
 
 #### RPC Method Security
 
-| Method | Requires Connection | Requires Unlock |
-|--------|--------------------|-----------------| 
-| `dusk_requestAccounts` | No (grants it) | No |
-| `dusk_accounts` | No | No |
+| Method | Permission Required | Unlock Required |
+|--------|---------------------|-----------------|
+| `dusk_getCapabilities` | No | No |
+| `dusk_requestAccounts` | No (grants it) | Yes (prompt) |
+| `dusk_accounts` | Yes (returns `[]` otherwise) | Yes (returns `[]` otherwise) |
 | `dusk_chainId` | No | No |
+| `dusk_switchNetwork` | Yes | No |
 | `dusk_getPublicBalance` | Yes | Yes |
-| `dusk_sendTransaction` | Yes | Yes |
 | `dusk_estimateGas` | Yes | No |
+| `dusk_sendTransaction` | Yes | Yes |
+| `dusk_signMessage` | Yes | Yes |
+| `dusk_signAuth` | Yes | Yes |
+| `dusk_disconnect` | No | No |
 
 #### User Approval for Transactions
 
@@ -121,9 +126,11 @@ Manifest V3 enforces strict CSP by default:
 
 #### Tauri
 
-**Current state**: `"csp": null` (disabled)
+Tauri builds use a restrictive CSP configured in `apps/tauri/src-tauri/tauri.conf.json`.
 
-**TODO**: Re-enable strict CSP once Tauri issues are resolved.
+Notes:
+- `script-src` is `'self'` + `'wasm-unsafe-eval'` (wallet uses WASM protocol driver)
+- `style-src` currently allows `'unsafe-inline'` because the UI sets some inline styles via JS
 
 ### 5. Network Security
 
@@ -169,7 +176,7 @@ Users must trust:
 - The extension itself (install from official source)
 - Other installed extensions (could attempt to steal data)
 
-**Mitigation**: Minimal permissions requested; no `<all_urls>` in manifest.
+**Mitigation**: Keep requested permissions minimal and review `host_permissions` regularly (broad host access increases blast radius).
 
 ### 3. IndexedDB Encryption
 

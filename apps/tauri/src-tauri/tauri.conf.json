@@ -11,7 +11,7 @@
   "app": {
     "withGlobalTauri": true,
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' asset: data: https: http:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https: http: ws: wss: ipc: tauri:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'self';"
     },
     "windows": [
       {
