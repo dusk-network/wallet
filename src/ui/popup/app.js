@@ -363,6 +363,20 @@ const acctMenu = createAccountMenuController({
       showToast(e?.message ?? String(e));
     }
   },
+  onAddAccount: async () => {
+    try {
+      acctMenu.close();
+      const resp = await send({ type: "DUSK_UI_ADD_ACCOUNT" });
+      if (resp?.error) throw new Error(resp.error.message ?? "Failed to add account");
+      if (!resp?.ok) throw new Error("Failed to add account");
+
+      showToast("Account added.");
+      state.needsRefresh = true;
+      await render({ forceRefresh: true });
+    } catch (e) {
+      showToast(e?.message ?? String(e));
+    }
+  },
   onOpenOptions: async () => {
     acctMenu.close();
     netMenu.close();

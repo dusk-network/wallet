@@ -143,12 +143,12 @@ export function createHeaderRenderer({
 
       actions.push(accountChipEl(account, { onCopy: showToast, connected, host }));
 
-      const canSwitchAccounts = walletReady && accountCount > 1 && acctMenu;
-      if (canSwitchAccounts) {
+      const canOpenAccounts = walletReady && acctMenu;
+      if (canOpenAccounts) {
         const btn = h("button", {
           class: "icon-btn icon-only",
           text: "▾",
-          title: "Switch account",
+          title: accountCount > 1 ? "Switch account" : "Accounts",
           onclick: () => {
             try {
               if (acctMenu?.isOpen) acctMenu.close();
