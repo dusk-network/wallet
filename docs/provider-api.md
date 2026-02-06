@@ -271,7 +271,7 @@ dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 |-------|---------|------|
 | `connect` | `{ chainId }` | Permission granted |
 | `disconnect` | `{ code: 4900, message }` | Permission revoked |
-| `accountsChanged` | `AccountId[]` | Lock/unlock, connect/disconnect |
+| `accountsChanged` | `AccountId[]` | Lock/unlock, connect/disconnect, or user changes the connected account for the site |
 | `chainChanged` | `ChainId` | Network changed (different chain ID) |
 | `duskNodeChanged` | `{ chainId, nodeUrl, networkName }` | Node URL changed (even same chain) |
 

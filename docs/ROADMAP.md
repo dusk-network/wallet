@@ -116,41 +116,41 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 #### 5.0.1 Decide Canonical dApp API Surface
 - [x] Decision: dApps can read **public** state only (accounts via `dusk_requestAccounts`/`dusk_accounts`, chain, public balance) and submit transactions via `dusk_sendTransaction`.
 - [x] Decision: the provider must not expose shielded addresses/balances/sync state to dApps. `dusk_getAddresses` is not part of the dApp/provider surface (shielded stays internal to the wallet UI).
-- [ ] Implementation: remove/disable `dusk_getAddresses` in the dApp RPC handler (return `4200`) and remove it from docs/SDK.
+- [x] Implementation: remove/disable `dusk_getAddresses` in the dApp RPC handler (return `4200`) and remove it from docs/SDK.
 
 #### 5.0.2 Fix Current Mismatches (Docs/SDK/Engine)
-- [ ] **Calldata limit:** align `fnArgs` max across docs + dApp RPC + engine (currently docs/rpc allow 128 KiB, engine enforces 64 KiB).
-- [ ] **Transfer recipient type:** document/encode that `transfer.to` can be a public account or a shielded address; fix approval UI label to not imply "account only".
-- [ ] **dApp tx kinds:** either support `shield`/`unshield` in dApp approvals, or explicitly reject them from dApps (`4200`) and document it.
-- [ ] **Contract calls privacy selection:** add `privacy: "public" | "shielded"` for `contract_call` so dApps can request Phoenix vs Moonlight without needing a `to` field.
-- [ ] Ensure the Dusk Connect SDK types match the canonical provider surface (including the transfer recipient type).
+- [x] **Calldata limit:** align `fnArgs` max across docs + dApp RPC + engine (currently docs/rpc allow 128 KiB, engine enforces 64 KiB).
+- [x] **Transfer recipient type:** document/encode that `transfer.to` can be a public account or a shielded address; fix approval UI label to not imply "account only".
+- [x] **dApp tx kinds:** either support `shield`/`unshield` in dApp approvals, or explicitly reject them from dApps (`4200`) and document it.
+- [x] **Contract calls privacy selection:** add `privacy: "public" | "shielded"` for `contract_call` so dApps can request Phoenix vs Moonlight without needing a `to` field.
+- [x] Ensure the Dusk Connect SDK types match the canonical provider surface (including the transfer recipient type).
 
 #### 5.0.3 Capability Discovery / Versioning
-- [ ] Add a provider capability RPC (e.g. `dusk_getCapabilities` or `dusk_providerInfo`) returning supported RPC methods + transaction kinds.
-- [ ] Include limits in capabilities (e.g. `maxFnArgsBytes`).
-- [ ] Include feature flags in capabilities (shielded read/sync availability, signing availability).
-- [ ] Include provider + wallet version identifiers in capabilities.
-- [ ] Update Dusk Connect to use capabilities for feature detection (avoid hard-coding method lists).
-- [ ] Add conformance tests in the wallet repo that assert: docs == implementation == SDK expectations.
+- [x] Add a provider capability RPC (e.g. `dusk_getCapabilities` or `dusk_providerInfo`) returning supported RPC methods + transaction kinds.
+- [x] Include limits in capabilities (e.g. `maxFnArgsBytes`).
+- [x] Include feature flags in capabilities (shielded read/sync availability, signing availability).
+- [x] Include provider + wallet version identifiers in capabilities.
+- [x] Update Dusk Connect to use capabilities for feature detection (avoid hard-coding method lists).
+- [x] Add conformance tests in the wallet repo that assert: docs == implementation == SDK expectations.
 
 #### 5.0.4 Signing (Ethereum Parity Gap)
-- [ ] Design + implement a Dusk-native signing API for dApps:
+- [x] Design + implement a Dusk-native signing API for dApps:
   - `dusk_signMessage` (generic, arbitrary bytes; always domain-separated)
   - `dusk_signAuth` (canonical login/auth envelope including origin + chainId + nonce/timestamps)
-- [ ] Add an approval UI for signing requests (separate from tx approvals).
-- [ ] Add SDK helpers for signing and common dApp auth flows.
+- [x] Add an approval UI for signing requests (separate from tx approvals).
+- [x] Add SDK helpers for signing and common dApp auth flows.
 
 #### 5.0.5 Multi-Account & Permissions (Provider-Level)
-- [ ] UI: account switching + per-origin account selection (align with provider behavior: which account is exposed to a site).
-- [ ] Provider semantics: decide whether to ever expose multiple accounts to a single origin (MetaMask-style array) vs single-account-only.
-- [ ] Add provider events semantics for account switching (consistent `accountsChanged` behavior).
+- [x] UI: account switching + per-origin account selection (align with provider behavior: which account is exposed to a site).
+- [x] Provider semantics: single-account-per-origin (array length 0 or 1), MetaMask-like account picker on connect.
+- [x] Add provider events semantics for account switching (consistent `accountsChanged` behavior).
 
 ### 5.1 Documentation
 - [x] `ARCHITECTURE.md` — System deep-dive
 - [x] `SECURITY.md` — Threat model
 - [x] `CONTRIBUTING.md` — Contribution guide
 - [x] `AGENTS.md` — AI agent context
-- [ ] `provider-api.md` — Keep in lockstep with `src/background/rpc.js` + Dusk Connect SDK
+- [x] `provider-api.md` — Keep in lockstep with `src/background/rpc.js` + Dusk Connect SDK
 
 ### 5.2 Tooling
 - [ ] Mock Rusk node for testing
