@@ -26,7 +26,7 @@ let engineCreating = null;
 
 /**
  * Cache the last config we pushed into the engine.
- * @type {{ nodeUrl: string, proverUrl?: string, archiverUrl?: string } | null}
+ * @type {{ nodeUrl: string, proverUrl?: string, archiverUrl?: string, accountCount?: number, selectedAccountIndex?: number } | null}
  */
 let lastEngineConfig = null;
 
@@ -238,14 +238,18 @@ export async function ensureEngineConfigured() {
 
   const proverUrl = settings?.proverUrl;
   const archiverUrl = settings?.archiverUrl;
+  const accountCount = settings?.accountCount;
+  const selectedAccountIndex = settings?.selectedAccountIndex;
 
-  const next = { nodeUrl, proverUrl, archiverUrl };
+  const next = { nodeUrl, proverUrl, archiverUrl, accountCount, selectedAccountIndex };
 
   if (
     !lastEngineConfig ||
     lastEngineConfig.nodeUrl !== next.nodeUrl ||
     lastEngineConfig.proverUrl !== next.proverUrl ||
-    lastEngineConfig.archiverUrl !== next.archiverUrl
+    lastEngineConfig.archiverUrl !== next.archiverUrl ||
+    lastEngineConfig.accountCount !== next.accountCount ||
+    lastEngineConfig.selectedAccountIndex !== next.selectedAccountIndex
   ) {
     lastEngineConfig = next;
     await engineCall("engine_config", next);
@@ -258,8 +262,9 @@ export async function getEngineStatus() {
     return {
       isUnlocked: Boolean(status?.isUnlocked),
       accounts: Array.isArray(status?.accounts) ? status.accounts : [],
+      selectedAccountIndex: Number(status?.selectedAccountIndex ?? 0) || 0,
     };
   } catch {
-    return { isUnlocked: false, accounts: [] };
+    return { isUnlocked: false, accounts: [], selectedAccountIndex: 0 };
   }
 }

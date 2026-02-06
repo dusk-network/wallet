@@ -22,7 +22,11 @@ export async function getPermissionForOrigin(origin) {
  */
 export async function approveOrigin(origin, accountIndex = 0) {
   const permissions = await getPermissions();
-  permissions[origin] = { accountIndex, connectedAt: Date.now() };
+  const prev = permissions[origin] ?? null;
+  permissions[origin] = {
+    accountIndex,
+    connectedAt: Number(prev?.connectedAt) || Date.now(),
+  };
   await storage.set({ [STORAGE_KEYS.PERMISSIONS]: permissions });
   return permissions[origin];
 }

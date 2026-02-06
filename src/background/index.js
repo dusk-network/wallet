@@ -1,7 +1,7 @@
 // Background service worker entry.
 
 import { createVault, loadVault, unlockVault } from "../shared/vault.js";
-import { getPermissionForOrigin } from "../shared/permissions.js";
+import { approveOrigin, getPermissionForOrigin, getPermissions } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
@@ -265,7 +265,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
 
         const vault = await loadVault();
+        const settings = await getSettings();
         const status = await getEngineStatus();
+        const perm = await getPermissionForOrigin(entry.origin);
+
         sendResponse({
           rid: message.rid,
           kind: entry.kind,
@@ -274,6 +277,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
           accounts: status.accounts,
+          accountCount: settings?.accountCount ?? 1,
+          selectedAccountIndex: status.selectedAccountIndex ?? settings?.selectedAccountIndex ?? 0,
+          permissionAccountIndex:
+            perm && perm.accountIndex !== undefined && perm.accountIndex !== null
+              ? Number(perm.accountIndex) || 0
+              : null,
         });
         return;
       }
@@ -312,6 +321,69 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         // Notify dApps that accounts are no longer available.
         broadcastAccountsChangedAll().catch(() => {});
+        sendResponse({ ok: true });
+        return;
+      }
+
+      // UI selects a different local account (profile index)
+      if (message?.type === "DUSK_UI_SET_ACCOUNT_INDEX") {
+        const status = await getEngineStatus();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+
+        const idx = Number(message.index);
+        if (!Number.isFinite(idx) || idx < 0) {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "index must be a non-negative number");
+        }
+
+        const settings = await getSettings();
+        const maxIndex = Math.max(0, Number(settings?.accountCount ?? 1) - 1);
+        const clamped = Math.min(Math.floor(idx), maxIndex);
+
+        await setSettings({ selectedAccountIndex: clamped });
+        await ensureEngineConfigured();
+        const res = await engineCall("engine_selectAccount", { index: clamped });
+        sendResponse({ ok: true, result: res });
+        return;
+      }
+
+      // UI derives a new account (next profile)
+      if (message?.type === "DUSK_UI_ADD_ACCOUNT") {
+        const status = await getEngineStatus();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+
+        await ensureEngineConfigured();
+        const res = await engineCall("engine_addAccount");
+        const accounts = Array.isArray(res?.accounts) ? res.accounts : [];
+        const selectedAccountIndex = Number(res?.selectedAccountIndex ?? 0) || 0;
+        await setSettings({
+          accountCount: Math.max(1, accounts.length || 1),
+          selectedAccountIndex,
+        });
+
+        sendResponse({ ok: true, result: res });
+        return;
+      }
+
+      // UI changes which account is exposed to a connected origin.
+      if (message?.type === "DUSK_UI_SET_ORIGIN_ACCOUNT") {
+        const origin = String(message.origin ?? "").trim();
+        const accountIndex = Number(message.accountIndex);
+        if (!origin) {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "origin is required");
+        }
+        if (!Number.isFinite(accountIndex) || accountIndex < 0) {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "accountIndex must be a non-negative number");
+        }
+
+        const settings = await getSettings();
+        const maxIndex = Math.max(0, Number(settings?.accountCount ?? 1) - 1);
+        const clamped = Math.min(Math.floor(accountIndex), maxIndex);
+
+        await approveOrigin(origin, clamped);
         sendResponse({ ok: true });
         return;
       }
@@ -482,6 +554,21 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         let shieldedSync = null;
         let shieldedError = null;
 
+        // Connected sites (for settings UI)
+        let permissions = null;
+        try {
+          const perms = await getPermissions();
+          permissions = Object.entries(perms ?? {})
+            .map(([o, p]) => ({
+              origin: o,
+              accountIndex: Number(p?.accountIndex ?? 0) || 0,
+              connectedAt: Number(p?.connectedAt ?? 0) || 0,
+            }))
+            .sort((a, b) => a.origin.localeCompare(b.origin));
+        } catch {
+          permissions = null;
+        }
+
         // Recent activity (transaction list). This is used by the Home +
         // Activity screens to provide MetaMask-like feedback instead of
         // ephemeral toasts.
@@ -570,6 +657,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           shieldedBalance,
           shieldedSync,
           shieldedError,
+          selectedAccountIndex: status.selectedAccountIndex ?? settings.selectedAccountIndex ?? 0,
+          accountCount: settings.accountCount ?? 1,
+          permissions,
           nodeUrl: settings.nodeUrl,
           proverUrl: settings.proverUrl,
           archiverUrl: settings.archiverUrl,

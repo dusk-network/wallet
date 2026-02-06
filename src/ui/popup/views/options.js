@@ -5,6 +5,7 @@ import { clearVault } from "../../../shared/vault.js";
 import { AUTO_LOCK_OPTIONS } from "../../../shared/settings.js";
 import { platform } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 
 export function optionsView(ov, { state, actions } = {}) {
@@ -22,6 +23,64 @@ export function optionsView(ov, { state, actions } = {}) {
           state.route = "home";
           state.needsRefresh = true;
           await actions?.render?.({ forceRefresh: true });
+        },
+      })
+    : null;
+
+  // Account selector (multi-account)
+  const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
+  const selectedAccountIndex = Number(ov?.selectedAccountIndex ?? 0) || 0;
+  const accountCount = Math.max(
+    1,
+    Number(ov?.accountCount ?? (accounts.length || 1)) || 1
+  );
+  const displayAccounts = accounts.length
+    ? accounts
+    : Array.from({ length: accountCount }, () => "");
+
+  const accountSelect = h(
+    "select",
+    { id: "account" },
+    (accounts.length ? accounts : [""]).map((acct, i) =>
+      h("option", {
+        value: String(i),
+        text: String(acct)
+          ? `Account ${i + 1} · ${truncateMiddle(String(acct), 8, 6)}`
+          : `Account ${i + 1}`,
+      })
+    )
+  );
+  accountSelect.value = String(
+    Math.max(0, Math.min(selectedAccountIndex, Math.max(0, accounts.length - 1)))
+  );
+
+  accountSelect.addEventListener("change", async () => {
+    try {
+      await actions?.send?.({
+        type: "DUSK_UI_SET_ACCOUNT_INDEX",
+        index: Number(accountSelect.value),
+      });
+      actions?.showToast?.("Account selected.");
+      state.needsRefresh = true;
+      await actions?.render?.({ forceRefresh: true });
+    } catch (e) {
+      actions?.showToast?.(e?.message ?? String(e), 2500);
+    }
+  });
+
+  const addAccountBtn = ov?.isUnlocked
+    ? h("button", {
+        class: "btn-outline",
+        text: "Add account",
+        onclick: async () => {
+          try {
+            await actions?.send?.({ type: "DUSK_UI_ADD_ACCOUNT" });
+            actions?.showToast?.("Account added.");
+            state.needsRefresh = true;
+            await actions?.render?.({ forceRefresh: true });
+          } catch (e) {
+            actions?.showToast?.(e?.message ?? String(e), 2500);
+          }
         },
       })
     : null;
@@ -183,6 +242,57 @@ export function optionsView(ov, { state, actions } = {}) {
     },
   });
 
+  const connectedSites = Array.isArray(ov?.permissions) ? ov.permissions : [];
+  const connectedSitesEl = platform.capabilities.dapp
+    ? connectedSites.length
+      ? h(
+          "div",
+          { class: "row" },
+          connectedSites.flatMap((p) => {
+            const origin = String(p?.origin ?? "");
+            const idx = Number(p?.accountIndex ?? 0) || 0;
+
+            const sel = h(
+              "select",
+              {},
+              displayAccounts.map((acct, i) =>
+                h("option", {
+                  value: String(i),
+                  text: String(acct)
+                    ? `Account ${i + 1} · ${truncateMiddle(String(acct), 6, 4)}`
+                    : `Account ${i + 1}`,
+                })
+              )
+            );
+            sel.value = String(
+              Math.max(0, Math.min(idx, Math.max(0, displayAccounts.length - 1)))
+            );
+
+            sel.addEventListener("change", async () => {
+              try {
+                await actions?.send?.({
+                  type: "DUSK_UI_SET_ORIGIN_ACCOUNT",
+                  origin,
+                  accountIndex: Number(sel.value),
+                });
+                actions?.showToast?.("Updated site account.");
+                state.needsRefresh = true;
+                await actions?.render?.({ forceRefresh: true });
+              } catch (e) {
+                actions?.showToast?.(e?.message ?? String(e), 2500);
+              }
+            });
+
+            return [
+              h("div", { class: "divider" }),
+              h("div", { class: "muted", text: origin }),
+              h("div", { class: "select-wrap" }, [sel]),
+            ];
+          })
+        )
+      : h("div", { class: "row" }, [h("div", { class: "muted", text: "No connected sites." })])
+    : null;
+
   const clearVaultBtn = h("button", {
     class: "btn-destructive",
     text: "Reset wallet vault",
@@ -247,6 +357,17 @@ export function optionsView(ov, { state, actions } = {}) {
       },
     }),
     lockBtn ? h("div", { class: "row" }, [h("div", { class: "btnrow" }, [lockBtn])]) : null,
+    ov?.isUnlocked
+      ? h("div", { class: "row" }, [
+          h("label", { text: "Account" }),
+          h("div", { class: "select-wrap" }, [accountSelect]),
+          addAccountBtn ? h("div", { class: "btnrow" }, [addAccountBtn]) : null,
+          h("div", {
+            class: "muted",
+            text: "This controls which account the wallet UI is operating on.",
+          }),
+        ].filter(Boolean))
+      : null,
     h("div", { class: "row" }, [
       h("label", { text: "Auto-lock" }),
       h("div", { class: "select-wrap" }, [autoLockSelect]),
@@ -306,5 +427,6 @@ export function optionsView(ov, { state, actions } = {}) {
           : [clearVaultBtn]
       ),
     ]),
+    connectedSitesEl,
   ].filter(Boolean);
 }

@@ -161,8 +161,9 @@ async function buildProviderState(origin) {
   let accounts = [];
   if (hasPermission && status.isUnlocked) {
     const all = Array.isArray(status.accounts) ? status.accounts : [];
-    const idx = Number(perm?.accountIndex ?? 0);
-    accounts = Number.isFinite(idx) && all[idx] ? [all[idx]] : all;
+    const idxRaw = Number(perm?.accountIndex ?? 0);
+    const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
+    accounts = all[idx] ? [all[idx]] : [];
   }
 
   return {
@@ -308,8 +309,9 @@ export async function broadcastAccountsChangedAll() {
     const hasPermission = Boolean(perm);
     let visible = [];
     if (hasPermission && unlocked) {
-      const idx = Number(perm?.accountIndex ?? 0);
-      visible = Number.isFinite(idx) && accounts[idx] ? [accounts[idx]] : accounts;
+      const idxRaw = Number(perm?.accountIndex ?? 0);
+      const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
+      visible = accounts[idx] ? [accounts[idx]] : [];
     }
     for (const port of set) {
       safePost(port, { type: "DUSK_PROVIDER_EVENT", name: "accountsChanged", data: visible });
@@ -330,8 +332,9 @@ export async function broadcastAccountsChangedForOrigin(origin) {
   const accounts = Array.isArray(status.accounts) ? status.accounts : [];
   let visible = [];
   if (hasPermission && status.isUnlocked) {
-    const idx = Number(perm?.accountIndex ?? 0);
-    visible = Number.isFinite(idx) && accounts[idx] ? [accounts[idx]] : accounts;
+    const idxRaw = Number(perm?.accountIndex ?? 0);
+    const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
+    visible = accounts[idx] ? [accounts[idx]] : [];
   }
   broadcastToOrigin(origin, "accountsChanged", visible);
 }
@@ -387,12 +390,21 @@ export async function handlePermissionsDiff(oldPerms, newPerms) {
 
   const removed = [];
   const added = [];
+  const changed = [];
 
   for (const origin of Object.keys(oldP)) {
     if (!newP[origin]) removed.push(origin);
   }
   for (const origin of Object.keys(newP)) {
     if (!oldP[origin]) added.push(origin);
+  }
+  for (const origin of Object.keys(newP)) {
+    if (!oldP[origin]) continue;
+    const oldIdxRaw = Number(oldP[origin]?.accountIndex ?? 0);
+    const newIdxRaw = Number(newP[origin]?.accountIndex ?? 0);
+    const oldIdx = Number.isFinite(oldIdxRaw) && oldIdxRaw >= 0 ? Math.floor(oldIdxRaw) : 0;
+    const newIdx = Number.isFinite(newIdxRaw) && newIdxRaw >= 0 ? Math.floor(newIdxRaw) : 0;
+    if (oldIdx !== newIdx) changed.push(origin);
   }
 
   // First emit connect/disconnect, then refresh accounts.
@@ -414,6 +426,11 @@ export async function handlePermissionsDiff(oldPerms, newPerms) {
   // and accounts when granted.
   if (added.length || removed.length) {
     await broadcastAccountsChangedAll();
+  }
+
+  // Account selection changes should emit accountsChanged.
+  for (const origin of changed) {
+    await broadcastAccountsChangedForOrigin(origin);
   }
 }
 

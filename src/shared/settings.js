@@ -22,6 +22,10 @@ export const DEFAULT_SETTINGS = {
   archiverUrl: "https://testnet.nodes.dusk.network",
   /** Auto-lock timeout in minutes (0 = disabled) */
   autoLockTimeoutMinutes: 5,
+  /** Number of derived accounts (public + shielded keypairs) */
+  accountCount: 1,
+  /** Selected account index for the wallet UI */
+  selectedAccountIndex: 0,
 };
 
 function normalizeBaseUrl(v) {
@@ -72,11 +76,24 @@ export async function getSettings() {
     archiverUrl = inferEndpointsFromNodeUrl(nodeUrl).archiverUrl;
   }
 
+  // Account settings
+  let accountCount = Number(merged.accountCount ?? 1);
+  if (!Number.isFinite(accountCount) || accountCount < 1) accountCount = 1;
+  accountCount = Math.floor(accountCount);
+
+  let selectedAccountIndex = Number(merged.selectedAccountIndex ?? 0);
+  if (!Number.isFinite(selectedAccountIndex) || selectedAccountIndex < 0) {
+    selectedAccountIndex = 0;
+  }
+  selectedAccountIndex = Math.min(Math.floor(selectedAccountIndex), Math.max(0, accountCount - 1));
+
   return {
     ...merged,
     nodeUrl,
     proverUrl,
     archiverUrl,
+    accountCount,
+    selectedAccountIndex,
   };
 }
 

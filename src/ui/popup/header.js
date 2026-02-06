@@ -116,7 +116,10 @@ export function createHeaderRenderer({
 
     const actions = [];
 
-    const account = ov?.accounts?.[0];
+    const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
+    const idxRaw = Number(ov?.selectedAccountIndex ?? 0);
+    const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
+    const account = accounts[idx] ?? accounts[0];
     if (ov?.isUnlocked && typeof account === "string" && account.length) {
       let host = null;
       let connected = false;

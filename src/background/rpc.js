@@ -23,9 +23,7 @@ import { requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { putTxMeta } from "../shared/txStore.js";
 import {
-  broadcastAccountsChangedForOrigin,
   broadcastChainChangedAll,
-  broadcastToOrigin,
 } from "./dappEvents.js";
 import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
@@ -91,6 +89,14 @@ export async function handleRpc(origin, request) {
     return out;
   }
 
+  function sanitizeAccountIndex(v, len, fallback = 0) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return fallback;
+    const idx = Math.floor(n);
+    if (!Number.isFinite(len) || len <= 0) return fallback;
+    return Math.max(0, Math.min(idx, len - 1));
+  }
+
   switch (method) {
     case "dusk_getCapabilities": {
       const settings = await getSettings();
@@ -145,34 +151,32 @@ export async function handleRpc(origin, request) {
         );
       }
 
-      // Ask the user to connect this origin.
-      await requestUserApproval("connect", origin, { requestedAccounts: true });
-
-      // If user approved, origin is now whitelisted.
-      await approveOrigin(origin, 0);
-
-      // Notify provider listeners in this origin that a connection was established.
-      try {
-        const settings = await getSettings();
-        const chainId = chainIdFromNodeUrl(settings?.nodeUrl ?? "");
-        broadcastToOrigin(origin, "connect", { chainId });
-        // Also push accounts availability (will be [] if still locked).
-        await broadcastAccountsChangedForOrigin(origin);
-      } catch {
-        // ignore
+      // If the site is already connected and the wallet is unlocked, return the
+      // currently permitted account without prompting again.
+      const existing = await getPermissionForOrigin(origin);
+      const st0 = await getEngineStatus();
+      if (existing && st0?.isUnlocked) {
+        const arr = Array.isArray(st0.accounts) ? st0.accounts : [];
+        const idx = sanitizeAccountIndex(existing.accountIndex, arr.length, 0);
+        return arr[idx] ? [arr[idx]] : [];
       }
+
+      // Ask the user to connect this origin (approval UI includes unlock).
+      const approved = await requestUserApproval("connect", origin, { requestedAccounts: true });
 
       const { isUnlocked, accounts } = await getEngineStatus();
       if (!isUnlocked) {
-        // User approved but wallet is still locked, treat as unauthorized.
-        throw rpcError(
-          ERROR_CODES.UNAUTHORIZED,
-          "Wallet is still locked. Unlock to access accounts."
-        );
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet is still locked. Unlock to access accounts.");
       }
-      // Expose the permitted account only (MetaMask-style).
+
       const arr = Array.isArray(accounts) ? accounts : [];
-      return arr.length ? [arr[0]] : [];
+      const idx = sanitizeAccountIndex(approved?.accountIndex, arr.length, 0);
+
+      // If user approved, origin is now whitelisted with the chosen account.
+      await approveOrigin(origin, idx);
+
+      // Expose the permitted account only (MetaMask-style array).
+      return arr[idx] ? [arr[idx]] : [];
     }
 
     case "dusk_accounts": {
@@ -182,7 +186,8 @@ export async function handleRpc(origin, request) {
       const { isUnlocked, accounts } = await getEngineStatus();
       if (!isUnlocked) return [];
       const arr = Array.isArray(accounts) ? accounts : [];
-      return arr.length ? [arr[0]] : [];
+      const idx = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
+      return arr[idx] ? [arr[idx]] : [];
     }
 
     case "dusk_chainId": {
@@ -285,11 +290,14 @@ export async function handleRpc(origin, request) {
       const perm = await getPermissionForOrigin(origin);
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
-      const { isUnlocked } = await getEngineStatus();
+      const { isUnlocked, accounts } = await getEngineStatus();
       if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 
       await ensureEngineConfigured();
-      return await engineCall("dusk_getPublicBalance");
+      const arr = Array.isArray(accounts) ? accounts : [];
+      return await engineCall("dusk_getPublicBalance", {
+        profileIndex: sanitizeAccountIndex(perm.accountIndex, arr.length, 0),
+      });
     }
 
     case "dusk_estimateGas": {
@@ -367,10 +375,18 @@ export async function handleRpc(origin, request) {
       const overrides = await requestUserApproval("send_tx", origin, baseParams);
       const finalParams = mergeTxParams(baseParams, overrides);
 
-      const { isUnlocked } = await getEngineStatus();
+      const { isUnlocked, accounts } = await getEngineStatus();
       if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 
-      const result = await engineCall("dusk_sendTransaction", finalParams);
+      const arr = Array.isArray(accounts) ? accounts : [];
+      const idx = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
+
+      const engineParams = {
+        ...finalParams,
+        // Never allow a dApp to select an arbitrary local profile.
+        profileIndex: idx,
+      };
+      const result = await engineCall("dusk_sendTransaction", engineParams);
       const hash = result?.hash ?? "";
 
       // Persist minimal metadata so we can later show an "executed" notification
@@ -447,14 +463,16 @@ export async function handleRpc(origin, request) {
         messageLen,
       });
 
-      const { isUnlocked } = await getEngineStatus();
+      const { isUnlocked, accounts } = await getEngineStatus();
       if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 
       await ensureEngineConfigured();
+      const arr = Array.isArray(accounts) ? accounts : [];
       return await engineCall("dusk_signMessage", {
         origin,
         chainId,
         message: params.message,
+        profileIndex: sanitizeAccountIndex(perm.accountIndex, arr.length, 0),
       });
     }
 
@@ -480,32 +498,23 @@ export async function handleRpc(origin, request) {
         statement: params.statement ?? "",
       });
 
-      const { isUnlocked } = await getEngineStatus();
+      const { isUnlocked, accounts } = await getEngineStatus();
       if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 
       await ensureEngineConfigured();
+      const arr = Array.isArray(accounts) ? accounts : [];
       return await engineCall("dusk_signAuth", {
         origin,
         chainId,
         nonce,
         statement: params.statement ?? "",
         expiresAt: params.expiresAt ?? "",
+        profileIndex: sanitizeAccountIndex(perm.accountIndex, arr.length, 0),
       });
     }
 
     case "dusk_disconnect": {
       await revokeOrigin(origin);
-
-      // Notify provider listeners for this origin.
-      try {
-        broadcastToOrigin(origin, "disconnect", {
-          code: 4900,
-          message: "Disconnected",
-        });
-        await broadcastAccountsChangedForOrigin(origin);
-      } catch {
-        // ignore
-      }
       return true;
     }
 

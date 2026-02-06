@@ -2,6 +2,7 @@ import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/am
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { h } from "../lib/dom.js";
+import { truncateMiddle } from "../lib/strings.js";
 import "../components/GasEditor.js";
 import {
   runtimeGetURL,
@@ -50,13 +51,34 @@ export async function renderNotification() {
     return;
   }
 
-  const { kind, origin, params, hasVault, isUnlocked, accounts } = pending;
+  const {
+    kind,
+    origin,
+    params,
+    hasVault,
+    isUnlocked,
+    accounts,
+    accountCount,
+    selectedAccountIndex,
+    permissionAccountIndex,
+  } = pending;
   // Normalize request kind defensively. In some environments the value might
   // include whitespace or differ in casing (e.g. service worker restarts,
   // serialization quirks). The UI should still render the correct screen.
   const kindNorm = String(kind ?? "")
     .trim()
     .toLowerCase();
+
+  const accountsArr = Array.isArray(accounts) ? accounts : [];
+  const permIdxRaw =
+    permissionAccountIndex === null || permissionAccountIndex === undefined
+      ? null
+      : Number(permissionAccountIndex);
+  const permIdx = permIdxRaw !== null && Number.isFinite(permIdxRaw) && permIdxRaw >= 0 ? Math.floor(permIdxRaw) : null;
+  const selIdxRaw = Number(selectedAccountIndex ?? 0);
+  const selIdx = Number.isFinite(selIdxRaw) && selIdxRaw >= 0 ? Math.floor(selIdxRaw) : 0;
+  const idxForOrigin = permIdx ?? selIdx;
+  const activeAccount = accountsArr[idxForOrigin] ?? accountsArr[0] ?? "";
 
   const header = h("div", { class: "row" }, [
     h("div", { class: "muted", text: "Request from" }),
@@ -148,6 +170,27 @@ export async function renderNotification() {
   }
 
   if (kindNorm === "connect") {
+    const count = Math.max(1, Number(accountCount ?? (accountsArr.length || 1)) || 1);
+    const displayAccounts = accountsArr.length
+      ? accountsArr
+      : Array.from({ length: count }, () => "");
+
+    const accountSelect = h(
+      "select",
+      {},
+      displayAccounts.map((acct, i) =>
+        h("option", {
+          value: String(i),
+          text: String(acct)
+            ? `Account ${i + 1} · ${truncateMiddle(String(acct), 10, 8)}`
+            : `Account ${i + 1}`,
+        })
+      )
+    );
+    accountSelect.value = String(
+      Math.max(0, Math.min(idxForOrigin, Math.max(0, displayAccounts.length - 1)))
+    );
+
     setApp([
       header,
       h("div", { class: "row" }, [
@@ -155,9 +198,13 @@ export async function renderNotification() {
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Account" }),
-        h("div", { class: "box" }, [h("code", { text: accounts?.[0] ?? "(none)" })]),
+        h("div", { class: "select-wrap" }, [accountSelect]),
+        h("div", {
+          class: "muted",
+          text: "The site will only be able to use the selected public account.",
+        }),
       ]),
-      decisionButtons("Connect"),
+      decisionButtons("Connect", () => ({ accountIndex: Number(accountSelect.value) })),
     ]);
     return;
   }
@@ -207,7 +254,7 @@ export async function renderNotification() {
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Account" }),
-        h("div", { class: "box" }, [h("code", { text: accounts?.[0] ?? "(none)" })]),
+        h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Chain ID" }),
@@ -244,7 +291,7 @@ export async function renderNotification() {
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Account" }),
-        h("div", { class: "box" }, [h("code", { text: accounts?.[0] ?? "(none)" })]),
+        h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Chain ID" }),
@@ -291,6 +338,10 @@ export async function renderNotification() {
       setApp([
         header,
         h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve transfer" })]),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "From" }),
+          h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+        ]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "To" }),
           h("div", { class: "box" }, [h("code", { text: to })]),
@@ -362,6 +413,10 @@ export async function renderNotification() {
       setApp([
         header,
         h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve contract call" })]),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "From" }),
+          h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+        ]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "Contract" }),
           h("div", { class: "box" }, [h("code", { text: contractIdHex })]),

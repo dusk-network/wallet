@@ -202,6 +202,8 @@ let engineConfig = {
   nodeUrl: "https://testnet.nodes.dusk.network",
   proverUrl: "https://testnet.provers.dusk.network",
   archiverUrl: "https://testnet.nodes.dusk.network",
+  accountCount: 1,
+  selectedAccountIndex: 0,
 };
 
 let engineDebugHook = null;
@@ -294,6 +296,22 @@ export function configure(patch = {}) {
     const next = patch.archiverUrl;
     changedArchiver = next !== engineConfig.archiverUrl;
     engineConfig.archiverUrl = next;
+  }
+
+  // Account derivation config (persisted in settings). This is used on unlock
+  // to restore the same derived accounts.
+  if (patch.accountCount !== undefined) {
+    const n = Number(patch.accountCount);
+    if (Number.isFinite(n) && n >= 1) {
+      engineConfig.accountCount = Math.floor(n);
+    }
+  }
+
+  if (patch.selectedAccountIndex !== undefined) {
+    const n = Number(patch.selectedAccountIndex);
+    if (Number.isFinite(n) && n >= 0) {
+      engineConfig.selectedAccountIndex = Math.floor(n);
+    }
   }
 
   // Prover/archiver can change without switching the node URL (custom setups).
@@ -565,8 +583,26 @@ export async function unlockWithMnemonic(mnemonic) {
   state.seed = seed;
   state.walletId = p0?.account?.toString?.() ?? "";
   state.profileGenerator = pg;
-  state.profiles = [p0];
-  state.currentIndex = 0;
+
+  // Restore derived accounts (public + shielded) based on persisted settings.
+  const targetCountRaw = Number(engineConfig.accountCount ?? 1);
+  const targetCount =
+    Number.isFinite(targetCountRaw) && targetCountRaw >= 1
+      ? Math.floor(targetCountRaw)
+      : 1;
+
+  const profiles = [p0];
+  for (let i = 1; i < targetCount; i++) {
+    // ProfileGenerator.next() skips default and generates sequential indices.
+    profiles.push(await pg.next());
+  }
+
+  state.profiles = profiles;
+
+  const selRaw = Number(engineConfig.selectedAccountIndex ?? 0);
+  const sel =
+    Number.isFinite(selRaw) && selRaw >= 0 ? Math.floor(selRaw) : 0;
+  state.currentIndex = Math.min(sel, Math.max(0, profiles.length - 1));
   debugEngine("unlock_state_set", {
     totalMs: engineSince(unlockStart),
   });
@@ -613,6 +649,54 @@ export function getCurrentProfile() {
   const p = state.profiles[state.currentIndex];
   if (!p) throw new Error("Wallet not unlocked");
   return p;
+}
+
+export function getSelectedAccountIndex() {
+  return Number(state.currentIndex) || 0;
+}
+
+function normalizeProfileIndex(v, fallback = 0) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.floor(n);
+}
+
+async function ensureProfileIndex(idx) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const i = normalizeProfileIndex(idx, state.currentIndex || 0);
+  if (state.profiles[i]) return state.profiles[i];
+  if (!state.profileGenerator) throw new Error("No profile generator (wallet not unlocked?)");
+
+  // Derive missing profiles sequentially.
+  while (state.profiles.length <= i) {
+    state.profiles.push(await state.profileGenerator.next());
+  }
+  return state.profiles[i];
+}
+
+export async function selectAccountIndex({ index } = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const idx = normalizeProfileIndex(index, 0);
+  await ensureProfileIndex(idx);
+  state.currentIndex = idx;
+  return {
+    selectedAccountIndex: state.currentIndex,
+    accounts: getAccounts(),
+    addresses: getAddresses(),
+  };
+}
+
+export async function addAccount() {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  if (!state.profileGenerator) throw new Error("No profile generator (wallet not unlocked?)");
+  const p = await state.profileGenerator.next();
+  state.profiles.push(p);
+  state.currentIndex = state.profiles.length - 1;
+  return {
+    selectedAccountIndex: state.currentIndex,
+    accounts: getAccounts(),
+    addresses: getAddresses(),
+  };
 }
 
 export function getAccounts() {
@@ -939,10 +1023,10 @@ function formatWsError(err, nodeUrl) {
   return `Failed to connect to node ${nodeUrl} (unknown websocket error)`;
 }
 
-export async function getPublicBalance() {
+export async function getPublicBalance({ profileIndex } = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   await ensureNetwork();
-  const profile = getCurrentProfile();
+  const profile = await ensureProfileIndex(profileIndex ?? state.currentIndex);
   return await withTimeout(
     state.bookkeeper.balance(profile.account),
     12_000,
@@ -1145,11 +1229,11 @@ export function getShieldedStatus() {
   return { ...state.shielded.status };
 }
 
-async function ensureShieldedMetaForCurrent() {
+async function ensureShieldedMetaForIndex(profileIndex) {
   const netKey = getNetworkKey();
   const walletId = getWalletId();
   if (!walletId) throw new Error("No walletId (wallet locked?)");
-  const idx = state.currentIndex || 0;
+  const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
   let meta;
   try {
     meta = await ensureShieldedMeta(netKey, walletId, idx, {
@@ -1182,6 +1266,10 @@ async function ensureShieldedMetaForCurrent() {
   });
 
   return meta;
+}
+
+async function ensureShieldedMetaForCurrent() {
+  return await ensureShieldedMetaForIndex(state.currentIndex || 0);
 }
 
 export async function setShieldedCheckpointNow({ profileIndex = 0 } = {}) {
@@ -1568,6 +1656,7 @@ export async function transfer(params) {
   const { to, memo } = params;
 
   const amount = typeof params.amount === "bigint" ? params.amount : BigInt(params.amount);
+  const profileIndex = params?.profileIndex;
 
   const toType = ProfileGenerator.typeOf(to);
   if (toType !== "account" && toType !== "address") {
@@ -1575,19 +1664,19 @@ export async function transfer(params) {
   }
 
   const network = await ensureNetwork();
-  const profile = getCurrentProfile();
+  const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
+  const profile = await ensureProfileIndex(idx);
 
   // Shielded transfers spend from the local note cache.
   // We avoid blocking the UX on a full sync here (MetaMask-style).
   // If the cache is empty, we kick off a background sync and fail fast with
   // a clear message.
   if (toType === "address") {
-    await ensureShieldedMetaForCurrent();
+    await ensureShieldedMetaForIndex(idx);
 
     try {
       const netKey = getNetworkKey();
       const walletId = getWalletId();
-      const idx = state.currentIndex || 0;
 
       if (walletId) {
         const n = await countNotes(netKey, walletId, idx);
@@ -1635,7 +1724,6 @@ export async function transfer(params) {
     if (Array.isArray(result?.nullifiers) && result.nullifiers.length) {
       const netKey = getNetworkKey();
       const walletId = getWalletId();
-      const idx = state.currentIndex || 0;
       if (walletId) {
         await putPendingNullifiers(netKey, walletId, idx, result.nullifiers, result.hash);
       }
@@ -1701,7 +1789,8 @@ export async function sendTransaction(params) {
 
   // Common
   const network = await ensureNetwork();
-  const profile = getCurrentProfile();
+  const idx = normalizeProfileIndex(params?.profileIndex, state.currentIndex || 0);
+  const profile = await ensureProfileIndex(idx);
 
   if (kind === TX_KIND.TRANSFER) {
     // Reuse existing transfer logic for now.
@@ -1824,11 +1913,10 @@ export async function sendTransaction(params) {
     // Shielded contract calls spend from the local note cache (Phoenix tx).
     // If the cache is empty, fail fast and trigger a background sync.
     if (isShielded) {
-      await ensureShieldedMetaForCurrent();
+      await ensureShieldedMetaForIndex(idx);
       try {
         const netKey = getNetworkKey();
         const walletId = getWalletId();
-        const idx = state.currentIndex || 0;
 
         if (walletId) {
           const n = await countNotes(netKey, walletId, idx);
@@ -1997,7 +2085,7 @@ export async function signMessage(params) {
   const messageLen = messageBytes.length;
   const messageHash = await sha256Hex(messageBytes);
 
-  const profile = getCurrentProfile();
+  const profile = await ensureProfileIndex(params.profileIndex ?? state.currentIndex);
   const memo = [
     "Dusk Connect SignMessage v1",
     `Origin: ${origin}`,
@@ -2050,7 +2138,7 @@ export async function signAuth(params) {
     expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   }
 
-  const profile = getCurrentProfile();
+  const profile = await ensureProfileIndex(params.profileIndex ?? state.currentIndex);
   const lines = [
     "Dusk Connect SignAuth v1",
     `Account: ${profile.account.toString()}`,

@@ -1,15 +1,18 @@
 import {
   configure,
+  addAccount,
   getAccounts,
   getAddresses,
   getCachedGasPrice,
   getGasPrice,
+  getSelectedAccountIndex,
   getPublicBalance,
   getShieldedBalance,
   getShieldedStatus,
   isUnlocked,
   lock,
   sendTransaction,
+  selectAccountIndex,
   signAuth,
   signMessage,
   setShieldedCheckpointNow,
@@ -161,6 +164,7 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
             result: {
               isUnlocked: isUnlocked(),
               accounts: isUnlocked() ? getAccounts() : [],
+              selectedAccountIndex: isUnlocked() ? getSelectedAccountIndex() : 0,
             },
           });
           return;
@@ -185,12 +189,24 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
           sendResponse({ id, result: true });
           return;
 
+        case "engine_selectAccount": {
+          const res = await selectAccountIndex(params ?? {});
+          sendResponse({ id, result: res });
+          return;
+        }
+
+        case "engine_addAccount": {
+          const res = await addAccount();
+          sendResponse({ id, result: res });
+          return;
+        }
+
         case "dusk_getAddresses":
           sendResponse({ id, result: isUnlocked() ? getAddresses() : [] });
           return;
 
         case "dusk_getPublicBalance": {
-          const bal = await getPublicBalance();
+          const bal = await getPublicBalance(params ?? {});
           sendResponse({
             id,
             result: { nonce: bal.nonce.toString(), value: bal.value.toString() },

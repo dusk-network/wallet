@@ -50,8 +50,13 @@ function isTauriMobileLike() {
 }
 
 export function receiveView(ov, { state, actions } = {}) {
-  const account = ov?.accounts?.[0] ?? "";
-  const address = ov?.addresses?.[0] ?? "";
+  const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
+  const addresses = Array.isArray(ov?.addresses) ? ov.addresses : [];
+  const idxRaw = Number(ov?.selectedAccountIndex ?? 0);
+  const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
+
+  const account = accounts[idx] ?? accounts[0] ?? "";
+  const address = addresses[idx] ?? addresses[0] ?? "";
 
   const chainId = chainIdFromNodeUrl(ov?.nodeUrl ?? "");
 
