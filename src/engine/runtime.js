@@ -7,6 +7,13 @@ import {
   getGasPrice,
   getSelectedAccountIndex,
   getPublicBalance,
+  encodeDrc20Input,
+  encodeDrc721Input,
+  getDrc20Metadata,
+  getDrc20Balance,
+  getDrc721Metadata,
+  getDrc721OwnerOf,
+  getDrc721TokenUri,
   getMinimumStake,
   getStakeInfo,
   getShieldedBalance,
@@ -241,6 +248,48 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
               hardFaults: Number(info?.hardFaults ?? 0) || 0,
             },
           });
+          return;
+        }
+
+        case "dusk_encodeDrc20Input": {
+          const out = await encodeDrc20Input(params ?? {});
+          sendResponse({ id, result: out });
+          return;
+        }
+
+        case "dusk_encodeDrc721Input": {
+          const out = await encodeDrc721Input(params ?? {});
+          sendResponse({ id, result: out });
+          return;
+        }
+
+        case "dusk_getDrc20Metadata": {
+          const out = await getDrc20Metadata(params ?? {});
+          sendResponse({ id, result: out });
+          return;
+        }
+
+        case "dusk_getDrc20Balance": {
+          const out = await getDrc20Balance(params ?? {});
+          sendResponse({ id, result: String(out) });
+          return;
+        }
+
+        case "dusk_getDrc721Metadata": {
+          const out = await getDrc721Metadata(params ?? {});
+          sendResponse({ id, result: out });
+          return;
+        }
+
+        case "dusk_getDrc721OwnerOf": {
+          const out = await getDrc721OwnerOf(params ?? {});
+          sendResponse({ id, result: out });
+          return;
+        }
+
+        case "dusk_getDrc721TokenUri": {
+          const out = await getDrc721TokenUri(params ?? {});
+          sendResponse({ id, result: String(out) });
           return;
         }
 

@@ -2,9 +2,11 @@ import { mnemonicToSeedSync } from "bip39";
 import {
   Bookkeeper,
   Bookmark,
+  Contract,
   Network,
   ProfileGenerator,
   AddressSyncer,
+  dataDrivers,
   useAsProtocolDriver,
 } from "@dusk/w3sper";
 import { bytesToHex, hexToBytes, sha256Hex, toBytes } from "./bytes.js";
@@ -449,6 +451,9 @@ const state = {
   treasuryAll: null,
   bookkeeperAll: null,
   protocolLoaded: false,
+  drivers: {
+    registry: null,
+  },
 
   // Shielded sync/balance
   shielded: {
@@ -472,6 +477,35 @@ const state = {
 function getWalletId() {
   // Empty when locked.
   return String(state.walletId || "").trim();
+}
+
+// ----------------------------------------------------------------------------
+// Data-drivers (DRC20 / DRC721)
+// ----------------------------------------------------------------------------
+
+const DRIVER_KEYS = Object.freeze({
+  DRC20: "drc20",
+  DRC721: "drc721",
+});
+
+function ensureDriverRegistry() {
+  if (state.drivers?.registry) return state.drivers.registry;
+
+  const reg = new dataDrivers.DataDriverRegistry(fetch);
+  reg.register(DRIVER_KEYS.DRC20, assetUrl("drivers/drc20_data_driver.wasm"));
+  reg.register(DRIVER_KEYS.DRC721, assetUrl("drivers/drc721_data_driver.wasm"));
+
+  state.drivers.registry = reg;
+  return reg;
+}
+
+async function getDriver(key) {
+  const reg = ensureDriverRegistry();
+  return await reg.get(String(key));
+}
+
+function jsonWithBigInts(value) {
+  return JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
 }
 
 export function isUnlocked() {
@@ -1072,6 +1106,142 @@ export async function getStakeInfo({ profileIndex } = {}) {
     12_000,
     "Stake request timed out"
   );
+}
+
+/**
+ * Encode a DRC20 contract input using the canonical DRC20 data-driver.
+ *
+ * @param {{ fnName: string, args?: any }} params
+ * @returns {Promise<Uint8Array>}
+ */
+export async function encodeDrc20Input(params = {}) {
+  const fnName = String(params?.fnName ?? "").trim();
+  if (!fnName) throw new Error("fnName is required");
+  const driver = await getDriver(DRIVER_KEYS.DRC20);
+  const json = params?.args === undefined || params?.args === null ? "null" : jsonWithBigInts(params.args);
+  return driver.encodeInputFn(fnName, json);
+}
+
+/**
+ * Encode a DRC721 contract input using the canonical DRC721 data-driver.
+ *
+ * @param {{ fnName: string, args?: any }} params
+ * @returns {Promise<Uint8Array>}
+ */
+export async function encodeDrc721Input(params = {}) {
+  const fnName = String(params?.fnName ?? "").trim();
+  if (!fnName) throw new Error("fnName is required");
+  const driver = await getDriver(DRIVER_KEYS.DRC721);
+  const json = params?.args === undefined || params?.args === null ? "null" : jsonWithBigInts(params.args);
+  return driver.encodeInputFn(fnName, json);
+}
+
+/**
+ * @param {{ contractId: any }} params
+ * @returns {Promise<{ name: string, symbol: string, decimals: number }>}
+ */
+export async function getDrc20Metadata(params = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const contractIdBytes = toContractIdBytes(params?.contractId);
+
+  const network = await ensureNetwork();
+  const driver = await getDriver(DRIVER_KEYS.DRC20);
+  const c = new Contract({ contractId: contractIdBytes, driver, network });
+
+  const [name, symbol, decimals] = await Promise.all([
+    c.call.name(),
+    c.call.symbol(),
+    c.call.decimals(),
+  ]);
+
+  return Object.freeze({
+    name: String(name ?? ""),
+    symbol: String(symbol ?? ""),
+    decimals: Number(decimals ?? 0) || 0,
+  });
+}
+
+/**
+ * @param {{ contractId: any, profileIndex?: number }} params
+ * @returns {Promise<string>} u64 decimal string
+ */
+export async function getDrc20Balance(params = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const contractIdBytes = toContractIdBytes(params?.contractId);
+
+  const idx = normalizeProfileIndex(params?.profileIndex, state.currentIndex || 0);
+  const profile = await ensureProfileIndex(idx);
+
+  const network = await ensureNetwork();
+  const driver = await getDriver(DRIVER_KEYS.DRC20);
+  const c = new Contract({ contractId: contractIdBytes, driver, network });
+
+  const out = await c.call.balance_of({
+    account: { External: profile.account.toString() },
+  });
+
+  // Data-driver returns bigints as strings.
+  return String(out ?? "0");
+}
+
+/**
+ * @param {{ contractId: any }} params
+ * @returns {Promise<{ name: string, symbol: string, baseUri: string }>}
+ */
+export async function getDrc721Metadata(params = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const contractIdBytes = toContractIdBytes(params?.contractId);
+
+  const network = await ensureNetwork();
+  const driver = await getDriver(DRIVER_KEYS.DRC721);
+  const c = new Contract({ contractId: contractIdBytes, driver, network });
+
+  const [name, symbol, baseUri] = await Promise.all([
+    c.call.name(),
+    c.call.symbol(),
+    c.call.base_uri(),
+  ]);
+
+  return Object.freeze({
+    name: String(name ?? ""),
+    symbol: String(symbol ?? ""),
+    baseUri: String(baseUri ?? ""),
+  });
+}
+
+/**
+ * @param {{ contractId: any, tokenId: any }} params
+ * @returns {Promise<any>} Account enum JSON from the data-driver
+ */
+export async function getDrc721OwnerOf(params = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const contractIdBytes = toContractIdBytes(params?.contractId);
+  const token_id = String(params?.tokenId ?? "").trim();
+  if (!token_id) throw new Error("tokenId is required");
+
+  const network = await ensureNetwork();
+  const driver = await getDriver(DRIVER_KEYS.DRC721);
+  const c = new Contract({ contractId: contractIdBytes, driver, network });
+
+  return await c.call.owner_of({ token_id });
+}
+
+/**
+ * @param {{ contractId: any, tokenId: any }} params
+ * @returns {Promise<string>}
+ */
+export async function getDrc721TokenUri(params = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const contractIdBytes = toContractIdBytes(params?.contractId);
+  const token_id = String(params?.tokenId ?? "").trim();
+  if (!token_id) throw new Error("tokenId is required");
+
+  const network = await ensureNetwork();
+  const driver = await getDriver(DRIVER_KEYS.DRC721);
+  const c = new Contract({ contractId: contractIdBytes, driver, network });
+
+  const out = await c.call.token_uri({ token_id });
+  return String(out ?? "");
 }
 
 /**

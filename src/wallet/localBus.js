@@ -12,6 +12,13 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
 import {
+  getWatchedAssets,
+  watchToken,
+  unwatchToken,
+  watchNft,
+  unwatchNft,
+} from "../shared/assetsStore.js";
+import {
   configure,
   addAccount,
   getAccounts,
@@ -19,6 +26,13 @@ import {
   getCachedGasPrice,
   getSelectedAccountIndex,
   getPublicBalance,
+  encodeDrc20Input,
+  encodeDrc721Input,
+  getDrc20Metadata,
+  getDrc20Balance,
+  getDrc721Metadata,
+  getDrc721OwnerOf,
+  getDrc721TokenUri,
   getShieldedBalance,
   getShieldedStatus,
   isUnlocked,
@@ -230,6 +244,18 @@ export async function localSend(message) {
       };
     }
 
+    // UI sets NFT metadata privacy settings
+    if (message?.type === "DUSK_UI_SET_NFT_SETTINGS") {
+      const enabled = message.nftMetadataEnabled !== false;
+      const ipfsGateway = String(message.ipfsGateway ?? "");
+      const next = await setSettings({ nftMetadataEnabled: enabled, ipfsGateway });
+      return {
+        ok: true,
+        nftMetadataEnabled: next.nftMetadataEnabled !== false,
+        ipfsGateway: next.ipfsGateway ?? "",
+      };
+    }
+
     // UI fetches cached gas price stats for UX (recommended gas buttons).
     if (message?.type === "DUSK_UI_GET_CACHED_GAS_PRICE") {
       await ensureEngineConfigured();
@@ -321,9 +347,11 @@ export async function localSend(message) {
         shieldedBalance,
         shieldedSync,
         shieldedError,
-          nodeUrl: settings.nodeUrl,
-          proverUrl: settings.proverUrl,
-          archiverUrl: settings.archiverUrl,
+        nodeUrl: settings.nodeUrl,
+        proverUrl: settings.proverUrl,
+        archiverUrl: settings.archiverUrl,
+        nftMetadataEnabled: settings.nftMetadataEnabled !== false,
+        ipfsGateway: settings.ipfsGateway ?? "",
         networkName: networkNameFromNodeUrl(settings.nodeUrl),
         activeOrigin,
         activeConnected,
@@ -351,6 +379,139 @@ export async function localSend(message) {
       const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
       const info = await getStakeInfo({ profileIndex: idx });
       return { ok: true, result: serializeStakeInfo(info) };
+    }
+
+    // --- Assets (DRC20 / DRC721) ----------------------------------------
+    if (message?.type === "DUSK_UI_ASSETS_GET") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      const settings = await getSettings();
+      const walletId = String(status?.accounts?.[0] ?? "").trim();
+      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
+      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
+      const result = await getWatchedAssets(walletId, settings.nodeUrl, idx);
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_ASSETS_WATCH_TOKEN") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      const settings = await getSettings();
+      const walletId = String(status?.accounts?.[0] ?? "").trim();
+      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
+      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
+      const result = await watchToken(walletId, settings.nodeUrl, idx, message?.token);
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_ASSETS_UNWATCH_TOKEN") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      const settings = await getSettings();
+      const walletId = String(status?.accounts?.[0] ?? "").trim();
+      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
+      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
+      const result = await unwatchToken(walletId, settings.nodeUrl, idx, message?.contractId);
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_ASSETS_WATCH_NFT") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      const settings = await getSettings();
+      const walletId = String(status?.accounts?.[0] ?? "").trim();
+      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
+      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
+      const result = await watchNft(walletId, settings.nodeUrl, idx, message?.nft);
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_ASSETS_UNWATCH_NFT") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      const settings = await getSettings();
+      const walletId = String(status?.accounts?.[0] ?? "").trim();
+      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
+      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
+      const result = await unwatchNft(
+        walletId,
+        settings.nodeUrl,
+        idx,
+        message?.contractId,
+        message?.tokenId
+      );
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_DRC20_GET_METADATA") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const result = await getDrc20Metadata({ contractId: message?.contractId });
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_DRC20_GET_BALANCE") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
+      const result = await getDrc20Balance({ contractId: message?.contractId, profileIndex: idx });
+      return { ok: true, result: String(result ?? "0") };
+    }
+
+    if (message?.type === "DUSK_UI_DRC20_ENCODE_INPUT") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const result = await encodeDrc20Input({ fnName: message?.fnName, args: message?.args });
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_DRC721_GET_METADATA") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const result = await getDrc721Metadata({ contractId: message?.contractId });
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_DRC721_OWNER_OF") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const result = await getDrc721OwnerOf({ contractId: message?.contractId, tokenId: message?.tokenId });
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_DRC721_TOKEN_URI") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const result = await getDrc721TokenUri({ contractId: message?.contractId, tokenId: message?.tokenId });
+      return { ok: true, result: String(result ?? "") };
     }
 
     // UI selects a different local account (profile index)
@@ -425,6 +586,10 @@ export async function localSend(message) {
             nodeUrl,
             kind,
             profileIndex: Number(status.selectedAccountIndex ?? 0) || 0,
+            asset:
+              message?.asset && typeof message.asset === "object"
+                ? message.asset
+                : undefined,
             to: baseParams?.to ? String(baseParams.to) : undefined,
             amount:
               baseParams?.amount !== undefined && baseParams?.amount !== null

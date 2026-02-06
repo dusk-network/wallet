@@ -27,6 +27,10 @@ export const DEFAULT_SETTINGS = {
   accountCount: 1,
   /** Selected account index for the wallet UI */
   selectedAccountIndex: 0,
+  /** Whether the wallet may fetch remote NFT metadata/images (privacy toggle). */
+  nftMetadataEnabled: true,
+  /** IPFS gateway base used to resolve ipfs:// token URIs. */
+  ipfsGateway: "https://ipfs.io/ipfs/",
 };
 
 function normalizeBaseUrl(v) {
@@ -39,6 +43,19 @@ function normalizeBaseUrl(v) {
   } catch {
     // If it's not a full URL (missing scheme), still normalize trailing slashes.
     return s.replace(/\/+$/, "");
+  }
+}
+
+function normalizeIpfsGateway(v) {
+  const s = String(v ?? "").trim();
+  if (!s) return DEFAULT_SETTINGS.ipfsGateway;
+  try {
+    const u = new URL(s);
+    const base = u.toString();
+    if (base.includes("/ipfs/")) return base.endsWith("/") ? base : `${base}/`;
+    return `${u.origin}/ipfs/`;
+  } catch {
+    return DEFAULT_SETTINGS.ipfsGateway;
   }
 }
 
@@ -96,6 +113,8 @@ export async function getSettings() {
     archiverUrl,
     accountCount,
     selectedAccountIndex,
+    nftMetadataEnabled: merged.nftMetadataEnabled !== false,
+    ipfsGateway: normalizeIpfsGateway(merged.ipfsGateway),
   };
 }
 
@@ -115,6 +134,9 @@ export async function setSettings(patch) {
   }
   if ("archiverUrl" in patch) {
     next.archiverUrl = normalizeBaseUrl(next.archiverUrl);
+  }
+  if ("ipfsGateway" in patch) {
+    next.ipfsGateway = normalizeIpfsGateway(next.ipfsGateway);
   }
 
   // If nodeUrl changed but prover/archiver weren't provided, infer them.
@@ -143,6 +165,10 @@ export async function setSettings(patch) {
     if (!Number.isFinite(n) || n < 0) n = 0;
     const maxIdx = Math.max(0, Number(next.accountCount ?? 1) - 1);
     next.selectedAccountIndex = Math.min(Math.floor(n), maxIdx);
+  }
+
+  if ("nftMetadataEnabled" in patch) {
+    next.nftMetadataEnabled = patch.nftMetadataEnabled !== false;
   }
 
   await storage.set({ [STORAGE_KEYS.SETTINGS]: next });
