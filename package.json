@@ -38,6 +38,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
     "@vitest/coverage-v8": "^4.0.18",
+    "fake-indexeddb": "^6.2.5",
     "vite": "^5.3.1",
     "vite-plugin-node-polyfills": "^0.23.0",
     "vitest": "^4.0.18"

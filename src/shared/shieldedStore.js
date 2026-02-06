@@ -185,6 +185,10 @@ export function metaCursor(meta) {
 async function clearStoreByOwner(db, storeName, ownerKeyStr) {
   return await new Promise((resolve, reject) => {
     const tx = db.transaction([storeName], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () =>
+      reject(tx.error || new Error(`Failed to clear ${storeName}`));
+
     const store = tx.objectStore(storeName);
     const index = store.index("byOwner");
     const req = index.openCursor(IDBKeyRange.only(ownerKeyStr));
@@ -194,8 +198,6 @@ async function clearStoreByOwner(db, storeName, ownerKeyStr) {
       cursor.delete();
       cursor.continue();
     };
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error(`Failed to clear ${storeName}`));
   });
 }
 
@@ -235,6 +237,9 @@ export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) 
 
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NOTES], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to write notes"));
+
     const store = tx.objectStore(STORE_NOTES);
     for (const e of entries) {
       store.put({
@@ -248,8 +253,6 @@ export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) 
         updatedAt: Date.now(),
       });
     }
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to write notes"));
   });
 
   return entries.length;
@@ -433,10 +436,12 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
 
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () =>
+      reject(tx.error || new Error("Failed to write pending"));
+
     const store = tx.objectStore(STORE_PENDING);
     for (const r of rows) store.put(r);
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to write pending"));
   });
 
   return rows.length;
@@ -464,6 +469,10 @@ export async function markNullifiersSpent(networkKey, walletId, profileIndex, nu
 
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NOTES, STORE_SPENT, STORE_PENDING], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () =>
+      reject(tx.error || new Error("Failed to mark spent"));
+
     const notes = tx.objectStore(STORE_NOTES);
     const spent = tx.objectStore(STORE_SPENT);
     const pending = tx.objectStore(STORE_PENDING);
@@ -497,9 +506,6 @@ export async function markNullifiersSpent(networkKey, walletId, profileIndex, nu
         } catch {}
       };
     }
-
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to mark spent"));
   });
 
   return hexes.length;
@@ -526,6 +532,9 @@ export async function unspendNullifiers(networkKey, walletId, profileIndex, null
 
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_SPENT, STORE_NOTES], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to unspend"));
+
     const spent = tx.objectStore(STORE_SPENT);
     const notes = tx.objectStore(STORE_NOTES);
 
@@ -549,9 +558,6 @@ export async function unspendNullifiers(networkKey, walletId, profileIndex, null
         }
       };
     }
-
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to unspend"));
   });
 
   return hexes.length;
