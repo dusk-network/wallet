@@ -88,24 +88,24 @@ Current: 93% on shared utilities, core engine untested.
 **Priority: Medium**
 
 ### 4.1 Staking
-- [ ] Stake/unstake flows
-- [ ] Rewards display
+- [x] Stake/unstake flows (incl. withdraw rewards)
+- [x] Rewards display (stake info summary)
 - [ ] Validator selection (TBD: if this is actually meaningful in Dusk; today it is mostly "your stake keys" rather than delegation)
 
 ### 4.2 Transactions (Core UX)
-- [ ] Better gas estimation UI (quick win, see Phase 5; use Rusk gas price stats endpoint)
+- [x] Better gas estimation UI (implemented as part of Phase 5.4; uses Rusk gas price stats endpoint)
 
 ### 4.3 Assets (DRC20 / DRC721)
 
 Goal: users should be able to manage common on-chain assets (tokens + NFTs) in-wallet, similar to the "Tokens" / "NFTs" tabs in Ethereum wallets.
 
-- [ ] **DRC20 (tokens):** add a wallet UI to "watch/import" a token by `contractId` (per-network), fetch `{ name, symbol, decimals }`, and display balance (public only).
-- [ ] **DRC20 (send):** add a send flow that builds `contract_call` transactions for `transfer(TransferCall)` using a canonical DRC20 data-driver for encoding.
-- [ ] **DRC20 (approvals):** add an approval flow for `approve(ApproveCall)` with safer defaults (exact amount), plus an explicit one-click "MAX" option with strong warnings (spender, amount, token).
-- [ ] **DRC721 (NFTs):** add an "Import NFT" flow by `{ contractId, token_id }` (MetaMask-style), verify ownership via `owner_of`, and display metadata using `token_uri`.
-- [ ] **Auto-discovery (lightweight):** after the user successfully submits a DRC20/DRC721 tx (transfer/approve/etc), offer to add that token/NFT to their watched assets list.
-- [ ] **NFT privacy controls:** default to fetching metadata/images, but offer a setting to disable remote metadata/image fetches (token URI may be HTTP/IPFS and can leak usage patterns).
-- [ ] **Activity UX:** label locally-submitted DRC20/DRC721 actions in the activity feed (even without full inbound history/indexing).
+- [x] **DRC20 (tokens):** add a wallet UI to "watch/import" a token by `contractId` (per-network), fetch `{ name, symbol, decimals }`, and display balance (public only).
+- [x] **DRC20 (send):** add a send flow that builds `contract_call` transactions for `transfer(TransferCall)` using a canonical DRC20 data-driver for encoding.
+- [x] **DRC20 (approvals):** add an approval flow for `approve(ApproveCall)` with safer defaults (exact amount), plus an explicit one-click "MAX" option with strong warnings (spender, amount, token).
+- [x] **DRC721 (NFTs):** add an "Import NFT" flow by `{ contractId, token_id }` (MetaMask-style), verify ownership via `owner_of`, and display metadata using `token_uri`.
+- [x] **Auto-discovery (lightweight):** from tx details, offer "Watch token" / "Import NFT" actions for `contract_call` txs (prefills `contractId`).
+- [x] **NFT privacy controls:** default to fetching metadata/images, but offer a setting to disable remote metadata/image fetches (token URI may be HTTP/IPFS and can leak usage patterns).
+- [x] **Activity UX:** label locally-submitted DRC20 actions in the activity feed (even without full inbound history/indexing).
 
 ---
 
