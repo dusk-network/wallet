@@ -15,6 +15,7 @@ export const DAPP_RPC_METHODS = Object.freeze([
   "dusk_getPublicBalance",
   "dusk_estimateGas",
   "dusk_sendTransaction",
+  "dusk_watchAsset",
   "dusk_signMessage",
   "dusk_signAuth",
   "dusk_disconnect",
@@ -30,4 +31,3 @@ export const DAPP_LIMITS = Object.freeze({
   // Protocol enforced for memo payloads (TransactionData::Memo).
   maxMemoBytes: 512,
 });
-

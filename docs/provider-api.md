@@ -212,6 +212,49 @@ const tx = await dusk.request({
 
 ---
 
+### `dusk_watchAsset`
+
+Prompt the user to add a **DRC20** token or **DRC721** NFT to the wallet's Assets UI (approval required).
+
+Requires prior connection (`dusk_requestAccounts`) and an unlocked wallet.
+
+Assets are stored per **(network + selected account/profile)**.
+
+```js
+// Watch/import a DRC20 token by contractId
+await dusk.request({
+  method: "dusk_watchAsset",
+  params: {
+    type: "DRC20",
+    options: {
+      contractId: "0x02000..." // 32 bytes
+      // image: "https://..."  // optional hint (may be ignored by the wallet)
+    }
+  }
+});
+
+// Watch/import a DRC721 NFT by contractId + tokenId (u64 decimal string)
+await dusk.request({
+  method: "dusk_watchAsset",
+  params: {
+    type: "DRC721",
+    options: {
+      contractId: "0x02000...", // 32 bytes
+      tokenId: "1"
+      // image: "https://..."  // optional hint (may be ignored by the wallet)
+    }
+  }
+});
+```
+
+The wallet verifies on-chain metadata before persisting the asset.
+
+For `type: "DRC721"`, the wallet also verifies the connected account currently owns `tokenId`.
+
+Returns `true` on success. Throws `4001` if rejected, `4100` if not connected.
+
+---
+
 ### `dusk_signMessage`
 
 Sign an arbitrary **message** for off-chain use (auth, session binding, etc).

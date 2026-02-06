@@ -22,6 +22,7 @@ import {
 import { requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { putTxMeta } from "../shared/txStore.js";
+import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
 import {
   broadcastChainChangedAll,
 } from "./dappEvents.js";
@@ -130,6 +131,7 @@ export async function handleRpc(origin, request) {
           signMessage: true,
           signAuth: true,
           contractCallPrivacy: true,
+          watchAsset: true,
         },
       });
     }
@@ -431,6 +433,113 @@ export async function handleRpc(origin, request) {
         notifyTxSubmitted({ hash, origin }).catch(() => {});
       }
       return result;
+    }
+
+    case "dusk_watchAsset": {
+      const perm = await getPermissionForOrigin(origin);
+      if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
+
+      // Normalize params: allow object or single-element array.
+      let p = params;
+      if (Array.isArray(p)) p = p[0];
+      if (!p || typeof p !== "object") {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          "params must be an object (or single-element array) with { type, options }"
+        );
+      }
+
+      const typeRaw = String(p.type ?? "").trim();
+      const type = typeRaw.toUpperCase();
+      const options = p.options;
+      if (!options || typeof options !== "object") {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.options must be an object");
+      }
+
+      // Normalize contractId early so the approval UI has a canonical value.
+      let contractId;
+      try {
+        contractId = normalizeContractId(options.contractId);
+      } catch {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          "options.contractId must be a 32-byte hex string (0x + 64 hex chars)"
+        );
+      }
+
+      // For NFTs tokenId is required.
+      let tokenId = null;
+      if (type === "DRC721") {
+        const raw = String(options.tokenId ?? "").trim();
+        if (!raw) throw rpcError(ERROR_CODES.INVALID_PARAMS, "options.tokenId is required for DRC721");
+        try {
+          const n = BigInt(raw);
+          if (n < 0n || n > 18446744073709551615n) throw new Error("range");
+          tokenId = n.toString();
+        } catch {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "options.tokenId must be a u64 decimal string");
+        }
+      }
+
+      if (type !== "DRC20" && type !== "DRC721") {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, `Unsupported asset type: ${typeRaw || "(missing)"}`);
+      }
+
+      // Ask the user to approve adding this asset (approval UI includes unlock).
+      await requestUserApproval("watch_asset", origin, {
+        type,
+        options: {
+          ...options,
+          contractId,
+          ...(tokenId ? { tokenId } : {}),
+        },
+      });
+
+      const { isUnlocked, accounts } = await getEngineStatus();
+      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+
+      await ensureEngineConfigured();
+      const arr = Array.isArray(accounts) ? accounts : [];
+      const idx = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
+
+      const settings = await getSettings();
+      const nodeUrl = settings?.nodeUrl ?? "";
+      const walletId = String(arr?.[0] ?? "").trim();
+      const account = String(arr?.[idx] ?? "").trim();
+
+      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
+      if (!account) throw rpcError(ERROR_CODES.INTERNAL, "Account unavailable");
+
+      if (type === "DRC20") {
+        // Verify on-chain metadata via the canonical driver.
+        const meta = await engineCall("dusk_getDrc20Metadata", { contractId });
+        await watchToken(walletId, nodeUrl, idx, {
+          contractId,
+          name: meta?.name ?? "",
+          symbol: meta?.symbol ?? "",
+          decimals: meta?.decimals ?? 0,
+        });
+        return true;
+      }
+
+      // type === "DRC721"
+      const meta = await engineCall("dusk_getDrc721Metadata", { contractId });
+      const owner = await engineCall("dusk_getDrc721OwnerOf", { contractId, tokenId });
+      const owned = Boolean(owner && typeof owner === "object" && owner.External === account);
+      if (!owned) {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "NFT is not owned by the connected account");
+      }
+      const tokenUri = await engineCall("dusk_getDrc721TokenUri", { contractId, tokenId });
+
+      await watchNft(walletId, nodeUrl, idx, {
+        contractId,
+        tokenId,
+        name: meta?.name ?? "",
+        symbol: meta?.symbol ?? "",
+        tokenUri: tokenUri ?? "",
+      });
+
+      return true;
     }
 
     case "dusk_signMessage": {
