@@ -90,6 +90,8 @@ const accounts = await dusk.request({ method: "dusk_requestAccounts" });
 // → ["2Z8m..."]
 ```
 
+The wallet exposes a **single** public account to each origin (array length 0 or 1). The connect prompt lets the user choose which account to expose.
+
 Returns `AccountId[]`. Throws `4001` if rejected, `4100` if wallet not set up.
 
 ---
