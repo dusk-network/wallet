@@ -31,8 +31,8 @@
 ### 1.3 Security Testing
 - [x] Unit tests for `crypto.js`
 - [x] Unit tests for `vault.js`
-- [ ] Integration tests for `shieldedStore.js`
-- [ ] Document threat model in `SECURITY.md`
+- [x] Integration tests for `shieldedStore.js`
+- [x] Document threat model in `SECURITY.md`
 
 ---
 
@@ -43,18 +43,18 @@
 Current: 93% on shared utilities, core engine untested.
 
 ### 2.1 Core Engine Tests
-- [ ] `walletEngine.js` (1700+ lines) — Mock w3sper, test tx flows
-- [ ] `shieldedStore.js` — IndexedDB operations
+- [x] `walletEngine.js` (1700+ lines) — Mock w3sper, test tx flows
+- [x] `shieldedStore.js` — IndexedDB operations
 - [x] `permissions.js` — Origin-based access control
 
 ### 2.2 Background Tests
-- [ ] `rpc.js` — dApp RPC handler
-- [ ] `pending.js` — Approval queue
-- [ ] `dappEvents.js` — Event broadcasting
+- [x] `rpc.js` — dApp RPC handler
+- [x] `pending.js` — Approval queue
+- [x] `dappEvents.js` — Event broadcasting
 
 ### 2.3 Integration Tests
-- [ ] E2E: unlock → send tx → verify
-- [ ] dApp connection flow
+- [x] E2E: unlock → send tx → verify
+- [x] dApp connection flow
 
 ---
 
