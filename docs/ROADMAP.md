@@ -145,14 +145,14 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 - [x] `provider-api.md` — Keep in lockstep with `src/background/rpc.js` + Dusk Connect SDK
 
 ### 5.2 Tooling
-- [ ] Integration test node via Docker image (`dusknode/rusk`) instead of mocking
-- [ ] Storybook for UI components
-- [ ] E2E test harness (Playwright)
+- [x] Integration test node via Docker image (`dusknode/rusk`) instead of mocking
+- [x] Storybook for UI components
+- [x] E2E test harness (Playwright)
 
 ### 5.3 CI/CD
 - [x] GitHub Actions (test, build)
 - [x] Automated releases on tags
-- [ ] Coverage badges in README
+- [x] Coverage badges in README
 
 ### 5.4 Wallet UX Quick Wins
 - [x] Multi-account: account switching UI in the main wallet UI (not only in Settings/Options)

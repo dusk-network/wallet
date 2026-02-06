@@ -3,3 +3,7 @@
 /coverage
 /apps/tauri/src-tauri/target
 /apps/tauri/src-tauri/gen
+/playwright-report
+/test-results
+/.playwright
+/storybook-static

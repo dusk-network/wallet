@@ -13,6 +13,10 @@ A non-custodial wallet for [Dusk](https://dusk.network). Browser extension, desk
     <img src="https://github.com/HDauven/dusk-wallet/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   &nbsp;
+  <a href="https://codecov.io/gh/HDauven/dusk-wallet">
+    <img src="https://codecov.io/gh/HDauven/dusk-wallet/branch/main/graph/badge.svg" alt="Coverage">
+  </a>
+  &nbsp;
   <a href="https://github.com/HDauven/dusk-wallet/stargazers">
     <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/HDauven/dusk-wallet?style=social">
   </a>
@@ -115,6 +119,16 @@ npm run build:extension   # Build extension → dist/
 npm run build:firefox     # Build Firefox extension → dist-firefox/
 npm run build:tauri       # Build Tauri bundle → dist-tauri/
 npm run dev:tauri         # Run Tauri dev server
+
+# Local Rusk node (Docker)
+npm run rusk:up
+npm run rusk:wait
+
+# UI component workbench
+npm run storybook
+
+# E2E (Playwright + Docker Rusk)
+npm run e2e:rusk
 ```
 
 ## Security
