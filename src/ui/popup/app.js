@@ -5,6 +5,7 @@ import { refreshOverview, getActiveOrigin } from "./overview.js";
 import { h, setChildren } from "../lib/dom.js";
 import { toastView } from "../components/Toast.js";
 import { createNetworkMenuController } from "../components/NetworkMenu.js";
+import { createAccountMenuController } from "../components/AccountMenu.js";
 import { createHeaderRenderer } from "./header.js";
 import { send } from "../../wallet/bus.js";
 
@@ -23,7 +24,7 @@ import {
   onboardingImportView,
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
-import { getRuntimeKind } from "../../platform/runtime.js";
+import { getRuntimeKind, isExtensionRuntime } from "../../platform/runtime.js";
 import {
   getExtensionApi,
   runtimeGetURL,
@@ -139,6 +140,42 @@ function scheduleShieldedPoll(ov) {
         // ignore
       }
     }, 1200);
+  } catch {
+    // ignore
+  }
+}
+
+// --- Pending tx polling (local runtimes) -----------------------------------
+// The extension receives push events from background/offscreen when txs execute.
+// In local runtimes we don't have a background messaging channel, so we
+// opportunistically poll overview while there are pending txs.
+let pendingTxPollTimer = null;
+function schedulePendingTxPoll(ov) {
+  try {
+    if (pendingTxPollTimer) {
+      clearTimeout(pendingTxPollTimer);
+      pendingTxPollTimer = null;
+    }
+
+    if (isExtensionRuntime()) return;
+    if (!ov?.isUnlocked) return;
+    if (state.route !== "home" && state.route !== "activity") return;
+
+    const txs = Array.isArray(ov?.txs) ? ov.txs : [];
+    const hasPending = txs.some((tx) => {
+      const s = String(tx?.status ?? "submitted").toLowerCase();
+      return s !== "executed" && s !== "failed";
+    });
+    if (!hasPending) return;
+
+    pendingTxPollTimer = setTimeout(() => {
+      try {
+        if (state.route !== "home" && state.route !== "activity") return;
+        render({ forceRefresh: true }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    }, 2500);
   } catch {
     // ignore
   }
@@ -310,15 +347,41 @@ const netMenu = createNetworkMenuController({
   },
 });
 
+// --- Account menu --------------------------------------------------------
+const acctMenu = createAccountMenuController({
+  onSelectAccountIndex: async (index) => {
+    try {
+      acctMenu.close();
+      const resp = await send({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index });
+      if (resp?.error) throw new Error(resp.error.message ?? "Failed to switch account");
+      if (!resp?.ok) throw new Error("Failed to switch account");
+
+      showToast("Account selected.");
+      state.needsRefresh = true;
+      await render({ forceRefresh: true });
+    } catch (e) {
+      showToast(e?.message ?? String(e));
+    }
+  },
+  onOpenOptions: async () => {
+    acctMenu.close();
+    netMenu.close();
+    state.route = "options";
+    await render();
+  },
+});
+
 // --- Header actions -------------------------------------------------------
 async function onRefresh() {
   netMenu.close();
+  acctMenu.close();
   state.needsRefresh = true;
   await render({ forceRefresh: true });
 }
 
 async function onOpenOptions() {
   netMenu.close();
+  acctMenu.close();
   state.route = "options";
   await render();
 }
@@ -326,6 +389,7 @@ async function onOpenOptions() {
 async function onExpand() {
   try {
     netMenu.close();
+    acctMenu.close();
     const origin = await getActiveOrigin();
     const qs = new URLSearchParams();
     if (origin) qs.set("origin", origin);
@@ -361,6 +425,7 @@ async function onExpand() {
 const renderHeader = createHeaderRenderer({
   headerActionsHost,
   netMenu,
+  acctMenu,
   onRefresh,
   onOpenOptions,
   onExpand,
@@ -377,6 +442,7 @@ export async function render({ forceRefresh = false } = {}) {
 
   // Keep shielded sync progress visible while on home/activity.
   scheduleShieldedPoll(ov);
+  schedulePendingTxPoll(ov);
 
   const actions = { send, render, showToast };
 

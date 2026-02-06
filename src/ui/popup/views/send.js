@@ -634,15 +634,94 @@ export function sendConfirmView(ov, { state, actions } = {}) {
 
   // Gas editor (collapsed by default)
   const defaultGas = getDefaultGas(TX_KIND.TRANSFER);
+  const defaultLimit =
+    defaultGas?.limit !== undefined && defaultGas?.limit !== null
+      ? String(defaultGas.limit)
+      : "";
+  const fallbackPrice =
+    defaultGas?.price !== undefined && defaultGas?.price !== null
+      ? String(defaultGas.price)
+      : "";
+
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.amountLux = d.amountLux;
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-  gasEditor.helpText = defaultGas
-    ? `Default gas: ${defaultGas.limit} limit · ${defaultGas.price} price (LUX). Max fee shown is limit × price. Clear both to use node defaults.`
-    : "Max fee shown is limit × price. Clear both to use node defaults.";
+  gasEditor.helpText =
+    "Max fee shown is limit × price. Clear both to use node defaults.";
 
-  // Prefer persisted draft gas, otherwise show defaults.
-  gasEditor.setGas(d?.gas ?? defaultGas ?? null);
+  // Prefer persisted draft gas. Otherwise we'll fetch the node's current gas
+  // price stats and set a recommended default (median).
+  gasEditor.setGas(d?.gas ?? null);
+
+  const gasHint = h("div", { class: "muted", text: "Loading gas price suggestion…" });
+  const btnAuto = h("button", {
+    class: "btn-outline",
+    type: "button",
+    text: "Auto",
+    onclick: () => gasEditor.setGas(null),
+  });
+  const btnLow = h("button", { class: "btn-outline", type: "button", text: "Low", disabled: true });
+  const btnRec = h("button", { class: "btn-outline", type: "button", text: "Recommended", disabled: true });
+  const btnHigh = h("button", { class: "btn-outline", type: "button", text: "High", disabled: true });
+
+  const gasQuickRow = h(
+    "div",
+    { style: "display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;" },
+    [btnAuto, btnLow, btnRec, btnHigh]
+  );
+
+  // Fire-and-forget: fetch suggested prices (cached for 30s).
+  (async () => {
+    try {
+      if (d?.gas) {
+        gasHint.textContent = defaultLimit && fallbackPrice
+          ? `Default gas: ${defaultLimit} limit · ${fallbackPrice} price (LUX)`
+          : "Gas is set.";
+        btnLow.disabled = true;
+        btnRec.disabled = true;
+        btnHigh.disabled = true;
+        return;
+      }
+
+      const resp = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
+      if (resp?.error) throw new Error(resp.error.message ?? "Failed to fetch gas price");
+      const stats = resp?.result ?? resp;
+
+      const min = String(stats?.min ?? "1");
+      const median = String(stats?.median ?? stats?.average ?? "1");
+      const max = String(stats?.max ?? median);
+
+      gasHint.textContent = `Gas price (LUX): min ${min} · median ${median} · max ${max}`;
+      gasEditor.helpText =
+        (defaultLimit
+          ? `Suggested gas price comes from the node mempool. Default limit: ${defaultLimit}. `
+          : "Suggested gas price comes from the node mempool. ") +
+        "Max fee shown is limit × price. Clear both to use node defaults.";
+
+      const apply = (price) => {
+        if (!defaultLimit) return;
+        gasEditor.setGas({ limit: defaultLimit, price: String(price ?? "") });
+      };
+
+      btnLow.disabled = !defaultLimit;
+      btnRec.disabled = !defaultLimit;
+      btnHigh.disabled = !defaultLimit;
+      btnLow.onclick = () => apply(min);
+      btnRec.onclick = () => apply(median);
+      btnHigh.onclick = () => apply(max);
+
+      // Default to median (recommended) for a predictable UX.
+      if (defaultLimit) {
+        gasEditor.setGas({ limit: defaultLimit, price: median });
+      }
+    } catch (e) {
+      gasHint.textContent = "Gas price unavailable (using defaults).";
+      // Fall back to static defaults so the user still sees a max fee.
+      if (defaultLimit && fallbackPrice) {
+        gasEditor.setGas({ limit: defaultLimit, price: fallbackPrice });
+      }
+    }
+  })().catch(() => {});
 
   confirmBtn.addEventListener("click", async () => {
     confirmBtn.disabled = true;
@@ -718,6 +797,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           ])
         : h("div"),
       gasEditor,
+      gasHint,
+      gasQuickRow,
       h("div", { class: "btnrow" }, [cancelBtn, confirmBtn]),
     ]),
   ].filter(Boolean);

@@ -265,6 +265,23 @@ export function homeView(ov, { state, actions } = {}) {
     const isHighlight = state?.highlightTx && String(state.highlightTx) === hash;
     const pulse = pulseClassFor(hash);
 
+    // Account label (use stored profileIndex when available).
+    let acctLabel = "";
+    try {
+      const idxRaw = Number(tx?.profileIndex);
+      const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : null;
+      if (idx !== null) {
+        const name = String(ov?.accountNames?.[String(idx)] ?? "").trim();
+        acctLabel = name || `Account ${idx + 1}`;
+      }
+    } catch {
+      acctLabel = "";
+    }
+
+    const subText = [sub || (hash ? truncateMiddle(hash, 10, 8) : ""), acctLabel]
+      .filter(Boolean)
+      .join(" · ");
+
     const left = h("div", { class: "activity-left" }, [
       h("div", { class: statusClass(st), title: st }),
       h("div", { class: "activity-ico", text: icon }),
@@ -276,7 +293,7 @@ export function homeView(ov, { state, actions } = {}) {
         tx?.submittedAt ? h("span", { class: "activity-time", text: timeAgo(tx.submittedAt) }) : null,
       ].filter(Boolean)),
       h("div", { class: "activity-sub" }, [
-        h("span", { text: sub || (hash ? truncateMiddle(hash, 10, 8) : "") }),
+        h("span", { text: subText }),
         st === "failed" && tx?.error
           ? h("span", { class: "activity-err", text: ` • ${String(tx.error).slice(0, 80)}` })
           : null,

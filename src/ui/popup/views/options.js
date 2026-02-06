@@ -4,6 +4,7 @@ import { clearPermissions } from "../../../shared/permissions.js";
 import { clearVault } from "../../../shared/vault.js";
 import { AUTO_LOCK_OPTIONS } from "../../../shared/settings.js";
 import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
+import { setAccountName } from "../../../shared/accountNames.js";
 import { platform } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
@@ -39,15 +40,22 @@ export function optionsView(ov, { state, actions } = {}) {
     ? accounts
     : Array.from({ length: accountCount }, () => "");
 
+  const nameMap = ov?.accountNames && typeof ov.accountNames === "object" ? ov.accountNames : {};
+
   const accountSelect = h(
     "select",
     { id: "account" },
     (accounts.length ? accounts : [""]).map((acct, i) =>
       h("option", {
         value: String(i),
-        text: String(acct)
-          ? `Account ${i + 1} · ${truncateMiddle(String(acct), 8, 6)}`
-          : `Account ${i + 1}`,
+        text: (() => {
+          const name = String(nameMap?.[String(i)] ?? "").trim();
+          const acctText = String(acct) ? truncateMiddle(String(acct), 8, 6) : "";
+          if (name && acctText) return `${name} · ${acctText}`;
+          if (name) return name;
+          if (acctText) return `Account ${i + 1} · ${acctText}`;
+          return `Account ${i + 1}`;
+        })(),
       })
     )
   );
@@ -85,6 +93,43 @@ export function optionsView(ov, { state, actions } = {}) {
           }
         },
       })
+    : null;
+
+  const walletId = ov?.isUnlocked && accounts.length ? String(accounts[0] ?? "").trim() : "";
+  const accountNamesEditor = ov?.isUnlocked && walletId
+    ? h("div", { class: "row" }, [
+        h("label", { text: "Account names" }),
+        ...displayAccounts.map((acct, i) => {
+          const input = h("input", {
+            placeholder: `Account ${i + 1} name (optional)`,
+            value: String(nameMap?.[String(i)] ?? ""),
+          });
+
+          input.addEventListener("change", async () => {
+            try {
+              await setAccountName(walletId, i, input.value);
+              actions?.showToast?.("Account name saved.");
+              state.needsRefresh = true;
+              await actions?.render?.({ forceRefresh: true });
+            } catch (e) {
+              actions?.showToast?.(e?.message ?? String(e), 2500);
+            }
+          });
+
+          const addr = String(acct ?? "").trim();
+          return h("div", { class: "row" }, [
+            h("div", { class: "muted", text: `Account ${i + 1}` }),
+            input,
+            addr
+              ? h("div", { class: "muted" }, [h("code", { text: addr })])
+              : null,
+          ].filter(Boolean));
+        }),
+        h("div", {
+          class: "muted",
+          text: "Optional labels stored locally (per wallet).",
+        }),
+      ])
     : null;
 
   // Auto-lock timeout selector.
@@ -260,9 +305,14 @@ export function optionsView(ov, { state, actions } = {}) {
               displayAccounts.map((acct, i) =>
                 h("option", {
                   value: String(i),
-                  text: String(acct)
-                    ? `Account ${i + 1} · ${truncateMiddle(String(acct), 6, 4)}`
-                    : `Account ${i + 1}`,
+                  text: (() => {
+                    const name = String(nameMap?.[String(i)] ?? "").trim();
+                    const acctText = String(acct) ? truncateMiddle(String(acct), 6, 4) : "";
+                    if (name && acctText) return `${name} · ${acctText}`;
+                    if (name) return name;
+                    if (acctText) return `Account ${i + 1} · ${acctText}`;
+                    return `Account ${i + 1}`;
+                  })(),
                 })
               )
             );
@@ -370,6 +420,7 @@ export function optionsView(ov, { state, actions } = {}) {
           }),
         ].filter(Boolean))
       : null,
+    accountNamesEditor,
     h("div", { class: "row" }, [
       h("label", { text: "Auto-lock" }),
       h("div", { class: "select-wrap" }, [autoLockSelect]),

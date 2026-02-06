@@ -181,9 +181,22 @@ export function txDetailsView(ov, { state, actions } = {}) {
       ? h("div", { class: "err", text: String(tx.error) })
       : null;
 
+  let accountLabel = null;
+  try {
+    const idxRaw = Number(tx?.profileIndex);
+    const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : null;
+    if (idx !== null) {
+      const name = String(ov?.accountNames?.[String(idx)] ?? "").trim();
+      accountLabel = name ? `${name} (Account ${idx + 1})` : `Account ${idx + 1}`;
+    }
+  } catch {
+    accountLabel = null;
+  }
+
   const detailsRows = [
     kvRow("Tx hash", hash, { mono: true }),
     tx?.origin ? kvRow("Origin", String(tx.origin), { mono: true }) : null,
+    accountLabel ? kvRow("Account", accountLabel) : null,
     tx?.to ? kvRow("To", String(tx.to), { mono: true }) : null,
     tx?.contractId ? kvRow("Contract", String(tx.contractId), { mono: true }) : null,
     tx?.fnName ? kvRow("Method", String(tx.fnName), { mono: true }) : null,

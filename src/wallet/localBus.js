@@ -6,23 +6,29 @@
 
 import { createVault, loadVault, unlockVault } from "../shared/vault.js";
 import { getSettings, setSettings } from "../shared/settings.js";
+import { getAccountNames } from "../shared/accountNames.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
+import { listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
 import {
   configure,
+  addAccount,
   getAccounts,
   getAddresses,
   getCachedGasPrice,
+  getSelectedAccountIndex,
   getPublicBalance,
   getShieldedBalance,
   getShieldedStatus,
   isUnlocked,
   lock,
   sendTransaction,
+  selectAccountIndex,
   setShieldedCheckpointNow,
   startShieldedSync,
   unlockWithMnemonic,
+  waitTxExecuted,
 } from "../shared/walletEngine.js";
 
 // Prevent users from accidentally triggering expensive vault / stronghold
@@ -45,6 +51,8 @@ async function ensureEngineConfigured() {
     nodeUrl: settings.nodeUrl,
     proverUrl: settings.proverUrl,
     archiverUrl: settings.archiverUrl,
+    accountCount: settings.accountCount,
+    selectedAccountIndex: settings.selectedAccountIndex,
   });
   return settings;
 }
@@ -53,6 +61,7 @@ function engineStatus() {
   return {
     isUnlocked: isUnlocked(),
     accounts: isUnlocked() ? getAccounts() : [],
+    selectedAccountIndex: isUnlocked() ? getSelectedAccountIndex() : 0,
   };
 }
 
@@ -203,6 +212,13 @@ export async function localSend(message) {
       };
     }
 
+    // UI fetches cached gas price stats for UX (recommended gas buttons).
+    if (message?.type === "DUSK_UI_GET_CACHED_GAS_PRICE") {
+      await ensureEngineConfigured();
+      const result = await getCachedGasPrice();
+      return { ok: true, result };
+    }
+
     // UI asks for overview data (network + addresses + balance)
     if (message?.type === "DUSK_UI_OVERVIEW") {
       const vault = await loadVault();
@@ -219,6 +235,23 @@ export async function localSend(message) {
       let shieldedBalance = null;
       let shieldedSync = null;
       let shieldedError = null;
+
+      // Recent activity (transaction list) scoped to the current node URL.
+      let txs = [];
+      try {
+        txs = await listTxs({ nodeUrl: settings.nodeUrl });
+      } catch {
+        txs = [];
+      }
+
+      // Account names (stored per walletId, which is profile 0 account).
+      let accountNames = {};
+      try {
+        const walletId = status?.isUnlocked ? String(status?.accounts?.[0] ?? "").trim() : "";
+        accountNames = walletId ? await getAccountNames(walletId) : {};
+      } catch {
+        accountNames = {};
+      }
 
       if (status.isUnlocked) {
         try {
@@ -262,6 +295,8 @@ export async function localSend(message) {
         hasVault: Boolean(vault),
         isUnlocked: status.isUnlocked,
         accounts: status.accounts,
+        selectedAccountIndex: status.selectedAccountIndex,
+        accountCount: settings.accountCount ?? 1,
         addresses,
         balance,
         balanceError,
@@ -274,7 +309,50 @@ export async function localSend(message) {
         networkName: networkNameFromNodeUrl(settings.nodeUrl),
         activeOrigin,
         activeConnected,
+        txs,
+        accountNames,
       };
+    }
+
+    // UI selects a different local account (profile index)
+    if (message?.type === "DUSK_UI_SET_ACCOUNT_INDEX") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+
+      const idx = Number(message.index);
+      if (!Number.isFinite(idx) || idx < 0) {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "index must be a non-negative number");
+      }
+
+      const settings = await getSettings();
+      const maxIndex = Math.max(0, Number(settings?.accountCount ?? 1) - 1);
+      const clamped = Math.min(Math.floor(idx), maxIndex);
+
+      await setSettings({ selectedAccountIndex: clamped });
+      await ensureEngineConfigured();
+      const res = await selectAccountIndex({ index: clamped });
+      return { ok: true, result: res };
+    }
+
+    // UI derives a new account (next profile)
+    if (message?.type === "DUSK_UI_ADD_ACCOUNT") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+
+      await ensureEngineConfigured();
+      const res = await addAccount();
+      const accounts = Array.isArray(res?.accounts) ? res.accounts : [];
+      const selectedAccountIndex = Number(res?.selectedAccountIndex ?? 0) || 0;
+      await setSettings({
+        accountCount: Math.max(1, accounts.length || 1),
+        selectedAccountIndex,
+      });
+
+      return { ok: true, result: res };
     }
 
     // UI initiated transaction (from the wallet popup)
@@ -295,6 +373,75 @@ export async function localSend(message) {
       }
       const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
       const result = await sendTransaction(baseParams);
+
+      // Persist metadata (see background/index.js comments).
+      const hash = result?.hash ?? "";
+      const kind = String(baseParams?.kind ?? "");
+      try {
+        const nodeUrl = (await getSettings())?.nodeUrl ?? "";
+
+        if (hash) {
+          await putTxMeta(hash, {
+            origin: "Wallet",
+            nodeUrl,
+            kind,
+            profileIndex: Number(status.selectedAccountIndex ?? 0) || 0,
+            to: baseParams?.to ? String(baseParams.to) : undefined,
+            amount:
+              baseParams?.amount !== undefined && baseParams?.amount !== null
+                ? String(baseParams.amount)
+                : undefined,
+            deposit:
+              baseParams?.deposit !== undefined && baseParams?.deposit !== null
+                ? String(baseParams.deposit)
+                : undefined,
+            contractId:
+              kind === "contract_call" && baseParams?.contractId
+                ? String(baseParams.contractId)
+                : undefined,
+            fnName:
+              kind === "contract_call" && baseParams?.fnName
+                ? String(baseParams.fnName)
+                : undefined,
+            gasLimit: baseParams?.gas?.limit != null ? String(baseParams.gas.limit) : undefined,
+            gasPrice: baseParams?.gas?.price != null ? String(baseParams.gas.price) : undefined,
+            submittedAt: Date.now(),
+            status: "submitted",
+          });
+
+          // Fire-and-forget: wait for EXECUTED and patch local activity.
+          (async () => {
+            try {
+              const executedEvent = await waitTxExecuted(hash, { timeoutMs: 180_000 });
+              const ok = !(executedEvent && typeof executedEvent === "object") ||
+                !(executedEvent.success === false || executedEvent.err || executedEvent.error || executedEvent.result?.err || executedEvent.result?.error);
+              const err =
+                executedEvent?.err ??
+                executedEvent?.error ??
+                executedEvent?.result?.err ??
+                executedEvent?.result?.error;
+              const error =
+                ok ? "" : typeof err === "string" ? err : typeof err?.message === "string" ? err.message : err ? JSON.stringify(err) : "";
+
+              await patchTxMeta(hash, {
+                status: ok ? "executed" : "failed",
+                error: ok ? undefined : (error || undefined),
+              });
+            } catch (e) {
+              await patchTxMeta(hash, {
+                status: "failed",
+                error: e?.message ?? String(e),
+              });
+            } finally {
+              // Reconcile shielded state after tx execution.
+              startShieldedSync({ force: false }).catch(() => {});
+            }
+          })().catch(() => {});
+        }
+      } catch {
+        // best-effort
+      }
+
       return {
         ok: true,
         result: {

@@ -399,6 +399,7 @@ export async function handleRpc(origin, request) {
             origin,
             nodeUrl,
             kind,
+            profileIndex: idx,
             // Helpful fields for the Activity list UI
             to: finalParams?.to ? String(finalParams.to) : undefined,
             amount:

@@ -25,6 +25,7 @@ function networkStatusClass(status) {
 export function createHeaderRenderer({
   headerActionsHost,
   netMenu,
+  acctMenu,
   onRefresh,
   onOpenOptions,
   onExpand,
@@ -81,6 +82,7 @@ export function createHeaderRenderer({
       networkPill.disabled = !walletReady;
       networkPill.classList.toggle("is-disabled", !walletReady);
       if (!walletReady && netMenu?.isOpen) netMenu.close();
+      if (!walletReady && acctMenu?.isOpen) acctMenu.close();
 
       networkPill.onclick = walletReady
         ? () => {
@@ -117,6 +119,10 @@ export function createHeaderRenderer({
     const actions = [];
 
     const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
+    const accountCountRaw = Number(ov?.accountCount ?? accounts.length ?? 1);
+    const accountCount = Number.isFinite(accountCountRaw) && accountCountRaw >= 1
+      ? Math.floor(accountCountRaw)
+      : 1;
     const idxRaw = Number(ov?.selectedAccountIndex ?? 0);
     const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
     const account = accounts[idx] ?? accounts[0];
@@ -136,6 +142,24 @@ export function createHeaderRenderer({
       }
 
       actions.push(accountChipEl(account, { onCopy: showToast, connected, host }));
+
+      const canSwitchAccounts = walletReady && accountCount > 1 && acctMenu;
+      if (canSwitchAccounts) {
+        const btn = h("button", {
+          class: "icon-btn icon-only",
+          text: "▾",
+          title: "Switch account",
+          onclick: () => {
+            try {
+              if (acctMenu?.isOpen) acctMenu.close();
+              else acctMenu?.open(btn, ov);
+            } catch {
+              // ignore
+            }
+          },
+        });
+        actions.push(btn);
+      }
     }
 
     if (expandBtn) actions.push(expandBtn);

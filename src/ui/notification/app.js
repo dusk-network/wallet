@@ -60,6 +60,7 @@ export async function renderNotification() {
     accounts,
     accountCount,
     selectedAccountIndex,
+    accountNames,
     permissionAccountIndex,
   } = pending;
   // Normalize request kind defensively. In some environments the value might
@@ -175,15 +176,24 @@ export async function renderNotification() {
       ? accountsArr
       : Array.from({ length: count }, () => "");
 
+    const nameMap = accountNames && typeof accountNames === "object" ? accountNames : {};
+
     const accountSelect = h(
       "select",
       {},
       displayAccounts.map((acct, i) =>
         h("option", {
           value: String(i),
-          text: String(acct)
-            ? `Account ${i + 1} · ${truncateMiddle(String(acct), 10, 8)}`
-            : `Account ${i + 1}`,
+          text: (() => {
+            const name = String(nameMap?.[String(i)] ?? "").trim();
+            const acctText = String(acct)
+              ? truncateMiddle(String(acct), 10, 8)
+              : "";
+            if (name && acctText) return `${name} · ${acctText}`;
+            if (name) return `${name}`;
+            if (acctText) return `Account ${i + 1} · ${acctText}`;
+            return `Account ${i + 1}`;
+          })(),
         })
       )
     );

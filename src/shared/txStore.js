@@ -5,6 +5,7 @@ import { storage, STORAGE_KEYS } from "./storage.js";
  * @property {string} origin
  * @property {string} nodeUrl
  * @property {string} kind
+ * @property {number=} profileIndex
  * @property {string=} to
  * @property {string=} amount
  * @property {string=} deposit

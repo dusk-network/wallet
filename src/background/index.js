@@ -31,6 +31,7 @@ import {
   notifyTxExecuted,
   registerTxNotificationHandlers,
 } from "./txNotify.js";
+import { getAccountNames } from "../shared/accountNames.js";
 import { getTxMeta, patchTxMeta, putTxMeta, listTxs } from "../shared/txStore.js";
 import {
   getNetworkStatus,
@@ -269,6 +270,14 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const status = await getEngineStatus();
         const perm = await getPermissionForOrigin(entry.origin);
 
+        let accountNames = {};
+        try {
+          const walletId = status?.isUnlocked ? String(status?.accounts?.[0] ?? "").trim() : "";
+          accountNames = walletId ? await getAccountNames(walletId) : {};
+        } catch {
+          accountNames = {};
+        }
+
         sendResponse({
           rid: message.rid,
           kind: entry.kind,
@@ -279,6 +288,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           accounts: status.accounts,
           accountCount: settings?.accountCount ?? 1,
           selectedAccountIndex: status.selectedAccountIndex ?? settings?.selectedAccountIndex ?? 0,
+          accountNames,
           permissionAccountIndex:
             perm && perm.accountIndex !== undefined && perm.accountIndex !== null
               ? Number(perm.accountIndex) || 0
@@ -579,6 +589,15 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           txs = [];
         }
 
+        // Account names (stored per walletId, which is profile 0 account).
+        let accountNames = {};
+        try {
+          const walletId = status?.isUnlocked ? String(status?.accounts?.[0] ?? "").trim() : "";
+          accountNames = walletId ? await getAccountNames(walletId) : {};
+        } catch {
+          accountNames = {};
+        }
+
         // Get network status and check if we need to refresh it
         let networkStatus = await getNetworkStatus();
         if (isStatusStale(networkStatus, 30000)) {
@@ -669,6 +688,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           activeOrigin,
           activeConnected,
           txs,
+          accountNames,
         });
         return;
       }
@@ -682,6 +702,14 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           archiverUrl: settings.archiverUrl,
         });
         sendResponse({ ok: true, networkStatus: status });
+        return;
+      }
+
+      // UI fetches cached gas price stats for UX (recommended gas buttons).
+      if (message?.type === "DUSK_UI_GET_CACHED_GAS_PRICE") {
+        await ensureEngineConfigured();
+        const result = await engineCall("dusk_getCachedGasPrice");
+        sendResponse({ ok: true, result });
         return;
       }
 
@@ -716,6 +744,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
               origin: "Wallet",
               nodeUrl,
               kind,
+              profileIndex:
+                status?.selectedAccountIndex !== undefined && status?.selectedAccountIndex !== null
+                  ? Number(status.selectedAccountIndex) || 0
+                  : Number(settings?.selectedAccountIndex ?? 0) || 0,
               // Helpful fields for the Activity list UI
               to: baseParams?.to ? String(baseParams.to) : undefined,
               amount:
