@@ -87,21 +87,14 @@ Current: 93% on shared utilities, core engine untested.
 
 **Priority: Medium**
 
-### 4.1 Multi-Account
-- [ ] Account switching UI
-- [ ] Per-account naming
-- [ ] Account-specific history
-
-### 4.2 Staking
+### 4.1 Staking
 - [ ] Stake/unstake flows
 - [ ] Rewards display
-- [ ] Validator selection
+- [ ] Validator selection (TBD: if this is actually meaningful in Dusk; today it is mostly "your stake keys" rather than delegation)
 
-### 4.3 Transactions
-- [ ] History with filtering
-- [ ] Cancel/speed-up pending tx
-- [ ] Better gas estimation UI
-- [ ] Batch transactions
+### 4.2 Transactions (Core UX)
+- [ ] History with filtering (quick win, see Phase 5)
+- [ ] Better gas estimation UI (quick win, see Phase 5)
 
 ---
 
@@ -162,9 +155,35 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 - [x] Automated releases on tags
 - [ ] Coverage badges in README
 
+### 5.4 Wallet UX Quick Wins
+- [ ] Multi-account: account switching UI in the main wallet UI (not only in Settings/Options)
+- [ ] Multi-account: per-account naming (persisted per `walletId`)
+- [ ] Multi-account: account-specific history views
+- [ ] Transactions: history with filtering (public + shielded where applicable)
+- [ ] Transactions: better gas estimation UI (fee floor, min limits, "what you pay" display)
+
 ---
 
-## Phase 6: Future 🟢
+## Phase 6: Large / Risky Projects 🟢
+
+**Priority: Low**
+
+### 6.1 Key Derivation Upgrade (EIP-2334)
+- [ ] Adopt EIP-2334 derivation for Moonlight (BLS) accounts (requires backward compatibility)
+- [ ] Add a migration UX (legacy → EIP) for existing wallets
+- [ ] Support dual-scheme restore/import (scan legacy + EIP and let the user choose)
+
+### 6.2 Provisioner/Staking Key Export (Extension)
+- [ ] Export node-compatible provisioner keys (`.keys` + `.cpk`) from the wallet UI
+- [ ] Requires protocol driver / `wallet-core` changes to allow deriving/exporting the BLS secret key bytes safely (JS can handle encryption + file format)
+
+### 6.3 Advanced Transactions (Protocol Dependent)
+- [ ] Cancel/speed-up pending tx (only if Dusk supports replace-by-nonce semantics)
+- [ ] Batch transactions (only if Dusk supports an atomic batch mechanism)
+
+---
+
+## Phase 7: Future 🟢
 
 **Priority: Low**
 
