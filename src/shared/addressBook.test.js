@@ -28,6 +28,7 @@ const {
   getAddressBookEntry,
   upsertAddressBookEntry,
   removeAddressBookEntry,
+  clearAddressBook,
 } = await import("./addressBook.js");
 
 describe("addressBook", () => {
@@ -178,6 +179,60 @@ describe("addressBook", () => {
 
       expect(updated.type).toBe("account");
     });
+
+    it("falls back to timestamp id when crypto.randomUUID throws", async () => {
+      const c = globalThis.crypto;
+      expect(c).toBeTruthy();
+
+      // Override crypto.randomUUID to throw to exercise the catch branch.
+      Object.defineProperty(c, "randomUUID", {
+        value: () => {
+          throw new Error("boom");
+        },
+        configurable: true,
+      });
+
+      try {
+        const result = await upsertAddressBookEntry({ name: "Alice", address: "addr123" });
+        expect(typeof result.id).toBe("string");
+        expect(result.id.length).toBeGreaterThan(0);
+      } finally {
+        // Restore prototype-provided randomUUID.
+        try {
+          delete c.randomUUID;
+        } catch {
+          // ignore
+        }
+      }
+    });
+
+    it("prunes to 200 entries by oldest updatedAt", async () => {
+      const nowSpy = vi.spyOn(Date, "now");
+      let t = 1;
+      nowSpy.mockImplementation(() => t++);
+
+      try {
+        for (let i = 0; i < 205; i++) {
+          await upsertAddressBookEntry({
+            id: String(i),
+            name: `Name ${i}`,
+            address: `addr${i}`,
+          });
+        }
+
+        const stored = __getStore()?.[STORAGE_KEYS.ADDRESS_BOOK] ?? {};
+        expect(Object.keys(stored)).toHaveLength(200);
+
+        // Oldest 5 should be gone.
+        for (let i = 0; i < 5; i++) {
+          expect(stored[String(i)]).toBeUndefined();
+        }
+        expect(stored["5"]).toBeTruthy();
+        expect(stored["204"]).toBeTruthy();
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
   });
 
   describe("removeAddressBookEntry", () => {
@@ -202,5 +257,24 @@ describe("addressBook", () => {
       await removeAddressBookEntry("");
       await removeAddressBookEntry(null);
     });
+  });
+
+  it("sorts by updatedAt when names are equal (newest first)", async () => {
+    const store = {
+      "1": { id: "1", name: "Alice", address: "addr1", updatedAt: 100 },
+      "2": { id: "2", name: "Alice", address: "addr2", updatedAt: 200 },
+    };
+    await storage.set({ [STORAGE_KEYS.ADDRESS_BOOK]: store });
+
+    const result = await listAddressBook();
+    expect(result.map((e) => e.id)).toEqual(["2", "1"]);
+  });
+
+  it("clears all address book entries", async () => {
+    await upsertAddressBookEntry({ name: "Alice", address: "addr" });
+    expect(await listAddressBook()).toHaveLength(1);
+
+    await clearAddressBook();
+    expect(await listAddressBook()).toEqual([]);
   });
 });

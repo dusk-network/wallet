@@ -133,6 +133,13 @@ describe("applyTxDefaults", () => {
     const result = applyTxDefaults(params);
     expect(result.gas).toEqual({ limit: "10000000", price: "1" });
   });
+
+  it("removes undefined gas field when no defaults exist", () => {
+    const params = { kind: "unknown_kind", to: "abc", gas: undefined };
+    const result = applyTxDefaults(params);
+    expect(result).toEqual({ kind: "unknown_kind", to: "abc" });
+    expect("gas" in result).toBe(false);
+  });
 });
 
 describe("isCompleteGas", () => {

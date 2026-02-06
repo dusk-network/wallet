@@ -73,6 +73,10 @@ describe("formatLuxToDusk", () => {
   it("handles large amounts", () => {
     expect(formatLuxToDusk("1000000000000000000")).toBe("1000000000");
   });
+
+  it("returns input string on invalid lux values", () => {
+    expect(formatLuxToDusk("not-a-number")).toBe("not-a-number");
+  });
 });
 
 describe("clampDecimals", () => {

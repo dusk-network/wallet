@@ -124,6 +124,10 @@ describe("toBytes", () => {
     expect(toBytes("base64:aGVsbG8=")).toEqual(new Uint8Array([104, 101, 108, 108, 111]));
   });
 
+  it("converts best-effort base64 without prefix", () => {
+    expect(toBytes("aGVsbG8=")).toEqual(new Uint8Array([104, 101, 108, 108, 111]));
+  });
+
   it("returns empty array for null/undefined", () => {
     expect(toBytes(null)).toEqual(new Uint8Array());
     expect(toBytes(undefined)).toEqual(new Uint8Array());

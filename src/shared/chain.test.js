@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { chainIdFromNodeUrl, chainReferenceFromChainId, fnv1a32 } from "./chain.js";
+import {
+  chainIdFromNodeUrl,
+  chainReferenceFromChainId,
+  chainIdFromReference,
+  parseCaip2,
+  fnv1a32,
+} from "./chain.js";
 
 describe("chainIdFromNodeUrl", () => {
   it("returns dusk:1 for mainnet", () => {
@@ -52,6 +58,39 @@ describe("chainReferenceFromChainId", () => {
   it("rejects hex/decimal inputs", () => {
     expect(chainReferenceFromChainId("0x1")).toBe("");
     expect(chainReferenceFromChainId("2")).toBe("");
+  });
+
+  it("rejects non-numeric dusk references", () => {
+    expect(chainReferenceFromChainId("dusk:abc")).toBe("");
+  });
+});
+
+describe("chainIdFromReference", () => {
+  it("builds dusk:<ref> by default", () => {
+    expect(chainIdFromReference("1")).toBe("dusk:1");
+  });
+
+  it("returns empty string when namespace or reference missing", () => {
+    expect(chainIdFromReference("", "dusk")).toBe("");
+    expect(chainIdFromReference("1", "")).toBe("");
+  });
+});
+
+describe("parseCaip2", () => {
+  it("parses a valid CAIP-2 id", () => {
+    expect(parseCaip2("dusk:1")).toEqual({ namespace: "dusk", reference: "1" });
+  });
+
+  it("returns null for invalid namespace", () => {
+    expect(parseCaip2("du$k:1")).toBeNull();
+    expect(parseCaip2("d:1")).toBeNull();
+    expect(parseCaip2("toolongns:1")).toBeNull();
+  });
+
+  it("returns null for invalid reference", () => {
+    expect(parseCaip2("dusk:")).toBeNull();
+    expect(parseCaip2("dusk:1.2")).toBeNull();
+    expect(parseCaip2(`dusk:${"a".repeat(33)}`)).toBeNull();
   });
 });
 

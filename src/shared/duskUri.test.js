@@ -108,6 +108,10 @@ describe("parseDuskUri", () => {
     });
   });
 
+  it("returns null for invalid chain suffix", () => {
+    expect(parseDuskUri("dusk:public-abc@dusk:abc")).toBeNull();
+  });
+
   it("parses query parameters", () => {
     const result = parseDuskUri("dusk:public-abc?amount=1.5&memo=Hello&label=Alice");
     expect(result).toMatchObject({
@@ -152,6 +156,12 @@ describe("parseDuskUri", () => {
   it("decodes URL-encoded recipient", () => {
     const result = parseDuskUri("dusk:public-abc%2Fdef");
     expect(result.to).toBe("abc/def");
+  });
+
+  it("tolerates invalid percent-encoding in recipient", () => {
+    // decodeURIComponent throws on this sequence; we keep it best-effort.
+    const result = parseDuskUri("dusk:public-%E0%A4");
+    expect(result).toMatchObject({ kind: "public", to: "%E0%A4" });
   });
 
   it("handles URI with // after scheme", () => {
