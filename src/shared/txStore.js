@@ -13,6 +13,7 @@ import { storage, STORAGE_KEYS } from "./storage.js";
  * @property {string=} fnName
  * @property {string=} gasLimit
  * @property {string=} gasPrice
+ * @property {any=} asset Optional UI hint for Activity labeling (e.g. DRC20/DRC721 summary).
  * @property {number} submittedAt
  * @property {"submitted"|"executed"|"failed"} status
  * @property {string=} error
