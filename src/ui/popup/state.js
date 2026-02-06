@@ -9,7 +9,9 @@ export const ONBOARD_ROUTES = new Set([
 ]);
 
 export const state = {
-  // home | send | confirm | convert | convert_confirm | stake | stake_confirm | receive | activity | tx | options | contacts | onboarding_*...
+  // home | send | confirm | convert | convert_confirm | stake | stake_confirm
+  // | asset_add_token | asset_add_nft | asset_token | asset_token_confirm | asset_nft
+  // | receive | activity | tx | options | contacts | onboarding_*...
   route: (() => {
     if (isOptionsPage) return "options";
     try {
@@ -22,6 +24,11 @@ export const state = {
         "convert_confirm",
         "stake",
         "stake_confirm",
+        "asset_add_token",
+        "asset_add_nft",
+        "asset_token",
+        "asset_token_confirm",
+        "asset_nft",
         "receive",
         "activity",
         "tx",
@@ -53,6 +60,13 @@ export const state = {
   txDetailFrom: null,
   overview: null,
   draft: null,
+  // Watched assets cache (tokens + NFTs)
+  assets: null,
+  // Selected asset for detail views
+  assetTokenContractId: null,
+  assetNft: null, // { contractId, tokenId } or null
+  // Draft contract call for token actions
+  assetTxDraft: null,
   toast: null,
   // { hash: string, kind: "ok"|"bad", at: number }
   txPulse: null,

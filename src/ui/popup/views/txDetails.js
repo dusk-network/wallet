@@ -246,6 +246,55 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   const detailsCard = detailsRows.length ? h("div", { class: "box tx-kv-card" }, detailsRows) : null;
 
+  const kindNorm = String(tx?.kind ?? "").toLowerCase();
+  const contractId = tx?.contractId ? String(tx.contractId) : "";
+  const watchActions =
+    kindNorm === TX_KIND.CONTRACT_CALL && contractId
+      ? h("div", { class: "box" }, [
+          h("div", { class: "muted", text: "Assets" }),
+          h("div", { class: "muted", text: "Add this contract to your watched assets list." }),
+          h("div", { class: "btnrow" }, [
+            h("button", {
+              class: "btn-outline",
+              text: "Watch token",
+              onclick: async () => {
+                try {
+                  state.assetAddToken = {
+                    contractId,
+                    loading: false,
+                    error: null,
+                    meta: null,
+                  };
+                  state.route = "asset_add_token";
+                  await actions?.render?.();
+                } catch {
+                  // ignore
+                }
+              },
+            }),
+            h("button", {
+              class: "btn-outline",
+              text: "Import NFT",
+              onclick: async () => {
+                try {
+                  state.assetAddNft = {
+                    contractId,
+                    tokenId: "",
+                    loading: false,
+                    error: null,
+                    info: null,
+                  };
+                  state.route = "asset_add_nft";
+                  await actions?.render?.();
+                } catch {
+                  // ignore
+                }
+              },
+            }),
+          ]),
+        ])
+      : null;
+
   return [
     subnav({ title: "Transaction", onBack, backText: "← Activity" }),
     h("div", { class: "row" }, [
@@ -257,6 +306,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
         subtitle ? h("div", { class: "muted", text: subtitle }) : null,
       ].filter(Boolean)),
       detailsCard,
+      watchActions,
       btnRow,
     ].filter(Boolean)),
   ].filter(Boolean);

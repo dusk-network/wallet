@@ -15,6 +15,8 @@ export function optionsView(ov, { state, actions } = {}) {
   const currentProverUrl = String(ov?.proverUrl ?? "").trim();
   const currentArchiverUrl = String(ov?.archiverUrl ?? "").trim();
   const currentAutoLock = Number(ov?.autoLockTimeoutMinutes ?? 5);
+  const currentNftMetaEnabled = ov?.nftMetadataEnabled !== false;
+  const currentIpfsGateway = String(ov?.ipfsGateway ?? "https://ipfs.io/ipfs/").trim();
 
   const lockBtn = ov?.isUnlocked
     ? h("button", {
@@ -400,6 +402,40 @@ export function optionsView(ov, { state, actions } = {}) {
     },
   });
 
+  const nftMetaToggle = h("input", { type: "checkbox" });
+  nftMetaToggle.checked = currentNftMetaEnabled;
+
+  const ipfsGatewayInput = h("input", {
+    value: currentIpfsGateway,
+    placeholder: "https://ipfs.io/ipfs/",
+  });
+
+  const saveNftBtn = h("button", {
+    class: "btn-outline",
+    text: "Save NFT settings",
+    onclick: async () => {
+      const prevText = saveNftBtn.textContent;
+      try {
+        saveNftBtn.disabled = true;
+        saveNftBtn.textContent = "Saving...";
+        const resp = await actions?.send?.({
+          type: "DUSK_UI_SET_NFT_SETTINGS",
+          nftMetadataEnabled: Boolean(nftMetaToggle.checked),
+          ipfsGateway: ipfsGatewayInput.value,
+        });
+        if (resp?.error) throw new Error(resp.error.message ?? "Failed to save NFT settings");
+        actions?.showToast?.("NFT settings saved.");
+        state.needsRefresh = true;
+        await actions?.render?.({ forceRefresh: true });
+      } catch (e) {
+        actions?.showToast?.(e?.message ?? String(e), 2500);
+      } finally {
+        saveNftBtn.disabled = false;
+        saveNftBtn.textContent = prevText;
+      }
+    },
+  });
+
   return [
     subnav({
       title: "Settings",
@@ -466,6 +502,22 @@ export function optionsView(ov, { state, actions } = {}) {
       ]),
     ]),
     h("div", { class: "row" }, [h("div", { class: "btnrow" }, [saveBtn])]),
+    h("div", { class: "divider" }),
+    h("div", { class: "row" }, [
+      h("label", { text: "NFT privacy" }),
+      h("div", { class: "muted", text: "Fetching NFT metadata/images can leak usage patterns to third-party servers." }),
+      h("label", { text: "Fetch NFT metadata/images" }),
+      h("div", { class: "box" }, [
+        h("div", { class: "hrow" }, [
+          h("div", { class: "muted", text: nftMetaToggle.checked ? "Enabled" : "Disabled" }),
+          nftMetaToggle,
+        ]),
+      ]),
+      h("label", { text: "IPFS gateway" }),
+      ipfsGatewayInput,
+      h("div", { class: "muted", text: "Used to resolve ipfs:// URIs (default: https://ipfs.io/ipfs/)." }),
+      h("div", { class: "btnrow" }, [saveNftBtn]),
+    ]),
     h("div", { class: "row" }, [
       h("div", { class: "muted", text: "Manage saved recipients for quick sending." }),
       h("div", { class: "btnrow" }, [addressBookBtn]),

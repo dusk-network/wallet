@@ -10,6 +10,7 @@ import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { openUrl, platform } from "../../../platform/index.js";
+import { assetsSectionsView } from "./assets.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -24,6 +25,28 @@ function timeAgo(ts) {
   if (hhr < 24) return `${hhr}h`;
   const d = Math.floor(hhr / 24);
   return `${d}d`;
+}
+
+function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
+  const u = safeBigInt(units, 0n);
+  let d = Number(decimals ?? 0);
+  if (!Number.isFinite(d) || d < 0) d = 0;
+  d = Math.min(64, Math.floor(d));
+
+  const s = u.toString();
+  if (d === 0) return s;
+
+  const pad = s.length <= d ? "0".repeat(d - s.length + 1) + s : s;
+  const intPart = pad.slice(0, -d) || "0";
+  let frac = pad.slice(-d);
+
+  // Trim trailing zeros, then clamp.
+  frac = frac.replace(/0+$/, "");
+  if (typeof maxFrac === "number" && maxFrac >= 0 && frac.length > maxFrac) {
+    frac = frac.slice(0, maxFrac).replace(/0+$/, "");
+  }
+
+  return frac ? `${intPart}.${frac}` : intPart;
 }
 
 export function homeView(ov, { state, actions } = {}) {
@@ -236,6 +259,47 @@ export function homeView(ov, { state, actions } = {}) {
       };
     }
     if (kind === TX_KIND.CONTRACT_CALL) {
+      const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
+      if (asset && String(asset?.type ?? "") === "DRC20") {
+        const sym = String(asset?.symbol ?? "").trim() || "Token";
+        const op = String(asset?.op ?? "").toLowerCase();
+
+        if (op === "transfer") {
+          const amt = formatTokenUnits(asset?.valueUnits ?? asset?.value ?? "0", asset?.decimals ?? 0, { maxFrac: 6 });
+          const to = asset?.to ? truncateMiddle(String(asset.to), 10, 8) : "";
+          return {
+            title: amt ? `Send ${amt} ${sym}` : `Send ${sym}`,
+            sub: to ? `to ${to}` : "",
+            icon: "↗",
+          };
+        }
+
+        if (op === "approve") {
+          const isMax = Boolean(asset?.isMax);
+          const amt = isMax
+            ? "MAX"
+            : formatTokenUnits(asset?.valueUnits ?? asset?.value ?? "0", asset?.decimals ?? 0, { maxFrac: 6 });
+          const spender = asset?.spender ? truncateMiddle(String(asset.spender), 10, 8) : "";
+          const sub = [spender ? `spender ${spender}` : "", amt ? `amount ${amt}` : ""].filter(Boolean).join(" · ");
+          return {
+            title: `Approve ${sym}`,
+            sub,
+            icon: "✓",
+          };
+        }
+
+        return { title: `Call ${sym}`, sub: String(tx?.fnName ?? ""), icon: "⬡" };
+      }
+
+      if (asset && String(asset?.type ?? "") === "DRC721") {
+        const sym = String(asset?.symbol ?? "").trim() || "NFT";
+        const tokenId = asset?.tokenId != null ? String(asset.tokenId) : "";
+        const op = String(asset?.op ?? "").toLowerCase();
+        const title = tokenId ? `${sym} #${tokenId}` : sym;
+        const sub = op ? op : String(tx?.fnName ?? "");
+        return { title, sub, icon: "⬢" };
+      }
+
       const fn = tx?.fnName ? String(tx.fnName) : "contract call";
       const dep = safeBigInt(tx?.deposit, 0n);
       const depS = dep > 0n ? formatLuxShort(dep, UI_DISPLAY_DECIMALS) : "";
@@ -487,6 +551,6 @@ export function homeView(ov, { state, actions } = {}) {
     hero,
     actionBar,
     tabs,
-    ...(activeTab === "activity" ? [activityFull] : [assetsCard]),
+    ...(activeTab === "activity" ? [activityFull] : [assetsCard, ...assetsSectionsView(ov, { state, actions })]),
   ].filter(Boolean);
 }

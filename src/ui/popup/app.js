@@ -14,6 +14,13 @@ import { receiveView } from "./views/receive.js";
 import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
+import {
+  assetAddTokenView,
+  assetAddNftView,
+  assetTokenView,
+  assetTokenConfirmView,
+  assetNftView,
+} from "./views/assets.js";
 import { optionsView } from "./views/options.js";
 import { addressBookView } from "./views/addressbook.js";
 import { txDetailsView } from "./views/txDetails.js";
@@ -534,6 +541,26 @@ export async function render({ forceRefresh = false } = {}) {
   }
   if (state.route === "stake_confirm") {
     setApp(stakeConfirmView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "asset_add_token") {
+    setApp(assetAddTokenView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "asset_add_nft") {
+    setApp(assetAddNftView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "asset_token") {
+    setApp(assetTokenView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "asset_token_confirm") {
+    setApp(assetTokenConfirmView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "asset_nft") {
+    setApp(assetNftView(ov, { state, actions }));
     return;
   }
   if (state.route === "receive") {
