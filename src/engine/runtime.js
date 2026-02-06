@@ -8,7 +8,9 @@ import {
   getSelectedAccountIndex,
   getPublicBalance,
   encodeDrc20Input,
+  decodeDrc20Input,
   encodeDrc721Input,
+  decodeDrc721Input,
   getDrc20Metadata,
   getDrc20Balance,
   getDrc721Metadata,
@@ -257,8 +259,20 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
           return;
         }
 
+        case "dusk_decodeDrc20Input": {
+          const out = await decodeDrc20Input(params ?? {});
+          sendResponse({ id, result: out });
+          return;
+        }
+
         case "dusk_encodeDrc721Input": {
           const out = await encodeDrc721Input(params ?? {});
+          sendResponse({ id, result: out });
+          return;
+        }
+
+        case "dusk_decodeDrc721Input": {
+          const out = await decodeDrc721Input(params ?? {});
           sendResponse({ id, result: out });
           return;
         }

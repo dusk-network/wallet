@@ -1123,6 +1123,20 @@ export async function encodeDrc20Input(params = {}) {
 }
 
 /**
+ * Decode DRC20 contract input args using the canonical DRC20 data-driver.
+ *
+ * @param {{ fnName: string, fnArgs: any }} params
+ * @returns {Promise<any>}
+ */
+export async function decodeDrc20Input(params = {}) {
+  const fnName = String(params?.fnName ?? "").trim();
+  if (!fnName) throw new Error("fnName is required");
+  const bytes = toBytes(params?.fnArgs);
+  const driver = await getDriver(DRIVER_KEYS.DRC20);
+  return driver.decodeInputFn(fnName, bytes);
+}
+
+/**
  * Encode a DRC721 contract input using the canonical DRC721 data-driver.
  *
  * @param {{ fnName: string, args?: any }} params
@@ -1134,6 +1148,20 @@ export async function encodeDrc721Input(params = {}) {
   const driver = await getDriver(DRIVER_KEYS.DRC721);
   const json = params?.args === undefined || params?.args === null ? "null" : jsonWithBigInts(params.args);
   return driver.encodeInputFn(fnName, json);
+}
+
+/**
+ * Decode DRC721 contract input args using the canonical DRC721 data-driver.
+ *
+ * @param {{ fnName: string, fnArgs: any }} params
+ * @returns {Promise<any>}
+ */
+export async function decodeDrc721Input(params = {}) {
+  const fnName = String(params?.fnName ?? "").trim();
+  if (!fnName) throw new Error("fnName is required");
+  const bytes = toBytes(params?.fnArgs);
+  const driver = await getDriver(DRIVER_KEYS.DRC721);
+  return driver.decodeInputFn(fnName, bytes);
 }
 
 /**

@@ -27,7 +27,9 @@ import {
   getSelectedAccountIndex,
   getPublicBalance,
   encodeDrc20Input,
+  decodeDrc20Input,
   encodeDrc721Input,
+  decodeDrc721Input,
   getDrc20Metadata,
   getDrc20Balance,
   getDrc721Metadata,
@@ -484,6 +486,16 @@ export async function localSend(message) {
       return { ok: true, result };
     }
 
+    if (message?.type === "DUSK_UI_DRC20_DECODE_INPUT") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const result = await decodeDrc20Input({ fnName: message?.fnName, fnArgs: message?.fnArgs });
+      return { ok: true, result };
+    }
+
     if (message?.type === "DUSK_UI_DRC721_GET_METADATA") {
       const status = engineStatus();
       if (!status.isUnlocked) {
@@ -512,6 +524,16 @@ export async function localSend(message) {
       await ensureEngineConfigured();
       const result = await getDrc721TokenUri({ contractId: message?.contractId, tokenId: message?.tokenId });
       return { ok: true, result: String(result ?? "") };
+    }
+
+    if (message?.type === "DUSK_UI_DRC721_DECODE_INPUT") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const result = await decodeDrc721Input({ fnName: message?.fnName, fnArgs: message?.fnArgs });
+      return { ok: true, result };
     }
 
     // UI selects a different local account (profile index)

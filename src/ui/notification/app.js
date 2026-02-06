@@ -11,6 +11,7 @@ import {
 } from "../../platform/extensionApi.js";
 
 const app = document.getElementById("app");
+const MAX_U64 = 18446744073709551615n;
 
 function setApp(children) {
   app.innerHTML = "";
@@ -36,6 +37,56 @@ function prettyAmount(v) {
   } catch {
     return String(v);
   }
+}
+
+function accountEnumToString(a) {
+  if (!a) return "";
+  if (typeof a === "string") return a;
+  if (typeof a === "object") {
+    if (typeof a.External === "string") return a.External;
+    if (typeof a.Contract === "string") return a.Contract;
+  }
+  try {
+    return JSON.stringify(a);
+  } catch {
+    return String(a);
+  }
+}
+
+function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
+  const u = safeBigInt(units, 0n);
+  let d = Number(decimals ?? 0);
+  if (!Number.isFinite(d) || d < 0) d = 0;
+  d = Math.min(64, Math.floor(d));
+
+  const s = u.toString();
+  if (d === 0) return s;
+
+  const pad = s.length <= d ? "0".repeat(d - s.length + 1) + s : s;
+  const intPart = pad.slice(0, -d) || "0";
+  let frac = pad.slice(-d);
+
+  frac = frac.replace(/0+$/, "");
+  if (typeof maxFrac === "number" && maxFrac >= 0 && frac.length > maxFrac) {
+    frac = frac.slice(0, maxFrac).replace(/0+$/, "");
+  }
+
+  return frac ? `${intPart}.${frac}` : intPart;
+}
+
+async function sendResult(message) {
+  const res = await send(message);
+  if (!res) throw new Error("No response");
+  const err = res?.error;
+  if (err) {
+    if (typeof err === "string") throw new Error(err);
+    throw new Error(err?.message ?? "Request failed");
+  }
+  if (res?.ok === false) {
+    if (typeof res?.error === "string") throw new Error(res.error);
+    throw new Error(res?.error?.message ?? "Request failed");
+  }
+  return Object.prototype.hasOwnProperty.call(res, "result") ? res.result : res;
 }
 
 export async function renderNotification() {
@@ -164,6 +215,41 @@ export async function renderNotification() {
         },
       }),
     ]);
+
+  function decisionButtonsWithState({ approveText, approveDisabled, approveTitle, getApprovedParams } = {}) {
+    const rejectBtn = h("button", {
+      class: "btn-outline",
+      text: "Reject",
+      onclick: async () => {
+        await send({ type: "DUSK_PENDING_DECISION", rid, decision: "reject" });
+        window.close();
+      },
+    });
+
+    const approveBtn = h("button", {
+      class: "btn-primary",
+      text: approveText || "Approve",
+      disabled: Boolean(approveDisabled),
+      title: approveTitle || "",
+      onclick: async () => {
+        try {
+          const approvedParams =
+            typeof getApprovedParams === "function" ? getApprovedParams() : null;
+          await send({
+            type: "DUSK_PENDING_DECISION",
+            rid,
+            decision: "approve",
+            approvedParams,
+          });
+          window.close();
+        } catch (e) {
+          alert(e?.message ?? String(e));
+        }
+      },
+    });
+
+    return { row: h("div", { class: "btnrow" }, [rejectBtn, approveBtn]), approveBtn, rejectBtn };
+  }
 
   if (!isUnlocked) {
     setApp([header, lockBox()]);
@@ -326,6 +412,112 @@ export async function renderNotification() {
     return;
   }
 
+  if (kindNorm === "watch_asset") {
+    const typeRaw = String(params?.type ?? "").trim();
+    const type = typeRaw.toUpperCase();
+    const options = params?.options && typeof params.options === "object" ? params.options : {};
+
+    const contractId = String(options?.contractId ?? "");
+    const tokenId = options?.tokenId != null ? String(options.tokenId) : "";
+
+    let meta = null;
+    let owner = null;
+    let tokenUri = "";
+    let ownedKnown = false;
+    let owned = true;
+
+    if (type === "DRC20") {
+      try {
+        meta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId });
+      } catch {
+        meta = null;
+      }
+    } else if (type === "DRC721") {
+      try {
+        meta = await sendResult({ type: "DUSK_UI_DRC721_GET_METADATA", contractId });
+      } catch {
+        meta = null;
+      }
+      if (tokenId) {
+        try {
+          owner = await sendResult({ type: "DUSK_UI_DRC721_OWNER_OF", contractId, tokenId });
+          const ownerStr = accountEnumToString(owner);
+          ownedKnown = Boolean(ownerStr);
+          owned = ownerStr === String(activeAccount ?? "");
+        } catch {
+          ownedKnown = false;
+          owned = true;
+        }
+        try {
+          tokenUri = String(
+            await sendResult({ type: "DUSK_UI_DRC721_TOKEN_URI", contractId, tokenId })
+          );
+        } catch {
+          tokenUri = "";
+        }
+      }
+    }
+
+    const add = decisionButtonsWithState({
+      approveText: type === "DRC721" ? "Import NFT" : "Add token",
+      approveDisabled: type === "DRC721" && ownedKnown && !owned,
+    });
+
+    setApp([
+      header,
+      h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve watch asset" })]),
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Account" }),
+        h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+      ]),
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Type" }),
+        h("div", { class: "box" }, [h("code", { text: type || "(missing)" })]),
+      ]),
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: "Contract" }),
+        h("div", { class: "box" }, [h("code", { text: contractId || "(missing)" })]),
+      ]),
+      type === "DRC721"
+        ? h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Token ID" }),
+            h("div", { class: "box" }, [h("code", { text: tokenId || "(missing)" })]),
+          ])
+        : h("div"),
+      meta
+        ? h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Metadata (on-chain)" }),
+            h("div", { class: "box" }, [
+              h("code", {
+                text: JSON.stringify(meta, null, 2),
+              }),
+            ]),
+          ])
+        : h("div"),
+      type === "DRC721" && tokenUri
+        ? h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Token URI (raw)" }),
+            h("div", { class: "box" }, [h("code", { text: tokenUri })]),
+          ])
+        : h("div"),
+      type === "DRC721" && ownedKnown && !owned
+        ? h("div", { class: "callout warn" }, [
+            h("div", { class: "callout-title", text: "Not owned" }),
+            h("div", {
+              class: "muted",
+              text: "This NFT is not owned by the connected account, so it cannot be imported.",
+            }),
+          ])
+        : h("div"),
+      h("div", {
+        class: "muted",
+        text: "The wallet will verify the standard interface and on-chain metadata before persisting the asset.",
+      }),
+      add.row,
+    ]);
+    return;
+  }
+
   if (kindNorm === "send_tx") {
     const txKind = String(params?.kind ?? "").toLowerCase();
 
@@ -406,19 +598,333 @@ export async function renderNotification() {
       }
 
       const fnName = String(params?.fnName ?? "");
+      const fnNameTrim = fnName.trim();
+      const fnNameLower = fnNameTrim.toLowerCase();
 
       let argsBytes = new Uint8Array();
       let argsLen = 0;
       let argsHash = "";
+      let argsOk = false;
       try {
         argsBytes = toBytes(params?.fnArgs);
         argsLen = argsBytes.length;
         argsHash = await sha256Hex(argsBytes);
+        argsOk = true;
       } catch {
         // ignore; show raw below
       }
 
       const display = params?.display;
+
+      const wantsDrc20 =
+        argsOk && ["transfer", "approve", "transfer_from"].includes(fnNameLower);
+      const wantsDrc721 =
+        argsOk && ["approve", "set_approval_for_all", "transfer_from"].includes(fnNameLower);
+
+      let drcKind = "";
+      let decoded = null;
+
+      if (wantsDrc20) {
+        try {
+          decoded = await sendResult({
+            type: "DUSK_UI_DRC20_DECODE_INPUT",
+            fnName: fnNameTrim,
+            fnArgs: argsBytes,
+          });
+          drcKind = "DRC20";
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!drcKind && wantsDrc721) {
+        try {
+          decoded = await sendResult({
+            type: "DUSK_UI_DRC721_DECODE_INPUT",
+            fnName: fnNameTrim,
+            fnArgs: argsBytes,
+          });
+          drcKind = "DRC721";
+        } catch {
+          // ignore
+        }
+      }
+
+      let drcMeta = null;
+      if (drcKind === "DRC20") {
+        try {
+          drcMeta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId: contractIdHex });
+        } catch {
+          drcMeta = null;
+        }
+      }
+      if (drcKind === "DRC721") {
+        try {
+          drcMeta = await sendResult({ type: "DUSK_UI_DRC721_GET_METADATA", contractId: contractIdHex });
+        } catch {
+          drcMeta = null;
+        }
+      }
+
+      // Specialized approval UI for canonical token standards.
+      if (drcKind === "DRC20" && decoded && typeof decoded === "object") {
+        const sym = String(drcMeta?.symbol ?? "").trim() || "TOKEN";
+        const name = String(drcMeta?.name ?? "").trim() || "DRC20 token";
+        const dec = Number(drcMeta?.decimals ?? 0) || 0;
+
+        const toStr = accountEnumToString(decoded?.to);
+        const spenderStr = accountEnumToString(decoded?.spender);
+        const ownerStr = accountEnumToString(decoded?.owner);
+        const valueUnitsStr = decoded?.value != null ? String(decoded.value) : "";
+        const valueHuman = valueUnitsStr ? formatTokenUnits(valueUnitsStr, dec, { maxFrac: UI_DISPLAY_DECIMALS }) : "—";
+
+        const isApprove = fnNameLower === "approve";
+        const isTransfer = fnNameLower === "transfer";
+        const isTransferFrom = fnNameLower === "transfer_from";
+
+        const isMax =
+          isApprove && safeBigInt(valueUnitsStr, -1n) === MAX_U64;
+
+        const ackInput = h("input", {
+          placeholder: "Type MAX to confirm",
+          oninput: () => {
+            const ok = String(ackInput.value ?? "")
+              .trim()
+              .toUpperCase() === "MAX";
+            add.approveBtn.disabled = !(ok && isUnlocked);
+          },
+        });
+
+        const add = decisionButtonsWithState({
+          approveText: isTransfer ? "Approve transfer" : isApprove ? "Approve spending" : "Approve",
+          approveDisabled: Boolean(isMax),
+          approveTitle: isMax ? "Type MAX to enable approval" : "",
+          getApprovedParams: () => gasEditor.readOverrideGas(gas),
+        });
+
+        setApp([
+          header,
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Approve DRC20 contract call" }),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "From" }),
+            h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Token" }),
+            h("div", { class: "box" }, [
+              h("div", { text: `${name} (${sym})` }),
+              h("div", { class: "muted" }, [h("code", { text: contractIdHex })]),
+            ]),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Privacy" }),
+            h("div", { class: "box" }, [
+              h("code", { text: privacy === "shielded" ? "Shielded" : "Public" }),
+            ]),
+          ]),
+          isTransfer || isTransferFrom
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "To" }),
+                h("div", { class: "box" }, [h("code", { text: toStr || "(missing)" })]),
+              ])
+            : h("div"),
+          isApprove
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "Spender" }),
+                h("div", { class: "box" }, [h("code", { text: spenderStr || "(missing)" })]),
+              ])
+            : h("div"),
+          isTransferFrom
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "Owner" }),
+                h("div", { class: "box" }, [h("code", { text: ownerStr || "(missing)" })]),
+              ])
+            : h("div"),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Amount" }),
+            h("div", { class: "box" }, [
+              h("code", {
+                text: valueUnitsStr ? `${valueHuman} ${sym}` : "—",
+                title: valueUnitsStr ? `Units: ${valueUnitsStr}` : "",
+              }),
+            ]),
+          ]),
+          isMax
+            ? h("div", { class: "callout warn" }, [
+                h("div", { class: "callout-title", text: "Unlimited allowance (MAX)" }),
+                h("div", {
+                  class: "muted",
+                  text:
+                    "This approval grants unlimited spending permission (u64::MAX). Only continue if you trust the spender.",
+                }),
+                ackInput,
+              ])
+            : h("div"),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Args hash" }),
+            h("div", { class: "box" }, [
+              h("code", {
+                text: argsHash
+                  ? `${argsLen} bytes · sha256=${argsHash.slice(0, 12)}…${argsHash.slice(-8)}`
+                  : "—",
+              }),
+            ]),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Amount (DUSK)" }),
+            h("div", { class: "box" }, [
+              h("code", { text: `${amountDuskStr} DUSK`, title: `Lux: ${amountLuxStr}` }),
+            ]),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Deposit (DUSK)" }),
+            h("div", { class: "box" }, [
+              h("code", { text: `${depositDuskStr} DUSK`, title: `Lux: ${depositLuxStr}` }),
+            ]),
+          ]),
+          gasEditor,
+          display
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "Site-provided details (unverified)" }),
+                h("div", { class: "box" }, [h("code", { text: JSON.stringify(display, null, 2) })]),
+              ])
+            : h("div"),
+          add.row,
+        ]);
+        return;
+      }
+
+      if (drcKind === "DRC721" && decoded && typeof decoded === "object") {
+        const sym = String(drcMeta?.symbol ?? "").trim() || "NFT";
+        const name = String(drcMeta?.name ?? "").trim() || "DRC721";
+
+        const approvedStr = accountEnumToString(decoded?.approved);
+        const operatorStr = accountEnumToString(decoded?.operator);
+        const fromStr = accountEnumToString(decoded?.from);
+        const toStr = accountEnumToString(decoded?.to);
+
+        const tokenIdStr =
+          decoded?.token_id != null
+            ? String(decoded.token_id)
+            : decoded?.tokenId != null
+              ? String(decoded.tokenId)
+              : "";
+
+        const isApprove = fnNameLower === "approve";
+        const isSetApprovalForAll = fnNameLower === "set_approval_for_all";
+        const isTransferFrom = fnNameLower === "transfer_from";
+
+        const approvedBool = Boolean(decoded?.approved);
+
+        const add = decisionButtonsWithState({
+          approveText: isTransferFrom ? "Approve transfer" : isApprove ? "Approve" : "Approve",
+          getApprovedParams: () => gasEditor.readOverrideGas(gas),
+        });
+
+        setApp([
+          header,
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Approve DRC721 contract call" }),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "From" }),
+            h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Contract" }),
+            h("div", { class: "box" }, [
+              h("div", { text: `${name} (${sym})` }),
+              h("div", { class: "muted" }, [h("code", { text: contractIdHex })]),
+            ]),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Privacy" }),
+            h("div", { class: "box" }, [
+              h("code", { text: privacy === "shielded" ? "Shielded" : "Public" }),
+            ]),
+          ]),
+          tokenIdStr
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "Token ID" }),
+                h("div", { class: "box" }, [h("code", { text: tokenIdStr })]),
+              ])
+            : h("div"),
+          isApprove
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "Approved" }),
+                h("div", { class: "box" }, [h("code", { text: approvedStr || "(missing)" })]),
+              ])
+            : h("div"),
+          isSetApprovalForAll
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "Operator" }),
+                h("div", { class: "box" }, [h("code", { text: operatorStr || "(missing)" })]),
+              ])
+            : h("div"),
+          isSetApprovalForAll
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "Approved for all" }),
+                h("div", { class: "box" }, [
+                  h("code", { text: approvedBool ? "true" : "false" }),
+                ]),
+              ])
+            : h("div"),
+          isTransferFrom
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "From (owner)" }),
+                h("div", { class: "box" }, [h("code", { text: fromStr || "(missing)" })]),
+              ])
+            : h("div"),
+          isTransferFrom
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "To" }),
+                h("div", { class: "box" }, [h("code", { text: toStr || "(missing)" })]),
+              ])
+            : h("div"),
+          isSetApprovalForAll && approvedBool
+            ? h("div", { class: "callout warn" }, [
+                h("div", { class: "callout-title", text: "High risk" }),
+                h("div", {
+                  class: "muted",
+                  text: "This grants an operator permission to transfer all of your NFTs in this collection.",
+                }),
+              ])
+            : h("div"),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Args hash" }),
+            h("div", { class: "box" }, [
+              h("code", {
+                text: argsHash
+                  ? `${argsLen} bytes · sha256=${argsHash.slice(0, 12)}…${argsHash.slice(-8)}`
+                  : "—",
+              }),
+            ]),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Amount (DUSK)" }),
+            h("div", { class: "box" }, [
+              h("code", { text: `${amountDuskStr} DUSK`, title: `Lux: ${amountLuxStr}` }),
+            ]),
+          ]),
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Deposit (DUSK)" }),
+            h("div", { class: "box" }, [
+              h("code", { text: `${depositDuskStr} DUSK`, title: `Lux: ${depositLuxStr}` }),
+            ]),
+          ]),
+          gasEditor,
+          display
+            ? h("div", { class: "row" }, [
+                h("div", { class: "muted", text: "Site-provided details (unverified)" }),
+                h("div", { class: "box" }, [h("code", { text: JSON.stringify(display, null, 2) })]),
+              ])
+            : h("div"),
+          add.row,
+        ]);
+        return;
+      }
 
       setApp([
         header,

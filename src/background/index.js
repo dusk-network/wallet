@@ -903,6 +903,20 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      if (message?.type === "DUSK_UI_DRC20_DECODE_INPUT") {
+        const status = await getEngineStatus();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+        await ensureEngineConfigured();
+        const result = await engineCall("dusk_decodeDrc20Input", {
+          fnName: message?.fnName,
+          fnArgs: message?.fnArgs,
+        });
+        sendResponse({ ok: true, result });
+        return;
+      }
+
       if (message?.type === "DUSK_UI_DRC721_GET_METADATA") {
         const status = await getEngineStatus();
         if (!status.isUnlocked) {
@@ -939,6 +953,20 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           tokenId: message?.tokenId,
         });
         sendResponse({ ok: true, result: String(result ?? "") });
+        return;
+      }
+
+      if (message?.type === "DUSK_UI_DRC721_DECODE_INPUT") {
+        const status = await getEngineStatus();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+        await ensureEngineConfigured();
+        const result = await engineCall("dusk_decodeDrc721Input", {
+          fnName: message?.fnName,
+          fnArgs: message?.fnArgs,
+        });
+        sendResponse({ ok: true, result });
         return;
       }
 
