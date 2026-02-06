@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 
 import { bytesToHex, sha256Hex, toBytes } from "./bytes.js";
+import { MAX_ACCOUNT_COUNT } from "./constants.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -314,11 +315,14 @@ describe("walletEngine", () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
 
-    const res1 = await engine.addAccount();
-    expect(res1.selectedAccountIndex).toBe(1);
-    expect(res1.accounts).toEqual(["acct0", "acct1"]);
+    // Derive up to the supported limit.
+    for (let i = 2; i <= MAX_ACCOUNT_COUNT; i++) {
+      const res = await engine.addAccount();
+      expect(res.selectedAccountIndex).toBe(i - 1);
+      expect(res.accounts).toHaveLength(i);
+    }
 
-    await expect(engine.addAccount()).rejects.toThrow(/Only 2 accounts/i);
+    await expect(engine.addAccount()).rejects.toThrow(new RegExp(`Only ${MAX_ACCOUNT_COUNT} accounts`, "i"));
   });
 
   it("signMessage signs a domain-separated envelope (uses selected profileIndex)", async () => {

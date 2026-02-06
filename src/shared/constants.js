@@ -18,9 +18,9 @@ export const TX_KIND = Object.freeze({
 });
 
 /**
- * Dusk standard maximum number of wallet profiles.
+ * Maximum number of wallet profiles supported by the UI/engine.
  *
  * Note: Shielded note scanning cost scales with the number of profiles. The
- * upstream CLI wallet defaults to 2 profiles max as well.
+ * upstream CLI wallet defaults to a low number of profiles as well.
  */
-export const MAX_ACCOUNT_COUNT = 2;
+export const MAX_ACCOUNT_COUNT = 5;
