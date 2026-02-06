@@ -9,13 +9,14 @@ describe("TX_KIND", () => {
     expect(TX_KIND.CONTRACT_CALL).toBe("contract_call");
     expect(TX_KIND.STAKE).toBe("stake");
     expect(TX_KIND.UNSTAKE).toBe("unstake");
+    expect(TX_KIND.WITHDRAW_REWARD).toBe("withdraw_reward");
   });
 
   it("is frozen (immutable)", () => {
     expect(Object.isFrozen(TX_KIND)).toBe(true);
   });
 
-  it("has all 6 transaction types", () => {
-    expect(Object.keys(TX_KIND).length).toBe(6);
+  it("has all 7 transaction types", () => {
+    expect(Object.keys(TX_KIND).length).toBe(7);
   });
 });

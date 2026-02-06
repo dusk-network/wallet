@@ -7,6 +7,8 @@ import {
   getGasPrice,
   getSelectedAccountIndex,
   getPublicBalance,
+  getMinimumStake,
+  getStakeInfo,
   getShieldedBalance,
   getShieldedStatus,
   isUnlocked,
@@ -210,6 +212,34 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
           sendResponse({
             id,
             result: { nonce: bal.nonce.toString(), value: bal.value.toString() },
+          });
+          return;
+        }
+
+        case "dusk_getMinimumStake": {
+          const min = await getMinimumStake();
+          sendResponse({ id, result: String(min) });
+          return;
+        }
+
+        case "dusk_getStakeInfo": {
+          const info = await getStakeInfo(params ?? {});
+          // Serialize bigints for structured clone stability.
+          sendResponse({
+            id,
+            result: {
+              amount: info?.amount
+                ? {
+                    value: info.amount.value?.toString?.() ?? String(info.amount.value),
+                    locked: info.amount.locked?.toString?.() ?? String(info.amount.locked),
+                    eligibility: info.amount.eligibility?.toString?.() ?? String(info.amount.eligibility),
+                    total: info.amount.total?.toString?.() ?? String(info.amount.total),
+                  }
+                : null,
+              reward: info?.reward?.toString?.() ?? String(info?.reward ?? 0),
+              faults: Number(info?.faults ?? 0) || 0,
+              hardFaults: Number(info?.hardFaults ?? 0) || 0,
+            },
           });
           return;
         }

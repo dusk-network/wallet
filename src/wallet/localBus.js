@@ -29,6 +29,8 @@ import {
   startShieldedSync,
   unlockWithMnemonic,
   waitTxExecuted,
+  getMinimumStake,
+  getStakeInfo,
 } from "../shared/walletEngine.js";
 
 // Prevent users from accidentally triggering expensive vault / stronghold
@@ -42,6 +44,22 @@ function serializeError(err) {
     code: err?.code ?? ERROR_CODES.INTERNAL,
     message: err?.message ?? String(err),
     data: err?.data,
+  };
+}
+
+function serializeStakeInfo(info) {
+  return {
+    amount: info?.amount
+      ? {
+          value: info.amount.value?.toString?.() ?? String(info.amount.value),
+          locked: info.amount.locked?.toString?.() ?? String(info.amount.locked),
+          eligibility: info.amount.eligibility?.toString?.() ?? String(info.amount.eligibility),
+          total: info.amount.total?.toString?.() ?? String(info.amount.total),
+        }
+      : null,
+    reward: info?.reward?.toString?.() ?? String(info?.reward ?? 0),
+    faults: Number(info?.faults ?? 0) || 0,
+    hardFaults: Number(info?.hardFaults ?? 0) || 0,
   };
 }
 
@@ -312,6 +330,27 @@ export async function localSend(message) {
         txs,
         accountNames,
       };
+    }
+
+    if (message?.type === "DUSK_UI_GET_MINIMUM_STAKE") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const min = await getMinimumStake();
+      return { ok: true, result: String(min) };
+    }
+
+    if (message?.type === "DUSK_UI_GET_STAKE_INFO") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
+      const info = await getStakeInfo({ profileIndex: idx });
+      return { ok: true, result: serializeStakeInfo(info) };
     }
 
     // UI selects a different local account (profile index)

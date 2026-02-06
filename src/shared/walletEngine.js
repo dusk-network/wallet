@@ -1055,6 +1055,25 @@ export async function getPublicBalance({ profileIndex } = {}) {
   );
 }
 
+export async function getMinimumStake() {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  await ensureNetwork();
+  // Protocol-driver backed; returned in Lux as bigint.
+  return await state.bookkeeper.minimumStake;
+}
+
+export async function getStakeInfo({ profileIndex } = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  await ensureNetwork();
+  const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
+  const profile = await ensureProfileIndex(idx);
+  return await withTimeout(
+    state.bookkeeper.stakeInfo(profile.account),
+    12_000,
+    "Stake request timed out"
+  );
+}
+
 /**
  * Fetch current gas price stats from the Rusk node's mempool.
  * @param {Object} [opts]
@@ -1788,6 +1807,9 @@ function toContractIdBytes(contractId) {
  * - { kind: 'transfer', to, amount, memo?, gas? }
  * - { kind: 'shield', amount, gas? }
  * - { kind: 'unshield', amount, gas? }
+ * - { kind: 'stake', amount, gas? }
+ * - { kind: 'unstake', amount?, gas? } // omit/0 amount => full unstake
+ * - { kind: 'withdraw_reward', amount?, gas? } // omit/0 amount => withdraw all
  * - { kind: 'contract_call', contractId, fnName, fnArgs, to?, amount?, deposit?, gas? }
  */
 export async function sendTransaction(params) {
@@ -1882,6 +1904,85 @@ export async function sendTransaction(params) {
     }
 
     return { hash: result.hash, nullifiers: result.nullifiers };
+  }
+
+  if (kind === TX_KIND.STAKE) {
+    if ("to" in params && params.to) {
+      throw new Error("Stake does not accept a 'to' field");
+    }
+    if ("memo" in params && params.memo) {
+      throw new Error("Stake cannot include a memo payload");
+    }
+
+    const amount = toU64(params.amount, { name: "amount" });
+    if (amount <= 0n) throw new Error("amount must be > 0");
+
+    // If a stake already exists, interpret `stake` as a topup (wallet UX).
+    let hasStake = false;
+    try {
+      const info = await state.bookkeeper.stakeInfo(profile.account);
+      hasStake = Boolean(info?.amount);
+    } catch {
+      hasStake = false;
+    }
+
+    let tx = hasStake ? state.bookkeeper.as(profile).topup(amount) : state.bookkeeper.as(profile).stake(amount);
+    const gas = normalizeGas(params.gas);
+    if (gas) tx = tx.gas(gas);
+
+    const result = await network.execute(tx);
+    return { hash: result.hash, nonce: result.nonce };
+  }
+
+  if (kind === TX_KIND.UNSTAKE) {
+    if ("to" in params && params.to) {
+      throw new Error("Unstake does not accept a 'to' field");
+    }
+    if ("memo" in params && params.memo) {
+      throw new Error("Unstake cannot include a memo payload");
+    }
+
+    // If amount is omitted/0, unstake everything (w3sper treats non-bigint as "full").
+    const raw = params.amount;
+    const wantsFull = raw === undefined || raw === null || raw === "" || raw === 0 || raw === "0" || raw === 0n;
+    const amount = wantsFull ? undefined : toU64(raw, { name: "amount" });
+    if (amount !== undefined && amount <= 0n) throw new Error("amount must be > 0");
+
+    let tx = wantsFull ? state.bookkeeper.as(profile).unstake() : state.bookkeeper.as(profile).unstake(amount);
+    const gas = normalizeGas(params.gas);
+    if (gas) tx = tx.gas(gas);
+
+    const result = await network.execute(tx);
+    return { hash: result.hash, nonce: result.nonce };
+  }
+
+  if (kind === TX_KIND.WITHDRAW_REWARD) {
+    if ("to" in params && params.to) {
+      throw new Error("Withdraw reward does not accept a 'to' field");
+    }
+    if ("memo" in params && params.memo) {
+      throw new Error("Withdraw reward cannot include a memo payload");
+    }
+
+    let reward = 0n;
+    try {
+      const info = await state.bookkeeper.stakeInfo(profile.account);
+      reward = typeof info?.reward === "bigint" ? info.reward : 0n;
+    } catch {
+      reward = 0n;
+    }
+
+    let amount = toU64(params.amount, { name: "amount" });
+    // UX: allow empty/0 to mean "withdraw all".
+    if (amount <= 0n) amount = reward;
+    if (amount <= 0n) throw new Error("No rewards available to withdraw");
+
+    let tx = state.bookkeeper.as(profile).withdraw(amount);
+    const gas = normalizeGas(params.gas);
+    if (gas) tx = tx.gas(gas);
+
+    const result = await network.execute(tx);
+    return { hash: result.hash, nonce: result.nonce };
   }
 
   if (kind === TX_KIND.CONTRACT_CALL) {

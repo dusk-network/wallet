@@ -15,6 +15,7 @@ export const TX_KIND = Object.freeze({
   // Staking (not yet exposed in UI, but used in engine/defaults).
   STAKE: "stake",
   UNSTAKE: "unstake",
+  WITHDRAW_REWARD: "withdraw_reward",
 });
 
 /**

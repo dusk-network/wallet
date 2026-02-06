@@ -34,6 +34,18 @@ export const DEFAULT_GAS_BY_KIND = Object.freeze({
     limit: "50000000",
     price: "1",
   }),
+  [TX_KIND.STAKE]: Object.freeze({
+    limit: "50000000",
+    price: "1",
+  }),
+  [TX_KIND.UNSTAKE]: Object.freeze({
+    limit: "50000000",
+    price: "1",
+  }),
+  [TX_KIND.WITHDRAW_REWARD]: Object.freeze({
+    limit: "50000000",
+    price: "1",
+  }),
   [TX_KIND.CONTRACT_CALL]: Object.freeze({
     limit: "500000000",
     price: "1",
