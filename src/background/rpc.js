@@ -31,7 +31,7 @@ import { runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 export async function handleRpc(origin, request) {
   const { method, params } = request || {};
 
-  const MAX_CALLDATA_BYTES = 128 * 1024;
+  const MAX_CALLDATA_BYTES = 64 * 1024;
 
   function estimateBytes(v) {
     if (v == null) return 0;
@@ -276,6 +276,15 @@ export async function handleRpc(origin, request) {
         throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.kind is required");
       }
 
+      // dApps are only allowed to request a limited set of tx kinds.
+      // Shielded conversion and staking flows are wallet-internal.
+      if (kind !== TX_KIND.TRANSFER && kind !== TX_KIND.CONTRACT_CALL) {
+        throw rpcError(
+          ERROR_CODES.UNSUPPORTED,
+          `Unsupported transaction kind for dApps: ${kind}`
+        );
+      }
+
       if (kind === TX_KIND.CONTRACT_CALL) {
         if (params.memo) {
           throw rpcError(
@@ -378,13 +387,13 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_getAddresses": {
-      const perm = await getPermissionForOrigin(origin);
-      if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
-
-      const { isUnlocked } = await getEngineStatus();
-      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-
-      return await engineCall("dusk_getAddresses");
+      // Shielded address visibility is intentionally not part of the dApp surface.
+      // dApps can still *send* to shielded addresses, but they must not be able
+      // to enumerate the user's shielded addresses.
+      throw rpcError(
+        ERROR_CODES.UNSUPPORTED,
+        "dusk_getAddresses is not available to dApps"
+      );
     }
 
     default:

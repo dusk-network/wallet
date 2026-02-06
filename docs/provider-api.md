@@ -167,7 +167,7 @@ const tx = await dusk.request({
   method: "dusk_sendTransaction",
   params: {
     kind: "transfer",
-    to: "2Z8m...",           // AccountId
+    to: "2Z8m...",           // AccountId (public) OR Address (shielded)
     amount: "1000000000",    // 1 DUSK in LUX
     memo: "optional",
     gas: { limit: "10000000", price: "1" }  // optional
@@ -194,18 +194,7 @@ const tx = await dusk.request({
 });
 ```
 
-`fnArgs` max: 128 KiB. Memo not allowed for contract calls.
-
----
-
-### `dusk_getAddresses`
-
-Get shielded addresses. Requires connection + unlocked wallet.
-
-```js
-const addrs = await dusk.request({ method: "dusk_getAddresses" });
-// → ["4Kp9..."]
-```
+`fnArgs` max: 64 KiB. Memo not allowed for contract calls.
 
 ---
 

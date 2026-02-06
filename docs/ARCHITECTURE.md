@@ -315,7 +315,6 @@ window.dusk = {
 | `dusk_getPublicBalance` | Get balance |
 | `dusk_estimateGas` | Get gas prices |
 | `dusk_sendTransaction` | Send transaction |
-| `dusk_getAddresses` | Get shielded addresses |
 | `dusk_disconnect` | Revoke permission |
 
 See [provider-api.md](provider-api.md) for full documentation.
