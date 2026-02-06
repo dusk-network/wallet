@@ -168,7 +168,7 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 
 ### 5.4 Wallet UX Quick Wins
 - [x] Multi-account: account switching UI in the main wallet UI (not only in Settings/Options)
-- [x] Multi-account: enforce Dusk standard max of 2 profiles (note scanning cost scales with profiles)
+- [x] Multi-account: support up to 5 profiles (note: shielded scanning cost scales with profiles)
 - [x] Multi-account: per-account naming (persisted per `walletId`)
 - [x] Activity view: polish the existing activity feed (local submitted/executed statuses, explorer links)
 - [x] Transactions: better gas estimation UI (use Rusk gas price stats, show recommended + range)
@@ -178,8 +178,12 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 Goal: for token/NFT contracts that follow the DRC standards, dApp developers should get ERC20/ERC721-like ergonomics in the SDK, and users should see verified, human-readable approvals in the wallet (not just opaque bytes).
 
 - [ ] **Provider:** implement an EIP-747-like "watch asset" request so dApps can prompt users to add a token/NFT to the wallet UI (approval required).
-  - Proposed RPC: `dusk_watchAsset` with `type: "DRC20" | "DRC721"` and options like `{ contractId, symbol?, decimals?, image?, tokenId? }`.
-  - Wallet must verify on-chain metadata (via contract views) before persisting.
+  - Proposed RPC: `dusk_watchAsset` with params `{ type, options }` (object-style, like other `dusk_*` methods).
+  - Types:
+    - `type: "DRC20"` with `options: { contractId, image? }`
+    - `type: "DRC721"` with `options: { contractId, tokenId, image? }` (tokenId required; "watch collection" is deferred until we have an indexer/archive integration)
+  - Wallet must verify on-chain metadata (via contract views + canonical drivers) before persisting.
+  - Persist watched assets per **(network + selected profile)**, like Ethereum wallets (assets are account-scoped and chain-scoped).
 - [ ] **Wallet approvals (verified decode):** for DRC20/DRC721 calls (`transfer`, `approve`, `transfer_from`, `set_approval_for_all`), decode args using a canonical data-driver and show a specialized approval screen (amount formatted with decimals, token symbol, spender/to/from, high-risk warnings).
 - [ ] **SDK wrappers:** add `drc20` / `drc721` helper modules built on `createDuskContract()`:
   - typed `read` (`name/symbol/decimals/balance_of/allowance/...`)
@@ -189,6 +193,7 @@ Goal: for token/NFT contracts that follow the DRC standards, dApp developers sho
 - [ ] **Conformance tests:** add tests that assert the canonical drivers can:
   - encode inputs that the chain accepts, and
   - decode outputs/events for the standard methods.
+- [ ] **IPFS handling:** support `ipfs://...` token URIs via a configurable gateway setting (default on, default gateway `https://ipfs.io/ipfs/`) and always show the raw URI.
 
 ---
 
