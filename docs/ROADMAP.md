@@ -101,9 +101,10 @@ Goal: users should be able to manage common on-chain assets (tokens + NFTs) in-w
 
 - [ ] **DRC20 (tokens):** add a wallet UI to "watch/import" a token by `contractId` (per-network), fetch `{ name, symbol, decimals }`, and display balance (public only).
 - [ ] **DRC20 (send):** add a send flow that builds `contract_call` transactions for `transfer(TransferCall)` using a canonical DRC20 data-driver for encoding.
-- [ ] **DRC20 (approvals):** add an approval flow for `approve(ApproveCall)` with safer defaults (exact amount), plus clear warnings (spender, amount, token).
+- [ ] **DRC20 (approvals):** add an approval flow for `approve(ApproveCall)` with safer defaults (exact amount), plus an explicit one-click "MAX" option with strong warnings (spender, amount, token).
 - [ ] **DRC721 (NFTs):** add an "Import NFT" flow by `{ contractId, token_id }` (MetaMask-style), verify ownership via `owner_of`, and display metadata using `token_uri`.
-- [ ] **NFT privacy controls:** setting to disable remote metadata/image fetches (token URI may be HTTP/IPFS and can leak usage patterns).
+- [ ] **Auto-discovery (lightweight):** after the user successfully submits a DRC20/DRC721 tx (transfer/approve/etc), offer to add that token/NFT to their watched assets list.
+- [ ] **NFT privacy controls:** default to fetching metadata/images, but offer a setting to disable remote metadata/image fetches (token URI may be HTTP/IPFS and can leak usage patterns).
 - [ ] **Activity UX:** label locally-submitted DRC20/DRC721 actions in the activity feed (even without full inbound history/indexing).
 
 ---
@@ -177,7 +178,7 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 Goal: for token/NFT contracts that follow the DRC standards, dApp developers should get ERC20/ERC721-like ergonomics in the SDK, and users should see verified, human-readable approvals in the wallet (not just opaque bytes).
 
 - [ ] **Provider:** implement an EIP-747-like "watch asset" request so dApps can prompt users to add a token/NFT to the wallet UI (approval required).
-  - Proposed RPC: `wallet_watchAsset` (Ethereum-compatible name) with `type: "DRC20" | "DRC721"` and options like `{ contractId, symbol?, decimals?, image?, tokenId? }`.
+  - Proposed RPC: `dusk_watchAsset` with `type: "DRC20" | "DRC721"` and options like `{ contractId, symbol?, decimals?, image?, tokenId? }`.
   - Wallet must verify on-chain metadata (via contract views) before persisting.
 - [ ] **Wallet approvals (verified decode):** for DRC20/DRC721 calls (`transfer`, `approve`, `transfer_from`, `set_approval_for_all`), decode args using a canonical data-driver and show a specialized approval screen (amount formatted with decimals, token symbol, spender/to/from, high-risk warnings).
 - [ ] **SDK wrappers:** add `drc20` / `drc721` helper modules built on `createDuskContract()`:
