@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "author": "Hein Dauven <heindauven@gmail.com> (https://x.com/HeinDauven)",
+  "license": "MIT",
   "scripts": {
     "generate:shells": "node scripts/generate-shells.js",
     "prebuild": "node scripts/generate-shells.js",
