@@ -40,15 +40,11 @@ jobs:
       - name: Build Firefox extension
         run: npm run build:firefox
 
-      - name: Build Tauri web assets
-        run: npm run build:tauri
-
       - name: Package artifacts
         run: |
           VERSION="${GITHUB_REF_NAME}"
           zip -r "dusk-wallet-chrome-${VERSION}.zip" dist
           zip -r "dusk-wallet-firefox-${VERSION}.zip" dist-firefox
-          zip -r "dusk-wallet-tauri-web-${VERSION}.zip" dist-tauri
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -57,4 +53,3 @@ jobs:
           files: |
             dusk-wallet-chrome-${{ github.ref_name }}.zip
             dusk-wallet-firefox-${{ github.ref_name }}.zip
-            dusk-wallet-tauri-web-${{ github.ref_name }}.zip

@@ -1,6 +1,6 @@
 # Dusk Wallet
 
-A non-custodial wallet for [Dusk](https://dusk.network). Browser extension, desktop, and mobile—one codebase.
+A non-custodial wallet for [Dusk](https://dusk.network). Chrome and Firefox extension builds from one codebase.
 
 **Your keys. Your DUSK. No middleman.**
 
@@ -44,7 +44,7 @@ A non-custodial wallet for [Dusk](https://dusk.network). Browser extension, desk
 
 🔄 **Multi-network** — Switch between mainnet, testnet, devnet, or custom nodes.
 
-📱 **Cross-platform** — Chrome extension today. Desktop and mobile via Tauri.
+🧩 **Shared runtime** — Extension targets share the same wallet engine and UI shell.
 
 ## Install
 
@@ -64,15 +64,6 @@ npm run build:firefox
 ```
 
 Then load `dist-firefox/` as a temporary add-on in `about:debugging`.
-
-### Desktop / Mobile (Tauri)
-
-```bash
-npm run build:tauri
-npm run tauri:dev
-```
-
-See [apps/tauri/README.md](apps/tauri/README.md) for platform-specific setup.
 
 ## For dApp Developers
 
@@ -110,15 +101,13 @@ src/
 └── wallet/          # Engine interface
 ```
 
-The wallet engine runs in an offscreen document (extension) or directly in-process (Tauri). Same cryptographic core either way.
+The wallet engine runs in an offscreen document for extension builds. The shared runtime is structured so other hosts can reuse the same cryptographic core.
 
 ## Development
 
 ```bash
 npm run build:extension   # Build extension → dist/
 npm run build:firefox     # Build Firefox extension → dist-firefox/
-npm run build:tauri       # Build Tauri bundle → dist-tauri/
-npm run dev:tauri         # Run Tauri dev server
 
 # Local Rusk node (Docker)
 npm run rusk:up
@@ -134,7 +123,6 @@ npm run e2e:rusk
 ## Security
 
 - Mnemonic encrypted with user password (PBKDF2 + AES-GCM)
-- Tauri uses OS keychain via Stronghold
 - No analytics, no tracking, no remote calls except to your chosen node
 
 ## License

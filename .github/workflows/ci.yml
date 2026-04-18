@@ -41,6 +41,3 @@ jobs:
 
       - name: Build Firefox extension
         run: npm run build:firefox
-
-      - name: Build Tauri web assets
-        run: npm run build:tauri

@@ -126,11 +126,7 @@ Manifest V3 enforces strict CSP by default:
 
 #### Tauri
 
-Tauri builds use a restrictive CSP configured in `apps/tauri/src-tauri/tauri.conf.json`.
-
-Notes:
-- `script-src` is `'self'` + `'wasm-unsafe-eval'` (wallet uses WASM protocol driver)
-- `style-src` currently allows `'unsafe-inline'` because the UI sets some inline styles via JS
+The public repository does not currently include a native Tauri wrapper, so there is no checked-in `tauri.conf.json` to audit here.
 
 ### 5. Network Security
 

@@ -453,15 +453,6 @@ npm run build          # Production build → dist/
 npm run dev            # Development with watch
 ```
 
-### Tauri
-
-```bash
-cd apps/tauri
-npm run tauri build    # Desktop build
-npm run tauri android  # Android build
-npm run tauri ios      # iOS build
-```
-
 Uses Vite for bundling with separate configs:
 - `vite.config.js` — Extension
-- `vite.tauri.config.js` — Tauri
+- `vite.tauri.config.js` — WebView-oriented frontend build kept alongside the shared runtime
