@@ -5,20 +5,20 @@ A non-custodial wallet for [Dusk](https://dusk.network). Browser extension, desk
 **Your keys. Your DUSK. No middleman.**
 
 <p align="center">
-  <a href="https://github.com/HDauven/dusk-wallet/actions/workflows/ci.yml">
-    <img src="https://github.com/HDauven/dusk-wallet/actions/workflows/ci.yml/badge.svg" alt="CI">
+  <a href="https://github.com/dusk-network/wallet/actions/workflows/ci.yml">
+    <img src="https://github.com/dusk-network/wallet/actions/workflows/ci.yml/badge.svg" alt="CI">
   </a>
   &nbsp;
-  <a href="https://github.com/HDauven/dusk-wallet/actions/workflows/release.yml">
-    <img src="https://github.com/HDauven/dusk-wallet/actions/workflows/release.yml/badge.svg" alt="Release">
+  <a href="https://github.com/dusk-network/wallet/actions/workflows/release.yml">
+    <img src="https://github.com/dusk-network/wallet/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   &nbsp;
-  <a href="https://codecov.io/gh/HDauven/dusk-wallet">
-    <img src="https://codecov.io/gh/HDauven/dusk-wallet/branch/main/graph/badge.svg" alt="Coverage">
+  <a href="https://codecov.io/gh/dusk-network/wallet">
+    <img src="https://codecov.io/gh/dusk-network/wallet/branch/main/graph/badge.svg" alt="Coverage">
   </a>
   &nbsp;
-  <a href="https://github.com/HDauven/dusk-wallet/stargazers">
-    <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/HDauven/dusk-wallet?style=social">
+  <a href="https://github.com/dusk-network/wallet/stargazers">
+    <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/dusk-network/wallet?style=social">
   </a>
   &nbsp;
   <a href="https://discord.gg/dusk-official">

@@ -5,6 +5,14 @@
   "type": "module",
   "author": "Hein Dauven <heindauven@gmail.com> (https://x.com/HeinDauven)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dusk-network/wallet.git"
+  },
+  "homepage": "https://github.com/dusk-network/wallet",
+  "bugs": {
+    "url": "https://github.com/dusk-network/wallet/issues"
+  },
   "scripts": {
     "generate:shells": "node scripts/generate-shells.js",
     "prebuild": "node scripts/generate-shells.js",
