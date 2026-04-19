@@ -89,6 +89,41 @@ async function sendResult(message) {
   return Object.prototype.hasOwnProperty.call(res, "result") ? res.result : res;
 }
 
+// Keep the approval window alive while the user is actively reviewing it.
+let activityHeartbeatTimer = null;
+
+function startActivityHeartbeat() {
+  if (activityHeartbeatTimer) return;
+  send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
+  activityHeartbeatTimer = setInterval(() => {
+    send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
+  }, 30_000);
+}
+
+function stopActivityHeartbeat() {
+  if (!activityHeartbeatTimer) return;
+  clearInterval(activityHeartbeatTimer);
+  activityHeartbeatTimer = null;
+}
+
+startActivityHeartbeat();
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    stopActivityHeartbeat();
+    return;
+  }
+  startActivityHeartbeat();
+});
+
+document.addEventListener(
+  "click",
+  () => {
+    send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
+  },
+  { passive: true }
+);
+
 export async function renderNotification() {
   const rid = getRid();
   if (!rid) {

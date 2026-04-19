@@ -212,9 +212,6 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       if (message?.type === "DUSK_RPC_REQUEST") {
         const origin = message.origin || getOriginFromSender(sender);
 
-        // User-initiated dApp interaction counts as activity.
-        updateActivity();
-
         // Ensure any dApp port(s) opened from this tab are bound to the same
         // origin so provider push events (connect/chainChanged/...) work
         // reliably.
