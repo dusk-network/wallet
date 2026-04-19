@@ -1,19 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+let store = {};
+
 vi.mock("./storage.js", () => {
-  let store = {};
   return {
     storage: {
-      get: vi.fn(async (key) => ({ [key]: store[key] })),
+      get: vi.fn(async (keys) => {
+        if (keys == null) return { ...store };
+        if (typeof keys === "string") {
+          return store[keys] === undefined ? {} : { [keys]: store[keys] };
+        }
+        if (Array.isArray(keys)) {
+          return Object.fromEntries(keys.filter((key) => store[key] !== undefined).map((key) => [key, store[key]]));
+        }
+        if (typeof keys === "object") {
+          return Object.fromEntries(
+            Object.entries(keys).map(([key, fallback]) => [
+              key,
+              store[key] === undefined ? fallback : store[key],
+            ])
+          );
+        }
+        return {};
+      }),
       set: vi.fn(async (obj) => {
         Object.assign(store, obj);
       }),
-      remove: vi.fn(async (key) => {
-        delete store[key];
+      remove: vi.fn(async (keys) => {
+        if (Array.isArray(keys)) {
+          keys.forEach((key) => {
+            delete store[key];
+          });
+          return;
+        }
+        delete store[keys];
       }),
     },
     STORAGE_KEYS: {
       VAULT: "dusk_vault_v1",
+      UNLOCK_GUARD: "dusk_unlock_guard_v1",
     },
     __resetStore: () => {
       store = {};
@@ -81,6 +106,25 @@ async function loadVaultModule() {
     await expect(vaultMod.unlockVault(password)).rejects.toThrow(/too many attempts/i);
   });
 
+  it("persists unlock rate limits across module reloads", async () => {
+    let { storageMod, vaultMod } = await loadVaultModule();
+
+    const mnemonic = "test seed phrase";
+    const password = "password123";
+
+    await vaultMod.createVault(mnemonic, password);
+    await expect(vaultMod.unlockVault("wrong-password")).rejects.toThrow(/incorrect password/i);
+
+    const guardBeforeReload = storageMod.__getStore()[storageMod.STORAGE_KEYS.UNLOCK_GUARD];
+    expect(guardBeforeReload?.failures).toBe(1);
+    expect(guardBeforeReload?.nextAllowedAt).toBeGreaterThan(Date.now());
+
+    vi.resetModules();
+    ({ vaultMod } = await loadVaultModule());
+
+    await expect(vaultMod.unlockVault(password)).rejects.toThrow(/too many attempts/i);
+  });
+
   it("removes unsupported vault formats", async () => {
     const { storageMod, vaultMod } = await loadVaultModule();
 
@@ -88,16 +132,24 @@ async function loadVaultModule() {
     await storageMod.storage.set({ [storageMod.STORAGE_KEYS.VAULT]: legacy });
 
     await expect(vaultMod.unlockVault("password123")).rejects.toThrow(/unsupported vault format/i);
-    expect(storageMod.storage.remove).toHaveBeenCalledWith(storageMod.STORAGE_KEYS.VAULT);
+    expect(storageMod.storage.remove).toHaveBeenCalledWith([
+      storageMod.STORAGE_KEYS.VAULT,
+      storageMod.STORAGE_KEYS.UNLOCK_GUARD,
+    ]);
   });
 
   it("clears vault from storage", async () => {
     const { storageMod, vaultMod } = await loadVaultModule();
 
     await storageMod.storage.set({ [storageMod.STORAGE_KEYS.VAULT]: { foo: "bar" } });
+    await storageMod.storage.set({
+      [storageMod.STORAGE_KEYS.UNLOCK_GUARD]: { failures: 2, nextAllowedAt: Date.now() + 5_000 },
+    });
     await vaultMod.clearVault();
 
     const stored = storageMod.__getStore()[storageMod.STORAGE_KEYS.VAULT];
+    const guard = storageMod.__getStore()[storageMod.STORAGE_KEYS.UNLOCK_GUARD];
     expect(stored).toBeUndefined();
+    expect(guard).toBeUndefined();
   });
 });

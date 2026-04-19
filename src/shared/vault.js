@@ -19,12 +19,35 @@ const STRONGHOLD_STORE_KEY_MNEMONIC = "mnemonic";
 const UNLOCK_BACKOFF_BASE_MS = 1_000;
 const UNLOCK_BACKOFF_MAX_MS = 60_000;
 
-const unlockGuard = {
-  failures: 0,
-  nextAllowedAt: 0,
-};
+function normalizeUnlockGuard(value) {
+  const failures = Number(value?.failures ?? 0);
+  const nextAllowedAt = Number(value?.nextAllowedAt ?? 0);
 
-function checkUnlockRateLimit() {
+  return {
+    failures: Number.isFinite(failures) && failures > 0 ? Math.floor(failures) : 0,
+    nextAllowedAt:
+      Number.isFinite(nextAllowedAt) && nextAllowedAt > 0 ? Math.floor(nextAllowedAt) : 0,
+  };
+}
+
+async function getUnlockGuard() {
+  const items = await storage.get({
+    [STORAGE_KEYS.UNLOCK_GUARD]: { failures: 0, nextAllowedAt: 0 },
+  });
+  return normalizeUnlockGuard(items[STORAGE_KEYS.UNLOCK_GUARD]);
+}
+
+async function setUnlockGuard(value) {
+  const next = normalizeUnlockGuard(value);
+  if (!next.failures && !next.nextAllowedAt) {
+    await storage.remove(STORAGE_KEYS.UNLOCK_GUARD);
+    return;
+  }
+  await storage.set({ [STORAGE_KEYS.UNLOCK_GUARD]: next });
+}
+
+async function checkUnlockRateLimit() {
+  const unlockGuard = await getUnlockGuard();
   const now = Date.now();
   if (unlockGuard.nextAllowedAt && now < unlockGuard.nextAllowedAt) {
     const waitMs = unlockGuard.nextAllowedAt - now;
@@ -33,18 +56,19 @@ function checkUnlockRateLimit() {
   }
 }
 
-function recordUnlockFailure() {
+async function recordUnlockFailure() {
+  const unlockGuard = await getUnlockGuard();
   unlockGuard.failures += 1;
   const delay = Math.min(
     UNLOCK_BACKOFF_MAX_MS,
     UNLOCK_BACKOFF_BASE_MS * 2 ** (unlockGuard.failures - 1)
   );
   unlockGuard.nextAllowedAt = Date.now() + delay;
+  await setUnlockGuard(unlockGuard);
 }
 
-function resetUnlockFailures() {
-  unlockGuard.failures = 0;
-  unlockGuard.nextAllowedAt = 0;
+async function resetUnlockFailures() {
+  await storage.remove(STORAGE_KEYS.UNLOCK_GUARD);
 }
 
 function isBadFileKeyError(err) {
@@ -157,6 +181,7 @@ export async function createVault(mnemonic, password) {
       // Persist a non-sensitive sentinel so the UI can detect that a vault exists
       // without needing to touch the filesystem.
       await storage.set({ [STORAGE_KEYS.VAULT]: { kind: "stronghold" } });
+      await resetUnlockFailures();
       return true;
     } finally {
       try {
@@ -170,6 +195,7 @@ export async function createVault(mnemonic, password) {
   const enc = await encryptMnemonic(m, p);
   const serial = serializeEncryptInfo(enc);
   await storage.set({ [STORAGE_KEYS.VAULT]: serial });
+  await resetUnlockFailures();
   return true;
 }
 
@@ -186,14 +212,14 @@ export async function unlockVault(password) {
       throw new Error("No wallet vault found. Import a mnemonic first.");
     }
 
-    checkUnlockRateLimit();
+    await checkUnlockRateLimit();
 
     let stronghold;
     try {
       stronghold = await tauriLoadStronghold(p);
     } catch {
       // If a snapshot exists but loading fails, it's almost always a wrong password.
-      recordUnlockFailure();
+      await recordUnlockFailure();
       throw new Error("Incorrect password");
     }
 
@@ -212,7 +238,7 @@ export async function unlockVault(password) {
       }
       // store.get returns number[]
       const mnemonic = new TextDecoder().decode(new Uint8Array(bytes));
-      resetUnlockFailures();
+      await resetUnlockFailures();
       return mnemonic;
     } finally {
       try {
@@ -235,14 +261,14 @@ export async function unlockVault(password) {
   }
 
   const enc = deserializeEncryptInfo(vault);
-  checkUnlockRateLimit();
+  await checkUnlockRateLimit();
 
   try {
     const mnemonic = await decryptMnemonic(enc, p);
-    resetUnlockFailures();
+    await resetUnlockFailures();
     return mnemonic;
   } catch {
-    recordUnlockFailure();
+    await recordUnlockFailure();
     throw new Error("Incorrect password");
   }
 }
@@ -251,9 +277,9 @@ export async function clearVault() {
   if (isTauriRuntime()) {
     await tauriDeleteVaultSnapshot();
     // Also clear any previous storage key, if present from a web run.
-    await storage.remove(STORAGE_KEYS.VAULT);
+    await storage.remove([STORAGE_KEYS.VAULT, STORAGE_KEYS.UNLOCK_GUARD]);
     return;
   }
 
-  await storage.remove(STORAGE_KEYS.VAULT);
+  await storage.remove([STORAGE_KEYS.VAULT, STORAGE_KEYS.UNLOCK_GUARD]);
 }

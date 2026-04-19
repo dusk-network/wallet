@@ -10,6 +10,7 @@ export const storage = kv;
 
 export const STORAGE_KEYS = {
   VAULT: "dusk_vault_v1", // encrypted mnemonic
+  UNLOCK_GUARD: "dusk_unlock_guard_v1", // { failures, nextAllowedAt }
   SETTINGS: "dusk_settings_v1",
   PERMISSIONS: "dusk_permissions_v1", // { [origin]: { accountIndex, connectedAt } }
   TXS: "dusk_txs_v1", // { [hash]: { origin, nodeUrl, kind, submittedAt, status, error? } }
