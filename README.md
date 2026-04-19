@@ -50,16 +50,21 @@ A non-custodial wallet for [Dusk](https://dusk.network). Chrome and Firefox exte
 
 ### Chrome Extension
 
+From a fresh checkout:
+
 ```bash
 npm install
-npm run build:extension
+npm run build:chrome
 ```
 
 Then load `dist/` as an unpacked extension in `chrome://extensions` (Developer mode).
 
 ### Firefox Extension
 
+From a fresh checkout:
+
 ```bash
+npm install
 npm run build:firefox
 ```
 
@@ -99,6 +104,13 @@ src/
 ```
 
 The wallet engine runs in an offscreen document for extension builds. The shared runtime is structured so other hosts can reuse the same cryptographic core.
+
+Additional documentation:
+
+- [Provider API](docs/provider-api.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Security notes](docs/SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## Development
 

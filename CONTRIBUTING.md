@@ -10,13 +10,13 @@ Thank you for your interest in contributing! This document will help you get sta
 
 ```bash
 # Clone the repository
-git clone https://github.com/dusk-network/dusk-wallet.git
-cd dusk-wallet
+git clone https://github.com/dusk-network/wallet.git
+cd wallet
 
 # Install dependencies
 npm install
 
-# Run in development mode
+# Build in watch mode
 npm run dev
 
 # Load extension in Chrome

@@ -4,11 +4,15 @@
 
 ## Overview
 
-Dusk Wallet is a multi-platform self-custody wallet supporting:
+Dusk Wallet is architected as a multi-host self-custody wallet:
 
-- **Browser Extension** (Chrome, Firefox planned)
-- **Desktop** (Windows, macOS, Linux via Tauri)
-- **Mobile** (Android, iOS via Tauri)
+- **Browser Extension** (Chrome and Firefox builds live in this repository)
+- **Shared runtime for native hosts** (Tauri-oriented abstractions exist in the codebase)
+
+At the moment, this public repository is extension-first. The native Tauri wrappers and
+app-level configuration are not checked in here yet, so references to Tauri in this
+document describe the shared architecture target rather than a fully published desktop or
+mobile app in this repository.
 
 The architecture prioritizes:
 1. **Security** — Mnemonic never leaves device, encrypted at rest
@@ -209,6 +213,10 @@ Content Script              Service Worker              Offscreen
 ---
 
 ## Tauri Architecture
+
+This section describes the intended native-host integration layer. The public repository
+currently ships the browser-extension implementation plus the shared abstractions that a
+native wrapper would use.
 
 ### Simplified Flow
 
