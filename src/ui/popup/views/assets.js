@@ -861,31 +861,6 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   ];
 }
 
-function normalizeIpfsGateway(gw) {
-  const s = String(gw ?? "").trim();
-  if (!s) return "https://ipfs.io/ipfs/";
-  // Accept either origin-only or full /ipfs/ base.
-  try {
-    const u = new URL(s);
-    const base = u.toString();
-    if (base.includes("/ipfs/")) return base.endsWith("/") ? base : `${base}/`;
-    return `${u.origin}/ipfs/`;
-  } catch {
-    return "https://ipfs.io/ipfs/";
-  }
-}
-
-function resolveTokenUri(uri, ipfsGateway) {
-  const raw = String(uri ?? "").trim();
-  if (!raw) return "";
-  if (raw.startsWith("ipfs://")) {
-    const rest = raw.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
-    const gw = normalizeIpfsGateway(ipfsGateway);
-    return `${gw}${rest.replace(/^\/+/, "")}`;
-  }
-  return raw;
-}
-
 export function assetNftView(ov, { state, actions } = {}) {
   const sel = state?.assetNft;
   const cid = String(sel?.contractId ?? "").trim();
@@ -921,39 +896,6 @@ export function assetNftView(ov, { state, actions } = {}) {
   const name = String(nft?.name ?? "").trim() || "DRC721";
   const tokenUri = String(nft?.tokenUri ?? "").trim();
 
-  const metaState = (state.assetNftMeta ??= {});
-  const key = `${cid}:${tokenId}`;
-  const meta = metaState[key] ?? null;
-
-  const shouldFetchMeta = ov?.nftMetadataEnabled !== false && tokenUri;
-  const gateway = normalizeIpfsGateway(ov?.ipfsGateway ?? "");
-  const resolved = tokenUri ? resolveTokenUri(tokenUri, gateway) : "";
-
-  if (shouldFetchMeta && resolved && !metaState[`${key}:loading`]) {
-    metaState[`${key}:loading`] = true;
-    fetch(resolved, { cache: "no-store" })
-      .then(async (res) => {
-        const ct = res.headers.get("content-type") || "";
-        if (ct.includes("application/json")) return await res.json();
-        // Best-effort: attempt JSON anyway.
-        try {
-          return await res.json();
-        } catch {
-          return { _raw: resolved };
-        }
-      })
-      .then((j) => {
-        metaState[key] = j;
-      })
-      .catch(() => {
-        metaState[key] = { _error: true };
-      })
-      .finally(() => {
-        metaState[`${key}:loading`] = false;
-        actions?.render?.().catch(() => {});
-      });
-  }
-
   const doUnwatch = async () => {
     try {
       const resp = await actions?.send?.({ type: "DUSK_UI_ASSETS_UNWATCH_NFT", contractId: cid, tokenId });
@@ -966,11 +908,6 @@ export function assetNftView(ov, { state, actions } = {}) {
     }
   };
 
-  const metaName = meta && typeof meta === "object" ? String(meta?.name ?? "") : "";
-  const metaDesc = meta && typeof meta === "object" ? String(meta?.description ?? "") : "";
-  const metaImgRaw = meta && typeof meta === "object" ? (meta?.image || meta?.image_url || meta?.imageUrl || "") : "";
-  const metaImg = metaImgRaw ? resolveTokenUri(metaImgRaw, gateway) : "";
-
   return [
     subnav({ title: `${sym} #${tokenId}`, onBack }),
     h("div", { class: "row" }, [
@@ -979,18 +916,11 @@ export function assetNftView(ov, { state, actions } = {}) {
         h("div", { class: "muted" }, [h("code", { text: cid })]),
         tokenUri ? h("div", { class: "muted", text: `token_uri: ${tokenUri}` }) : h("div", { class: "muted", text: "token_uri is empty." }),
       ]),
-      ov?.nftMetadataEnabled === false
-        ? h("div", { class: "muted", text: "Metadata fetching is disabled in Settings (privacy)." })
-        : tokenUri
-        ? h("div", { class: "box" }, [
-            h("div", { class: "muted", text: "Metadata" }),
-            metaState[`${key}:loading`] ? h("div", { class: "muted", text: "Loading…" }) : null,
-            meta && meta._error ? h("div", { class: "muted", text: "Metadata fetch failed. Open token URI to view." }) : null,
-            metaName ? h("div", { class: "asset-sym", text: metaName }) : null,
-            metaDesc ? h("div", { class: "muted", text: metaDesc }) : null,
-            metaImg ? h("img", { src: metaImg, alt: metaName || "NFT image", style: "width:100%; border-radius:14px; margin-top:10px;" }) : null,
-            resolved ? h("div", { class: "muted" }, [h("a", { href: resolved, target: "_blank", rel: "noreferrer", text: "Open metadata URL" })]) : null,
-          ].filter(Boolean))
+      tokenUri
+        ? h("div", {
+            class: "muted",
+            text: "NFT metadata and media fetching is temporarily disabled for security reasons. The raw token_uri is shown above, but the wallet will not fetch or render it yet.",
+          })
         : null,
       h("button", { class: "btn-outline", text: "Remove NFT", onclick: doUnwatch }),
     ].filter(Boolean)),

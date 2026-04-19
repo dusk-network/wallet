@@ -248,12 +248,13 @@ export async function localSend(message) {
 
     // UI sets NFT metadata privacy settings
     if (message?.type === "DUSK_UI_SET_NFT_SETTINGS") {
-      const enabled = message.nftMetadataEnabled !== false;
       const ipfsGateway = String(message.ipfsGateway ?? "");
-      const next = await setSettings({ nftMetadataEnabled: enabled, ipfsGateway });
+      // Match the extension runtime: direct NFT metadata/media fetches are
+      // temporarily disabled until we have a trusted fetch path.
+      const next = await setSettings({ nftMetadataEnabled: false, ipfsGateway });
       return {
         ok: true,
-        nftMetadataEnabled: next.nftMetadataEnabled !== false,
+        nftMetadataEnabled: false,
         ipfsGateway: next.ipfsGateway ?? "",
       };
     }

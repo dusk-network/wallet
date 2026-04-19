@@ -541,12 +541,14 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI sets NFT metadata privacy settings
       if (message?.type === "DUSK_UI_SET_NFT_SETTINGS") {
-        const enabled = message.nftMetadataEnabled !== false;
         const ipfsGateway = String(message.ipfsGateway ?? "");
-        const next = await setSettings({ nftMetadataEnabled: enabled, ipfsGateway });
+        // Keep accepting the message shape so older UIs don't break, but force
+        // metadata/media fetching to remain disabled until we have a trusted
+        // proxy/indexer path.
+        const next = await setSettings({ nftMetadataEnabled: false, ipfsGateway });
         sendResponse({
           ok: true,
-          nftMetadataEnabled: next.nftMetadataEnabled !== false,
+          nftMetadataEnabled: false,
           ipfsGateway: next.ipfsGateway ?? "",
         });
         return;

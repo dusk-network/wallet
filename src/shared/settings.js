@@ -27,8 +27,14 @@ export const DEFAULT_SETTINGS = {
   accountCount: 1,
   /** Selected account index for the wallet UI */
   selectedAccountIndex: 0,
-  /** Whether the wallet may fetch remote NFT metadata/images (privacy toggle). */
-  nftMetadataEnabled: true,
+  /**
+   * Direct NFT metadata/media fetching is temporarily disabled.
+   *
+   * Security rationale: arbitrary tokenURI fetches leak wallet activity to
+   * attacker-controlled hosts. Re-enable only once metadata is served through
+   * a trusted proxy/indexer or an audited allowlisted fetch path.
+   */
+  nftMetadataEnabled: false,
   /** IPFS gateway base used to resolve ipfs:// token URIs. */
   ipfsGateway: "https://ipfs.io/ipfs/",
 };
@@ -113,7 +119,9 @@ export async function getSettings() {
     archiverUrl,
     accountCount,
     selectedAccountIndex,
-    nftMetadataEnabled: merged.nftMetadataEnabled !== false,
+    // Intentionally force this off for now. Older installs may still have
+    // `true` in storage from before the security hardening pass.
+    nftMetadataEnabled: false,
     ipfsGateway: normalizeIpfsGateway(merged.ipfsGateway),
   };
 }
@@ -168,7 +176,7 @@ export async function setSettings(patch) {
   }
 
   if ("nftMetadataEnabled" in patch) {
-    next.nftMetadataEnabled = patch.nftMetadataEnabled !== false;
+    next.nftMetadataEnabled = false;
   }
 
   await storage.set({ [STORAGE_KEYS.SETTINGS]: next });
