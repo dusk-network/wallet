@@ -1,19 +1,18 @@
 // Inpage provider injected into dApp pages.
 //
-// Exposes window.dusk.request({ method, params }) similar to MetaMask's EIP-1193.
-// Additionally supports MetaMask-style push events:
-// - accountsChanged
-// - chainChanged
-// - connect / disconnect
-//
-// NOTE: Dusk isn't EVM. The provider follows an EIP-1193-like interface
-// (request + events) but methods are Dusk-prefixed (dusk_*).
-// In theory we could map to `eth_*` where applicable.
+// The provider itself is still EIP-1193-like (`request`, events, state props),
+// but discovery is no longer based on a shared `window.dusk` singleton.
+// Instead, wallets announce themselves through the Dusk discovery events:
+// - `dusk:requestProvider`
+// - `dusk:announceProvider`
 
 (function () {
-  if (window.dusk) {
+  if (window.duskWallet) {
     return;
   }
+
+  const DUSK_REQUEST_PROVIDER_EVENT = "dusk:requestProvider";
+  const DUSK_ANNOUNCE_PROVIDER_EVENT = "dusk:announceProvider";
 
   const pending = new Map();
   const listeners = new Map();
@@ -24,6 +23,14 @@
     selectedAddress: null,
     isAuthorized: false,
   };
+
+  const walletInfo = Object.freeze({
+    uuid: "wallet.dusk.extension",
+    name: "Dusk Wallet",
+    icon:
+      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop stop-color='%237aa2ff'/%3E%3Cstop offset='1' stop-color='%2333d1ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='18' fill='%23070b14'/%3E%3Cpath d='M21 16h12.5c11.2 0 18.5 6.5 18.5 16s-7.3 16-18.5 16H21V16Zm11.4 24c6.5 0 10.6-3.1 10.6-8s-4.1-8-10.6-8h-2.7v16h2.7Z' fill='url(%23g)'/%3E%3C/svg%3E",
+    rdns: "network.dusk.wallet",
+  });
 
   function shallowArrayEq(a, b) {
     if (a === b) return true;
@@ -63,9 +70,6 @@
     const ls = listeners.get(event) || [];
     ls.push(handler);
     listeners.set(event, ls);
-
-    // Lazy subscription: only open a background port when the site actually
-    // registers for events (or does its first request).
     ensurePushSubscribed();
   }
 
@@ -131,7 +135,6 @@
       throw new Error("Invalid request: method must be a string");
     }
 
-    // Opening a port is cheap enough and enables push events.
     ensurePushSubscribed();
 
     const id =
@@ -154,24 +157,53 @@
     return p;
   }
 
-  // Legacy MetaMask convenience
   function enable() {
-    // Use the Dusk method name to avoid implying EVM compatibility.
     return request({ method: "dusk_requestAccounts" });
   }
 
   function isConnected() {
-    // Provider transport is the extension injection, if this code is running,
-    // we're connected to the extension.
     return true;
   }
+
+  const provider = {
+    isDusk: true,
+    request,
+    enable,
+    on,
+    once,
+    removeListener,
+    off: removeListener,
+    removeAllListeners,
+    isConnected,
+    get chainId() {
+      return state.chainId;
+    },
+    get selectedAddress() {
+      return state.selectedAddress;
+    },
+    get isAuthorized() {
+      return state.isAuthorized;
+    },
+  };
+
+  function announce() {
+    window.dispatchEvent(
+      new CustomEvent(DUSK_ANNOUNCE_PROVIDER_EVENT, {
+        detail: {
+          info: walletInfo,
+          provider,
+        },
+      })
+    );
+  }
+
+  window.addEventListener(DUSK_REQUEST_PROVIDER_EVENT, announce);
 
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     const msg = event.data;
     if (!msg || msg.target !== "DUSK_EXTENSION") return;
 
-    // Background -> content script -> inpage: state snapshot
     if (msg.type === "DUSK_PROVIDER_STATE" && msg.state) {
       const st = msg.state;
       setChainId(st.chainId, { emitEvent: false });
@@ -179,7 +211,6 @@
       return;
     }
 
-    // Background -> content script -> inpage: provider push event
     if (msg.type === "DUSK_PROVIDER_EVENT") {
       const name = msg.name;
       const data = msg.data;
@@ -192,7 +223,6 @@
         return;
       }
       if (name === "connect") {
-        // connect payload: { chainId }
         if (data && typeof data.chainId === "string") {
           setChainId(data.chainId, { emitEvent: false });
         }
@@ -200,18 +230,15 @@
         return;
       }
       if (name === "disconnect") {
-        // disconnect payload: { code, message }
         setAccounts([], { emitEvent: true });
         setAuthorized(false, { emitEvent: true, data });
         return;
       }
 
-      // Pass through unknown events (future-proof)
       emit(name, data);
       return;
     }
 
-    // RPC response
     if (msg.type !== "DUSK_RPC_RESPONSE") return;
 
     const { id, response } = msg;
@@ -231,9 +258,6 @@
     const result = response?.result !== undefined ? response.result : response;
     entry.resolve(result);
 
-    // Update local state for known methods.
-    // (Events will still come from push, but this keeps provider properties fresh
-    // even if listeners aren't registered.)
     const m = entry.method;
     if (m === "dusk_requestAccounts" && Array.isArray(result)) {
       setAccounts(result, { emitEvent: true });
@@ -250,26 +274,10 @@
     }
   });
 
-  // Minimal provider surface
-  window.dusk = {
-    isDusk: true,
-    request,
-    enable,
-    on,
-    once,
-    removeListener,
-    off: removeListener,
-    removeAllListeners,
-    isConnected,
-    // MetaMask-ish properties
-    get chainId() {
-      return state.chainId;
-    },
-    get selectedAddress() {
-      return state.selectedAddress;
-    },
-    get isAuthorized() {
-      return state.isAuthorized;
-    },
-  };
+  // Wallet-specific namespace for debugging / internal use only.
+  window.duskWallet = provider;
+
+  // Announce immediately so already-listening dApps can discover the provider,
+  // and listen for future discovery requests so load order does not matter.
+  announce();
 })();

@@ -1,10 +1,15 @@
 import { TX_KIND } from "./constants.js";
 
-// Canonical dApp/provider surface area for the injected provider (`window.dusk`).
+// Canonical dApp/provider surface area for the discovered Dusk provider.
 //
 // This file is intentionally small and dependency-free so we can:
 // - keep docs and SDK in sync via tests
 // - expose the same information at runtime via `dusk_getCapabilities`
+
+export const DAPP_DISCOVERY_EVENTS = Object.freeze([
+  "dusk:requestProvider",
+  "dusk:announceProvider",
+]);
 
 export const DAPP_RPC_METHODS = Object.freeze([
   "dusk_getCapabilities",
