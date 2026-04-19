@@ -11,6 +11,13 @@ export const DAPP_DISCOVERY_EVENTS = Object.freeze([
   "dusk:announceProvider",
 ]);
 
+export const DAPP_DISCOVERY_INFO_FIELDS = Object.freeze([
+  "uuid",
+  "name",
+  "icon",
+  "rdns",
+]);
+
 export const DAPP_RPC_METHODS = Object.freeze([
   "dusk_getCapabilities",
   "dusk_requestAccounts",

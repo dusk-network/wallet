@@ -2,6 +2,8 @@
 
 The Dusk Wallet extension announces a provider into web pages through **Dusk discovery events**. The provider itself is modeled after EIP-1193 (MetaMask's interface), but Dusk isn't EVM, so all methods use `dusk_*` prefixes.
 
+The canonical discovery protocol is documented in [`@dusk-network/connect`](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md).
+
 ## Quick Start
 
 ```js
@@ -38,6 +40,11 @@ const { hash } = await dusk.request({
 
 Wallet discovery is event-based so multiple Dusk wallets can coexist on the page.
 
+Canonical discovery events:
+
+- `dusk:requestProvider`
+- `dusk:announceProvider`
+
 ```js
 window.addEventListener("dusk:announceProvider", (event) => {
   const { info, provider } = event.detail;
@@ -48,6 +55,11 @@ window.dispatchEvent(new Event("dusk:requestProvider"));
 ```
 
 Announced provider metadata:
+
+- `uuid`
+- `name`
+- `icon`
+- `rdns`
 
 ```js
 {
