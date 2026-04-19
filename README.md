@@ -40,7 +40,7 @@ A non-custodial wallet for [Dusk](https://dusk.network). Chrome and Firefox exte
 
 ⚡ **Public & Shielded** — Send from your public account or shield funds for privacy.
 
-🌐 **dApp Ready** — Connect to any Dusk dApp. MetaMask-style `window.dusk` provider.
+🌐 **dApp Ready** — Connect to any Dusk dApp through event-based provider discovery.
 
 🔄 **Multi-network** — Switch between mainnet, testnet, devnet, or custom nodes.
 
@@ -67,23 +67,20 @@ Then load `dist-firefox/` as a temporary add-on in `about:debugging`.
 
 ## For dApp Developers
 
-The extension injects `window.dusk`—an EIP-1193-style provider. Dusk isn't EVM, but the patterns are familiar.
+The extension announces an EIP-1193-style provider through Dusk discovery events. Dusk isn't EVM, but the provider patterns are familiar.
 
 ```js
-// Connect
-const [account] = await dusk.request({ method: "dusk_requestAccounts" });
+const providers = [];
 
-// Send DUSK
-await dusk.request({
-  method: "dusk_sendTransaction",
-  params: {
-    kind: "transfer",
-    to: account,
-    amount: "1000000000"  // 1 DUSK
-  }
+window.addEventListener("dusk:announceProvider", (event) => {
+  providers.push(event.detail);
 });
 
-// Listen for changes
+window.dispatchEvent(new Event("dusk:requestProvider"));
+
+const dusk = providers[0]?.provider;
+const [account] = await dusk.request({ method: "dusk_requestAccounts" });
+
 dusk.on("accountsChanged", console.log);
 dusk.on("chainChanged", console.log);
 ```

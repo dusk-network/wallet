@@ -13,7 +13,7 @@ Dusk Wallet is a multi-platform self-custody wallet supporting:
 The architecture prioritizes:
 1. **Security** — Mnemonic never leaves device, encrypted at rest
 2. **Code reuse** — Shared core logic across all platforms
-3. **dApp compatibility** — MetaMask-style provider API
+3. **dApp compatibility** — Event-based wallet discovery + EIP-1193-like provider API
 
 ---
 
@@ -293,15 +293,14 @@ const result = await state.network.execute(tx);
 
 ### Injection
 
-The provider is injected into web pages via content script:
+The provider is injected into web pages via content script and announced through discovery events:
 
 ```js
-// contentScript.js → injects inpage.js
-window.dusk = {
-  request({ method, params }) { ... },
-  on(event, handler) { ... },
-  // ...
-};
+window.addEventListener("dusk:announceProvider", (event) => {
+  const { info, provider } = event.detail;
+});
+
+window.dispatchEvent(new Event("dusk:requestProvider"));
 ```
 
 ### RPC Methods

@@ -1,10 +1,21 @@
 # Dusk Provider API
 
-The Dusk Wallet extension injects `window.dusk` into web pages. It's modeled after EIP-1193 (MetaMask's interface), but Dusk isn't EVM—so all methods use `dusk_*` prefixes.
+The Dusk Wallet extension announces a provider into web pages through **Dusk discovery events**. The provider itself is modeled after EIP-1193 (MetaMask's interface), but Dusk isn't EVM, so all methods use `dusk_*` prefixes.
 
 ## Quick Start
 
 ```js
+const providers = [];
+
+window.addEventListener("dusk:announceProvider", (event) => {
+  providers.push(event.detail);
+});
+
+window.dispatchEvent(new Event("dusk:requestProvider"));
+
+const dusk = providers[0]?.provider;
+if (!dusk) throw new Error("Dusk wallet not installed");
+
 // Connect to wallet (prompts user)
 const [account] = await dusk.request({ method: "dusk_requestAccounts" });
 
@@ -23,10 +34,39 @@ const { hash } = await dusk.request({
 });
 ```
 
+## Discovery
+
+Wallet discovery is event-based so multiple Dusk wallets can coexist on the page.
+
+```js
+window.addEventListener("dusk:announceProvider", (event) => {
+  const { info, provider } = event.detail;
+  console.log(info.uuid, info.name, info.rdns);
+});
+
+window.dispatchEvent(new Event("dusk:requestProvider"));
+```
+
+Announced provider metadata:
+
+```js
+{
+  info: {
+    uuid: string,
+    name: string,
+    icon: string,
+    rdns: string
+  },
+  provider: DuskProvider
+}
+```
+
+Wallets may also expose a wallet-specific namespace for debugging or internal use, but dApps should treat the discovery events as the canonical integration surface.
+
 ## Provider Surface
 
 ```js
-window.dusk = {
+provider = {
   // Core
   request({ method, params }) → Promise<any>,
   
@@ -341,7 +381,15 @@ Errors are thrown as `Error` objects with `.code`, `.message`, and optional `.da
 ## Full Example
 
 ```js
-const dusk = window.dusk;
+const providers = [];
+
+window.addEventListener("dusk:announceProvider", (event) => {
+  providers.push(event.detail);
+});
+
+window.dispatchEvent(new Event("dusk:requestProvider"));
+
+const dusk = providers[0]?.provider;
 if (!dusk) throw new Error("Dusk wallet not installed");
 
 // Subscribe to state changes
