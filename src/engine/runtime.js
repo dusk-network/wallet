@@ -1,6 +1,5 @@
 import {
   configure,
-  addAccount,
   getAccounts,
   getAddresses,
   getCachedGasPrice,
@@ -54,7 +53,19 @@ const ext = getExtensionApi();
 let enginePreloadError = null;
 let enginePreloadDone = false;
 
+function engineDebugEnabled() {
+  try {
+    return (
+      globalThis.__DUSK_ENGINE_DEBUG__ === true ||
+      globalThis.localStorage?.getItem?.("dusk_engine_debug") === "1"
+    );
+  } catch {
+    return false;
+  }
+}
+
 setEngineDebugHook((payload) => {
+  if (!engineDebugEnabled()) return;
   try {
     runtimeSendMessage(
       {
@@ -202,12 +213,6 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
 
         case "engine_selectAccount": {
           const res = await selectAccountIndex(params ?? {});
-          sendResponse({ id, result: res });
-          return;
-        }
-
-        case "engine_addAccount": {
-          const res = await addAccount();
           sendResponse({ id, result: res });
           return;
         }

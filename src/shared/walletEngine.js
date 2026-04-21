@@ -204,9 +204,12 @@ let engineConfig = {
   nodeUrl: "https://testnet.nodes.dusk.network",
   proverUrl: "https://testnet.provers.dusk.network",
   archiverUrl: "https://testnet.nodes.dusk.network",
-  accountCount: 1,
+  accountCount: 2,
   selectedAccountIndex: 0,
 };
+
+const NETWORK_RETRY_BASE_MS = 5_000;
+const NETWORK_RETRY_MAX_MS = 60_000;
 
 let engineDebugHook = null;
 
@@ -258,6 +261,7 @@ export function configure(patch = {}) {
         state.network?.disconnect?.();
       } catch {}
       state.protocolLoaded = false;
+      state.networkFailure = null;
       try {
         // Some implementations may use close().
         state.network?.close?.();
@@ -447,6 +451,7 @@ const state = {
   profileGenerator: null,
   network: null,
   networkConnectPromise: null,
+  networkFailure: null,
   treasury: null,
   bookkeeper: null,
   treasuryAll: null,
@@ -740,23 +745,6 @@ export async function selectAccountIndex({ index } = {}) {
   };
 }
 
-export async function addAccount() {
-  if (!state.unlocked) throw new Error("Wallet locked");
-  if (!state.profileGenerator) throw new Error("No profile generator (wallet not unlocked?)");
-  if (state.profiles.length >= MAX_ACCOUNT_COUNT) {
-    throw new Error(`Only ${MAX_ACCOUNT_COUNT} accounts are supported right now`);
-  }
-  await ensureProtocolDriverLoaded();
-  const p = await state.profileGenerator.next();
-  state.profiles.push(p);
-  state.currentIndex = state.profiles.length - 1;
-  return {
-    selectedAccountIndex: state.currentIndex,
-    accounts: getAccounts(),
-    addresses: getAddresses(),
-  };
-}
-
 export function getAccounts() {
   // Return public account identifiers (base58)
   return state.profiles.map((p) => p.account.toString());
@@ -797,8 +785,40 @@ export async function preloadProtocolDriver() {
   await ensureProtocolDriverLoaded();
 }
 
+function networkRetryDelay(attempts) {
+  const exponent = Math.max(0, Math.min(Number(attempts || 1) - 1, 4));
+  return Math.min(NETWORK_RETRY_BASE_MS * 2 ** exponent, NETWORK_RETRY_MAX_MS);
+}
+
+function throwIfNetworkBackoffActive(nodeUrl) {
+  const failure = state.networkFailure;
+  if (!failure || failure.nodeUrl !== nodeUrl) return;
+  if (Date.now() >= Number(failure.retryAt || 0)) return;
+  throw new Error(failure.message || `Failed to connect to node ${nodeUrl}`);
+}
+
+function recordNetworkFailure(nodeUrl, err) {
+  const previous = state.networkFailure?.nodeUrl === nodeUrl ? state.networkFailure : null;
+  const attempts = Math.max(1, Number(previous?.attempts || 0) + 1);
+  const message = formatWsError(err, nodeUrl);
+  state.networkFailure = {
+    nodeUrl,
+    message,
+    attempts,
+    failedAt: Date.now(),
+    retryAt: Date.now() + networkRetryDelay(attempts),
+  };
+  return message;
+}
+
 export async function ensureNetwork() {
   const url = new URL(engineConfig.nodeUrl);
+  const nodeUrl = url.toString();
+
+  // UI overview can be requested repeatedly while a node is offline. Keep
+  // retries bounded so unavailable local/custom nodes do not hammer WebSocket
+  // connect attempts or spam extension logs.
+  throwIfNetworkBackoffActive(nodeUrl);
 
   // Always load the protocol driver first. Even if the network is already
   // connected, Bookkeeper operations (shielded balance, tx building, etc.)
@@ -858,7 +878,10 @@ export async function ensureNetwork() {
 
           // Some w3sper versions may mutate internal callables during connect().
           patchNetworkEndpoints(state.network);
+          state.networkFailure = null;
         } catch (err) {
+          const message = recordNetworkFailure(nodeUrl, err);
+
           // Drop the cached network/bookkeeper objects so a retry starts from a
           // clean state.
           try {
@@ -878,7 +901,7 @@ export async function ensureNetwork() {
           state.treasuryAll = null;
           state.bookkeeperAll = null;
 
-          throw new Error(formatWsError(err, url.toString()));
+          throw new Error(message);
         } finally {
           state.networkConnectPromise = null;
         }
@@ -1617,8 +1640,13 @@ export async function startShieldedSync({ force = false } = {}) {
           state.shielded.syncPromise = null;
           return { started: false, status: getShieldedStatus() };
         }
-      } catch {
-        // ignore; we'll attempt a normal sync below
+      } catch (e) {
+        setShieldedStatus({
+          state: "error",
+          lastError: e?.message ? String(e.message) : String(e),
+        });
+        broadcastShieldedStatus("error");
+        return { started: false, status: getShieldedStatus() };
       }
     }
 

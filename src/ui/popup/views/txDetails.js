@@ -217,7 +217,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : null;
     if (idx !== null) {
       const name = String(ov?.accountNames?.[String(idx)] ?? "").trim();
-      accountLabel = name ? `${name} (Account ${idx + 1})` : `Account ${idx + 1}`;
+      accountLabel = name ? `${name} (Profile ${idx + 1})` : `Profile ${idx + 1}`;
     }
   } catch {
     accountLabel = null;
@@ -226,7 +226,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const detailsRows = [
     kvRow("Tx hash", hash, { mono: true }),
     tx?.origin ? kvRow("Origin", String(tx.origin), { mono: true }) : null,
-    accountLabel ? kvRow("Account", accountLabel) : null,
+    accountLabel ? kvRow("Profile", accountLabel) : null,
     tx?.to ? kvRow("To", String(tx.to), { mono: true }) : null,
     tx?.contractId ? kvRow("Contract", String(tx.contractId), { mono: true }) : null,
     tx?.fnName ? kvRow("Method", String(tx.fnName), { mono: true }) : null,

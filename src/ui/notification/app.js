@@ -312,8 +312,8 @@ export async function renderNotification() {
               : "";
             if (name && acctText) return `${name} · ${acctText}`;
             if (name) return `${name}`;
-            if (acctText) return `Account ${i + 1} · ${acctText}`;
-            return `Account ${i + 1}`;
+            if (acctText) return `Profile ${i + 1} · ${acctText}`;
+            return `Profile ${i + 1}`;
           })(),
         })
       )
@@ -325,14 +325,14 @@ export async function renderNotification() {
     setApp([
       header,
       h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Connect this site to your Dusk account?" }),
+        h("div", { class: "muted", text: "Connect this site to a Dusk profile?" }),
       ]),
       h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Account" }),
+        h("div", { class: "muted", text: "Profile" }),
         h("div", { class: "select-wrap" }, [accountSelect]),
         h("div", {
           class: "muted",
-          text: "The site will only be able to use the selected public account.",
+          text: "The site will only be able to use the selected profile's public account.",
         }),
       ]),
       decisionButtons("Connect", () => ({ accountIndex: Number(accountSelect.value) })),

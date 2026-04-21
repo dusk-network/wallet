@@ -21,7 +21,8 @@ export const TX_KIND = Object.freeze({
 /**
  * Maximum number of wallet profiles supported by the UI/engine.
  *
- * Note: Shielded note scanning cost scales with the number of profiles. The
- * upstream CLI wallet defaults to a low number of profiles as well.
+ * Note: Shielded note scanning cost scales with the number of profiles. Match
+ * the CLI wallet's two-profile default/limit until there is a product reason
+ * to support broader account discovery.
  */
-export const MAX_ACCOUNT_COUNT = 5;
+export const MAX_ACCOUNT_COUNT = 2;

@@ -361,24 +361,10 @@ const acctMenu = createAccountMenuController({
     try {
       acctMenu.close();
       const resp = await send({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index });
-      if (resp?.error) throw new Error(resp.error.message ?? "Failed to switch account");
-      if (!resp?.ok) throw new Error("Failed to switch account");
+      if (resp?.error) throw new Error(resp.error.message ?? "Failed to switch profile");
+      if (!resp?.ok) throw new Error("Failed to switch profile");
 
-      showToast("Account selected.");
-      state.needsRefresh = true;
-      await render({ forceRefresh: true });
-    } catch (e) {
-      showToast(e?.message ?? String(e));
-    }
-  },
-  onAddAccount: async () => {
-    try {
-      acctMenu.close();
-      const resp = await send({ type: "DUSK_UI_ADD_ACCOUNT" });
-      if (resp?.error) throw new Error(resp.error.message ?? "Failed to add account");
-      if (!resp?.ok) throw new Error("Failed to add account");
-
-      showToast("Account added.");
+      showToast("Profile selected.");
       state.needsRefresh = true;
       await render({ forceRefresh: true });
     } catch (e) {

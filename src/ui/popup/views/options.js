@@ -29,7 +29,7 @@ export function optionsView(ov, { state, actions } = {}) {
       })
     : null;
 
-  // Account selector (multi-account)
+  // Profile selector. Each profile has its own public account + shielded keypair.
   const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
   const selectedAccountIndex = Number(ov?.selectedAccountIndex ?? 0) || 0;
   const accountCount = Math.min(
@@ -53,8 +53,8 @@ export function optionsView(ov, { state, actions } = {}) {
           const acctText = String(acct) ? truncateMiddle(String(acct), 8, 6) : "";
           if (name && acctText) return `${name} · ${acctText}`;
           if (name) return name;
-          if (acctText) return `Account ${i + 1} · ${acctText}`;
-          return `Account ${i + 1}`;
+          if (acctText) return `Profile ${i + 1} · ${acctText}`;
+          return `Profile ${i + 1}`;
         })(),
       })
     )
@@ -69,7 +69,7 @@ export function optionsView(ov, { state, actions } = {}) {
         type: "DUSK_UI_SET_ACCOUNT_INDEX",
         index: Number(accountSelect.value),
       });
-      actions?.showToast?.("Account selected.");
+      actions?.showToast?.("Profile selected.");
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
     } catch (e) {
@@ -77,40 +77,20 @@ export function optionsView(ov, { state, actions } = {}) {
     }
   });
 
-  const canAddAccount = displayAccounts.length < MAX_ACCOUNT_COUNT;
-  const addAccountBtn = ov?.isUnlocked && canAddAccount
-    ? h("button", {
-        class: "btn-outline",
-        text: "Add account",
-        onclick: async () => {
-          try {
-            const resp = await actions?.send?.({ type: "DUSK_UI_ADD_ACCOUNT" });
-            if (resp?.error) throw new Error(resp.error.message ?? "Failed to add account");
-            if (!resp?.ok) throw new Error("Failed to add account");
-            actions?.showToast?.("Account added.");
-            state.needsRefresh = true;
-            await actions?.render?.({ forceRefresh: true });
-          } catch (e) {
-            actions?.showToast?.(e?.message ?? String(e), 2500);
-          }
-        },
-      })
-    : null;
-
   const walletId = ov?.isUnlocked && accounts.length ? String(accounts[0] ?? "").trim() : "";
   const accountNamesEditor = ov?.isUnlocked && walletId
     ? h("div", { class: "row" }, [
-        h("label", { text: "Account names" }),
+        h("label", { text: "Profile names" }),
         ...displayAccounts.map((acct, i) => {
           const input = h("input", {
-            placeholder: `Account ${i + 1} name (optional)`,
+            placeholder: `Profile ${i + 1} name (optional)`,
             value: String(nameMap?.[String(i)] ?? ""),
           });
 
           input.addEventListener("change", async () => {
             try {
               await setAccountName(walletId, i, input.value);
-              actions?.showToast?.("Account name saved.");
+              actions?.showToast?.("Profile name saved.");
               state.needsRefresh = true;
               await actions?.render?.({ forceRefresh: true });
             } catch (e) {
@@ -120,7 +100,7 @@ export function optionsView(ov, { state, actions } = {}) {
 
           const addr = String(acct ?? "").trim();
           return h("div", { class: "row" }, [
-            h("div", { class: "muted", text: `Account ${i + 1}` }),
+            h("div", { class: "muted", text: `Profile ${i + 1}` }),
             input,
             addr
               ? h("div", { class: "muted" }, [h("code", { text: addr })])
@@ -312,8 +292,8 @@ export function optionsView(ov, { state, actions } = {}) {
                     const acctText = String(acct) ? truncateMiddle(String(acct), 6, 4) : "";
                     if (name && acctText) return `${name} · ${acctText}`;
                     if (name) return name;
-                    if (acctText) return `Account ${i + 1} · ${acctText}`;
-                    return `Account ${i + 1}`;
+                    if (acctText) return `Profile ${i + 1} · ${acctText}`;
+                    return `Profile ${i + 1}`;
                   })(),
                 })
               )
@@ -329,7 +309,7 @@ export function optionsView(ov, { state, actions } = {}) {
                   origin,
                   accountIndex: Number(sel.value),
                 });
-                actions?.showToast?.("Updated site account.");
+                actions?.showToast?.("Updated site profile.");
                 state.needsRefresh = true;
                 await actions?.render?.({ forceRefresh: true });
               } catch (e) {
@@ -413,12 +393,11 @@ export function optionsView(ov, { state, actions } = {}) {
     lockBtn ? h("div", { class: "row" }, [h("div", { class: "btnrow" }, [lockBtn])]) : null,
     ov?.isUnlocked
       ? h("div", { class: "row" }, [
-          h("label", { text: "Account" }),
+          h("label", { text: "Active profile" }),
           h("div", { class: "select-wrap" }, [accountSelect]),
-          addAccountBtn ? h("div", { class: "btnrow" }, [addAccountBtn]) : null,
           h("div", {
             class: "muted",
-            text: "This controls which account the wallet UI is operating on.",
+            text: "Dusk wallets expose two deterministic profiles, matching the CLI wallet.",
           }),
         ].filter(Boolean))
       : null,

@@ -20,7 +20,6 @@ import {
 } from "../shared/assetsStore.js";
 import {
   configure,
-  addAccount,
   getAccounts,
   getAddresses,
   getCachedGasPrice,
@@ -301,6 +300,8 @@ export async function localSend(message) {
       }
 
       if (status.isUnlocked) {
+        let publicBalanceAvailable = false;
+
         try {
           addresses = getAddresses() ?? [];
         } catch {
@@ -310,15 +311,9 @@ export async function localSend(message) {
         try {
           const bal = await getPublicBalance();
           balance = { nonce: bal.nonce.toString(), value: bal.value.toString() };
+          publicBalanceAvailable = true;
         } catch (e) {
           balanceError = e?.message ?? String(e);
-        }
-
-        try {
-          // Kick off incremental sync (non-blocking)
-          await startShieldedSync({ force: false });
-        } catch {
-          // ignore
         }
 
         try {
@@ -327,14 +322,25 @@ export async function localSend(message) {
           shieldedSync = null;
         }
 
-        try {
-          const sb = await getShieldedBalance();
-          shieldedBalance = {
-            value: sb.value?.toString?.() ?? String(sb.value),
-            spendable: sb.spendable?.toString?.() ?? String(sb.spendable),
-          };
-        } catch (e) {
-          shieldedError = e?.message ?? String(e);
+        if (publicBalanceAvailable) {
+          try {
+            // Kick off incremental sync (non-blocking)
+            await startShieldedSync({ force: false });
+          } catch {
+            // ignore
+          }
+
+          try {
+            const sb = await getShieldedBalance();
+            shieldedBalance = {
+              value: sb.value?.toString?.() ?? String(sb.value),
+              spendable: sb.spendable?.toString?.() ?? String(sb.spendable),
+            };
+          } catch (e) {
+            shieldedError = e?.message ?? String(e);
+          }
+        } else {
+          shieldedError = balanceError;
         }
       }
 
@@ -556,25 +562,6 @@ export async function localSend(message) {
       await setSettings({ selectedAccountIndex: clamped });
       await ensureEngineConfigured();
       const res = await selectAccountIndex({ index: clamped });
-      return { ok: true, result: res };
-    }
-
-    // UI derives a new account (next profile)
-    if (message?.type === "DUSK_UI_ADD_ACCOUNT") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-
-      await ensureEngineConfigured();
-      const res = await addAccount();
-      const accounts = Array.isArray(res?.accounts) ? res.accounts : [];
-      const selectedAccountIndex = Number(res?.selectedAccountIndex ?? 0) || 0;
-      await setSettings({
-        accountCount: Math.max(1, accounts.length || 1),
-        selectedAccountIndex,
-      });
-
       return { ok: true, result: res };
     }
 

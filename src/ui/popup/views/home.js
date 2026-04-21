@@ -357,14 +357,14 @@ export function homeView(ov, { state, actions } = {}) {
     const isHighlight = state?.highlightTx && String(state.highlightTx) === hash;
     const pulse = pulseClassFor(hash);
 
-    // Account label (use stored profileIndex when available).
+    // Profile label (use stored profileIndex when available).
     let acctLabel = "";
     try {
       const idxRaw = Number(tx?.profileIndex);
       const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : null;
       if (idx !== null) {
         const name = String(ov?.accountNames?.[String(idx)] ?? "").trim();
-        acctLabel = name || `Account ${idx + 1}`;
+        acctLabel = name || `Profile ${idx + 1}`;
       }
     } catch {
       acctLabel = "";

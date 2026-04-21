@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 
 import { bytesToHex, sha256Hex, toBytes } from "./bytes.js";
-import { MAX_ACCOUNT_COUNT } from "./constants.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -289,6 +288,14 @@ describe("walletEngine", () => {
     vi.unstubAllGlobals();
   });
 
+  it("derives the CLI-aligned two default profiles on unlock", async () => {
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    expect(engine.getAccounts()).toEqual(["acct0", "acct1"]);
+    expect(engine.getAddresses()).toEqual(["addr0", "addr1"]);
+    expect(engine.getSelectedAccountIndex()).toBe(0);
+  });
+
   it("restores multiple derived accounts on unlock", async () => {
     engine.configure({ accountCount: 2, selectedAccountIndex: 1 });
     await engine.unlockWithMnemonic(MNEMONIC);
@@ -309,20 +316,6 @@ describe("walletEngine", () => {
     expect(res.selectedAccountIndex).toBe(1);
     expect(res.accounts).toEqual(["acct0", "acct1"]);
     expect(engine.getSelectedAccountIndex()).toBe(1);
-  });
-
-  it("addAccount derives the next profile and selects it", async () => {
-    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
-    await engine.unlockWithMnemonic(MNEMONIC);
-
-    // Derive up to the supported limit.
-    for (let i = 2; i <= MAX_ACCOUNT_COUNT; i++) {
-      const res = await engine.addAccount();
-      expect(res.selectedAccountIndex).toBe(i - 1);
-      expect(res.accounts).toHaveLength(i);
-    }
-
-    await expect(engine.addAccount()).rejects.toThrow(new RegExp(`Only ${MAX_ACCOUNT_COUNT} accounts`, "i"));
   });
 
   it("signMessage signs a domain-separated envelope (uses selected profileIndex)", async () => {

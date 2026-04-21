@@ -23,7 +23,7 @@ test.beforeEach(async ({ page }) => {
   }, { nodeUrl });
 });
 
-test("import wallet, add second account, name + switch accounts", async ({ page }) => {
+test("import wallet, name + switch default accounts", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByText("Set up your Dusk Wallet")).toBeVisible();
@@ -40,37 +40,35 @@ test("import wallet, add second account, name + switch accounts", async ({ page 
   // Home view
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 120_000 });
 
-  // Open settings and add a second account
+  // Open settings; the wallet defaults to the same two profiles as the CLI.
   await page.getByTitle("Options").click();
   await expect(page.getByText("Settings")).toBeVisible();
-
-  await page.getByRole("button", { name: "Add account" }).click();
   await expect(page.locator("select#account option")).toHaveCount(2);
 
-  // Set per-account names (saved on change/blur).
-  const name1 = page.getByPlaceholder("Account 1 name (optional)");
+  // Set per-profile names (saved on change/blur).
+  const name1 = page.getByPlaceholder("Profile 1 name (optional)");
   await name1.fill("Main");
   await name1.press("Tab");
-  await expect(page.getByPlaceholder("Account 1 name (optional)")).toHaveValue("Main");
+  await expect(page.getByPlaceholder("Profile 1 name (optional)")).toHaveValue("Main");
 
-  const name2 = page.getByPlaceholder("Account 2 name (optional)");
+  const name2 = page.getByPlaceholder("Profile 2 name (optional)");
   await name2.fill("Spending");
   await name2.press("Tab");
-  await expect(page.getByPlaceholder("Account 2 name (optional)")).toHaveValue("Spending");
+  await expect(page.getByPlaceholder("Profile 2 name (optional)")).toHaveValue("Spending");
 
   // Back to home so the header switcher is visible
   await page.getByRole("button", { name: "← Back" }).click();
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
 
-  // Open account menu and switch
-  await page.getByTitle("Switch account").click();
-  await expect(page.getByText("Select account")).toBeVisible();
+  // Open profile menu and switch
+  await page.getByTitle("Switch profile").click();
+  await expect(page.getByText("Select profile")).toBeVisible();
   await expect(page.getByText("Main")).toBeVisible();
   await expect(page.getByText("Spending")).toBeVisible();
 
   await page.getByRole("button", { name: /Spending/ }).click();
 
-  // Verify switch persisted (Settings selector now points to account 2)
+  // Verify switch persisted (Settings selector now points to profile 2)
   await page.getByTitle("Options").click();
   await expect(page.locator("select#account")).toHaveValue("1");
 });

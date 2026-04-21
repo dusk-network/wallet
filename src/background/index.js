@@ -187,7 +187,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "DUSK_ENGINE_PROGRESS") {
     try {
-      console.log("[engine]", message.payload);
+      if (globalThis.__DUSK_ENGINE_DEBUG__ === true) {
+        console.log("[engine]", message.payload);
+      }
     } catch {
       // ignore
     }
@@ -358,26 +360,6 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         await setSettings({ selectedAccountIndex: clamped });
         await ensureEngineConfigured();
         const res = await engineCall("engine_selectAccount", { index: clamped });
-        sendResponse({ ok: true, result: res });
-        return;
-      }
-
-      // UI derives a new account (next profile)
-      if (message?.type === "DUSK_UI_ADD_ACCOUNT") {
-        const status = await getEngineStatus();
-        if (!status.isUnlocked) {
-          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-        }
-
-        await ensureEngineConfigured();
-        const res = await engineCall("engine_addAccount");
-        const accounts = Array.isArray(res?.accounts) ? res.accounts : [];
-        const selectedAccountIndex = Number(res?.selectedAccountIndex ?? 0) || 0;
-        await setSettings({
-          accountCount: Math.max(1, accounts.length || 1),
-          selectedAccountIndex,
-        });
-
         sendResponse({ ok: true, result: res });
         return;
       }
@@ -629,6 +611,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
 
         if (status.isUnlocked) {
+          let publicBalanceAvailable = false;
+
           try {
             await ensureEngineConfigured();
             addresses = (await engineCall("dusk_getAddresses")) ?? [];
@@ -639,6 +623,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           try {
             await ensureEngineConfigured();
             balance = await engineCall("dusk_getPublicBalance");
+            publicBalanceAvailable = true;
           } catch (e) {
             balanceError = e?.message ?? String(e);
           }
@@ -660,28 +645,32 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             shieldedSync = fallbackShieldedStatus;
           }
 
-          try {
-            await ensureEngineConfigured();
-            const st = shieldedSync?.state;
-            const age = Date.now() - Number(shieldedSync?.updatedAt || 0);
-            const shouldAuto =
-              st === "idle" ||
-              st === "error" ||
-              (st === "done" && age > 30_000);
+          if (publicBalanceAvailable) {
+            try {
+              await ensureEngineConfigured();
+              const st = shieldedSync?.state;
+              const age = Date.now() - Number(shieldedSync?.updatedAt || 0);
+              const shouldAuto =
+                st === "idle" ||
+                st === "error" ||
+                (st === "done" && age > 30_000);
 
-            if (shouldAuto) {
-              // Fire-and-forget: don't await, avoid slowing down overview.
-              engineCall("dusk_syncShielded", { force: false }).catch(() => {});
+              if (shouldAuto) {
+                // Fire-and-forget: don't await, avoid slowing down overview.
+                engineCall("dusk_syncShielded", { force: false }).catch(() => {});
+              }
+            } catch {
+              // ignore
             }
-          } catch {
-            // ignore
-          }
 
-          try {
-            await ensureEngineConfigured();
-            shieldedBalance = await engineCall("dusk_getShieldedBalance");
-          } catch (e) {
-            shieldedError = e?.message ?? String(e);
+            try {
+              await ensureEngineConfigured();
+              shieldedBalance = await engineCall("dusk_getShieldedBalance");
+            } catch (e) {
+              shieldedError = e?.message ?? String(e);
+            }
+          } else {
+            shieldedError = balanceError;
           }
         }
 

@@ -1,14 +1,12 @@
 import { h } from "../lib/dom.js";
 import { truncateMiddle } from "../lib/strings.js";
-import { MAX_ACCOUNT_COUNT } from "../../shared/constants.js";
 
 /**
- * Small controller that renders the account selection menu under an anchor.
+ * Small controller that renders the profile selection menu under an anchor.
  * Uses the same base classes as the network menu so ui.css styling applies.
  */
 export function createAccountMenuController({
   onSelectAccountIndex,
-  onAddAccount,
   onOpenOptions,
 } = {}) {
   let menuEl = null;
@@ -42,7 +40,7 @@ export function createAccountMenuController({
     const items = displayAccounts.map((acct, i) => {
       const active = i === selIdx;
       const name = String(nameMap?.[String(i)] ?? "").trim();
-      const label = name || `Account ${i + 1}`;
+      const label = name || `Profile ${i + 1}`;
       const hint = acct ? truncateMiddle(String(acct), 12, 10) : "";
 
       const left = h("div", { class: "net-menu-item-left" }, [
@@ -74,28 +72,6 @@ export function createAccountMenuController({
       );
     });
 
-    const canAddAccount = typeof onAddAccount === "function" && count < MAX_ACCOUNT_COUNT;
-    const addAccountBtn = !canAddAccount
-      ? null
-      : h("button", {
-          class: "net-menu-item",
-          type: "button",
-          onclick: async () => {
-            try {
-              close();
-              await onAddAccount?.();
-            } catch (e) {
-              alert(e?.message ?? String(e));
-            }
-          },
-        }, [
-          h("div", { class: "net-menu-item-left" }, [
-            h("div", { class: "net-menu-item-label", text: "Add account" }),
-            h("div", { class: "net-menu-item-hint", text: `Derive profile ${count + 1} of ${MAX_ACCOUNT_COUNT}` }),
-          ]),
-          h("div", { class: "net-menu-check", text: "+" }),
-        ]);
-
     const manageAccountsBtn =
       typeof onOpenOptions !== "function"
         ? null
@@ -112,17 +88,16 @@ export function createAccountMenuController({
             },
           }, [
             h("div", { class: "net-menu-item-left" }, [
-              h("div", { class: "net-menu-item-label", text: "Manage accounts" }),
+              h("div", { class: "net-menu-item-label", text: "Manage profiles" }),
               h("div", { class: "net-menu-item-hint", text: "Settings" }),
             ]),
             h("div", { class: "net-menu-check", text: "›" }),
           ]);
 
     const menu = h("div", { class: "net-menu acct-menu", role: "menu" }, [
-      h("div", { class: "net-menu-title", text: "Select account" }),
+      h("div", { class: "net-menu-title", text: "Select profile" }),
       ...items,
-      addAccountBtn || manageAccountsBtn ? h("div", { class: "divider" }) : null,
-      addAccountBtn,
+      manageAccountsBtn ? h("div", { class: "divider" }) : null,
       manageAccountsBtn,
     ].filter(Boolean));
 

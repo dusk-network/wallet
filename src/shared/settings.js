@@ -24,7 +24,7 @@ export const DEFAULT_SETTINGS = {
   /** Auto-lock timeout in minutes (0 = disabled) */
   autoLockTimeoutMinutes: 5,
   /** Number of derived accounts (public + shielded keypairs) */
-  accountCount: 1,
+  accountCount: 2,
   /** Selected account index for the wallet UI */
   selectedAccountIndex: 0,
   /**
@@ -101,8 +101,10 @@ export async function getSettings() {
   }
 
   // Account settings
-  let accountCount = Number(merged.accountCount ?? 1);
-  if (!Number.isFinite(accountCount) || accountCount < 1) accountCount = 1;
+  let accountCount = Number(merged.accountCount ?? DEFAULT_SETTINGS.accountCount);
+  if (!Number.isFinite(accountCount) || accountCount < DEFAULT_SETTINGS.accountCount) {
+    accountCount = DEFAULT_SETTINGS.accountCount;
+  }
   accountCount = Math.floor(accountCount);
   accountCount = Math.min(accountCount, MAX_ACCOUNT_COUNT);
 
@@ -164,8 +166,10 @@ export async function setSettings(patch) {
 
   // Clamp account settings on write as well (avoid persisting invalid values).
   if ("accountCount" in patch) {
-    let n = Number(next.accountCount ?? 1);
-    if (!Number.isFinite(n) || n < 1) n = 1;
+    let n = Number(next.accountCount ?? DEFAULT_SETTINGS.accountCount);
+    if (!Number.isFinite(n) || n < DEFAULT_SETTINGS.accountCount) {
+      n = DEFAULT_SETTINGS.accountCount;
+    }
     next.accountCount = Math.min(Math.floor(n), MAX_ACCOUNT_COUNT);
   }
   if ("selectedAccountIndex" in patch || "accountCount" in patch) {
