@@ -759,7 +759,7 @@ async function ensureProtocolDriverLoaded() {
 
   // Load wasm bytes packaged with the extension, or from web/tauri assets.
   const loadStart = engineNow();
-  const wasmUrl = assetUrl("wallet_core-1.3.0.wasm");
+  const wasmUrl = assetUrl("wallet_core-1.6.0.wasm");
   debugEngine("protocol_driver_load_start", { wasmUrl });
   const fetchStart = engineNow();
   const buffer = await fetch(wasmUrl).then((r) => r.arrayBuffer());
