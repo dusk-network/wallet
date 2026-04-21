@@ -84,7 +84,9 @@ export function optionsView(ov, { state, actions } = {}) {
         text: "Add account",
         onclick: async () => {
           try {
-            await actions?.send?.({ type: "DUSK_UI_ADD_ACCOUNT" });
+            const resp = await actions?.send?.({ type: "DUSK_UI_ADD_ACCOUNT" });
+            if (resp?.error) throw new Error(resp.error.message ?? "Failed to add account");
+            if (!resp?.ok) throw new Error("Failed to add account");
             actions?.showToast?.("Account added.");
             state.needsRefresh = true;
             await actions?.render?.({ forceRefresh: true });

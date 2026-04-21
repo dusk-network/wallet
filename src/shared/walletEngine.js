@@ -257,6 +257,7 @@ export function configure(patch = {}) {
         // w3sper's Network exposes connect(); disconnect() exists in newer versions.
         state.network?.disconnect?.();
       } catch {}
+      state.protocolLoaded = false;
       try {
         // Some implementations may use close().
         state.network?.close?.();
@@ -717,6 +718,7 @@ async function ensureProfileIndex(idx) {
   if (!state.profileGenerator) throw new Error("No profile generator (wallet not unlocked?)");
 
   // Derive missing profiles sequentially.
+  await ensureProtocolDriverLoaded();
   while (state.profiles.length <= i) {
     state.profiles.push(await state.profileGenerator.next());
   }
@@ -744,6 +746,7 @@ export async function addAccount() {
   if (state.profiles.length >= MAX_ACCOUNT_COUNT) {
     throw new Error(`Only ${MAX_ACCOUNT_COUNT} accounts are supported right now`);
   }
+  await ensureProtocolDriverLoaded();
   const p = await state.profileGenerator.next();
   state.profiles.push(p);
   state.currentIndex = state.profiles.length - 1;
@@ -830,6 +833,7 @@ export async function ensureNetwork() {
             } catch {
               // ignore
             }
+            state.protocolLoaded = false;
             try {
               state.network?.close?.();
             } catch {
@@ -862,6 +866,7 @@ export async function ensureNetwork() {
           } catch {
             // ignore
           }
+          state.protocolLoaded = false;
           try {
             state.network?.close?.();
           } catch {

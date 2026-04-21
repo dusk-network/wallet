@@ -18,6 +18,8 @@
     "prebuild": "node scripts/generate-shells.js",
     "build": "vite build",
     "dev": "vite build --watch",
+    "dev:tauri": "vite -c vite.tauri.config.js --host 127.0.0.1",
+    "build:tauri": "vite build -c vite.tauri.config.js",
     "prebuild:chrome": "node scripts/generate-shells.js",
     "build:chrome": "vite build -c vite.config.js",
     "prebuild:firefox": "node scripts/generate-shells.js",
