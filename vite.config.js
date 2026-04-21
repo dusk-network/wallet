@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 
+const engineDebug = process.env.DUSK_ENGINE_DEBUG === "1";
+
 export default defineConfig({
   plugins: [
     // bip39 pulls in node shims, the web-wallet already uses this plugin.
@@ -12,6 +14,7 @@ export default defineConfig({
     __DUSK_BACKEND__: JSON.stringify("extension"),
     __DUSK_TARGET__: JSON.stringify("chrome"),
     __DUSK_ENGINE_HOST__: JSON.stringify("offscreen"),
+    ...(engineDebug ? { "globalThis.__DUSK_ENGINE_DEBUG__": "true" } : {}),
   },
   build: {
     outDir: "dist",
