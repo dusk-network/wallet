@@ -34,6 +34,8 @@ A non-custodial wallet for [Dusk](https://dusk.network). Chrome and Firefox exte
   </a>
 </p>
 
+![Dusk Wallet extension design](./dusk-wallet-screenshots.png)
+
 ## Features
 
 🔐 **Self-custody** — Your mnemonic never leaves your device. Encrypted at rest.
