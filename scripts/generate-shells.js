@@ -50,6 +50,19 @@ function networkPill(label = "Loading…") {
   ];
 }
 
+function fullNav() {
+  return [
+    `<nav class="full-nav" aria-label="Wallet">`,
+    `  <button class="full-nav-item" type="button" data-route="home">Dashboard</button>`,
+    `  <button class="full-nav-item" type="button" data-route="send">Send</button>`,
+    `  <button class="full-nav-item" type="button" data-route="receive">Receive</button>`,
+    `  <button class="full-nav-item" type="button" data-route="stake">Stake</button>`,
+    `  <button class="full-nav-item" type="button" data-route="activity">History</button>`,
+    `  <button class="full-nav-item" type="button" data-route="contacts">Contacts</button>`,
+    `</nav>`,
+  ];
+}
+
 function brandMarkIcon() {
   return [
     `<div class="brand-mark" aria-hidden="true">`,
@@ -111,6 +124,10 @@ function walletShell({
   for (const l of networkPill(initialNetworkLabel)) lines.push(`${innerIndent}    ${l}`);
   lines.push(`${innerIndent}  </div>`);
   lines.push(``);
+  if (isFull) {
+    for (const l of fullNav()) lines.push(`${innerIndent}  ${l}`);
+    lines.push(``);
+  }
   lines.push(`${innerIndent}  <div class="header-actions" id="header-actions"></div>`);
   lines.push(`${innerIndent}</div>`);
   lines.push(``);
@@ -187,6 +204,15 @@ ${devComment}
               <span class="network-pill__chev" aria-hidden="true">▾</span>
             </button>
           </div>
+
+          <nav class="full-nav" aria-label="Wallet">
+            <button class="full-nav-item" type="button" data-route="home">Dashboard</button>
+            <button class="full-nav-item" type="button" data-route="send">Send</button>
+            <button class="full-nav-item" type="button" data-route="receive">Receive</button>
+            <button class="full-nav-item" type="button" data-route="stake">Stake</button>
+            <button class="full-nav-item" type="button" data-route="activity">History</button>
+            <button class="full-nav-item" type="button" data-route="contacts">Contacts</button>
+          </nav>
 
           <div class="header-actions" id="header-actions"></div>
         </div>

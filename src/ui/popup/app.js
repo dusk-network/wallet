@@ -52,6 +52,7 @@ try {
 
 const app = document.getElementById("app");
 const headerActionsHost = document.getElementById("header-actions");
+const fullNav = document.querySelector(".full-nav");
 const ext = getExtensionApi();
 
 // Animate route changes only.
@@ -106,6 +107,36 @@ function setApp(children) {
 
 function showError(err) {
   return h("div", { class: "err", text: err?.message ?? String(err) });
+}
+
+function updateFullNav() {
+  try {
+    if (!fullNav) return;
+    const route = state?.route === "activity" ? "activity" : state?.route || "home";
+    for (const item of fullNav.querySelectorAll("[data-route]")) {
+      const itemRoute = item.getAttribute("data-route");
+      const active = itemRoute === route || (itemRoute === "home" && route === "tx");
+      item.classList.toggle("is-active", active);
+      if (active) item.setAttribute("aria-current", "page");
+      else item.removeAttribute("aria-current");
+    }
+  } catch {
+    // ignore
+  }
+}
+
+if (fullNav) {
+  fullNav.addEventListener("click", async (event) => {
+    const btn = event.target?.closest?.("[data-route]");
+    if (!btn) return;
+    const route = btn.getAttribute("data-route");
+    if (!route) return;
+    netMenu.close();
+    acctMenu.close();
+    state.route = route;
+    if (route !== "activity") state.highlightTx = null;
+    await render();
+  });
 }
 
 // --- Toast ---------------------------------------------------------------
@@ -444,9 +475,15 @@ const renderHeader = createHeaderRenderer({
 export async function render({ forceRefresh = false } = {}) {
   await refreshOverview(send, { force: forceRefresh });
   const ov = state.overview;
+  try {
+    document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";
+  } catch {
+    // ignore
+  }
 
   // Always render header actions based on latest overview
   renderHeader(ov);
+  updateFullNav();
 
   // Keep shielded sync progress visible while on home/activity.
   scheduleShieldedPoll(ov);
