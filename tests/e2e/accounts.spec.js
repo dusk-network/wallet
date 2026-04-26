@@ -38,7 +38,7 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await page.getByRole("button", { name: "Import wallet" }).click();
 
   // Home view
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 120_000 });
+  await expect(page.locator("#app").getByRole("button", { name: "Send" })).toBeVisible({ timeout: 120_000 });
 
   // Open settings; the wallet defaults to the same two profiles as the CLI.
   await page.getByTitle("Options").click();
@@ -58,7 +58,7 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
 
   // Back to home so the header switcher is visible
   await page.getByRole("button", { name: "← Back" }).click();
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
+  await expect(page.locator("#app").getByRole("button", { name: "Send" })).toBeVisible();
 
   // Open profile menu and switch
   await page.getByTitle("Switch profile").click();

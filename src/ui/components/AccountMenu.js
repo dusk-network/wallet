@@ -104,11 +104,16 @@ export function createAccountMenuController({
     document.body.appendChild(menu);
     menuEl = menu;
 
-    // Position under the anchor
+    // Position near the anchor while keeping the menu inside the viewport.
     const r = anchorEl.getBoundingClientRect();
-    const menuWidth = 260;
+    const menuWidth = Math.max(260, menu.offsetWidth || 0);
+    const menuHeight = menu.offsetHeight || 0;
     const left = Math.max(8, Math.min(r.left, window.innerWidth - menuWidth - 8));
-    const top = Math.min(window.innerHeight - 8, r.bottom + 8);
+    const below = r.bottom + 8;
+    const above = r.top - menuHeight - 8;
+    const top = below + menuHeight <= window.innerHeight - 8
+      ? below
+      : Math.max(8, above);
     menu.style.left = `${left}px`;
     menu.style.top = `${top}px`;
 
