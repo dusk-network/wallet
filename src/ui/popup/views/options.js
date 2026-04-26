@@ -100,16 +100,17 @@ export function optionsView(ov, { state, actions } = {}) {
 
           const addr = String(acct ?? "").trim();
           return h("div", { class: "row" }, [
-            h("div", { class: "muted", text: `Profile ${i + 1}` }),
+            h("div", { class: "settings-profile-line" }, [
+              h("span", { text: `Profile ${i + 1}` }),
+              addr
+                ? h("code", {
+                    text: truncateMiddle(addr, 12, 8),
+                    title: addr,
+                  })
+                : null,
+            ].filter(Boolean)),
             input,
-            addr
-              ? h("div", { class: "muted" }, [h("code", { text: addr })])
-              : null,
           ].filter(Boolean));
-        }),
-        h("div", {
-          class: "muted",
-          text: "Optional labels stored locally (per wallet).",
         }),
       ])
     : null;
@@ -382,93 +383,71 @@ export function optionsView(ov, { state, actions } = {}) {
     },
   });
 
+  const settingsSection = (title, children = []) =>
+    h("section", { class: "settings-section" }, [
+      h("div", { class: "settings-section-title", text: title }),
+      ...children.filter(Boolean),
+    ]);
+
   return [
     subnav({
+      actions: lockBtn ? [lockBtn] : [],
       title: "Settings",
       onBack: () => {
         state.route = "home";
         actions?.render?.().catch(() => {});
       },
     }),
-    lockBtn ? h("div", { class: "row" }, [h("div", { class: "btnrow" }, [lockBtn])]) : null,
-    ov?.isUnlocked
-      ? h("div", { class: "row" }, [
-          h("label", { text: "Active profile" }),
-          h("div", { class: "select-wrap" }, [accountSelect]),
-          h("div", {
-            class: "muted",
-            text: "Dusk wallets expose two deterministic profiles, matching the CLI wallet.",
-          }),
-        ].filter(Boolean))
-      : null,
-    accountNamesEditor,
-    h("div", { class: "row" }, [
-      h("label", { text: "Auto-lock" }),
-      h("div", { class: "select-wrap" }, [autoLockSelect]),
-      h("div", {
-        class: "muted",
-        text: "Automatically lock the wallet after a period of inactivity.",
-      }),
-    ]),
-    h("div", { class: "divider" }),
-    h("div", { class: "row" }, [
-      h("label", { text: "Network" }),
-      h("div", { class: "select-wrap" }, [networkSelect]),
-      networkHint,
-      h("div", {
-        class: "muted",
-        text: "Selecting a network will prefill the node URL. You can still edit it manually.",
-      }),
-    ]),
-    h("div", { class: "row" }, [
-      h("label", { text: "Node URL" }),
-      nodeUrlInput,
-      h("div", { class: "muted" }, [
-        "This must be the base http(s) URL of a Rusk/RUES-enabled node. Example: ",
-        h("code", { text: "https://nodes.dusk.network" }),
+    settingsSection("Profile", [
+      ov?.isUnlocked
+        ? h("div", { class: "row" }, [
+            h("label", { text: "Active profile" }),
+            h("div", { class: "select-wrap" }, [accountSelect]),
+          ].filter(Boolean))
+        : null,
+      accountNamesEditor,
+      h("div", { class: "row" }, [
+        h("label", { text: "Auto-lock" }),
+        h("div", { class: "select-wrap" }, [autoLockSelect]),
       ]),
     ]),
-
-    h("div", { class: "row" }, [
-      h("label", { text: "Prover URL" }),
-      proverUrlInput,
-      h("div", { class: "muted" }, [
-        "Optional. Used for shielded transaction proving. Example: ",
-        h("code", { text: "https://testnet.provers.dusk.network" }),
+    settingsSection("Network", [
+      h("div", { class: "row" }, [
+        h("label", { text: "Network" }),
+        h("div", { class: "select-wrap" }, [networkSelect]),
+        networkHint,
       ]),
-    ]),
-
-    h("div", { class: "row" }, [
-      h("label", { text: "Archiver URL" }),
-      archiverUrlInput,
-      h("div", { class: "muted" }, [
-        "Optional. Used for note discovery/sync. Example: ",
-        h("code", { text: "https://testnet.nodes.dusk.network" }),
+      h("div", { class: "row" }, [
+        h("label", { text: "Node URL" }),
+        nodeUrlInput,
       ]),
+      h("div", { class: "row" }, [
+        h("label", { text: "Prover URL" }),
+        proverUrlInput,
+      ]),
+      h("div", { class: "row" }, [
+        h("label", { text: "Archiver URL" }),
+        archiverUrlInput,
+      ]),
+      h("div", { class: "btnrow settings-actions" }, [saveBtn]),
     ]),
-    h("div", { class: "row" }, [h("div", { class: "btnrow" }, [saveBtn])]),
-    h("div", { class: "divider" }),
-    h("div", { class: "row" }, [
-      h("label", { text: "NFT media" }),
-      h("div", {
-        class: "muted",
-        text: "Direct NFT metadata/image fetching is temporarily disabled for security reasons. The wallet still supports importing DRC721 ownership data, but it will not fetch remote tokenURI content until that path is routed through a trusted service.",
-      }),
-    ]),
-    h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "Manage saved recipients for quick sending." }),
-      h("div", { class: "btnrow" }, [addressBookBtn]),
-    ]),
-    h("div", { class: "divider" }),
-    h("div", { class: "row" }, [
+    settingsSection("Data", [
+      h("div", { class: "row" }, [
+        h("label", { text: "NFT media" }),
+        h("div", { class: "muted", text: "Remote media disabled." }),
+      ]),
+      h("div", { class: "settings-inline-action" }, [
+        h("label", { text: "Saved recipients" }),
+        h("div", { class: "btnrow" }, [addressBookBtn]),
+      ]),
       h(
         "div",
-        { class: "btnrow" },
+        { class: "btnrow settings-actions settings-actions--danger" },
         platform.capabilities.dapp
           ? [clearPermBtn, clearVaultBtn]
           : [clearVaultBtn]
       ),
+      connectedSitesEl,
     ]),
-    connectedSitesEl,
   ].filter(Boolean);
 }

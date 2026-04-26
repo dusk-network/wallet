@@ -46,7 +46,7 @@ export function onboardingWelcomeView({ state, actions } = {}) {
       },
     },
     [
-      h("div", { class: "action-icon", text: "✨" }),
+      h("div", { class: "action-icon", text: "+" }),
       h("div", { class: "action-title", text: "Create wallet" }),
     ]
   );
@@ -65,7 +65,7 @@ export function onboardingWelcomeView({ state, actions } = {}) {
       },
     },
     [
-      h("div", { class: "action-icon", text: "⤒" }),
+      h("div", { class: "action-icon", text: "↧" }),
       h("div", { class: "action-title", text: "Import wallet" }),
     ]
   );

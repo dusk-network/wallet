@@ -163,11 +163,27 @@ export function homeView(ov, { state, actions } = {}) {
   // Home hero shows the total once shielded is available.
   const heroAmt = hasTotal ? totalDusk : balDusk;
   const heroAmtTitle = hasTotal ? totalFull : balFull;
-  const heroLabel = hasTotal ? "Total" : "Public";
+  const heroLabel = hasTotal ? "Total balance" : "Public balance";
 
-  const balanceLabel = h("div", { class: "balance-sub" }, [h("span", { text: heroLabel })]);
+  const balanceLabel = h("div", { class: "balance-sub balance-label" }, [h("span", { text: heroLabel })]);
 
   const balanceSubRow = h("div", { class: "balance-subrow" }, [balanceLabel, connInline].filter(Boolean));
+  const balanceSplit = h("div", { class: "balance-split" }, [
+    h("div", { class: "balance-split-item" }, [
+      h("span", { class: "balance-split-label", text: "Public" }),
+      h("span", { class: "balance-split-value", text: balDusk, title: balFull }),
+    ]),
+    showShielded
+      ? h("div", { class: "balance-split-item" }, [
+          h("span", {
+            class: "balance-split-label",
+            text: shieldStatus ? `Shielded · ${shieldStatus}` : "Shielded",
+            title: shieldStatusTitle,
+          }),
+          h("span", { class: "balance-split-value", text: shieldDusk, title: shieldFull }),
+        ])
+      : null,
+  ].filter(Boolean));
 
   const actionBtn = (label, ico, onClick) =>
     h(
@@ -183,31 +199,55 @@ export function homeView(ov, { state, actions } = {}) {
     );
 
   const actionBar = h("div", { class: "action-bar" }, [
-    actionBtn("Send", "↗", () => {
+    actionBtn("Send", "↑", () => {
       state.route = "send";
       state.draft = null;
       actions?.render?.().catch(() => {});
     }),
-    actionBtn("Receive", "⤓", () => {
+    actionBtn("Receive", "↓", () => {
       state.route = "receive";
       actions?.render?.().catch(() => {});
     }),
-    actionBtn("Shield", "🛡", () => {
+    actionBtn("Shield", "✦", () => {
       state.route = "convert";
       state.draft = { kind: TX_KIND.SHIELD, amountDusk: "", amountLux: "" };
       actions?.render?.().catch(() => {});
     }),
-    actionBtn("Stake", "⛓", () => {
+    actionBtn("Stake", "△", () => {
       state.route = "stake";
       actions?.render?.().catch(() => {});
     }),
   ]);
 
+  const dashboardTopbar = h("div", { class: "dashboard-topbar" }, [
+    h("div", { class: "dashboard-title", text: activeTab === "activity" ? "History" : "Dashboard" }),
+    h("div", { class: "dashboard-top-actions" }, [
+      h("button", {
+        class: "btn-outline dashboard-top-action",
+        text: "Receive",
+        onclick: () => {
+          state.route = "receive";
+          actions?.render?.().catch(() => {});
+        },
+      }),
+      h("button", {
+        class: "btn-primary dashboard-top-action",
+        text: "Send",
+        onclick: () => {
+          state.route = "send";
+          state.draft = null;
+          actions?.render?.().catch(() => {});
+        },
+      }),
+    ]),
+  ]);
+
   // Balance hero is a single surface block. Action buttons are intentionally
   // rendered *outside* this container (more MetaMask-like, less "card-in-card").
   const hero = h("div", { class: "home-balance home-hero" }, [
-    h("div", { class: "balance-amount", text: heroAmt, title: heroAmtTitle }),
     balanceSubRow,
+    h("div", { class: "balance-amount", text: heroAmt, title: heroAmtTitle }),
+    balanceSplit,
     ov?.balanceError
       ? h("div", { class: "muted", text: `Balance error: ${ov.balanceError}` })
       : null,
@@ -232,30 +272,45 @@ export function homeView(ov, { state, actions } = {}) {
     return "status-dot status-dot--pending";
   };
 
+  const statusLabel = (status) => {
+    const s = String(status ?? "").toLowerCase();
+    if (s === "executed") return "Finalized";
+    if (s === "failed") return "Failed";
+    if (s === "submitted") return "Pending";
+    return s ? s.slice(0, 1).toUpperCase() + s.slice(1) : "Pending";
+  };
+
   const describe = (tx) => {
     const kind = String(tx?.kind ?? "").toLowerCase();
     if (kind === TX_KIND.TRANSFER) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
+      const to = tx?.to ? truncateMiddle(String(tx.to), 10, 8) : "";
       return {
-        title: amt ? `Send ${amt} DUSK` : "Send",
-        sub: tx?.to ? truncateMiddle(String(tx.to), 10, 8) : "",
-        icon: "↗",
+        title: to ? `Sent to ${to}` : "Sent DUSK",
+        sub: "Moonlight",
+        amount: amt ? `-${amt} DUSK` : "",
+        tone: "out",
+        icon: "↑",
       };
     }
     if (kind === TX_KIND.SHIELD) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: amt ? `Shield ${amt} DUSK` : "Shield",
-        sub: "Public → Shielded",
-        icon: "⇢",
+        title: "Shielded transfer",
+        sub: "Phoenix · PLONK proof verified",
+        amount: amt ? `${amt} DUSK` : "—",
+        tone: "shield",
+        icon: "✦",
       };
     }
     if (kind === TX_KIND.UNSHIELD) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: amt ? `Unshield ${amt} DUSK` : "Unshield",
-        sub: "Shielded → Public",
-        icon: "⇠",
+        title: "Unshielded transfer",
+        sub: "Phoenix → Moonlight",
+        amount: amt ? `${amt} DUSK` : "—",
+        tone: "shield",
+        icon: "✦",
       };
     }
     if (kind === TX_KIND.CONTRACT_CALL) {
@@ -268,9 +323,11 @@ export function homeView(ov, { state, actions } = {}) {
           const amt = formatTokenUnits(asset?.valueUnits ?? asset?.value ?? "0", asset?.decimals ?? 0, { maxFrac: 6 });
           const to = asset?.to ? truncateMiddle(String(asset.to), 10, 8) : "";
           return {
-            title: amt ? `Send ${amt} ${sym}` : `Send ${sym}`,
-            sub: to ? `to ${to}` : "",
-            icon: "↗",
+            title: to ? `Sent ${sym} to ${to}` : `Sent ${sym}`,
+            sub: "Moonlight",
+            amount: amt ? `-${amt} ${sym}` : "",
+            tone: "out",
+            icon: "↑",
           };
         }
 
@@ -284,11 +341,13 @@ export function homeView(ov, { state, actions } = {}) {
           return {
             title: `Approve ${sym}`,
             sub,
-            icon: "✓",
+            amount: isMax ? "MAX" : amt,
+            tone: "neutral",
+            icon: "·",
           };
         }
 
-        return { title: `Call ${sym}`, sub: String(tx?.fnName ?? ""), icon: "⬡" };
+        return { title: `Call ${sym}`, sub: String(tx?.fnName ?? ""), amount: "—", tone: "neutral", icon: "◇" };
       }
 
       if (asset && String(asset?.type ?? "") === "DRC721") {
@@ -297,7 +356,7 @@ export function homeView(ov, { state, actions } = {}) {
         const op = String(asset?.op ?? "").toLowerCase();
         const title = tokenId ? `${sym} #${tokenId}` : sym;
         const sub = op ? op : String(tx?.fnName ?? "");
-        return { title, sub, icon: "⬢" };
+        return { title, sub, amount: "—", tone: "neutral", icon: "◇" };
       }
 
       const fn = tx?.fnName ? String(tx.fnName) : "contract call";
@@ -306,34 +365,42 @@ export function homeView(ov, { state, actions } = {}) {
       return {
         title: `Call ${fn}`,
         sub: depS ? `deposit ${depS} DUSK` : "",
-        icon: "⬡",
+        amount: depS ? `-${depS} DUSK` : "—",
+        tone: depS ? "out" : "neutral",
+        icon: "◇",
       };
     }
     if (kind === TX_KIND.STAKE) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: amt ? `Stake ${amt} DUSK` : "Stake",
-        sub: "Staking",
-        icon: "⛓",
+        title: "Stake delegated",
+        sub: "Hyperstaking · ~10s finality",
+        amount: amt ? `-${amt} DUSK` : "",
+        tone: "out",
+        icon: "△",
       };
     }
     if (kind === TX_KIND.UNSTAKE) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: amt ? `Unstake ${amt} DUSK` : "Unstake",
-        sub: tx?.amount != null ? "Staking" : "All stake",
-        icon: "⛓",
+        title: "Stake withdrawn",
+        sub: tx?.amount != null ? "Hyperstaking" : "All stake",
+        amount: amt ? `${amt} DUSK` : "—",
+        tone: "in",
+        icon: "△",
       };
     }
     if (kind === TX_KIND.WITHDRAW_REWARD) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: amt ? `Withdraw ${amt} DUSK` : "Withdraw rewards",
-        sub: tx?.amount != null ? "Rewards" : "All rewards",
-        icon: "⛓",
+        title: "Rewards withdrawn",
+        sub: tx?.amount != null ? "Epoch rewards" : "All rewards",
+        amount: amt ? `+${amt} DUSK` : "—",
+        tone: "in",
+        icon: "↓",
       };
     }
-    return { title: "Transaction", sub: "", icon: "•" };
+    return { title: "Transaction", sub: "", amount: "—", tone: "neutral", icon: "•" };
   };
 
   const pulseClassFor = (hash) => {
@@ -349,7 +416,7 @@ export function homeView(ov, { state, actions } = {}) {
   };
 
   const txRow = (tx) => {
-    const { title, sub, icon } = describe(tx);
+    const { title, sub, amount, tone, icon } = describe(tx);
     const hash = String(tx?.hash ?? "");
     const st = String(tx?.status ?? "submitted");
     const stLower = st.toLowerCase();
@@ -374,16 +441,16 @@ export function homeView(ov, { state, actions } = {}) {
       .filter(Boolean)
       .join(" · ");
 
-    const left = h("div", { class: "activity-left" }, [
+    const left = h("div", { class: "activity-left activity-tx-left" }, [
       h("div", { class: statusClass(st), title: st }),
-      h("div", { class: "activity-ico", text: icon }),
+      h("div", { class: `activity-ico activity-ico--${tone || "neutral"}`, text: icon }),
     ]);
 
     const main = h("div", { class: "activity-main" }, [
       h("div", { class: "activity-title" }, [
         h("span", { text: title }),
-        tx?.submittedAt ? h("span", { class: "activity-time", text: timeAgo(tx.submittedAt) }) : null,
-      ].filter(Boolean)),
+        h("span", { class: `activity-status activity-status--${isPending ? "pending" : stLower}`, text: statusLabel(st) }),
+      ]),
       h("div", { class: "activity-sub" }, [
         h("span", { text: subText }),
         st === "failed" && tx?.error
@@ -392,73 +459,82 @@ export function homeView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
     ]);
 
-    const btnCopy = h("button", {
-      class: "icon-btn icon-only",
-      text: "⧉",
-      title: "Copy tx hash",
-      onclick: async (e) => {
-        e?.stopPropagation?.();
-        const ok = await copyToClipboard(hash);
-        actions?.showToast?.(ok ? "Copied tx hash" : "Copy failed");
-      },
+    const amountEl = h("div", {
+      class: `activity-amount activity-amount--${tone || "neutral"}`,
+      text: amount || "—",
     });
-
-    const btnOpen = h("button", {
-      class: "icon-btn icon-only",
-      text: "↗",
-      title: "View in Explorer",
-      onclick: async (e) => {
-        e?.stopPropagation?.();
-        const url = explorerTxUrl(nodeUrl, hash);
-        const ok = url ? await openUrl(url) : false;
-        if (!ok) actions?.showToast?.("No explorer available for this network");
-      },
+    const timeEl = h("div", {
+      class: "activity-time",
+      text: tx?.submittedAt ? timeAgo(tx.submittedAt) : "",
     });
-
-    const chevron = h("div", { class: "activity-chevron", text: "›" });
-    const right = h("div", { class: "activity-right" }, [btnOpen, btnCopy, chevron]);
 
     const cls = [
       "activity-item",
+      "activity-tx-item",
       isPending ? "is-pending" : "",
+      stLower === "executed" ? "is-executed" : "",
+      stLower === "failed" ? "is-failed" : "",
       isHighlight ? "is-highlight" : "",
       pulse,
     ]
       .filter(Boolean)
       .join(" ");
 
+    const openDetails = async () => {
+      // Open in-app details view (MetaMask-like) instead of forcing an explorer tab.
+      try {
+        if (state) {
+          state.txDetailHash = hash;
+          state.txDetailFrom = state.route || "activity";
+          state.route = "tx";
+          actions?.render?.().catch(() => {});
+          return;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Fallback: open explorer (or copy hash) if we can't navigate.
+      const url = explorerTxUrl(nodeUrl, hash);
+      const ok = url ? await openUrl(url) : false;
+      if (!ok) {
+        const copied = await copyToClipboard(hash);
+        actions?.showToast?.(copied ? "Copied tx hash" : "No explorer available");
+      }
+    };
+
     return h(
-      "button",
+      "div",
       {
         class: cls,
-        onclick: async () => {
-          // Open in-app details view (MetaMask-like) instead of forcing an explorer tab.
-          try {
-            if (state) {
-              state.txDetailHash = hash;
-              state.txDetailFrom = state.route || "activity";
-              state.route = "tx";
-              actions?.render?.().catch(() => {});
-              return;
-            }
-          } catch {
-            // ignore
-          }
-
-          // Fallback: open explorer (or copy hash) if we can't navigate.
-          const url = explorerTxUrl(nodeUrl, hash);
-          const ok = url ? await openUrl(url) : false;
-          if (!ok) {
-            const copied = await copyToClipboard(hash);
-            actions?.showToast?.(copied ? "Copied tx hash" : "No explorer available");
+        role: "button",
+        tabindex: "0",
+        onclick: openDetails,
+        onkeydown: (e) => {
+          if (e?.key === "Enter" || e?.key === " ") {
+            e.preventDefault();
+            openDetails();
           }
         },
       },
-      [left, main, right]
+      [left, main, amountEl, timeEl]
     );
   };
 
-  const activityFull = h("div", { class: "activity-card" }, [
+  const viewAll = h("button", {
+    class: "activity-view-all",
+    text: "View all →",
+    onclick: (e) => {
+      e?.stopPropagation?.();
+      switchTab("activity");
+    },
+  });
+
+  const activityFull = h("div", { class: "activity-card activity-card--tx" }, [
+    h("div", { class: "activity-card-head" }, [
+      h("div", { class: "activity-section-label", text: "Recent transactions" }),
+      viewAll,
+    ]),
     txs.length
       ? h("div", { class: "activity-list" }, txs.map((tx) => txRow(tx)))
       : h("div", { class: "muted", text: "No activity yet." }),
@@ -499,58 +575,22 @@ export function homeView(ov, { state, actions } = {}) {
     ]
   );
 
-  const assetsCard = h("div", { class: "box assets-card" }, [
-    h("div", { class: "asset-row asset-row--main" }, [
-      h("div", { class: "asset-ico" }, [
-        h("img", {
-          class: "asset-ico-img",
-          src: "icons/dusk-32.png",
-          alt: "DUSK",
-          draggable: false,
-        }),
-      ]),
-      h("div", { class: "asset-main" }, [
-        h("div", { class: "asset-sym", text: "DUSK" }),
-        h("div", { class: "asset-name", text: "Native token" }),
-      ]),
-      h("div", { class: "asset-bal" }, [
-        h("div", {
-          class: "asset-amt",
-          text: hasTotal ? totalDusk : balDusk,
-          title: hasTotal ? totalFull : balFull,
-        }),
-        h("div", { class: "asset-sub", text: hasTotal ? "Total" : "Public" }),
-      ]),
-    ]),
-    h("div", { class: "asset-breakdown" }, [
-      h("div", { class: "asset-break-row" }, [
-        h("div", { class: "asset-break-label" }, [
-          h("span", { text: "Public" }),
-        ]),
-        h("div", { class: "asset-break-amt", text: balDusk, title: balFull }),
-      ]),
-      showShielded
-        ? h("div", { class: "asset-break-row" }, [
-            h("div", { class: "asset-break-label" }, [
-              h("span", { text: "Shielded" }),
-              h("span", {
-                class: "asset-break-status",
-                text: shieldStatus ? `• ${shieldStatus}` : "",
-                title: shieldStatusTitle,
-              }),
-            ]),
-            h("div", { class: "asset-break-amt", text: shieldDusk, title: shieldFull }),
-          ])
-        : null,
-    ].filter(Boolean)),
-  ]);
+  const tabContent = activeTab === "activity"
+    ? [activityFull]
+    : assetsSectionsView(ov, { state, actions });
 
-  // Assets tab: keep it focused on balances. Activity lives exclusively
-  // in the Activity tab to avoid duplication and keep the popup compact.
+  // Full mode should feel like an app dashboard, while popup remains a compact
+  // single-column wallet. CSS handles the responsive collapse.
   return [
-    hero,
-    actionBar,
-    tabs,
-    ...(activeTab === "activity" ? [activityFull] : [assetsCard, ...assetsSectionsView(ov, { state, actions })]),
-  ].filter(Boolean);
+    h("div", { class: "wallet-dashboard" }, [
+      dashboardTopbar,
+      hero,
+      h("div", { class: "dashboard-actions" }, [
+        h("div", { class: "dashboard-section-label", text: "Actions" }),
+        actionBar,
+      ]),
+      tabs,
+      ...tabContent,
+    ]),
+  ];
 }

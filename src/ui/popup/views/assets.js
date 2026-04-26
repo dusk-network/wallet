@@ -268,9 +268,9 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
     );
   });
 
-  const tokensCard = h("div", { class: "box" }, [
+  const tokensCard = h("div", { class: "box asset-section-card" }, [
     h("div", { class: "hrow" }, [
-      h("div", { class: "muted", text: "Tokens" }),
+      h("div", { class: "asset-section-title", text: "Tokens" }),
       h("button", { class: "btn-outline", text: "Add token", onclick: openAddToken }),
     ]),
     st?.loading ? h("div", { class: "muted", text: "Loading…" }) : null,
@@ -278,9 +278,9 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
     tokenRows.length ? h("div", { class: "activity-list" }, tokenRows) : h("div", { class: "muted", text: "No watched tokens." }),
   ].filter(Boolean));
 
-  const nftCard = h("div", { class: "box" }, [
+  const nftCard = h("div", { class: "box asset-section-card" }, [
     h("div", { class: "hrow" }, [
-      h("div", { class: "muted", text: "NFTs" }),
+      h("div", { class: "asset-section-title", text: "NFTs" }),
       h("button", { class: "btn-outline", text: "Import NFT", onclick: openAddNft }),
     ]),
     nftRows.length ? h("div", { class: "activity-list" }, nftRows) : h("div", { class: "muted", text: "No imported NFTs." }),
