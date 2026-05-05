@@ -1,3 +1,4 @@
+import { ProfileGenerator } from "@dusk/w3sper";
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
@@ -561,6 +562,11 @@ export async function renderNotification() {
       const amount = params?.amount ?? "0";
       const memo = params?.memo ?? "";
       const gas = params?.gas ?? null;
+      const privacy = String(params?.privacy ?? "").trim().toLowerCase();
+      const toType = to ? ProfileGenerator.typeOf(String(to)) : "";
+      const isShieldedTransfer = privacy === "shielded" || toType === "address";
+      const fromLabel = isShieldedTransfer ? "Phoenix shielded balance" : activeAccount || "(none)";
+      const railLabel = isShieldedTransfer ? "Shielded (Phoenix)" : "Public (Moonlight)";
 
       const amountLuxStr = prettyAmount(amount);
       const amountDuskStr = formatLuxShort(amountLuxStr, UI_DISPLAY_DECIMALS);
@@ -577,7 +583,11 @@ export async function renderNotification() {
         h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve transfer" })]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "From" }),
-          h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+          h("div", { class: "box" }, [h("code", { text: fromLabel })]),
+        ]),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Privacy" }),
+          h("div", { class: "box" }, [h("code", { text: railLabel })]),
         ]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "To" }),

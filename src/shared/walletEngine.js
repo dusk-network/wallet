@@ -1919,11 +1919,22 @@ export async function transfer(params) {
 
   const amount = typeof params.amount === "bigint" ? params.amount : BigInt(params.amount);
   const profileIndex = params?.profileIndex;
+  const privacyRaw = params?.privacy === undefined || params?.privacy === null ? "" : String(params.privacy).trim().toLowerCase();
+  if (privacyRaw && privacyRaw !== "public" && privacyRaw !== "shielded") {
+    throw new Error("Invalid privacy: expected \"public\" or \"shielded\"");
+  }
 
   const toType = ProfileGenerator.typeOf(to);
   if (toType !== "account" && toType !== "address") {
     throw new Error("Invalid recipient: expected a Dusk account or shielded address");
   }
+  if (privacyRaw === "public" && toType !== "account") {
+    throw new Error("Public transfer requires a public recipient (base58 account)");
+  }
+  if (privacyRaw === "shielded" && toType !== "address") {
+    throw new Error("Shielded transfer requires a shielded recipient (base58 address)");
+  }
+  const isShieldedTransfer = toType === "address";
 
   const network = await ensureNetwork();
   const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
@@ -1933,7 +1944,7 @@ export async function transfer(params) {
   // We avoid blocking the UX on a full sync here (MetaMask-style).
   // If the cache is empty, we kick off a background sync and fail fast with
   // a clear message.
-  if (toType === "address") {
+  if (isShieldedTransfer) {
     await ensureShieldedMetaForIndex(idx);
 
     try {
@@ -1970,7 +1981,7 @@ export async function transfer(params) {
   if (gas) tx = tx.gas(gas);
 
   // Default to obfuscated transfers for privacy.
-  if (toType === "address" && typeof tx?.obfuscated === "function") {
+  if (isShieldedTransfer && typeof tx?.obfuscated === "function") {
     try {
       tx.obfuscated();
     } catch {
