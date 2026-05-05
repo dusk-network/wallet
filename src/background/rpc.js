@@ -1,4 +1,5 @@
 import { loadVault } from "../shared/vault.js";
+import { ProfileGenerator } from "@dusk/w3sper";
 import {
   approveOrigin,
   getPermissionForOrigin,
@@ -119,16 +120,15 @@ export async function handleRpc(origin, request) {
     return profile;
   }
 
-  async function requireConnectedPermission() {
-    const perm = await getPermissionForOrigin(origin);
-    if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
-    const status = await getEngineStatus();
-    if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet is locked");
-    return { perm, status };
+  function hasShieldedGrant(perm) {
+    return Boolean(perm?.grants?.shieldedReceiveAddress);
   }
 
-  async function requestProfileConnection(options = {}) {
-    const wantsShielded = Boolean(options?.shieldedReceiveAddress);
+  function sameProfilePermission(perm, profile) {
+    return Boolean(perm?.profileId && profile?.profileId && perm.profileId === profile.profileId);
+  }
+
+  async function ensureVaultForProfileRequest() {
     const vault = await loadVault();
     if (!vault) {
       try {
@@ -142,16 +142,33 @@ export async function handleRpc(origin, request) {
         "Wallet not set up. Create or import a recovery phrase first."
       );
     }
+  }
+
+  async function requestProfileConnection(options = {}) {
+    const requestedShieldedGrant = Boolean(options?.shieldedReceiveAddress);
+    await ensureVaultForProfileRequest();
 
     const existing = await getPermissionForOrigin(origin);
-    const st0 = await getEngineStatus();
-    if (existing && st0?.isUnlocked && (!wantsShielded || existing.shieldedReceiveAddress)) {
-      return { perm: existing, status: st0 };
-    }
+    const statusBeforePrompt = await getEngineStatus();
+    const selectedProfile = profileFromStatus(
+      statusBeforePrompt,
+      statusBeforePrompt?.selectedAccountIndex ?? existing?.accountIndex ?? 0,
+      false
+    );
+    const effectiveShieldedGrant =
+      requestedShieldedGrant ||
+      (sameProfilePermission(existing, selectedProfile) && hasShieldedGrant(existing));
 
     const approved = await requestUserApproval("connect", origin, {
-      requestedAccounts: true,
-      shieldedReceiveAddress: wantsShielded,
+      requestedProfiles: true,
+      shieldedReceiveAddress: requestedShieldedGrant,
+      effectiveShieldedReceiveAddress: effectiveShieldedGrant,
+      currentProfileId: existing?.profileId,
+      currentAccountIndex:
+        existing && existing.accountIndex !== undefined && existing.accountIndex !== null
+          ? Number(existing.accountIndex) || 0
+          : null,
+      currentGrants: existing?.grants ?? null,
       reason: options?.reason,
       label: options?.label,
     });
@@ -163,8 +180,40 @@ export async function handleRpc(origin, request) {
 
     const arr = Array.isArray(status.accounts) ? status.accounts : [];
     const idx = sanitizeAccountIndex(approved?.accountIndex, arr.length, 0);
-    const perm = await approveOrigin(origin, idx, { shieldedReceiveAddress: wantsShielded });
+    const profile = profileFromStatus(status, idx, false);
+    if (!profile) throw rpcError(ERROR_CODES.UNAUTHORIZED, "No wallet profile is available");
+    const sameProfile = sameProfilePermission(existing, profile);
+    const effectiveGrant = requestedShieldedGrant || (sameProfile && hasShieldedGrant(existing));
+    const perm = await approveOrigin(origin, {
+      profileId: profile.profileId,
+      accountIndex: idx,
+      grants: {
+        publicAccount: true,
+        shieldedReceiveAddress: effectiveGrant,
+      },
+    });
     return { perm, status };
+  }
+
+  function validateTransferPrivacy(params) {
+    const privacyRaw = params?.privacy === undefined || params?.privacy === null
+      ? ""
+      : String(params.privacy).trim().toLowerCase();
+    if (!privacyRaw) {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, 'privacy is required for transfer ("public" or "shielded")');
+    }
+    if (privacyRaw !== "public" && privacyRaw !== "shielded") {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, 'privacy must be "public" or "shielded"');
+    }
+    const to = String(params?.to ?? "").trim();
+    const toType = to ? ProfileGenerator.typeOf(to) : "";
+    if (privacyRaw === "public" && toType !== "account") {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "Public transfer requires a public recipient account");
+    }
+    if (privacyRaw === "shielded" && toType !== "address") {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "Shielded transfer requires a shielded recipient address");
+    }
+    return privacyRaw;
   }
 
   switch (method) {
@@ -206,34 +255,35 @@ export async function handleRpc(origin, request) {
       });
     }
 
-    case "dusk_requestAccounts": {
-      const { perm, status } = await requestProfileConnection(firstParamObject(params));
-      const arr = Array.isArray(status.accounts) ? status.accounts : [];
-      const idx = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
-
-      // Expose the permitted account only (MetaMask-style array).
-      return arr[idx] ? [arr[idx]] : [];
-    }
-
     case "dusk_requestProfiles": {
       const options = firstParamObject(params);
       const { perm, status } = await requestProfileConnection(options);
-      const profile = profileFromStatus(status, perm.accountIndex, Boolean(options?.shieldedReceiveAddress || perm?.shieldedReceiveAddress));
+      const profile = profileFromStatus(status, perm.accountIndex, hasShieldedGrant(perm));
       return profile ? [profile] : [];
     }
 
     case "dusk_profiles": {
-      const { perm, status } = await requireConnectedPermission();
-      const profile = profileFromStatus(status, perm.accountIndex, Boolean(perm?.shieldedReceiveAddress));
+      const perm = await getPermissionForOrigin(origin);
+      if (!perm) return [];
+      const status = await getEngineStatus();
+      if (!status?.isUnlocked) return [];
+      const profile = profileFromStatus(status, perm.accountIndex, hasShieldedGrant(perm));
       return profile ? [profile] : [];
     }
 
     case "dusk_requestShieldedAddress": {
       const options = firstParamObject(params);
-      const { perm, status } = await requestProfileConnection({
-        ...options,
-        shieldedReceiveAddress: true,
-      });
+      const existing = await getPermissionForOrigin(origin);
+      const status0 = await getEngineStatus();
+      const existingProfile = existing && status0?.isUnlocked
+        ? profileFromStatus(status0, existing.accountIndex, true)
+        : null;
+      const { perm, status } = existingProfile && sameProfilePermission(existing, existingProfile) && hasShieldedGrant(existing)
+        ? { perm: existing, status: status0 }
+        : await requestProfileConnection({
+            ...options,
+            shieldedReceiveAddress: true,
+          });
       const profile = profileFromStatus(status, perm.accountIndex, true);
       if (!profile?.shieldedAddress) {
         throw rpcError(ERROR_CODES.UNAUTHORIZED, "No shielded receive address is available");
@@ -241,19 +291,9 @@ export async function handleRpc(origin, request) {
       return {
         address: profile.shieldedAddress,
         account: profile.account,
+        profileId: profile.profileId,
         chainId: chainIdFromNodeUrl((await getSettings())?.nodeUrl ?? ""),
       };
-    }
-
-    case "dusk_accounts": {
-      const perm = await getPermissionForOrigin(origin);
-      if (!perm) return [];
-
-      const { isUnlocked, accounts } = await getEngineStatus();
-      if (!isUnlocked) return [];
-      const arr = Array.isArray(accounts) ? accounts : [];
-      const idx = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
-      return arr[idx] ? [arr[idx]] : [];
     }
 
     case "dusk_chainId": {
@@ -397,15 +437,23 @@ export async function handleRpc(origin, request) {
         );
       }
 
+      let normalizedParams = params;
+      if (kind === TX_KIND.TRANSFER) {
+        normalizedParams = {
+          ...params,
+          privacy: validateTransferPrivacy(params),
+        };
+      }
+
       if (kind === TX_KIND.CONTRACT_CALL) {
-        if (params.memo) {
+        if (normalizedParams.memo) {
           throw rpcError(
             ERROR_CODES.INVALID_PARAMS,
             "memo is not allowed for contract_call (payload is either memo OR contract call)"
           );
         }
 
-        const privacy = String(params.privacy ?? "public").trim().toLowerCase();
+        const privacy = String(normalizedParams.privacy ?? "public").trim().toLowerCase();
         if (privacy !== "public" && privacy !== "shielded") {
           throw rpcError(
             ERROR_CODES.INVALID_PARAMS,
@@ -413,7 +461,7 @@ export async function handleRpc(origin, request) {
           );
         }
 
-        const est = estimateBytes(params.fnArgs);
+        const est = estimateBytes(normalizedParams.fnArgs);
         if (typeof est === "number" && est > MAX_CALLDATA_BYTES) {
           throw rpcError(
             ERROR_CODES.INVALID_PARAMS,
@@ -434,7 +482,7 @@ export async function handleRpc(origin, request) {
       } catch {
         // Ignore errors, will fall back to static default
       }
-      const baseParams = applyTxDefaults(params, { dynamicPrice });
+      const baseParams = applyTxDefaults(normalizedParams, { dynamicPrice });
 
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
@@ -465,6 +513,7 @@ export async function handleRpc(origin, request) {
             origin,
             nodeUrl,
             kind,
+            privacy: finalParams?.privacy ? String(finalParams.privacy) : undefined,
             profileIndex: idx,
             // Helpful fields for the Activity list UI
             to: finalParams?.to ? String(finalParams.to) : undefined,

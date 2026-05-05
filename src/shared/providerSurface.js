@@ -20,11 +20,9 @@ export const DAPP_DISCOVERY_INFO_FIELDS = Object.freeze([
 
 export const DAPP_RPC_METHODS = Object.freeze([
   "dusk_getCapabilities",
-  "dusk_requestAccounts",
   "dusk_requestProfiles",
   "dusk_profiles",
   "dusk_requestShieldedAddress",
-  "dusk_accounts",
   "dusk_chainId",
   "dusk_switchNetwork",
   "dusk_getPublicBalance",

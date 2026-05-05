@@ -1,4 +1,3 @@
-import { ProfileGenerator } from "@dusk/w3sper";
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
@@ -293,7 +292,13 @@ export async function renderNotification() {
   }
 
   if (kindNorm === "connect") {
-    const wantsShielded = Boolean(params?.shieldedReceiveAddress);
+    const requestedShielded = Boolean(params?.shieldedReceiveAddress);
+    const currentAccountIndexRaw = Number(params?.currentAccountIndex);
+    const currentAccountIndex =
+      Number.isFinite(currentAccountIndexRaw) && currentAccountIndexRaw >= 0
+        ? Math.floor(currentAccountIndexRaw)
+        : null;
+    const currentShieldedGrant = Boolean(params?.currentGrants?.shieldedReceiveAddress);
     const count = Math.max(1, Number(accountCount ?? (accountsArr.length || 1)) || 1);
     const displayAccounts = accountsArr.length
       ? accountsArr
@@ -324,24 +329,36 @@ export async function renderNotification() {
       Math.max(0, Math.min(idxForOrigin, Math.max(0, displayAccounts.length - 1)))
     );
 
+    const effectiveShieldedGrantForSelection = () => {
+      const selectedIndex = Number(accountSelect.value);
+      const sameProfile =
+        currentAccountIndex !== null &&
+        Number.isFinite(selectedIndex) &&
+        Math.floor(selectedIndex) === currentAccountIndex;
+      return requestedShielded || (sameProfile && currentShieldedGrant);
+    };
+    const disclosureText = h("div", { class: "muted" });
+    const updateDisclosureText = () => {
+      disclosureText.textContent = effectiveShieldedGrantForSelection()
+        ? "The site will be able to use the selected profile's public account and shareable shielded receive address."
+        : "The site will only be able to use the selected profile's public account.";
+    };
+    accountSelect.onchange = updateDisclosureText;
+    updateDisclosureText();
+
     setApp([
       header,
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Connect this site to a Dusk profile?" }),
       ]),
       h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Profile" }),
-          h("div", { class: "select-wrap" }, [accountSelect]),
-          h("div", {
-            class: "muted",
-            text: wantsShielded
-              ? "The site will be able to use the selected profile's public account and shareable shielded receive address."
-              : "The site will only be able to use the selected profile's public account.",
-          }),
-        ]),
+        h("div", { class: "muted", text: "Profile" }),
+        h("div", { class: "select-wrap" }, [accountSelect]),
+        disclosureText,
+      ]),
       decisionButtons("Connect", () => ({
         accountIndex: Number(accountSelect.value),
-        shieldedReceiveAddress: wantsShielded,
+        shieldedReceiveAddress: effectiveShieldedGrantForSelection(),
       })),
     ]);
     return;
@@ -569,8 +586,7 @@ export async function renderNotification() {
       const memo = params?.memo ?? "";
       const gas = params?.gas ?? null;
       const privacy = String(params?.privacy ?? "").trim().toLowerCase();
-      const toType = to ? ProfileGenerator.typeOf(String(to)) : "";
-      const isShieldedTransfer = privacy === "shielded" || toType === "address";
+      const isShieldedTransfer = privacy === "shielded";
       const fromLabel = isShieldedTransfer ? "Phoenix shielded balance" : activeAccount || "(none)";
       const railLabel = isShieldedTransfer ? "Shielded (Phoenix)" : "Public (Moonlight)";
 

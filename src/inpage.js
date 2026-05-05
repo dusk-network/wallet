@@ -18,9 +18,8 @@
   const listeners = new Map();
 
   const state = {
-    accounts: [],
+    profiles: [],
     chainId: null,
-    selectedAddress: null,
     isAuthorized: false,
   };
 
@@ -95,16 +94,14 @@
     else listeners.clear();
   }
 
-  function setAccounts(next, { emitEvent } = {}) {
+  function setProfiles(next, { emitEvent } = {}) {
     const arr = Array.isArray(next) ? next : [];
-    if (shallowArrayEq(state.accounts, arr)) {
-      state.accounts = arr;
-      state.selectedAddress = arr[0] ?? null;
+    if (shallowArrayEq(state.profiles, arr)) {
+      state.profiles = arr;
       return;
     }
-    state.accounts = arr;
-    state.selectedAddress = arr[0] ?? null;
-    if (emitEvent) emit("accountsChanged", arr);
+    state.profiles = arr;
+    if (emitEvent) emit("profilesChanged", arr);
   }
 
   function setChainId(next, { emitEvent } = {}) {
@@ -157,10 +154,6 @@
     return p;
   }
 
-  function enable() {
-    return request({ method: "dusk_requestAccounts" });
-  }
-
   function isConnected() {
     return true;
   }
@@ -168,7 +161,6 @@
   const provider = {
     isDusk: true,
     request,
-    enable,
     on,
     once,
     removeListener,
@@ -178,8 +170,8 @@
     get chainId() {
       return state.chainId;
     },
-    get selectedAddress() {
-      return state.selectedAddress;
+    get profiles() {
+      return state.profiles;
     },
     get isAuthorized() {
       return state.isAuthorized;
@@ -207,15 +199,14 @@
     if (msg.type === "DUSK_PROVIDER_STATE" && msg.state) {
       const st = msg.state;
       setChainId(st.chainId, { emitEvent: false });
-      setAccounts(st.accounts, { emitEvent: false });
       return;
     }
 
     if (msg.type === "DUSK_PROVIDER_EVENT") {
       const name = msg.name;
       const data = msg.data;
-      if (name === "accountsChanged") {
-        setAccounts(data, { emitEvent: true });
+      if (name === "profilesChanged") {
+        setProfiles(data, { emitEvent: true });
         return;
       }
       if (name === "chainChanged") {
@@ -230,7 +221,7 @@
         return;
       }
       if (name === "disconnect") {
-        setAccounts([], { emitEvent: true });
+        setProfiles([], { emitEvent: true });
         setAuthorized(false, { emitEvent: true, data });
         return;
       }
@@ -259,17 +250,17 @@
     entry.resolve(result);
 
     const m = entry.method;
-    if (m === "dusk_requestAccounts" && Array.isArray(result)) {
-      setAccounts(result, { emitEvent: true });
+    if (m === "dusk_requestProfiles" && Array.isArray(result)) {
+      setProfiles(result, { emitEvent: true });
     }
-    if (m === "dusk_accounts" && Array.isArray(result)) {
-      setAccounts(result, { emitEvent: false });
+    if (m === "dusk_profiles" && Array.isArray(result)) {
+      setProfiles(result, { emitEvent: false });
     }
     if (m === "dusk_chainId") {
       setChainId(result, { emitEvent: false });
     }
     if (m === "dusk_disconnect") {
-      setAccounts([], { emitEvent: true });
+      setProfiles([], { emitEvent: true });
       setAuthorized(false, { emitEvent: true, data: { code: 4900, message: "Disconnected" } });
     }
   });

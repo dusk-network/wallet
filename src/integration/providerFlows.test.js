@@ -33,7 +33,18 @@ function makeLocalStorage() {
 // Mocks for background dependencies (engine + UI approvals)
 // ---------------------------------------------------------------------------
 
-let engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+let engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+
+vi.mock("@dusk/w3sper", () => ({
+  ProfileGenerator: {
+    typeOf(value) {
+      const s = String(value ?? "");
+      if (s.startsWith("acct")) return "account";
+      if (s.startsWith("addr")) return "address";
+      return "undefined";
+    },
+  },
+}));
 
 const engineCall = vi.fn(async (method) => {
   if (method === "dusk_getCachedGasPrice") {
@@ -88,7 +99,7 @@ describe("integration: provider flows", () => {
     prevLocalStorage = globalThis.localStorage ?? null;
     globalThis.localStorage = makeLocalStorage();
 
-    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
   });
 
   afterEach(() => {
@@ -96,21 +107,25 @@ describe("integration: provider flows", () => {
     else delete globalThis.localStorage;
   });
 
-  it("dApp connection flow: requestAccounts -> accounts -> disconnect", async () => {
+  it("dApp connection flow: requestProfiles -> profiles -> disconnect", async () => {
     const { handleRpc } = await import("../background/rpc.js");
     const { getPermissionForOrigin } = await import("../shared/permissions.js");
 
     const origin = "https://dapp.example";
 
-    const accounts = await handleRpc(origin, { method: "dusk_requestAccounts" });
-    expect(accounts).toEqual(["acct1"]);
+    const profiles = await handleRpc(origin, { method: "dusk_requestProfiles" });
+    expect(profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
     expect(requestUserApproval).toHaveBeenCalledWith("connect", origin, expect.any(Object));
 
     const perm = await getPermissionForOrigin(origin);
-    expect(perm).toMatchObject({ accountIndex: 1 });
+    expect(perm).toMatchObject({
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+    });
 
-    const accounts2 = await handleRpc(origin, { method: "dusk_accounts" });
-    expect(accounts2).toEqual(["acct1"]);
+    const profiles2 = await handleRpc(origin, { method: "dusk_profiles" });
+    expect(profiles2).toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
 
     await handleRpc(origin, { method: "dusk_disconnect" });
     expect(await getPermissionForOrigin(origin)).toBeNull();
@@ -122,12 +137,13 @@ describe("integration: provider flows", () => {
 
     const origin = "https://dapp.example";
 
-    await handleRpc(origin, { method: "dusk_requestAccounts" });
+    await handleRpc(origin, { method: "dusk_requestProfiles" });
 
     const tx = await handleRpc(origin, {
       method: "dusk_sendTransaction",
       params: {
         kind: "transfer",
+        privacy: "public",
         to: "acct0",
         amount: "1",
         memo: "hi",

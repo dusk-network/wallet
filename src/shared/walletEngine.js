@@ -1911,7 +1911,7 @@ function normalizeGas(gas) {
 /**
  * Transfer funds.
  *
- * @param {{to:string, amount:string|bigint, memo?:string, gas?:{limit?:string|bigint, price?:string|bigint}}} params
+ * @param {{privacy:"public"|"shielded", to:string, amount:string|bigint, memo?:string, gas?:{limit?:string|bigint, price?:string|bigint}}} params
  */
 export async function transfer(params) {
   if (!state.unlocked) throw new Error("Wallet locked");
@@ -1920,7 +1920,10 @@ export async function transfer(params) {
   const amount = typeof params.amount === "bigint" ? params.amount : BigInt(params.amount);
   const profileIndex = params?.profileIndex;
   const privacyRaw = params?.privacy === undefined || params?.privacy === null ? "" : String(params.privacy).trim().toLowerCase();
-  if (privacyRaw && privacyRaw !== "public" && privacyRaw !== "shielded") {
+  if (!privacyRaw) {
+    throw new Error("Transfer privacy is required: expected \"public\" or \"shielded\"");
+  }
+  if (privacyRaw !== "public" && privacyRaw !== "shielded") {
     throw new Error("Invalid privacy: expected \"public\" or \"shielded\"");
   }
 
@@ -1934,7 +1937,7 @@ export async function transfer(params) {
   if (privacyRaw === "shielded" && toType !== "address") {
     throw new Error("Shielded transfer requires a shielded recipient (base58 address)");
   }
-  const isShieldedTransfer = toType === "address";
+  const isShieldedTransfer = privacyRaw === "shielded";
 
   const network = await ensureNetwork();
   const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
@@ -2046,7 +2049,7 @@ function toContractIdBytes(contractId) {
  * Send a transaction from the currently selected account.
  *
  * Supported kinds:
- * - { kind: 'transfer', to, amount, memo?, gas? }
+ * - { kind: 'transfer', privacy, to, amount, memo?, gas? }
  * - { kind: 'shield', amount, gas? }
  * - { kind: 'unshield', amount, gas? }
  * - { kind: 'stake', amount, gas? }

@@ -316,8 +316,9 @@ window.dispatchEvent(new Event("dusk:requestProvider"));
 | Method | Description |
 |--------|-------------|
 | `dusk_getCapabilities` | Get supported methods/limits |
-| `dusk_requestAccounts` | Request connection |
-| `dusk_accounts` | Get connected accounts |
+| `dusk_requestProfiles` | Request profile connection |
+| `dusk_profiles` | Get connected profile fields |
+| `dusk_requestShieldedAddress` | Request or upgrade shielded receive address access |
 | `dusk_chainId` | Get current chain ID |
 | `dusk_switchNetwork` | Switch networks |
 | `dusk_getPublicBalance` | Get balance |

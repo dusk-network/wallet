@@ -398,6 +398,7 @@ describe("walletEngine", () => {
 
     const result = await engine.sendTransaction({
       kind: "transfer",
+      privacy: "public",
       to: "acct0",
       amount: "1",
       memo: "hi",
@@ -412,5 +413,26 @@ describe("walletEngine", () => {
     expect(tx.profile?.account?.toString?.()).toBe("acct1");
     expect(tx.toValue).toBe("acct0");
     expect(tx.memoValue).toBe("hi");
+  });
+
+  it("sendTransaction requires transfer privacy and validates recipient rail", async () => {
+    engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    await expect(
+      engine.sendTransaction({ kind: "transfer", to: "acct0", amount: "1" })
+    ).rejects.toThrow(/privacy is required/i);
+    await expect(
+      engine.sendTransaction({ kind: "transfer", privacy: " ", to: "acct0", amount: "1" })
+    ).rejects.toThrow(/privacy is required/i);
+    await expect(
+      engine.sendTransaction({ kind: "transfer", privacy: "private", to: "acct0", amount: "1" })
+    ).rejects.toThrow(/Invalid privacy/);
+    await expect(
+      engine.sendTransaction({ kind: "transfer", privacy: "public", to: "addr0", amount: "1" })
+    ).rejects.toThrow(/Public transfer requires/);
+    await expect(
+      engine.sendTransaction({ kind: "transfer", privacy: "shielded", to: "acct0", amount: "1" })
+    ).rejects.toThrow(/Shielded transfer requires/);
   });
 });

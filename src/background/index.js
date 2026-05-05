@@ -379,7 +379,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const maxIndex = Math.max(0, Number(settings?.accountCount ?? 1) - 1);
         const clamped = Math.min(Math.floor(accountIndex), maxIndex);
 
-        await approveOrigin(origin, clamped);
+        const status = await getEngineStatus();
+        const account = Array.isArray(status?.accounts) ? status.accounts[clamped] : "";
+        await approveOrigin(origin, {
+          profileId: `account:${clamped}:${account || ""}`,
+          accountIndex: clamped,
+          grants: { publicAccount: true, shieldedReceiveAddress: false },
+        });
         sendResponse({ ok: true });
         return;
       }
