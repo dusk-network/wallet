@@ -98,6 +98,75 @@ export async function handleRpc(origin, request) {
     return Math.max(0, Math.min(idx, len - 1));
   }
 
+  function firstParamObject(value) {
+    const p = Array.isArray(value) ? value[0] : value;
+    return p && typeof p === "object" ? p : {};
+  }
+
+  function profileFromStatus(status, index, includeShielded = false) {
+    const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
+    const addresses = Array.isArray(status?.addresses) ? status.addresses : [];
+    const idx = sanitizeAccountIndex(index, accounts.length, 0);
+    const account = accounts[idx];
+    if (!account) return null;
+    const profile = {
+      profileId: `account:${idx}:${account}`,
+      account,
+    };
+    if (includeShielded && addresses[idx]) {
+      profile.shieldedAddress = addresses[idx];
+    }
+    return profile;
+  }
+
+  async function requireConnectedPermission() {
+    const perm = await getPermissionForOrigin(origin);
+    if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
+    const status = await getEngineStatus();
+    if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet is locked");
+    return { perm, status };
+  }
+
+  async function requestProfileConnection(options = {}) {
+    const wantsShielded = Boolean(options?.shieldedReceiveAddress);
+    const vault = await loadVault();
+    if (!vault) {
+      try {
+        const url = runtimeGetURL("full.html");
+        tabsCreate({ url }).catch(() => {});
+      } catch {
+        // ignore
+      }
+      throw rpcError(
+        ERROR_CODES.UNAUTHORIZED,
+        "Wallet not set up. Create or import a recovery phrase first."
+      );
+    }
+
+    const existing = await getPermissionForOrigin(origin);
+    const st0 = await getEngineStatus();
+    if (existing && st0?.isUnlocked && (!wantsShielded || existing.shieldedReceiveAddress)) {
+      return { perm: existing, status: st0 };
+    }
+
+    const approved = await requestUserApproval("connect", origin, {
+      requestedAccounts: true,
+      shieldedReceiveAddress: wantsShielded,
+      reason: options?.reason,
+      label: options?.label,
+    });
+
+    const status = await getEngineStatus();
+    if (!status?.isUnlocked) {
+      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet is still locked. Unlock to access accounts.");
+    }
+
+    const arr = Array.isArray(status.accounts) ? status.accounts : [];
+    const idx = sanitizeAccountIndex(approved?.accountIndex, arr.length, 0);
+    const perm = await approveOrigin(origin, idx, { shieldedReceiveAddress: wantsShielded });
+    return { perm, status };
+  }
+
   switch (method) {
     case "dusk_getCapabilities": {
       const settings = await getSettings();
@@ -128,6 +197,7 @@ export async function handleRpc(origin, request) {
           shieldedRead: false,
           // Transfers *to* shielded recipients are supported.
           shieldedRecipients: true,
+          shieldedReceiveAddress: true,
           signMessage: true,
           signAuth: true,
           contractCallPrivacy: true,
@@ -137,48 +207,42 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_requestAccounts": {
-      // If the wallet isn't set up yet, don't even show a connect prompt.
-      // MetaMask forces onboarding first, so we do the same.
-      const vault = await loadVault();
-      if (!vault) {
-        try {
-          const url = runtimeGetURL("full.html");
-          tabsCreate({ url }).catch(() => {});
-        } catch {
-          // ignore
-        }
-        throw rpcError(
-          ERROR_CODES.UNAUTHORIZED,
-          "Wallet not set up. Create or import a recovery phrase first."
-        );
-      }
-
-      // If the site is already connected and the wallet is unlocked, return the
-      // currently permitted account without prompting again.
-      const existing = await getPermissionForOrigin(origin);
-      const st0 = await getEngineStatus();
-      if (existing && st0?.isUnlocked) {
-        const arr = Array.isArray(st0.accounts) ? st0.accounts : [];
-        const idx = sanitizeAccountIndex(existing.accountIndex, arr.length, 0);
-        return arr[idx] ? [arr[idx]] : [];
-      }
-
-      // Ask the user to connect this origin (approval UI includes unlock).
-      const approved = await requestUserApproval("connect", origin, { requestedAccounts: true });
-
-      const { isUnlocked, accounts } = await getEngineStatus();
-      if (!isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet is still locked. Unlock to access accounts.");
-      }
-
-      const arr = Array.isArray(accounts) ? accounts : [];
-      const idx = sanitizeAccountIndex(approved?.accountIndex, arr.length, 0);
-
-      // If user approved, origin is now whitelisted with the chosen account.
-      await approveOrigin(origin, idx);
+      const { perm, status } = await requestProfileConnection(firstParamObject(params));
+      const arr = Array.isArray(status.accounts) ? status.accounts : [];
+      const idx = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
 
       // Expose the permitted account only (MetaMask-style array).
       return arr[idx] ? [arr[idx]] : [];
+    }
+
+    case "dusk_requestProfiles": {
+      const options = firstParamObject(params);
+      const { perm, status } = await requestProfileConnection(options);
+      const profile = profileFromStatus(status, perm.accountIndex, Boolean(options?.shieldedReceiveAddress || perm?.shieldedReceiveAddress));
+      return profile ? [profile] : [];
+    }
+
+    case "dusk_profiles": {
+      const { perm, status } = await requireConnectedPermission();
+      const profile = profileFromStatus(status, perm.accountIndex, Boolean(perm?.shieldedReceiveAddress));
+      return profile ? [profile] : [];
+    }
+
+    case "dusk_requestShieldedAddress": {
+      const options = firstParamObject(params);
+      const { perm, status } = await requestProfileConnection({
+        ...options,
+        shieldedReceiveAddress: true,
+      });
+      const profile = profileFromStatus(status, perm.accountIndex, true);
+      if (!profile?.shieldedAddress) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "No shielded receive address is available");
+      }
+      return {
+        address: profile.shieldedAddress,
+        account: profile.account,
+        chainId: chainIdFromNodeUrl((await getSettings())?.nodeUrl ?? ""),
+      };
     }
 
     case "dusk_accounts": {

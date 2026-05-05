@@ -186,6 +186,7 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
             result: {
               isUnlocked: isUnlocked(),
               accounts: isUnlocked() ? getAccounts() : [],
+              addresses: isUnlocked() ? getAddresses() : [],
               selectedAccountIndex: isUnlocked() ? getSelectedAccountIndex() : 0,
             },
           });

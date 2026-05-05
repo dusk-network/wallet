@@ -159,6 +159,47 @@ const accounts = await dusk.request({ method: "dusk_accounts" });
 
 ---
 
+### `dusk_requestProfiles`
+
+Connect the site to one wallet profile. Opens approval prompt.
+
+```js
+const profiles = await dusk.request({
+  method: "dusk_requestProfiles",
+  params: { shieldedReceiveAddress: true, reason: "payment_request" }
+});
+// → [{ profileId, account, shieldedAddress }]
+```
+
+The shielded receive address is included only when explicitly requested and approved.
+
+---
+
+### `dusk_profiles`
+
+Get connected profile information without prompting.
+
+```js
+const profiles = await dusk.request({ method: "dusk_profiles" });
+// → [] if not connected/locked, otherwise the approved profile
+```
+
+---
+
+### `dusk_requestShieldedAddress`
+
+Prompt for the selected profile's shareable shielded receive address.
+
+```js
+const result = await dusk.request({
+  method: "dusk_requestShieldedAddress",
+  params: { reason: "payment_request" }
+});
+// → { address, account, chainId }
+```
+
+---
+
 ### `dusk_chainId`
 
 Get current chain ID (CAIP-2, `dusk:<id>`).

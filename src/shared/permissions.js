@@ -19,13 +19,17 @@ export async function getPermissionForOrigin(origin) {
 /**
  * @param {string} origin
  * @param {number} accountIndex
+ * @param {{ shieldedReceiveAddress?: boolean }} [options]
  */
-export async function approveOrigin(origin, accountIndex = 0) {
+export async function approveOrigin(origin, accountIndex = 0, options = {}) {
   const permissions = await getPermissions();
   const prev = permissions[origin] ?? null;
   permissions[origin] = {
     accountIndex,
     connectedAt: Number(prev?.connectedAt) || Date.now(),
+    shieldedReceiveAddress: Boolean(
+      options?.shieldedReceiveAddress || prev?.shieldedReceiveAddress
+    ),
   };
   await storage.set({ [STORAGE_KEYS.PERMISSIONS]: permissions });
   return permissions[origin];

@@ -293,6 +293,7 @@ export async function renderNotification() {
   }
 
   if (kindNorm === "connect") {
+    const wantsShielded = Boolean(params?.shieldedReceiveAddress);
     const count = Math.max(1, Number(accountCount ?? (accountsArr.length || 1)) || 1);
     const displayAccounts = accountsArr.length
       ? accountsArr
@@ -329,14 +330,19 @@ export async function renderNotification() {
         h("div", { class: "muted", text: "Connect this site to a Dusk profile?" }),
       ]),
       h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Profile" }),
-        h("div", { class: "select-wrap" }, [accountSelect]),
-        h("div", {
-          class: "muted",
-          text: "The site will only be able to use the selected profile's public account.",
-        }),
-      ]),
-      decisionButtons("Connect", () => ({ accountIndex: Number(accountSelect.value) })),
+          h("div", { class: "muted", text: "Profile" }),
+          h("div", { class: "select-wrap" }, [accountSelect]),
+          h("div", {
+            class: "muted",
+            text: wantsShielded
+              ? "The site will be able to use the selected profile's public account and shareable shielded receive address."
+              : "The site will only be able to use the selected profile's public account.",
+          }),
+        ]),
+      decisionButtons("Connect", () => ({
+        accountIndex: Number(accountSelect.value),
+        shieldedReceiveAddress: wantsShielded,
+      })),
     ]);
     return;
   }
