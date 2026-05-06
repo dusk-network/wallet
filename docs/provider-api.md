@@ -94,6 +94,7 @@ provider = {
   
   // Properties (read-only)
   chainId: string | null,
+  profiles: DuskProfile[],
   isAuthorized: boolean,
   isDusk: true
 }
@@ -170,7 +171,7 @@ const result = await dusk.request({
   method: "dusk_requestShieldedAddress",
   params: { reason: "payment_request" }
 });
-// → { address, account, chainId }
+// → { address, account, profileId, chainId }
 ```
 
 ---
@@ -378,6 +379,7 @@ Emits `disconnect`.
 ```js
 dusk.on("connect", ({ chainId }) => { });
 dusk.on("disconnect", ({ code, message }) => { });
+dusk.on("profilesChanged", (profiles) => { });
 dusk.on("chainChanged", (chainId) => { });
 dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 ```
@@ -386,6 +388,7 @@ dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 |-------|---------|------|
 | `connect` | `{ chainId }` | Permission granted |
 | `disconnect` | `{ code: 4900, message }` | Permission revoked |
+| `profilesChanged` | `DuskProfile[]` | Lock/unlock, connect/disconnect, selected profile changes, or profile grant changes |
 | `chainChanged` | `ChainId` | Network changed (different chain ID) |
 | `duskNodeChanged` | `{ chainId, nodeUrl, networkName }` | Node URL changed (even same chain) |
 
