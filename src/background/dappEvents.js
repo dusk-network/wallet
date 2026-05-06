@@ -1,7 +1,7 @@
 // Dapp provider push events (MetaMask/EIP-1193 style).
 //
 // This module manages long-lived `chrome.runtime.Port` connections from
-// content scripts and broadcasts provider events like accountsChanged, chainChanged.
+// content scripts and broadcasts provider events like profilesChanged, chainChanged.
 
 import { getSettings } from "../shared/settings.js";
 import { getPermissions } from "../shared/permissions.js";
@@ -158,13 +158,7 @@ async function buildProviderState(origin) {
   const hasPermission = Boolean(perm);
 
   const status = await getEngineStatus();
-  let accounts = [];
-  if (hasPermission && status.isUnlocked) {
-    const all = Array.isArray(status.accounts) ? status.accounts : [];
-    const idxRaw = Number(perm?.accountIndex ?? 0);
-    const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
-    accounts = all[idx] ? [all[idx]] : [];
-  }
+  const profiles = hasPermission && status.isUnlocked ? profileSnapshotForPermission(perm, status) : [];
 
   return {
     chainId,
@@ -172,8 +166,35 @@ async function buildProviderState(origin) {
     nodeUrl,
     // "Connected" in the sense of site permission (not chain transport!).
     isConnected: hasPermission,
-    accounts,
+    profiles,
   };
+}
+
+function normalizeAccountIndex(value) {
+  const idxRaw = Number(value ?? 0);
+  return Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
+}
+
+function hasShieldedGrant(perm) {
+  return Boolean(perm?.grants?.shieldedReceiveAddress);
+}
+
+function profileSnapshotForPermission(perm, status) {
+  if (!perm || !status?.isUnlocked) return [];
+  const accounts = Array.isArray(status.accounts) ? status.accounts : [];
+  const addresses = Array.isArray(status.addresses) ? status.addresses : [];
+  const idx = normalizeAccountIndex(perm.accountIndex);
+  const account = accounts[idx];
+  if (!account) return [];
+
+  const profile = {
+    profileId: String(perm.profileId || `account:${idx}:${account}`),
+    account,
+  };
+  if (hasShieldedGrant(perm) && addresses[idx]) {
+    profile.shieldedAddress = addresses[idx];
+  }
+  return [profile];
 }
 
 /**
@@ -295,48 +316,32 @@ export function broadcastToAll(name, data) {
 }
 
 /**
- * Recompute and broadcast accounts visibility for all open dapp ports.
+ * Recompute and broadcast profile visibility for all open dapp ports.
  * This should be called when wallet locks/unlocks or permissions change.
  */
-export async function broadcastAccountsChangedAll() {
+export async function broadcastProfilesChangedAll() {
   const perms = await getPermissions();
   const status = await getEngineStatus();
-  const unlocked = status.isUnlocked;
-  const accounts = Array.isArray(status.accounts) ? status.accounts : [];
 
   for (const [origin, set] of portsByOrigin.entries()) {
     const perm = perms?.[origin];
-    const hasPermission = Boolean(perm);
-    let visible = [];
-    if (hasPermission && unlocked) {
-      const idxRaw = Number(perm?.accountIndex ?? 0);
-      const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
-      visible = accounts[idx] ? [accounts[idx]] : [];
-    }
+    const visible = profileSnapshotForPermission(perm, status);
     for (const port of set) {
-      safePost(port, { type: "DUSK_PROVIDER_EVENT", name: "accountsChanged", data: visible });
+      safePost(port, { type: "DUSK_PROVIDER_EVENT", name: "profilesChanged", data: visible });
     }
   }
 }
 
 /**
- * Broadcast accountsChanged for a single origin.
+ * Broadcast profilesChanged for a single origin.
  *
  * @param {string} origin
  */
-export async function broadcastAccountsChangedForOrigin(origin) {
+export async function broadcastProfilesChangedForOrigin(origin) {
   const perms = await getPermissions();
   const status = await getEngineStatus();
   const perm = perms?.[origin];
-  const hasPermission = Boolean(perm);
-  const accounts = Array.isArray(status.accounts) ? status.accounts : [];
-  let visible = [];
-  if (hasPermission && status.isUnlocked) {
-    const idxRaw = Number(perm?.accountIndex ?? 0);
-    const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
-    visible = accounts[idx] ? [accounts[idx]] : [];
-  }
-  broadcastToOrigin(origin, "accountsChanged", visible);
+  broadcastToOrigin(origin, "profilesChanged", profileSnapshotForPermission(perm, status));
 }
 
 /**
@@ -400,14 +405,12 @@ export async function handlePermissionsDiff(oldPerms, newPerms) {
   }
   for (const origin of Object.keys(newP)) {
     if (!oldP[origin]) continue;
-    const oldIdxRaw = Number(oldP[origin]?.accountIndex ?? 0);
-    const newIdxRaw = Number(newP[origin]?.accountIndex ?? 0);
-    const oldIdx = Number.isFinite(oldIdxRaw) && oldIdxRaw >= 0 ? Math.floor(oldIdxRaw) : 0;
-    const newIdx = Number.isFinite(newIdxRaw) && newIdxRaw >= 0 ? Math.floor(newIdxRaw) : 0;
-    if (oldIdx !== newIdx) changed.push(origin);
+    if (permissionProfileKey(oldP[origin]) !== permissionProfileKey(newP[origin])) {
+      changed.push(origin);
+    }
   }
 
-  // First emit connect/disconnect, then refresh accounts.
+  // First emit connect/disconnect, then refresh profiles.
   if (added.length || removed.length) {
     const settings = await getSettings();
     const chainId = chainIdFromNodeUrl(settings?.nodeUrl ?? "");
@@ -422,16 +425,26 @@ export async function handlePermissionsDiff(oldPerms, newPerms) {
     }
   }
 
-  // Always refresh accounts for any origin diff, so sites see [] when revoked
-  // and accounts when granted.
+  // Always refresh profiles for any origin diff, so sites see [] when revoked
+  // and profile fields when granted.
   if (added.length || removed.length) {
-    await broadcastAccountsChangedAll();
+    await broadcastProfilesChangedAll();
   }
 
-  // Account selection changes should emit accountsChanged.
+  // Profile selection or grant changes should emit profilesChanged.
   for (const origin of changed) {
-    await broadcastAccountsChangedForOrigin(origin);
+    await broadcastProfilesChangedForOrigin(origin);
   }
+}
+
+function permissionProfileKey(perm) {
+  if (!perm) return "";
+  return JSON.stringify({
+    profileId: perm.profileId ?? "",
+    accountIndex: normalizeAccountIndex(perm.accountIndex),
+    publicAccount: Boolean(perm.grants?.publicAccount),
+    shieldedReceiveAddress: Boolean(perm.grants?.shieldedReceiveAddress),
+  });
 }
 
 /**
@@ -472,13 +485,13 @@ export function registerStorageChangeForwarder() {
       handleSettingsDiff(oldS, newS).catch(() => {});
     }
 
-    // Vault removed => accounts become unavailable everywhere
+    // Vault removed => profiles become unavailable everywhere
     if (changes[STORAGE_KEYS.VAULT]) {
       const oldV = changes[STORAGE_KEYS.VAULT].oldValue;
       const newV = changes[STORAGE_KEYS.VAULT].newValue;
       if (oldV && !newV) {
         // Vault deleted: effectively locked for dApps.
-        broadcastAccountsChangedAll().catch(() => {});
+        broadcastProfilesChangedAll().catch(() => {});
       }
     }
   });

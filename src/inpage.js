@@ -199,6 +199,8 @@
     if (msg.type === "DUSK_PROVIDER_STATE" && msg.state) {
       const st = msg.state;
       setChainId(st.chainId, { emitEvent: false });
+      setProfiles(st.profiles, { emitEvent: false });
+      setAuthorized(Boolean(st.isConnected), { emitEvent: false });
       return;
     }
 
