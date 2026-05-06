@@ -19,8 +19,8 @@ import {
 import { handleRpc } from "./rpc.js";
 import { getPending, resolvePendingDecision } from "./pending.js";
 import {
-  broadcastAccountsChangedAll,
   broadcastChainChangedAll,
+  broadcastProfilesChangedAll,
   bindPortsForSenderOrigin,
   registerDappPort,
   registerStorageChangeForwarder,
@@ -103,7 +103,7 @@ async function handleAutoLockAlarm() {
     console.log("[Dusk] Auto-locking wallet due to inactivity.");
     try {
       await engineCall("engine_lock");
-      broadcastAccountsChangedAll().catch(() => {});
+      broadcastProfilesChangedAll().catch(() => {});
     } catch (e) {
       console.error("[Dusk] Auto-lock failed:", e);
     }
@@ -131,7 +131,7 @@ ext?.runtime?.onInstalled?.addListener((details) => {
   }
 });
 
-// Dapp provider ports (push events: accountsChanged, chainChanged, ...).
+// Dapp provider ports (push events: profilesChanged, chainChanged, ...).
 ext?.runtime?.onConnect?.addListener((port) => {
   if (port?.name === "DUSK_DAPP_PORT") {
     registerDappPort(port);
@@ -324,8 +324,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         updateActivity();
         setupAutoLockAlarm().catch(console.error);
 
-        // Notify dApps that accounts are now available.
-        broadcastAccountsChangedAll().catch(() => {});
+        // Notify dApps that profiles are now available.
+        broadcastProfilesChangedAll().catch(() => {});
 
         sendResponse({ ok: true, accounts });
         return;
@@ -335,8 +335,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       if (message?.type === "DUSK_UI_LOCK") {
         await engineCall("engine_lock");
 
-        // Notify dApps that accounts are no longer available.
-        broadcastAccountsChangedAll().catch(() => {});
+        // Notify dApps that profiles are no longer available.
+        broadcastProfilesChangedAll().catch(() => {});
         sendResponse({ ok: true });
         return;
       }
@@ -379,7 +379,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const maxIndex = Math.max(0, Number(settings?.accountCount ?? 1) - 1);
         const clamped = Math.min(Math.floor(accountIndex), maxIndex);
 
-        await approveOrigin(origin, clamped);
+        const status = await getEngineStatus();
+        const account = Array.isArray(status?.accounts) ? status.accounts[clamped] : "";
+        await approveOrigin(origin, {
+          profileId: `account:${clamped}:${account || ""}`,
+          accountIndex: clamped,
+          grants: { publicAccount: true, shieldedReceiveAddress: false },
+        });
         sendResponse({ ok: true });
         return;
       }

@@ -18,14 +18,28 @@ export async function getPermissionForOrigin(origin) {
 
 /**
  * @param {string} origin
- * @param {number} accountIndex
+ * @param {{ profileId?: string, accountIndex?: number, grants?: { publicAccount?: boolean, shieldedReceiveAddress?: boolean } }} grant
  */
-export async function approveOrigin(origin, accountIndex = 0) {
+export async function approveOrigin(origin, grant = {}) {
   const permissions = await getPermissions();
   const prev = permissions[origin] ?? null;
+  const accountIndex = Math.max(0, Math.floor(Number(grant?.accountIndex ?? 0) || 0));
+  const profileId = String(grant?.profileId ?? `profile:${accountIndex}`);
+  const sameProfile = prev?.profileId === profileId;
+  const previousShieldedGrant = Boolean(prev?.grants?.shieldedReceiveAddress);
+  const requestedShieldedGrant = Boolean(grant?.grants?.shieldedReceiveAddress);
+
   permissions[origin] = {
+    profileId,
     accountIndex,
+    grants: {
+      publicAccount: true,
+      shieldedReceiveAddress: sameProfile
+        ? previousShieldedGrant || requestedShieldedGrant
+        : requestedShieldedGrant,
+    },
     connectedAt: Number(prev?.connectedAt) || Date.now(),
+    updatedAt: Date.now(),
   };
   await storage.set({ [STORAGE_KEYS.PERMISSIONS]: permissions });
   return permissions[origin];

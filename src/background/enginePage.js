@@ -262,9 +262,10 @@ export async function getEngineStatus() {
     return {
       isUnlocked: Boolean(status?.isUnlocked),
       accounts: Array.isArray(status?.accounts) ? status.accounts : [],
+      addresses: Array.isArray(status?.addresses) ? status.addresses : [],
       selectedAccountIndex: Number(status?.selectedAccountIndex ?? 0) || 0,
     };
   } catch {
-    return { isUnlocked: false, accounts: [], selectedAccountIndex: 0 };
+    return { isUnlocked: false, accounts: [], addresses: [], selectedAccountIndex: 0 };
   }
 }

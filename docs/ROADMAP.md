@@ -118,7 +118,7 @@ Goal: users should be able to manage common on-chain assets (tokens + NFTs) in-w
 Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/connect`, "Dusk Connect") feel as predictable for dApp developers as `window.ethereum` + common Ethereum SDKs.
 
 #### 5.0.1 Decide Canonical dApp API Surface
-- [x] Decision: dApps can read **public** state only (accounts via `dusk_requestAccounts`/`dusk_accounts`, chain, public balance) and submit transactions via `dusk_sendTransaction`.
+- [x] Decision: dApps use profiles as the provider identity model (`dusk_requestProfiles`/`dusk_profiles`), with explicit per-profile grants for public account and optional shielded receive address access.
 - [x] Decision: the provider must not expose shielded addresses/balances/sync state to dApps. `dusk_getAddresses` is not part of the dApp/provider surface (shielded stays internal to the wallet UI).
 - [x] Implementation: remove/disable `dusk_getAddresses` in the dApp RPC handler (return `4200`) and remove it from docs/SDK.
 
@@ -182,7 +182,7 @@ Goal: for token/NFT contracts that follow the DRC standards, dApp developers sho
   - Types:
     - `type: "DRC20"` with `options: { contractId, image? }`
     - `type: "DRC721"` with `options: { contractId, tokenId, image? }` (tokenId required; "watch collection" is deferred until we have an indexer/archive integration)
-  - Requires prior connection permission (`dusk_requestAccounts`).
+  - Requires prior profile connection permission (`dusk_requestProfiles`).
   - Wallet verifies on-chain metadata (via contract views + canonical drivers) before persisting.
   - For `DRC721`, require current ownership at watch time.
   - Persist watched assets per **(network + selected profile)**, like Ethereum wallets (assets are account-scoped and chain-scoped).

@@ -18,8 +18,8 @@ window.dispatchEvent(new Event("dusk:requestProvider"));
 const dusk = providers[0]?.provider;
 if (!dusk) throw new Error("Dusk wallet not installed");
 
-// Connect to wallet (prompts user)
-const [account] = await dusk.request({ method: "dusk_requestAccounts" });
+// Connect to one wallet profile (prompts user)
+const [profile] = await dusk.request({ method: "dusk_requestProfiles" });
 
 // Check balance
 const { value } = await dusk.request({ method: "dusk_getPublicBalance" });
@@ -30,7 +30,8 @@ const { hash } = await dusk.request({
   method: "dusk_sendTransaction",
   params: {
     kind: "transfer",
-    to: account,
+    privacy: "public",
+    to: profile.account,
     amount: "1000000000"  // 1 DUSK = 1e9 LUX
   }
 });
@@ -89,13 +90,11 @@ provider = {
   removeListener(event, handler),
   removeAllListeners(event?),
   
-  // Legacy
-  enable() → dusk_requestAccounts,
   isConnected() → true,
   
   // Properties (read-only)
   chainId: string | null,
-  selectedAddress: string | null,
+  profiles: DuskProfile[],
   isAuthorized: boolean,
   isDusk: true
 }
@@ -133,28 +132,46 @@ const caps = await dusk.request({ method: "dusk_getCapabilities" });
 // → { methods: [...], txKinds: [...], limits: { maxFnArgsBytes: 65536, ... }, ... }
 ```
 
-### `dusk_requestAccounts`
+### `dusk_requestProfiles`
 
-Connect the site to the wallet. Opens approval prompt.
+Connect the site to one wallet profile. Opens approval prompt.
 
 ```js
-const accounts = await dusk.request({ method: "dusk_requestAccounts" });
-// → ["2Z8m..."]
+const profiles = await dusk.request({ method: "dusk_requestProfiles" });
+// → [{ profileId, account }]
+
+const profiles = await dusk.request({
+  method: "dusk_requestProfiles",
+  params: { shieldedReceiveAddress: true, reason: "payment_request" }
+});
+// → [{ profileId, account, shieldedAddress }]
 ```
 
-The wallet exposes a **single** public account to each origin (array length 0 or 1). The connect prompt lets the user choose which account to expose.
-
-Returns `AccountId[]`. Throws `4001` if rejected, `4100` if wallet not set up.
+The approval dialog shows the effective disclosure in one prompt: either public account only, or public account plus shareable shielded receive address. The shielded receive address is included only when requested and approved for that profile.
 
 ---
 
-### `dusk_accounts`
+### `dusk_profiles`
 
-Get connected accounts without prompting.
+Get connected profile information without prompting.
 
 ```js
-const accounts = await dusk.request({ method: "dusk_accounts" });
-// → [] if not connected/locked, ["2Z8m..."] otherwise
+const profiles = await dusk.request({ method: "dusk_profiles" });
+// → [] if not connected/locked, otherwise the approved profile
+```
+
+---
+
+### `dusk_requestShieldedAddress`
+
+Prompt for the selected profile's shareable shielded receive address.
+
+```js
+const result = await dusk.request({
+  method: "dusk_requestShieldedAddress",
+  params: { reason: "payment_request" }
+});
+// → { address, account, profileId, chainId }
 ```
 
 ---
@@ -232,7 +249,8 @@ const tx = await dusk.request({
   method: "dusk_sendTransaction",
   params: {
     kind: "transfer",
-    to: "2Z8m...",           // AccountId (public) OR Address (shielded)
+    privacy: "public",       // "public" | "shielded" is required
+    to: "2Z8m...",           // AccountId for public, Address for shielded
     amount: "1000000000",    // 1 DUSK in LUX
     memo: "optional",
     gas: { limit: "10000000", price: "1" }  // optional
@@ -240,6 +258,8 @@ const tx = await dusk.request({
 });
 // → { hash: "abc...", nonce: "5" }
 ```
+
+Transfers must declare their privacy rail. The wallet rejects missing or invalid `privacy`, public transfers to shielded addresses, and shielded transfers to public accounts.
 
 #### Contract Call
 
@@ -268,7 +288,7 @@ const tx = await dusk.request({
 
 Prompt the user to add a **DRC20** token or **DRC721** NFT to the wallet's Assets UI (approval required).
 
-Requires prior connection (`dusk_requestAccounts`) and an unlocked wallet.
+Requires prior profile connection and an unlocked wallet.
 
 Assets are stored per **(network + selected account/profile)**.
 
@@ -350,7 +370,7 @@ await dusk.request({ method: "dusk_disconnect" });
 // → true
 ```
 
-Emits `disconnect` and `accountsChanged([])`.
+Emits `disconnect`.
 
 ---
 
@@ -359,7 +379,7 @@ Emits `disconnect` and `accountsChanged([])`.
 ```js
 dusk.on("connect", ({ chainId }) => { });
 dusk.on("disconnect", ({ code, message }) => { });
-dusk.on("accountsChanged", (accounts) => { });
+dusk.on("profilesChanged", (profiles) => { });
 dusk.on("chainChanged", (chainId) => { });
 dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 ```
@@ -368,7 +388,7 @@ dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 |-------|---------|------|
 | `connect` | `{ chainId }` | Permission granted |
 | `disconnect` | `{ code: 4900, message }` | Permission revoked |
-| `accountsChanged` | `AccountId[]` | Lock/unlock, connect/disconnect, or user changes the connected account for the site |
+| `profilesChanged` | `DuskProfile[]` | Lock/unlock, connect/disconnect, selected profile changes, or profile grant changes |
 | `chainChanged` | `ChainId` | Network changed (different chain ID) |
 | `duskNodeChanged` | `{ chainId, nodeUrl, networkName }` | Node URL changed (even same chain) |
 
@@ -405,12 +425,11 @@ const dusk = providers[0]?.provider;
 if (!dusk) throw new Error("Dusk wallet not installed");
 
 // Subscribe to state changes
-dusk.on("accountsChanged", accts => console.log("Accounts:", accts));
 dusk.on("chainChanged", id => console.log("Chain:", id));
 
 // Connect
-const [account] = await dusk.request({ method: "dusk_requestAccounts" });
-console.log("Connected:", account);
+const [profile] = await dusk.request({ method: "dusk_requestProfiles" });
+console.log("Connected:", profile.profileId, profile.account);
 
 // Read balance
 const { value } = await dusk.request({ method: "dusk_getPublicBalance" });
@@ -421,6 +440,7 @@ const { hash } = await dusk.request({
   method: "dusk_sendTransaction",
   params: {
     kind: "transfer",
+    privacy: "public",
     to: "2Z8mRecipient...",
     amount: "500000000"  // 0.5 DUSK
   }

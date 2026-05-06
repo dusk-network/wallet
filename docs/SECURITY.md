@@ -97,8 +97,9 @@ Implementation uses `chrome.alarms` API for reliable timing even when service wo
 | Method | Permission Required | Unlock Required |
 |--------|---------------------|-----------------|
 | `dusk_getCapabilities` | No | No |
-| `dusk_requestAccounts` | No (grants it) | Yes (prompt) |
-| `dusk_accounts` | Yes (returns `[]` otherwise) | Yes (returns `[]` otherwise) |
+| `dusk_requestProfiles` | No (grants it) | Yes (prompt) |
+| `dusk_profiles` | Yes (returns `[]` otherwise) | Yes (returns `[]` otherwise) |
+| `dusk_requestShieldedAddress` | No (grants or upgrades it) | Yes (prompt) |
 | `dusk_chainId` | No | No |
 | `dusk_switchNetwork` | Yes | No |
 | `dusk_getPublicBalance` | Yes | Yes |

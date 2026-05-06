@@ -2,7 +2,7 @@
 //
 // This file implements two flows:
 // 1) Request/response RPC (`window.postMessage` -> `runtime.sendMessage`)
-// 2) Provider event push via a long-lived `Port` (accountsChanged, chainChanged, ...)
+// 2) Provider event push via a long-lived `Port` (profilesChanged, chainChanged, ...)
 
 // NOTE: MV3 content scripts run as classic scripts, not modules. Keep this file
 // free of static `import` statements so the bundled output doesn't include them.

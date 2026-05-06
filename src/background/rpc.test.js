@@ -2,6 +2,17 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { ERROR_CODES } from "../shared/errors.js";
 
+vi.mock("@dusk/w3sper", () => ({
+  ProfileGenerator: {
+    typeOf(value) {
+      const s = String(value ?? "");
+      if (s.startsWith("acct")) return "account";
+      if (s.startsWith("addr")) return "address";
+      return "undefined";
+    },
+  },
+}));
+
 // ---------------------------------------------------------------------------
 // Shared mutable state for mocks
 // ---------------------------------------------------------------------------
@@ -13,14 +24,26 @@ let settings = {
   proverUrl: "https://testnet.provers.dusk.network",
   archiverUrl: "https://testnet.nodes.dusk.network",
 };
-let engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+let engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
 
 const loadVault = vi.fn(async () => vaultValue);
 
-const approveOrigin = vi.fn(async (origin, accountIndex = 0) => {
+const approveOrigin = vi.fn(async (origin, grant = {}) => {
+  const accountIndex = Number(grant.accountIndex) || 0;
+  const profileId = grant.profileId || `account:${accountIndex}:acct${accountIndex}`;
+  const prev = perms[origin] ?? null;
+  const sameProfile = prev?.profileId === profileId;
+  const requestedShielded = Boolean(grant.grants?.shieldedReceiveAddress);
+  const previousShielded = Boolean(prev?.grants?.shieldedReceiveAddress);
   perms[origin] = {
-    accountIndex: Number(accountIndex) || 0,
-    connectedAt: perms[origin]?.connectedAt ?? 123,
+    profileId,
+    accountIndex,
+    grants: {
+      publicAccount: true,
+      shieldedReceiveAddress: sameProfile ? previousShielded || requestedShielded : requestedShielded,
+    },
+    connectedAt: prev?.connectedAt ?? 123,
+    updatedAt: 456,
   };
   return perms[origin];
 });
@@ -104,7 +127,7 @@ describe("background rpc handler", () => {
       proverUrl: "https://testnet.provers.dusk.network",
       archiverUrl: "https://testnet.nodes.dusk.network",
     };
-    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
 
     vi.clearAllMocks();
   });
@@ -126,65 +149,198 @@ describe("background rpc handler", () => {
     });
   });
 
-  it("dusk_requestAccounts rejects when no vault exists (opens onboarding)", async () => {
+  it("dusk_requestProfiles rejects when no vault exists (opens onboarding)", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
 
     vaultValue = null;
 
     await expect(
-      handleRpc("https://dapp.example", { method: "dusk_requestAccounts" })
+      handleRpc("https://dapp.example", { method: "dusk_requestProfiles" })
     ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
 
     expect(tabsCreate).toHaveBeenCalled();
     expect(runtimeGetURL).toHaveBeenCalledWith("full.html");
   });
 
-  it("dusk_requestAccounts does not grant permission if wallet stays locked", async () => {
+  it("dusk_requestProfiles does not grant permission if wallet stays locked", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
 
     vaultValue = { v: 1 };
     requestUserApproval.mockResolvedValueOnce({ accountIndex: 0 });
-    engineStatus = { isUnlocked: false, accounts: ["acct0"] };
+    engineStatus = { isUnlocked: false, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 };
 
     await expect(
-      handleRpc("https://dapp.example", { method: "dusk_requestAccounts" })
+      handleRpc("https://dapp.example", { method: "dusk_requestProfiles" })
     ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
 
     expect(approveOrigin).not.toHaveBeenCalled();
   });
 
-  it("dusk_requestAccounts stores accountIndex from approval and returns only that account", async () => {
+  it("dusk_requestProfiles stores a profile-scoped public-account grant", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
 
     vaultValue = { v: 1 };
     requestUserApproval.mockResolvedValueOnce({ accountIndex: 1 });
-    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
 
-    const accounts = await handleRpc("https://dapp.example", { method: "dusk_requestAccounts" });
-    expect(accounts).toEqual(["acct1"]);
-    expect(perms["https://dapp.example"]).toMatchObject({ accountIndex: 1 });
-
-    // Subsequent calls should not prompt again if already connected+unlocked.
-    const accounts2 = await handleRpc("https://dapp.example", { method: "dusk_requestAccounts" });
-    expect(accounts2).toEqual(["acct1"]);
-    expect(requestUserApproval).toHaveBeenCalledTimes(1);
+    const profiles = await handleRpc("https://dapp.example", { method: "dusk_requestProfiles" });
+    expect(profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
+    expect(perms["https://dapp.example"]).toMatchObject({
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+    });
   });
 
-  it("dusk_accounts returns [] when not connected/locked, otherwise the permitted account", async () => {
+  it("dusk_requestProfiles can grant a shielded receive address in one prompt", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
 
-    expect(await handleRpc("https://dapp.example", { method: "dusk_accounts" })).toEqual([]);
+    vaultValue = { v: 1 };
+    requestUserApproval.mockResolvedValueOnce({ accountIndex: 1 });
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
 
-    perms["https://dapp.example"] = { accountIndex: 1, connectedAt: 1 };
-    engineStatus = { isUnlocked: false, accounts: ["acct0", "acct1"] };
-    expect(await handleRpc("https://dapp.example", { method: "dusk_accounts" })).toEqual([]);
+    const profiles = await handleRpc("https://dapp.example", {
+      method: "dusk_requestProfiles",
+      params: { shieldedReceiveAddress: true, reason: "payment_request" },
+    });
 
-    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
-    expect(await handleRpc("https://dapp.example", { method: "dusk_accounts" })).toEqual(["acct1"]);
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "connect",
+      "https://dapp.example",
+      expect.objectContaining({
+        requestedProfiles: true,
+        shieldedReceiveAddress: true,
+        effectiveShieldedReceiveAddress: true,
+        reason: "payment_request",
+      })
+    );
+    expect(profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1", shieldedAddress: "addr1" }]);
+  });
+
+  it("dusk_profiles returns [] when not connected or locked", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    expect(await handleRpc("https://dapp.example", { method: "dusk_profiles" })).toEqual([]);
+
+    perms["https://dapp.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: true },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    engineStatus = { isUnlocked: false, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+    expect(await handleRpc("https://dapp.example", { method: "dusk_profiles" })).toEqual([]);
+  });
+
+  it("dusk_profiles returns only approved fields", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+    expect(await handleRpc("https://dapp.example", { method: "dusk_profiles" })).toEqual([
+      { profileId: "account:1:acct1", account: "acct1" },
+    ]);
+
+    perms["https://dapp.example"].grants.shieldedReceiveAddress = true;
+    expect(await handleRpc("https://dapp.example", { method: "dusk_profiles" })).toEqual([
+      { profileId: "account:1:acct1", account: "acct1", shieldedAddress: "addr1" },
+    ]);
+  });
+
+  it("dusk_requestShieldedAddress upgrades and returns the connected profile address", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    requestUserApproval.mockResolvedValueOnce({ accountIndex: 1 });
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_requestShieldedAddress" })
+    ).resolves.toEqual({
+      address: "addr1",
+      account: "acct1",
+      profileId: "account:1:acct1",
+      chainId: "dusk:2",
+    });
+    expect(perms["https://dapp.example"].grants.shieldedReceiveAddress).toBe(true);
+  });
+
+  it("reconnecting the same profile preserves shielded grant and prompts with effective disclosure", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: true },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    requestUserApproval.mockResolvedValueOnce({ accountIndex: 1 });
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 1 };
+
+    const profiles = await handleRpc("https://dapp.example", { method: "dusk_requestProfiles" });
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "connect",
+      "https://dapp.example",
+      expect.objectContaining({
+        shieldedReceiveAddress: false,
+        effectiveShieldedReceiveAddress: true,
+      })
+    );
+    expect(profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1", shieldedAddress: "addr1" }]);
+  });
+
+  it("reconnecting a different profile does not carry shielded grant unless requested", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: true },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    requestUserApproval.mockResolvedValueOnce({ accountIndex: 0 });
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+
+    const profiles = await handleRpc("https://dapp.example", { method: "dusk_requestProfiles" });
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "connect",
+      "https://dapp.example",
+      expect.objectContaining({
+        shieldedReceiveAddress: false,
+        effectiveShieldedReceiveAddress: false,
+      })
+    );
+    expect(profiles).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
+    expect(perms["https://dapp.example"].grants.shieldedReceiveAddress).toBe(false);
   });
 
   it("dusk_getPublicBalance passes the permitted profileIndex to the engine", async () => {
@@ -210,6 +366,7 @@ describe("background rpc handler", () => {
       method: "dusk_sendTransaction",
       params: {
         kind: "transfer",
+        privacy: "public",
         to: "acct1",
         amount: "1",
         memo: "hi",
@@ -229,6 +386,7 @@ describe("background rpc handler", () => {
         origin: "https://dapp.example",
         kind: "transfer",
         to: "acct1",
+        privacy: "public",
       })
     );
   });
@@ -243,6 +401,25 @@ describe("background rpc handler", () => {
     await expect(
       handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params: { kind: "shield" } })
     ).rejects.toMatchObject({ code: ERROR_CODES.UNSUPPORTED });
+  });
+
+  it.each([
+    ["missing privacy", { kind: "transfer", to: "acct1", amount: "1" }],
+    ["blank privacy", { kind: "transfer", privacy: "  ", to: "acct1", amount: "1" }],
+    ["invalid privacy", { kind: "transfer", privacy: "private", to: "acct1", amount: "1" }],
+    ["public to shielded address", { kind: "transfer", privacy: "public", to: "addr1", amount: "1" }],
+    ["shielded to public account", { kind: "transfer", privacy: "shielded", to: "acct1", amount: "1" }],
+  ])("dusk_sendTransaction rejects transfer with %s", async (_label, params) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalledWith("send_tx", expect.anything(), expect.anything());
   });
 
   it("dusk_sendTransaction validates contract_call privacy", async () => {
@@ -268,4 +445,3 @@ describe("background rpc handler", () => {
     ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
   });
 });
-
