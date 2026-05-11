@@ -80,13 +80,18 @@ Implementation uses `chrome.alarms` API for reliable timing even when service wo
 
 - Each origin must explicitly request connection
 - User approves via popup before granting access
-- Permissions stored per-origin with the selected public account index
+- Permissions stored per-origin with the selected profile/account index and grants
 
 ```js
 // Permission record
 {
   "https://dapp.example.com": {
+    profileId: "account:0:...",
     accountIndex: 0,
+    grants: {
+      publicAccount: true,
+      shieldedReceiveAddress: false
+    },
     connectedAt: 1706400000000,
   }
 }
@@ -105,6 +110,7 @@ Implementation uses `chrome.alarms` API for reliable timing even when service wo
 | `dusk_getPublicBalance` | Yes | Yes |
 | `dusk_estimateGas` | Yes | No |
 | `dusk_sendTransaction` | Yes | Yes |
+| `dusk_watchAsset` | Yes | Yes |
 | `dusk_signMessage` | Yes | Yes |
 | `dusk_signAuth` | Yes | Yes |
 | `dusk_disconnect` | No | No |
@@ -214,7 +220,7 @@ Dusk uses BLS12-381 signatures, which Ledger/Trezor do not support.
 
 - [ ] Never log sensitive data (mnemonic, private keys)
 - [ ] Validate all message inputs
-- [ ] Use strict CSP in Tauri builds
+- [ ] Use strict CSP in any native wrapper builds
 - [ ] Keep dependencies updated
 - [ ] Run security-focused code review for crypto code
 
@@ -252,7 +258,8 @@ Dusk uses BLS12-381 signatures, which Ledger/Trezor do not support.
 If you discover a security vulnerability, please:
 
 1. **Do not** open a public GitHub issue
-2. Email security concerns to [maintainer email]
+2. Report it privately through GitHub Security Advisories:
+   https://github.com/dusk-network/wallet/security/advisories/new
 3. Include detailed reproduction steps
 4. Allow reasonable time for fix before disclosure
 

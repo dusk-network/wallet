@@ -86,13 +86,21 @@ window.addEventListener("dusk:announceProvider", (event) => {
 window.dispatchEvent(new Event("dusk:requestProvider"));
 
 const dusk = providers[0]?.provider;
-const [account] = await dusk.request({ method: "dusk_requestAccounts" });
+const [profile] = await dusk.request({ method: "dusk_requestProfiles" });
+console.log(profile.account);
 
-dusk.on("accountsChanged", console.log);
+dusk.on("profilesChanged", console.log);
 dusk.on("chainChanged", console.log);
 ```
 
-Full API reference: [docs/provider-api.md](docs/provider-api.md)
+Canonical v0.1 docs:
+
+- Provider API: [docs/provider-api.md](docs/provider-api.md)
+- Discovery protocol: [dusk-network/connect docs/wallet-discovery.md](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md)
+- Connect SDK usage: [dusk-network/connect README.md](https://github.com/dusk-network/connect/blob/main/README.md)
+- Wallet implementer guidance: [dusk-network/connect docs/wallet-implementer.md](https://github.com/dusk-network/connect/blob/main/docs/wallet-implementer.md)
+- Security/threat model: [docs/SECURITY.md](docs/SECURITY.md)
+- v0.1 release checklist: [dusk-network/connect docs/RELEASE_CHECKLIST_v0.1.md](https://github.com/dusk-network/connect/blob/main/docs/RELEASE_CHECKLIST_v0.1.md)
 
 ## Architecture
 
