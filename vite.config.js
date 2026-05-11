@@ -1,13 +1,10 @@
 import { defineConfig } from "vite";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
+import inject from "@rollup/plugin-inject";
 
 const engineDebug = process.env.DUSK_ENGINE_DEBUG === "1";
 
 export default defineConfig({
-  plugins: [
-    // bip39 pulls in node shims, the web-wallet already uses this plugin.
-    nodePolyfills(),
-  ],
+  plugins: [],
   define: {
     // Build-time constant used by src/wallet/bus.js to avoid bundling the
     // local (Tauri/web) backend into the extension bundle.
@@ -22,6 +19,11 @@ export default defineConfig({
     sourcemap: true,
     // We use multiple JS entrypoints so the output file names are stable.
     rollupOptions: {
+      plugins: [
+        // bip39@3.1.0 is CommonJS and references the Node Buffer global.
+        // Keep this to Buffer only; do not pull the full node-stdlib-browser graph.
+        inject({ Buffer: ["buffer", "Buffer"] }),
+      ],
       input: {
         background: "src/background.js",
         contentScript: "src/contentScript.js",

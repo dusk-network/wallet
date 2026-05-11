@@ -468,6 +468,11 @@ export function sendFormView(ov, { state, actions } = {}) {
 
         const toVal = to.value.trim();
         if (!toVal) throw new Error("Recipient is required");
+        const recType = ProfileGenerator.typeOf(toVal);
+        if (recType !== "account" && recType !== "address") {
+          throw new Error("Invalid recipient: expected a Dusk account or shielded address");
+        }
+        const privacy = recType === "address" ? "shielded" : "public";
 
         const amtLux = parseDuskToLux(amount.value);
         const memoVal = memo.value.trim();
@@ -477,6 +482,7 @@ export function sendFormView(ov, { state, actions } = {}) {
 
         state.draft = {
           to: toVal,
+          privacy,
           amountLux: amtLux,
           amountDusk: amount.value.trim(),
           memo: memoVal,
@@ -737,6 +743,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         type: "DUSK_UI_SEND_TX",
         params: {
           kind: TX_KIND.TRANSFER,
+          privacy: d.privacy || (recType === "address" ? "shielded" : "public"),
           to: d.to,
           amount: d.amountLux,
           memo: d.memo || undefined,

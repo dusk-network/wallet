@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { defineConfig } from "vite";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
+import inject from "@rollup/plugin-inject";
 
 const MANIFEST_PATH = path.resolve("config/manifest.firefox.json");
 
@@ -68,7 +68,7 @@ const workerUrl = getWorkerUrl();`;
 }
 
 export default defineConfig({
-  plugins: [nodePolyfills(), firefoxWorkerPlugin(), manifestPlugin()],
+  plugins: [firefoxWorkerPlugin(), manifestPlugin()],
   define: {
     __DUSK_BACKEND__: JSON.stringify("extension"),
     __DUSK_TARGET__: JSON.stringify("firefox"),
@@ -79,6 +79,11 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     rollupOptions: {
+      plugins: [
+        // bip39@3.1.0 is CommonJS and references the Node Buffer global.
+        // Keep this to Buffer only; do not pull the full node-stdlib-browser graph.
+        inject({ Buffer: ["buffer", "Buffer"] }),
+      ],
       input: {
         background: "src/background.js",
         contentScript: "src/contentScript.js",

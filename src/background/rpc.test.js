@@ -2,16 +2,10 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { ERROR_CODES } from "../shared/errors.js";
 
-vi.mock("@dusk/w3sper", () => ({
-  ProfileGenerator: {
-    typeOf(value) {
-      const s = String(value ?? "");
-      if (s.startsWith("acct")) return "account";
-      if (s.startsWith("addr")) return "address";
-      return "undefined";
-    },
-  },
-}));
+const PUBLIC_ACCOUNT =
+  "M8vMuVUZZrHCW3LBFKEctWFJerYmT2HghQNuGHKrgV6BQqgkYK1A4FZLX3Nm9Rri63RZwL4gQCMhLyJRJQE5MQouqqu77Dr1rQnHqk1W7zAf4WKZqr6MgdxzkxFwFjo8ZM";
+const SHIELDED_ADDRESS =
+  "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
 
 // ---------------------------------------------------------------------------
 // Shared mutable state for mocks
@@ -416,7 +410,7 @@ describe("background rpc handler", () => {
       params: {
         kind: "transfer",
         privacy: "public",
-        to: "acct1",
+        to: PUBLIC_ACCOUNT,
         amount: "1",
         memo: "hi",
         profileIndex: 999,
@@ -430,7 +424,7 @@ describe("background rpc handler", () => {
       expect.objectContaining({
         kind: "transfer",
         privacy: "public",
-        to: "acct1",
+        to: PUBLIC_ACCOUNT,
         amount: "1",
         chainId: "dusk:2",
         networkName: "Testnet",
@@ -448,7 +442,7 @@ describe("background rpc handler", () => {
       expect.objectContaining({
         origin: "https://dapp.example",
         kind: "transfer",
-        to: "acct1",
+        to: PUBLIC_ACCOUNT,
         privacy: "public",
       })
     );
@@ -471,7 +465,7 @@ describe("background rpc handler", () => {
         params: {
           kind: "transfer",
           privacy: "public",
-          to: "acct1",
+          to: PUBLIC_ACCOUNT,
           amount: "1",
         },
       })
@@ -499,7 +493,7 @@ describe("background rpc handler", () => {
         params: {
           kind: "transfer",
           privacy: "public",
-          to: "acct1",
+          to: PUBLIC_ACCOUNT,
           amount: "1",
         },
       })
@@ -644,22 +638,22 @@ describe("background rpc handler", () => {
   });
 
   it.each([
-    ["missing privacy", { kind: "transfer", to: "acct1", amount: "1" }],
-    ["blank privacy", { kind: "transfer", privacy: "  ", to: "acct1", amount: "1" }],
-    ["invalid privacy", { kind: "transfer", privacy: "private", to: "acct1", amount: "1" }],
-    ["public to shielded address", { kind: "transfer", privacy: "public", to: "addr1", amount: "1" }],
-    ["shielded to public account", { kind: "transfer", privacy: "shielded", to: "acct1", amount: "1" }],
-    ["missing amount", { kind: "transfer", privacy: "public", to: "acct1" }],
-    ["zero amount", { kind: "transfer", privacy: "public", to: "acct1", amount: "0" }],
-    ["decimal amount", { kind: "transfer", privacy: "public", to: "acct1", amount: "1.5" }],
-    ["negative amount", { kind: "transfer", privacy: "public", to: "acct1", amount: "-1" }],
-    ["amount larger than u64", { kind: "transfer", privacy: "public", to: "acct1", amount: "18446744073709551616" }],
-    ["non-string memo", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", memo: { text: "hi" } }],
-    ["oversized memo", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", memo: "x".repeat(513) }],
-    ["partial gas", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", gas: { limit: "1" } }],
-    ["non-object gas", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", gas: "auto" }],
-    ["zero gas", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", gas: { limit: "0", price: "1" } }],
-    ["decimal gas", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", gas: { limit: "1.5", price: "1" } }],
+    ["missing privacy", { kind: "transfer", to: PUBLIC_ACCOUNT, amount: "1" }],
+    ["blank privacy", { kind: "transfer", privacy: "  ", to: PUBLIC_ACCOUNT, amount: "1" }],
+    ["invalid privacy", { kind: "transfer", privacy: "private", to: PUBLIC_ACCOUNT, amount: "1" }],
+    ["public to shielded address", { kind: "transfer", privacy: "public", to: SHIELDED_ADDRESS, amount: "1" }],
+    ["shielded to public account", { kind: "transfer", privacy: "shielded", to: PUBLIC_ACCOUNT, amount: "1" }],
+    ["missing amount", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT }],
+    ["zero amount", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "0" }],
+    ["decimal amount", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1.5" }],
+    ["negative amount", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "-1" }],
+    ["amount larger than u64", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "18446744073709551616" }],
+    ["non-string memo", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", memo: { text: "hi" } }],
+    ["oversized memo", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", memo: "x".repeat(513) }],
+    ["partial gas", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { limit: "1" } }],
+    ["non-object gas", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: "auto" }],
+    ["zero gas", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { limit: "0", price: "1" } }],
+    ["decimal gas", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { limit: "1.5", price: "1" } }],
   ])("dusk_sendTransaction rejects transfer with %s", async (_label, params) => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

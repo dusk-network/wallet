@@ -142,6 +142,26 @@ throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 sendResponse({ error: serializeError(err) });
 ```
 
+### Public Bundle Dependency Hygiene
+
+Keep the public extension dependency surface small, especially for `contentScript.js`
+and `inpage.js`. Avoid broad Node compatibility layers and Browserify-style
+polyfills in shipped Chrome/Firefox artifacts unless a concrete package
+requirement is proven and documented in the relevant Vite config.
+
+Prefer browser-native APIs such as WebCrypto, `fetch`, `URL`, `TextEncoder`, and
+`TextDecoder`. If a runtime shim is required, keep it as narrow as possible; the
+current Buffer injection exists for the `bip39@3.1.0` path.
+
+Do not import `@dusk/w3sper`, `@jsr/dusk__exu`, or wallet-engine modules into
+the MV3 background service worker. Keep w3sper/exu in offscreen, engine-page, or
+UI contexts because the exu sandbox uses Blob worker URLs that are not available
+in extension service workers.
+
+Wallet-initiated transfers must include explicit `privacy: "public"` or
+`privacy: "shielded"` before calling `dusk_sendTransaction`; dApp-initiated
+transfers already require this field at the provider boundary.
+
 ---
 
 ## Conventions

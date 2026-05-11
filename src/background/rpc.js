@@ -1,5 +1,4 @@
 import { loadVault } from "../shared/vault.js";
-import { ProfileGenerator } from "@dusk/w3sper";
 import {
   approveOrigin,
   getPermissionForOrigin,
@@ -13,6 +12,7 @@ import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.j
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
 import { sha256Hex, toBytes } from "../shared/bytes.js";
+import { classifyDuskIdentifier } from "../shared/duskIdentifiers.js";
 import { DAPP_LIMITS, DAPP_RPC_METHODS, DAPP_TX_KINDS } from "../shared/providerSurface.js";
 import {
   engineCall,
@@ -316,7 +316,7 @@ export async function handleRpc(origin, request) {
       throw rpcError(ERROR_CODES.INVALID_PARAMS, 'privacy must be "public" or "shielded"');
     }
     const to = String(params?.to ?? "").trim();
-    const toType = to ? ProfileGenerator.typeOf(to) : "";
+    const toType = to ? classifyDuskIdentifier(to) : "";
     if (privacyRaw === "public" && toType !== "account") {
       throw rpcError(ERROR_CODES.INVALID_PARAMS, "Public transfer requires a public recipient account");
     }

@@ -35,16 +35,8 @@ function makeLocalStorage() {
 
 let engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
 
-vi.mock("@dusk/w3sper", () => ({
-  ProfileGenerator: {
-    typeOf(value) {
-      const s = String(value ?? "");
-      if (s.startsWith("acct")) return "account";
-      if (s.startsWith("addr")) return "address";
-      return "undefined";
-    },
-  },
-}));
+const PUBLIC_ACCOUNT =
+  "M8vMuVUZZrHCW3LBFKEctWFJerYmT2HghQNuGHKrgV6BQqgkYK1A4FZLX3Nm9Rri63RZwL4gQCMhLyJRJQE5MQouqqu77Dr1rQnHqk1W7zAf4WKZqr6MgdxzkxFwFjo8ZM";
 
 const engineCall = vi.fn(async (method) => {
   if (method === "dusk_getCachedGasPrice") {
@@ -144,7 +136,7 @@ describe("integration: provider flows", () => {
       params: {
         kind: "transfer",
         privacy: "public",
-        to: "acct0",
+        to: PUBLIC_ACCOUNT,
         amount: "1",
         memo: "hi",
       },
@@ -157,7 +149,7 @@ describe("integration: provider flows", () => {
     expect(entry).toMatchObject({
       origin,
       kind: "transfer",
-      to: "acct0",
+      to: PUBLIC_ACCOUNT,
       status: "submitted",
     });
   });
