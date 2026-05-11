@@ -34,21 +34,7 @@ export async function handleRpc(origin, request) {
   const { method, params } = request || {};
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
-
-  function estimateBytes(v) {
-    if (v == null) return 0;
-    if (Array.isArray(v)) return v.length;
-    if (typeof v === "string") {
-      let s = v.trim();
-      if (s.startsWith("0x") || s.startsWith("0X")) s = s.slice(2);
-      // hex
-      if (/^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0) return s.length / 2;
-      // base64-ish estimate
-      s = s.replace(/^base64:/i, "");
-      return Math.floor((s.length * 3) / 4);
-    }
-    return null;
-  }
+  const MAX_U64 = 18446744073709551615n;
 
   function mergeGas(baseGas, overrideGas) {
     if (!overrideGas || typeof overrideGas !== "object") {
@@ -102,6 +88,130 @@ export async function handleRpc(origin, request) {
   function firstParamObject(value) {
     const p = Array.isArray(value) ? value[0] : value;
     return p && typeof p === "object" ? p : {};
+  }
+
+  function validateU64(value, name, { required = false, allowZero = true } = {}) {
+    if (value === undefined || value === null || value === "") {
+      if (required) {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, `${name} is required`);
+      }
+      return "0";
+    }
+
+    let n;
+    try {
+      if (typeof value === "number") {
+        if (!Number.isSafeInteger(value)) throw new Error("unsafe");
+        n = BigInt(value);
+      } else if (typeof value === "bigint") {
+        n = value;
+      } else if (typeof value === "string") {
+        const s = value.trim();
+        if (!/^\d+$/.test(s)) throw new Error("format");
+        n = BigInt(s);
+      } else {
+        throw new Error("type");
+      }
+    } catch {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, `${name} must be a u64 decimal string`);
+    }
+
+    if (n < 0n || n > MAX_U64) {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, `${name} must be a u64 decimal string`);
+    }
+    if (!allowZero && n === 0n) {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, `${name} must be > 0`);
+    }
+    return n.toString();
+  }
+
+  function validateGasShape(gas) {
+    if (gas === undefined || gas === null) return gas;
+    if (typeof gas !== "object" || Array.isArray(gas)) {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "gas must be an object with { limit, price } or null");
+    }
+    if (!isCompleteGas(gas)) {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "gas must include both limit and price, or neither");
+    }
+    if (!("limit" in gas) && !("price" in gas)) return gas;
+    return {
+      ...gas,
+      limit: validateU64(gas.limit, "gas.limit", { required: true, allowZero: false }),
+      price: validateU64(gas.price, "gas.price", { required: true, allowZero: false }),
+    };
+  }
+
+  function validateMemo(memo) {
+    if (memo === undefined || memo === null || memo === "") return memo;
+    if (typeof memo !== "string") {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "memo must be a string");
+    }
+    const bytes = new TextEncoder().encode(memo);
+    if (bytes.length > DAPP_LIMITS.maxMemoBytes) {
+      throw rpcError(
+        ERROR_CODES.INVALID_PARAMS,
+        `memo too large (max ${DAPP_LIMITS.maxMemoBytes} bytes)`
+      );
+    }
+    return memo;
+  }
+
+  function validateContractId(value) {
+    try {
+      return normalizeContractId(value);
+    } catch {
+      throw rpcError(
+        ERROR_CODES.INVALID_PARAMS,
+        "contractId must be a 32-byte hex string (0x + 64 hex chars)"
+      );
+    }
+  }
+
+  function validateFnName(value) {
+    if (typeof value !== "string") {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "fnName must be a string");
+    }
+    const fnName = value.trim();
+    if (!fnName) throw rpcError(ERROR_CODES.INVALID_PARAMS, "fnName is required");
+    if (fnName.length > DAPP_LIMITS.maxFnNameChars) {
+      throw rpcError(
+        ERROR_CODES.INVALID_PARAMS,
+        `fnName too long (max ${DAPP_LIMITS.maxFnNameChars} chars)`
+      );
+    }
+    return fnName;
+  }
+
+  function validateFnArgs(value) {
+    let bytes;
+    try {
+      bytes = toBytes(value);
+    } catch {
+      throw rpcError(
+        ERROR_CODES.INVALID_PARAMS,
+        "fnArgs must be bytes (hex string, base64 string, Uint8Array, ArrayBuffer, or number[])"
+      );
+    }
+    if (bytes.length > MAX_CALLDATA_BYTES) {
+      throw rpcError(
+        ERROR_CODES.INVALID_PARAMS,
+        `fnArgs too large (max ${MAX_CALLDATA_BYTES} bytes)`
+      );
+    }
+    return bytes;
+  }
+
+  function validateNodeUrl(value) {
+    const trimmed = String(value ?? "").trim();
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("protocol");
+      }
+      return trimmed;
+    } catch {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid nodeUrl");
+    }
   }
 
   function profileFromStatus(status, index, includeShielded = false) {
@@ -354,13 +464,7 @@ export async function handleRpc(origin, request) {
           NETWORK_PRESETS.find((n) => n.id === presetId)?.nodeUrl ?? "";
       }
 
-      // Validate nodeUrl
-      try {
-        // eslint-disable-next-line no-new
-        new URL(targetNodeUrl);
-      } catch {
-        throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid nodeUrl");
-      }
+      targetNodeUrl = validateNodeUrl(targetNodeUrl);
 
       const settings = await getSettings();
       const currentNodeUrl = String(settings?.nodeUrl ?? "");
@@ -442,11 +546,14 @@ export async function handleRpc(origin, request) {
         normalizedParams = {
           ...params,
           privacy: validateTransferPrivacy(params),
+          amount: validateU64(params.amount, "amount", { required: true, allowZero: false }),
+          memo: validateMemo(params.memo),
+          gas: validateGasShape(params.gas),
         };
       }
 
       if (kind === TX_KIND.CONTRACT_CALL) {
-        if (normalizedParams.memo) {
+        if (normalizedParams.memo !== undefined && normalizedParams.memo !== null && normalizedParams.memo !== "") {
           throw rpcError(
             ERROR_CODES.INVALID_PARAMS,
             "memo is not allowed for contract_call (payload is either memo OR contract call)"
@@ -461,13 +568,16 @@ export async function handleRpc(origin, request) {
           );
         }
 
-        const est = estimateBytes(normalizedParams.fnArgs);
-        if (typeof est === "number" && est > MAX_CALLDATA_BYTES) {
-          throw rpcError(
-            ERROR_CODES.INVALID_PARAMS,
-            `fnArgs too large (max ${MAX_CALLDATA_BYTES} bytes)`
-          );
-        }
+        validateFnArgs(normalizedParams.fnArgs);
+        normalizedParams = {
+          ...normalizedParams,
+          privacy,
+          contractId: validateContractId(normalizedParams.contractId),
+          fnName: validateFnName(normalizedParams.fnName),
+          amount: validateU64(normalizedParams.amount, "amount"),
+          deposit: validateU64(normalizedParams.deposit, "deposit"),
+          gas: validateGasShape(normalizedParams.gas),
+        };
       }
 
       // Fill wallet defaults (standard gas settings) so the user always sees a fee.
@@ -482,12 +592,26 @@ export async function handleRpc(origin, request) {
       } catch {
         // Ignore errors, will fall back to static default
       }
-      const baseParams = applyTxDefaults(normalizedParams, { dynamicPrice });
+      const {
+        profileIndex: _ignoredProfileIndex,
+        accountIndex: _ignoredAccountIndex,
+        ...safeNormalizedParams
+      } = normalizedParams;
+      const baseParams = applyTxDefaults(safeNormalizedParams, { dynamicPrice });
+      const approvalSettings = await getSettings();
+      const approvalNodeUrl = String(approvalSettings?.nodeUrl ?? "");
+      const approvalParams = {
+        ...baseParams,
+        chainId: chainIdFromNodeUrl(approvalNodeUrl),
+        nodeUrl: approvalNodeUrl,
+        networkName: networkNameFromNodeUrl(approvalNodeUrl),
+      };
 
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
-      const overrides = await requestUserApproval("send_tx", origin, baseParams);
+      const overrides = await requestUserApproval("send_tx", origin, approvalParams);
       const finalParams = mergeTxParams(baseParams, overrides);
+      finalParams.gas = validateGasShape(finalParams.gas);
 
       const { isUnlocked, accounts } = await getEngineStatus();
       if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
@@ -662,6 +786,9 @@ export async function handleRpc(origin, request) {
       if (!params || typeof params !== "object") {
         throw rpcError(ERROR_CODES.INVALID_PARAMS, "params must be an object");
       }
+      if (!Object.prototype.hasOwnProperty.call(params, "message")) {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.message is required");
+      }
 
       // Compute a stable message hash for the approval UI.
       let messageLen = 0;
@@ -711,6 +838,23 @@ export async function handleRpc(origin, request) {
       if (!nonce) {
         throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.nonce is required");
       }
+      if (nonce.length > 128) {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.nonce too long (max 128 chars)");
+      }
+
+      const statement = params.statement != null ? String(params.statement).trim() : "";
+      if (statement.length > 280) {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.statement too long (max 280 chars)");
+      }
+
+      let expiresAt = "";
+      if (params.expiresAt != null && String(params.expiresAt).trim()) {
+        const t = Date.parse(String(params.expiresAt));
+        if (!Number.isFinite(t)) {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.expiresAt must be an ISO timestamp");
+        }
+        expiresAt = new Date(t).toISOString();
+      }
 
       const settings = await getSettings();
       const chainId = chainIdFromNodeUrl(settings?.nodeUrl ?? "");
@@ -718,7 +862,8 @@ export async function handleRpc(origin, request) {
       await requestUserApproval("sign_auth", origin, {
         chainId,
         nonce,
-        statement: params.statement ?? "",
+        statement,
+        expiresAt,
       });
 
       const { isUnlocked, accounts } = await getEngineStatus();
@@ -730,8 +875,8 @@ export async function handleRpc(origin, request) {
         origin,
         chainId,
         nonce,
-        statement: params.statement ?? "",
-        expiresAt: params.expiresAt ?? "",
+        statement,
+        expiresAt,
         profileIndex: sanitizeAccountIndex(perm.accountIndex, arr.length, 0),
       });
     }
