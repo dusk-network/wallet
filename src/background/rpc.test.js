@@ -260,6 +260,43 @@ describe("background rpc handler", () => {
     ]);
   });
 
+  it("keeps permissions and disconnect scoped to the requesting origin", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://a.example"] = {
+      profileId: "account:0:acct0",
+      accountIndex: 0,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    perms["https://b.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: true },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+
+    expect(await handleRpc("https://a.example", { method: "dusk_profiles" })).toEqual([
+      { profileId: "account:0:acct0", account: "acct0" },
+    ]);
+    expect(await handleRpc("https://b.example", { method: "dusk_profiles" })).toEqual([
+      { profileId: "account:1:acct1", account: "acct1", shieldedAddress: "addr1" },
+    ]);
+    expect(await handleRpc("https://untrusted.example", { method: "dusk_profiles" })).toEqual([]);
+
+    await expect(handleRpc("https://a.example", { method: "dusk_disconnect" })).resolves.toBe(true);
+
+    expect(perms["https://a.example"]).toBeUndefined();
+    expect(perms["https://b.example"]).toBeTruthy();
+    expect(await handleRpc("https://b.example", { method: "dusk_profiles" })).toEqual([
+      { profileId: "account:1:acct1", account: "acct1", shieldedAddress: "addr1" },
+    ]);
+  });
+
   it("dusk_requestShieldedAddress upgrades and returns the connected profile address", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -391,6 +428,61 @@ describe("background rpc handler", () => {
     );
   });
 
+  it("dusk_signMessage overwrites dApp-supplied profile/account indexes before engine calls", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signMessage",
+        params: {
+          message: "0x1234",
+          profileIndex: 999,
+          accountIndex: 999,
+        },
+      })
+    ).resolves.toMatchObject({ ok: true });
+
+    const call = engineCall.mock.calls.find(([m]) => m === "dusk_signMessage");
+    expect(call).toBeTruthy();
+    expect(call[1]).toMatchObject({
+      origin: "https://dapp.example",
+      profileIndex: 1,
+    });
+    expect(call[1]).not.toHaveProperty("accountIndex");
+  });
+
+  it("custody-sensitive methods reject while locked and do not call the engine", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = {
+      profileId: "account:0:acct0",
+      accountIndex: 0,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    engineStatus = { isUnlocked: false, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signMessage",
+        params: { message: "0x1234" },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_signMessage", expect.anything());
+  });
+
   it("dusk_sendTransaction rejects unsupported tx kinds for dApps", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -443,5 +535,37 @@ describe("background rpc handler", () => {
         },
       })
     ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+  });
+
+  it("dusk_signMessage rejects malformed message params before approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signMessage",
+        params: { message: { not: "bytes" } },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalledWith("sign_message", expect.anything(), expect.anything());
+  });
+
+  it("dusk_signAuth rejects missing nonce before approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signAuth",
+        params: { statement: "Sign in" },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalledWith("sign_auth", expect.anything(), expect.anything());
   });
 });

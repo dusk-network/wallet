@@ -51,6 +51,13 @@ class FakePort {
   }
 }
 
+class FakePortWithoutSenderOrigin extends FakePort {
+  constructor(tabId = 1) {
+    super("https://unused.example", tabId);
+    this.sender = { tab: { id: tabId } };
+  }
+}
+
 describe("dappEvents", () => {
   beforeEach(() => {
     permissions = {};
@@ -169,5 +176,67 @@ describe("dappEvents", () => {
     expect(profileMsgs.at(-1)?.data).toEqual([
       { profileId: "account:0:acct0", account: "acct0", shieldedAddress: "addr0" },
     ]);
+  });
+
+  it("does not let a HELLO message re-key a sender-derived origin", async () => {
+    permissions = {
+      "https://dapp.example": {
+        profileId: "account:0:acct0",
+        accountIndex: 0,
+        grants: { publicAccount: true, shieldedReceiveAddress: false },
+        connectedAt: 1,
+        updatedAt: 1,
+      },
+      "https://evil.example": {
+        profileId: "account:1:acct1",
+        accountIndex: 1,
+        grants: { publicAccount: true, shieldedReceiveAddress: true },
+        connectedAt: 1,
+        updatedAt: 1,
+      },
+    };
+
+    const ev = await import("./dappEvents.js");
+
+    const port = new FakePort("https://dapp.example");
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+
+    port.onMessage.emit({ type: "DUSK_DAPP_HELLO", origin: "https://evil.example" });
+    await new Promise((r) => setTimeout(r, 0));
+
+    await ev.broadcastProfilesChangedForOrigin("https://evil.example");
+    await ev.broadcastProfilesChangedForOrigin("https://dapp.example");
+
+    const profileMsgs = port.messages.filter(
+      (m) => m?.type === "DUSK_PROVIDER_EVENT" && m?.name === "profilesChanged"
+    );
+    expect(profileMsgs).toHaveLength(1);
+    expect(profileMsgs[0].data).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
+  });
+
+  it("uses HELLO only as a fallback when sender origin is unavailable", async () => {
+    permissions = {
+      "https://dapp.example": {
+        profileId: "account:1:acct1",
+        accountIndex: 1,
+        grants: { publicAccount: true, shieldedReceiveAddress: false },
+        connectedAt: 1,
+        updatedAt: 1,
+      },
+    };
+
+    const ev = await import("./dappEvents.js");
+
+    const port = new FakePortWithoutSenderOrigin();
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(port.messages).toEqual([]);
+
+    port.onMessage.emit({ type: "DUSK_DAPP_HELLO", origin: "https://dapp.example" });
+    await new Promise((r) => setTimeout(r, 0));
+
+    const stateMsg = port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE");
+    expect(stateMsg?.state.profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
   });
 });

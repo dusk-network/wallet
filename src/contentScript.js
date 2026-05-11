@@ -74,6 +74,10 @@ function runtimeSendMessage(message, options) {
   return callApi(ext?.runtime?.sendMessage, [message], ext?.runtime, options);
 }
 
+function isValidRequestId(id) {
+  return typeof id === "string" && id.length > 0 && id.length <= 128;
+}
+
 const EXTENSION_TARGET =
   typeof __DUSK_TARGET__ !== "undefined" ? __DUSK_TARGET__ : "chrome";
 const IS_FIREFOX = EXTENSION_TARGET === "firefox";
@@ -185,9 +189,11 @@ window.addEventListener("message", (event) => {
   // RPC requests from the inpage provider.
   if (msg.type !== "DUSK_RPC_REQUEST") return;
 
+  const id = msg.id;
+  if (!isValidRequestId(id)) return;
+
   ensurePort();
 
-  const id = msg.id;
   const request = msg.request;
 
   runtimeSendMessage({
