@@ -438,6 +438,7 @@ export async function renderNotification() {
     const chainId = String(params?.chainId ?? "");
     const nonce = String(params?.nonce ?? "");
     const statement = String(params?.statement ?? "").trim();
+    const expiresAt = String(params?.expiresAt ?? "").trim();
 
     setApp([
       header,
@@ -462,6 +463,12 @@ export async function renderNotification() {
         h("div", { class: "muted", text: "Nonce" }),
         h("div", { class: "box" }, [h("code", { text: nonce || "—" })]),
       ]),
+      expiresAt
+        ? h("div", { class: "row" }, [
+            h("div", { class: "muted", text: "Expires" }),
+            h("div", { class: "box" }, [h("code", { text: expiresAt })]),
+          ])
+        : h("div"),
       h("div", {
         class: "muted",
         text: "Only sign in if you trust this site.",
@@ -579,6 +586,17 @@ export async function renderNotification() {
 
   if (kindNorm === "send_tx") {
     const txKind = String(params?.kind ?? "").toLowerCase();
+    const txChainId = String(params?.chainId ?? "");
+    const txNetworkName = String(params?.networkName ?? "");
+    const txNodeUrl = String(params?.nodeUrl ?? "");
+    const networkRow = h("div", { class: "row" }, [
+      h("div", { class: "muted", text: "Network" }),
+      h("div", { class: "box" }, [
+        h("div", { text: txNetworkName || txChainId || "Unknown" }),
+        txChainId ? h("div", { class: "muted", text: txChainId }) : null,
+        txNodeUrl ? h("div", { class: "muted", text: txNodeUrl }) : null,
+      ].filter(Boolean)),
+    ]);
 
     if (txKind === TX_KIND.TRANSFER) {
       const to = params?.to ?? "";
@@ -602,6 +620,7 @@ export async function renderNotification() {
 
       setApp([
         header,
+        networkRow,
         h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve transfer" })]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "From" }),
@@ -771,6 +790,7 @@ export async function renderNotification() {
 
         setApp([
           header,
+          networkRow,
           h("div", { class: "row" }, [
             h("div", { class: "muted", text: "Approve DRC20 contract call" }),
           ]),
@@ -892,6 +912,7 @@ export async function renderNotification() {
 
         setApp([
           header,
+          networkRow,
           h("div", { class: "row" }, [
             h("div", { class: "muted", text: "Approve DRC721 contract call" }),
           ]),
@@ -995,6 +1016,7 @@ export async function renderNotification() {
 
       setApp([
         header,
+        networkRow,
         h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve contract call" })]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "From" }),

@@ -424,6 +424,20 @@ describe("background rpc handler", () => {
     });
 
     expect(tx).toMatchObject({ hash: "0xhash", nonce: "5" });
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "send_tx",
+      "https://dapp.example",
+      expect.objectContaining({
+        kind: "transfer",
+        privacy: "public",
+        to: "acct1",
+        amount: "1",
+        chainId: "dusk:2",
+        networkName: "Testnet",
+        nodeUrl: "https://testnet.nodes.dusk.network",
+        gas: { limit: "10000000", price: "1" },
+      })
+    );
 
     const call = engineCall.mock.calls.find(([m]) => m === "dusk_sendTransaction");
     expect(call).toBeTruthy();
@@ -465,6 +479,33 @@ describe("background rpc handler", () => {
 
     expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
     expect(putTxMeta).not.toHaveBeenCalled();
+  });
+
+  it("dusk_sendTransaction preserves user rejection error codes", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+    requestUserApproval.mockRejectedValueOnce(
+      Object.assign(new Error("User rejected the request"), {
+        code: ERROR_CODES.USER_REJECTED,
+      })
+    );
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "transfer",
+          privacy: "public",
+          to: "acct1",
+          amount: "1",
+        },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.USER_REJECTED });
+
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
   });
 
   it("dusk_signMessage overwrites dApp-supplied profile/account indexes before engine calls", async () => {
@@ -608,6 +649,17 @@ describe("background rpc handler", () => {
     ["invalid privacy", { kind: "transfer", privacy: "private", to: "acct1", amount: "1" }],
     ["public to shielded address", { kind: "transfer", privacy: "public", to: "addr1", amount: "1" }],
     ["shielded to public account", { kind: "transfer", privacy: "shielded", to: "acct1", amount: "1" }],
+    ["missing amount", { kind: "transfer", privacy: "public", to: "acct1" }],
+    ["zero amount", { kind: "transfer", privacy: "public", to: "acct1", amount: "0" }],
+    ["decimal amount", { kind: "transfer", privacy: "public", to: "acct1", amount: "1.5" }],
+    ["negative amount", { kind: "transfer", privacy: "public", to: "acct1", amount: "-1" }],
+    ["amount larger than u64", { kind: "transfer", privacy: "public", to: "acct1", amount: "18446744073709551616" }],
+    ["non-string memo", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", memo: { text: "hi" } }],
+    ["oversized memo", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", memo: "x".repeat(513) }],
+    ["partial gas", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", gas: { limit: "1" } }],
+    ["non-object gas", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", gas: "auto" }],
+    ["zero gas", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", gas: { limit: "0", price: "1" } }],
+    ["decimal gas", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", gas: { limit: "1.5", price: "1" } }],
   ])("dusk_sendTransaction rejects transfer with %s", async (_label, params) => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -644,6 +696,147 @@ describe("background rpc handler", () => {
     ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
   });
 
+  it.each([
+    ["invalid contractId", { contractId: "0x1234", fnName: "stake", fnArgs: "0x", amount: "0", deposit: "0", display: { label: "safe" } }],
+    ["missing fnName", { contractId: `0x${"02".repeat(32)}`, fnArgs: "0x", amount: "0", deposit: "0" }],
+    ["oversized fnName", { contractId: `0x${"02".repeat(32)}`, fnName: "x".repeat(65), fnArgs: "0x", amount: "0", deposit: "0" }],
+    ["malformed fnArgs", { contractId: `0x${"02".repeat(32)}`, fnName: "stake", fnArgs: { bytes: "0x" }, amount: "0", deposit: "0" }],
+    ["oversized fnArgs", { contractId: `0x${"02".repeat(32)}`, fnName: "stake", fnArgs: `0x${"00".repeat(65537)}`, amount: "0", deposit: "0" }],
+    ["negative deposit", { contractId: `0x${"02".repeat(32)}`, fnName: "stake", fnArgs: "0x", amount: "0", deposit: "-1" }],
+    ["partial gas", { contractId: `0x${"02".repeat(32)}`, fnName: "stake", fnArgs: "0x", amount: "0", deposit: "0", gas: { price: "1" } }],
+    ["memo", { contractId: `0x${"02".repeat(32)}`, fnName: "stake", fnArgs: "0x", amount: "0", deposit: "0", memo: "not allowed" }],
+  ])("dusk_sendTransaction rejects contract_call with %s before approval", async (_label, tx) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "contract_call",
+          privacy: "public",
+          ...tx,
+        },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalledWith("send_tx", expect.anything(), expect.anything());
+  });
+
+  it("dusk_sendTransaction approval shows canonical contract call context", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+    requestUserApproval.mockImplementationOnce(async () => {
+      engineStatus = { isUnlocked: false, accounts: ["acct0"] };
+      return null;
+    });
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "contract_call",
+          privacy: "shielded",
+          contractId: `0x${"AB".repeat(32)}`,
+          fnName: "transfer",
+          fnArgs: "0x1234",
+          amount: "0",
+          deposit: "5",
+          display: { spender: "untrusted-display-only" },
+        },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "send_tx",
+      "https://dapp.example",
+      expect.objectContaining({
+        kind: "contract_call",
+        privacy: "shielded",
+        contractId: `0x${"ab".repeat(32)}`,
+        fnName: "transfer",
+        fnArgs: "0x1234",
+        amount: "0",
+        deposit: "5",
+        chainId: "dusk:2",
+        networkName: "Testnet",
+        nodeUrl: "https://testnet.nodes.dusk.network",
+      })
+    );
+  });
+
+  it.each([
+    ["non-object params", null],
+    ["unsupported type", { type: "ERC20", options: { contractId: `0x${"02".repeat(32)}` } }],
+    ["missing options", { type: "DRC20" }],
+    ["invalid DRC20 contractId", { type: "DRC20", options: { contractId: "0x1234", symbol: "FAKE" } }],
+    ["missing DRC721 tokenId", { type: "DRC721", options: { contractId: `0x${"02".repeat(32)}` } }],
+    ["negative DRC721 tokenId", { type: "DRC721", options: { contractId: `0x${"02".repeat(32)}`, tokenId: "-1" } }],
+    ["oversized DRC721 tokenId", { type: "DRC721", options: { contractId: `0x${"02".repeat(32)}`, tokenId: "18446744073709551616" } }],
+  ])("dusk_watchAsset rejects %s before approval", async (_label, params) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_watchAsset",
+        params,
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalledWith("watch_asset", expect.anything(), expect.anything());
+  });
+
+  it.each([
+    ["non-object params", null],
+    ["unknown chain", { chainId: "dusk:999" }],
+    ["invalid node URL", { nodeUrl: "not a url" }],
+    ["unsupported node URL protocol", { nodeUrl: "ftp://node.example" }],
+  ])("dusk_switchNetwork rejects %s before approval", async (_label, params) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_switchNetwork",
+        params,
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalledWith("switch_network", expect.anything(), expect.anything());
+  });
+
+  it("dusk_switchNetwork returns null without approval when target preset URL matches current settings", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    settings = {
+      ...settings,
+      nodeUrl: "https://testnet.nodes.dusk.network",
+    };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_switchNetwork",
+        params: { chainId: "dusk:2" },
+      })
+    ).resolves.toBeNull();
+
+    expect(requestUserApproval).not.toHaveBeenCalledWith("switch_network", expect.anything(), expect.anything());
+    expect(setSettings).not.toHaveBeenCalled();
+  });
+
   it("dusk_signMessage rejects malformed message params before approval", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -655,6 +848,22 @@ describe("background rpc handler", () => {
       handleRpc("https://dapp.example", {
         method: "dusk_signMessage",
         params: { message: { not: "bytes" } },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalledWith("sign_message", expect.anything(), expect.anything());
+  });
+
+  it("dusk_signMessage rejects missing message before approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signMessage",
+        params: {},
       })
     ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
     expect(requestUserApproval).not.toHaveBeenCalledWith("sign_message", expect.anything(), expect.anything());
@@ -674,5 +883,66 @@ describe("background rpc handler", () => {
       })
     ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
     expect(requestUserApproval).not.toHaveBeenCalledWith("sign_auth", expect.anything(), expect.anything());
+  });
+
+  it.each([
+    ["oversized nonce", { nonce: "n".repeat(129) }],
+    ["oversized statement", { nonce: "n", statement: "s".repeat(281) }],
+    ["invalid expiresAt", { nonce: "n", expiresAt: "not a date" }],
+  ])("dusk_signAuth rejects %s before approval", async (_label, params) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signAuth",
+        params,
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalledWith("sign_auth", expect.anything(), expect.anything());
+  });
+
+  it("dusk_signAuth includes nonce and normalized expiry in approval and engine payload", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signAuth",
+        params: {
+          nonce: "nonce-1",
+          statement: "Sign in",
+          expiresAt: "2026-05-11T12:00:00Z",
+        },
+      })
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "sign_auth",
+      "https://dapp.example",
+      expect.objectContaining({
+        chainId: "dusk:2",
+        nonce: "nonce-1",
+        statement: "Sign in",
+        expiresAt: "2026-05-11T12:00:00.000Z",
+      })
+    );
+    expect(engineCall).toHaveBeenCalledWith(
+      "dusk_signAuth",
+      expect.objectContaining({
+        origin: "https://dapp.example",
+        chainId: "dusk:2",
+        nonce: "nonce-1",
+        statement: "Sign in",
+        expiresAt: "2026-05-11T12:00:00.000Z",
+        profileIndex: 0,
+      })
+    );
   });
 });
