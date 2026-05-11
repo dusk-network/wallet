@@ -190,4 +190,12 @@ describe("Provider Surface Conformance", () => {
 
     expect(tableMethods).toEqual(uniqSorted(DAPP_RPC_METHODS));
   });
+
+  it("docs/SECURITY.md has non-placeholder private vulnerability reporting instructions", async () => {
+    const docPath = path.resolve(process.cwd(), "docs", "SECURITY.md");
+    const md = await readFile(docPath, "utf8");
+
+    expect(md).toContain("https://github.com/dusk-network/wallet/security/advisories/new");
+    expect(md).not.toContain("[maintainer email]");
+  });
 });

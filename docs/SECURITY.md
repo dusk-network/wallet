@@ -258,7 +258,8 @@ Dusk uses BLS12-381 signatures, which Ledger/Trezor do not support.
 If you discover a security vulnerability, please:
 
 1. **Do not** open a public GitHub issue
-2. Email security concerns to [maintainer email]
+2. Report it privately through GitHub Security Advisories:
+   https://github.com/dusk-network/wallet/security/advisories/new
 3. Include detailed reproduction steps
 4. Allow reasonable time for fix before disclosure
 
