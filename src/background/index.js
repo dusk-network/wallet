@@ -142,11 +142,25 @@ ext?.runtime?.onConnect?.addListener((port) => {
 registerStorageChangeForwarder();
 
 function getOriginFromSender(sender) {
-  // sender.url for content scripts contains full URL of the page
-  try {
-    if (sender?.url) return new URL(sender.url).origin;
-  } catch {
-    // ignore
+  // sender.url for content scripts contains the full page URL. Some browser
+  // contexts omit it but still expose tab.url/pendingUrl.
+  const candidates = [];
+  if (sender?.url) candidates.push(sender.url);
+  if (sender?.tab?.url) candidates.push(sender.tab.url);
+  if (sender?.tab?.pendingUrl) candidates.push(sender.tab.pendingUrl);
+
+  for (const candidate of candidates) {
+    try {
+      const origin = new URL(candidate).origin;
+      if (
+        origin.startsWith("http://") ||
+        origin.startsWith("https://")
+      ) {
+        return origin;
+      }
+    } catch {
+      // ignore
+    }
   }
   return "";
 }
@@ -212,7 +226,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // RPC messages from contentScript
       if (message?.type === "DUSK_RPC_REQUEST") {
-        const origin = message.origin || getOriginFromSender(sender);
+        const origin = getOriginFromSender(sender) || message.origin || "";
 
         // Ensure any dApp port(s) opened from this tab are bound to the same
         // origin so provider push events (connect/chainChanged/...) work

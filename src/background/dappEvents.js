@@ -232,14 +232,13 @@ export function registerDappPort(port) {
   // Content scripts can optionally send a HELLO with an origin.
   port.onMessage.addListener((msg) => {
     if (msg?.type === "DUSK_DAPP_HELLO" && typeof msg.origin === "string") {
-      // If sender.url couldn't be parsed, allow the explicit origin.
+      // If sender.url couldn't be parsed, allow the explicit origin. When the
+      // browser gave us a sender-derived origin, do not let a HELLO re-key the
+      // port to a different origin.
       const o = msg.origin;
       if (!isWebOrigin(o)) return;
+      if (meta.origin && meta.origin !== o) return;
 
-      // Re-key.
-      if (meta.origin && meta.origin !== o) {
-        removePort(meta.origin, port);
-      }
       if (meta.origin !== o) {
         meta.origin = o;
         addPort(o, port);
