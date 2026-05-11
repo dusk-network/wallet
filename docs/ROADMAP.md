@@ -25,7 +25,7 @@
 - [x] Remove legacy vault format support
 
 ### 1.2 Content Security Policy
-- [x] Define strict CSP for Tauri (`"csp": null` currently)
+- [ ] Define strict CSP for the native Tauri wrapper once that wrapper is checked in
 - [x] Ensure extension CSP blocks inline scripts
 
 ### 1.3 Security Testing
@@ -146,8 +146,8 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 
 #### 5.0.5 Multi-Account & Permissions (Provider-Level)
 - [x] UI: account switching + per-origin account selection (align with provider behavior: which account is exposed to a site).
-- [x] Provider semantics: single-account-per-origin (array length 0 or 1), MetaMask-like account picker on connect.
-- [x] Add provider events semantics for account switching (consistent `accountsChanged` behavior).
+- [x] Provider semantics: single-profile-per-origin for v0.1, exposed through `dusk_requestProfiles` / `dusk_profiles`.
+- [x] Add provider event semantics for profile switching and grant changes (`profilesChanged`).
 
 ### 5.1 Documentation
 - [x] `ARCHITECTURE.md` — System deep-dive
@@ -168,7 +168,7 @@ Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/conne
 
 ### 5.4 Wallet UX Quick Wins
 - [x] Multi-account: account switching UI in the main wallet UI (not only in Settings/Options)
-- [x] Multi-account: support up to 5 profiles (note: shielded scanning cost scales with profiles)
+- [x] Multi-account: support up to 2 profiles (note: shielded scanning cost scales with profiles)
 - [x] Multi-account: per-account naming (persisted per `walletId`)
 - [x] Activity view: polish the existing activity feed (local submitted/executed statuses, explorer links)
 - [x] Transactions: better gas estimation UI (use Rusk gas price stats, show recommended + range)

@@ -27,7 +27,7 @@ src/
 │   ├── rpc.js            # dApp RPC handler (dusk_* methods)
 │   ├── offscreen.js      # Bridge to offscreen document
 │   ├── pending.js        # Approval queue for dApp requests
-│   ├── dappEvents.js     # accountsChanged, chainChanged events
+│   ├── dappEvents.js     # profilesChanged, chainChanged events
 │   └── txNotify.js       # Transaction notifications
 │
 ├── ui/

@@ -30,6 +30,15 @@ function extractSdkReadmeMethods(markdown) {
   return out;
 }
 
+function extractMarkdownTableMethods(markdown) {
+  const out = [];
+  for (const line of String(markdown).split(/\r?\n/)) {
+    const m = line.match(/^\|\s*`(dusk_[^`]+)`\s*\|/);
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
+
 function extractSectionBacktickedBullets(markdown, sectionTitle) {
   const lines = String(markdown).split(/\r?\n/);
   const out = [];
@@ -162,5 +171,23 @@ describe("Provider Surface Conformance", () => {
     const sdkMethods = uniqSorted(extractSdkReadmeMethods(md));
     const canonical = uniqSorted(DAPP_RPC_METHODS);
     expect(sdkMethods).toEqual(canonical);
+  });
+
+  it("wallet README uses the current profile API in public dApp examples", async () => {
+    const readmePath = path.resolve(process.cwd(), "README.md");
+    const md = await readFile(readmePath, "utf8");
+
+    expect(md).toContain("dusk_requestProfiles");
+    expect(md).toContain("profilesChanged");
+    expect(md).not.toContain("dusk_requestAccounts");
+    expect(md).not.toContain("accountsChanged");
+  });
+
+  it("docs/SECURITY.md permission table covers the canonical dApp RPC methods", async () => {
+    const docPath = path.resolve(process.cwd(), "docs", "SECURITY.md");
+    const md = await readFile(docPath, "utf8");
+    const tableMethods = uniqSorted(extractMarkdownTableMethods(md));
+
+    expect(tableMethods).toEqual(uniqSorted(DAPP_RPC_METHODS));
   });
 });
