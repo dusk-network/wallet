@@ -106,6 +106,27 @@ async function loadVaultModule() {
     await expect(vaultMod.unlockVault(password)).rejects.toThrow(/too many attempts/i);
   });
 
+  it("returns a generic decrypt failure for wrong passwords without vault detail", async () => {
+    const { vaultMod } = await loadVaultModule();
+
+    const mnemonic = "test seed phrase";
+    const password = "password123";
+
+    await vaultMod.createVault(mnemonic, password);
+
+    let error;
+    try {
+      await vaultMod.unlockVault("wrong-password");
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeTruthy();
+    expect(error.message).toBe("Incorrect password");
+    expect(error.message).not.toContain(mnemonic);
+    expect(error.message).not.toMatch(/decrypt|crypto|aes|gcm|salt|iv|data/i);
+  });
+
   it("persists unlock rate limits across module reloads", async () => {
     let { storageMod, vaultMod } = await loadVaultModule();
 

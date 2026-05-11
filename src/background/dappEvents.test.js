@@ -178,6 +178,42 @@ describe("dappEvents", () => {
     ]);
   });
 
+  it("broadcasts empty profiles when lock or auto-lock clears dApp-visible state", async () => {
+    permissions = {
+      "https://dapp.example": {
+        profileId: "account:0:acct0",
+        accountIndex: 0,
+        grants: { publicAccount: true, shieldedReceiveAddress: true },
+        connectedAt: 1,
+        updatedAt: 1,
+      },
+    };
+
+    const ev = await import("./dappEvents.js");
+
+    const port = new FakePort("https://dapp.example");
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const stateMsg = port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE");
+    expect(stateMsg?.state.profiles).toEqual([
+      { profileId: "account:0:acct0", account: "acct0", shieldedAddress: "addr0" },
+    ]);
+
+    engineStatus = {
+      isUnlocked: false,
+      accounts: ["acct0", "acct1"],
+      addresses: ["addr0", "addr1"],
+    };
+
+    await ev.broadcastProfilesChangedAll();
+
+    const profileMsgs = port.messages.filter(
+      (m) => m?.type === "DUSK_PROVIDER_EVENT" && m?.name === "profilesChanged"
+    );
+    expect(profileMsgs.at(-1)?.data).toEqual([]);
+  });
+
   it("does not let a HELLO message re-key a sender-derived origin", async () => {
     permissions = {
       "https://dapp.example": {
