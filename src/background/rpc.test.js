@@ -86,6 +86,13 @@ const requestUserApproval = vi.fn(async () => null);
 const notifyTxSubmitted = vi.fn(async () => true);
 const putTxMeta = vi.fn(async () => {});
 const broadcastChainChangedAll = vi.fn(async () => {});
+const watchToken = vi.fn(async () => true);
+const watchNft = vi.fn(async () => true);
+const normalizeContractId = vi.fn((value) => {
+  const s = String(value ?? "").trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(s)) throw new Error("invalid contractId");
+  return s.toLowerCase();
+});
 
 const tabsCreate = vi.fn(async () => ({ id: 1 }));
 const runtimeGetURL = vi.fn((path) => `chrome-extension://test/${String(path ?? "")}`);
@@ -111,6 +118,11 @@ vi.mock("./engineHost.js", () => ({
 vi.mock("./pending.js", () => ({ requestUserApproval }));
 vi.mock("./txNotify.js", () => ({ notifyTxSubmitted }));
 vi.mock("../shared/txStore.js", () => ({ putTxMeta }));
+vi.mock("../shared/assetsStore.js", () => ({
+  normalizeContractId,
+  watchToken,
+  watchNft,
+}));
 vi.mock("./dappEvents.js", () => ({ broadcastChainChangedAll }));
 vi.mock("../platform/extensionApi.js", () => ({
   getExtensionApi,
@@ -428,6 +440,33 @@ describe("background rpc handler", () => {
     );
   });
 
+  it("dusk_sendTransaction rejects if the wallet locks after approval and before send", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+    requestUserApproval.mockImplementationOnce(async () => {
+      engineStatus = { isUnlocked: false, accounts: ["acct0", "acct1"] };
+      return null;
+    });
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "transfer",
+          privacy: "public",
+          to: "acct1",
+          amount: "1",
+        },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+    expect(putTxMeta).not.toHaveBeenCalled();
+  });
+
   it("dusk_signMessage overwrites dApp-supplied profile/account indexes before engine calls", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -481,6 +520,74 @@ describe("background rpc handler", () => {
       })
     ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
     expect(engineCall).not.toHaveBeenCalledWith("dusk_signMessage", expect.anything());
+  });
+
+  it("dusk_signMessage rejects if the wallet locks after approval and before signing", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+    requestUserApproval.mockImplementationOnce(async () => {
+      engineStatus = { isUnlocked: false, accounts: ["acct0"] };
+      return null;
+    });
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signMessage",
+        params: { message: "0x1234" },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_signMessage", expect.anything());
+  });
+
+  it("dusk_signAuth rejects if the wallet locks after approval and before signing", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+    requestUserApproval.mockImplementationOnce(async () => {
+      engineStatus = { isUnlocked: false, accounts: ["acct0"] };
+      return null;
+    });
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signAuth",
+        params: { nonce: "nonce-1", statement: "Sign in" },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_signAuth", expect.anything());
+  });
+
+  it("dusk_watchAsset rejects if the wallet locks after approval and before asset writes", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+    requestUserApproval.mockImplementationOnce(async () => {
+      engineStatus = { isUnlocked: false, accounts: ["acct0"] };
+      return null;
+    });
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_watchAsset",
+        params: {
+          type: "DRC20",
+          options: { contractId: `0x${"02".repeat(32)}` },
+        },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_getDrc20Metadata", expect.anything());
+    expect(watchToken).not.toHaveBeenCalled();
+    expect(watchNft).not.toHaveBeenCalled();
   });
 
   it("dusk_sendTransaction rejects unsupported tx kinds for dApps", async () => {
