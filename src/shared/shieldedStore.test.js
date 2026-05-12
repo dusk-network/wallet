@@ -87,6 +87,42 @@ describe("shieldedStore (IndexedDB)", () => {
     expect(keys).toEqual(["bb"]);
   });
 
+  it("tracks and clears pending nullifiers by tx hash", async () => {
+    const { networkKey, walletId, profileIndex } = nextOwner();
+
+    const n1 = new Uint8Array([0xaa]);
+    const n2 = new Uint8Array([0xbb]);
+
+    const notes = new Map();
+    notes.set(n1, new Uint8Array([0x01]));
+    notes.set(n2, new Uint8Array([0x02]));
+    await store.putNotesMap(networkKey, walletId, profileIndex, notes);
+    await store.putPendingNullifiers(networkKey, walletId, profileIndex, [n1], "tx-a");
+    await store.putPendingNullifiers(networkKey, walletId, profileIndex, [n2], "tx-b");
+
+    expect(await store.getPendingNullifiersForTx(networkKey, walletId, profileIndex, "tx-a")).toEqual(["aa"]);
+
+    const marked = await store.markPendingNullifiersRecoverable(
+      networkKey,
+      walletId,
+      profileIndex,
+      "tx-a",
+      "removed"
+    );
+    expect(marked).toBe(1);
+
+    let spendable = await store.getSpendableNotesMap(networkKey, walletId, profileIndex);
+    expect(Array.from(spendable.keys()).map((k) => bytesToHex(k))).toEqual([]);
+
+    const cleared = await store.clearPendingNullifiersForTx(networkKey, walletId, profileIndex, "tx-a");
+    expect(cleared).toBe(1);
+
+    spendable = await store.getSpendableNotesMap(networkKey, walletId, profileIndex);
+    expect(Array.from(spendable.keys()).map((k) => bytesToHex(k))).toEqual(["aa"]);
+    expect(await store.getPendingNullifiersForTx(networkKey, walletId, profileIndex, "tx-a")).toEqual([]);
+    expect(await store.getPendingNullifiersForTx(networkKey, walletId, profileIndex, "tx-b")).toEqual(["bb"]);
+  });
+
   it("moves nullifiers to spent and clears pending reservations", async () => {
     const { networkKey, walletId, profileIndex } = nextOwner();
 

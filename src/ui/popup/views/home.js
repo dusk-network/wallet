@@ -11,6 +11,7 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { assetsSectionsView } from "./assets.js";
+import { txActivityStatusLabel, txKindRailLabel, txStatusTone } from "./txDisplay.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -257,27 +258,18 @@ export function homeView(ov, { state, actions } = {}) {
   const txs = Array.isArray(ov?.txs) ? ov.txs : [];
   const nodeUrl = String(ov?.nodeUrl ?? "");
 
-  // Pending count (for a small Activity tab badge). We consider any
-  // non-executed/non-failed tx as pending.
+  // Pending count (for a small Activity tab badge).
   const pendingCount = txs.reduce((n, tx) => {
     const s = String(tx?.status ?? "submitted").toLowerCase();
-    if (s === "executed" || s === "failed") return n;
-    return n + 1;
+    return s === "submitted" || s === "mempool" ? n + 1 : n;
   }, 0);
 
   const statusClass = (status) => {
-    const s = String(status ?? "").toLowerCase();
-    if (s === "executed") return "status-dot status-dot--ok";
-    if (s === "failed") return "status-dot status-dot--bad";
-    return "status-dot status-dot--pending";
+    return `status-dot status-dot--${txStatusTone(status)}`;
   };
 
   const statusLabel = (status) => {
-    const s = String(status ?? "").toLowerCase();
-    if (s === "executed") return "Finalized";
-    if (s === "failed") return "Failed";
-    if (s === "submitted") return "Pending";
-    return s ? s.slice(0, 1).toUpperCase() + s.slice(1) : "Pending";
+    return txActivityStatusLabel(status);
   };
 
   const describe = (tx) => {
@@ -287,7 +279,7 @@ export function homeView(ov, { state, actions } = {}) {
       const to = tx?.to ? truncateMiddle(String(tx.to), 10, 8) : "";
       return {
         title: to ? `Sent to ${to}` : "Sent DUSK",
-        sub: "Moonlight",
+        sub: txKindRailLabel(tx),
         amount: amt ? `-${amt} DUSK` : "",
         tone: "out",
         icon: "↑",
@@ -420,7 +412,7 @@ export function homeView(ov, { state, actions } = {}) {
     const hash = String(tx?.hash ?? "");
     const st = String(tx?.status ?? "submitted");
     const stLower = st.toLowerCase();
-    const isPending = stLower !== "executed" && stLower !== "failed";
+    const isPending = stLower === "submitted" || stLower === "mempool";
     const isHighlight = state?.highlightTx && String(state.highlightTx) === hash;
     const pulse = pulseClassFor(hash);
 
@@ -453,7 +445,7 @@ export function homeView(ov, { state, actions } = {}) {
       ]),
       h("div", { class: "activity-sub" }, [
         h("span", { text: subText }),
-        st === "failed" && tx?.error
+        stLower === "failed" && tx?.error
           ? h("span", { class: "activity-err", text: ` • ${String(tx.error).slice(0, 80)}` })
           : null,
       ].filter(Boolean)),
@@ -472,6 +464,7 @@ export function homeView(ov, { state, actions } = {}) {
       "activity-item",
       "activity-tx-item",
       isPending ? "is-pending" : "",
+      stLower === "removed" || stLower === "unknown" ? "is-pending" : "",
       stLower === "executed" ? "is-executed" : "",
       stLower === "failed" ? "is-failed" : "",
       isHighlight ? "is-highlight" : "",

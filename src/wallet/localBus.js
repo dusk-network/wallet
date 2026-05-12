@@ -11,6 +11,7 @@ import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
+import { bytesToHex } from "../shared/bytes.js";
 import {
   getWatchedAssets,
   watchToken,
@@ -44,6 +45,7 @@ import {
   startShieldedSync,
   unlockWithMnemonic,
   waitTxExecuted,
+  waitTxRemoved,
   getMinimumStake,
   getStakeInfo,
 } from "../shared/walletEngine.js";
@@ -53,6 +55,25 @@ import {
 // Argon2 + snapshot encryption is running).
 let unlockInFlight = null;
 let createWalletInFlight = null;
+
+function nullifierHexes(value) {
+  const out = [];
+  for (const n of Array.isArray(value) ? value : []) {
+    try {
+      if (typeof n === "string") {
+        const hex = n.trim();
+        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
+        continue;
+      }
+      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+      const hex = bytesToHex(u8);
+      if (hex) out.push(hex);
+    } catch {
+      // ignore invalid nullifier shapes
+    }
+  }
+  return out;
+}
 
 function serializeError(err) {
   return {
@@ -591,10 +612,12 @@ export async function localSend(message) {
         const nodeUrl = (await getSettings())?.nodeUrl ?? "";
 
         if (hash) {
+          const pendingNullifiers = nullifierHexes(result?.nullifiers);
           await putTxMeta(hash, {
             origin: "Wallet",
             nodeUrl,
             kind,
+            privacy: baseParams?.privacy ? String(baseParams.privacy) : undefined,
             profileIndex: Number(status.selectedAccountIndex ?? 0) || 0,
             asset:
               message?.asset && typeof message.asset === "object"
@@ -619,14 +642,40 @@ export async function localSend(message) {
                 : undefined,
             gasLimit: baseParams?.gas?.limit != null ? String(baseParams.gas.limit) : undefined,
             gasPrice: baseParams?.gas?.price != null ? String(baseParams.gas.price) : undefined,
+            pendingNullifiers,
+            reservationStatus: pendingNullifiers.length ? "pending" : undefined,
+            reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
             submittedAt: Date.now(),
             status: "submitted",
           });
 
-          // Fire-and-forget: wait for EXECUTED and patch local activity.
+          // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
           (async () => {
             try {
-              const executedEvent = await waitTxExecuted(hash, { timeoutMs: 180_000 });
+              const timeoutMs = 180_000;
+              const removedWatcher = waitTxRemoved(hash, { timeoutMs })
+                .then((event) => ({ type: "removed", event }))
+                .catch((e) => {
+                  if (/removed watcher not available/i.test(String(e?.message ?? e))) {
+                    return new Promise(() => {});
+                  }
+                  throw e;
+                });
+              const lifecycle = await Promise.race([
+                waitTxExecuted(hash, { timeoutMs }).then((event) => ({ type: "executed", event })),
+                removedWatcher,
+              ]);
+
+              if (lifecycle?.type === "removed") {
+                await patchTxMeta(hash, {
+                  status: "removed",
+                  removedAt: Date.now(),
+                  recoveryReason: "removed",
+                });
+                return;
+              }
+
+              const executedEvent = lifecycle?.event;
               const ok = !(executedEvent && typeof executedEvent === "object") ||
                 !(executedEvent.success === false || executedEvent.err || executedEvent.error || executedEvent.result?.err || executedEvent.result?.error);
               const err =
@@ -642,10 +691,13 @@ export async function localSend(message) {
                 error: ok ? undefined : (error || undefined),
               });
             } catch (e) {
-              // A watcher timeout/error is not a transaction failure. Keep the
-              // tx submitted/pending until an executed event reports success or
-              // failure, or until a later sync reconciles shielded state.
-              void e;
+              await patchTxMeta(hash, {
+                status: "unknown",
+                lastCheckedAt: Date.now(),
+                recoveryReason: /timed out/i.test(String(e?.message ?? e))
+                  ? "watcher_timeout"
+                  : "watcher_unavailable",
+              });
             } finally {
               // Reconcile shielded state after tx execution.
               startShieldedSync({ force: false }).catch(() => {});

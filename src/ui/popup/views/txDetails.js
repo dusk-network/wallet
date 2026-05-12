@@ -8,6 +8,7 @@ import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortHash, truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
+import { txRecoveryReasonLabel, txStatusLabel, txStatusTone } from "./txDisplay.js";
 
 function fmtDate(ts) {
   const n = Number(ts || 0);
@@ -20,10 +21,20 @@ function fmtDate(ts) {
 }
 
 function statusLabel(status) {
-  const s = String(status ?? "").toLowerCase();
-  if (s === "executed") return "Executed";
-  if (s === "failed") return "Failed";
-  return "Pending";
+  return txStatusLabel(status);
+}
+
+function statusHelp(tx) {
+  const s = String(tx?.status ?? "").toLowerCase();
+  if (s === "submitted") return "Submitted. Waiting for network execution.";
+  if (s === "mempool") return "This transaction is still waiting in the mempool. Do not retry yet.";
+  if (s === "unknown") {
+    return "The wallet did not receive an execution event before timeout. This does not mean the transaction failed.";
+  }
+  if (s === "removed") {
+    return "This transaction is no longer in this node's mempool. Shielded funds may still be reserved locally.";
+  }
+  return "";
 }
 
 function describeTx(tx) {
@@ -151,12 +162,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   const status = statusLabel(tx?.status);
   const s = String(tx?.status ?? "").toLowerCase();
-  const statusPillClass =
-    s === "executed"
-      ? "meta-pill meta-pill--ok"
-      : s === "failed"
-      ? "meta-pill meta-pill--bad"
-      : "meta-pill meta-pill--pending";
+  const statusPillClass = `meta-pill meta-pill--${txStatusTone(s)}`;
 
   const gasLimit = tx?.gasLimit != null ? safeBigInt(tx.gasLimit, 0n) : null;
   const gasPrice = tx?.gasPrice != null ? safeBigInt(tx.gasPrice, 0n) : null;
@@ -210,6 +216,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
     String(tx?.status ?? "").toLowerCase() === "failed" && tx?.error
       ? h("div", { class: "err", text: String(tx.error) })
       : null;
+  const help = statusHelp(tx);
+  const statusBox = help ? h("div", { class: "box" }, [h("div", { class: "muted", text: help })]) : null;
 
   let accountLabel = null;
   try {
@@ -242,6 +250,12 @@ export function txDetailsView(ov, { state, actions } = {}) {
         )
       : null,
     tx?.submittedAt ? kvRow("Submitted", fmtDate(tx.submittedAt)) : null,
+    tx?.mempoolSeenAt ? kvRow("Mempool seen", fmtDate(tx.mempoolSeenAt)) : null,
+    tx?.lastCheckedAt ? kvRow("Last checked", fmtDate(tx.lastCheckedAt)) : null,
+    tx?.removedAt ? kvRow("Removed", fmtDate(tx.removedAt)) : null,
+    tx?.executedAt ? kvRow("Executed", fmtDate(tx.executedAt)) : null,
+    tx?.reservationStatus ? kvRow("Shielded reservation", String(tx.reservationStatus)) : null,
+    tx?.recoveryReason ? kvRow("Recovery reason", txRecoveryReasonLabel(tx.recoveryReason)) : null,
   ].filter(Boolean);
 
   const detailsCard = detailsRows.length ? h("div", { class: "box tx-kv-card" }, detailsRows) : null;
@@ -300,6 +314,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     h("div", { class: "row" }, [
       chips,
       errorBox,
+      statusBox,
       h("div", { class: "box tx-summary" }, [
         h("div", { class: "muted", text: kindLabel }),
         h("div", { class: "balance-amount", text: title }),

@@ -304,6 +304,20 @@ async function getPendingRows(db, ok) {
   });
 }
 
+async function getPendingRowsForTx(db, ok, txHash) {
+  const hash = String(txHash || "");
+  if (!hash) return [];
+
+  return await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PENDING], "readonly");
+    const store = tx.objectStore(STORE_PENDING);
+    const index = store.index("byOwnerTx");
+    const req = index.getAll(IDBKeyRange.only([ok, hash]));
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error || new Error("Failed to read pending tx rows"));
+  });
+}
+
 /**
  * Returns a Map of spendable notes (unspent notes minus locally pending nullifiers).
  */
@@ -425,7 +439,9 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
         profileIndex: Number(profileIndex),
         nullifier: hex,
         txHash: hash,
+        reservationStatus: "pending",
         createdAt: Date.now(),
+        reservationUpdatedAt: Date.now(),
       });
     } catch {
       // ignore
@@ -442,6 +458,68 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
 
     const store = tx.objectStore(STORE_PENDING);
     for (const r of rows) store.put(r);
+  });
+
+  return rows.length;
+}
+
+/**
+ * Return pending nullifiers reserved by a specific submitted tx.
+ * @returns {Promise<string[]>}
+ */
+export async function getPendingNullifiersForTx(networkKey, walletId, profileIndex, txHash) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+  const rows = await getPendingRowsForTx(db, ok, txHash);
+  return rows.map((r) => String(r?.nullifier ?? "")).filter(Boolean);
+}
+
+/**
+ * Mark tx-scoped pending rows as recoverable without making them spendable.
+ */
+export async function markPendingNullifiersRecoverable(networkKey, walletId, profileIndex, txHash, reason = "unknown") {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+  const rows = await getPendingRowsForTx(db, ok, txHash);
+  if (!rows.length) return 0;
+
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PENDING], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to mark pending recoverable"));
+
+    const store = tx.objectStore(STORE_PENDING);
+    const now = Date.now();
+    for (const row of rows) {
+      store.put({
+        ...row,
+        reservationStatus: "recoverable",
+        recoveryReason: String(reason || "unknown"),
+        reservationUpdatedAt: now,
+      });
+    }
+  });
+
+  return rows.length;
+}
+
+/**
+ * Explicitly release tx-scoped pending rows. This restores spendability and
+ * must only be called by a deliberate recovery path, never by timeout alone.
+ */
+export async function clearPendingNullifiersForTx(networkKey, walletId, profileIndex, txHash) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+  const rows = await getPendingRowsForTx(db, ok, txHash);
+  if (!rows.length) return 0;
+
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PENDING], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to clear pending tx rows"));
+
+    const store = tx.objectStore(STORE_PENDING);
+    for (const row of rows) store.delete(row.id);
   });
 
   return rows.length;

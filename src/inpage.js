@@ -31,12 +31,21 @@
     rdns: "network.dusk.wallet",
   });
 
+  function profileKey(profile) {
+    if (!profile || typeof profile !== "object") return String(profile);
+    return [
+      String(profile.profileId ?? ""),
+      String(profile.account ?? ""),
+      String(profile.shieldedAddress ?? ""),
+    ].join("\u0000");
+  }
+
   function shallowArrayEq(a, b) {
     if (a === b) return true;
     if (!Array.isArray(a) || !Array.isArray(b)) return false;
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false;
+      if (profileKey(a[i]) !== profileKey(b[i])) return false;
     }
     return true;
   }

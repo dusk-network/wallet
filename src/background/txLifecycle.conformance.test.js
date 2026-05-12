@@ -9,5 +9,16 @@ describe("transaction lifecycle conformance", () => {
 
     expect(runtime).not.toMatch(/catch \(e\) \{[\s\S]*?type: "DUSK_TX_EXECUTED"[\s\S]*?ok: false/);
     expect(localBus).not.toMatch(/catch \(e\) \{[\s\S]*?status: "failed"/);
+    expect(runtime).toMatch(/type: "DUSK_TX_UNKNOWN"/);
+    expect(localBus).toMatch(/status: "unknown"/);
+  });
+
+  it("background handles removed and unknown without failed notification copy", async () => {
+    const source = await readFile(path.resolve(process.cwd(), "src/background/index.js"), "utf8");
+
+    expect(source).toMatch(/message\?\.type === "DUSK_TX_REMOVED"/);
+    expect(source).toMatch(/message\?\.type === "DUSK_TX_UNKNOWN"/);
+    expect(source).toMatch(/status: "removed"/);
+    expect(source).toMatch(/status: "unknown"/);
   });
 });
