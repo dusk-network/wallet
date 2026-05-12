@@ -140,17 +140,10 @@ async function watchTxExecuted(hash) {
     // nullifiers get cleared/marked spent and balances update quickly.
     startShieldedSync({ force: false }).catch(() => {});
   } catch (e) {
-    // Still send a best-effort message so the UI can react.
-    try {
-      await runtimeSendMessage({
-        type: "DUSK_TX_EXECUTED",
-        hash,
-        ok: false,
-        error: e?.message ?? String(e),
-      });
-    } catch {
-      // ignore
-    }
+    // A watcher timeout/error is not a transaction failure. The tx may still
+    // be in the mempool, and Phoenix nullifiers must remain reserved until
+    // execution/sync proves the spend or a deliberate pending-clear path exists.
+    void e;
   } finally {
     activeTxWatches.delete(hash);
   }

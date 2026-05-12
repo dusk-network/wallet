@@ -642,10 +642,10 @@ export async function localSend(message) {
                 error: ok ? undefined : (error || undefined),
               });
             } catch (e) {
-              await patchTxMeta(hash, {
-                status: "failed",
-                error: e?.message ?? String(e),
-              });
+              // A watcher timeout/error is not a transaction failure. Keep the
+              // tx submitted/pending until an executed event reports success or
+              // failure, or until a later sync reconciles shielded state.
+              void e;
             } finally {
               // Reconcile shielded state after tx execution.
               startShieldedSync({ force: false }).catch(() => {});
