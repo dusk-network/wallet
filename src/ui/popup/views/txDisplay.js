@@ -17,6 +17,13 @@ export function txActivityStatusLabel(status) {
   return txStatusLabel(status);
 }
 
+export function txStatusTone(status) {
+  const s = String(status ?? "").toLowerCase();
+  if (s === "executed") return "ok";
+  if (s === "failed") return "bad";
+  return "pending";
+}
+
 export function transferRailLabel(tx) {
   const privacy = String(tx?.privacy ?? "").toLowerCase();
   if (privacy === "shielded") return "Shielded (Phoenix)";

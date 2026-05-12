@@ -8,7 +8,7 @@ import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortHash, truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
-import { txRecoveryReasonLabel, txStatusLabel } from "./txDisplay.js";
+import { txRecoveryReasonLabel, txStatusLabel, txStatusTone } from "./txDisplay.js";
 
 function fmtDate(ts) {
   const n = Number(ts || 0);
@@ -162,14 +162,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   const status = statusLabel(tx?.status);
   const s = String(tx?.status ?? "").toLowerCase();
-  const statusPillClass =
-    s === "executed"
-      ? "meta-pill meta-pill--ok"
-      : s === "failed"
-      ? "meta-pill meta-pill--bad"
-      : s === "removed" || s === "unknown"
-      ? "meta-pill meta-pill--bad"
-      : "meta-pill meta-pill--pending";
+  const statusPillClass = `meta-pill meta-pill--${txStatusTone(s)}`;
 
   const gasLimit = tx?.gasLimit != null ? safeBigInt(tx.gasLimit, 0n) : null;
   const gasPrice = tx?.gasPrice != null ? safeBigInt(tx.gasPrice, 0n) : null;

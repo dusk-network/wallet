@@ -11,7 +11,7 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { assetsSectionsView } from "./assets.js";
-import { txActivityStatusLabel, txKindRailLabel } from "./txDisplay.js";
+import { txActivityStatusLabel, txKindRailLabel, txStatusTone } from "./txDisplay.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -265,11 +265,7 @@ export function homeView(ov, { state, actions } = {}) {
   }, 0);
 
   const statusClass = (status) => {
-    const s = String(status ?? "").toLowerCase();
-    if (s === "executed") return "status-dot status-dot--ok";
-    if (s === "failed") return "status-dot status-dot--bad";
-    if (s === "removed" || s === "unknown") return "status-dot status-dot--bad";
-    return "status-dot status-dot--pending";
+    return `status-dot status-dot--${txStatusTone(status)}`;
   };
 
   const statusLabel = (status) => {
@@ -468,9 +464,9 @@ export function homeView(ov, { state, actions } = {}) {
       "activity-item",
       "activity-tx-item",
       isPending ? "is-pending" : "",
+      stLower === "removed" || stLower === "unknown" ? "is-pending" : "",
       stLower === "executed" ? "is-executed" : "",
       stLower === "failed" ? "is-failed" : "",
-      stLower === "removed" || stLower === "unknown" ? "is-failed" : "",
       isHighlight ? "is-highlight" : "",
       pulse,
     ]

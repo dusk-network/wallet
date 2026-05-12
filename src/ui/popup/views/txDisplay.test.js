@@ -5,6 +5,7 @@ import {
   txActivityStatusLabel,
   txRecoveryReasonLabel,
   txStatusLabel,
+  txStatusTone,
 } from "./txDisplay.js";
 
 describe("tx display helpers", () => {
@@ -17,6 +18,13 @@ describe("tx display helpers", () => {
     expect(txStatusLabel("unknown")).toBe("Unknown");
     expect(txActivityStatusLabel("unknown")).toBe("Unknown");
     expect(txActivityStatusLabel("executed")).toBe("Finalized");
+  });
+
+  it("does not visually tone unknown or removed as failed", () => {
+    expect(txStatusTone("failed")).toBe("bad");
+    expect(txStatusTone("unknown")).toBe("pending");
+    expect(txStatusTone("removed")).toBe("pending");
+    expect(txStatusTone("mempool")).toBe("pending");
   });
 
   it("maps technical recovery reasons to user-safe copy", () => {
