@@ -11,6 +11,7 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { assetsSectionsView } from "./assets.js";
+import { txActivityStatusLabel, txKindRailLabel } from "./txDisplay.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -272,14 +273,7 @@ export function homeView(ov, { state, actions } = {}) {
   };
 
   const statusLabel = (status) => {
-    const s = String(status ?? "").toLowerCase();
-    if (s === "executed") return "Finalized";
-    if (s === "failed") return "Failed during execution";
-    if (s === "mempool") return "In mempool";
-    if (s === "removed") return "Removed from mempool";
-    if (s === "unknown") return "Status unknown";
-    if (s === "submitted") return "Pending";
-    return s ? s.slice(0, 1).toUpperCase() + s.slice(1) : "Pending";
+    return txActivityStatusLabel(status);
   };
 
   const describe = (tx) => {
@@ -289,7 +283,7 @@ export function homeView(ov, { state, actions } = {}) {
       const to = tx?.to ? truncateMiddle(String(tx.to), 10, 8) : "";
       return {
         title: to ? `Sent to ${to}` : "Sent DUSK",
-        sub: "Moonlight",
+        sub: txKindRailLabel(tx),
         amount: amt ? `-${amt} DUSK` : "",
         tone: "out",
         icon: "↑",

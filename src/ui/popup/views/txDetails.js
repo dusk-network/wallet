@@ -8,6 +8,7 @@ import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortHash, truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
+import { txRecoveryReasonLabel, txStatusLabel } from "./txDisplay.js";
 
 function fmtDate(ts) {
   const n = Number(ts || 0);
@@ -20,13 +21,7 @@ function fmtDate(ts) {
 }
 
 function statusLabel(status) {
-  const s = String(status ?? "").toLowerCase();
-  if (s === "executed") return "Executed";
-  if (s === "failed") return "Failed during execution";
-  if (s === "mempool") return "In mempool";
-  if (s === "removed") return "Removed from mempool";
-  if (s === "unknown") return "Status unknown";
-  return "Pending";
+  return txStatusLabel(status);
 }
 
 function statusHelp(tx) {
@@ -267,7 +262,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     tx?.removedAt ? kvRow("Removed", fmtDate(tx.removedAt)) : null,
     tx?.executedAt ? kvRow("Executed", fmtDate(tx.executedAt)) : null,
     tx?.reservationStatus ? kvRow("Shielded reservation", String(tx.reservationStatus)) : null,
-    tx?.recoveryReason ? kvRow("Recovery reason", String(tx.recoveryReason)) : null,
+    tx?.recoveryReason ? kvRow("Recovery reason", txRecoveryReasonLabel(tx.recoveryReason)) : null,
   ].filter(Boolean);
 
   const detailsCard = detailsRows.length ? h("div", { class: "box tx-kv-card" }, detailsRows) : null;
