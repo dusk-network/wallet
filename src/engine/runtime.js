@@ -35,6 +35,7 @@ import {
 } from "../shared/walletEngine.js";
 
 import { ERROR_CODES } from "../shared/errors.js";
+import { bytesToHex } from "../shared/bytes.js";
 import { getExtensionApi, runtimeSendMessage } from "../platform/extensionApi.js";
 
 function serializeError(err) {
@@ -43,6 +44,25 @@ function serializeError(err) {
     message: err?.message ?? String(err),
     data: err?.data,
   };
+}
+
+function nullifierHexes(value) {
+  const out = [];
+  for (const n of Array.isArray(value) ? value : []) {
+    try {
+      if (typeof n === "string") {
+        const hex = n.trim();
+        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
+        continue;
+      }
+      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+      const hex = bytesToHex(u8);
+      if (hex) out.push(hex);
+    } catch {
+      // ignore invalid nullifier shapes
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -393,6 +413,8 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
           // Keep the provider response simple, always return the tx hash,
           // and only include a nonce when it exists (public tx).
           const resp = { hash: result.hash };
+          const pendingNullifiers = nullifierHexes(result?.nullifiers);
+          if (pendingNullifiers.length) resp.nullifiers = pendingNullifiers;
           if (result.nonce !== undefined && result.nonce !== null) {
             resp.nonce = result.nonce?.toString?.() ?? String(result.nonce);
           }

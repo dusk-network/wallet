@@ -61,7 +61,8 @@ const engineCall = vi.fn(async (method, params) => {
     return { nonce: "0", value: "0", __params: params };
   }
   if (method === "dusk_sendTransaction") {
-    return { hash: "0xhash", nonce: "5", __params: params };
+    const nullifiers = params?.privacy === "shielded" ? ["aa"] : undefined;
+    return { hash: "0xhash", nonce: "5", nullifiers, __params: params };
   }
   if (method === "dusk_signMessage") {
     return { ok: true, __params: params };
@@ -456,7 +457,7 @@ describe("background rpc handler", () => {
     vaultValue = { v: 1 };
     engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
 
-    await handleRpc("https://dapp.example", {
+    const result = await handleRpc("https://dapp.example", {
       method: "dusk_sendTransaction",
       params: {
         kind: "transfer",
@@ -466,6 +467,7 @@ describe("background rpc handler", () => {
       },
     });
 
+    expect(result).toEqual({ hash: "0xhash", nonce: "5" });
     expect(requestUserApproval).toHaveBeenCalledWith(
       "send_tx",
       "https://dapp.example",
@@ -474,6 +476,14 @@ describe("background rpc handler", () => {
         privacy: "shielded",
         to: SHIELDED_ADDRESS,
         gas: { limit: "15000000", price: "1" },
+      })
+    );
+    expect(putTxMeta).toHaveBeenCalledWith(
+      "0xhash",
+      expect.objectContaining({
+        privacy: "shielded",
+        pendingNullifiers: ["aa"],
+        reservationStatus: "pending",
       })
     );
   });

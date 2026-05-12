@@ -40,6 +40,11 @@ export async function handleRpc(origin, request) {
     const out = [];
     for (const n of Array.isArray(value) ? value : []) {
       try {
+        if (typeof n === "string") {
+          const hex = n.trim();
+          if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
+          continue;
+        }
         const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
         const hex = bytesToHex(u8);
         if (hex) out.push(hex);
@@ -687,7 +692,11 @@ export async function handleRpc(origin, request) {
       } catch {
         notifyTxSubmitted({ hash, origin }).catch(() => {});
       }
-      return result;
+      const response = { hash };
+      if (result?.nonce !== undefined && result?.nonce !== null) {
+        response.nonce = result.nonce?.toString?.() ?? String(result.nonce);
+      }
+      return response;
     }
 
     case "dusk_watchAsset": {

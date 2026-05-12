@@ -220,6 +220,24 @@ describe("background Phoenix tx lifecycle flow", () => {
     );
   });
 
+  it("marks executed shielded tx reservations spent", async () => {
+    const hash = "0xexecuted";
+    await seedTxMeta(hash);
+
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "executed",
+      reservationStatus: "spent",
+      pendingNullifiers: ["aa"],
+    });
+
+    expect(mocks.sentMessages).toContainEqual(
+      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed" })
+    );
+  });
+
   it("marks removed shielded tx reservations recoverable without clearing pending nullifiers", async () => {
     const hash = "0xremoved";
     await seedTxMeta(hash);

@@ -77,6 +77,11 @@ function nullifierHexes(value) {
   const out = [];
   for (const n of Array.isArray(value) ? value : []) {
     try {
+      if (typeof n === "string") {
+        const hex = n.trim();
+        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
+        continue;
+      }
       const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
       const hex = bytesToHex(u8);
       if (hex) out.push(hex);
@@ -128,6 +133,8 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
       error: undefined,
       executedAt: now,
       lastCheckedAt: now,
+      reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
+      reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
     });
     return { status: "executed", ok: true, origin, nodeUrl };
   }
@@ -357,12 +364,15 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           const meta = await getTxMeta(hash);
           const origin = meta?.origin ?? "Wallet";
           const nodeUrl = meta?.nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
+          const now = Date.now();
 
           await patchTxMeta(hash, {
             status: ok ? "executed" : "failed",
-            executedAt: Date.now(),
-            lastCheckedAt: Date.now(),
+            executedAt: now,
+            lastCheckedAt: now,
             error: ok ? undefined : error || undefined,
+            reservationStatus: ok && isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
+            reservationUpdatedAt: ok && isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
           });
 
           notifyTxExecuted({ hash, origin, ok, error, nodeUrl }).catch(() => {});
@@ -1207,7 +1217,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         } catch {
           notifyTxSubmitted({ hash, origin: "Wallet" }).catch(() => {});
         }
-        sendResponse({ ok: true, result });
+        const publicResult = { hash };
+        if (result?.nonce !== undefined && result?.nonce !== null) {
+          publicResult.nonce = result.nonce?.toString?.() ?? String(result.nonce);
+        }
+        sendResponse({ ok: true, result: publicResult });
         return;
       }
 
