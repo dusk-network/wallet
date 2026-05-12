@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
+import inject from "@rollup/plugin-inject";
 
 // Frontend build for Tauri desktop/mobile.
 //
@@ -8,7 +8,7 @@ import { nodePolyfills } from "vite-plugin-node-polyfills";
 // - No background/contentScript/inpage/offscreen bundles
 
 export default defineConfig({
-  plugins: [nodePolyfills()],
+  plugins: [],
   define: {
     __DUSK_BACKEND__: JSON.stringify("local"),
   },
@@ -17,6 +17,11 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     rollupOptions: {
+      plugins: [
+        // bip39@3.1.0 is CommonJS and references the Node Buffer global.
+        // Keep this to Buffer only; do not pull the full node-stdlib-browser graph.
+        inject({ Buffer: ["buffer", "Buffer"] }),
+      ],
       input: {
         popup: "src/popup.js",
       },
