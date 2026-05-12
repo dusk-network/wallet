@@ -22,8 +22,24 @@ function fmtDate(ts) {
 function statusLabel(status) {
   const s = String(status ?? "").toLowerCase();
   if (s === "executed") return "Executed";
-  if (s === "failed") return "Failed";
+  if (s === "failed") return "Failed during execution";
+  if (s === "mempool") return "In mempool";
+  if (s === "removed") return "Removed from mempool";
+  if (s === "unknown") return "Status unknown";
   return "Pending";
+}
+
+function statusHelp(tx) {
+  const s = String(tx?.status ?? "").toLowerCase();
+  if (s === "submitted") return "Submitted. Waiting for network execution.";
+  if (s === "mempool") return "This transaction is still waiting in the mempool. Do not retry yet.";
+  if (s === "unknown") {
+    return "The wallet did not receive an execution event before timeout. This does not mean the transaction failed.";
+  }
+  if (s === "removed") {
+    return "This transaction is no longer in this node's mempool. Shielded funds may still be reserved locally.";
+  }
+  return "";
 }
 
 function describeTx(tx) {
@@ -156,6 +172,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
       ? "meta-pill meta-pill--ok"
       : s === "failed"
       ? "meta-pill meta-pill--bad"
+      : s === "removed" || s === "unknown"
+      ? "meta-pill meta-pill--bad"
       : "meta-pill meta-pill--pending";
 
   const gasLimit = tx?.gasLimit != null ? safeBigInt(tx.gasLimit, 0n) : null;
@@ -210,6 +228,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
     String(tx?.status ?? "").toLowerCase() === "failed" && tx?.error
       ? h("div", { class: "err", text: String(tx.error) })
       : null;
+  const help = statusHelp(tx);
+  const statusBox = help ? h("div", { class: "box" }, [h("div", { class: "muted", text: help })]) : null;
 
   let accountLabel = null;
   try {
@@ -242,6 +262,12 @@ export function txDetailsView(ov, { state, actions } = {}) {
         )
       : null,
     tx?.submittedAt ? kvRow("Submitted", fmtDate(tx.submittedAt)) : null,
+    tx?.mempoolSeenAt ? kvRow("Mempool seen", fmtDate(tx.mempoolSeenAt)) : null,
+    tx?.lastCheckedAt ? kvRow("Last checked", fmtDate(tx.lastCheckedAt)) : null,
+    tx?.removedAt ? kvRow("Removed", fmtDate(tx.removedAt)) : null,
+    tx?.executedAt ? kvRow("Executed", fmtDate(tx.executedAt)) : null,
+    tx?.reservationStatus ? kvRow("Shielded reservation", String(tx.reservationStatus)) : null,
+    tx?.recoveryReason ? kvRow("Recovery reason", String(tx.recoveryReason)) : null,
   ].filter(Boolean);
 
   const detailsCard = detailsRows.length ? h("div", { class: "box tx-kv-card" }, detailsRows) : null;
@@ -300,6 +326,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     h("div", { class: "row" }, [
       chips,
       errorBox,
+      statusBox,
       h("div", { class: "box tx-summary" }, [
         h("div", { class: "muted", text: kindLabel }),
         h("div", { class: "balance-amount", text: title }),

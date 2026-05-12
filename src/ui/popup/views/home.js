@@ -257,25 +257,27 @@ export function homeView(ov, { state, actions } = {}) {
   const txs = Array.isArray(ov?.txs) ? ov.txs : [];
   const nodeUrl = String(ov?.nodeUrl ?? "");
 
-  // Pending count (for a small Activity tab badge). We consider any
-  // non-executed/non-failed tx as pending.
+  // Pending count (for a small Activity tab badge).
   const pendingCount = txs.reduce((n, tx) => {
     const s = String(tx?.status ?? "submitted").toLowerCase();
-    if (s === "executed" || s === "failed") return n;
-    return n + 1;
+    return s === "submitted" || s === "mempool" ? n + 1 : n;
   }, 0);
 
   const statusClass = (status) => {
     const s = String(status ?? "").toLowerCase();
     if (s === "executed") return "status-dot status-dot--ok";
     if (s === "failed") return "status-dot status-dot--bad";
+    if (s === "removed" || s === "unknown") return "status-dot status-dot--bad";
     return "status-dot status-dot--pending";
   };
 
   const statusLabel = (status) => {
     const s = String(status ?? "").toLowerCase();
     if (s === "executed") return "Finalized";
-    if (s === "failed") return "Failed";
+    if (s === "failed") return "Failed during execution";
+    if (s === "mempool") return "In mempool";
+    if (s === "removed") return "Removed from mempool";
+    if (s === "unknown") return "Status unknown";
     if (s === "submitted") return "Pending";
     return s ? s.slice(0, 1).toUpperCase() + s.slice(1) : "Pending";
   };
@@ -420,7 +422,7 @@ export function homeView(ov, { state, actions } = {}) {
     const hash = String(tx?.hash ?? "");
     const st = String(tx?.status ?? "submitted");
     const stLower = st.toLowerCase();
-    const isPending = stLower !== "executed" && stLower !== "failed";
+    const isPending = stLower === "submitted" || stLower === "mempool";
     const isHighlight = state?.highlightTx && String(state.highlightTx) === hash;
     const pulse = pulseClassFor(hash);
 
@@ -453,7 +455,7 @@ export function homeView(ov, { state, actions } = {}) {
       ]),
       h("div", { class: "activity-sub" }, [
         h("span", { text: subText }),
-        st === "failed" && tx?.error
+        stLower === "failed" && tx?.error
           ? h("span", { class: "activity-err", text: ` • ${String(tx.error).slice(0, 80)}` })
           : null,
       ].filter(Boolean)),
@@ -474,6 +476,7 @@ export function homeView(ov, { state, actions } = {}) {
       isPending ? "is-pending" : "",
       stLower === "executed" ? "is-executed" : "",
       stLower === "failed" ? "is-failed" : "",
+      stLower === "removed" || stLower === "unknown" ? "is-failed" : "",
       isHighlight ? "is-highlight" : "",
       pulse,
     ]

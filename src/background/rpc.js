@@ -11,7 +11,7 @@ import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
-import { sha256Hex, toBytes } from "../shared/bytes.js";
+import { bytesToHex, sha256Hex, toBytes } from "../shared/bytes.js";
 import { classifyDuskIdentifier } from "../shared/duskIdentifiers.js";
 import { DAPP_LIMITS, DAPP_RPC_METHODS, DAPP_TX_KINDS } from "../shared/providerSurface.js";
 import {
@@ -35,6 +35,20 @@ export async function handleRpc(origin, request) {
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
   const MAX_U64 = 18446744073709551615n;
+
+  function nullifierHexes(value) {
+    const out = [];
+    for (const n of Array.isArray(value) ? value : []) {
+      try {
+        const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+        const hex = bytesToHex(u8);
+        if (hex) out.push(hex);
+      } catch {
+        // ignore invalid nullifier shapes
+      }
+    }
+    return out;
+  }
 
   function mergeGas(baseGas, overrideGas) {
     if (!overrideGas || typeof overrideGas !== "object") {
@@ -633,6 +647,7 @@ export async function handleRpc(origin, request) {
         const settings = await getSettings();
         const nodeUrl = settings?.nodeUrl ?? "";
         if (hash) {
+          const pendingNullifiers = nullifierHexes(result?.nullifiers);
           await putTxMeta(hash, {
             origin,
             nodeUrl,
@@ -659,6 +674,9 @@ export async function handleRpc(origin, request) {
                 : undefined,
             gasLimit: finalParams?.gas?.limit != null ? String(finalParams.gas.limit) : undefined,
             gasPrice: finalParams?.gas?.price != null ? String(finalParams.gas.price) : undefined,
+            pendingNullifiers,
+            reservationStatus: pendingNullifiers.length ? "pending" : undefined,
+            reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
             submittedAt: Date.now(),
             status: "submitted",
           });

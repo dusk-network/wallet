@@ -15,8 +15,17 @@ import { storage, STORAGE_KEYS } from "./storage.js";
  * @property {string=} gasPrice
  * @property {any=} asset Optional UI hint for Activity labeling (e.g. DRC20/DRC721 summary).
  * @property {number} submittedAt
- * @property {"submitted"|"executed"|"failed"} status
+ * @property {"submitted"|"mempool"|"executed"|"failed"|"removed"|"unknown"} status
  * @property {string=} error
+ * @property {"public"|"shielded"=} privacy
+ * @property {string[]=} pendingNullifiers
+ * @property {"pending"|"spent"|"recoverable"|"released"=} reservationStatus
+ * @property {number=} reservationUpdatedAt
+ * @property {string=} recoveryReason
+ * @property {number=} lastCheckedAt
+ * @property {number=} mempoolSeenAt
+ * @property {number=} removedAt
+ * @property {number=} executedAt
  */
 
 async function getAll() {

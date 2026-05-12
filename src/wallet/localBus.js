@@ -44,6 +44,7 @@ import {
   startShieldedSync,
   unlockWithMnemonic,
   waitTxExecuted,
+  waitTxRemoved,
   getMinimumStake,
   getStakeInfo,
 } from "../shared/walletEngine.js";
@@ -623,10 +624,33 @@ export async function localSend(message) {
             status: "submitted",
           });
 
-          // Fire-and-forget: wait for EXECUTED and patch local activity.
+          // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
           (async () => {
             try {
-              const executedEvent = await waitTxExecuted(hash, { timeoutMs: 180_000 });
+              const timeoutMs = 180_000;
+              const removedWatcher = waitTxRemoved(hash, { timeoutMs })
+                .then((event) => ({ type: "removed", event }))
+                .catch((e) => {
+                  if (/removed watcher not available/i.test(String(e?.message ?? e))) {
+                    return new Promise(() => {});
+                  }
+                  throw e;
+                });
+              const lifecycle = await Promise.race([
+                waitTxExecuted(hash, { timeoutMs }).then((event) => ({ type: "executed", event })),
+                removedWatcher,
+              ]);
+
+              if (lifecycle?.type === "removed") {
+                await patchTxMeta(hash, {
+                  status: "removed",
+                  removedAt: Date.now(),
+                  recoveryReason: "removed",
+                });
+                return;
+              }
+
+              const executedEvent = lifecycle?.event;
               const ok = !(executedEvent && typeof executedEvent === "object") ||
                 !(executedEvent.success === false || executedEvent.err || executedEvent.error || executedEvent.result?.err || executedEvent.result?.error);
               const err =
@@ -642,10 +666,13 @@ export async function localSend(message) {
                 error: ok ? undefined : (error || undefined),
               });
             } catch (e) {
-              // A watcher timeout/error is not a transaction failure. Keep the
-              // tx submitted/pending until an executed event reports success or
-              // failure, or until a later sync reconciles shielded state.
-              void e;
+              await patchTxMeta(hash, {
+                status: "unknown",
+                lastCheckedAt: Date.now(),
+                recoveryReason: /timed out/i.test(String(e?.message ?? e))
+                  ? "watcher_timeout"
+                  : "watcher_unavailable",
+              });
             } finally {
               // Reconcile shielded state after tx execution.
               startShieldedSync({ force: false }).catch(() => {});

@@ -203,7 +203,7 @@ function schedulePendingTxPoll(ov) {
     const txs = Array.isArray(ov?.txs) ? ov.txs : [];
     const hasPending = txs.some((tx) => {
       const s = String(tx?.status ?? "submitted").toLowerCase();
-      return s !== "executed" && s !== "failed";
+      return s === "submitted" || s === "mempool";
     });
     if (!hasPending) return;
 
@@ -258,16 +258,24 @@ function installTxStatusListener() {
         if (msg?.type !== "DUSK_UI_TX_STATUS") return;
 
         const hash = String(msg.hash ?? "");
-        const ok = msg.ok !== false;
+        const status = String(
+          msg.status ?? (msg.ok === false ? "failed" : msg.ok === true ? "executed" : "unknown")
+        ).toLowerCase();
         const sh =
           hash && hash.length > 18
             ? `${hash.slice(0, 10)}…${hash.slice(-8)}`
             : hash;
 
-        if (ok) {
+        if (status === "executed") {
           showToast(sh ? `Transaction executed: ${sh}` : "Transaction executed", 2500);
-        } else {
-          showToast(sh ? `Transaction failed: ${sh}` : "Transaction failed", 3000);
+        } else if (status === "failed") {
+          showToast(sh ? `Transaction failed during execution: ${sh}` : "Transaction failed during execution", 3000);
+        } else if (status === "removed") {
+          showToast(sh ? `Transaction removed from mempool: ${sh}` : "Transaction removed from mempool", 3000);
+        } else if (status === "mempool") {
+          showToast(sh ? `Transaction is in mempool: ${sh}` : "Transaction is in mempool", 2500);
+        } else if (status === "unknown") {
+          showToast(sh ? `Transaction status unknown: ${sh}` : "Transaction status unknown", 3000);
         }
 
         // Best-effort immediate UI update so the Activity row can transition
@@ -277,16 +285,20 @@ function installTxStatusListener() {
           if (ov && Array.isArray(ov.txs)) {
             const item = ov.txs.find((t) => String(t?.hash ?? "") === hash);
             if (item) {
-              item.status = ok ? "executed" : "failed";
-              if (!ok && msg?.error) item.error = String(msg.error);
+              item.status = status;
+              if (status === "failed" && msg?.error) item.error = String(msg.error);
             }
           }
         } catch {
           // ignore
         }
 
-        // Pulse the activity row (pending -> executed/failed) for a short time.
-        state.txPulse = { hash, kind: ok ? "ok" : "bad", at: Date.now() };
+        // Pulse the activity row for a short time.
+        state.txPulse = {
+          hash,
+          kind: status === "failed" ? "bad" : status === "executed" ? "ok" : "pending",
+          at: Date.now(),
+        };
         setTimeout(() => {
           try {
             if (state.txPulse && state.txPulse.hash === hash) {

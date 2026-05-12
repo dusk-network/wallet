@@ -2558,3 +2558,38 @@ export async function waitTxExecuted(hash, opts = {}) {
     `Timed out waiting for transaction execution (${hash.slice(0, 12)}…)`
   );
 }
+
+/**
+ * Wait until a transaction is removed from the node mempool, if the runtime
+ * exposes a removed watcher.
+ *
+ * @param {string} hash
+ * @param {{timeoutMs?: number}} [opts]
+ * @returns {Promise<any>} The removed event payload.
+ */
+export async function waitTxRemoved(hash, opts = {}) {
+  if (!hash || typeof hash !== "string") {
+    throw new Error("hash is required");
+  }
+
+  const timeoutMs = Number(opts.timeoutMs ?? 120_000);
+  const network = await ensureNetwork();
+  const txs = network?.transactions;
+  const withId = txs?.withId?.bind(txs);
+  if (!withId) {
+    throw new Error("Transaction watcher not available on this Network instance");
+  }
+
+  const handle = withId(hash);
+  const once = handle?.once;
+  const removed = once?.removed?.bind(once);
+  if (!removed) {
+    throw new Error("Transaction removed watcher not available");
+  }
+
+  return await withTimeout(
+    Promise.resolve(removed()),
+    timeoutMs,
+    `Timed out waiting for transaction removal (${hash.slice(0, 12)}…)`
+  );
+}

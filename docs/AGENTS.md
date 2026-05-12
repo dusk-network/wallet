@@ -250,7 +250,7 @@ transfers already require this field at the provider boundary.
 
 4. **Gas completeness**: Gas must have both `limit` AND `price`, or neither (null = auto). Partial gas objects are invalid.
 
-5. **Pending shielded spends**: `waitTxExecuted` timeout/errors are not transaction failures. Phoenix txs can remain in a node mempool after the wallet watcher times out, so keep them pending unless an executed event reports an error or a deliberate pending-clear path is used.
+5. **Pending shielded spends**: `waitTxExecuted` timeout/errors are not transaction failures. Phoenix txs can remain in a node mempool after the wallet watcher times out, so keep them pending/unknown unless an executed event reports an error or a deliberate pending-clear path is used. See `docs/investigations/phoenix-tx-lifecycle.md`.
 
 6. **BLS signatures**: Dusk uses BLS12-381 signatures. Hardware wallets (Ledger/Trezor) don't support this, so HW wallet integration isn't possible.
 
