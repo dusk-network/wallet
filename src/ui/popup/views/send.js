@@ -50,11 +50,18 @@ export function sendFormView(ov, { state, actions } = {}) {
   // ------------------------------------------------------------
   // The send screen doesn't expose gas settings yet. We base MAX calculations
   // on the wallet's safe defaults for transfers.
-  const defaultGas = getDefaultGas(TX_KIND.TRANSFER);
-  const feeLux =
-    defaultGas && defaultGas.limit != null && defaultGas.price != null
+  function defaultGasForRecipientType(type) {
+    return getDefaultGas(TX_KIND.TRANSFER, {
+      privacy: type === "address" ? "shielded" : "public",
+    });
+  }
+
+  function feeLuxForRecipientType(type) {
+    const defaultGas = defaultGasForRecipientType(type);
+    return defaultGas && defaultGas.limit != null && defaultGas.price != null
       ? safeBigInt(defaultGas.limit, 0n) * safeBigInt(defaultGas.price, 0n)
       : 0n;
+  }
 
   // Balances from overview.
   const pubBalLux = safeBigInt(ov?.balance?.value, 0n);
@@ -92,12 +99,12 @@ export function sendFormView(ov, { state, actions } = {}) {
   function getMaxAmountLux() {
     if (detectedRecipientType === "address") {
       if (shSpendLux == null) return null;
-      return clamp0(shSpendLux - feeLux);
+      return clamp0(shSpendLux - feeLuxForRecipientType("address"));
     }
     if (detectedRecipientType === "account") {
       // Public transfers are limited by the Moonlight account balance.
       if (ov?.balance?.value == null) return null;
-      return clamp0(pubBalLux - feeLux);
+      return clamp0(pubBalLux - feeLuxForRecipientType("account"));
     }
     return null;
   }
@@ -116,6 +123,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     amountMeta.style.display = "flex";
 
     if (detectedRecipientType === "address") {
+      const feeLux = feeLuxForRecipientType("address");
       amountMetaMain.textContent = `Spendable (shielded): ${formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)} DUSK`;
 
       const parts = [];
@@ -127,6 +135,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       }
       amountMetaSub.textContent = parts.join(" · ");
     } else {
+      const feeLux = feeLuxForRecipientType("account");
       amountMetaMain.textContent = `Available (public): ${formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)} DUSK`;
       amountMetaSub.textContent = feeLux > 0n ? `Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK` : "";
     }
@@ -639,7 +648,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   });
 
   // Gas editor (collapsed by default)
-  const defaultGas = getDefaultGas(TX_KIND.TRANSFER);
+  const defaultGas = getDefaultGas(TX_KIND.TRANSFER, {
+    privacy: d.privacy || (recType === "address" ? "shielded" : "public"),
+  });
   const defaultLimit =
     defaultGas?.limit !== undefined && defaultGas?.limit !== null
       ? String(defaultGas.limit)

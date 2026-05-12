@@ -429,7 +429,7 @@ describe("background rpc handler", () => {
         chainId: "dusk:2",
         networkName: "Testnet",
         nodeUrl: "https://testnet.nodes.dusk.network",
-        gas: { limit: "10000000", price: "1" },
+        gas: { limit: "2000000", price: "1" },
       })
     );
 
@@ -444,6 +444,36 @@ describe("background rpc handler", () => {
         kind: "transfer",
         to: PUBLIC_ACCOUNT,
         privacy: "public",
+      })
+    );
+  });
+
+  it("dusk_sendTransaction applies the higher Phoenix transfer gas default", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+
+    await handleRpc("https://dapp.example", {
+      method: "dusk_sendTransaction",
+      params: {
+        kind: "transfer",
+        privacy: "shielded",
+        to: SHIELDED_ADDRESS,
+        amount: "1",
+      },
+    });
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "send_tx",
+      "https://dapp.example",
+      expect.objectContaining({
+        kind: "transfer",
+        privacy: "shielded",
+        to: SHIELDED_ADDRESS,
+        gas: { limit: "15000000", price: "1" },
       })
     );
   });

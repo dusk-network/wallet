@@ -12,19 +12,29 @@ import { TX_KIND } from "./constants.js";
  * Default gas settings by transaction kind.
  *
  * Rationale (current practical guidance):
- * - Public transfers: ~120k gas used
- * - Shielded transfers: ~1.1M gas used
+ * - Public/Moonlight transfers: currently expected around 1-2M gas
+ * - Shielded/Phoenix transfers: currently expected around 11-12M gas
  * - Heavy operations (stake/unstake/withdraw): can reach ~27M
  *
  * So:
- * - 10,000,000 for kind=transfer is very safe for both public + shielded,
- *   while keeping max fee reasonable.
+ * - transfer defaults are privacy-aware: public defaults to 2M, shielded
+ *   defaults to 15M to leave headroom above observed Phoenix transfer cost.
  * - 500,000,000 for contract_call is a conservative default safety cap.
  */
+export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
+  public: Object.freeze({
+    limit: "2000000",
+    price: "1",
+  }),
+  shielded: Object.freeze({
+    limit: "15000000",
+    price: "1",
+  }),
+});
+
 export const DEFAULT_GAS_BY_KIND = Object.freeze({
   [TX_KIND.TRANSFER]: Object.freeze({
-    limit: "10000000",
-    price: "1",
+    ...DEFAULT_TRANSFER_GAS_BY_PRIVACY.public,
   }),
   [TX_KIND.SHIELD]: Object.freeze({
     limit: "50000000",
@@ -55,9 +65,15 @@ export const DEFAULT_GAS_BY_KIND = Object.freeze({
 /**
  * Return the default gas object for a given kind, or null.
  * @param {string} kind
+ * @param {{privacy?: string}} [opts]
  */
-export function getDefaultGas(kind) {
+export function getDefaultGas(kind, opts = {}) {
   const k = String(kind || "").toLowerCase();
+  if (k === TX_KIND.TRANSFER) {
+    const privacy = String(opts?.privacy ?? "").trim().toLowerCase();
+    if (privacy === "shielded") return DEFAULT_TRANSFER_GAS_BY_PRIVACY.shielded;
+    if (privacy === "public") return DEFAULT_TRANSFER_GAS_BY_PRIVACY.public;
+  }
   return DEFAULT_GAS_BY_KIND[k] ?? null;
 }
 
@@ -73,9 +89,10 @@ export function getDefaultGas(kind) {
  * @param {any} gas
  * @param {Object} [opts]
  * @param {string} [opts.dynamicPrice] - Override default price with live network value.
+ * @param {string} [opts.privacy] - Privacy rail for transfer defaults.
  */
-export function applyGasDefaults(kind, gas, { dynamicPrice } = {}) {
-  const def = getDefaultGas(kind);
+export function applyGasDefaults(kind, gas, { dynamicPrice, privacy } = {}) {
+  const def = getDefaultGas(kind, { privacy });
   if (!def) return gas === undefined ? undefined : gas;
 
   // Explicit "auto" sentinel.
@@ -106,7 +123,10 @@ export function applyTxDefaults(params, { dynamicPrice } = {}) {
   const kind = String(params.kind || "").toLowerCase();
   if (!kind) return params;
 
-  const gas = applyGasDefaults(kind, params.gas, { dynamicPrice });
+  const gas = applyGasDefaults(kind, params.gas, {
+    dynamicPrice,
+    privacy: params.privacy,
+  });
   const out = { ...params };
 
   if (gas === undefined) {

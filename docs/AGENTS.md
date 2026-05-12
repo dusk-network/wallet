@@ -111,7 +111,7 @@ No offscreen document needed — engine runs in the same process.
 ```js
 // 1. Static defaults per transaction kind
 const DEFAULT_GAS_BY_KIND = {
-  transfer: { limit: "10000000", price: "1" },
+  transfer: { limit: "2000000", price: "1" }, // public; shielded transfer uses 15000000
   shield: { limit: "50000000", price: "1" },
   // ...
 };
@@ -172,7 +172,7 @@ transfers already require this field at the provider boundary.
 | Chain IDs | CAIP-2 `dusk:<id>` | `"dusk:1"` (mainnet), `"dusk:2"` (testnet) |
 | Amounts | LUX string (u64) | `"1000000000"` = 1 DUSK |
 | Addresses | Base58 | Account: `"2Z8m..."`, Shielded: `"4Kp9..."` |
-| Gas | object or null | `{ limit: "10000000", price: "1" }` or `null` (auto) |
+| Gas | object or null | `{ limit: "2000000", price: "1" }` or `null` (auto) |
 
 ### File Naming
 
@@ -250,9 +250,11 @@ transfers already require this field at the provider boundary.
 
 4. **Gas completeness**: Gas must have both `limit` AND `price`, or neither (null = auto). Partial gas objects are invalid.
 
-5. **BLS signatures**: Dusk uses BLS12-381 signatures. Hardware wallets (Ledger/Trezor) don't support this, so HW wallet integration isn't possible.
+5. **Pending shielded spends**: `waitTxExecuted` timeout/errors are not transaction failures. Phoenix txs can remain in a node mempool after the wallet watcher times out, so keep them pending unless an executed event reports an error or a deliberate pending-clear path is used.
 
-6. **Firefox offscreen**: Firefox MV3 doesn't support offscreen documents. The Firefox build hosts the engine in `engine.html` (hidden extension page) instead.
+6. **BLS signatures**: Dusk uses BLS12-381 signatures. Hardware wallets (Ledger/Trezor) don't support this, so HW wallet integration isn't possible.
+
+7. **Firefox offscreen**: Firefox MV3 doesn't support offscreen documents. The Firefox build hosts the engine in `engine.html` (hidden extension page) instead.
 
 ---
 
@@ -305,7 +307,7 @@ const result = await sendTransaction({
   kind: "transfer",
   to: "2Z8m...",
   amount: "1000000000",
-  gas: { limit: "10000000", price: "1" }
+  gas: { limit: "2000000", price: "1" }
 });
 
 // Get gas price

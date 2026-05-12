@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  DEFAULT_TRANSFER_GAS_BY_PRIVACY,
   DEFAULT_GAS_BY_KIND,
   getDefaultGas,
   applyGasDefaults,
@@ -9,9 +10,20 @@ import {
 import { TX_KIND } from "./constants.js";
 
 describe("DEFAULT_GAS_BY_KIND", () => {
-  it("has defaults for transfer", () => {
+  it("has a public fallback default for transfer", () => {
     expect(DEFAULT_GAS_BY_KIND[TX_KIND.TRANSFER]).toEqual({
-      limit: "10000000",
+      limit: "2000000",
+      price: "1",
+    });
+  });
+
+  it("has privacy-aware defaults for transfer", () => {
+    expect(DEFAULT_TRANSFER_GAS_BY_PRIVACY.public).toEqual({
+      limit: "2000000",
+      price: "1",
+    });
+    expect(DEFAULT_TRANSFER_GAS_BY_PRIVACY.shielded).toEqual({
+      limit: "15000000",
       price: "1",
     });
   });
@@ -40,17 +52,31 @@ describe("DEFAULT_GAS_BY_KIND", () => {
   it("is frozen", () => {
     expect(Object.isFrozen(DEFAULT_GAS_BY_KIND)).toBe(true);
     expect(Object.isFrozen(DEFAULT_GAS_BY_KIND[TX_KIND.TRANSFER])).toBe(true);
+    expect(Object.isFrozen(DEFAULT_TRANSFER_GAS_BY_PRIVACY)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_TRANSFER_GAS_BY_PRIVACY.shielded)).toBe(true);
   });
 });
 
 describe("getDefaultGas", () => {
   it("returns defaults for known kinds", () => {
-    expect(getDefaultGas("transfer")).toEqual({ limit: "10000000", price: "1" });
+    expect(getDefaultGas("transfer")).toEqual({ limit: "2000000", price: "1" });
     expect(getDefaultGas("shield")).toEqual({ limit: "50000000", price: "1" });
   });
 
+  it("returns privacy-aware transfer defaults", () => {
+    expect(getDefaultGas("transfer", { privacy: "public" })).toEqual({
+      limit: "2000000",
+      price: "1",
+    });
+    expect(getDefaultGas("transfer", { privacy: "shielded" })).toEqual({
+      limit: "15000000",
+      price: "1",
+    });
+  });
+
   it("handles case insensitivity", () => {
-    expect(getDefaultGas("TRANSFER")).toEqual({ limit: "10000000", price: "1" });
+    expect(getDefaultGas("TRANSFER")).toEqual({ limit: "2000000", price: "1" });
+    expect(getDefaultGas("TRANSFER", { privacy: "Shielded" })).toEqual({ limit: "15000000", price: "1" });
     expect(getDefaultGas("Shield")).toEqual({ limit: "50000000", price: "1" });
   });
 
@@ -64,12 +90,17 @@ describe("getDefaultGas", () => {
 describe("applyGasDefaults", () => {
   it("fills missing limit and price", () => {
     const result = applyGasDefaults("transfer", {});
-    expect(result).toEqual({ limit: "10000000", price: "1" });
+    expect(result).toEqual({ limit: "2000000", price: "1" });
+  });
+
+  it("fills privacy-aware transfer gas", () => {
+    const result = applyGasDefaults("transfer", {}, { privacy: "shielded" });
+    expect(result).toEqual({ limit: "15000000", price: "1" });
   });
 
   it("fills missing limit only", () => {
     const result = applyGasDefaults("transfer", { price: "2" });
-    expect(result).toEqual({ limit: "10000000", price: "2" });
+    expect(result).toEqual({ limit: "2000000", price: "2" });
   });
 
   it("fills missing price only", () => {
@@ -97,18 +128,30 @@ describe("applyGasDefaults", () => {
 
   it("handles empty string values", () => {
     const result = applyGasDefaults("transfer", { limit: "", price: "" });
-    expect(result).toEqual({ limit: "10000000", price: "1" });
+    expect(result).toEqual({ limit: "2000000", price: "1" });
   });
 });
 
 describe("applyTxDefaults", () => {
-  it("applies gas defaults to transfer params", () => {
-    const params = { kind: "transfer", to: "abc123" };
+  it("applies public gas defaults to transfer params", () => {
+    const params = { kind: "transfer", privacy: "public", to: "abc123" };
     const result = applyTxDefaults(params);
     expect(result).toEqual({
       kind: "transfer",
+      privacy: "public",
       to: "abc123",
-      gas: { limit: "10000000", price: "1" },
+      gas: { limit: "2000000", price: "1" },
+    });
+  });
+
+  it("applies shielded gas defaults to transfer params", () => {
+    const params = { kind: "transfer", privacy: "shielded", to: "abc123" };
+    const result = applyTxDefaults(params);
+    expect(result).toEqual({
+      kind: "transfer",
+      privacy: "shielded",
+      to: "abc123",
+      gas: { limit: "15000000", price: "1" },
     });
   });
 
@@ -131,7 +174,7 @@ describe("applyTxDefaults", () => {
   it("handles case insensitive kind", () => {
     const params = { kind: "TRANSFER", to: "abc" };
     const result = applyTxDefaults(params);
-    expect(result.gas).toEqual({ limit: "10000000", price: "1" });
+    expect(result.gas).toEqual({ limit: "2000000", price: "1" });
   });
 
   it("removes undefined gas field when no defaults exist", () => {

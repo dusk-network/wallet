@@ -115,7 +115,7 @@ The provider starts emitting events after the first `request()` call or `on()` s
 
 **Chain IDs:** `dusk:1` mainnet, `dusk:2` testnet, `dusk:3` devnet, `dusk:0` local. Custom nodes get `dusk:` + FNV-1a32 hash of origin (decimal).
 
-**Gas:** `{ limit: LuxString, price: LuxString }` or omit for wallet defaults.
+**Gas:** `{ limit: LuxString, price: LuxString }` or omit for wallet defaults. Transfer defaults are privacy-aware: public transfers use a lower Moonlight default, while shielded transfers use a higher Phoenix default.
 
 ---
 
@@ -253,7 +253,7 @@ const tx = await dusk.request({
     to: "2Z8m...",           // AccountId for public, Address for shielded
     amount: "1000000000",    // 1 DUSK in LUX
     memo: "optional",
-    gas: { limit: "10000000", price: "1" }  // optional
+    gas: { limit: "2000000", price: "1" }   // optional; shielded defaults higher
   }
 });
 // → { hash: "abc...", nonce: "5" }
