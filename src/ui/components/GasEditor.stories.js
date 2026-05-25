@@ -14,7 +14,7 @@ function wrap(child) {
 export const Auto = () => {
   const el = document.createElement("dusk-gas-editor");
   el.amountLux = "1000000000"; // 1 DUSK
-  el.helpText = "Auto gas (node defaults).";
+  el.helpText = "Auto gas (wallet defaults).";
   el.setGas(null);
   return wrap(el);
 };

@@ -280,7 +280,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
 
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-  gasEditor.helpText = "Max fee shown is limit × price. Clear both to use node defaults.";
+  gasEditor.helpText = "Max fee shown is limit × price. Clear both to use wallet defaults.";
 
   // Stake spends amount; unstake/withdraw do not.
   if (kind === TX_KIND.STAKE) {

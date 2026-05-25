@@ -2,9 +2,13 @@ import { describe, it, expect } from "vitest";
 import {
   DEFAULT_TRANSFER_GAS_BY_PRIVACY,
   DEFAULT_GAS_BY_KIND,
+  MIN_TRANSFER_GAS_BY_PRIVACY,
+  MIN_CONTRACT_CALL_GAS_BY_PRIVACY,
   getDefaultGas,
+  getMinimumGas,
   applyGasDefaults,
   applyTxDefaults,
+  assertMinimumGas,
   isCompleteGas,
 } from "./txDefaults.js";
 import { TX_KIND } from "./constants.js";
@@ -54,6 +58,8 @@ describe("DEFAULT_GAS_BY_KIND", () => {
     expect(Object.isFrozen(DEFAULT_GAS_BY_KIND[TX_KIND.TRANSFER])).toBe(true);
     expect(Object.isFrozen(DEFAULT_TRANSFER_GAS_BY_PRIVACY)).toBe(true);
     expect(Object.isFrozen(DEFAULT_TRANSFER_GAS_BY_PRIVACY.shielded)).toBe(true);
+    expect(Object.isFrozen(MIN_TRANSFER_GAS_BY_PRIVACY)).toBe(true);
+    expect(Object.isFrozen(MIN_CONTRACT_CALL_GAS_BY_PRIVACY)).toBe(true);
   });
 });
 
@@ -87,6 +93,18 @@ describe("getDefaultGas", () => {
   });
 });
 
+describe("getMinimumGas", () => {
+  it("returns privacy-aware transfer floors", () => {
+    expect(getMinimumGas("transfer", { privacy: "public" })).toEqual({ limit: "2000000" });
+    expect(getMinimumGas("transfer", { privacy: "shielded" })).toEqual({ limit: "15000000" });
+  });
+
+  it("returns a shielded contract-call floor", () => {
+    expect(getMinimumGas("contract_call", { privacy: "shielded" })).toEqual({ limit: "100000000" });
+    expect(getMinimumGas("contract_call", { privacy: "public" })).toBeNull();
+  });
+});
+
 describe("applyGasDefaults", () => {
   it("fills missing limit and price", () => {
     const result = applyGasDefaults("transfer", {});
@@ -113,8 +131,8 @@ describe("applyGasDefaults", () => {
     expect(result).toEqual({ limit: "5000000", price: "2" });
   });
 
-  it("returns null for explicit null (auto sentinel)", () => {
-    expect(applyGasDefaults("transfer", null)).toBeNull();
+  it("fills defaults for explicit null (auto sentinel)", () => {
+    expect(applyGasDefaults("transfer", null)).toEqual({ limit: "2000000", price: "1" });
   });
 
   it("returns undefined when no defaults exist and gas undefined", () => {
@@ -129,6 +147,22 @@ describe("applyGasDefaults", () => {
   it("handles empty string values", () => {
     const result = applyGasDefaults("transfer", { limit: "", price: "" });
     expect(result).toEqual({ limit: "2000000", price: "1" });
+  });
+
+  it("rejects under-floor shielded transfer gas", () => {
+    expect(() =>
+      applyGasDefaults("transfer", { limit: "10000000", price: "1" }, { privacy: "shielded" })
+    ).toThrow(/at least 15000000/);
+  });
+
+  it("rejects under-floor shielded contract-call gas", () => {
+    expect(() =>
+      applyGasDefaults(
+        "contract_call",
+        { limit: "99999999", price: "1" },
+        { privacy: "shielded" }
+      )
+    ).toThrow(/at least 100000000/);
   });
 });
 
@@ -156,9 +190,9 @@ describe("applyTxDefaults", () => {
   });
 
   it("preserves existing gas values", () => {
-    const params = { kind: "transfer", to: "abc", gas: { limit: "5000", price: "2" } };
+    const params = { kind: "transfer", to: "abc", gas: { limit: "5000000", price: "2" } };
     const result = applyTxDefaults(params);
-    expect(result.gas).toEqual({ limit: "5000", price: "2" });
+    expect(result.gas).toEqual({ limit: "5000000", price: "2" });
   });
 
   it("returns params unchanged if no kind", () => {
@@ -177,11 +211,43 @@ describe("applyTxDefaults", () => {
     expect(result.gas).toEqual({ limit: "2000000", price: "1" });
   });
 
+  it("rejects under-floor shielded transfer params", () => {
+    expect(() =>
+      applyTxDefaults({
+        kind: "transfer",
+        privacy: "shielded",
+        gas: { limit: "10000000", price: "1" },
+      })
+    ).toThrow(/at least 15000000/);
+  });
+
+  it("rejects under-floor shielded contract-call params", () => {
+    expect(() =>
+      applyTxDefaults({
+        kind: "contract_call",
+        privacy: "shielded",
+        gas: { limit: "50000000", price: "1" },
+      })
+    ).toThrow(/at least 100000000/);
+  });
+
   it("removes undefined gas field when no defaults exist", () => {
     const params = { kind: "unknown_kind", to: "abc", gas: undefined };
     const result = applyTxDefaults(params);
     expect(result).toEqual({ kind: "unknown_kind", to: "abc" });
     expect("gas" in result).toBe(false);
+  });
+});
+
+describe("assertMinimumGas", () => {
+  it("preserves gas at the floor", () => {
+    expect(
+      assertMinimumGas(
+        "transfer",
+        { limit: "15000000", price: "1" },
+        { privacy: "shielded" }
+      )
+    ).toEqual({ limit: "15000000", price: "1" });
   });
 });
 

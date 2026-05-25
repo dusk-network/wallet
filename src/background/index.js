@@ -443,6 +443,26 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      if (message?.type === "DUSK_UI_RECHECK_TX") {
+        const hash = String(message.hash ?? "").trim();
+        if (!hash) {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "hash is required");
+        }
+
+        const meta = await getTxMeta(hash);
+        const reconciled = await reconcileTxPresence(hash, {
+          preserveRemoved: meta?.status === "removed",
+        });
+        emitUiTxStatus({
+          hash,
+          status: reconciled.status || meta?.status || "unknown",
+          ok: reconciled.status === "executed" ? true : reconciled.status === "failed" ? false : undefined,
+          error: reconciled.error,
+        }).catch(() => {});
+        sendResponse({ ok: true, result: reconciled });
+        return;
+      }
+
       // UI asks for pending request details
       if (message?.type === "DUSK_GET_PENDING") {
         const entry = getPending(message.rid);

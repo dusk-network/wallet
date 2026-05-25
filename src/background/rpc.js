@@ -96,6 +96,18 @@ export async function handleRpc(origin, request) {
     return out;
   }
 
+  function applyTxDefaultsForRpc(params, options) {
+    try {
+      return applyTxDefaults(params, options);
+    } catch (err) {
+      if (err?.code) throw err;
+      throw rpcError(
+        ERROR_CODES.INVALID_PARAMS,
+        err?.message ?? "Invalid transaction parameters"
+      );
+    }
+  }
+
   function sanitizeAccountIndex(v, len, fallback = 0) {
     const n = Number(v);
     if (!Number.isFinite(n) || n < 0) return fallback;
@@ -616,7 +628,7 @@ export async function handleRpc(origin, request) {
         accountIndex: _ignoredAccountIndex,
         ...safeNormalizedParams
       } = normalizedParams;
-      const baseParams = applyTxDefaults(safeNormalizedParams, { dynamicPrice });
+      const baseParams = applyTxDefaultsForRpc(safeNormalizedParams, { dynamicPrice });
       const approvalSettings = await getSettings();
       const approvalNodeUrl = String(approvalSettings?.nodeUrl ?? "");
       const approvalParams = {
@@ -629,7 +641,7 @@ export async function handleRpc(origin, request) {
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
       const overrides = await requestUserApproval("send_tx", origin, approvalParams);
-      const finalParams = mergeTxParams(baseParams, overrides);
+      const finalParams = applyTxDefaultsForRpc(mergeTxParams(baseParams, overrides), { dynamicPrice });
       finalParams.gas = validateGasShape(finalParams.gas);
 
       const { isUnlocked, accounts } = await getEngineStatus();

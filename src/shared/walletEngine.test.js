@@ -177,6 +177,7 @@ vi.mock("@dusk/w3sper", () => {
     as(profile) {
       return {
         transfer: (amount) => new TxBuilder(profile, amount),
+        unshield: (amount) => new TxBuilder(profile, amount),
       };
     }
   }
@@ -216,6 +217,9 @@ vi.mock("@dusk/w3sper", () => {
 
     async execute(tx) {
       globalThis.__W3SPER_LAST_EXEC_TX__ = tx;
+      if (typeof globalThis.__W3SPER_EXECUTE_IMPL__ === "function") {
+        return await globalThis.__W3SPER_EXECUTE_IMPL__(tx);
+      }
       return { hash: "0xmockhash", nonce: 42 };
     }
   }
@@ -257,6 +261,8 @@ vi.mock("@dusk/w3sper", () => {
 
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const NETWORK_KEY = "https://testnet.nodes.dusk.network";
+const WALLET_ID = "acct0";
 
 describe("walletEngine", () => {
   /** @type {typeof import('./walletEngine.js')} */
@@ -265,6 +271,7 @@ describe("walletEngine", () => {
   beforeEach(async () => {
     vi.resetModules();
     globalThis.__W3SPER_LAST_EXEC_TX__ = null;
+    globalThis.__W3SPER_EXECUTE_IMPL__ = null;
 
     // walletEngine loads a WASM protocol driver via fetch() on first use.
     vi.stubGlobal(
@@ -286,6 +293,7 @@ describe("walletEngine", () => {
       // ignore
     }
     vi.unstubAllGlobals();
+    delete globalThis.__W3SPER_EXECUTE_IMPL__;
   });
 
   it("derives the CLI-aligned two default profiles on unlock", async () => {
@@ -434,5 +442,129 @@ describe("walletEngine", () => {
     await expect(
       engine.sendTransaction({ kind: "transfer", privacy: "shielded", to: "acct0", amount: "1" })
     ).rejects.toThrow(/Shielded transfer requires/);
+  });
+
+  it("serializes concurrent Phoenix transfers until pending nullifiers are written", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    const store = await import("./shieldedStore.js");
+    await store.clearNotes(NETWORK_KEY, WALLET_ID, 0);
+    const notes = new Map();
+    notes.set(new Uint8Array([0xaa]), new Uint8Array([0x01]));
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, notes);
+
+    let releaseFirst = () => {};
+    const firstGate = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    let markFirstStarted = () => {};
+    const firstStarted = new Promise((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const executeStarts = [];
+    let secondSpendableAtStart = null;
+
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async () => {
+      executeStarts.push(Date.now());
+      if (executeStarts.length === 1) {
+        markFirstStarted();
+        await firstGate;
+        return { hash: "0xfirst", nullifiers: [new Uint8Array([0xaa])] };
+      }
+
+      const spendable = await store.getSpendableNotesMap(NETWORK_KEY, WALLET_ID, 0);
+      secondSpendableAtStart = Array.from(spendable.keys()).map((key) => bytesToHex(key));
+      return { hash: "0xsecond", nullifiers: [new Uint8Array([0xbb])] };
+    });
+
+    const first = engine.sendTransaction({
+      kind: "transfer",
+      privacy: "shielded",
+      to: "addr0",
+      amount: "1",
+    });
+    const second = engine.sendTransaction({
+      kind: "transfer",
+      privacy: "shielded",
+      to: "addr0",
+      amount: "1",
+    });
+
+    await firstStarted;
+    expect(executeStarts).toHaveLength(1);
+
+    releaseFirst();
+    await expect(Promise.all([first, second])).resolves.toEqual(
+      expect.arrayContaining([
+        { hash: "0xfirst", nonce: undefined, nullifiers: [new Uint8Array([0xaa])] },
+        { hash: "0xsecond", nonce: undefined, nullifiers: [new Uint8Array([0xbb])] },
+      ])
+    );
+
+    expect(secondSpendableAtStart).toEqual([]);
+    expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xfirst")).toEqual(["aa"]);
+    expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xsecond")).toEqual(["bb"]);
+  });
+
+  it("persists returned nullifiers for shielded contract calls", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    const store = await import("./shieldedStore.js");
+    await store.clearNotes(NETWORK_KEY, WALLET_ID, 0);
+    const notes = new Map();
+    notes.set(new Uint8Array([0xcc]), new Uint8Array([0x01]));
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, notes);
+
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async () => ({
+      hash: "0xcontract",
+      nullifiers: [new Uint8Array([0xcc])],
+    }));
+
+    const result = await engine.sendTransaction({
+      kind: "contract_call",
+      privacy: "shielded",
+      to: "addr0",
+      amount: "0",
+      deposit: "0",
+      contractId: "00".repeat(32),
+      fnName: "transfer",
+      fnArgs: "0x",
+    });
+
+    expect(result).toEqual({
+      hash: "0xcontract",
+      nonce: undefined,
+      nullifiers: [new Uint8Array([0xcc])],
+    });
+    expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xcontract")).toEqual(["cc"]);
+  });
+
+  it("persists returned nullifiers for unshield transactions", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    const store = await import("./shieldedStore.js");
+    await store.clearNotes(NETWORK_KEY, WALLET_ID, 0);
+    const notes = new Map();
+    notes.set(new Uint8Array([0xdd]), new Uint8Array([0x01]));
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, notes);
+
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async () => ({
+      hash: "0xunshield",
+      nullifiers: [new Uint8Array([0xdd])],
+    }));
+
+    const result = await engine.sendTransaction({
+      kind: "unshield",
+      amount: "1",
+    });
+
+    expect(result).toEqual({
+      hash: "0xunshield",
+      nullifiers: [new Uint8Array([0xdd])],
+    });
+    expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xunshield")).toEqual(["dd"]);
   });
 });
