@@ -8,6 +8,8 @@ import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { detectPresetIdFromNodeUrl, networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
+import { bytesToHex } from "../shared/bytes.js";
+import { classifyTxPresence } from "../shared/txLifecycle.js";
 
 import {
   engineCall,
@@ -69,6 +71,119 @@ let lastActivityTimestamp = 0;
 /** Update activity timestamp to prevent auto-lock. */
 function updateActivity() {
   lastActivityTimestamp = Date.now();
+}
+
+function nullifierHexes(value) {
+  const out = [];
+  for (const n of Array.isArray(value) ? value : []) {
+    try {
+      if (typeof n === "string") {
+        const hex = n.trim();
+        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
+        continue;
+      }
+      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+      const hex = bytesToHex(u8);
+      if (hex) out.push(hex);
+    } catch {
+      // ignore invalid nullifier shapes
+    }
+  }
+  return out;
+}
+
+function isShieldedTxMeta(meta) {
+  return (
+    String(meta?.privacy ?? "") === "shielded" ||
+    (Array.isArray(meta?.pendingNullifiers) && meta.pendingNullifiers.length > 0)
+  );
+}
+
+async function emitUiTxStatus(payload) {
+  try {
+    await runtimeSendMessage({
+      type: "DUSK_UI_TX_STATUS",
+      ...payload,
+    });
+  } catch {
+    // ignore
+  }
+}
+
+async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
+  const meta = await getTxMeta(hash);
+  const settings = await getSettings();
+  const nodeUrl = meta?.nodeUrl ?? settings?.nodeUrl ?? "";
+  const origin = meta?.origin ?? "Wallet";
+  const now = Date.now();
+
+  if (!nodeUrl) {
+    await patchTxMeta(hash, {
+      status: preserveRemoved ? "removed" : "unknown",
+      lastCheckedAt: now,
+      recoveryReason: "node_url_missing",
+    });
+    return { status: preserveRemoved ? "removed" : "unknown", origin, nodeUrl, error: "node_url_missing" };
+  }
+
+  const presence = await classifyTxPresence(nodeUrl, hash);
+  if (presence.state === "executed_success") {
+    await patchTxMeta(hash, {
+      status: "executed",
+      error: undefined,
+      executedAt: now,
+      lastCheckedAt: now,
+      reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
+      reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
+    });
+    return { status: "executed", ok: true, origin, nodeUrl };
+  }
+
+  if (presence.state === "executed_failed") {
+    await patchTxMeta(hash, {
+      status: "failed",
+      error: presence.error || undefined,
+      executedAt: now,
+      lastCheckedAt: now,
+    });
+    return { status: "failed", ok: false, origin, nodeUrl, error: presence.error || "" };
+  }
+
+  if (presence.state === "mempool") {
+    await patchTxMeta(hash, {
+      status: "mempool",
+      error: undefined,
+      mempoolSeenAt: now,
+      lastCheckedAt: now,
+      reservationStatus: isShieldedTxMeta(meta) ? "pending" : meta?.reservationStatus,
+    });
+    return { status: "mempool", origin, nodeUrl };
+  }
+
+  if (presence.state === "not_found") {
+    const status = preserveRemoved ? "removed" : "unknown";
+    await patchTxMeta(hash, {
+      status,
+      lastCheckedAt: now,
+      recoveryReason: preserveRemoved ? "removed" : "not_found",
+      reservationStatus: preserveRemoved && isShieldedTxMeta(meta)
+        ? "recoverable"
+        : meta?.reservationStatus,
+    });
+    return { status, origin, nodeUrl };
+  }
+
+  await patchTxMeta(hash, {
+    status: preserveRemoved ? "removed" : "unknown",
+    lastCheckedAt: now,
+    recoveryReason: presence.error || "reconciliation_unavailable",
+  });
+  return {
+    status: preserveRemoved ? "removed" : "unknown",
+    origin,
+    nodeUrl,
+    error: presence.error || "reconciliation_unavailable",
+  };
 }
 
 /** Start or restart the auto-lock alarm based on current settings. */
@@ -239,7 +354,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      // Offscreen notifies us when a tx gets executed (best-effort).
+      // Offscreen notifies us when a tx lifecycle event is observed (best-effort).
       if (message?.type === "DUSK_TX_EXECUTED") {
         const hash = String(message.hash ?? "");
         const ok = message.ok !== false; // default true
@@ -249,10 +364,15 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           const meta = await getTxMeta(hash);
           const origin = meta?.origin ?? "Wallet";
           const nodeUrl = meta?.nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
+          const now = Date.now();
 
           await patchTxMeta(hash, {
             status: ok ? "executed" : "failed",
+            executedAt: now,
+            lastCheckedAt: now,
             error: ok ? undefined : error || undefined,
+            reservationStatus: ok && isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
+            reservationUpdatedAt: ok && isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
           });
 
           notifyTxExecuted({ hash, origin, ok, error, nodeUrl }).catch(() => {});
@@ -262,17 +382,63 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
 
         // Also broadcast to any open UI views so they can show a toast.
-        try {
-          runtimeSendMessage({
-            type: "DUSK_UI_TX_STATUS",
-            hash,
-            ok,
-            error,
-          }).catch(() => {});
-        } catch {
-          // ignore
-        }
+        emitUiTxStatus({
+          hash,
+          status: ok ? "executed" : "failed",
+          ok,
+          error,
+        }).catch(() => {});
 
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (message?.type === "DUSK_TX_REMOVED") {
+        const hash = String(message.hash ?? "");
+        const reason = message.reason ? String(message.reason) : "removed";
+        const meta = await getTxMeta(hash);
+        const now = Date.now();
+
+        await patchTxMeta(hash, {
+          status: "removed",
+          removedAt: now,
+          lastCheckedAt: now,
+          reservationStatus: isShieldedTxMeta(meta) ? "recoverable" : meta?.reservationStatus,
+          reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
+          recoveryReason: reason,
+        });
+
+        const reconciled = await reconcileTxPresence(hash, { preserveRemoved: true });
+        emitUiTxStatus({
+          hash,
+          status: reconciled.status || "removed",
+          ok: reconciled.status === "executed" ? true : undefined,
+          error: reconciled.error,
+        }).catch(() => {});
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (message?.type === "DUSK_TX_UNKNOWN") {
+        const hash = String(message.hash ?? "");
+        const reason = message.reason ? String(message.reason) : "watcher_timeout";
+        const meta = await getTxMeta(hash);
+        const now = Date.now();
+
+        await patchTxMeta(hash, {
+          status: "unknown",
+          lastCheckedAt: now,
+          reservationStatus: isShieldedTxMeta(meta) ? "pending" : meta?.reservationStatus,
+          recoveryReason: reason,
+        });
+
+        const reconciled = await reconcileTxPresence(hash);
+        emitUiTxStatus({
+          hash,
+          status: reconciled.status || "unknown",
+          ok: reconciled.status === "executed" ? true : reconciled.status === "failed" ? false : undefined,
+          error: reconciled.error,
+        }).catch(() => {});
         sendResponse({ ok: true });
         return;
       }
@@ -1005,10 +1171,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           const nodeUrl = settings?.nodeUrl ?? "";
 
           if (hash) {
+            const pendingNullifiers = nullifierHexes(result?.nullifiers);
             await putTxMeta(hash, {
               origin: "Wallet",
               nodeUrl,
               kind,
+              privacy: baseParams?.privacy ? String(baseParams.privacy) : undefined,
               profileIndex:
                 status?.selectedAccountIndex !== undefined && status?.selectedAccountIndex !== null
                   ? Number(status.selectedAccountIndex) || 0
@@ -1037,6 +1205,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
                   : undefined,
               gasLimit: baseParams?.gas?.limit != null ? String(baseParams.gas.limit) : undefined,
               gasPrice: baseParams?.gas?.price != null ? String(baseParams.gas.price) : undefined,
+              pendingNullifiers,
+              reservationStatus: pendingNullifiers.length ? "pending" : undefined,
+              reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
               submittedAt: Date.now(),
               status: "submitted",
             });
@@ -1046,7 +1217,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         } catch {
           notifyTxSubmitted({ hash, origin: "Wallet" }).catch(() => {});
         }
-        sendResponse({ ok: true, result });
+        const publicResult = { hash };
+        if (result?.nonce !== undefined && result?.nonce !== null) {
+          publicResult.nonce = result.nonce?.toString?.() ?? String(result.nonce);
+        }
+        sendResponse({ ok: true, result: publicResult });
         return;
       }
 

@@ -11,18 +11,28 @@ class TestCustomEvent extends Event {
   }
 }
 
+class TestMessageEvent extends Event {
+  constructor(type, init = {}) {
+    super(type);
+    this.data = init.data;
+    this.source = init.source;
+  }
+}
+
 async function runInpageScript() {
   const source = await readFile(inpageUrl, "utf8");
   const window = new EventTarget();
   window.window = window;
   window.location = { origin: "https://dapp.example" };
   window.postMessage = () => {};
+  window.MessageEvent = TestMessageEvent;
 
   const context = vm.createContext({
     window,
     console,
     Event,
     CustomEvent: TestCustomEvent,
+    MessageEvent: TestMessageEvent,
     Map,
     Array,
     Object,
@@ -61,5 +71,50 @@ describe("integration: inpage provider discovery", () => {
     expect(typeof announcements[0].info.icon).toBe("string");
     expect(window.dusk).toBeUndefined();
     expect(window.duskWallet?.isDusk).toBe(true);
+  });
+
+  it("deduplicates equivalent profilesChanged payloads", async () => {
+    const window = await runInpageScript();
+    const events = [];
+    window.duskWallet.on("profilesChanged", (profiles) => events.push(profiles));
+
+    const profile = { profileId: "account:0:acct0", account: "acct0" };
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        source: window,
+        data: {
+          target: "DUSK_EXTENSION",
+          type: "DUSK_PROVIDER_EVENT",
+          name: "profilesChanged",
+          data: [profile],
+        },
+      })
+    );
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        source: window,
+        data: {
+          target: "DUSK_EXTENSION",
+          type: "DUSK_PROVIDER_EVENT",
+          name: "profilesChanged",
+          data: [{ profileId: "account:0:acct0", account: "acct0" }],
+        },
+      })
+    );
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        source: window,
+        data: {
+          target: "DUSK_EXTENSION",
+          type: "DUSK_PROVIDER_EVENT",
+          name: "profilesChanged",
+          data: [{ profileId: "account:0:acct0", account: "acct0", shieldedAddress: "addr0" }],
+        },
+      })
+    );
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual([profile]);
+    expect(events[1]).toEqual([{ profileId: "account:0:acct0", account: "acct0", shieldedAddress: "addr0" }]);
   });
 });

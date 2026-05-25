@@ -28,12 +28,14 @@ import {
   setShieldedCheckpointNow,
   startShieldedSync,
   waitTxExecuted,
+  waitTxRemoved,
   unlockWithMnemonic,
   preloadProtocolDriver,
   setEngineDebugHook,
 } from "../shared/walletEngine.js";
 
 import { ERROR_CODES } from "../shared/errors.js";
+import { bytesToHex } from "../shared/bytes.js";
 import { getExtensionApi, runtimeSendMessage } from "../platform/extensionApi.js";
 
 function serializeError(err) {
@@ -42,6 +44,25 @@ function serializeError(err) {
     message: err?.message ?? String(err),
     data: err?.data,
   };
+}
+
+function nullifierHexes(value) {
+  const out = [];
+  for (const n of Array.isArray(value) ? value : []) {
+    try {
+      if (typeof n === "string") {
+        const hex = n.trim();
+        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
+        continue;
+      }
+      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+      const hex = bytesToHex(u8);
+      if (hex) out.push(hex);
+    } catch {
+      // ignore invalid nullifier shapes
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,9 +142,35 @@ async function watchTxExecuted(hash) {
   activeTxWatches.add(hash);
 
   try {
-    const executedEvent = await waitTxExecuted(hash, { timeoutMs: 180_000 });
-    const ok = inferTxOk(executedEvent);
-    const error = ok ? "" : inferTxError(executedEvent);
+    const timeoutMs = 180_000;
+    const removedWatcher = waitTxRemoved(hash, { timeoutMs })
+      .then((event) => ({ type: "removed", event }))
+      .catch((e) => {
+        if (/removed watcher not available/i.test(String(e?.message ?? e))) {
+          return new Promise(() => {});
+        }
+        throw e;
+      });
+    const lifecycle = await Promise.race([
+      waitTxExecuted(hash, { timeoutMs }).then((event) => ({ type: "executed", event })),
+      removedWatcher,
+    ]);
+
+    if (lifecycle?.type === "removed") {
+      try {
+        await runtimeSendMessage({
+          type: "DUSK_TX_REMOVED",
+          hash,
+          reason: inferTxError(lifecycle.event) || "removed",
+        });
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    const ok = inferTxOk(lifecycle?.event);
+    const error = ok ? "" : inferTxError(lifecycle?.event);
 
     try {
       await runtimeSendMessage({
@@ -143,7 +190,17 @@ async function watchTxExecuted(hash) {
     // A watcher timeout/error is not a transaction failure. The tx may still
     // be in the mempool, and Phoenix nullifiers must remain reserved until
     // execution/sync proves the spend or a deliberate pending-clear path exists.
-    void e;
+    try {
+      await runtimeSendMessage({
+        type: "DUSK_TX_UNKNOWN",
+        hash,
+        reason: /timed out/i.test(String(e?.message ?? e))
+          ? "watcher_timeout"
+          : "watcher_unavailable",
+      });
+    } catch {
+      // ignore
+    }
   } finally {
     activeTxWatches.delete(hash);
   }
@@ -356,6 +413,8 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
           // Keep the provider response simple, always return the tx hash,
           // and only include a nonce when it exists (public tx).
           const resp = { hash: result.hash };
+          const pendingNullifiers = nullifierHexes(result?.nullifiers);
+          if (pendingNullifiers.length) resp.nullifiers = pendingNullifiers;
           if (result.nonce !== undefined && result.nonce !== null) {
             resp.nonce = result.nonce?.toString?.() ?? String(result.nonce);
           }
