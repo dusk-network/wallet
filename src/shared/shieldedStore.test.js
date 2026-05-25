@@ -87,6 +87,34 @@ describe("shieldedStore (IndexedDB)", () => {
     expect(keys).toEqual(["bb"]);
   });
 
+  it("scopes pending nullifiers by network, wallet, and profile", async () => {
+    const { networkKey, walletId } = nextOwner();
+    const n1 = new Uint8Array([0xaa]);
+    const note = new Uint8Array([0x01]);
+
+    await store.putNotesMap(networkKey, walletId, 0, new Map([[n1, note]]));
+    await store.putNotesMap(networkKey, walletId, 1, new Map([[n1, note]]));
+    await store.putNotesMap(`${networkKey}-other`, walletId, 0, new Map([[n1, note]]));
+    await store.putNotesMap(networkKey, `${walletId}-other`, 0, new Map([[n1, note]]));
+
+    await store.putPendingNullifiers(networkKey, walletId, 0, [n1], "tx-profile-0");
+
+    const spendableProfile0 = await store.getSpendableNotesMap(networkKey, walletId, 0);
+    expect(Array.from(spendableProfile0.keys()).map((k) => bytesToHex(k))).toEqual([]);
+
+    const spendableProfile1 = await store.getSpendableNotesMap(networkKey, walletId, 1);
+    expect(Array.from(spendableProfile1.keys()).map((k) => bytesToHex(k))).toEqual(["aa"]);
+
+    const spendableOtherNetwork = await store.getSpendableNotesMap(`${networkKey}-other`, walletId, 0);
+    expect(Array.from(spendableOtherNetwork.keys()).map((k) => bytesToHex(k))).toEqual(["aa"]);
+
+    const spendableOtherWallet = await store.getSpendableNotesMap(networkKey, `${walletId}-other`, 0);
+    expect(Array.from(spendableOtherWallet.keys()).map((k) => bytesToHex(k))).toEqual(["aa"]);
+
+    expect(await store.getPendingNullifiersForTx(networkKey, walletId, 0, "tx-profile-0")).toEqual(["aa"]);
+    expect(await store.getPendingNullifiersForTx(networkKey, walletId, 1, "tx-profile-0")).toEqual([]);
+  });
+
   it("tracks and clears pending nullifiers by tx hash", async () => {
     const { networkKey, walletId, profileIndex } = nextOwner();
 

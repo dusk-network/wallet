@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ERROR_CODES } from "../shared/errors.js";
+
+const SHIELDED_ADDRESS =
+  "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+
 const mocks = vi.hoisted(() => ({
   listener: null,
   sentMessages: [],
   classifyTxPresence: vi.fn(),
   notifyTxExecuted: vi.fn(async () => true),
+  requestUserApproval: vi.fn(async () => null),
 }));
 
 function makeLocalStorage() {
@@ -50,6 +56,7 @@ vi.mock("../background/engineHost.js", () => ({
 
 vi.mock("../background/pending.js", () => ({
   getPending: vi.fn(() => null),
+  requestUserApproval: mocks.requestUserApproval,
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
 }));
 
@@ -257,5 +264,125 @@ describe("background Phoenix tx lifecycle flow", () => {
       expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "removed" })
     );
     expect(mocks.notifyTxExecuted).not.toHaveBeenCalled();
+  });
+
+  it("rechecks old shielded reservations without clearing pending nullifiers", async () => {
+    const hash = "0xrecheck";
+    await seedTxMeta(hash, { status: "unknown", recoveryReason: "watcher_timeout" });
+    mocks.classifyTxPresence.mockResolvedValueOnce({ state: "mempool", tx: { id: hash } });
+
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_RECHECK_TX", hash })).resolves.toMatchObject({
+      ok: true,
+      result: { status: "mempool" },
+    });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "mempool",
+      reservationStatus: "pending",
+      pendingNullifiers: ["aa"],
+    });
+
+    expect(mocks.sentMessages).toContainEqual(
+      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "mempool" })
+    );
+    expect(mocks.sentMessages).not.toContainEqual(
+      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "failed" })
+    );
+    expect(mocks.notifyTxExecuted).not.toHaveBeenCalled();
+  });
+
+  it("rechecks old shielded reservations to finalized success and marks reservation spent", async () => {
+    const hash = "0xrecheck-success";
+    await seedTxMeta(hash, { status: "unknown", recoveryReason: "watcher_timeout" });
+    mocks.classifyTxPresence.mockResolvedValueOnce({ state: "executed_success", tx: { id: hash } });
+
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_RECHECK_TX", hash })).resolves.toMatchObject({
+      ok: true,
+      result: { status: "executed", ok: true },
+    });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "executed",
+      reservationStatus: "spent",
+      pendingNullifiers: ["aa"],
+    });
+
+    expect(mocks.sentMessages).toContainEqual(
+      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed", ok: true })
+    );
+  });
+
+  it("rechecks old shielded reservations to finalized failure without releasing pending nullifiers", async () => {
+    const hash = "0xrecheck-failed";
+    await seedTxMeta(hash, { status: "unknown", recoveryReason: "watcher_timeout" });
+    mocks.classifyTxPresence.mockResolvedValueOnce({
+      state: "executed_failed",
+      tx: { id: hash },
+      error: "OutOfGas",
+    });
+
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_RECHECK_TX", hash })).resolves.toMatchObject({
+      ok: true,
+      result: { status: "failed", ok: false, error: "OutOfGas" },
+    });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      reservationStatus: "pending",
+      pendingNullifiers: ["aa"],
+    });
+
+    expect(mocks.sentMessages).toContainEqual(
+      expect.objectContaining({
+        type: "DUSK_UI_TX_STATUS",
+        hash,
+        status: "failed",
+        ok: false,
+        error: "OutOfGas",
+      })
+    );
+  });
+
+  it("serializes under-floor Phoenix gas from dApp RPC as INVALID_PARAMS", async () => {
+    globalThis.localStorage.setItem(
+      "dusk_permissions_v1",
+      JSON.stringify({
+        "https://dapp.example": {
+          profileId: "account:0:acct0",
+          accountIndex: 0,
+          grants: { publicAccount: true, shieldedReceiveAddress: false },
+          connectedAt: 1,
+          updatedAt: 1,
+        },
+      })
+    );
+
+    const response = await sendBackgroundMessage({
+      type: "DUSK_RPC_REQUEST",
+      id: "req-1",
+      origin: "https://dapp.example",
+      request: {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "transfer",
+          privacy: "shielded",
+          to: SHIELDED_ADDRESS,
+          amount: "1",
+          gas: { limit: "10000000", price: "1" },
+        },
+      },
+    });
+
+    expect(response).toMatchObject({
+      error: {
+        code: ERROR_CODES.INVALID_PARAMS,
+        message: expect.stringContaining("at least 15000000"),
+      },
+    });
+    expect(mocks.requestUserApproval).not.toHaveBeenCalled();
   });
 });

@@ -488,6 +488,66 @@ describe("background rpc handler", () => {
     );
   });
 
+  it("dusk_sendTransaction rejects under-floor Phoenix transfer gas before approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "transfer",
+          privacy: "shielded",
+          to: SHIELDED_ADDRESS,
+          amount: "1",
+          gas: { limit: "10000000", price: "1" },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: ERROR_CODES.INVALID_PARAMS,
+      message: expect.stringMatching(/at least 15000000/),
+    });
+
+    expect(requestUserApproval).not.toHaveBeenCalledWith("send_tx", expect.anything(), expect.anything());
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+  });
+
+  it("dusk_sendTransaction rejects approval override that lowers Phoenix transfer gas", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+    requestUserApproval.mockResolvedValueOnce({ gas: { limit: "10000000", price: "1" } });
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "transfer",
+          privacy: "shielded",
+          to: SHIELDED_ADDRESS,
+          amount: "1",
+        },
+      })
+    ).rejects.toMatchObject({
+      code: ERROR_CODES.INVALID_PARAMS,
+      message: expect.stringMatching(/at least 15000000/),
+    });
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "send_tx",
+      "https://dapp.example",
+      expect.objectContaining({ gas: { limit: "15000000", price: "1" } })
+    );
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+  });
+
   it("dusk_sendTransaction rejects if the wallet locks after approval and before send", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -800,6 +860,70 @@ describe("background rpc handler", () => {
         chainId: "dusk:2",
         networkName: "Testnet",
         nodeUrl: "https://testnet.nodes.dusk.network",
+      })
+    );
+  });
+
+  it("dusk_sendTransaction rejects under-floor shielded contract-call gas before approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "contract_call",
+          privacy: "shielded",
+          contractId: `0x${"ab".repeat(32)}`,
+          fnName: "transfer",
+          fnArgs: "0x1234",
+          amount: "0",
+          deposit: "5",
+          gas: { limit: "50000000", price: "1" },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: ERROR_CODES.INVALID_PARAMS,
+      message: expect.stringMatching(/at least 100000000/),
+    });
+
+    expect(requestUserApproval).not.toHaveBeenCalledWith("send_tx", expect.anything(), expect.anything());
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+  });
+
+  it("dusk_sendTransaction strips shielded contract-call nullifiers from provider response", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+
+    const result = await handleRpc("https://dapp.example", {
+      method: "dusk_sendTransaction",
+      params: {
+        kind: "contract_call",
+        privacy: "shielded",
+        contractId: `0x${"ab".repeat(32)}`,
+        fnName: "transfer",
+        fnArgs: "0x1234",
+        amount: "0",
+        deposit: "5",
+      },
+    });
+
+    expect(result).toEqual({ hash: "0xhash", nonce: "5" });
+    expect(putTxMeta).toHaveBeenCalledWith(
+      "0xhash",
+      expect.objectContaining({
+        kind: "contract_call",
+        privacy: "shielded",
+        pendingNullifiers: ["aa"],
+        reservationStatus: "pending",
       })
     );
   });

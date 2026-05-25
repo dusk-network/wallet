@@ -228,7 +228,7 @@ export class DuskGasEditor extends HTMLElement {
     // Require both or none.
     if ((gl === undefined) !== (gp === undefined)) {
       throw new Error(
-        "Provide both gas limit and gas price (or clear both to use node defaults)."
+        "Provide both gas limit and gas price (or clear both to use wallet defaults)."
       );
     }
 
@@ -254,7 +254,7 @@ export class DuskGasEditor extends HTMLElement {
     // Require both or none.
     if ((limit === "") !== (price === "")) {
       throw new Error(
-        "Provide both gas limit and gas price (or clear both to use node defaults)."
+        "Provide both gas limit and gas price (or clear both to use wallet defaults)."
       );
     }
 

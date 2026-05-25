@@ -664,7 +664,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   gasEditor.amountLux = d.amountLux;
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
   gasEditor.helpText =
-    "Max fee shown is limit × price. Clear both to use node defaults.";
+    "Max fee shown is limit × price. Clear both to use wallet defaults.";
 
   // Prefer persisted draft gas. Otherwise we'll fetch the node's current gas
   // price stats and set a recommended default (median).
@@ -713,7 +713,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         (defaultLimit
           ? `Suggested gas price comes from the node mempool. Default limit: ${defaultLimit}. `
           : "Suggested gas price comes from the node mempool. ") +
-        "Max fee shown is limit × price. Clear both to use node defaults.";
+        "Max fee shown is limit × price. Clear both to use wallet defaults.";
 
       const apply = (price) => {
         if (!defaultLimit) return;

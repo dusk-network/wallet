@@ -752,7 +752,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
   gasEditor.amountLux = "0";
-  gasEditor.helpText = "Max fee shown is limit × price. Clear both to use node defaults.";
+  gasEditor.helpText = "Max fee shown is limit × price. Clear both to use wallet defaults.";
   gasEditor.setGas(d?.gas ?? null);
 
   const gasHint = h("div", { class: "muted", text: "Loading gas price suggestion…" });

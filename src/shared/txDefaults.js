@@ -20,6 +20,11 @@ import { TX_KIND } from "./constants.js";
  * - transfer defaults are privacy-aware: public defaults to 2M, shielded
  *   defaults to 15M to leave headroom above observed Phoenix transfer cost.
  * - 500,000,000 for contract_call is a conservative default safety cap.
+ *
+ * Minimums are client-side safety floors. They are not a substitute for
+ * node-side simulation/admission checks, but they prevent the wallet from
+ * submitting obviously under-gassed transactions that can leave Phoenix
+ * reservations stuck until mempool expiry/removal.
  */
 export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
   public: Object.freeze({
@@ -29,6 +34,15 @@ export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
   shielded: Object.freeze({
     limit: "15000000",
     price: "1",
+  }),
+});
+
+export const MIN_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
+  public: Object.freeze({
+    limit: "2000000",
+  }),
+  shielded: Object.freeze({
+    limit: "15000000",
   }),
 });
 
@@ -62,6 +76,21 @@ export const DEFAULT_GAS_BY_KIND = Object.freeze({
   }),
 });
 
+export const MIN_GAS_BY_KIND = Object.freeze({
+  [TX_KIND.TRANSFER]: Object.freeze({
+    ...MIN_TRANSFER_GAS_BY_PRIVACY.public,
+  }),
+  [TX_KIND.UNSHIELD]: Object.freeze({
+    limit: "50000000",
+  }),
+});
+
+export const MIN_CONTRACT_CALL_GAS_BY_PRIVACY = Object.freeze({
+  shielded: Object.freeze({
+    limit: "100000000",
+  }),
+});
+
 /**
  * Return the default gas object for a given kind, or null.
  * @param {string} kind
@@ -78,11 +107,67 @@ export function getDefaultGas(kind, opts = {}) {
 }
 
 /**
+ * Return the client-side minimum gas floor for a given kind, or null.
+ * @param {string} kind
+ * @param {{privacy?: string}} [opts]
+ */
+export function getMinimumGas(kind, opts = {}) {
+  const k = String(kind || "").toLowerCase();
+  const privacy = String(opts?.privacy ?? "").trim().toLowerCase();
+  if (k === TX_KIND.TRANSFER) {
+    if (privacy === "shielded") return MIN_TRANSFER_GAS_BY_PRIVACY.shielded;
+    if (privacy === "public") return MIN_TRANSFER_GAS_BY_PRIVACY.public;
+  }
+  if (k === TX_KIND.CONTRACT_CALL && privacy === "shielded") {
+    return MIN_CONTRACT_CALL_GAS_BY_PRIVACY.shielded;
+  }
+  return MIN_GAS_BY_KIND[k] ?? null;
+}
+
+function parseGasLimit(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error("Invalid gas limit");
+    return BigInt(value);
+  }
+  const s = String(value).trim();
+  if (!/^\d+$/.test(s)) throw new Error("Invalid gas limit");
+  return BigInt(s);
+}
+
+/**
+ * Enforce client-side minimum gas floors.
+ * @param {string} kind
+ * @param {any} gas
+ * @param {{privacy?: string}} [opts]
+ */
+export function assertMinimumGas(kind, gas, opts = {}) {
+  if (!gas || typeof gas !== "object" || Array.isArray(gas)) return gas;
+  const min = getMinimumGas(kind, opts);
+  if (!min?.limit) return gas;
+
+  const limit = parseGasLimit(gas.limit);
+  if (limit === null) return gas;
+  const minLimit = BigInt(min.limit);
+  if (limit < minLimit) {
+    const privacy = String(opts?.privacy ?? "").trim().toLowerCase();
+    const prefix =
+      String(kind || "").toLowerCase() === TX_KIND.CONTRACT_CALL && privacy === "shielded"
+        ? "Shielded contract call"
+        : privacy === "shielded"
+        ? "Shielded transaction"
+        : "Transaction";
+    throw new Error(`${prefix} gas limit must be at least ${min.limit}`);
+  }
+  return gas;
+}
+
+/**
  * Apply defaults to a gas object.
  *
  * Rules:
- * - If gas is `null`, treat as explicit "auto" and keep null.
- * - If gas is undefined or missing fields, fill from defaults.
+ * - If gas is null/undefined or missing fields, fill from defaults.
  * - Returns `undefined` if no defaults exist and no gas provided.
  *
  * @param {string} kind
@@ -95,9 +180,6 @@ export function applyGasDefaults(kind, gas, { dynamicPrice, privacy } = {}) {
   const def = getDefaultGas(kind, { privacy });
   if (!def) return gas === undefined ? undefined : gas;
 
-  // Explicit "auto" sentinel.
-  if (gas === null) return null;
-
   const out =
     gas && typeof gas === "object" && !Array.isArray(gas) ? { ...gas } : {};
 
@@ -109,7 +191,7 @@ export function applyGasDefaults(kind, gas, { dynamicPrice, privacy } = {}) {
     out.price = dynamicPrice ?? def.price;
   }
 
-  return out;
+  return assertMinimumGas(kind, out, { privacy });
 }
 
 /**

@@ -30,6 +30,8 @@ import {
   putShieldedMeta,
 } from "./shieldedStore.js";
 
+const phoenixSpendLocks = new Map();
+
 // Read the current Transfer Contract note-tree size (bookmark) from the node.
 //
 // IMPORTANT:
@@ -483,6 +485,40 @@ const state = {
 function getWalletId() {
   // Empty when locked.
   return String(state.walletId || "").trim();
+}
+
+async function withPhoenixSpendMutex(profileIndex, fn) {
+  const key = `${getNetworkKey()}|${getWalletId()}|${Number(profileIndex) || 0}`;
+  const previous = phoenixSpendLocks.get(key) ?? Promise.resolve();
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const next = previous.catch(() => {}).then(() => gate);
+  phoenixSpendLocks.set(key, next);
+
+  await previous.catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (phoenixSpendLocks.get(key) === next) {
+      phoenixSpendLocks.delete(key);
+    }
+  }
+}
+
+async function persistPendingNullifiersForTx(result, profileIndex) {
+  if (!Array.isArray(result?.nullifiers) || !result.nullifiers.length) return 0;
+  const walletId = getWalletId();
+  if (!walletId) return 0;
+  return await putPendingNullifiers(
+    getNetworkKey(),
+    walletId,
+    Number(profileIndex) || 0,
+    result.nullifiers,
+    result.hash
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -1943,35 +1979,58 @@ export async function transfer(params) {
   const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
   const profile = await ensureProfileIndex(idx);
 
-  // Shielded transfers spend from the local note cache.
-  // We avoid blocking the UX on a full sync here (MetaMask-style).
-  // If the cache is empty, we kick off a background sync and fail fast with
-  // a clear message.
   if (isShieldedTransfer) {
-    await ensureShieldedMetaForIndex(idx);
+    return await withPhoenixSpendMutex(idx, async () => {
+      // Shielded transfers spend from the local note cache. Keep the cache
+      // check, tx build/execute, and reservation write serialized per profile
+      // so concurrent sends cannot build against the same spendable note set.
+      await ensureShieldedMetaForIndex(idx);
 
-    try {
-      const netKey = getNetworkKey();
-      const walletId = getWalletId();
+      try {
+        const netKey = getNetworkKey();
+        const walletId = getWalletId();
 
-      if (walletId) {
-        const n = await countNotes(netKey, walletId, idx);
-        if (!n) {
-          // Fire-and-forget: start scanning for owned notes, but don't block.
-          startShieldedSync({ force: false }).catch(() => {});
-          throw new Error(
-            "Shielded wallet is still syncing. Please wait for shielded sync to complete before sending."
-          );
+        if (walletId) {
+          const n = await countNotes(netKey, walletId, idx);
+          if (!n) {
+            // Fire-and-forget: start scanning for owned notes, but don't block.
+            startShieldedSync({ force: false }).catch(() => {});
+            throw new Error(
+              "Shielded wallet is still syncing. Please wait for shielded sync to complete before sending."
+            );
+          }
+        }
+      } catch (e) {
+        // If we explicitly raised the "still syncing" message, surface it.
+        const msg = e?.message ? String(e.message) : String(e);
+        if (msg.includes("Shielded wallet is still syncing")) {
+          throw e;
+        }
+        // Otherwise ignore and attempt to build the tx with current cache.
+      }
+
+      let tx = state.bookkeeper.as(profile).transfer(amount).to(to);
+
+      if (typeof memo === "string" && memo.length > 0) {
+        tx = tx.memo(memo);
+      }
+
+      const gas = normalizeGas(params.gas);
+      if (gas) tx = tx.gas(gas);
+
+      // Default to obfuscated transfers for privacy.
+      if (typeof tx?.obfuscated === "function") {
+        try {
+          tx.obfuscated();
+        } catch {
+          // ignore
         }
       }
-    } catch (e) {
-      // If we explicitly raised the "still syncing" message, surface it.
-      const msg = e?.message ? String(e.message) : String(e);
-      if (msg.includes("Shielded wallet is still syncing")) {
-        throw e;
-      }
-      // Otherwise ignore and attempt to build the tx with current cache.
-    }
+
+      const result = await network.execute(tx);
+      await persistPendingNullifiersForTx(result, idx);
+      return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
+    });
   }
 
   let tx = state.bookkeeper.as(profile).transfer(amount).to(to);
@@ -1983,30 +2042,7 @@ export async function transfer(params) {
   const gas = normalizeGas(params.gas);
   if (gas) tx = tx.gas(gas);
 
-  // Default to obfuscated transfers for privacy.
-  if (isShieldedTransfer && typeof tx?.obfuscated === "function") {
-    try {
-      tx.obfuscated();
-    } catch {
-      // ignore
-    }
-  }
-
   const result = await network.execute(tx);
-
-  // If this is a shielded spend, reserve the nullifiers locally to prevent
-  // double-spend before we observe them as spent on chain.
-  try {
-    if (Array.isArray(result?.nullifiers) && result.nullifiers.length) {
-      const netKey = getNetworkKey();
-      const walletId = getWalletId();
-      if (walletId) {
-        await putPendingNullifiers(netKey, walletId, idx, result.nullifiers, result.hash);
-      }
-    }
-  } catch {
-    // best-effort
-  }
 
   // network.execute returns the tx object returned by tx.build, frozen
   return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
@@ -2106,49 +2142,35 @@ export async function sendTransaction(params) {
     const amount = toU64(params.amount, { name: "amount" });
     if (amount <= 0n) throw new Error("amount must be > 0");
 
-    // Spending shielded notes requires the local note cache. If the cache is
-    // empty, kick off a background sync and fail fast with a clear message.
-    await ensureShieldedMetaForCurrent();
-    try {
-      const netKey = getNetworkKey();
-      const walletId = getWalletId();
-      const idx = state.currentIndex || 0;
-      if (walletId) {
-        const n = await countNotes(netKey, walletId, idx);
-        if (!n) {
-          startShieldedSync({ force: false }).catch(() => {});
-          throw new Error(
-            "Shielded wallet is still syncing. Please wait for shielded sync to complete before unshielding."
-          );
-        }
-      }
-    } catch (e) {
-      const msg = e?.message ? String(e.message) : String(e);
-      if (msg.includes("Shielded wallet is still syncing")) throw e;
-    }
-
-    let tx = state.bookkeeper.as(profile).unshield(amount);
-    const gas = normalizeGas(params.gas);
-    if (gas) tx = tx.gas(gas);
-
-    const result = await network.execute(tx);
-
-    // Reserve nullifiers locally to prevent double-spend before we observe them
-    // as spent on chain.
-    try {
-      if (Array.isArray(result?.nullifiers) && result.nullifiers.length) {
+    return await withPhoenixSpendMutex(idx, async () => {
+      // Spending shielded notes requires the local note cache. Keep the cache
+      // check, tx build/execute, and reservation write serialized per profile.
+      await ensureShieldedMetaForIndex(idx);
+      try {
         const netKey = getNetworkKey();
         const walletId = getWalletId();
-        const idx = state.currentIndex || 0;
         if (walletId) {
-          await putPendingNullifiers(netKey, walletId, idx, result.nullifiers, result.hash);
+          const n = await countNotes(netKey, walletId, idx);
+          if (!n) {
+            startShieldedSync({ force: false }).catch(() => {});
+            throw new Error(
+              "Shielded wallet is still syncing. Please wait for shielded sync to complete before unshielding."
+            );
+          }
         }
+      } catch (e) {
+        const msg = e?.message ? String(e.message) : String(e);
+        if (msg.includes("Shielded wallet is still syncing")) throw e;
       }
-    } catch {
-      // best-effort
-    }
 
-    return { hash: result.hash, nullifiers: result.nullifiers };
+      let tx = state.bookkeeper.as(profile).unshield(amount);
+      const gas = normalizeGas(params.gas);
+      if (gas) tx = tx.gas(gas);
+
+      const result = await network.execute(tx);
+      await persistPendingNullifiersForTx(result, idx);
+      return { hash: result.hash, nullifiers: result.nullifiers };
+    });
   }
 
   if (kind === TX_KIND.STAKE) {
@@ -2301,6 +2323,31 @@ export async function sendTransaction(params) {
       contractId: Array.from(contractIdBytes),
     });
 
+    if (isShielded) {
+      return await withPhoenixSpendMutex(idx, async () => {
+        let tx = state.bookkeeper.as(profile).transfer(amount).to(to).payload(payload);
+
+        if (deposit > 0n) {
+          tx = tx.deposit(deposit);
+        }
+
+        const gas = normalizeGas(params.gas);
+        if (gas) tx = tx.gas(gas);
+
+        // Default to obfuscated phoenix contract calls for privacy.
+        if (typeof tx?.obfuscated === "function") {
+          try {
+            tx.obfuscated();
+          } catch {
+            // ignore
+          }
+        }
+
+        const result = await network.execute(tx);
+        await persistPendingNullifiersForTx(result, idx);
+        return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
+      });
+    }
     let tx = state.bookkeeper.as(profile).transfer(amount).to(to).payload(payload);
 
     if (deposit > 0n) {
@@ -2309,15 +2356,6 @@ export async function sendTransaction(params) {
 
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
-
-    // Default to obfuscated phoenix contract calls for privacy.
-    if (isShielded && typeof tx?.obfuscated === "function") {
-      try {
-        tx.obfuscated();
-      } catch {
-        // ignore
-      }
-    }
 
     const result = await network.execute(tx);
     return { hash: result.hash, nonce: result.nonce };
