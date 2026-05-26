@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+import { sha256Hex } from "../shared/bytes.js";
 import { ERROR_CODES } from "../shared/errors.js";
 
 const PUBLIC_ACCOUNT =
@@ -633,6 +634,84 @@ describe("background rpc handler", () => {
       profileIndex: 1,
     });
     expect(call[1]).not.toHaveProperty("accountIndex");
+  });
+
+  it("dusk_signMessage sends canonical readable preview metadata for approval without changing engine input", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+    const message = new TextEncoder().encode("Sign in to Dusk Wallet");
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signMessage",
+        params: {
+          message,
+          display: { messageHash: "fake", messagePreview: { text: "fake" } },
+        },
+      })
+    ).resolves.toMatchObject({ ok: true });
+
+    const expectedHash = await sha256Hex(message);
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "sign_message",
+      "https://dapp.example",
+      expect.objectContaining({
+        chainId: "dusk:2",
+        messageHash: `0x${expectedHash}`,
+        messageLen: message.length,
+        messagePreview: expect.objectContaining({
+          kind: "text",
+          text: "Sign in to Dusk Wallet",
+          byteLength: message.length,
+          truncated: false,
+        }),
+      })
+    );
+
+    const approvalPayload = requestUserApproval.mock.calls.find(([kind]) => kind === "sign_message")?.[2];
+    expect(approvalPayload).not.toHaveProperty("display");
+
+    const enginePayload = engineCall.mock.calls.find(([m]) => m === "dusk_signMessage")?.[1];
+    expect(enginePayload).toMatchObject({
+      origin: "https://dapp.example",
+      chainId: "dusk:2",
+      message,
+      profileIndex: 0,
+    });
+    expect(enginePayload).not.toHaveProperty("messagePreview");
+    expect(enginePayload).not.toHaveProperty("messageHash");
+    expect(enginePayload).not.toHaveProperty("messageLen");
+  });
+
+  it("dusk_signMessage labels binary approval payloads as opaque bytes", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_signMessage",
+        params: { message: Uint8Array.from([0xff, 0xfe, 0xfd]) },
+      })
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "sign_message",
+      "https://dapp.example",
+      expect.objectContaining({
+        messageLen: 3,
+        messagePreview: expect.objectContaining({
+          kind: "opaque",
+          reason: "invalid_utf8",
+          label: "Opaque bytes",
+        }),
+      })
+    );
   });
 
   it("custody-sensitive methods reject while locked and do not call the engine", async () => {
