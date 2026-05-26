@@ -12,8 +12,7 @@ export default defineConfig({
   webServer: {
     command: "npm run dev:tauri",
     url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === "1",
     timeout: 120_000,
   },
 });
-

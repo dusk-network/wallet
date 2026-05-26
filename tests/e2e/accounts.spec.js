@@ -26,6 +26,7 @@ test.beforeEach(async ({ page }) => {
 test("import wallet, name + switch default accounts", async ({ page }) => {
   await page.goto("/");
 
+  await expect(page).toHaveTitle("Dusk Wallet");
   await expect(page.getByText("Set up your Dusk Wallet")).toBeVisible();
   await page.getByRole("button", { name: "Import wallet" }).click();
 
