@@ -22,6 +22,12 @@ const EXAMPLE_PK =
   "26brdzqNXEG1jTzCubJAPhks18bSSDY4n21ZW6VLYkCv6bBUdBAZZAbn1Coz1LPBYc4uEekBbzFnZvhL9untGCqRamhZS2cBV51fdZog3qkP3NbMEaqgNMcKEahAFV8t2Cke";
 
 describe("Canonical data-drivers conformance (DRC20 / DRC721)", () => {
+  it("wallet engine binds fetch for extension data-driver loading", async () => {
+    const source = await readFile(path.resolve(process.cwd(), "src", "shared", "walletEngine.js"), "utf8");
+    expect(source).toContain("globalThis.fetch.bind(globalThis)");
+    expect(source).toContain("new dataDrivers.DataDriverRegistry(fetchAsset)");
+  });
+
   it("DRC20 driver can encode+decode standard inputs", async () => {
     const driver = await loadDriverFromPublic("drc20_data_driver.wasm");
 

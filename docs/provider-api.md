@@ -329,11 +329,11 @@ Returns `true` on success. Throws `4001` if rejected, `4100` if not connected.
 
 ### `dusk_signMessage`
 
-Sign an arbitrary **message** for off-chain use (auth, session binding, etc).
+Sign arbitrary **bytes** for low-level off-chain use.
 
 Requires connection + unlocked wallet.
 
-> Note: The wallet signs a **domain-separated SHA-256 hash** of your message (origin + chainId are included in the signed envelope). The approval UI shows the hash and message length.
+> Note: The wallet signs a **domain-separated SHA-256 hash** of your message bytes (origin + chainId are included in the signed envelope). The approval UI may show a readable UTF-8 preview when safe; binary, invalid, or large messages are shown as opaque bytes with hash and length. Prefer `dusk_signAuth` for login/session authentication flows.
 
 ```js
 const sig = await dusk.request({

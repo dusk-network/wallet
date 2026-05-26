@@ -12,6 +12,7 @@ import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.j
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
 import { bytesToHex, sha256Hex, toBytes } from "../shared/bytes.js";
+import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import { classifyDuskIdentifier } from "../shared/duskIdentifiers.js";
 import { DAPP_LIMITS, DAPP_RPC_METHODS, DAPP_TX_KINDS } from "../shared/providerSurface.js";
 import {
@@ -832,10 +833,12 @@ export async function handleRpc(origin, request) {
       // Compute a stable message hash for the approval UI.
       let messageLen = 0;
       let messageHash = "";
+      let messagePreview = null;
       try {
         const msgBytes = toBytes(params.message);
         messageLen = msgBytes.length;
         messageHash = await sha256Hex(msgBytes);
+        messagePreview = describeSignMessagePreview(msgBytes);
       } catch {
         throw rpcError(
           ERROR_CODES.INVALID_PARAMS,
@@ -850,6 +853,7 @@ export async function handleRpc(origin, request) {
         chainId,
         messageHash: `0x${messageHash}`,
         messageLen,
+        messagePreview,
       });
 
       const { isUnlocked, accounts } = await getEngineStatus();

@@ -401,6 +401,55 @@ export async function renderNotification() {
     const chainId = String(params?.chainId ?? "");
     const messageHash = String(params?.messageHash ?? "");
     const messageLen = Number(params?.messageLen ?? 0) || 0;
+    const preview = params?.messagePreview && typeof params.messagePreview === "object"
+      ? params.messagePreview
+      : null;
+    const hashLine = messageHash
+      ? `${messageLen} bytes · sha256=${messageHash.slice(0, 12)}…${messageHash.slice(-8)}`
+      : `${messageLen} bytes`;
+    const signsCopy = preview?.kind === "text"
+      ? "This signs the message shown above. It does not submit a transaction."
+      : "This signs the message bytes described above. It does not submit a transaction.";
+    const previewRows = [];
+
+    if (preview?.kind === "text") {
+      previewRows.push(
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: preview.truncated ? "Message preview" : "Message" }),
+          h("div", { class: "box" }, [
+            h("code", {
+              text: String(preview.text ?? ""),
+              title: preview.truncated ? "Preview truncated; verify the hash for exact bytes." : "",
+            }),
+            preview.truncated
+              ? h("div", {
+                  class: "muted",
+                  text: "Preview shortened. The full message is covered by the hash below.",
+                })
+              : null,
+          ]),
+        ])
+      );
+    } else {
+      const reason = String(preview?.reason ?? "");
+      const reasonText =
+        reason === "too_large"
+          ? "Message is too large to preview safely."
+          : reason === "invalid_utf8"
+            ? "This message is not readable text."
+            : reason === "control_characters"
+              ? "This message contains hidden control characters."
+              : "Message content is not previewed.";
+      previewRows.push(
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Message" }),
+          h("div", { class: "box" }, [
+            h("code", { text: "Opaque bytes" }),
+            h("div", { class: "muted", text: reasonText }),
+          ]),
+        ])
+      );
+    }
 
     setApp([
       header,
@@ -415,19 +464,16 @@ export async function renderNotification() {
         h("div", { class: "muted", text: "Chain ID" }),
         h("div", { class: "box" }, [h("code", { text: chainId || "—" })]),
       ]),
+      ...previewRows,
       h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Message (hashed)" }),
+        h("div", { class: "muted", text: "Message hash" }),
         h("div", { class: "box" }, [
-          h("code", {
-            text: messageHash
-              ? `${messageLen} bytes · sha256=${messageHash.slice(0, 12)}…${messageHash.slice(-8)}`
-              : `${messageLen} bytes`,
-          }),
+          h("code", { text: hashLine }),
         ]),
       ]),
-      h("div", {
-        class: "muted",
-        text: "This request does not submit a transaction. It signs a domain-separated hash for off-chain use.",
+        h("div", {
+          class: "muted",
+        text: signsCopy,
       }),
       decisionButtons("Sign"),
     ]);
@@ -690,10 +736,12 @@ export async function renderNotification() {
       let argsBytes = new Uint8Array();
       let argsLen = 0;
       let argsHash = "";
+      let argsHex = "";
       let argsOk = false;
       try {
         argsBytes = toBytes(params?.fnArgs);
         argsLen = argsBytes.length;
+        argsHex = `0x${bytesToHex(argsBytes)}`;
         argsHash = await sha256Hex(argsBytes);
         argsOk = true;
       } catch {
@@ -715,7 +763,7 @@ export async function renderNotification() {
           decoded = await sendResult({
             type: "DUSK_UI_DRC20_DECODE_INPUT",
             fnName: fnNameTrim,
-            fnArgs: argsBytes,
+            fnArgs: argsHex,
           });
           drcKind = "DRC20";
         } catch {
@@ -728,7 +776,7 @@ export async function renderNotification() {
           decoded = await sendResult({
             type: "DUSK_UI_DRC721_DECODE_INPUT",
             fnName: fnNameTrim,
-            fnArgs: argsBytes,
+            fnArgs: argsHex,
           });
           drcKind = "DRC721";
         } catch {
@@ -1064,7 +1112,7 @@ export async function renderNotification() {
         gasEditor,
         display
           ? h("div", { class: "row" }, [
-              h("div", { class: "muted", text: "Decoded details (provided by site)" }),
+              h("div", { class: "muted", text: "Site-provided details (unverified)" }),
               h("div", { class: "box" }, [h("code", { text: JSON.stringify(display, null, 2) })]),
             ])
           : h("div"),

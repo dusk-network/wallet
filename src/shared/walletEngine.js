@@ -533,7 +533,11 @@ const DRIVER_KEYS = Object.freeze({
 function ensureDriverRegistry() {
   if (state.drivers?.registry) return state.drivers.registry;
 
-  const reg = new dataDrivers.DataDriverRegistry(fetch);
+  const fetchAsset =
+    typeof globalThis.fetch === "function"
+      ? globalThis.fetch.bind(globalThis)
+      : fetch;
+  const reg = new dataDrivers.DataDriverRegistry(fetchAsset);
   reg.register(DRIVER_KEYS.DRC20, assetUrl("drivers/drc20_data_driver.wasm"));
   reg.register(DRIVER_KEYS.DRC721, assetUrl("drivers/drc721_data_driver.wasm"));
 

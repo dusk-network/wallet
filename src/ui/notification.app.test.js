@@ -12,4 +12,14 @@ describe("notification approval UI", () => {
     expect(transferBlock?.[1]).toContain("Public (Moonlight)");
     expect(transferBlock?.[1]).not.toContain("ProfileGenerator.typeOf");
   });
+
+  it("sends contract-call decode requests with serializable hex args", async () => {
+    const source = await readFile(path.resolve(process.cwd(), "src", "ui", "notification", "app.js"), "utf8");
+
+    expect(source).toContain("argsHex = `0x${bytesToHex(argsBytes)}`");
+    expect(source).toContain('type: "DUSK_UI_DRC20_DECODE_INPUT"');
+    expect(source).toContain('type: "DUSK_UI_DRC721_DECODE_INPUT"');
+    expect(source).toContain("fnArgs: argsHex");
+    expect(source).not.toContain("fnArgs: argsBytes");
+  });
 });
