@@ -1,3 +1,4 @@
+import "../../../shared/bufferGlobal.js";
 import { entropyToMnemonic, validateMnemonic } from "bip39";
 import { bytesToHex } from "../../../shared/bytes.js";
 import { h } from "../../lib/dom.js";

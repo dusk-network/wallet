@@ -1,3 +1,4 @@
+import "./bufferGlobal.js";
 import { mnemonicToSeedSync } from "bip39";
 import {
   Bookkeeper,
