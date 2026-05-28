@@ -3,6 +3,16 @@
   "name": "Dusk Wallet",
   "version": "0.1.0",
   "description": "Crypto wallet for the Dusk network.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "wallet@dusk.network",
+      "data_collection_permissions": {
+        "required": [
+          "financialAndPaymentInfo"
+        ]
+      }
+    }
+  },
   "action": {
     "default_title": "Dusk Wallet",
     "default_popup": "popup.html",
