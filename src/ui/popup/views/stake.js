@@ -10,6 +10,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
+import { sozuLiquidStakingView } from "./sozu.js";
 
 const FUNDING_PUBLIC = "account";
 const FUNDING_SHIELDED = "address";
@@ -431,6 +432,7 @@ export function stakeFormView(ov, { state, actions } = {}) {
         ? h("div", { class: "row" }, positions.map(positionCard))
         : h("div", { class: "box muted", text: "No local stake positions found." }),
       actionPanel,
+      sozuLiquidStakingView(ov, { state, actions }),
     ].filter(Boolean)),
   ];
 }
