@@ -579,6 +579,10 @@ export async function render({ forceRefresh = false } = {}) {
     state.staking.loaded = false;
     state.staking.error = null;
   }
+  if (overviewRefreshed && state.sozu) {
+    state.sozu.loaded = false;
+    state.sozu.error = null;
+  }
   const ov = state.overview;
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";

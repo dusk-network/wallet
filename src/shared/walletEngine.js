@@ -14,8 +14,19 @@ import {
 } from "@dusk/w3sper";
 import { bytesToHex, hexToBytes, sha256Hex, toBytes } from "./bytes.js";
 import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
+import { detectPresetIdFromNodeUrl } from "./network.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
+import {
+  SOZU_HUB_CONTRACT_NAMES,
+  getSozuHubBootstrap,
+  resolveSozuConfig,
+} from "./sozuConfig.js";
+import {
+  estimateSozuPositionValue,
+  parseSozuPoolState,
+  parseSozuPosition,
+} from "./sozuAdapter.js";
 
 import {
   clearNotes,
@@ -539,6 +550,8 @@ async function persistPendingNullifiersForTx(result, profileIndex) {
 const DRIVER_KEYS = Object.freeze({
   DRC20: "drc20",
   DRC721: "drc721",
+  SOZU_HUB: "sozu_hub",
+  SOZU_POOL: "sozu_pool",
 });
 
 function ensureDriverRegistry() {
@@ -552,6 +565,8 @@ function ensureDriverRegistry() {
   reg.register(DRIVER_KEYS.DRC20, assetUrl("drivers/drc20_data_driver.wasm"));
   reg.register(DRIVER_KEYS.DRC721, assetUrl("drivers/drc721_data_driver.wasm"));
   reg.register(STAKE, assetUrl("drivers/stake_data_driver.wasm"));
+  reg.register(DRIVER_KEYS.SOZU_HUB, assetUrl("drivers/sozu_hub_data_driver.wasm"));
+  reg.register(DRIVER_KEYS.SOZU_POOL, assetUrl("drivers/sozu_pool_data_driver.wasm"));
 
   state.drivers.registry = reg;
   return reg;
@@ -1531,6 +1546,143 @@ export async function getDrc721TokenUri(params = {}) {
 
   const out = await c.call.token_uri({ token_id });
   return String(out ?? "");
+}
+
+async function discoverSozuContracts(network, bootstrap) {
+  const driver = await getDriver(DRIVER_KEYS.SOZU_HUB);
+  const hub = new Contract({
+    contractId: toContractIdBytes(bootstrap.contracts.hub),
+    driver,
+    network,
+  });
+  const entries = await Promise.all(
+    SOZU_HUB_CONTRACT_NAMES.map(async (name) => {
+      try {
+        const value = await withTimeout(
+          hub.call.contract(name),
+          8_000,
+          `Timed out resolving Sozu ${name} contract`
+        );
+        return [name, typeof value === "string" ? value : null];
+      } catch {
+        return [name, null];
+      }
+    })
+  );
+  return Object.fromEntries(entries.filter(([, value]) => value));
+}
+
+async function readSozuPoolState(network, config) {
+  const driver = await getDriver(DRIVER_KEYS.SOZU_POOL);
+  const pool = new Contract({
+    contractId: toContractIdBytes(config.contracts.pool),
+    driver,
+    network,
+  });
+  const exchangeRate = await withTimeout(
+    pool.call.exchange_rate(),
+    8_000,
+    "Timed out reading Sozu pool exchange rate"
+  );
+  return parseSozuPoolState({ exchangeRate });
+}
+
+async function readSozuPosition(network, config, profile) {
+  const driver = await getDriver(DRIVER_KEYS.SOZU_POOL);
+  const pool = new Contract({
+    contractId: toContractIdBytes(config.contracts.pool),
+    driver,
+    network,
+  });
+  const balance = await withTimeout(
+    pool.call.balance_of(profile.account.toString()),
+    8_000,
+    "Timed out reading Sozu position"
+  );
+  return parseSozuPosition({ balance });
+}
+
+export async function getSozuStatus(params = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const network = await ensureNetwork();
+  const idx = normalizeProfileIndex(params?.profileIndex, state.currentIndex || 0);
+  const profile = await ensureProfileIndex(idx);
+  const networkKey = detectPresetIdFromNodeUrl(engineConfig.nodeUrl);
+  const bootstrap = getSozuHubBootstrap(networkKey);
+
+  if (!bootstrap) {
+    return Object.freeze({
+      networkKey,
+      configured: false,
+      source: "unavailable",
+      reason: "Sozu liquid staking is not configured for this network.",
+    });
+  }
+
+  let discoveredContracts = {};
+  let discoveryError = "";
+  try {
+    discoveredContracts = await discoverSozuContracts(network, bootstrap);
+  } catch (e) {
+    discoveryError = e?.message ?? String(e);
+  }
+
+  const config = resolveSozuConfig({
+    networkKey,
+    bootstrap,
+    discoveredContracts,
+    allowFallback: true,
+  });
+
+  if (!config) {
+    return Object.freeze({
+      networkKey,
+      configured: false,
+      source: "unavailable",
+      contracts: { hub: bootstrap.contracts.hub },
+      discoveredContracts,
+      reason: discoveryError || "Sozu pool contract could not be resolved.",
+    });
+  }
+
+  let poolState = null;
+  let position = null;
+  let readError = "";
+  try {
+    [poolState, position] = await Promise.all([
+      readSozuPoolState(network, config),
+      readSozuPosition(network, config, profile),
+    ]);
+  } catch (e) {
+    readError = e?.message ?? String(e);
+  }
+
+  const balance = await withTimeout(
+    state.bookkeeper.balance(profile.account),
+    8_000,
+    "Timed out reading Sozu funding balance"
+  ).catch(() => null);
+
+  return Object.freeze({
+    networkKey,
+    configured: true,
+    source: config.source,
+    contracts: config.contracts,
+    discoveredContracts: config.discoveredContracts,
+    reason: readError,
+    pool: poolState,
+    position,
+    estimatedValueLux:
+      poolState && position ? estimateSozuPositionValue(position, poolState) : "0",
+    profileIndex: idx,
+    account: profile.account.toString(),
+    publicBalance: balance
+      ? {
+          nonce: balance.nonce?.toString?.() ?? String(balance.nonce ?? 0),
+          value: balance.value?.toString?.() ?? String(balance.value ?? 0),
+        }
+      : null,
+  });
 }
 
 /**

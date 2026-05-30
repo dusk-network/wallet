@@ -49,6 +49,7 @@ import {
   getMinimumStake,
   getStakeInfo,
   getStakeOwnerStatus,
+  getSozuStatus,
 } from "../shared/walletEngine.js";
 
 // Prevent users from accidentally triggering expensive vault / stronghold
@@ -420,6 +421,17 @@ export async function localSend(message) {
       await ensureEngineConfigured();
       const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
       const result = await getStakeOwnerStatus({ profileIndex: idx });
+      return { ok: true, result };
+    }
+
+    if (message?.type === "DUSK_UI_GET_SOZU_STATUS") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
+      const result = await getSozuStatus({ profileIndex: idx });
       return { ok: true, result };
     }
 

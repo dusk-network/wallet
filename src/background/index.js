@@ -1014,6 +1014,21 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      if (message?.type === "DUSK_UI_GET_SOZU_STATUS") {
+        const status = await getEngineStatus();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+        await ensureEngineConfigured();
+        const profileIndex =
+          Number.isFinite(Number(message.profileIndex)) && Number(message.profileIndex) >= 0
+            ? Math.floor(Number(message.profileIndex))
+            : Number(status.selectedAccountIndex ?? 0) || 0;
+        const result = await engineCall("dusk_getSozuStatus", { profileIndex });
+        sendResponse({ ok: true, result });
+        return;
+      }
+
       // UI fetches cached gas price stats for UX (recommended gas buttons).
       if (message?.type === "DUSK_UI_GET_CACHED_GAS_PRICE") {
         await ensureEngineConfigured();

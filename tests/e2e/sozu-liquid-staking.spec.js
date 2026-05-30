@@ -70,6 +70,33 @@ async function installStakeHarness(page, { networkName = "Testnet" } = {}) {
       window.__stakeActions = {
         send: async (message) => {
           window.__stakeMessages.push(message);
+          if (message?.type === "DUSK_UI_GET_SOZU_STATUS") {
+            return {
+              ok: true,
+              result: {
+                configured: true,
+                networkKey: networkName.toLowerCase(),
+                source: networkName === "Local" ? "unavailable" : "hub",
+                reason: networkName === "Local"
+                  ? "Sozu liquid staking is not configured for this network."
+                  : "",
+                contracts: networkName === "Local"
+                  ? {}
+                  : {
+                      hub: "bae85f8c24730a5a19fbe3d3bd58248ac8c302b62fe414a8c640d8c0ed286b9e",
+                      pool: "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+                    },
+                pool: {
+                  totalStakeLux: "5366833972489941",
+                  tokenTotalSupply: "3553557929448253",
+                  exchangeRate: 1.51027,
+                },
+                position: { shareBalanceLux: positionBalanceLux },
+                estimatedValueLux: "18123240000",
+                publicBalance: { value: "5000000000000" },
+              },
+            };
+          }
           return { ok: true, result: null };
         },
         render: async () => window.__renderStake(),
@@ -107,7 +134,9 @@ test.describe("Sozu liquid staking panel", () => {
     await expect(page.getByText("Liquid staking with Sozu")).toBeVisible();
     await expect(page.getByText("Stake without running a node")).toBeVisible();
     await expect(page.getByText("This uses Sozu contracts, not native provisioner staking.")).toBeVisible();
+    await expect(page.getByText("Hub discovered")).toBeVisible();
     await expect(page.getByText("Your Sozu shares")).toBeVisible();
+    await expect(page.getByText("Estimated DUSK value")).toBeVisible();
     await expect(page.getByRole("button", { name: "Review deposit" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Review withdraw" })).not.toBeVisible();
 
@@ -120,6 +149,25 @@ test.describe("Sozu liquid staking panel", () => {
       amount: "0",
       deposit: dusk(5),
       label: "Deposit into Sozu",
+    });
+    await expect(page.getByText("Review Sozu transaction")).toBeVisible();
+    await expect(page.getByText("Profile 1 public", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Submit Sozu transaction" }).click();
+    const submitted = await page.evaluate(() =>
+      window.__stakeMessages.findLast((msg) => msg?.type === "DUSK_UI_SEND_TX")
+    );
+    expect(submitted).toMatchObject({
+      type: "DUSK_UI_SEND_TX",
+      params: {
+        kind: "contract_call",
+        fnName: "sozu_stake",
+        profileIndex: 0,
+      },
+      asset: {
+        kind: "sozu",
+        action: "sozu_stake",
+      },
     });
 
     await page.getByRole("button", { name: "Withdraw" }).click();
@@ -139,7 +187,7 @@ test.describe("Sozu liquid staking panel", () => {
     await installStakeHarness(page, { networkName: "Local" });
 
     await expect(page.getByText("Liquid staking with Sozu")).toBeVisible();
-    await expect(page.getByText("Sozu liquid staking is not configured for this network.")).toBeVisible();
+    await expect(page.getByText("Sozu liquid staking is not configured for this network.").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Review deposit" })).toBeDisabled();
   });
 });

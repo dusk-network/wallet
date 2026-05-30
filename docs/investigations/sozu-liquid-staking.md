@@ -21,6 +21,25 @@ Configured networks:
 
 `devnet` and `local` do not have bundled contract IDs in the Sozu wallet config. The wallet must show a disabled state there unless the user/config layer provides IDs later.
 
+The Sozu hub data-driver is now available. The wallet should bootstrap from the
+network hub contract ID, then resolve these hub names:
+
+- `pool`
+- `relayer`
+- `substrate`
+- `staked-dusk`
+- `vault`
+
+On testnet, hub discovery currently matches the hardcoded pool/relayer/substrate
+config and additionally returns:
+
+- `staked-dusk`: `fdbf49102e76cf58224003451c6cb9e3403c54ff1d9042f8bc46ec25c6a4337c`
+- `vault`: `79635912e56834fa41aa01048cdb54f7b26756d97b3571345a64df7a0641dfce`
+
+Hardcoded pool/relayer/substrate values remain a fallback when hub discovery or
+the DD is unavailable. The UI labels this as fallback instead of pretending the
+state is hub-discovered.
+
 ## Contract Calls
 
 The Sozu CLI sends Moonlight contract calls to the pool contract:
@@ -49,7 +68,15 @@ The Sozu pool data-driver supports:
 - output decoding for `balance_of` and `exchange_rate`
 - events including `deposit`, `unstake`, and `reward`
 
-For this local v1 wallet pass, no Sozu data-driver WASM is committed. The adapter builds `sozu_stake`/`sozu_unstake` args directly because they are plain `u64` values. Live pool reads should use the Sozu pool data-driver in a later wiring pass.
+This branch includes only the Sozu hub and pool DD artifacts required by the
+wallet:
+
+- `public/drivers/sozu_hub_data_driver.wasm`
+- `public/drivers/sozu_pool_data_driver.wasm`
+
+The adapter still builds `sozu_stake`/`sozu_unstake` args directly because they
+are plain `u64` values, and the DD conformance tests verify those bytes match
+the Sozu fixtures.
 
 ## UX Separation
 
@@ -67,3 +94,5 @@ Initial safe copy:
 - Whether share balances should be displayed as `sDUSK`, another token symbol, or generic Sozu shares.
 - Whether Phoenix-funded Sozu contract calls should be exposed. Current wallet contract-call infrastructure can build shielded contract calls, but this needs a dedicated end-to-end safety pass before UI exposure.
 - Whether a local Sozu contract fixture can be run for browser-driven live validation.
+- Whether `staked-dusk` token metadata should be surfaced in the liquid staking
+  panel or kept as an advanced detail.

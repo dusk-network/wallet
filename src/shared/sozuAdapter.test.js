@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { TX_KIND } from "./constants.js";
-import { buildSozuClaimTx, buildSozuDepositTx, buildSozuWithdrawTx, encodeSozuU64, parseSozuPoolState, parseSozuPosition } from "./sozuAdapter.js";
-import { getSozuConfig, hasSozuConfig } from "./sozuConfig.js";
+import {
+  buildSozuClaimTx,
+  buildSozuDepositTx,
+  buildSozuWithdrawTx,
+  encodeSozuU64,
+  estimateSozuPositionValue,
+  parseSozuPoolState,
+  parseSozuPosition,
+} from "./sozuAdapter.js";
+import {
+  getSozuConfig,
+  getSozuHubBootstrap,
+  hasSozuConfig,
+  resolveSozuConfig,
+} from "./sozuConfig.js";
 
 describe("Sozu liquid staking adapter", () => {
   it("selects hardcoded v1 configs for supported networks", () => {
@@ -14,6 +27,35 @@ describe("Sozu liquid staking adapter", () => {
     );
     expect(hasSozuConfig("devnet")).toBe(false);
     expect(getSozuConfig("local")).toBe(null);
+  });
+
+  it("resolves hub-discovered contracts over hardcoded fallback", () => {
+    const bootstrap = getSozuHubBootstrap("testnet");
+    const cfg = resolveSozuConfig({
+      bootstrap,
+      discoveredContracts: {
+        pool: "11".repeat(32),
+        relayer: "22".repeat(32),
+        substrate: "33".repeat(32),
+        "staked-dusk": "44".repeat(32),
+      },
+    });
+
+    expect(cfg.source).toBe("hub");
+    expect(cfg.contracts.hub).toBe(bootstrap.contracts.hub);
+    expect(cfg.contracts.pool).toBe("11".repeat(32));
+    expect(cfg.contracts["staked-dusk"]).toBe("44".repeat(32));
+  });
+
+  it("falls back to static pool config when hub discovery is incomplete", () => {
+    const cfg = resolveSozuConfig({
+      networkKey: "testnet",
+      discoveredContracts: { relayer: "22".repeat(32) },
+    });
+
+    expect(cfg.source).toBe("fallback");
+    expect(cfg.contracts.pool).toBe(getSozuConfig("testnet").contracts.pool);
+    expect(cfg.contracts.relayer).toBe("22".repeat(32));
   });
 
   it("encodes Sozu u64 args as little-endian bytes", () => {
@@ -75,6 +117,15 @@ describe("Sozu liquid staking adapter", () => {
     expect(parseSozuPosition({ balance: "42" })).toEqual({
       shareBalanceLux: "42",
     });
+  });
+
+  it("estimates position value from shares and pool exchange rate", () => {
+    expect(
+      estimateSozuPositionValue(
+        { shareBalanceLux: "200" },
+        { totalStakeLux: "1500", tokenTotalSupply: "1000" }
+      )
+    ).toBe("300");
   });
 
   it("does not expose a fake claim action", () => {

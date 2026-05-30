@@ -1,3 +1,11 @@
+export const SOZU_HUB_CONTRACT_NAMES = Object.freeze([
+  "pool",
+  "relayer",
+  "substrate",
+  "staked-dusk",
+  "vault",
+]);
+
 const SOZU_CONFIGS = Object.freeze({
   testnet: Object.freeze({
     networkKey: "testnet",
@@ -29,6 +37,50 @@ function normalizeNetworkKey(value) {
 export function getSozuConfig(networkKeyOrChainId) {
   const key = normalizeNetworkKey(networkKeyOrChainId);
   return SOZU_CONFIGS[key] ?? null;
+}
+
+export function getSozuHubBootstrap(networkKeyOrChainId) {
+  const cfg = getSozuConfig(networkKeyOrChainId);
+  if (!cfg?.contracts?.hub) return null;
+  return Object.freeze({
+    networkKey: cfg.networkKey,
+    contracts: Object.freeze({ hub: cfg.contracts.hub }),
+    fallbackContracts: cfg.contracts,
+    source: "bootstrap",
+  });
+}
+
+export function resolveSozuConfig({
+  networkKey,
+  bootstrap,
+  discoveredContracts,
+  allowFallback = true,
+} = {}) {
+  const boot = bootstrap ?? getSozuHubBootstrap(networkKey);
+  if (!boot?.contracts?.hub) return null;
+
+  const discovered = Object.fromEntries(
+    Object.entries(discoveredContracts ?? {})
+      .filter(([, value]) => typeof value === "string" && /^[0-9a-fA-F]{64}$/.test(value))
+      .map(([key, value]) => [key, value.toLowerCase()])
+  );
+
+  const fallback = allowFallback ? boot.fallbackContracts ?? {} : {};
+  const contracts = Object.freeze({
+    ...fallback,
+    hub: boot.contracts.hub,
+    ...discovered,
+  });
+
+  if (!contracts.pool) return null;
+
+  const discoveredCore = ["pool", "relayer", "substrate"].every((name) => discovered[name]);
+  return Object.freeze({
+    networkKey: boot.networkKey,
+    contracts,
+    discoveredContracts: Object.freeze(discovered),
+    source: discoveredCore ? "hub" : "fallback",
+  });
 }
 
 export function listSozuConfigs() {

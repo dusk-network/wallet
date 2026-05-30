@@ -77,6 +77,13 @@ export function parseSozuPoolState(value = {}) {
   });
 }
 
+export function estimateSozuPositionValue(position = {}, pool = {}) {
+  const shares = toU64(position.shareBalanceLux ?? position.balance ?? position.shares ?? 0, "position.shareBalanceLux");
+  const totalStake = toU64(pool.totalStakeLux ?? pool.exchangeRate?.numerator ?? 0, "pool.totalStakeLux");
+  const totalSupply = toU64(pool.tokenTotalSupply ?? pool.exchangeRate?.denominator ?? 0, "pool.tokenTotalSupply");
+  return totalSupply > 0n ? ((shares * totalStake) / totalSupply).toString() : "0";
+}
+
 export function parseSozuPosition(value = {}) {
   const balance = toU64(value.balance ?? value.shares ?? 0, "position.balance");
   return Object.freeze({
