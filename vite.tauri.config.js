@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import inject from "@rollup/plugin-inject";
+import { localW3sperAlias } from "./vite.local-w3sper.js";
 
 // Frontend build for Tauri desktop/mobile.
 //
@@ -9,6 +10,9 @@ import inject from "@rollup/plugin-inject";
 
 export default defineConfig({
   plugins: [],
+  resolve: {
+    alias: localW3sperAlias(),
+  },
   define: {
     __DUSK_BACKEND__: JSON.stringify("local"),
   },

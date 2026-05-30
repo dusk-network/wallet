@@ -998,6 +998,22 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // UI fetches stake owner/manageability for a profile.
+      if (message?.type === "DUSK_UI_GET_STAKE_OWNER_STATUS") {
+        const status = await getEngineStatus();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+        await ensureEngineConfigured();
+        const profileIndex =
+          Number.isFinite(Number(message.profileIndex)) && Number(message.profileIndex) >= 0
+            ? Math.floor(Number(message.profileIndex))
+            : Number(status.selectedAccountIndex ?? 0) || 0;
+        const result = await engineCall("dusk_getStakeOwnerStatus", { profileIndex });
+        sendResponse({ ok: true, result });
+        return;
+      }
+
       // UI fetches cached gas price stats for UX (recommended gas buttons).
       if (message?.type === "DUSK_UI_GET_CACHED_GAS_PRICE") {
         await ensureEngineConfigured();
@@ -1247,9 +1263,16 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
               kind,
               privacy: baseParams?.privacy ? String(baseParams.privacy) : undefined,
               profileIndex:
-                status?.selectedAccountIndex !== undefined && status?.selectedAccountIndex !== null
+                baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
+                  ? Number(baseParams.profileIndex) || 0
+                  : status?.selectedAccountIndex !== undefined && status?.selectedAccountIndex !== null
                   ? Number(status.selectedAccountIndex) || 0
                   : Number(settings?.selectedAccountIndex ?? 0) || 0,
+              ownerProfileIndex:
+                baseParams?.ownerProfileIndex !== undefined && baseParams?.ownerProfileIndex !== null
+                  ? Number(baseParams.ownerProfileIndex) || 0
+                  : undefined,
+              payment: baseParams?.payment ? String(baseParams.payment) : undefined,
               asset:
                 message?.asset && typeof message.asset === "object"
                   ? message.asset

@@ -48,6 +48,7 @@ import {
   waitTxRemoved,
   getMinimumStake,
   getStakeInfo,
+  getStakeOwnerStatus,
 } from "../shared/walletEngine.js";
 
 // Prevent users from accidentally triggering expensive vault / stronghold
@@ -411,6 +412,17 @@ export async function localSend(message) {
       return { ok: true, result: serializeStakeInfo(info) };
     }
 
+    if (message?.type === "DUSK_UI_GET_STAKE_OWNER_STATUS") {
+      const status = engineStatus();
+      if (!status.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      }
+      await ensureEngineConfigured();
+      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
+      const result = await getStakeOwnerStatus({ profileIndex: idx });
+      return { ok: true, result };
+    }
+
     // --- Assets (DRC20 / DRC721) ----------------------------------------
     if (message?.type === "DUSK_UI_ASSETS_GET") {
       const status = engineStatus();
@@ -619,6 +631,11 @@ export async function localSend(message) {
             kind,
             privacy: baseParams?.privacy ? String(baseParams.privacy) : undefined,
             profileIndex: Number(status.selectedAccountIndex ?? 0) || 0,
+            ownerProfileIndex:
+              baseParams?.ownerProfileIndex !== undefined && baseParams?.ownerProfileIndex !== null
+                ? Number(baseParams.ownerProfileIndex) || 0
+                : undefined,
+            payment: baseParams?.payment ? String(baseParams.payment) : undefined,
             asset:
               message?.asset && typeof message.asset === "object"
                 ? message.asset

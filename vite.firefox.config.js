@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { defineConfig } from "vite";
 import inject from "@rollup/plugin-inject";
+import { localW3sperAlias } from "./vite.local-w3sper.js";
 
 const MANIFEST_PATH = path.resolve("config/manifest.firefox.json");
 
@@ -69,6 +70,9 @@ const workerUrl = getWorkerUrl();`;
 
 export default defineConfig({
   plugins: [firefoxWorkerPlugin(), manifestPlugin()],
+  resolve: {
+    alias: localW3sperAlias(),
+  },
   define: {
     __DUSK_BACKEND__: JSON.stringify("extension"),
     __DUSK_TARGET__: JSON.stringify("firefox"),

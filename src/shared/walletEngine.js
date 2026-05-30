@@ -6,7 +6,9 @@ import {
   Contract,
   Network,
   ProfileGenerator,
+  AccountSyncer,
   AddressSyncer,
+  STAKE,
   dataDrivers,
   useAsProtocolDriver,
 } from "@dusk/w3sper";
@@ -352,13 +354,6 @@ function getNetworkKey() {
   return String(engineConfig.nodeUrl || "").trim().replace(/\/+$/, "");
 }
 
-// --- Treasury (MVP) ---------------------------------------------------------
-// This treasury implementation is intentionally minimal:
-// - It supports public account-based operations: nonce/value + stake info.
-// - It DOES NOT manage shielded notes yet. Those require a note cache/sync.
-import { AccountSyncer } from "@dusk/w3sper";
-
-
 class RemoteTreasury {
   #network;
   #profiles = [];
@@ -440,6 +435,21 @@ class RemoteTreasury {
       "Stake request timed out"
     );
     return stakeInfo;
+  }
+
+  async stakeKeys(identifier) {
+    const idx = +identifier;
+    const profile = this.#profiles.at(idx);
+    if (!profile) {
+      throw new Error(`Unknown account index ${idx}`);
+    }
+    const syncer = new AccountSyncer(this.#network);
+    const [stakeKeys] = await withTimeout(
+      syncer.stakeKeys([profile]),
+      10_000,
+      "Stake owner request timed out"
+    );
+    return stakeKeys ?? null;
   }
 }
 
@@ -541,9 +551,26 @@ function ensureDriverRegistry() {
   const reg = new dataDrivers.DataDriverRegistry(fetchAsset);
   reg.register(DRIVER_KEYS.DRC20, assetUrl("drivers/drc20_data_driver.wasm"));
   reg.register(DRIVER_KEYS.DRC721, assetUrl("drivers/drc721_data_driver.wasm"));
+  reg.register(STAKE, assetUrl("drivers/stake_data_driver.wasm"));
 
   state.drivers.registry = reg;
   return reg;
+}
+
+function registerNetworkDataDrivers(network) {
+  try {
+    network?.dataDrivers?.register?.(STAKE, async () => {
+      const fetchAsset =
+        typeof globalThis.fetch === "function"
+          ? globalThis.fetch.bind(globalThis)
+          : fetch;
+      const response = await fetchAsset(assetUrl("drivers/stake_data_driver.wasm"));
+      return new Uint8Array(await response.arrayBuffer());
+    });
+  } catch {
+    // The staking UI will surface a clear owner lookup/build error if the
+    // driver cannot be registered.
+  }
 }
 
 async function getDriver(key) {
@@ -868,6 +895,7 @@ export async function ensureNetwork() {
 
   // Lazily create the Network instance.
   state.network = state.network ?? new Network(url);
+  registerNetworkDataDrivers(state.network);
 
   // Patch network methods that need to hit different services (prover/archiver)
   // than the base node URL. Public endpoints often run these on separate hosts.
@@ -1175,6 +1203,170 @@ export async function getStakeInfo({ profileIndex } = {}) {
     12_000,
     "Stake request timed out"
   );
+}
+
+function serializeStakeAmount(amount) {
+  if (!amount) return null;
+  return {
+    value: amount.value?.toString?.() ?? String(amount.value),
+    locked: amount.locked?.toString?.() ?? String(amount.locked),
+    eligibility: amount.eligibility?.toString?.() ?? String(amount.eligibility),
+    total: amount.total?.toString?.() ?? String(amount.total),
+  };
+}
+
+function serializeStakeInfo(info) {
+  return {
+    amount: serializeStakeAmount(info?.amount),
+    reward: info?.reward?.toString?.() ?? String(info?.reward ?? 0),
+    faults: Number(info?.faults ?? 0) || 0,
+    hardFaults: Number(info?.hardFaults ?? 0) || 0,
+  };
+}
+
+function accountOwnerString(owner) {
+  if (owner && typeof owner === "object" && "Account" in owner) {
+    return String(owner.Account);
+  }
+  return "";
+}
+
+function contractOwnerString(owner) {
+  if (owner && typeof owner === "object" && "Contract" in owner) {
+    return String(owner.Contract);
+  }
+  return "";
+}
+
+function localOwnerProfileIndex(ownerAccount) {
+  const account = String(ownerAccount ?? "");
+  if (!account) return null;
+  const idx = state.profiles.findIndex((p) => p?.account?.toString?.() === account);
+  return idx >= 0 ? idx : null;
+}
+
+function classifyStakeOwner({ hasStake, account, keys }) {
+  const owner = keys && !keys.__error ? keys.owner : null;
+  const ownerAccount = accountOwnerString(owner);
+  const ownerContract = contractOwnerString(owner);
+  const ownerProfileIndex = ownerAccount ? localOwnerProfileIndex(ownerAccount) : null;
+
+  let ownerKind = hasStake ? "unknown" : "none";
+  let manageable = true;
+  let reason = "";
+
+  if (!hasStake) {
+    ownerKind = "none";
+    manageable = true;
+    reason = "No existing stake. The selected profile will be the owner unless another local profile is selected.";
+  } else if (ownerContract) {
+    ownerKind = "contract";
+    manageable = false;
+    reason = "Contract-owned stake. View only.";
+  } else if (ownerAccount && ownerAccount === account) {
+    ownerKind = "self";
+    manageable = true;
+    reason = "Stake is owned by this profile.";
+  } else if (ownerAccount && ownerProfileIndex !== null) {
+    ownerKind = "local";
+    manageable = true;
+    reason = `Stake is owned by local Profile ${ownerProfileIndex + 1}.`;
+  } else if (ownerAccount) {
+    ownerKind = "missing";
+    manageable = false;
+    reason = "Owner key not found in this wallet.";
+  } else if (keys?.__error) {
+    ownerKind = "unknown";
+    manageable = false;
+    reason = keys.__error;
+  } else {
+    ownerKind = "unknown";
+    manageable = false;
+    reason = "Stake owner unavailable.";
+  }
+
+  return {
+    ownerKind,
+    ownerAccount: ownerAccount || null,
+    ownerContract: ownerContract || null,
+    ownerProfileIndex,
+    manageable,
+    reason,
+  };
+}
+
+async function loadStakePosition(profile, profileIndex) {
+  const account = profile.account.toString();
+  const [info, keys, balance] = await Promise.all([
+    withTimeout(
+      state.bookkeeper.stakeInfo(profile.account),
+      12_000,
+      "Stake request timed out"
+    ).catch((error) => ({ __error: error?.message ?? String(error) })),
+    withTimeout(
+      state.bookkeeper.stakeKeys(profile.account),
+      12_000,
+      "Stake owner request timed out"
+    ).catch((error) => ({ __error: error?.message ?? String(error) })),
+    withTimeout(
+      state.bookkeeper.balance(profile.account),
+      12_000,
+      "Stake profile balance request timed out"
+    ).catch((error) => ({ __error: error?.message ?? String(error) })),
+  ]);
+  const safeInfo = info?.__error ? null : info;
+  const safeBalance = balance?.__error ? null : balance;
+  const hasStake = Boolean(safeInfo?.amount);
+  const ownerState = classifyStakeOwner({ hasStake, account, keys });
+
+  return {
+    profileIndex,
+    account,
+    publicBalance: safeBalance
+      ? {
+          nonce: safeBalance.nonce?.toString?.() ?? String(safeBalance.nonce ?? 0),
+          value: safeBalance.value?.toString?.() ?? String(safeBalance.value ?? 0),
+        }
+      : null,
+    hasStake,
+    info: serializeStakeInfo(safeInfo),
+    keys: keys && !keys.__error ? keys : null,
+    ...ownerState,
+  };
+}
+
+export async function getStakeOwnerStatus({ profileIndex } = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  await ensureNetwork();
+  const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
+  const profile = await ensureProfileIndex(idx);
+  const selected = await loadStakePosition(profile, idx);
+  const positions = await Promise.all(
+    state.profiles.map((p, i) => (i === idx ? selected : loadStakePosition(p, i)))
+  );
+  const relatedStakes = positions.filter((pos) =>
+    pos.hasStake && (pos.profileIndex === idx || pos.ownerProfileIndex === idx)
+  );
+
+  return {
+    profileIndex: idx,
+    account: selected.account,
+    hasStake: selected.hasStake,
+    info: selected.info,
+    keys: selected.keys,
+    ownerKind: selected.ownerKind,
+    ownerAccount: selected.ownerAccount,
+    ownerContract: selected.ownerContract,
+    ownerProfileIndex: selected.ownerProfileIndex,
+    manageable: selected.manageable,
+    reason: selected.reason,
+    relatedStakes,
+    profiles: state.profiles.map((p, i) => ({
+      profileIndex: i,
+      account: p.account.toString(),
+      publicBalance: positions[i]?.publicBalance ?? null,
+    })),
+  };
 }
 
 /**
@@ -1949,6 +2141,60 @@ function normalizeGas(gas) {
   return Object.keys(out).length ? out : undefined;
 }
 
+async function ensureShieldedSpendReady(idx) {
+  await ensureShieldedMetaForIndex(idx);
+  try {
+    const netKey = getNetworkKey();
+    const walletId = getWalletId();
+    if (walletId) {
+      const n = await countNotes(netKey, walletId, idx);
+      if (!n) {
+        startShieldedSync({ force: false }).catch(() => {});
+        throw new Error(
+          "Shielded wallet is still syncing. Please wait for shielded sync to complete before sending shielded transactions."
+        );
+      }
+    }
+  } catch (e) {
+    const msg = e?.message ? String(e.message) : String(e);
+    if (msg.includes("Shielded wallet is still syncing")) throw e;
+  }
+}
+
+function isShieldedPayment(params) {
+  const payment = String(params?.payment ?? "").trim().toLowerCase();
+  const privacy = String(params?.privacy ?? "").trim().toLowerCase();
+  return payment === "address" || payment === "shielded" || privacy === "shielded";
+}
+
+async function stakeOwnerOptions(params, stakeProfile) {
+  const options = {
+    ownerProfiles: state.profiles.slice(),
+    payment: isShieldedPayment(params) ? "address" : "account",
+  };
+
+  if (params?.ownerProfileIndex !== undefined && params?.ownerProfileIndex !== null && params?.ownerProfileIndex !== "") {
+    const ownerIdx = normalizeProfileIndex(params.ownerProfileIndex, +stakeProfile || 0);
+    options.ownerProfile = await ensureProfileIndex(ownerIdx);
+  }
+
+  return options;
+}
+
+async function executeStakeTransaction(idx, params, makeTx) {
+  if (!isShieldedPayment(params)) {
+    const result = await state.network.execute(await makeTx());
+    return { hash: result.hash, nonce: result.nonce };
+  }
+
+  return await withPhoenixSpendMutex(idx, async () => {
+    await ensureShieldedSpendReady(idx);
+    const result = await state.network.execute(await makeTx());
+    await persistPendingNullifiersForTx(result, idx);
+    return { hash: result.hash, nullifiers: result.nullifiers };
+  });
+}
+
 /**
  * Transfer funds.
  *
@@ -2150,23 +2396,7 @@ export async function sendTransaction(params) {
     return await withPhoenixSpendMutex(idx, async () => {
       // Spending shielded notes requires the local note cache. Keep the cache
       // check, tx build/execute, and reservation write serialized per profile.
-      await ensureShieldedMetaForIndex(idx);
-      try {
-        const netKey = getNetworkKey();
-        const walletId = getWalletId();
-        if (walletId) {
-          const n = await countNotes(netKey, walletId, idx);
-          if (!n) {
-            startShieldedSync({ force: false }).catch(() => {});
-            throw new Error(
-              "Shielded wallet is still syncing. Please wait for shielded sync to complete before unshielding."
-            );
-          }
-        }
-      } catch (e) {
-        const msg = e?.message ? String(e.message) : String(e);
-        if (msg.includes("Shielded wallet is still syncing")) throw e;
-      }
+      await ensureShieldedSpendReady(idx);
 
       let tx = state.bookkeeper.as(profile).unshield(amount);
       const gas = normalizeGas(params.gas);
@@ -2198,12 +2428,16 @@ export async function sendTransaction(params) {
       hasStake = false;
     }
 
-    let tx = hasStake ? state.bookkeeper.as(profile).topup(amount) : state.bookkeeper.as(profile).stake(amount);
+    const ownerOptions = await stakeOwnerOptions(params, profile);
+    const txFactory = () => hasStake
+      ? state.bookkeeper.as(profile).topup(amount, ownerOptions)
+      : state.bookkeeper.as(profile).stake(amount, ownerOptions);
     const gas = normalizeGas(params.gas);
-    if (gas) tx = tx.gas(gas);
-
-    const result = await network.execute(tx);
-    return { hash: result.hash, nonce: result.nonce };
+    return await executeStakeTransaction(idx, params, async () => {
+      let tx = txFactory();
+      if (gas) tx = tx.gas(gas);
+      return tx;
+    });
   }
 
   if (kind === TX_KIND.UNSTAKE) {
@@ -2220,12 +2454,15 @@ export async function sendTransaction(params) {
     const amount = wantsFull ? undefined : toU64(raw, { name: "amount" });
     if (amount !== undefined && amount <= 0n) throw new Error("amount must be > 0");
 
-    let tx = wantsFull ? state.bookkeeper.as(profile).unstake() : state.bookkeeper.as(profile).unstake(amount);
+    const ownerOptions = await stakeOwnerOptions(params, profile);
     const gas = normalizeGas(params.gas);
-    if (gas) tx = tx.gas(gas);
-
-    const result = await network.execute(tx);
-    return { hash: result.hash, nonce: result.nonce };
+    return await executeStakeTransaction(idx, params, async () => {
+      let tx = wantsFull
+        ? state.bookkeeper.as(profile).unstake(undefined, ownerOptions)
+        : state.bookkeeper.as(profile).unstake(amount, ownerOptions);
+      if (gas) tx = tx.gas(gas);
+      return tx;
+    });
   }
 
   if (kind === TX_KIND.WITHDRAW_REWARD) {
@@ -2249,12 +2486,13 @@ export async function sendTransaction(params) {
     if (amount <= 0n) amount = reward;
     if (amount <= 0n) throw new Error("No rewards available to withdraw");
 
-    let tx = state.bookkeeper.as(profile).withdraw(amount);
+    const ownerOptions = await stakeOwnerOptions(params, profile);
     const gas = normalizeGas(params.gas);
-    if (gas) tx = tx.gas(gas);
-
-    const result = await network.execute(tx);
-    return { hash: result.hash, nonce: result.nonce };
+    return await executeStakeTransaction(idx, params, async () => {
+      let tx = state.bookkeeper.as(profile).withdraw(amount, ownerOptions);
+      if (gas) tx = tx.gas(gas);
+      return tx;
+    });
   }
 
   if (kind === TX_KIND.CONTRACT_CALL) {

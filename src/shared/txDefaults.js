@@ -15,6 +15,8 @@ import { TX_KIND } from "./constants.js";
  * - Public/Moonlight transfers: currently expected around 1-2M gas
  * - Shielded/Phoenix transfers: currently expected around 11-12M gas
  * - Heavy operations (stake/unstake/withdraw): can reach ~27M
+ * - Shielded staking operations pay from Phoenix notes and are deliberately
+ *   kept at the same conservative envelope as shielded contract calls.
  *
  * So:
  * - transfer defaults are privacy-aware: public defaults to 2M, shielded
@@ -76,6 +78,11 @@ export const DEFAULT_GAS_BY_KIND = Object.freeze({
   }),
 });
 
+export const SHIELDED_STAKING_GAS = Object.freeze({
+  limit: "500000000",
+  price: "1",
+});
+
 export const MIN_GAS_BY_KIND = Object.freeze({
   [TX_KIND.TRANSFER]: Object.freeze({
     ...MIN_TRANSFER_GAS_BY_PRIVACY.public,
@@ -91,6 +98,10 @@ export const MIN_CONTRACT_CALL_GAS_BY_PRIVACY = Object.freeze({
   }),
 });
 
+export const MIN_SHIELDED_STAKING_GAS = Object.freeze({
+  limit: "100000000",
+});
+
 /**
  * Return the default gas object for a given kind, or null.
  * @param {string} kind
@@ -103,7 +114,17 @@ export function getDefaultGas(kind, opts = {}) {
     if (privacy === "shielded") return DEFAULT_TRANSFER_GAS_BY_PRIVACY.shielded;
     if (privacy === "public") return DEFAULT_TRANSFER_GAS_BY_PRIVACY.public;
   }
+  if (
+    privacyIsShielded(opts) &&
+    (k === TX_KIND.STAKE || k === TX_KIND.UNSTAKE || k === TX_KIND.WITHDRAW_REWARD)
+  ) {
+    return SHIELDED_STAKING_GAS;
+  }
   return DEFAULT_GAS_BY_KIND[k] ?? null;
+}
+
+function privacyIsShielded(opts = {}) {
+  return String(opts?.privacy ?? "").trim().toLowerCase() === "shielded";
 }
 
 /**
@@ -120,6 +141,12 @@ export function getMinimumGas(kind, opts = {}) {
   }
   if (k === TX_KIND.CONTRACT_CALL && privacy === "shielded") {
     return MIN_CONTRACT_CALL_GAS_BY_PRIVACY.shielded;
+  }
+  if (
+    privacy === "shielded" &&
+    (k === TX_KIND.STAKE || k === TX_KIND.UNSTAKE || k === TX_KIND.WITHDRAW_REWARD)
+  ) {
+    return MIN_SHIELDED_STAKING_GAS;
   }
   return MIN_GAS_BY_KIND[k] ?? null;
 }
@@ -207,7 +234,7 @@ export function applyTxDefaults(params, { dynamicPrice } = {}) {
 
   const gas = applyGasDefaults(kind, params.gas, {
     dynamicPrice,
-    privacy: params.privacy,
+    privacy: params.privacy ?? (params.payment === "address" ? "shielded" : undefined),
   });
   const out = { ...params };
 

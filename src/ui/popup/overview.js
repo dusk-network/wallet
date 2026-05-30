@@ -19,10 +19,11 @@ export async function refreshOverview(send, { force = false } = {}) {
   const originChanged = origin !== state.lastOrigin;
 
   if (!force && state.overview && !state.needsRefresh && !originChanged) {
-    return;
+    return false;
   }
 
   state.overview = await send({ type: "DUSK_UI_OVERVIEW", origin, route: state.route });
   state.lastOrigin = origin;
   state.needsRefresh = false;
+  return true;
 }
