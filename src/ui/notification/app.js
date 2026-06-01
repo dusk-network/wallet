@@ -792,6 +792,7 @@ export async function renderNotification() {
         argsOk && ["approve", "set_approval_for_all", "transfer_from"].includes(fnNameLower);
 
       let drcKind = "";
+      let drcDriver = "";
       let decoded = null;
 
       if (wantsDrc20) {
@@ -802,8 +803,20 @@ export async function renderNotification() {
             fnArgs: argsHex,
           });
           drcKind = "DRC20";
+          drcDriver = "drc20";
         } catch {
-          // ignore
+          try {
+            decoded = await sendResult({
+              type: "DUSK_UI_DRC20_DECODE_INPUT",
+              fnName: fnNameTrim,
+              fnArgs: argsHex,
+              driver: "sozu_staked_dusk",
+            });
+            drcKind = "DRC20";
+            drcDriver = "sozu_staked_dusk";
+          } catch {
+            // ignore
+          }
         }
       }
 
@@ -823,7 +836,11 @@ export async function renderNotification() {
       let drcMeta = null;
       if (drcKind === "DRC20") {
         try {
-          drcMeta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId: contractIdHex });
+          drcMeta = await sendResult({
+            type: "DUSK_UI_DRC20_GET_METADATA",
+            contractId: contractIdHex,
+            driver: drcDriver,
+          });
         } catch {
           drcMeta = null;
         }

@@ -7,8 +7,10 @@ import {
   buildSozuWithdrawTx,
   encodeSozuU64,
   estimateSozuPositionValue,
+  makeSozuStDuskToken,
   parseSozuPoolState,
   parseSozuPosition,
+  SOZU_ST_DUSK_DRIVER,
 } from "./sozuAdapter.js";
 import {
   getSozuConfig,
@@ -71,6 +73,16 @@ describe("Sozu liquid staking adapter", () => {
     ]);
   });
 
+  it("builds stDUSK asset metadata with token precision and driver hint", () => {
+    expect(makeSozuStDuskToken("44".repeat(32))).toEqual({
+      contractId: "44".repeat(32),
+      name: "Staked DUSK",
+      symbol: "stDUSK",
+      decimals: 9,
+      driver: SOZU_ST_DUSK_DRIVER,
+    });
+  });
+
   it("builds deposit contract-call params with deposit equal to amount", () => {
     const config = getSozuConfig("testnet");
     const tx = buildSozuDepositTx({ config, amountLux: "1000000000000" });
@@ -114,15 +126,38 @@ describe("Sozu liquid staking adapter", () => {
       exchangeRate: 1.51027,
     });
 
+    expect(
+      parseSozuPoolState({
+        totalStakeLux: "5366833972489941",
+        tokenTotalSupply: "3553557929448253",
+        exchangeRate: 1.51027,
+      })
+    ).toMatchObject({
+      totalStakeLux: "5366833972489941",
+      tokenTotalSupply: "3553557929448253",
+      exchangeRate: 1.51027,
+    });
+
     expect(parseSozuPosition({ balance: "42" })).toEqual({
-      shareBalanceLux: "42",
+      poolBalanceLux: "42",
+      stDuskBalanceLux: "0",
+    });
+
+    expect(parseSozuPosition({ poolBalanceLux: "42", stDuskBalanceLux: "21" })).toEqual({
+      poolBalanceLux: "42",
+      stDuskBalanceLux: "21",
+    });
+
+    expect(parseSozuPosition({ balance: "42", stDuskBalance: "21" })).toEqual({
+      poolBalanceLux: "42",
+      stDuskBalanceLux: "21",
     });
   });
 
-  it("estimates position value from shares and pool exchange rate", () => {
+  it("estimates position value from stDUSK balance and pool exchange rate", () => {
     expect(
       estimateSozuPositionValue(
-        { shareBalanceLux: "200" },
+        { stDuskBalanceLux: "200" },
         { totalStakeLux: "1500", tokenTotalSupply: "1000" }
       )
     ).toBe("300");

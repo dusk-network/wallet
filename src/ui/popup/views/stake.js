@@ -17,6 +17,8 @@ const FUNDING_SHIELDED = "address";
 const ACTION_TOPUP = "topup";
 const ACTION_UNSTAKE = "unstake";
 const ACTION_CLAIM = "claim";
+const MODE_NATIVE = "native";
+const MODE_SOZU = "sozu";
 
 function stakeKindLabel(kind, { hasStake = true } = {}) {
   const k = String(kind ?? "").toLowerCase();
@@ -342,71 +344,69 @@ export function stakeFormView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  const selectAction = (pos, actionKind) => {
-    st.activePositionKey = positionKey(pos);
-    st.actionKind = actionKind;
-    actions?.render?.().catch(() => {});
-  };
-
   const positionCard = (pos) => {
     const selected = activePosition && positionKey(pos) === positionKey(activePosition);
     const stakeProfile = Number(pos.stakeProfileIndex) || 0;
     const ownerProfile = pos.ownerProfileIndex;
-    const rewardLux = safeBigInt(pos?.info?.reward ?? 0, 0n);
     const topupState = actionState(pos, ACTION_TOPUP, null, minLux);
     const manageState = actionState(pos, ACTION_UNSTAKE, null, minLux);
     const claimState = actionState(pos, ACTION_CLAIM, null, minLux);
 
-    return h("div", { class: selected ? "box is-selected" : "box" }, [
-      h("div", { class: "hrow" }, [
-        h("div", { class: "muted", text: "Stake account" }),
-        h("code", { text: `${profileLabel(stakeProfile)} · ${shortAccount(pos.stakeAccount)}` }),
+    const ownerLabel =
+      ownerProfile !== undefined && ownerProfile !== null
+        ? profileLabel(ownerProfile)
+        : pos.ownerKind === "contract"
+        ? "Contract"
+        : "Unavailable";
+    const rows = stakeMetricRows(pos.info);
+    const summaryRows = rows.filter((row) => {
+      const label = row?.querySelector?.(".muted")?.textContent ?? "";
+      return label === "Staked" || label === "Rewards";
+    });
+    const emptyCompact = !selected && !pos.hasStake;
+
+    return h("div", {
+      class: [
+        "box stake-card",
+        selected ? "is-selected" : "stake-card--compact",
+        emptyCompact ? "stake-card--empty" : "",
+      ].filter(Boolean).join(" "),
+      role: "button",
+      tabindex: "0",
+      onclick: () => {
+        st.activePositionKey = positionKey(pos);
+        actions?.render?.().catch(() => {});
+      },
+      onkeydown: (e) => {
+        if (e?.key === "Enter" || e?.key === " ") {
+          e.preventDefault();
+          st.activePositionKey = positionKey(pos);
+          actions?.render?.().catch(() => {});
+        }
+      },
+    }, [
+      h("div", { class: "stake-card__head" }, [
+        h("div", {}, [
+          h("div", { class: "muted", text: "Stake account" }),
+          h("code", { text: `${profileLabel(stakeProfile)} · ${shortAccount(pos.stakeAccount)}` }),
+        ]),
+        h("div", { class: pos.manageable === false ? "stake-badge stake-badge--warn" : "stake-badge", text: ownerLabel }),
       ]),
-      h("div", { class: "hrow" }, [
-        h("div", { class: "muted", text: "Owner" }),
-        h("code", {
-          text:
-            ownerProfile !== undefined && ownerProfile !== null
-              ? profileLabel(ownerProfile)
-              : pos.ownerKind === "contract"
-              ? "Contract"
-              : "Unavailable",
-        }),
-      ]),
-      h("div", { class: pos.manageable === false ? "err" : "muted", text: ownerCopy(pos) }),
-      ...stakeMetricRows(pos.info),
-      h("div", { class: "hrow" }, [
-        h("div", { class: "muted", text: "Gas payer" }),
-        h("code", {
-          text: `${profileLabel(stakeProfile)} public · ${fmtLux(fundingOptionsForPosition(pos).publicLux)} DUSK`,
-        }),
-      ]),
-      h("div", { class: "btnrow" }, [
-        h("button", {
-          class: "btn-outline",
-          text: pos.hasStake ? "Add stake" : "Create stake",
-          disabled: pos.manageable === false || !topupState.ok,
-          title: topupState.reason,
-          onclick: () => selectAction(pos, ACTION_TOPUP),
-        }),
-        h("button", {
-          class: "btn-outline",
-          text: "Unstake",
-          disabled: !pos.hasStake || pos.manageable === false || !manageState.ok,
-          title: manageState.reason,
-          onclick: () => selectAction(pos, ACTION_UNSTAKE),
-        }),
-        h("button", {
-          class: "btn-outline",
-          text: "Claim",
-          disabled: rewardLux <= 0n || pos.manageable === false || !claimState.ok,
-          title: claimState.reason,
-          onclick: () => selectAction(pos, ACTION_CLAIM),
-        }),
-      ]),
-      !selected && (!topupState.ok || !manageState.ok || !claimState.ok)
+      selected || pos.manageable === false || emptyCompact
+        ? h("div", { class: pos.manageable === false ? "stake-card__note stake-card__note--warn" : "stake-card__note", text: ownerCopy(pos) })
+        : null,
+      emptyCompact ? null : h("div", { class: "stake-metrics" }, selected ? rows : summaryRows),
+      selected
+        ? h("div", { class: "stake-gas-line" }, [
+            h("span", { text: "Gas" }),
+            h("code", {
+              text: `${profileLabel(stakeProfile)} public · ${fmtLux(fundingOptionsForPosition(pos).publicLux)} DUSK`,
+            }),
+          ])
+        : null,
+      !selected && !emptyCompact && (!topupState.ok || !manageState.ok || !claimState.ok)
         ? h("div", {
-            class: "muted",
+            class: "stake-card__note stake-card__note--warn",
             text: topupState.reason || manageState.reason || claimState.reason,
           })
         : null,
@@ -422,17 +422,46 @@ export function stakeFormView(ov, { state, actions } = {}) {
     : st?.error
     ? h("div", { class: "err", text: String(st.error) })
     : null;
+  const mode = st.mode === MODE_SOZU ? MODE_SOZU : MODE_NATIVE;
+  const setMode = (nextMode) => {
+    st.mode = nextMode === MODE_SOZU ? MODE_SOZU : MODE_NATIVE;
+    actions?.render?.().catch(() => {});
+  };
+  const modeTabs = h("div", { class: "tabs staking-mode-tabs", style: `--seg-index: ${mode === MODE_NATIVE ? 0 : 1};` }, [
+    h(
+      "button",
+      {
+        class: mode === MODE_NATIVE ? "tab is-active" : "tab",
+        onclick: () => setMode(MODE_NATIVE),
+      },
+      [h("span", { text: "Native staking" })]
+    ),
+    h(
+      "button",
+      {
+        class: mode === MODE_SOZU ? "tab is-active" : "tab",
+        onclick: () => setMode(MODE_SOZU),
+      },
+      [h("span", { text: "Liquid staking" })]
+    ),
+  ]);
+
+  const nativeView = [
+    statusLine,
+    h("div", { class: "staking-section-title", text: "Stake positions" }),
+    positions.length
+      ? h("div", { class: "stake-position-list" }, positions.map(positionCard))
+      : h("div", { class: "box muted", text: "No local stake positions found." }),
+    actionPanel,
+  ];
+
+  const liquidView = [sozuLiquidStakingView(ov, { state, actions })];
 
   return [
     subnav({ title: "Staking", onBack }),
-    h("div", { class: "row" }, [
-      statusLine,
-      h("div", { class: "muted", text: "Stake positions" }),
-      positions.length
-        ? h("div", { class: "row" }, positions.map(positionCard))
-        : h("div", { class: "box muted", text: "No local stake positions found." }),
-      actionPanel,
-      sozuLiquidStakingView(ov, { state, actions }),
+    h("div", { class: "row staking-shell" }, [
+      modeTabs,
+      ...(mode === MODE_SOZU ? liquidView : nativeView),
     ].filter(Boolean)),
   ];
 }
@@ -539,33 +568,35 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     },
   });
 
-  const actionTabs = h("div", { class: "btnrow" }, [
+  const actionIndex =
+    actionKind === ACTION_UNSTAKE ? 1 : actionKind === ACTION_CLAIM ? 2 : 0;
+  const actionTabs = h("div", {
+    class: "tabs tabs--mini stake-action-tabs",
+    style: `--seg-count: 3; --seg-index: ${actionIndex};`,
+  }, [
     h("button", {
-      class: actionKind === ACTION_TOPUP ? "btn-primary" : "btn-outline",
-      text: pos.hasStake ? "Add stake" : "Create",
+      class: actionKind === ACTION_TOPUP ? "tab is-active" : "tab",
       onclick: () => {
         st.actionKind = ACTION_TOPUP;
         actions?.render?.().catch(() => {});
       },
-    }),
+    }, [h("span", { text: pos.hasStake ? "Add stake" : "Create" })]),
     h("button", {
-      class: actionKind === ACTION_UNSTAKE ? "btn-primary" : "btn-outline",
-      text: "Unstake",
+      class: actionKind === ACTION_UNSTAKE ? "tab is-active" : "tab",
       disabled: !pos.hasStake,
       onclick: () => {
         st.actionKind = ACTION_UNSTAKE;
         actions?.render?.().catch(() => {});
       },
-    }),
+    }, [h("span", { text: "Unstake" })]),
     h("button", {
-      class: actionKind === ACTION_CLAIM ? "btn-primary" : "btn-outline",
-      text: "Claim",
+      class: actionKind === ACTION_CLAIM ? "tab is-active" : "tab",
       disabled: !pos.hasStake || rewardLux <= 0n,
       onclick: () => {
         st.actionKind = ACTION_CLAIM;
         actions?.render?.().catch(() => {});
       },
-    }),
+    }, [h("span", { text: "Claim" })]),
   ]);
 
   const maxButton =
@@ -603,15 +634,13 @@ function actionEditor(pos, st, { state, actions, minLux }) {
         });
       }));
 
-  return h("div", { class: "box" }, [
-    h("div", { class: "muted", text: "Manage position" }),
-    h("div", { class: "hrow" }, [
-      h("div", { class: "muted", text: "Stake account" }),
-      h("code", { text: `${profileLabel(stakeProfileIndex)} · ${shortAccount(pos.stakeAccount)}` }),
-    ]),
-    h("div", { class: "hrow" }, [
-      h("div", { class: "muted", text: "Owner" }),
-      ownerControl,
+  return h("div", { class: "box stake-editor" }, [
+    h("div", { class: "stake-editor__head" }, [
+      h("div", {}, [
+        h("div", { class: "muted", text: "Manage position" }),
+        h("code", { text: `${profileLabel(stakeProfileIndex)} · ${shortAccount(pos.stakeAccount)}` }),
+      ]),
+      h("div", { class: "stake-badge" }, [ownerControl]),
     ]),
     !pos.hasStake
       ? h("div", {
@@ -620,8 +649,8 @@ function actionEditor(pos, st, { state, actions, minLux }) {
         })
       : null,
     actionTabs,
-    h("div", { class: "hrow" }, [
-      h("div", { class: "muted", text: "Funding source" }),
+    h("div", { class: "stake-gas-line" }, [
+      h("span", { text: "Funding" }),
       h("code", { text: `${profileLabel(stakeProfileIndex)} public balance` }),
     ]),
     h("div", {
@@ -648,7 +677,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
           }),
         ])
       : null,
-    h("div", { class: "btnrow" }, [maxButton, reviewButton].filter(Boolean)),
+    h("div", { class: "btnrow stake-review-row" }, [maxButton, reviewButton].filter(Boolean)),
     actionKind === ACTION_TOPUP && maxTopupLux > 0n
       ? h("div", {
           class: "muted",
@@ -694,6 +723,17 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   gasEditor.setGas(d?.gas ?? null);
 
   const gasHint = h("div", { class: "muted", text: "Loading gas price suggestion…" });
+  const btnAuto = h("button", {
+    class: "btn-outline",
+    type: "button",
+    text: "Auto",
+    onclick: () => gasEditor.setGas(null),
+  });
+  const btnLow = h("button", { class: "btn-outline", type: "button", text: "Low", disabled: true });
+  const btnRec = h("button", { class: "btn-outline", type: "button", text: "Recommended", disabled: true });
+  const btnHigh = h("button", { class: "btn-outline", type: "button", text: "High", disabled: true });
+  const gasQuickRow = h("div", { class: "gas-quick-row" }, [btnAuto, btnLow, btnRec, btnHigh]);
+
   (async () => {
     try {
       if (d?.gas) {
@@ -705,8 +745,27 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
       const resp = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to fetch gas price");
       const stats = resp?.result ?? resp;
+      const min = String(stats?.min ?? "1");
       const median = String(stats?.median ?? stats?.average ?? "1");
-      gasHint.textContent = `Gas price suggestion (LUX): median ${median}`;
+      const max = String(stats?.max ?? median);
+      gasHint.textContent = `Gas price (LUX): min ${min} · median ${median} · max ${max}`;
+      gasEditor.helpText =
+        (defaultLimit
+          ? `Suggested gas price comes from the node mempool. Default limit: ${defaultLimit}. `
+          : "Suggested gas price comes from the node mempool. ") +
+        "Max fee shown is limit × price. Clear both to use wallet defaults.";
+
+      const apply = (price) => {
+        if (!defaultLimit) return;
+        gasEditor.setGas({ limit: defaultLimit, price: String(price ?? "") });
+      };
+      btnLow.disabled = !defaultLimit;
+      btnRec.disabled = !defaultLimit;
+      btnHigh.disabled = !defaultLimit;
+      btnLow.onclick = () => apply(min);
+      btnRec.onclick = () => apply(median);
+      btnHigh.onclick = () => apply(max);
+
       if (defaultLimit) gasEditor.setGas({ limit: defaultLimit, price: median });
       else if (fallbackPrice) gasEditor.setGas({ limit: defaultLimit, price: fallbackPrice });
     } catch {
@@ -792,6 +851,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       gasEditor,
       gasHint,
+      gasQuickRow,
       h("div", { class: "btnrow" }, [cancelBtn, confirmBtn]),
     ]),
   ];

@@ -44,8 +44,8 @@ state is hub-discovered.
 
 The Sozu CLI sends Moonlight contract calls to the pool contract:
 
-- deposit/liquid stake: `sozu_stake(amount)` with transaction `deposit = amount`
-- withdraw/liquid unstake: `sozu_unstake(amount)` with transaction `deposit = 0`
+- stake: `sozu_stake(amount)` with transaction `deposit = amount`
+- unstake: `sozu_unstake(amount)` with transaction `deposit = 0`
 
 Both arguments are encoded as a little-endian `u64`. The Sozu pool data-driver fixture confirms `1000000000000` encodes as `0010a5d4e8000000`.
 
@@ -55,7 +55,7 @@ The CLI also has `sozu_airdrop`, but that is not a normal wallet user action. I 
 
 Useful pool reads from `sozu-wallet/src/rues/pool.rs` and `sozu-contracts-dd/pool/src/lib.rs`:
 
-- `balance_of(account)` returns the user's pool/share balance.
+- `balance_of(account)` returns the user's DUSK-denominated balance in the pool.
 - `exchange_rate()` returns `{ numerator, denominator }`, representing total active stake over token total supply.
 
 Hub discovery exists through the hub contract `contract(name)`, but v1 intentionally uses the Sozu wallet's hardcoded config. Hub/DD discovery should be a follow-up.
@@ -69,10 +69,11 @@ The Sozu pool data-driver supports:
 - events including `deposit`, `unstake`, and `reward`
 
 This branch includes only the Sozu hub and pool DD artifacts required by the
-wallet:
+wallet, plus the stDUSK token DD used for the secondary receipt-token balance:
 
 - `public/drivers/sozu_hub_data_driver.wasm`
 - `public/drivers/sozu_pool_data_driver.wasm`
+- `public/drivers/sozu_staked_dusk_data_driver.wasm`
 
 The adapter still builds `sozu_stake`/`sozu_unstake` args directly because they
 are plain `u64` values, and the DD conformance tests verify those bytes match
@@ -87,12 +88,18 @@ Initial safe copy:
 - `Liquid staking with Sozu`
 - `Stake without running a node`
 - `This uses Sozu contracts, not native provisioner staking.`
+- Main actions and inputs should follow the public Sozu UI language:
+  `Stake` / `Unstake`, with DUSK-denominated amounts.
+- The primary position metric should be `Pool balance`, not shares. The pool
+  `balance_of(account)` call is already the DUSK-denominated pool balance.
+- The stDUSK token balance is shown as a secondary receipt-token detail when
+  the hub-discovered `staked-dusk` contract is available.
+- stDUSK can be added to the wallet's Assets view from the Sozu panel. It uses
+  the Sozu staked-DUSK data-driver because the token contract is DRC20-like but
+  does not use the same input JSON shape as the canonical DRC20 driver.
 
 ## Open Questions
 
 - Whether Sozu wants wallet v1 to use hardcoded IDs only, or a hosted/hub lookup fallback.
-- Whether share balances should be displayed as `sDUSK`, another token symbol, or generic Sozu shares.
 - Whether Phoenix-funded Sozu contract calls should be exposed. Current wallet contract-call infrastructure can build shielded contract calls, but this needs a dedicated end-to-end safety pass before UI exposure.
 - Whether a local Sozu contract fixture can be run for browser-driven live validation.
-- Whether `staked-dusk` token metadata should be surfaced in the liquid staking
-  panel or kept as an advanced detail.

@@ -1140,7 +1140,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
         }
         await ensureEngineConfigured();
-        const result = await engineCall("dusk_getDrc20Metadata", { contractId: message?.contractId });
+        const result = await engineCall("dusk_getDrc20Metadata", {
+          contractId: message?.contractId,
+          driver: message?.driver,
+        });
         sendResponse({ ok: true, result });
         return;
       }
@@ -1158,6 +1161,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const result = await engineCall("dusk_getDrc20Balance", {
           contractId: message?.contractId,
           profileIndex,
+          driver: message?.driver,
         });
         sendResponse({ ok: true, result: String(result ?? "0") });
         return;
@@ -1172,6 +1176,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const result = await engineCall("dusk_encodeDrc20Input", {
           fnName: message?.fnName,
           args: message?.args,
+          driver: message?.driver,
         });
         sendResponse({ ok: true, result });
         return;
@@ -1186,6 +1191,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const result = await engineCall("dusk_decodeDrc20Input", {
           fnName: message?.fnName,
           fnArgs: message?.fnArgs,
+          driver: message?.driver,
         });
         sendResponse({ ok: true, result });
         return;

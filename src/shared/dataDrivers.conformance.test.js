@@ -135,4 +135,25 @@ describe("Canonical data-drivers conformance (DRC20 / DRC721)", () => {
     const balance = new Uint8Array([42, 0, 0, 0, 0, 0, 0, 0]);
     expect(driver.decodeOutputFn("balance_of", balance)).toBe("42");
   });
+
+  it("Sozu stDUSK token driver can encode/decode token reads and transfers", async () => {
+    const driver = await loadDriverFromPublic("sozu_staked_dusk_data_driver.wasm");
+    const rkyv = driver.encodeInputFn("balance_of", JSON.stringify(EXAMPLE_PK));
+    expect(rkyv).toBeInstanceOf(Uint8Array);
+    expect(rkyv.byteLength).toBeGreaterThan(0);
+    expect(driver.decodeInputFn("balance_of", rkyv)).toBe(EXAMPLE_PK);
+
+    const transfer = [EXAMPLE_PK, "42"];
+    const transferBytes = driver.encodeInputFn("transfer", JSON.stringify(transfer));
+    expect(transferBytes).toBeInstanceOf(Uint8Array);
+    expect(driver.decodeInputFn("transfer", transferBytes)).toEqual(transfer);
+
+    const approve = [EXAMPLE_PK, "84"];
+    const approveBytes = driver.encodeInputFn("approve", JSON.stringify(approve));
+    expect(approveBytes).toBeInstanceOf(Uint8Array);
+    expect(driver.decodeInputFn("approve", approveBytes)).toEqual(approve);
+
+    const balance = new Uint8Array([42, 0, 0, 0, 0, 0, 0, 0]);
+    expect(driver.decodeOutputFn("balance_of", balance)).toBe("42");
+  });
 });

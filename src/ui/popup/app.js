@@ -8,12 +8,15 @@ import { createNetworkMenuController } from "../components/NetworkMenu.js";
 import { createAccountMenuController } from "../components/AccountMenu.js";
 import { createHeaderRenderer } from "./header.js";
 import { send } from "../../wallet/bus.js";
+import { safeBigInt } from "../../shared/amount.js";
+import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
 import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
+import { sozuConfirmView } from "./views/sozu.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -54,6 +57,62 @@ const app = document.getElementById("app");
 const headerActionsHost = document.getElementById("header-actions");
 const fullNav = document.querySelector(".full-nav");
 const ext = getExtensionApi();
+
+function stDuskWatchKey(ov, profileIndex, contractId) {
+  return [
+    String(ov?.nodeUrl ?? ""),
+    String(profileIndex ?? 0),
+    String(contractId ?? "").toLowerCase(),
+  ].join("|");
+}
+
+async function maybeAutoWatchDashboardStDusk(ov) {
+  try {
+    if (!ov?.isUnlocked) return;
+    if (state.route !== "home") return;
+
+    const profileIndex = Number(ov?.selectedAccountIndex ?? 0) || 0;
+    const st = (state.sozuAutoWatch ??= { key: "", pending: "" });
+
+    const statusResp = await send({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex });
+    if (statusResp?.error) return;
+
+    const status = statusResp?.result ?? statusResp ?? {};
+    const contractId = status?.contracts?.["staked-dusk"];
+    const balance = safeBigInt(status?.position?.stDuskBalanceLux ?? 0, 0n);
+    if (!contractId || balance <= 0n) return;
+
+    const key = stDuskWatchKey(ov, profileIndex, contractId);
+    if (st.key === key || st.pending === key) return;
+
+    const assetsResp = await send({ type: "DUSK_UI_ASSETS_GET", profileIndex });
+    const assets = assetsResp?.result ?? assetsResp ?? {};
+    const tokens = Array.isArray(assets?.tokens) ? assets.tokens : [];
+    if (tokens.some((t) => String(t?.contractId ?? "").toLowerCase() === String(contractId).toLowerCase())) {
+      st.key = key;
+      return;
+    }
+
+    st.pending = key;
+    const watchResp = await send({
+      type: "DUSK_UI_ASSETS_WATCH_TOKEN",
+      profileIndex,
+      token: makeSozuStDuskToken(contractId),
+    });
+    if (watchResp?.error) return;
+
+    st.key = key;
+    if (state.assets) state.assets.loaded = false;
+  } catch {
+    // Dashboard asset discovery is best-effort; it must not block wallet use.
+  } finally {
+    try {
+      if (state.sozuAutoWatch?.pending) state.sozuAutoWatch.pending = "";
+    } catch {
+      // ignore
+    }
+  }
+}
 
 // Animate route changes only.
 let lastAnimatedRoute = null;
@@ -584,6 +643,9 @@ export async function render({ forceRefresh = false } = {}) {
     state.sozu.error = null;
   }
   const ov = state.overview;
+  if (overviewRefreshed) {
+    await maybeAutoWatchDashboardStDusk(ov);
+  }
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";
   } catch {
@@ -673,6 +735,10 @@ export async function render({ forceRefresh = false } = {}) {
   }
   if (state.route === "stake_confirm") {
     setApp(stakeConfirmView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "sozu_confirm") {
+    setApp(sozuConfirmView(ov, { state, actions }));
     return;
   }
   if (state.route === "asset_add_token") {

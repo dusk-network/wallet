@@ -23,7 +23,7 @@ describe("stake view", () => {
     );
 
     expect(source).toContain("Stake positions");
-    expect(source).toContain("Gas payer");
+    expect(source).toContain("Gas");
     expect(source).toContain("Owner-paid gas is not available here.");
     expect(source).toContain("Gas still comes from");
     expect(source).toContain("Contract-owned stake. View only.");

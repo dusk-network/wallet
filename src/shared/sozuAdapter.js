@@ -1,9 +1,22 @@
 import { TX_KIND } from "./constants.js";
+import { LUX_DECIMALS } from "./amount.js";
 
 export const SOZU_FN = Object.freeze({
   STAKE: "sozu_stake",
   UNSTAKE: "sozu_unstake",
 });
+
+export const SOZU_ST_DUSK_DRIVER = "sozu_staked_dusk";
+
+export function makeSozuStDuskToken(contractId) {
+  return Object.freeze({
+    contractId,
+    name: "Staked DUSK",
+    symbol: "stDUSK",
+    decimals: LUX_DECIMALS,
+    driver: SOZU_ST_DUSK_DRIVER,
+  });
+}
 
 function toU64(value, name = "amountLux") {
   try {
@@ -64,6 +77,20 @@ export function buildSozuClaimTx() {
 }
 
 export function parseSozuPoolState(value = {}) {
+  if (value.totalStakeLux != null || value.tokenTotalSupply != null) {
+    const totalStake = toU64(value.totalStakeLux ?? 0, "pool.totalStakeLux");
+    const totalSupply = toU64(value.tokenTotalSupply ?? 0, "pool.tokenTotalSupply");
+    return Object.freeze({
+      totalStakeLux: totalStake.toString(),
+      tokenTotalSupply: totalSupply.toString(),
+      exchangeRate:
+        totalSupply > 0n
+          ? Number((totalStake * 1_000_000n) / totalSupply) / 1_000_000
+          : typeof value.exchangeRate === "number"
+          ? value.exchangeRate
+          : null,
+    });
+  }
   const rate = value.exchangeRate ?? value.rate ?? value;
   const numerator = toU64(rate?.numerator ?? 0, "exchangeRate.numerator");
   const denominator = toU64(rate?.denominator ?? 0, "exchangeRate.denominator");
@@ -78,15 +105,17 @@ export function parseSozuPoolState(value = {}) {
 }
 
 export function estimateSozuPositionValue(position = {}, pool = {}) {
-  const shares = toU64(position.shareBalanceLux ?? position.balance ?? position.shares ?? 0, "position.shareBalanceLux");
+  const shares = toU64(position.stDuskBalanceLux ?? position.shares ?? 0, "position.stDuskBalanceLux");
   const totalStake = toU64(pool.totalStakeLux ?? pool.exchangeRate?.numerator ?? 0, "pool.totalStakeLux");
   const totalSupply = toU64(pool.tokenTotalSupply ?? pool.exchangeRate?.denominator ?? 0, "pool.tokenTotalSupply");
   return totalSupply > 0n ? ((shares * totalStake) / totalSupply).toString() : "0";
 }
 
 export function parseSozuPosition(value = {}) {
-  const balance = toU64(value.balance ?? value.shares ?? 0, "position.balance");
+  const balance = toU64(value.balance ?? value.poolBalanceLux ?? value.shares ?? 0, "position.balance");
+  const stDuskBalance = toU64(value.stDuskBalance ?? value.stDuskBalanceLux ?? 0, "position.stDuskBalance");
   return Object.freeze({
-    shareBalanceLux: balance.toString(),
+    poolBalanceLux: balance.toString(),
+    stDuskBalanceLux: stDuskBalance.toString(),
   });
 }

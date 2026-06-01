@@ -513,7 +513,10 @@ export async function localSend(message) {
         throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
       }
       await ensureEngineConfigured();
-      const result = await getDrc20Metadata({ contractId: message?.contractId });
+      const result = await getDrc20Metadata({
+        contractId: message?.contractId,
+        driver: message?.driver,
+      });
       return { ok: true, result };
     }
 
@@ -524,7 +527,11 @@ export async function localSend(message) {
       }
       await ensureEngineConfigured();
       const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const result = await getDrc20Balance({ contractId: message?.contractId, profileIndex: idx });
+      const result = await getDrc20Balance({
+        contractId: message?.contractId,
+        profileIndex: idx,
+        driver: message?.driver,
+      });
       return { ok: true, result: String(result ?? "0") };
     }
 
@@ -534,7 +541,11 @@ export async function localSend(message) {
         throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
       }
       await ensureEngineConfigured();
-      const result = await encodeDrc20Input({ fnName: message?.fnName, args: message?.args });
+      const result = await encodeDrc20Input({
+        fnName: message?.fnName,
+        args: message?.args,
+        driver: message?.driver,
+      });
       return { ok: true, result };
     }
 
@@ -544,7 +555,11 @@ export async function localSend(message) {
         throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
       }
       await ensureEngineConfigured();
-      const result = await decodeDrc20Input({ fnName: message?.fnName, fnArgs: message?.fnArgs });
+      const result = await decodeDrc20Input({
+        fnName: message?.fnName,
+        fnArgs: message?.fnArgs,
+        driver: message?.driver,
+      });
       return { ok: true, result };
     }
 

@@ -60,6 +60,13 @@ function normalizeName(s, maxLen = 64) {
   return out.length > maxLen ? out.slice(0, maxLen) : out;
 }
 
+function normalizeTokenDriver(driver) {
+  const raw = String(driver ?? "").trim().toLowerCase();
+  if (!raw || raw === "drc20") return undefined;
+  if (raw === "sozu_staked_dusk") return "sozu_staked_dusk";
+  throw new Error(`Unsupported token driver: ${raw}`);
+}
+
 async function getAll() {
   const res = await storage.get({ [STORAGE_KEYS.ASSETS]: {} });
   const all = res?.[STORAGE_KEYS.ASSETS];
@@ -92,6 +99,7 @@ function ensureBuckets(all, walletId, networkKey, profileIndex) {
  * @property {string} name
  * @property {string} symbol
  * @property {number} decimals
+ * @property {string=} driver Optional token data-driver hint.
  * @property {number} addedAt
  */
 
@@ -129,7 +137,7 @@ export async function getWatchedAssets(walletId, networkKey, profileIndex) {
  * @param {string} walletId
  * @param {string} networkKey
  * @param {number} profileIndex
- * @param {{contractId: any, name: any, symbol: any, decimals: any}} token
+ * @param {{contractId: any, name: any, symbol: any, decimals: any, driver?: any}} token
  * @returns {Promise<{tokens: WatchedToken[], nfts: WatchedNft[]}>}
  */
 export async function watchToken(walletId, networkKey, profileIndex, token) {
@@ -140,6 +148,7 @@ export async function watchToken(walletId, networkKey, profileIndex, token) {
   const name = normalizeName(token?.name, 64);
   const symbol = normalizeName(token?.symbol, 16);
   const decimals = normalizeDecimals(token?.decimals);
+  const driver = normalizeTokenDriver(token?.driver);
 
   const nextTokens = p.tokens.filter((t) => String(t?.contractId) !== contractId);
   nextTokens.unshift({
@@ -148,6 +157,7 @@ export async function watchToken(walletId, networkKey, profileIndex, token) {
     name,
     symbol,
     decimals,
+    ...(driver ? { driver } : {}),
     addedAt: Date.now(),
   });
 
@@ -241,4 +251,3 @@ export async function unwatchNft(walletId, networkKey, profileIndex, contractId,
   await setAll(nextAll);
   return { tokens: p.tokens, nfts: nextNfts };
 }
-
