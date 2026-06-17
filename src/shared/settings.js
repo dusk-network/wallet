@@ -17,10 +17,10 @@ export const AUTO_LOCK_OPTIONS = [
 ];
 
 export const DEFAULT_SETTINGS = {
-  // Default to Testnet.
-  nodeUrl: "https://testnet.nodes.dusk.network",
-  proverUrl: "https://testnet.provers.dusk.network",
-  archiverUrl: "https://testnet.nodes.dusk.network",
+  // Default to Mainnet.
+  nodeUrl: "https://nodes.dusk.network",
+  proverUrl: "https://provers.dusk.network",
+  archiverUrl: "https://nodes.dusk.network",
   /** Auto-lock timeout in minutes (0 = disabled) */
   autoLockTimeoutMinutes: 5,
   /** Number of derived accounts (public + shielded keypairs) */

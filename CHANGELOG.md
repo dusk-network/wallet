@@ -10,6 +10,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - Added a repository privacy policy document for wallet extension store submissions. ([#29])
+- Added Sozu liquid staking support, native staking owner flows, and updated staking transaction review UX. ([#32], [#33])
+
+### Changed
+
+- Changed the default wallet network from Testnet to Mainnet.
 
 ## [0.1.0] - 2026-05-28
 
