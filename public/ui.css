@@ -470,72 +470,37 @@ body.page--popup .input-row > .icon-btn {
   letter-spacing: 0.06em;
 }
 
-/* Cohesive amount module (input + slider + meta) */
+/* Amount module: a normal input with a separate balance slider helper. */
 .amount-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  box-shadow: 0 1px 0 rgba(242,240,235,0.04) inset;
-
-  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
-}
-
-body.page--popup .amount-card {
-  padding: 9px 10px;
   gap: 8px;
 }
 
-.amount-card:hover {
-  border-color: rgba(242,240,235,0.16);
-  box-shadow:
-    0 1px 0 rgba(242,240,235,0.06) inset,
-    var(--shadow-soft);
+body.page--popup .amount-card {
+  gap: 7px;
 }
 
-.amount-card:focus-within {
-  box-shadow:
-    0 1px 0 rgba(242,240,235,0.06) inset,
-    0 0 0 4px rgba(113,177,255,0.24);
-  border-color: var(--ring);
-}
-
-.amount-card .input-row {
-  align-items: center;
+.amount-input-row {
+  align-items: stretch;
 }
 
 .amount-card .amount-input {
-  border: 0;
-  background: transparent;
-  padding: 4px 0;
-  font-size: 13.5px;
-  font-weight: 600;
-}
-
-.amount-card .amount-input:focus {
-  box-shadow: none;
-  border-color: transparent;
+  font-size: 12.5px;
+  font-weight: 500;
 }
 
 .amount-card .amount-meta {
   margin-top: 0;
-  padding: 0;
+  padding: 0 2px;
 }
 
 .amount-card .amount-range-wrap {
-  margin-top: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
+  margin-top: 2px;
 }
 
 body.page--popup .amount-card .amount-range-wrap {
-  margin-top: 0;
-  padding: 0;
+  margin-top: 2px;
 }
 
 .amount-meta {
@@ -543,7 +508,7 @@ body.page--popup .amount-card .amount-range-wrap {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  margin-top: -2px;
+  margin-top: 0;
   padding: 2px 2px 0;
   color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
   font-size: 12px;
