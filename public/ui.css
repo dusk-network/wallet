@@ -964,6 +964,75 @@ button:disabled {
   box-shadow: 0 0 0 3px color-mix(in oklab, oklch(0.72 0.18 142) 22%, transparent);
 }
 
+.site-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 92%, transparent);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0)),
+    color-mix(in oklab, var(--secondary) 78%, var(--card));
+  box-shadow: 0 1px 0 rgba(242,240,235,0.045) inset;
+}
+
+.site-bar-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.site-bar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.site-bar-status {
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.site-bar-origin {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-bar-action {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 92px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+body.page--popup .site-bar {
+  padding: 9px 10px;
+  gap: 10px;
+}
+
+body.page--popup .site-bar-action {
+  min-width: 84px;
+  height: 32px;
+  padding: 0 10px;
+}
+
 .conn-text {
   min-width: 0;
   white-space: nowrap;
@@ -1411,36 +1480,6 @@ button:disabled {
   color: var(--muted-foreground);
   font-weight: 600;
   letter-spacing: 0;
-}
-
-.conn-dot--sm {
-  width: 6px;
-  height: 6px;
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--muted) 25%, transparent);
-}
-
-.balance-site {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 55%;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 600;
-
-  padding: 6px 10px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--secondary);
-  box-shadow: 0 1px 0 rgba(242,240,235,0.04) inset;
-}
-
-.balance-site-text {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .balance-split {
