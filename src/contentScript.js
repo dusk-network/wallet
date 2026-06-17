@@ -81,6 +81,9 @@ function isValidRequestId(id) {
 const EXTENSION_TARGET =
   typeof __DUSK_TARGET__ !== "undefined" ? __DUSK_TARGET__ : "chrome";
 const IS_FIREFOX = EXTENSION_TARGET === "firefox";
+const DUSK_WALLET_ID = "wallet.dusk.extension";
+const DUSK_BRIDGE_TARGET = "DUSK_WALLET_EXTENSION";
+const INPAGE_SCRIPT_ID = "dusk-wallet-inpage";
 
 /** @type {any | null} */
 let dappPort = null;
@@ -92,11 +95,11 @@ function injectInpageIfNeeded() {
   if (!extApi?.runtime?.getURL) return;
 
   try {
-    const existing = document.getElementById("dusk-inpage");
+    const existing = document.getElementById(INPAGE_SCRIPT_ID);
     if (existing) return;
 
     const script = document.createElement("script");
-    script.id = "dusk-inpage";
+    script.id = INPAGE_SCRIPT_ID;
     script.type = "module";
     script.src = runtimeGetURL("inpage.js");
     (document.head || document.documentElement).appendChild(script);
@@ -127,7 +130,7 @@ function sendHello(port) {
 function forwardToInpage(payload) {
   try {
     window.postMessage(
-      { target: "DUSK_EXTENSION", ...payload },
+      { target: DUSK_BRIDGE_TARGET, ...payload, walletId: DUSK_WALLET_ID },
       window.location.origin
     );
   } catch {
@@ -178,7 +181,8 @@ window.addEventListener("message", (event) => {
   // Only accept messages from the same window
   if (event.source !== window) return;
   const msg = event.data;
-  if (!msg || msg.target !== "DUSK_EXTENSION") return;
+  if (!msg || msg.target !== DUSK_BRIDGE_TARGET) return;
+  if (msg.walletId !== DUSK_WALLET_ID) return;
 
   // Lazy-subscribe to push events when the dApp registers listeners.
   if (msg.type === "DUSK_PROVIDER_SUBSCRIBE") {
@@ -204,7 +208,8 @@ window.addEventListener("message", (event) => {
   })
     .then((response) => {
       const payload = {
-        target: "DUSK_EXTENSION",
+        target: DUSK_BRIDGE_TARGET,
+        walletId: DUSK_WALLET_ID,
         type: "DUSK_RPC_RESPONSE",
         id,
         response,
@@ -214,7 +219,8 @@ window.addEventListener("message", (event) => {
     })
     .catch((err) => {
       const payload = {
-        target: "DUSK_EXTENSION",
+        target: DUSK_BRIDGE_TARGET,
+        walletId: DUSK_WALLET_ID,
         type: "DUSK_RPC_RESPONSE",
         id,
         response: { error: { code: 4900, message: err?.message ?? String(err) } },

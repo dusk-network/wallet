@@ -3,6 +3,7 @@ import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 
 const inpageUrl = new URL("../inpage.js", import.meta.url);
+const DUSK_WALLET_ID = "wallet.dusk.extension";
 
 class TestCustomEvent extends Event {
   constructor(type, init = {}) {
@@ -83,7 +84,8 @@ describe("integration: inpage provider discovery", () => {
       new window.MessageEvent("message", {
         source: window,
         data: {
-          target: "DUSK_EXTENSION",
+          target: "DUSK_WALLET_EXTENSION",
+          walletId: DUSK_WALLET_ID,
           type: "DUSK_PROVIDER_EVENT",
           name: "profilesChanged",
           data: [profile],
@@ -94,7 +96,8 @@ describe("integration: inpage provider discovery", () => {
       new window.MessageEvent("message", {
         source: window,
         data: {
-          target: "DUSK_EXTENSION",
+          target: "DUSK_WALLET_EXTENSION",
+          walletId: DUSK_WALLET_ID,
           type: "DUSK_PROVIDER_EVENT",
           name: "profilesChanged",
           data: [{ profileId: "account:0:acct0", account: "acct0" }],
@@ -105,7 +108,8 @@ describe("integration: inpage provider discovery", () => {
       new window.MessageEvent("message", {
         source: window,
         data: {
-          target: "DUSK_EXTENSION",
+          target: "DUSK_WALLET_EXTENSION",
+          walletId: DUSK_WALLET_ID,
           type: "DUSK_PROVIDER_EVENT",
           name: "profilesChanged",
           data: [{ profileId: "account:0:acct0", account: "acct0", shieldedAddress: "addr0" }],
@@ -116,5 +120,98 @@ describe("integration: inpage provider discovery", () => {
     expect(events).toHaveLength(2);
     expect(events[0]).toEqual([profile]);
     expect(events[1]).toEqual([{ profileId: "account:0:acct0", account: "acct0", shieldedAddress: "addr0" }]);
+  });
+
+  it("scopes bridge messages to Dusk Wallet", async () => {
+    const source = await readFile(inpageUrl, "utf8");
+    const window = new EventTarget();
+    const posted = [];
+    window.window = window;
+    window.location = { origin: "https://dapp.example" };
+    window.postMessage = (msg, targetOrigin) => {
+      posted.push({ msg, targetOrigin });
+    };
+    window.MessageEvent = TestMessageEvent;
+
+    const context = vm.createContext({
+      window,
+      console,
+      Event,
+      CustomEvent: TestCustomEvent,
+      MessageEvent: TestMessageEvent,
+      Map,
+      Array,
+      Object,
+      String,
+      Boolean,
+      Promise,
+      Date,
+      Math,
+      Error,
+      crypto: { randomUUID: () => "req-1" },
+    });
+
+    vm.runInContext(source, context);
+
+    const resultPromise = window.duskWallet.request({ method: "dusk_chainId" });
+    expect(posted.at(-1)).toEqual({
+      msg: {
+        target: "DUSK_WALLET_EXTENSION",
+        walletId: DUSK_WALLET_ID,
+        type: "DUSK_RPC_REQUEST",
+        id: "req-1",
+        request: { method: "dusk_chainId", params: undefined },
+      },
+      targetOrigin: "https://dapp.example",
+    });
+
+    const events = [];
+    window.duskWallet.on("chainChanged", (chainId) => events.push(chainId));
+    expect(posted.at(-1).msg).toMatchObject({
+      target: "DUSK_WALLET_EXTENSION",
+      walletId: DUSK_WALLET_ID,
+      type: "DUSK_PROVIDER_SUBSCRIBE",
+    });
+
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        source: window,
+        data: {
+          target: "DUSK_WALLET_EXTENSION",
+          walletId: "wallet.pie.extension",
+          type: "DUSK_RPC_RESPONSE",
+          id: "req-1",
+          response: { result: "dusk:testnet" },
+        },
+      })
+    );
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        source: window,
+        data: {
+          target: "DUSK_WALLET_EXTENSION",
+          walletId: "wallet.pie.extension",
+          type: "DUSK_PROVIDER_EVENT",
+          name: "chainChanged",
+          data: "dusk:testnet",
+        },
+      })
+    );
+    expect(events).toEqual([]);
+
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        source: window,
+        data: {
+          target: "DUSK_WALLET_EXTENSION",
+          walletId: DUSK_WALLET_ID,
+          type: "DUSK_RPC_RESPONSE",
+          id: "req-1",
+          response: { result: "dusk:mainnet" },
+        },
+      })
+    );
+
+    await expect(resultPromise).resolves.toBe("dusk:mainnet");
   });
 });
