@@ -7,8 +7,23 @@
 // - `dusk:announceProvider`
 
 (function () {
-  if (window.duskWallet) {
+  const DUSK_WALLET_ID = "wallet.dusk.extension";
+  const DUSK_BRIDGE_TARGET = "DUSK_WALLET_EXTENSION";
+  const DUSK_INPAGE_INSTALLED_KEY = "__DUSK_WALLET_EXTENSION_INPAGE__";
+
+  if (window[DUSK_INPAGE_INSTALLED_KEY]) {
     return;
+  }
+
+  try {
+    Object.defineProperty(window, DUSK_INPAGE_INSTALLED_KEY, {
+      value: true,
+      configurable: false,
+      enumerable: false,
+      writable: false,
+    });
+  } catch {
+    window[DUSK_INPAGE_INSTALLED_KEY] = true;
   }
 
   const DUSK_REQUEST_PROVIDER_EVENT = "dusk:requestProvider";
@@ -24,7 +39,7 @@
   };
 
   const walletInfo = Object.freeze({
-    uuid: "wallet.dusk.extension",
+    uuid: DUSK_WALLET_ID,
     name: "Dusk Wallet",
     icon:
       "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop stop-color='%237aa2ff'/%3E%3Cstop offset='1' stop-color='%2333d1ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='18' fill='%23070b14'/%3E%3Cpath d='M21 16h12.5c11.2 0 18.5 6.5 18.5 16s-7.3 16-18.5 16H21V16Zm11.4 24c6.5 0 10.6-3.1 10.6-8s-4.1-8-10.6-8h-2.7v16h2.7Z' fill='url(%23g)'/%3E%3C/svg%3E",
@@ -65,7 +80,7 @@
   function ensurePushSubscribed() {
     try {
       window.postMessage(
-        { target: "DUSK_EXTENSION", type: "DUSK_PROVIDER_SUBSCRIBE" },
+        { target: DUSK_BRIDGE_TARGET, walletId: DUSK_WALLET_ID, type: "DUSK_PROVIDER_SUBSCRIBE" },
         window.location.origin
       );
     } catch {
@@ -148,7 +163,8 @@
       String(Date.now()) + Math.random();
 
     const msg = {
-      target: "DUSK_EXTENSION",
+      target: DUSK_BRIDGE_TARGET,
+      walletId: DUSK_WALLET_ID,
       type: "DUSK_RPC_REQUEST",
       id,
       request: { method, params },
@@ -203,7 +219,8 @@
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     const msg = event.data;
-    if (!msg || msg.target !== "DUSK_EXTENSION") return;
+    if (!msg || msg.target !== DUSK_BRIDGE_TARGET) return;
+    if (msg.walletId !== DUSK_WALLET_ID) return;
 
     if (msg.type === "DUSK_PROVIDER_STATE" && msg.state) {
       const st = msg.state;
@@ -277,7 +294,7 @@
   });
 
   // Wallet-specific namespace for debugging / internal use only.
-  window.duskWallet = provider;
+  if (!window.duskWallet) window.duskWallet = provider;
 
   // Announce immediately so already-listening dApps can discover the provider,
   // and listen for future discovery requests so load order does not matter.

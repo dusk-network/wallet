@@ -3,6 +3,7 @@ import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 
 const contentScriptUrl = new URL("./contentScript.js", import.meta.url);
+const DUSK_WALLET_ID = "wallet.dusk.extension";
 
 class FakeEvent {
   #listeners = [];
@@ -89,7 +90,8 @@ describe("contentScript message bridge", () => {
     const { window, sendMessage, connect } = await runContentScript();
 
     window.dispatchMessage({
-      target: "DUSK_EXTENSION",
+      target: "DUSK_WALLET_EXTENSION",
+      walletId: DUSK_WALLET_ID,
       type: "DUSK_RPC_REQUEST",
       id: "req-1",
       request: { method: "dusk_chainId" },
@@ -110,7 +112,8 @@ describe("contentScript message bridge", () => {
 
     for (const id of [undefined, null, "", 42, "x".repeat(129)]) {
       window.dispatchMessage({
-        target: "DUSK_EXTENSION",
+        target: "DUSK_WALLET_EXTENSION",
+        walletId: DUSK_WALLET_ID,
         type: "DUSK_RPC_REQUEST",
         id,
         request: { method: "dusk_chainId" },
@@ -125,7 +128,8 @@ describe("contentScript message bridge", () => {
     const { window, sentMessages } = await runContentScript();
 
     window.dispatchMessage({
-      target: "DUSK_EXTENSION",
+      target: "DUSK_WALLET_EXTENSION",
+      walletId: DUSK_WALLET_ID,
       type: "DUSK_RPC_REQUEST",
       id: "req-1",
       origin: "https://evil.example",
@@ -151,13 +155,15 @@ describe("contentScript message bridge", () => {
     const { window, sendMessage, connect } = await runContentScript();
 
     window.dispatchMessage({
-      target: "DUSK_EXTENSION",
+      target: "DUSK_WALLET_EXTENSION",
+      walletId: DUSK_WALLET_ID,
       type: "DUSK_PROVIDER_EVENT",
       name: "connect",
       data: { chainId: "dusk:2" },
     });
     window.dispatchMessage({
-      target: "DUSK_EXTENSION",
+      target: "DUSK_WALLET_EXTENSION",
+      walletId: DUSK_WALLET_ID,
       type: "DUSK_PROVIDER_STATE",
       state: {
         isConnected: true,
@@ -169,11 +175,12 @@ describe("contentScript message bridge", () => {
     expect(connect).not.toHaveBeenCalled();
   });
 
-  it("forwards provider events from the extension port to inpage only as extension-target messages", async () => {
+  it("forwards provider events from the extension port to inpage only as wallet-scoped messages", async () => {
     const { window, ports } = await runContentScript();
 
     window.dispatchMessage({
-      target: "DUSK_EXTENSION",
+      target: "DUSK_WALLET_EXTENSION",
+      walletId: DUSK_WALLET_ID,
       type: "DUSK_PROVIDER_SUBSCRIBE",
     });
     ports[0].onMessage.emit({
@@ -184,10 +191,68 @@ describe("contentScript message bridge", () => {
 
     expect(window.posted.at(-1)).toEqual({
       msg: {
-        target: "DUSK_EXTENSION",
+        target: "DUSK_WALLET_EXTENSION",
+        walletId: DUSK_WALLET_ID,
         type: "DUSK_PROVIDER_EVENT",
         name: "profilesChanged",
         data: [{ account: "acct0" }],
+      },
+      targetOrigin: "https://dapp.example",
+    });
+  });
+
+  it("ignores bridge messages for other wallets", async () => {
+    const { window, sendMessage, connect } = await runContentScript();
+
+    window.dispatchMessage({
+      target: "DUSK_EXTENSION",
+      type: "DUSK_RPC_REQUEST",
+      id: "req-0",
+      request: { method: "dusk_requestProfiles" },
+    });
+    window.dispatchMessage({
+      target: "DUSK_WALLET_EXTENSION",
+      walletId: "wallet.pie.extension",
+      type: "DUSK_PROVIDER_SUBSCRIBE",
+    });
+    window.dispatchMessage({
+      target: "DUSK_WALLET_EXTENSION",
+      walletId: "wallet.pie.extension",
+      type: "DUSK_RPC_REQUEST",
+      id: "req-1",
+      request: { method: "dusk_requestProfiles" },
+    });
+    window.dispatchMessage({
+      target: "DUSK_WALLET_EXTENSION",
+      type: "DUSK_RPC_REQUEST",
+      id: "req-2",
+      request: { method: "dusk_requestProfiles" },
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("scopes RPC responses to Dusk Wallet", async () => {
+    const { window } = await runContentScript();
+
+    window.dispatchMessage({
+      target: "DUSK_WALLET_EXTENSION",
+      walletId: DUSK_WALLET_ID,
+      type: "DUSK_RPC_REQUEST",
+      id: "req-1",
+      request: { method: "dusk_chainId" },
+    });
+
+    await Promise.resolve();
+
+    expect(window.posted.at(-1)).toEqual({
+      msg: {
+        target: "DUSK_WALLET_EXTENSION",
+        walletId: DUSK_WALLET_ID,
+        type: "DUSK_RPC_RESPONSE",
+        id: "req-1",
+        response: { id: "req-1", result: "ok" },
       },
       targetOrigin: "https://dapp.example",
     });
