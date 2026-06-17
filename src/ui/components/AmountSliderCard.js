@@ -78,7 +78,7 @@ export function createAmountSliderCard({
     },
   });
 
-  const amountRow = h("div", { class: "input-row" }, [amount, maxBtn]);
+  const amountRow = h("div", { class: "input-row amount-input-row" }, [amount, maxBtn]);
 
   const slider = h("input", {
     type: "range",
@@ -110,7 +110,7 @@ export function createAmountSliderCard({
 
   const sliderTrack = h("div", { class: "amount-range__track" }, [slider, ticks]);
 
-  const sliderWrap = h("div", { class: "amount-range-wrap", style: "display:none" }, [
+  const sliderWrap = h("div", { class: "amount-range-wrap amount-slider-helper", style: "display:none" }, [
     sliderTrack,
     sliderPct,
   ]);
