@@ -7,7 +7,7 @@ import { toastView } from "../components/Toast.js";
 import { createNetworkMenuController } from "../components/NetworkMenu.js";
 import { createAccountMenuController } from "../components/AccountMenu.js";
 import { createHeaderRenderer } from "./header.js";
-import { send } from "../../wallet/bus.js";
+import { send as rawSend } from "../../wallet/bus.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
 
@@ -57,6 +57,46 @@ const app = document.getElementById("app");
 const headerActionsHost = document.getElementById("header-actions");
 const fullNav = document.querySelector(".full-nav");
 const ext = getExtensionApi();
+
+function isWalletLockedResponse(value) {
+  const err = value?.error ?? value;
+  const message = String(err?.message ?? err ?? "");
+  return /wallet locked/i.test(message);
+}
+
+function applyLockedOverviewPatch() {
+  try {
+    state.overview = {
+      ...(state.overview ?? {}),
+      isUnlocked: false,
+      accounts: [],
+      addresses: [],
+      balance: null,
+      shieldedBalance: null,
+    };
+    state.needsRefresh = true;
+  } catch {
+    // ignore
+  }
+}
+
+let lockRefreshTimer = null;
+function scheduleLockedRefresh() {
+  applyLockedOverviewPatch();
+  if (lockRefreshTimer) clearTimeout(lockRefreshTimer);
+  lockRefreshTimer = setTimeout(() => {
+    lockRefreshTimer = null;
+    render({ forceRefresh: true }).catch(() => {});
+  }, 0);
+}
+
+async function send(message) {
+  const response = await rawSend(message);
+  if (isWalletLockedResponse(response)) {
+    scheduleLockedRefresh();
+  }
+  return response;
+}
 
 function stDuskWatchKey(ov, profileIndex, contractId) {
   return [
@@ -201,8 +241,9 @@ if (fullNav) {
     netMenu.close();
     acctMenu.close();
     state.route = route;
+    state.needsRefresh = true;
     if (route !== "activity") state.highlightTx = null;
-    await render();
+    await render({ forceRefresh: true });
   });
 }
 
@@ -343,7 +384,7 @@ function schedulePendingTxPoll(ov) {
   }
 }
 
-// --- Tx status push (from background) --------------------------------------
+// --- Runtime pushes (from background) --------------------------------------
 let txStatusListenerInstalled = false;
 let lastShieldedStatusKey = "";
 let shieldedStatusRefreshTimer = null;
@@ -373,6 +414,17 @@ function installTxStatusListener() {
 
     ext.runtime.onMessage.addListener((msg) => {
       try {
+        if (msg?.type === "DUSK_UI_LOCK_STATE") {
+          if (msg.isUnlocked === false) {
+            scheduleLockedRefresh();
+            return;
+          }
+
+          state.needsRefresh = true;
+          render({ forceRefresh: true }).catch(() => {});
+          return;
+        }
+
         if (msg?.type === "DUSK_UI_SHIELDED_STATUS") {
           const nextKey = shieldedStatusKey(msg.status);
           if (nextKey && nextKey === lastShieldedStatusKey) return;
@@ -552,6 +604,11 @@ const acctMenu = createAccountMenuController({
     try {
       acctMenu.close();
       const resp = await send({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index });
+      if (isWalletLockedResponse(resp)) {
+        applyLockedOverviewPatch();
+        await render({ forceRefresh: true });
+        return;
+      }
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to switch profile");
       if (!resp?.ok) throw new Error("Failed to switch profile");
 
@@ -559,6 +616,11 @@ const acctMenu = createAccountMenuController({
       state.needsRefresh = true;
       await render({ forceRefresh: true });
     } catch (e) {
+      if (isWalletLockedResponse(e)) {
+        applyLockedOverviewPatch();
+        await render({ forceRefresh: true });
+        return;
+      }
       showToast(e?.message ?? String(e));
     }
   },
