@@ -112,7 +112,13 @@ function showError(err) {
 function updateFullNav() {
   try {
     if (!fullNav) return;
-    const route = state?.route === "activity" ? "activity" : state?.route || "home";
+    const rawRoute = state?.route || "home";
+    const route =
+      rawRoute === "convert_confirm"
+        ? "convert"
+        : rawRoute === "activity"
+        ? "activity"
+        : rawRoute;
     for (const item of fullNav.querySelectorAll("[data-route]")) {
       const itemRoute = item.getAttribute("data-route");
       const active = itemRoute === route || (itemRoute === "home" && route === "tx");
