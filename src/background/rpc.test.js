@@ -157,6 +157,37 @@ describe("background rpc handler", () => {
     });
   });
 
+  it.each([
+    ["HTTPS", "https://dapp.example"],
+    ["localhost HTTP", "http://localhost:5173"],
+    ["127.0.0.1 HTTP", "http://127.0.0.1:5173"],
+    ["IPv6 localhost HTTP", "http://[::1]:5173"],
+  ])("accepts dApp RPC from %s origins", async (_label, origin) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    await expect(
+      handleRpc(origin, { method: "dusk_getCapabilities" })
+    ).resolves.toMatchObject({ provider: "dusk-wallet" });
+  });
+
+  it.each([
+    ["non-local HTTP", "http://dapp.example"],
+    ["private LAN HTTP", "http://192.168.1.10:5173"],
+    ["extension origin", "chrome-extension://abc/page.html"],
+    ["missing origin", ""],
+  ])("rejects dApp RPC from %s before permission lookup", async (_label, origin) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    await expect(
+      handleRpc(origin, { method: "dusk_requestProfiles" })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+
+    expect(getPermissionForOrigin).not.toHaveBeenCalled();
+    expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
   it("dusk_requestProfiles rejects when no vault exists (opens onboarding)", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -1036,6 +1067,8 @@ describe("background rpc handler", () => {
     ["unknown chain", { chainId: "dusk:999" }],
     ["invalid node URL", { nodeUrl: "not a url" }],
     ["unsupported node URL protocol", { nodeUrl: "ftp://node.example" }],
+    ["non-local HTTP node URL", { nodeUrl: "http://node.example:8080" }],
+    ["private LAN HTTP node URL", { nodeUrl: "http://192.168.1.20:8080" }],
   ])("dusk_switchNetwork rejects %s before approval", async (_label, params) => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -1050,6 +1083,35 @@ describe("background rpc handler", () => {
       })
     ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
     expect(requestUserApproval).not.toHaveBeenCalledWith("switch_network", expect.anything(), expect.anything());
+  });
+
+  it.each([
+    ["HTTPS custom node", "https://node.example"],
+    ["localhost custom node", "http://localhost:8080"],
+    ["127.0.0.1 custom node", "http://127.0.0.1:8080"],
+    ["IPv6 localhost custom node", "http://[::1]:8080"],
+  ])("dusk_switchNetwork accepts %s", async (_label, nodeUrl) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_switchNetwork",
+        params: { nodeUrl },
+      })
+    ).resolves.toBeNull();
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "switch_network",
+      "https://dapp.example",
+      expect.objectContaining({
+        to: expect.objectContaining({ nodeUrl }),
+      })
+    );
+    expect(setSettings).toHaveBeenCalledWith({ nodeUrl });
   });
 
   it("dusk_switchNetwork returns null without approval when target preset URL matches current settings", async () => {

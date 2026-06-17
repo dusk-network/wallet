@@ -8,6 +8,7 @@ import { getPermissions } from "../shared/permissions.js";
 import { STORAGE_KEYS } from "../shared/storage.js";
 import { chainIdFromNodeUrl } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { getEngineStatus } from "./engineHost.js";
 import { getExtensionApi } from "../platform/extensionApi.js";
 
@@ -78,13 +79,7 @@ function getOriginFromSender(sender) {
 }
 
 function isWebOrigin(origin) {
-  return (
-    typeof origin === "string" &&
-    origin.length > 0 &&
-    !origin.startsWith("chrome-extension://") &&
-    !origin.startsWith("moz-extension://") &&
-    !origin.startsWith("edge-extension://")
-  );
+  return isAllowedDappOrigin(origin);
 }
 
 /**

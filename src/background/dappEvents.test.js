@@ -214,6 +214,50 @@ describe("dappEvents", () => {
     expect(profileMsgs.at(-1)?.data).toEqual([]);
   });
 
+  it("does not bind non-local HTTP sender origins even when permission exists", async () => {
+    permissions = {
+      "http://dapp.example": {
+        profileId: "account:0:acct0",
+        accountIndex: 0,
+        grants: { publicAccount: true, shieldedReceiveAddress: false },
+        connectedAt: 1,
+        updatedAt: 1,
+      },
+    };
+
+    const ev = await import("./dappEvents.js");
+
+    const port = new FakePort("http://dapp.example");
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(port.messages).toEqual([]);
+  });
+
+  it("binds local HTTP sender origins for development", async () => {
+    permissions = {
+      "http://localhost:5173": {
+        profileId: "account:0:acct0",
+        accountIndex: 0,
+        grants: { publicAccount: true, shieldedReceiveAddress: false },
+        connectedAt: 1,
+        updatedAt: 1,
+      },
+    };
+
+    const ev = await import("./dappEvents.js");
+
+    const port = new FakePort("http://localhost:5173");
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const stateMsg = port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE");
+    expect(stateMsg?.state).toMatchObject({
+      isConnected: true,
+      profiles: [{ profileId: "account:0:acct0", account: "acct0" }],
+    });
+  });
+
   it("does not let a HELLO message re-key a sender-derived origin", async () => {
     permissions = {
       "https://dapp.example": {
@@ -274,5 +318,28 @@ describe("dappEvents", () => {
 
     const stateMsg = port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE");
     expect(stateMsg?.state.profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
+  });
+
+  it("ignores non-local HTTP HELLO fallback origins", async () => {
+    permissions = {
+      "http://dapp.example": {
+        profileId: "account:0:acct0",
+        accountIndex: 0,
+        grants: { publicAccount: true, shieldedReceiveAddress: false },
+        connectedAt: 1,
+        updatedAt: 1,
+      },
+    };
+
+    const ev = await import("./dappEvents.js");
+
+    const port = new FakePortWithoutSenderOrigin();
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+
+    port.onMessage.emit({ type: "DUSK_DAPP_HELLO", origin: "http://dapp.example" });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(port.messages).toEqual([]);
   });
 });

@@ -11,6 +11,10 @@ import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
+import {
+  isAllowedDappEndpoint,
+  isAllowedDappOrigin,
+} from "../shared/securityPolicy.js";
 import { bytesToHex, sha256Hex, toBytes } from "../shared/bytes.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import { classifyDuskIdentifier } from "../shared/duskIdentifiers.js";
@@ -32,6 +36,14 @@ import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensio
 
 // RPC Handler (from dApps)
 export async function handleRpc(origin, request) {
+  origin = String(origin ?? "").trim();
+  if (!isAllowedDappOrigin(origin)) {
+    throw rpcError(
+      ERROR_CODES.UNAUTHORIZED,
+      "Dusk Wallet only accepts dApp requests from HTTPS or local HTTP origins"
+    );
+  }
+
   const { method, params } = request || {};
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
@@ -240,10 +252,15 @@ export async function handleRpc(origin, request) {
       if (url.protocol !== "http:" && url.protocol !== "https:") {
         throw new Error("protocol");
       }
-      return trimmed;
     } catch {
       throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid nodeUrl");
     }
+
+    if (!isAllowedDappEndpoint(trimmed)) {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "nodeUrl must use HTTPS or local HTTP");
+    }
+
+    return trimmed;
   }
 
   function profileFromStatus(status, index, includeShielded = false) {
