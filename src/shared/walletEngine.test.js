@@ -113,6 +113,9 @@ vi.mock("@dusk/w3sper", () => {
   class TxBuilder {
     profile;
     amount;
+    ownerProfile = null;
+    ownerProfilesValue = [];
+    paymentValue = "account";
     toValue = "";
     memoValue = "";
     gasValue = null;
@@ -122,9 +125,12 @@ vi.mock("@dusk/w3sper", () => {
     payloadValue = null;
     obfuscatedValue = false;
 
-    constructor(profile, amount) {
+    constructor(profile, amount, options = {}) {
       this.profile = profile;
       this.amount = amount;
+      this.ownerProfile = options.ownerProfile ?? null;
+      this.ownerProfilesValue = Array.isArray(options.ownerProfiles) ? options.ownerProfiles : [];
+      this.paymentValue = options.payment ?? "account";
     }
 
     to(v) {
@@ -167,17 +173,67 @@ vi.mock("@dusk/w3sper", () => {
       return this;
     }
 
+    owner(profile) {
+      this.ownerProfile = profile;
+      return this;
+    }
+
+    ownerProfiles(profiles) {
+      this.ownerProfilesValue = Array.from(profiles ?? []);
+      return this;
+    }
+
+    shielded() {
+      this.paymentValue = "address";
+      return this;
+    }
+
+    public() {
+      this.paymentValue = "account";
+      return this;
+    }
+
     async build() {
       return { buffer: buildSignedMoonlightBuffer() };
     }
   }
 
   class Bookkeeper {
-    constructor(_treasury) {}
+    constructor(treasury) {
+      this.treasury = treasury;
+    }
+    get minimumStake() {
+      return Promise.resolve(1n);
+    }
+    balance(identifier) {
+      if (typeof globalThis.__W3SPER_BALANCE__ === "function") {
+        return globalThis.__W3SPER_BALANCE__(identifier);
+      }
+      return Promise.resolve({ nonce: 0n, value: 0n });
+    }
+    stakeInfo(identifier) {
+      if (typeof globalThis.__W3SPER_STAKE_INFO__ === "function") {
+        return globalThis.__W3SPER_STAKE_INFO__(identifier);
+      }
+      return Promise.resolve({ amount: null, reward: 0n, faults: 0, hardFaults: 0 });
+    }
+    stakeKeys(identifier) {
+      if (typeof globalThis.__W3SPER_STAKE_KEYS__ === "function") {
+        return globalThis.__W3SPER_STAKE_KEYS__(identifier);
+      }
+      return Promise.resolve(null);
+    }
+    async pick() {
+      return new Map([[new Uint8Array([0xee]), new Uint8Array([0x01])]]);
+    }
     as(profile) {
       return {
         transfer: (amount) => new TxBuilder(profile, amount),
-        unshield: (amount) => new TxBuilder(profile, amount),
+        unshield: (amount) => new TxBuilder(profile, amount, { payment: "address" }),
+        stake: (amount, options) => new TxBuilder(profile, amount, options),
+        topup: (amount, options) => new TxBuilder(profile, amount, { ...options, topup: true }),
+        unstake: (amount, options) => new TxBuilder(profile, amount, options),
+        withdraw: (amount, options) => new TxBuilder(profile, amount, options),
       };
     }
   }
@@ -195,6 +251,9 @@ vi.mock("@dusk/w3sper", () => {
         withId: (hash) => ({
           once: { executed: async () => ({ hash, success: true }) },
         }),
+      };
+      this.dataDrivers = {
+        register: vi.fn(),
       };
     }
 
@@ -235,12 +294,24 @@ vi.mock("@dusk/w3sper", () => {
 
   class AddressSyncer {
     constructor(_network) {}
+    get root() {
+      return Promise.resolve(new Uint8Array([0]));
+    }
+    async openings(picked) {
+      return Array.from(picked ?? [], () => new Uint8Array([0]));
+    }
   }
 
   class AccountSyncer {
     constructor(_network) {}
     async balances(profiles) {
       return (profiles ?? []).map(() => ({ nonce: 0n, value: 0n }));
+    }
+    async stakes() {
+      return [{ amount: null, reward: 0n, faults: 0, hardFaults: 0 }];
+    }
+    async stakeKeys() {
+      return [null];
     }
   }
 
@@ -255,6 +326,7 @@ vi.mock("@dusk/w3sper", () => {
     ProfileGenerator,
     AddressSyncer,
     AccountSyncer,
+    STAKE: "stake",
     useAsProtocolDriver,
   };
 });
@@ -272,6 +344,9 @@ describe("walletEngine", () => {
     vi.resetModules();
     globalThis.__W3SPER_LAST_EXEC_TX__ = null;
     globalThis.__W3SPER_EXECUTE_IMPL__ = null;
+    globalThis.__W3SPER_BALANCE__ = null;
+    globalThis.__W3SPER_STAKE_INFO__ = null;
+    globalThis.__W3SPER_STAKE_KEYS__ = null;
 
     // walletEngine loads a WASM protocol driver via fetch() on first use.
     vi.stubGlobal(
@@ -294,6 +369,8 @@ describe("walletEngine", () => {
     }
     vi.unstubAllGlobals();
     delete globalThis.__W3SPER_EXECUTE_IMPL__;
+    delete globalThis.__W3SPER_STAKE_INFO__;
+    delete globalThis.__W3SPER_STAKE_KEYS__;
   });
 
   it("derives the CLI-aligned two default profiles on unlock", async () => {
@@ -566,5 +643,186 @@ describe("walletEngine", () => {
       nullifiers: [new Uint8Array([0xdd])],
     });
     expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xunshield")).toEqual(["dd"]);
+  });
+
+  it("returns owner-separated stake status for local owner profiles", async () => {
+    engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    globalThis.__W3SPER_STAKE_INFO__ = vi.fn(async () => ({
+      amount: { value: 10n, locked: 0n, eligibility: 0n, total: 10n },
+      reward: 0n,
+      faults: 0,
+      hardFaults: 0,
+    }));
+    globalThis.__W3SPER_STAKE_KEYS__ = vi.fn(async () => ({
+      account: "acct0",
+      owner: { Account: "acct1" },
+    }));
+
+    await engine.selectAccountIndex({ index: 1 });
+    const status = await engine.getStakeOwnerStatus({ profileIndex: 0 });
+
+    expect(status.ownerKind).toBe("local");
+    expect(status.ownerProfileIndex).toBe(1);
+    expect(status.manageable).toBe(true);
+    expect(status.info.amount.value).toBe("10");
+  });
+
+  it("returns related stake positions owned by the selected profile", async () => {
+    engine.configure({ accountCount: 3, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    const stakeInfoByAccount = new Map([
+      ["acct0", {
+        amount: { value: 10n, locked: 1n, eligibility: 0n, total: 11n },
+        reward: 2n,
+        faults: 0,
+        hardFaults: 0,
+      }],
+      ["acct1", {
+        amount: { value: 100n, locked: 0n, eligibility: 4320n, total: 100n },
+        reward: 3n,
+        faults: 1,
+        hardFaults: 0,
+      }],
+    ]);
+    const stakeKeysByAccount = new Map([
+      ["acct0", { account: "acct0", owner: { Account: "acct1" } }],
+      ["acct1", { account: "acct1", owner: { Account: "acct0" } }],
+    ]);
+    const balanceByAccount = new Map([
+      ["acct0", { nonce: 7n, value: 1_000n }],
+      ["acct1", { nonce: 0n, value: 0n }],
+    ]);
+
+    globalThis.__W3SPER_STAKE_INFO__ = vi.fn(async (account) =>
+      stakeInfoByAccount.get(String(account)) ?? {
+        amount: null,
+        reward: 0n,
+        faults: 0,
+        hardFaults: 0,
+      }
+    );
+    globalThis.__W3SPER_STAKE_KEYS__ = vi.fn(async (account) =>
+      stakeKeysByAccount.get(String(account)) ?? null
+    );
+    globalThis.__W3SPER_BALANCE__ = vi.fn(async (account) =>
+      balanceByAccount.get(String(account)) ?? { nonce: 0n, value: 0n }
+    );
+
+    const status = await engine.getStakeOwnerStatus({ profileIndex: 0 });
+
+    expect(status.relatedStakes).toHaveLength(2);
+    expect(status.relatedStakes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          profileIndex: 0,
+          ownerProfileIndex: 1,
+          publicBalance: { nonce: "7", value: "1000" },
+          info: expect.objectContaining({
+            amount: expect.objectContaining({ value: "10", locked: "1", eligibility: "0" }),
+            reward: "2",
+          }),
+        }),
+        expect.objectContaining({
+          profileIndex: 1,
+          ownerProfileIndex: 0,
+          publicBalance: { nonce: "0", value: "0" },
+          info: expect.objectContaining({
+            amount: expect.objectContaining({ value: "100", eligibility: "4320" }),
+            reward: "3",
+            faults: 1,
+          }),
+        }),
+      ])
+    );
+  });
+
+  it("marks missing and contract stake owners as not wallet-manageable", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    globalThis.__W3SPER_STAKE_INFO__ = vi.fn(async () => ({
+      amount: { value: 10n, locked: 0n, eligibility: 0n, total: 10n },
+      reward: 0n,
+      faults: 0,
+      hardFaults: 0,
+    }));
+    globalThis.__W3SPER_STAKE_KEYS__ = vi.fn(async () => ({
+      account: "acct0",
+      owner: { Account: "acct9" },
+    }));
+
+    await expect(engine.getStakeOwnerStatus({ profileIndex: 0 })).resolves.toMatchObject({
+      ownerKind: "missing",
+      manageable: false,
+      ownerAccount: "acct9",
+    });
+
+    globalThis.__W3SPER_STAKE_KEYS__ = vi.fn(async () => ({
+      account: "acct0",
+      owner: { Contract: "00".repeat(32) },
+    }));
+
+    await expect(engine.getStakeOwnerStatus({ profileIndex: 0 })).resolves.toMatchObject({
+      ownerKind: "contract",
+      manageable: false,
+    });
+  });
+
+  it("passes explicit and candidate owner profiles to owner-aware staking builders", async () => {
+    engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    globalThis.__W3SPER_STAKE_INFO__ = vi.fn(async () => ({
+      amount: { value: 10n, locked: 0n, eligibility: 0n, total: 10n },
+      reward: 0n,
+      faults: 0,
+      hardFaults: 0,
+    }));
+
+    const result = await engine.sendTransaction({
+      kind: "stake",
+      amount: "1",
+      ownerProfileIndex: 1,
+      gas: { limit: "1", price: "1" },
+    });
+
+    expect(result).toEqual({ hash: "0xmockhash", nonce: 42 });
+    const tx = globalThis.__W3SPER_LAST_EXEC_TX__;
+    expect(tx.profile?.account?.toString?.()).toBe("acct0");
+    expect(tx.ownerProfile?.account?.toString?.()).toBe("acct1");
+    expect(tx.ownerProfilesValue.map((p) => p.account.toString())).toEqual(["acct0", "acct1"]);
+    expect(tx.paymentValue).toBe("account");
+  });
+
+  it("persists returned nullifiers for shielded staking when explicitly requested", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    const store = await import("./shieldedStore.js");
+    await store.clearNotes(NETWORK_KEY, WALLET_ID, 0);
+    const notes = new Map();
+    notes.set(new Uint8Array([0xee]), new Uint8Array([0x01]));
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, notes);
+
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async () => ({
+      hash: "0xstake",
+      nullifiers: [new Uint8Array([0xee])],
+    }));
+
+    const result = await engine.sendTransaction({
+      kind: "stake",
+      payment: "address",
+      amount: "1",
+    });
+
+    expect(result).toEqual({
+      hash: "0xstake",
+      nullifiers: [new Uint8Array([0xee])],
+    });
+    expect(globalThis.__W3SPER_LAST_EXEC_TX__.paymentValue).toBe("address");
+    expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xstake")).toEqual(["ee"]);
   });
 });

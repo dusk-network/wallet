@@ -80,6 +80,21 @@ describe("getDefaultGas", () => {
     });
   });
 
+  it("returns conservative shielded staking defaults", () => {
+    expect(getDefaultGas("stake", { privacy: "shielded" })).toEqual({
+      limit: "500000000",
+      price: "1",
+    });
+    expect(getDefaultGas("unstake", { privacy: "shielded" })).toEqual({
+      limit: "500000000",
+      price: "1",
+    });
+    expect(getDefaultGas("withdraw_reward", { privacy: "shielded" })).toEqual({
+      limit: "500000000",
+      price: "1",
+    });
+  });
+
   it("handles case insensitivity", () => {
     expect(getDefaultGas("TRANSFER")).toEqual({ limit: "2000000", price: "1" });
     expect(getDefaultGas("TRANSFER", { privacy: "Shielded" })).toEqual({ limit: "15000000", price: "1" });
@@ -102,6 +117,12 @@ describe("getMinimumGas", () => {
   it("returns a shielded contract-call floor", () => {
     expect(getMinimumGas("contract_call", { privacy: "shielded" })).toEqual({ limit: "100000000" });
     expect(getMinimumGas("contract_call", { privacy: "public" })).toBeNull();
+  });
+
+  it("returns shielded staking floors", () => {
+    expect(getMinimumGas("stake", { privacy: "shielded" })).toEqual({ limit: "100000000" });
+    expect(getMinimumGas("unstake", { privacy: "shielded" })).toEqual({ limit: "100000000" });
+    expect(getMinimumGas("withdraw_reward", { privacy: "shielded" })).toEqual({ limit: "100000000" });
   });
 });
 
@@ -162,6 +183,12 @@ describe("applyGasDefaults", () => {
         { limit: "99999999", price: "1" },
         { privacy: "shielded" }
       )
+    ).toThrow(/at least 100000000/);
+  });
+
+  it("rejects under-floor shielded staking gas", () => {
+    expect(() =>
+      applyGasDefaults("stake", { limit: "99999999", price: "1" }, { privacy: "shielded" })
     ).toThrow(/at least 100000000/);
   });
 });
@@ -229,6 +256,15 @@ describe("applyTxDefaults", () => {
         gas: { limit: "50000000", price: "1" },
       })
     ).toThrow(/at least 100000000/);
+  });
+
+  it("applies shielded staking defaults when payment uses address notes", () => {
+    expect(applyTxDefaults({ kind: "stake", payment: "address", amount: "1" })).toEqual({
+      kind: "stake",
+      payment: "address",
+      amount: "1",
+      gas: { limit: "500000000", price: "1" },
+    });
   });
 
   it("removes undefined gas field when no defaults exist", () => {

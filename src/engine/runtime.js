@@ -17,6 +17,7 @@ import {
   getDrc721TokenUri,
   getMinimumStake,
   getStakeInfo,
+  getStakeOwnerStatus,
   getShieldedBalance,
   getShieldedStatus,
   isUnlocked,
@@ -306,6 +307,12 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
               hardFaults: Number(info?.hardFaults ?? 0) || 0,
             },
           });
+          return;
+        }
+
+        case "dusk_getStakeOwnerStatus": {
+          const result = await getStakeOwnerStatus(params ?? {});
+          sendResponse({ id, result });
           return;
         }
 

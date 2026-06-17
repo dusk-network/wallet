@@ -286,6 +286,25 @@ function schedulePendingTxPoll(ov) {
 
 // --- Tx status push (from background) --------------------------------------
 let txStatusListenerInstalled = false;
+let lastShieldedStatusKey = "";
+let shieldedStatusRefreshTimer = null;
+
+function shieldedStatusKey(status) {
+  if (!status || typeof status !== "object") return "";
+  try {
+    return JSON.stringify({
+      state: status.state ?? "",
+      progress: Math.round(Number(status.progress ?? 0) * 1000) / 1000,
+      notes: Number(status.notes ?? 0) || 0,
+      cursorBookmark: String(status.cursorBookmark ?? ""),
+      cursorBlock: String(status.cursorBlock ?? ""),
+      lastError: String(status.lastError ?? ""),
+    });
+  } catch {
+    return String(status);
+  }
+}
+
 function installTxStatusListener() {
   if (txStatusListenerInstalled) return;
   txStatusListenerInstalled = true;
@@ -296,6 +315,10 @@ function installTxStatusListener() {
     ext.runtime.onMessage.addListener((msg) => {
       try {
         if (msg?.type === "DUSK_UI_SHIELDED_STATUS") {
+          const nextKey = shieldedStatusKey(msg.status);
+          if (nextKey && nextKey === lastShieldedStatusKey) return;
+          lastShieldedStatusKey = nextKey;
+
           // Shielded sync finished (or status changed) in offscreen.
           // Trigger an overview refresh so the UI updates without requiring
           // manual reload.
@@ -310,11 +333,13 @@ function installTxStatusListener() {
             // ignore
           }
 
-          setTimeout(() => {
+          if (shieldedStatusRefreshTimer) clearTimeout(shieldedStatusRefreshTimer);
+          shieldedStatusRefreshTimer = setTimeout(() => {
+            shieldedStatusRefreshTimer = null;
             refreshOverview(send, { force: true })
               .then(() => render())
               .catch(() => {});
-          }, 150);
+          }, 500);
 
           return;
         }
@@ -549,7 +574,11 @@ const renderHeader = createHeaderRenderer({
 
 // --- Main render ----------------------------------------------------------
 export async function render({ forceRefresh = false } = {}) {
-  await refreshOverview(send, { force: forceRefresh });
+  const overviewRefreshed = await refreshOverview(send, { force: forceRefresh });
+  if (overviewRefreshed && state.staking) {
+    state.staking.loaded = false;
+    state.staking.error = null;
+  }
   const ov = state.overview;
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";

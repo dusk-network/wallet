@@ -1,10 +1,14 @@
 import { defineConfig } from "vite";
 import inject from "@rollup/plugin-inject";
+import { localW3sperAlias } from "./vite.local-w3sper.js";
 
 const engineDebug = process.env.DUSK_ENGINE_DEBUG === "1";
 
 export default defineConfig({
   plugins: [],
+  resolve: {
+    alias: localW3sperAlias(),
+  },
   define: {
     // Build-time constant used by src/wallet/bus.js to avoid bundling the
     // local (Tauri/web) backend into the extension bundle.
