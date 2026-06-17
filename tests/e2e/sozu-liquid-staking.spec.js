@@ -237,9 +237,9 @@ test.describe("Sozu liquid staking panel", () => {
       deposit: dusk(5),
       label: "Stake with Sozu",
     });
-    await expect(page.getByText("You are about to use Sozu")).toBeVisible();
     await expect(page.getByText("Stake with Sozu")).toBeVisible();
-    await expect(page.getByText("Funding Profile 1 public")).toBeVisible();
+    await expect(page.getByText("Gas: Profile 1 public balance")).toBeVisible();
+    await expect(page.getByText("Total (max)")).toBeVisible();
     await expect(page.getByRole("button", { name: "Recommended" })).toBeVisible();
 
     await page.getByRole("button", { name: "Confirm" }).click();
