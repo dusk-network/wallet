@@ -323,7 +323,6 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       },
     }),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: kind === TX_KIND.SHIELD ? "You are about to shield" : "You are about to unshield" }),
       h("div", { class: "meta-pill", text: `${fromLabel} → ${toLabel}` }),
       h("div", { class: "home-balance" }, [
         h("div", {

@@ -361,8 +361,8 @@ export function homeView(ov, { state, actions } = {}) {
     if (kind === TX_KIND.STAKE) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: "Stake delegated",
-        sub: "Hyperstaking · ~10s finality",
+        title: "Stake",
+        sub: "Native staking",
         amount: amt ? `-${amt} DUSK` : "",
         tone: "out",
         icon: "△",
@@ -371,8 +371,8 @@ export function homeView(ov, { state, actions } = {}) {
     if (kind === TX_KIND.UNSTAKE) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: "Stake withdrawn",
-        sub: tx?.amount != null ? "Hyperstaking" : "All stake",
+        title: "Unstake",
+        sub: tx?.amount != null ? "Native staking" : "Full stake",
         amount: amt ? `${amt} DUSK` : "—",
         tone: "in",
         icon: "△",
@@ -381,8 +381,8 @@ export function homeView(ov, { state, actions } = {}) {
     if (kind === TX_KIND.WITHDRAW_REWARD) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: "Rewards withdrawn",
-        sub: tx?.amount != null ? "Epoch rewards" : "All rewards",
+        title: "Claim rewards",
+        sub: tx?.amount != null ? "Native staking rewards" : "All rewards",
         amount: amt ? `+${amt} DUSK` : "—",
         tone: "in",
         icon: "↓",

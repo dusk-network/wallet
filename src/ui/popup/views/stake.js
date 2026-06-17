@@ -645,7 +645,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     !pos.hasStake
       ? h("div", {
           class: "muted",
-          text: "New stakes are self-owned by default. Select another local owner only for owner-separated provisioner setups.",
+          text: "New stakes are self-owned by default. Choose another local owner only for separated-owner setups.",
         })
       : null,
     actionTabs,
@@ -656,13 +656,13 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     h("div", {
       class: "muted",
       text: canUseShielded
-        ? "Shielded funding is available from the stake profile."
-        : "Shielded staking funds are not available here.",
+        ? "Shielded funding is available."
+        : "Funding uses the stake profile's public balance.",
     }),
     h("div", {
       class: currentState.ok ? "muted" : "err",
       text: currentState.reason ||
-        `Gas is paid by ${profileLabel(stakeProfileIndex)}. Owner-paid gas is not available here.`,
+        `Gas comes from ${profileLabel(stakeProfileIndex)} public balance.`,
     }),
     usesAmountInput ? h("label", { for: "stake-action-amount", text: amountLabel }) : null,
     usesAmountInput ? input : null,
@@ -833,21 +833,19 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   return [
     subnav({ title: "Review", onBack: goBack }),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: `You are about to ${kindLabel.toLowerCase()}` }),
       h("div", { class: "box tx-summary" }, [
         h("div", { class: "muted", text: kindLabel }),
         h("div", { class: "balance-amount", text: amountLine() }),
-        h("div", { class: "muted", text: `Stake account ${d.stakeProfileLabel ?? profileLabel(d.stakeProfileIndex ?? d.profileIndex)}` }),
-        h("div", { class: "muted", text: `Owner ${d.ownerProfileLabel ?? profileLabel(d.ownerProfileIndex)}` }),
-        h("div", { class: "muted", text: `Gas paid by ${d.fundingLabel ?? fundingLabel(d.payment)}` }),
-        d.amountMode === "max" ? h("div", { class: "muted", text: "Max leaves room for the estimated fee." }) : null,
+        h("div", { class: "muted", text: `Stake account: ${d.stakeProfileLabel ?? profileLabel(d.stakeProfileIndex ?? d.profileIndex)}` }),
+        h("div", { class: "muted", text: `Owner: ${d.ownerProfileLabel ?? profileLabel(d.ownerProfileIndex)}` }),
+        h("div", { class: "muted", text: `Gas: ${d.fundingLabel ?? fundingLabel(d.payment)}` }),
+        d.amountMode === "max" ? h("div", { class: "muted", text: "Max includes the estimated fee." }) : null,
         d.amountMode === "all" && kind === TX_KIND.UNSTAKE
           ? h("div", { class: "muted", text: "Unstake the full position." })
           : null,
         d.amountMode === "all" && kind === TX_KIND.WITHDRAW_REWARD
           ? h("div", { class: "muted", text: "Claim all rewards." })
           : null,
-        d.amountLux ? h("div", { class: "muted", text: `Lux: ${String(d.amountLux)}` }) : null,
       ].filter(Boolean)),
       gasEditor,
       gasHint,

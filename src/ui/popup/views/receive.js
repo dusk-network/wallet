@@ -135,12 +135,12 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // --- Request payment (progressive disclosure) -----------------------
   const amountInput = h("input", {
-    placeholder: "Amount (optional, DUSK — e.g. 1.25)",
+    placeholder: "Amount (optional, DUSK)",
     value: typeof r.amountDusk === "string" ? r.amountDusk : "",
     inputmode: "decimal",
   });
   const memoInput = h("input", {
-    placeholder: "Memo / message (optional)",
+    placeholder: "Memo (optional)",
     value: typeof r.memo === "string" ? r.memo : "",
   });
   const amountErr = h("div", { class: "err", style: "display:none" });
@@ -168,7 +168,7 @@ export function receiveView(ov, { state, actions } = {}) {
         memoInput,
         h("div", {
           class: "muted",
-          text: "When a request is set, the QR encodes a dusk: link so Send can auto‑fill.",
+          text: "The QR updates to a dusk: request link.",
         }),
       ]),
     ]
@@ -329,7 +329,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
   const note = h("div", {
     class: "muted",
-    text: "Tip: paste or scan the QR in Send to auto‑fill the transaction.",
+    text: "Send can read this QR directly.",
   });
 
   return [

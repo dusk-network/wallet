@@ -613,7 +613,7 @@ export async function renderNotification() {
 
     setApp([
       header,
-      h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve watch asset" })]),
+      h("div", { class: "row" }, [h("div", { class: "muted", text: "Add asset" })]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Account" }),
         h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
@@ -659,7 +659,7 @@ export async function renderNotification() {
         : h("div"),
       h("div", {
         class: "muted",
-        text: "The wallet will verify the standard interface and on-chain metadata before persisting the asset.",
+        text: "Wallet verifies the standard interface and on-chain metadata before adding it.",
       }),
       add.row,
     ]);

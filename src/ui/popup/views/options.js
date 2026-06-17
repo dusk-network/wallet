@@ -330,10 +330,10 @@ export function optionsView(ov, { state, actions } = {}) {
 
   const clearVaultBtn = h("button", {
     class: "btn-destructive",
-    text: "Reset wallet vault",
+    text: "Reset wallet",
     onclick: async () => {
       const ok = confirm(
-        "This will remove the encrypted mnemonic from this browser profile. Continue?"
+        "This will remove the encrypted recovery phrase from this browser profile. Continue?"
       );
       if (!ok) return;
 
@@ -348,7 +348,7 @@ export function optionsView(ov, { state, actions } = {}) {
         await clearPermissions();
         await clearVault();
 
-        actions?.showToast?.("Vault removed. Please import again.", 2500);
+        actions?.showToast?.("Wallet reset. Import again to continue.", 2500);
         state.route = "home";
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
@@ -434,7 +434,7 @@ export function optionsView(ov, { state, actions } = {}) {
     settingsSection("Data", [
       h("div", { class: "row" }, [
         h("label", { text: "NFT media" }),
-        h("div", { class: "muted", text: "Remote media disabled." }),
+        h("div", { class: "muted", text: "Remote media is disabled." }),
       ]),
       h("div", { class: "settings-inline-action" }, [
         h("label", { text: "Saved recipients" }),
