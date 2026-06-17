@@ -115,6 +115,18 @@ async function emitUiTxStatus(payload) {
   }
 }
 
+async function emitUiLockState(isUnlocked, reason = "") {
+  try {
+    await runtimeSendMessage({
+      type: "DUSK_UI_LOCK_STATE",
+      isUnlocked: Boolean(isUnlocked),
+      reason: String(reason ?? ""),
+    });
+  } catch {
+    // ignore
+  }
+}
+
 async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
   const meta = await getTxMeta(hash);
   const settings = await getSettings();
@@ -223,6 +235,7 @@ async function handleAutoLockAlarm() {
     console.log("[Dusk] Auto-locking wallet due to inactivity.");
     try {
       await engineCall("engine_lock");
+      emitUiLockState(false, "auto_lock").catch(() => {});
       broadcastProfilesChangedAll().catch(() => {});
     } catch (e) {
       console.error("[Dusk] Auto-lock failed:", e);
@@ -531,6 +544,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         // Notify dApps that profiles are now available.
         broadcastProfilesChangedAll().catch(() => {});
+        emitUiLockState(true, "unlock").catch(() => {});
 
         sendResponse({ ok: true, accounts });
         return;
@@ -542,6 +556,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         // Notify dApps that profiles are no longer available.
         broadcastProfilesChangedAll().catch(() => {});
+        emitUiLockState(false, "manual_lock").catch(() => {});
         sendResponse({ ok: true });
         return;
       }
