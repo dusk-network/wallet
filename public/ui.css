@@ -1566,19 +1566,28 @@ button:disabled {
 }
 
 .action-btn-ico {
-  width: auto;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   border-radius: 0;
   display: grid;
   place-items: center;
   border: 0;
   background: transparent;
   color: var(--primary);
-  font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 14px;
   line-height: 1;
 
   transition: transform 180ms ease, color 180ms ease;
+}
+
+.action-btn-ico svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .action-btn:hover .action-btn-ico {
@@ -2734,6 +2743,16 @@ body.page--popup {
   --panel-padding: 14px;
   --section-gap: 12px;
   --panel-min-height: 560px;
+  overflow: hidden;
+}
+
+body.page--popup .panel-content {
+  scrollbar-width: none;
+}
+
+body.page--popup .panel-content::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 body.page--popup .home-balance {
@@ -2814,9 +2833,13 @@ body.page--popup .action-btn {
 }
 
 body.page--popup .action-btn-ico {
-  width: auto;
-  height: 16px;
-  font-size: 13px;
+  width: 21px;
+  height: 21px;
+}
+
+body.page--popup .action-btn-ico svg {
+  width: 21px;
+  height: 21px;
 }
 
 body.page--popup .action-btn-label {

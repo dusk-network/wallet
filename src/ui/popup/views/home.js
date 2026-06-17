@@ -50,6 +50,35 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
   return frac ? `${intPart}.${frac}` : intPart;
 }
 
+function actionIcon(name) {
+  const paths = {
+    send: [
+      '<path d="m5 12 14-7-5 14-2.8-5.2Z"/>',
+      '<path d="m11.2 13.8 3.2 5.2"/>',
+    ],
+    receive: [
+      '<path d="M4 13v4.5A2.5 2.5 0 0 0 6.5 20h11A2.5 2.5 0 0 0 20 17.5V13"/>',
+      '<path d="M12 4v10"/>',
+      '<path d="m7.5 9.5 4.5 4.5 4.5-4.5"/>',
+    ],
+    shield: [
+      '<path d="M3.7 12s3-5 8.3-5 8.3 5 8.3 5-3 5-8.3 5-8.3-5-8.3-5Z"/>',
+      '<circle cx="12" cy="12" r="2.4"/>',
+      '<path d="M19.5 4.5 4.5 19.5"/>',
+    ],
+    stake: [
+      '<path d="M12 3.5 20 8l-8 4.5L4 8Z"/>',
+      '<path d="m4 12 8 4.5 8-4.5"/>',
+      '<path d="m4 16 8 4.5 8-4.5"/>',
+    ],
+  };
+
+  return h("div", {
+    class: "action-btn-ico",
+    html: `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name]?.join("") ?? ""}</svg>`,
+  });
+}
+
 export function homeView(ov, { state, actions } = {}) {
   const hasBalance = Boolean(ov?.balance?.value);
   const pubLux = safeBigInt(ov?.balance?.value, 0n);
@@ -186,7 +215,7 @@ export function homeView(ov, { state, actions } = {}) {
       : null,
   ].filter(Boolean));
 
-  const actionBtn = (label, ico, onClick) =>
+  const actionBtn = (label, icon, onClick) =>
     h(
       "button",
       {
@@ -194,27 +223,27 @@ export function homeView(ov, { state, actions } = {}) {
         onclick: onClick,
       },
       [
-        h("div", { class: "action-btn-ico", text: ico }),
+        actionIcon(icon),
         h("div", { class: "action-btn-label", text: label }),
       ]
     );
 
   const actionBar = h("div", { class: "action-bar" }, [
-    actionBtn("Send", "↑", () => {
+    actionBtn("Send", "send", () => {
       state.route = "send";
       state.draft = null;
       actions?.render?.().catch(() => {});
     }),
-    actionBtn("Receive", "↓", () => {
+    actionBtn("Receive", "receive", () => {
       state.route = "receive";
       actions?.render?.().catch(() => {});
     }),
-    actionBtn("Shield", "✦", () => {
+    actionBtn("Shield", "shield", () => {
       state.route = "convert";
       state.draft = { kind: TX_KIND.SHIELD, amountDusk: "", amountLux: "" };
       actions?.render?.().catch(() => {});
     }),
-    actionBtn("Stake", "△", () => {
+    actionBtn("Stake", "stake", () => {
       state.route = "stake";
       actions?.render?.().catch(() => {});
     }),
