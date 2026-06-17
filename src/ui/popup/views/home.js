@@ -9,7 +9,7 @@ import { explorerTxUrl } from "../../../shared/explorer.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
-import { openUrl, platform } from "../../../platform/index.js";
+import { openUrl } from "../../../platform/index.js";
 import { assetsSectionsView } from "./assets.js";
 import { txActivityStatusLabel, txKindRailLabel, txStatusTone } from "./txDisplay.js";
 
@@ -157,39 +157,6 @@ export function homeView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  // Connected site label (compact). We intentionally don't spend a full card
-  // on this; the account chip already signals the account, and connection is
-  // shown as a small inline label.
-  let connHost = null;
-  let connConnected = false;
-  if (platform.capabilities.dapp) {
-    const origin = ov?.activeOrigin;
-    connConnected = Boolean(origin && ov?.activeConnected);
-    if (typeof origin === "string" && (origin.startsWith("https://") || origin.startsWith("http://"))) {
-      try {
-        connHost = new URL(origin).hostname;
-      } catch {
-        connHost = origin;
-      }
-    }
-  }
-
-  const connInline = connHost
-    ? h("div", { class: "balance-site", title: ov?.activeOrigin ?? "" }, [
-        h("div", {
-          class: [
-            "conn-dot",
-            connConnected ? "conn-dot--on" : "",
-            "conn-dot--sm",
-          ].filter(Boolean).join(" "),
-        }),
-        h("div", {
-          class: "balance-site-text",
-          text: `${connConnected ? "Connected" : "Site"}: ${connHost}`,
-        }),
-      ])
-    : null;
-
   // Home hero shows the total once shielded is available.
   const heroAmt = hasTotal ? totalDusk : balDusk;
   const heroAmtTitle = hasTotal ? totalFull : balFull;
@@ -197,7 +164,7 @@ export function homeView(ov, { state, actions } = {}) {
 
   const balanceLabel = h("div", { class: "balance-sub balance-label" }, [h("span", { text: heroLabel })]);
 
-  const balanceSubRow = h("div", { class: "balance-subrow" }, [balanceLabel, connInline].filter(Boolean));
+  const balanceSubRow = h("div", { class: "balance-subrow" }, [balanceLabel]);
   const balanceSplit = h("div", { class: "balance-split" }, [
     h("div", { class: "balance-split-item" }, [
       h("span", { class: "balance-split-label", text: "Public" }),

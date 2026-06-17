@@ -102,6 +102,8 @@ function setApp(children) {
   app.innerHTML = "";
   const toast = toastView(state.toast);
   if (toast) app.appendChild(toast);
+  const siteBar = activeSiteBar(state.overview);
+  if (siteBar) app.appendChild(siteBar);
   for (const child of children) app.appendChild(child);
 }
 
@@ -156,6 +158,62 @@ function showToast(text, ms = 1200) {
     render().catch(() => {});
   }, ms);
   render().catch(() => {});
+}
+
+function activeSiteInfo(ov) {
+  const origin = typeof ov?.activeOrigin === "string" ? ov.activeOrigin : "";
+  if (!origin) return null;
+  if (!origin.startsWith("https://") && !origin.startsWith("http://")) return null;
+
+  let host = origin;
+  try {
+    host = new URL(origin).hostname;
+  } catch {
+    // keep origin fallback
+  }
+
+  return {
+    origin,
+    host,
+    connected: Boolean(ov?.activeConnected),
+  };
+}
+
+function activeSiteBar(ov) {
+  if (!ov?.isUnlocked) return null;
+  const site = activeSiteInfo(ov);
+  if (!site) return null;
+
+  const btn = h("button", {
+    class: site.connected ? "btn-outline site-bar-action" : "btn-primary site-bar-action",
+    text: site.connected ? "Disconnect" : "Connect",
+    onclick: async () => {
+      try {
+        await send({
+          type: site.connected ? "DUSK_UI_DISCONNECT_ORIGIN" : "DUSK_UI_CONNECT_ORIGIN",
+          origin: site.origin,
+        });
+        showToast(site.connected ? "Site disconnected." : "Site connected.");
+        state.needsRefresh = true;
+        await render({ forceRefresh: true });
+      } catch (e) {
+        showToast(e?.message ?? String(e), 2500);
+      }
+    },
+  });
+
+  return h("div", { class: "site-bar", title: site.origin }, [
+    h("div", { class: "site-bar-main" }, [
+      h("div", {
+        class: ["conn-dot", site.connected ? "conn-dot--on" : ""].filter(Boolean).join(" "),
+      }),
+      h("div", { class: "site-bar-copy" }, [
+        h("div", { class: "site-bar-status", text: site.connected ? "Connected" : "Not connected" }),
+        h("div", { class: "site-bar-origin", text: site.host }),
+      ]),
+    ]),
+    btn,
+  ]);
 }
 
 // --- Shielded sync UI polling ----------------------------------------------

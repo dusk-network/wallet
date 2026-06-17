@@ -1,7 +1,12 @@
 // Background service worker entry.
 
 import { createVault, loadVault, unlockVault } from "../shared/vault.js";
-import { approveOrigin, getPermissionForOrigin, getPermissions } from "../shared/permissions.js";
+import {
+  approveOrigin,
+  getPermissionForOrigin,
+  getPermissions,
+  revokeOrigin,
+} from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
@@ -586,6 +591,50 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           accountIndex: clamped,
           grants: { publicAccount: true, shieldedReceiveAddress: false },
         });
+        sendResponse({ ok: true });
+        return;
+      }
+
+      // UI connects the active tab origin to the currently selected account.
+      if (message?.type === "DUSK_UI_CONNECT_ORIGIN") {
+        const origin = String(message.origin ?? "").trim();
+        if (!origin) {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "origin is required");
+        }
+
+        const status = await getEngineStatus();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+
+        const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
+        const idxRaw =
+          status.selectedAccountIndex !== undefined && status.selectedAccountIndex !== null
+            ? Number(status.selectedAccountIndex)
+            : Number((await getSettings())?.selectedAccountIndex ?? 0);
+        const idx = Math.max(
+          0,
+          Math.min(Math.floor(idxRaw) || 0, Math.max(0, accounts.length - 1))
+        );
+        const account = accounts[idx] ?? "";
+
+        await approveOrigin(origin, {
+          profileId: `account:${idx}:${account || ""}`,
+          accountIndex: idx,
+          grants: { publicAccount: true, shieldedReceiveAddress: false },
+        });
+        sendResponse({ ok: true });
+        return;
+      }
+
+      // UI disconnects the active tab origin.
+      if (message?.type === "DUSK_UI_DISCONNECT_ORIGIN") {
+        const origin = String(message.origin ?? "").trim();
+        if (!origin) {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "origin is required");
+        }
+
+        await revokeOrigin(origin);
         sendResponse({ ok: true });
         return;
       }
