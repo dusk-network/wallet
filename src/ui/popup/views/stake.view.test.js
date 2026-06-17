@@ -24,7 +24,7 @@ describe("stake view", () => {
 
     expect(source).toContain("Stake positions");
     expect(source).toContain("Gas");
-    expect(source).toContain("Owner-paid gas is not available here.");
+    expect(source).toContain("Gas comes from");
     expect(source).toContain("Gas still comes from");
     expect(source).toContain("Contract-owned stake. View only.");
   });
@@ -37,7 +37,7 @@ describe("stake view", () => {
 
     expect(source).toContain('st.amountMode = "max"');
     expect(source).toContain('makeDraft(null, "all")');
-    expect(source).toContain("Max leaves room for the estimated fee.");
+    expect(source).toContain("Max includes the estimated fee.");
     expect(source).toContain("Unstake the full position.");
     expect(source).toContain("Claim all rewards.");
   });

@@ -10,10 +10,10 @@ const MAX_U64 = 18446744073709551615n;
 
 function normalizeContractIdInput(s) {
   const raw = String(s ?? "").trim();
-  if (!raw) throw new Error("Missing contractId");
+  if (!raw) throw new Error("Missing contract ID");
   if (/^0x[0-9a-f]{64}$/i.test(raw)) return raw.toLowerCase();
   if (/^[0-9a-f]{64}$/i.test(raw)) return `0x${raw.toLowerCase()}`;
-  throw new Error("Invalid contractId (expected 32-byte hex)");
+  throw new Error("Invalid contract ID (expected 32-byte hex)");
 }
 
 function contractIdsEqual(a, b) {
@@ -296,7 +296,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
     ]),
     st?.loading ? h("div", { class: "muted", text: "Loading…" }) : null,
     st?.error ? h("div", { class: "err", text: String(st.error) }) : null,
-    tokenRows.length ? h("div", { class: "activity-list" }, tokenRows) : h("div", { class: "muted", text: "No watched tokens." }),
+    tokenRows.length ? h("div", { class: "activity-list" }, tokenRows) : h("div", { class: "muted", text: "No tokens added." }),
   ].filter(Boolean));
 
   const nftCard = h("div", { class: "box asset-section-card" }, [
@@ -304,7 +304,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
       h("div", { class: "asset-section-title", text: "NFTs" }),
       h("button", { class: "btn-outline", text: "Import NFT", onclick: openAddNft }),
     ]),
-    nftRows.length ? h("div", { class: "activity-list" }, nftRows) : h("div", { class: "muted", text: "No imported NFTs." }),
+    nftRows.length ? h("div", { class: "activity-list" }, nftRows) : h("div", { class: "muted", text: "No NFTs added." }),
   ]);
 
   return [tokensCard, nftCard];
@@ -324,7 +324,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
   });
 
   const input = h("input", {
-    placeholder: "contractId (0x…)",
+    placeholder: "Contract ID (0x…)",
     value: String(st.contractId ?? ""),
     oninput: (e) => {
       st.contractId = String(e?.target?.value ?? "");
@@ -395,7 +395,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
   return [
     subnav({ title: "Add token", onBack }),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "Watch a DRC20 token by contractId (per network + account)." }),
+      h("div", { class: "muted", text: "Add a DRC20 token by contract ID for this profile." }),
       h("label", { text: "Contract ID" }),
       input,
       h("div", { class: "btnrow" }, [lookupBtn, addBtn]),
@@ -420,7 +420,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
   });
 
   const contractInput = h("input", {
-    placeholder: "contractId (0x…)",
+    placeholder: "Contract ID (0x…)",
     value: String(st.contractId ?? ""),
     oninput: (e) => {
       st.contractId = String(e?.target?.value ?? "");
@@ -428,7 +428,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
   });
 
   const tokenIdInput = h("input", {
-    placeholder: "tokenId (u64)",
+    placeholder: "Token ID (u64)",
     value: String(st.tokenId ?? ""),
     oninput: (e) => {
       st.tokenId = String(e?.target?.value ?? "");
@@ -447,7 +447,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
 
         const cid = normalizeContractIdInput(st.contractId);
-        const tid = parseU64(st.tokenId, { name: "tokenId" });
+        const tid = parseU64(st.tokenId, { name: "token ID" });
 
         const [metaResp, ownerResp, uriResp] = await Promise.all([
           actions?.send?.({ type: "DUSK_UI_DRC721_GET_METADATA", contractId: cid }),
@@ -522,8 +522,8 @@ export function assetAddNftView(ov, { state, actions } = {}) {
           h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Symbol" }), h("code", { text: String(st.info?.meta?.symbol ?? "—") })]),
           h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Token ID" }), h("code", { text: String(st.info?.tokenId ?? "—") })]),
           h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Owner" }), h("code", { text: ownerStr || "—", title: ownerStr })]),
-          h("div", { class: owned ? "muted" : "err", text: owned ? "Owned by current account." : "Not owned by current account." }),
-          st.info?.tokenUri ? h("div", { class: "muted", text: `token_uri: ${st.info.tokenUri}` }) : h("div", { class: "muted", text: "token_uri is empty for this contract." }),
+          h("div", { class: owned ? "muted" : "err", text: owned ? "Owned by this account." : "Not owned by this account." }),
+          st.info?.tokenUri ? h("div", { class: "muted", text: `Token URI: ${st.info.tokenUri}` }) : h("div", { class: "muted", text: "Token URI is empty for this contract." }),
         ]);
       })()
     : null;
@@ -531,7 +531,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
   return [
     subnav({ title: "Import NFT", onBack }),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "Import a DRC721 NFT by contractId + tokenId (MetaMask-style)." }),
+      h("div", { class: "muted", text: "Add a DRC721 NFT by contract ID and token ID." }),
       h("label", { text: "Contract ID" }),
       contractInput,
       h("label", { text: "Token ID" }),
@@ -723,7 +723,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     h("input", {
       id: "asset-token-to",
       name: "assetTokenRecipient",
-      placeholder: "to (base58… or 0x…)",
+      placeholder: "Recipient (base58… or 0x…)",
       value: String(form.to ?? ""),
       oninput: (e) => {
         form.to = String(e?.target?.value ?? "");
@@ -733,7 +733,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     h("input", {
       id: "asset-token-amount",
       name: "assetTokenAmount",
-      placeholder: `amount (${sym})`,
+      placeholder: `Amount (${sym})`,
       value: String(form.amount ?? ""),
       oninput: (e) => {
         form.amount = String(e?.target?.value ?? "");
@@ -758,7 +758,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     h("input", {
       id: "asset-token-spender",
       name: "assetTokenSpender",
-      placeholder: "spender (base58… or 0x…)",
+      placeholder: "Spender (base58… or 0x…)",
       value: String(form.spender ?? ""),
       oninput: (e) => {
         form.spender = String(e?.target?.value ?? "");
@@ -769,7 +769,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
       h("input", {
         id: "asset-token-approve-amount",
         name: "assetTokenApproveAmount",
-        placeholder: `amount (${sym})`,
+        placeholder: `Amount (${sym})`,
         value: String(form.approveAmount ?? ""),
         oninput: (e) => {
           form.approveAmount = String(e?.target?.value ?? "");
@@ -777,10 +777,10 @@ export function assetTokenView(ov, { state, actions } = {}) {
       }),
       approveMaxBtn,
     ]),
-    h("button", { class: "btn-primary", text: "Review approve", onclick: () => reviewApprove({ max: false }) }),
+    h("button", { class: "btn-primary", text: "Review approval", onclick: () => reviewApprove({ max: false }) }),
     h("div", {
       class: "asset-action-note",
-      text: "Tip: MAX approvals are dangerous. Prefer exact amounts unless you trust the spender.",
+      text: "MAX approvals grant broad spending permission. Prefer exact amounts.",
     }),
   ]);
 
@@ -874,7 +874,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
     op === "approve" && d?.asset?.isMax
       ? h("div", {
           class: "err",
-          text: "Warning: This is an unlimited (MAX) approval. The spender can transfer any amount of this token from your account.",
+          text: "Unlimited approval. The spender can transfer any amount of this token from your account.",
         })
       : null;
 
@@ -987,12 +987,12 @@ export function assetNftView(ov, { state, actions } = {}) {
       h("div", { class: "box tx-summary" }, [
         h("div", { class: "muted", text: name }),
         h("div", { class: "muted" }, [h("code", { text: cid })]),
-        tokenUri ? h("div", { class: "muted", text: `token_uri: ${tokenUri}` }) : h("div", { class: "muted", text: "token_uri is empty." }),
+        tokenUri ? h("div", { class: "muted", text: `Token URI: ${tokenUri}` }) : h("div", { class: "muted", text: "Token URI is empty." }),
       ]),
       tokenUri
         ? h("div", {
             class: "muted",
-            text: "NFT metadata and media fetching is temporarily disabled for security reasons. The raw token_uri is shown above, but the wallet will not fetch or render it yet.",
+            text: "Media previews are disabled for now. The raw token URI is shown above.",
           })
         : null,
       h("button", { class: "btn-outline", text: "Remove NFT", onclick: doUnwatch }),

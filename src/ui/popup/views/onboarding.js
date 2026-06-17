@@ -77,13 +77,13 @@ export function onboardingWelcomeView({ state, actions } = {}) {
       h("div", {
         class: "muted",
         text:
-          "Create a new wallet or import an existing recovery phrase. Your recovery phrase is the ONLY way to restore your wallet.",
+          "Create a new wallet or import a recovery phrase. Keep it safe; it is the only way to restore your wallet.",
       }),
     ]),
     h("div", { class: "actions" }, [createBtn, importBtn]),
     h("div", {
       class: "muted",
-      text: "Tip: If you're just testing, you can create a new wallet and request funds from a faucet.",
+      text: "Testing? Create a wallet, then request funds from the faucet.",
     }),
   ].filter(Boolean);
 }
@@ -244,7 +244,7 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
   const busyTitle = h("div", { class: "callout-title", text: "Securing your wallet…" });
   const busyBody = h("div", {
     class: "muted",
-    text: "Deriving an encryption key and writing your vault. Keep this window open.",
+    text: "Encrypting your wallet. Keep this window open.",
   });
   const busyCallout = h("div", { class: "callout", style: "display:none" }, [busyTitle, busyBody]);
 
@@ -365,7 +365,7 @@ export function onboardingImportView({ state, actions } = {}) {
   const busyTitle = h("div", { class: "callout-title", text: "Securing your wallet…" });
   const busyBody = h("div", {
     class: "muted",
-    text: "Deriving an encryption key and writing your vault. Keep this window open.",
+    text: "Encrypting your wallet. Keep this window open.",
   });
   const busyCallout = h("div", { class: "callout", style: "display:none" }, [busyTitle, busyBody]);
 
@@ -406,10 +406,10 @@ export function onboardingImportView({ state, actions } = {}) {
 
         const m = mnemonicInput.getMnemonic();
         const words = m.split(" ").filter(Boolean);
-        if (!m || words.length === 0) throw new Error("Mnemonic is required");
+        if (!m || words.length === 0) throw new Error("Recovery phrase is required");
         if (words.length !== 12 && words.length !== 24)
-          throw new Error("Mnemonic must be 12 or 24 words");
-        if (!validateMnemonic(m)) throw new Error("Invalid mnemonic");
+          throw new Error("Recovery phrase must be 12 or 24 words");
+        if (!validateMnemonic(m)) throw new Error("Invalid recovery phrase");
         if ((pwd.value || "").length < 8) throw new Error("Password must be at least 8 characters");
         if (pwd.value !== pwd2.value) throw new Error("Passwords do not match");
 
@@ -444,7 +444,7 @@ export function onboardingImportView({ state, actions } = {}) {
         class: "muted",
         text: "Import an existing recovery phrase to restore your wallet.",
       }),
-      h("label", { text: "Mnemonic" }),
+      h("label", { text: "Recovery phrase" }),
       mnemonicInput.el,
       h("label", { text: "Password" }),
       pwd,

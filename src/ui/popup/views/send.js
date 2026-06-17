@@ -330,7 +330,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     // Give quick feedback when the user pastes a dusk: request link.
     if (/^dusk:/i.test(v)) {
       toTypePill.style.display = "inline-flex";
-      toTypePill.textContent = "Detected: Dusk request link";
+      toTypePill.textContent = "Dusk request link";
       detectedRecipientType = null;
       updateContactMatch("", null);
       updateAmountHelpers();
@@ -340,7 +340,7 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     if (t === "account" || t === "address") {
       toTypePill.style.display = "inline-flex";
-      toTypePill.textContent = t === "address" ? "Detected: Shielded address" : "Detected: Public account";
+      toTypePill.textContent = t === "address" ? "Shielded address" : "Public account";
       detectedRecipientType = t;
       updateContactMatch(v, t);
       updateAmountHelpers();
@@ -349,7 +349,7 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     // Fallback: unknown format
     toTypePill.style.display = "inline-flex";
-    toTypePill.textContent = "Detected: Unknown address format";
+    toTypePill.textContent = "Unknown address format";
     detectedRecipientType = null;
     updateContactMatch("", null);
     updateAmountHelpers();
@@ -404,7 +404,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       try {
         const payload = await openQrScanModal({
           title: "Scan request",
-          hint: "Scan a Dusk request QR (or choose an image)",
+          hint: "Scan a Dusk request QR or choose an image.",
         });
         if (!payload) return;
         const ok = maybeDecodeRequest(payload, { source: "qr" });
@@ -796,8 +796,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       },
     }),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "You are about to send" }),
-      h("div", { class: "meta-pill", text: `Type: ${txTypeLabel}` }),
+      h("div", { class: "meta-pill", text: txTypeLabel }),
       h("div", { class: "home-balance" }, [
         h("div", {
           class: "balance-amount",

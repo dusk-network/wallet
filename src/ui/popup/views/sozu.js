@@ -422,6 +422,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const publicBalance = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const draftNeeds = draftAmountLux(draft);
   const draftFeeLux = defaultContractCallFeeLux();
+  const fundingProfileLabel = `Profile ${Number(draft.profileIndex ?? 0) + 1}`;
   const stakeRequiredLux = draft.fnName === "sozu_stake" ? draftNeeds + draftFeeLux : draftFeeLux;
   const submitDisabled =
     st.submitting ||
@@ -500,15 +501,10 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   return [
     subnav({ title: "Review", onBack: goBack }),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "You are about to use Sozu" }),
       h("div", { class: "box tx-summary" }, [
         h("div", { class: "muted", text: draft.label ?? "Sozu transaction" }),
         h("div", { class: "balance-amount", text: `${fmtLux(draftNeeds.toString())} DUSK` }),
-        h("div", { class: "muted", text: `Method ${draft.fnName}` }),
-        h("div", { class: "muted", text: `Funding Profile ${Number(draft.profileIndex ?? 0) + 1} public` }),
-        draft.deposit && safeBigInt(draft.deposit, 0n) > 0n
-          ? h("div", { class: "muted", text: `Deposit ${fmtLux(draft.deposit)} DUSK` })
-          : null,
+        h("div", { class: "muted", text: `Gas: ${fundingProfileLabel} public balance` }),
       ].filter(Boolean)),
       submitDisabledReason ? h("div", { class: "err", text: submitDisabledReason }) : null,
       gasEditor,
