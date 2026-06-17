@@ -15,6 +15,7 @@
   },
   "scripts": {
     "generate:shells": "node scripts/generate-shells.js",
+    "generate:icons": "node scripts/generate-icons.js",
     "prebuild": "node scripts/generate-shells.js",
     "build": "vite build",
     "dev": "vite build --watch",
