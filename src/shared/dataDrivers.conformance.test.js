@@ -109,4 +109,51 @@ describe("Canonical data-drivers conformance (DRC20 / DRC721)", () => {
       expect(driver.decodeInputFn("transfer_from", rkyv)).toEqual(args);
     }
   });
+
+  it("Sozu hub driver can encode contract lookups and decode optional contract IDs", async () => {
+    const driver = await loadDriverFromPublic("sozu_hub_data_driver.wasm");
+    const rkyv = driver.encodeInputFn("contract", JSON.stringify("pool"));
+    expect(rkyv).toBeInstanceOf(Uint8Array);
+    expect(rkyv.byteLength).toBeGreaterThan(0);
+    expect(driver.decodeInputFn("contract", rkyv)).toBe("pool");
+
+    const out = new Uint8Array([
+      1,
+      ...Array.from({ length: 32 }, (_, i) => i + 1),
+    ]);
+    expect(driver.decodeOutputFn("contract", out)).toBe(
+      "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+    );
+  });
+
+  it("Sozu pool driver can encode deposit/withdraw args and decode reads", async () => {
+    const driver = await loadDriverFromPublic("sozu_pool_data_driver.wasm");
+    const stake = driver.encodeInputFn("sozu_stake", JSON.stringify("1000000000000"));
+    expect(Array.from(stake)).toEqual([0, 16, 165, 212, 232, 0, 0, 0]);
+    expect(driver.decodeInputFn("sozu_unstake", stake)).toBe("1000000000000");
+
+    const balance = new Uint8Array([42, 0, 0, 0, 0, 0, 0, 0]);
+    expect(driver.decodeOutputFn("balance_of", balance)).toBe("42");
+  });
+
+  it("Sozu stDUSK token driver can encode/decode token reads and transfers", async () => {
+    const driver = await loadDriverFromPublic("sozu_staked_dusk_data_driver.wasm");
+    const rkyv = driver.encodeInputFn("balance_of", JSON.stringify(EXAMPLE_PK));
+    expect(rkyv).toBeInstanceOf(Uint8Array);
+    expect(rkyv.byteLength).toBeGreaterThan(0);
+    expect(driver.decodeInputFn("balance_of", rkyv)).toBe(EXAMPLE_PK);
+
+    const transfer = [EXAMPLE_PK, "42"];
+    const transferBytes = driver.encodeInputFn("transfer", JSON.stringify(transfer));
+    expect(transferBytes).toBeInstanceOf(Uint8Array);
+    expect(driver.decodeInputFn("transfer", transferBytes)).toEqual(transfer);
+
+    const approve = [EXAMPLE_PK, "84"];
+    const approveBytes = driver.encodeInputFn("approve", JSON.stringify(approve));
+    expect(approveBytes).toBeInstanceOf(Uint8Array);
+    expect(driver.decodeInputFn("approve", approveBytes)).toEqual(approve);
+
+    const balance = new Uint8Array([42, 0, 0, 0, 0, 0, 0, 0]);
+    expect(driver.decodeOutputFn("balance_of", balance)).toBe("42");
+  });
 });

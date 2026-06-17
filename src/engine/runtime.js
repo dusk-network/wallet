@@ -15,6 +15,7 @@ import {
   getDrc721Metadata,
   getDrc721OwnerOf,
   getDrc721TokenUri,
+  getSozuStatus,
   getMinimumStake,
   getStakeInfo,
   getStakeOwnerStatus,
@@ -367,6 +368,12 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
         case "dusk_getDrc721TokenUri": {
           const out = await getDrc721TokenUri(params ?? {});
           sendResponse({ id, result: String(out) });
+          return;
+        }
+
+        case "dusk_getSozuStatus": {
+          const out = await getSozuStatus(params ?? {});
+          sendResponse({ id, result: out });
           return;
         }
 

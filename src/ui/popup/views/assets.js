@@ -16,6 +16,14 @@ function normalizeContractIdInput(s) {
   throw new Error("Invalid contractId (expected 32-byte hex)");
 }
 
+function contractIdsEqual(a, b) {
+  try {
+    return normalizeContractIdInput(a) === normalizeContractIdInput(b);
+  } catch {
+    return String(a ?? "") === String(b ?? "");
+  }
+}
+
 function parseU64(s, { name = "value" } = {}) {
   const raw = String(s ?? "").trim();
   if (!raw) throw new Error(`Missing ${name}`);
@@ -176,7 +184,12 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
     st.balancesAt[cid] = now;
 
     actions
-      ?.send?.({ type: "DUSK_UI_DRC20_GET_BALANCE", contractId: cid, profileIndex: idx })
+      ?.send?.({
+        type: "DUSK_UI_DRC20_GET_BALANCE",
+        contractId: cid,
+        profileIndex: idx,
+        driver: t?.driver,
+      })
       .then((resp) => {
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to fetch token balance");
         const v = String(resp?.result ?? resp ?? "0");
@@ -218,7 +231,8 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
     return h(
       "button",
       {
-        class: "activity-item",
+        class: "activity-item asset-click-row",
+        title: `Open ${sym}`,
         onclick: () => {
           state.assetTokenContractId = cid;
           state.route = "asset_token";
@@ -231,9 +245,12 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
           h("div", { class: "asset-sym", text: sym }),
           h("div", { class: "asset-name", text: name, title: cid }),
         ]),
-        h("div", { class: "asset-bal" }, [
-          h("div", { class: "asset-amt", text: bal }),
-          h("div", { class: "asset-sub", text: "Balance" }),
+        h("div", { class: "asset-row-tail" }, [
+          h("div", { class: "asset-bal" }, [
+            h("div", { class: "asset-amt", text: bal }),
+            h("div", { class: "asset-sub", text: "Balance" }),
+          ]),
+          h("div", { class: "activity-chevron", text: "›" }),
         ]),
       ]
     );
@@ -247,7 +264,8 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
     return h(
       "button",
       {
-        class: "activity-item",
+        class: "activity-item asset-click-row",
+        title: `Open ${sym} #${tokenId || "?"}`,
         onclick: () => {
           state.assetNft = { contractId: cid, tokenId };
           state.route = "asset_nft";
@@ -260,9 +278,12 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
           h("div", { class: "asset-sym", text: `${sym} #${tokenId || "?"}` }),
           h("div", { class: "asset-name", text: name, title: cid }),
         ]),
-        h("div", { class: "asset-bal" }, [
-          h("div", { class: "asset-amt", text: "1" }),
-          h("div", { class: "asset-sub", text: "NFT" }),
+        h("div", { class: "asset-row-tail" }, [
+          h("div", { class: "asset-bal" }, [
+            h("div", { class: "asset-amt", text: "1" }),
+            h("div", { class: "asset-sub", text: "NFT" }),
+          ]),
+          h("div", { class: "activity-chevron", text: "›" }),
         ]),
       ]
     );
@@ -530,7 +551,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
   }
 
   const st = ensureTokenBalancesLoaded(ov, { state, actions });
-  const token = Array.isArray(st?.tokens) ? st.tokens.find((t) => String(t?.contractId ?? "") === cid) : null;
+  const token = Array.isArray(st?.tokens) ? st.tokens.find((t) => contractIdsEqual(t?.contractId, cid)) : null;
 
   const onBack = () => {
     state.assetTokenContractId = null;
@@ -539,6 +560,15 @@ export function assetTokenView(ov, { state, actions } = {}) {
   };
 
   if (!token) {
+    if (st.loading || !st.loaded) {
+      return [
+        subnav({ title: "Token", onBack }),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Loading token…" }),
+        ]),
+      ];
+    }
+
     return [
       subnav({ title: "Token", onBack }),
       h("div", { class: "row" }, [
@@ -579,12 +609,13 @@ export function assetTokenView(ov, { state, actions } = {}) {
         type: "DUSK_UI_DRC20_ENCODE_INPUT",
         fnName: "transfer",
         args: { to, value: valueUnits },
+        driver: token?.driver,
       });
       if (enc?.error) throw new Error(enc.error.message ?? "Failed to encode transfer");
 
       state.assetTxDraft = {
         op: "transfer",
-        token: { contractId: cid, symbol: sym, name, decimals: dec },
+        token: { contractId: cid, symbol: sym, name, decimals: dec, driver: token?.driver },
         params: {
           kind: TX_KIND.CONTRACT_CALL,
           privacy: "public",
@@ -600,6 +631,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
           symbol: sym,
           name,
           decimals: dec,
+          driver: token?.driver,
           valueUnits,
           to: accountEnumToString(to),
         },
@@ -621,12 +653,13 @@ export function assetTokenView(ov, { state, actions } = {}) {
         type: "DUSK_UI_DRC20_ENCODE_INPUT",
         fnName: "approve",
         args: { spender, value: valueUnits },
+        driver: token?.driver,
       });
       if (enc?.error) throw new Error(enc.error.message ?? "Failed to encode approve");
 
       state.assetTxDraft = {
         op: "approve",
-        token: { contractId: cid, symbol: sym, name, decimals: dec },
+        token: { contractId: cid, symbol: sym, name, decimals: dec, driver: token?.driver },
         params: {
           kind: TX_KIND.CONTRACT_CALL,
           privacy: "public",
@@ -642,6 +675,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
           symbol: sym,
           name,
           decimals: dec,
+          driver: token?.driver,
           valueUnits,
           spender: accountEnumToString(spender),
           isMax: Boolean(max),
@@ -654,16 +688,51 @@ export function assetTokenView(ov, { state, actions } = {}) {
     }
   };
 
-  const sendSection = h("div", { class: "box" }, [
-    h("div", { class: "muted", text: "Transfer" }),
+  const tokenHero = h("div", { class: "box asset-token-hero" }, [
+    h("div", { class: "asset-token-head" }, [
+      h("div", { class: "asset-token-icon", text: sym.slice(0, 1).toUpperCase() }),
+      h("div", { class: "asset-token-titleblock" }, [
+        h("div", { class: "asset-token-symbol", text: sym }),
+        h("div", { class: "asset-token-name", text: name, title: cid }),
+      ]),
+    ]),
+    h("div", { class: "asset-token-balance" }, [
+      h("div", { class: "asset-token-balance-label", text: "Balance" }),
+      h("div", { class: "asset-token-balance-value", text: balHuman }),
+    ]),
+    h("div", { class: "asset-token-meta" }, [
+      h("div", { class: "asset-token-meta-row" }, [
+        h("span", { text: "Contract" }),
+        h("code", { text: truncateMiddle(cid, 12, 10), title: cid }),
+      ]),
+      balUnits != null
+        ? h("div", { class: "asset-token-meta-row" }, [
+            h("span", { text: "Atomic units" }),
+            h("code", { text: String(balUnits), title: String(balUnits) }),
+          ])
+        : null,
+    ].filter(Boolean)),
+  ]);
+
+  const sendSection = h("div", { class: "box asset-action-section" }, [
+    h("div", { class: "asset-action-head" }, [
+      h("div", { class: "asset-action-title", text: "Send" }),
+      h("div", { class: "asset-action-subtitle", text: `Transfer ${sym} to another account or contract.` }),
+    ]),
+    h("label", { for: "asset-token-to", text: "Recipient" }),
     h("input", {
+      id: "asset-token-to",
+      name: "assetTokenRecipient",
       placeholder: "to (base58… or 0x…)",
       value: String(form.to ?? ""),
       oninput: (e) => {
         form.to = String(e?.target?.value ?? "");
       },
     }),
+    h("label", { for: "asset-token-amount", text: "Amount" }),
     h("input", {
+      id: "asset-token-amount",
+      name: "assetTokenAmount",
       placeholder: `amount (${sym})`,
       value: String(form.amount ?? ""),
       oninput: (e) => {
@@ -680,17 +749,26 @@ export function assetTokenView(ov, { state, actions } = {}) {
     onclick: async () => reviewApprove({ max: true }),
   });
 
-  const approveSection = h("div", { class: "box" }, [
-    h("div", { class: "muted", text: "Approve" }),
+  const approveSection = h("div", { class: "box asset-action-section" }, [
+    h("div", { class: "asset-action-head" }, [
+      h("div", { class: "asset-action-title", text: "Approve" }),
+      h("div", { class: "asset-action-subtitle", text: `Let another account or contract spend ${sym}.` }),
+    ]),
+    h("label", { for: "asset-token-spender", text: "Spender" }),
     h("input", {
+      id: "asset-token-spender",
+      name: "assetTokenSpender",
       placeholder: "spender (base58… or 0x…)",
       value: String(form.spender ?? ""),
       oninput: (e) => {
         form.spender = String(e?.target?.value ?? "");
       },
     }),
+    h("label", { for: "asset-token-approve-amount", text: "Allowance" }),
     h("div", { class: "hrow" }, [
       h("input", {
+        id: "asset-token-approve-amount",
+        name: "assetTokenApproveAmount",
         placeholder: `amount (${sym})`,
         value: String(form.approveAmount ?? ""),
         oninput: (e) => {
@@ -701,23 +779,18 @@ export function assetTokenView(ov, { state, actions } = {}) {
     ]),
     h("button", { class: "btn-primary", text: "Review approve", onclick: () => reviewApprove({ max: false }) }),
     h("div", {
-      class: "muted",
+      class: "asset-action-note",
       text: "Tip: MAX approvals are dangerous. Prefer exact amounts unless you trust the spender.",
     }),
   ]);
 
   return [
     subnav({ title: sym, onBack }),
-    h("div", { class: "row" }, [
-      h("div", { class: "box tx-summary" }, [
-        h("div", { class: "muted", text: name }),
-        h("div", { class: "balance-amount", text: balHuman }),
-        balUnits != null ? h("div", { class: "muted", text: `Units: ${String(balUnits)}` }) : null,
-        h("div", { class: "muted" }, [h("code", { text: cid })]),
-      ].filter(Boolean)),
+    h("div", { class: "row asset-token-page" }, [
+      tokenHero,
       sendSection,
       approveSection,
-      h("button", { class: "btn-outline", text: "Remove token", onclick: doUnwatch }),
+      h("button", { class: "btn-outline asset-remove-btn", text: "Remove token", onclick: doUnwatch }),
     ]),
   ];
 }

@@ -14,8 +14,18 @@ import {
 } from "@dusk/w3sper";
 import { bytesToHex, hexToBytes, sha256Hex, toBytes } from "./bytes.js";
 import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
+import { detectPresetIdFromNodeUrl } from "./network.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
+import {
+  SOZU_HUB_CONTRACT_NAMES,
+  getSozuHubBootstrap,
+  resolveSozuConfig,
+} from "./sozuConfig.js";
+import {
+  parseSozuPoolState,
+  parseSozuPosition,
+} from "./sozuAdapter.js";
 
 import {
   clearNotes,
@@ -539,7 +549,75 @@ async function persistPendingNullifiersForTx(result, profileIndex) {
 const DRIVER_KEYS = Object.freeze({
   DRC20: "drc20",
   DRC721: "drc721",
+  SOZU_HUB: "sozu_hub",
+  SOZU_POOL: "sozu_pool",
+  SOZU_STAKED_DUSK: "sozu_staked_dusk",
 });
+
+function normalizeTokenDriver(driver) {
+  const raw = String(driver ?? "").trim().toLowerCase();
+  if (!raw || raw === DRIVER_KEYS.DRC20) return DRIVER_KEYS.DRC20;
+  if (raw === DRIVER_KEYS.SOZU_STAKED_DUSK) return DRIVER_KEYS.SOZU_STAKED_DUSK;
+  throw new Error(`Unsupported token driver: ${raw}`);
+}
+
+function accountEnumToTokenString(account) {
+  if (typeof account === "string") return account;
+  if (account && typeof account === "object") {
+    if (typeof account.External === "string") return account.External;
+    if (typeof account.Contract === "string") return account.Contract;
+  }
+  return String(account ?? "");
+}
+
+function tokenStringToAccountEnum(account) {
+  const s = String(account ?? "").trim();
+  if (/^0x[0-9a-f]{64}$/i.test(s)) return { Contract: s.toLowerCase() };
+  return { External: s };
+}
+
+function encodeSozuStakedDuskArgs(fnName, args = {}) {
+  const fn = String(fnName ?? "").trim().toLowerCase();
+  if (fn === "transfer") {
+    return [accountEnumToTokenString(args?.to), String(args?.value ?? "0")];
+  }
+  if (fn === "approve") {
+    return [accountEnumToTokenString(args?.spender), String(args?.value ?? "0")];
+  }
+  if (fn === "transfer_from") {
+    return [
+      accountEnumToTokenString(args?.owner),
+      accountEnumToTokenString(args?.to ?? args?.receiver),
+      String(args?.value ?? "0"),
+    ];
+  }
+  return args;
+}
+
+function decodeSozuStakedDuskArgs(fnName, decoded) {
+  const fn = String(fnName ?? "").trim().toLowerCase();
+  const values = Array.isArray(decoded) ? decoded : [];
+  if (fn === "transfer") {
+    return {
+      to: tokenStringToAccountEnum(values[0]),
+      value: String(values[1] ?? "0"),
+    };
+  }
+  if (fn === "approve") {
+    return {
+      spender: tokenStringToAccountEnum(values[0]),
+      value: String(values[1] ?? "0"),
+    };
+  }
+  if (fn === "transfer_from") {
+    return {
+      owner: tokenStringToAccountEnum(values[0]),
+      to: tokenStringToAccountEnum(values[1]),
+      value: String(values[2] ?? "0"),
+    };
+  }
+  return decoded;
+}
 
 function ensureDriverRegistry() {
   if (state.drivers?.registry) return state.drivers.registry;
@@ -552,6 +630,9 @@ function ensureDriverRegistry() {
   reg.register(DRIVER_KEYS.DRC20, assetUrl("drivers/drc20_data_driver.wasm"));
   reg.register(DRIVER_KEYS.DRC721, assetUrl("drivers/drc721_data_driver.wasm"));
   reg.register(STAKE, assetUrl("drivers/stake_data_driver.wasm"));
+  reg.register(DRIVER_KEYS.SOZU_HUB, assetUrl("drivers/sozu_hub_data_driver.wasm"));
+  reg.register(DRIVER_KEYS.SOZU_POOL, assetUrl("drivers/sozu_pool_data_driver.wasm"));
+  reg.register(DRIVER_KEYS.SOZU_STAKED_DUSK, assetUrl("drivers/sozu_staked_dusk_data_driver.wasm"));
 
   state.drivers.registry = reg;
   return reg;
@@ -1378,8 +1459,12 @@ export async function getStakeOwnerStatus({ profileIndex } = {}) {
 export async function encodeDrc20Input(params = {}) {
   const fnName = String(params?.fnName ?? "").trim();
   if (!fnName) throw new Error("fnName is required");
-  const driver = await getDriver(DRIVER_KEYS.DRC20);
-  const json = params?.args === undefined || params?.args === null ? "null" : jsonWithBigInts(params.args);
+  const driverKey = normalizeTokenDriver(params?.driver);
+  const driver = await getDriver(driverKey);
+  const args = driverKey === DRIVER_KEYS.SOZU_STAKED_DUSK
+    ? encodeSozuStakedDuskArgs(fnName, params?.args)
+    : params?.args;
+  const json = args === undefined || args === null ? "null" : jsonWithBigInts(args);
   return driver.encodeInputFn(fnName, json);
 }
 
@@ -1393,8 +1478,12 @@ export async function decodeDrc20Input(params = {}) {
   const fnName = String(params?.fnName ?? "").trim();
   if (!fnName) throw new Error("fnName is required");
   const bytes = toBytes(params?.fnArgs);
-  const driver = await getDriver(DRIVER_KEYS.DRC20);
-  return driver.decodeInputFn(fnName, bytes);
+  const driverKey = normalizeTokenDriver(params?.driver);
+  const driver = await getDriver(driverKey);
+  const decoded = driver.decodeInputFn(fnName, bytes);
+  return driverKey === DRIVER_KEYS.SOZU_STAKED_DUSK
+    ? decodeSozuStakedDuskArgs(fnName, decoded)
+    : decoded;
 }
 
 /**
@@ -1434,7 +1523,7 @@ export async function getDrc20Metadata(params = {}) {
   const contractIdBytes = toContractIdBytes(params?.contractId);
 
   const network = await ensureNetwork();
-  const driver = await getDriver(DRIVER_KEYS.DRC20);
+  const driver = await getDriver(normalizeTokenDriver(params?.driver));
   const c = new Contract({ contractId: contractIdBytes, driver, network });
 
   const [name, symbol, decimals] = await Promise.all([
@@ -1462,12 +1551,15 @@ export async function getDrc20Balance(params = {}) {
   const profile = await ensureProfileIndex(idx);
 
   const network = await ensureNetwork();
-  const driver = await getDriver(DRIVER_KEYS.DRC20);
+  const driverKey = normalizeTokenDriver(params?.driver);
+  const driver = await getDriver(driverKey);
   const c = new Contract({ contractId: contractIdBytes, driver, network });
 
-  const out = await c.call.balance_of({
-    account: { External: profile.account.toString() },
-  });
+  const out = await c.call.balance_of(
+    driverKey === DRIVER_KEYS.SOZU_STAKED_DUSK
+      ? profile.account.toString()
+      : { account: { External: profile.account.toString() } }
+  );
 
   // Data-driver returns bigints as strings.
   return String(out ?? "0");
@@ -1531,6 +1623,157 @@ export async function getDrc721TokenUri(params = {}) {
 
   const out = await c.call.token_uri({ token_id });
   return String(out ?? "");
+}
+
+async function discoverSozuContracts(network, bootstrap) {
+  const driver = await getDriver(DRIVER_KEYS.SOZU_HUB);
+  const hub = new Contract({
+    contractId: toContractIdBytes(bootstrap.contracts.hub),
+    driver,
+    network,
+  });
+  const entries = await Promise.all(
+    SOZU_HUB_CONTRACT_NAMES.map(async (name) => {
+      try {
+        const value = await withTimeout(
+          hub.call.contract(name),
+          8_000,
+          `Timed out resolving Sozu ${name} contract`
+        );
+        return [name, typeof value === "string" ? value : null];
+      } catch {
+        return [name, null];
+      }
+    })
+  );
+  return Object.fromEntries(entries.filter(([, value]) => value));
+}
+
+async function readSozuPoolState(network, config) {
+  const driver = await getDriver(DRIVER_KEYS.SOZU_POOL);
+  const pool = new Contract({
+    contractId: toContractIdBytes(config.contracts.pool),
+    driver,
+    network,
+  });
+  const exchangeRate = await withTimeout(
+    pool.call.exchange_rate(),
+    8_000,
+    "Timed out reading Sozu pool exchange rate"
+  );
+  return parseSozuPoolState({ exchangeRate });
+}
+
+async function readSozuPosition(network, config, profile) {
+  const poolDriver = await getDriver(DRIVER_KEYS.SOZU_POOL);
+  const pool = new Contract({
+    contractId: toContractIdBytes(config.contracts.pool),
+    driver: poolDriver,
+    network,
+  });
+  const balance = await withTimeout(
+    pool.call.balance_of(profile.account.toString()),
+    8_000,
+    "Timed out reading Sozu position"
+  );
+
+  let stDuskBalance = "0";
+  if (config.contracts["staked-dusk"]) {
+    const tokenDriver = await getDriver(DRIVER_KEYS.SOZU_STAKED_DUSK);
+    const token = new Contract({
+      contractId: toContractIdBytes(config.contracts["staked-dusk"]),
+      driver: tokenDriver,
+      network,
+    });
+    stDuskBalance = await withTimeout(
+      token.call.balance_of(profile.account.toString()),
+      8_000,
+      "Timed out reading stDUSK balance"
+    );
+  }
+
+  return parseSozuPosition({ balance, stDuskBalance });
+}
+
+export async function getSozuStatus(params = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const network = await ensureNetwork();
+  const idx = normalizeProfileIndex(params?.profileIndex, state.currentIndex || 0);
+  const profile = await ensureProfileIndex(idx);
+  const networkKey = detectPresetIdFromNodeUrl(engineConfig.nodeUrl);
+  const bootstrap = getSozuHubBootstrap(networkKey);
+
+  if (!bootstrap) {
+    return Object.freeze({
+      networkKey,
+      configured: false,
+      source: "unavailable",
+      reason: "Sozu liquid staking is not configured for this network.",
+    });
+  }
+
+  let discoveredContracts = {};
+  let discoveryError = "";
+  try {
+    discoveredContracts = await discoverSozuContracts(network, bootstrap);
+  } catch (e) {
+    discoveryError = e?.message ?? String(e);
+  }
+
+  const config = resolveSozuConfig({
+    networkKey,
+    bootstrap,
+    discoveredContracts,
+    allowFallback: true,
+  });
+
+  if (!config) {
+    return Object.freeze({
+      networkKey,
+      configured: false,
+      source: "unavailable",
+      contracts: { hub: bootstrap.contracts.hub },
+      discoveredContracts,
+      reason: discoveryError || "Sozu pool contract could not be resolved.",
+    });
+  }
+
+  let poolState = null;
+  let position = null;
+  let readError = "";
+  try {
+    [poolState, position] = await Promise.all([
+      readSozuPoolState(network, config),
+      readSozuPosition(network, config, profile),
+    ]);
+  } catch (e) {
+    readError = e?.message ?? String(e);
+  }
+
+  const balance = await withTimeout(
+    state.bookkeeper.balance(profile.account),
+    8_000,
+    "Timed out reading Sozu funding balance"
+  ).catch(() => null);
+
+  return Object.freeze({
+    networkKey,
+    configured: true,
+    source: config.source,
+    contracts: config.contracts,
+    discoveredContracts: config.discoveredContracts,
+    reason: readError,
+    pool: poolState,
+    position,
+    profileIndex: idx,
+    account: profile.account.toString(),
+    publicBalance: balance
+      ? {
+          nonce: balance.nonce?.toString?.() ?? String(balance.nonce ?? 0),
+          value: balance.value?.toString?.() ?? String(balance.value ?? 0),
+        }
+      : null,
+  });
 }
 
 /**

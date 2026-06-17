@@ -9,7 +9,7 @@ export const ONBOARD_ROUTES = new Set([
 ]);
 
 export const state = {
-  // home | send | confirm | convert | convert_confirm | stake | stake_confirm
+  // home | send | confirm | convert | convert_confirm | stake | stake_confirm | sozu_confirm
   // | asset_add_token | asset_add_nft | asset_token | asset_token_confirm | asset_nft
   // | receive | activity | tx | options | contacts | onboarding_*...
   route: (() => {
@@ -24,6 +24,7 @@ export const state = {
         "convert_confirm",
         "stake",
         "stake_confirm",
+        "sozu_confirm",
         "asset_add_token",
         "asset_add_nft",
         "asset_token",
