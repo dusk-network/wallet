@@ -200,22 +200,58 @@ export async function renderNotification() {
 
   const lockBox = () => {
     const pwd = h("input", { type: "password", placeholder: "Password" });
+    const errBox = h("div", { class: "err", style: "display:none" });
+
     const unlockBtn = h("button", {
       class: "btn-primary",
       text: "Unlock",
-      onclick: async () => {
+    });
+
+    let busy = false;
+    const unlock = async () => {
+      if (busy) return;
+      let focusPassword = false;
+      busy = true;
+      unlockBtn.disabled = true;
+      pwd.disabled = true;
+      unlockBtn.textContent = "Unlocking...";
+      errBox.style.display = "none";
+      errBox.textContent = "";
+
+      try {
         const res = await send({ type: "DUSK_UI_UNLOCK", password: pwd.value });
         if (res?.error) {
-          renderError(res.error.message || "Unlock failed");
+          errBox.textContent = res.error.message || "Unlock failed";
+          errBox.style.display = "block";
+          pwd.value = "";
+          focusPassword = true;
           return;
         }
         await renderNotification();
-      },
+      } catch (error) {
+        errBox.textContent = error?.message || "Unlock failed";
+        errBox.style.display = "block";
+        focusPassword = true;
+      } finally {
+        busy = false;
+        unlockBtn.disabled = false;
+        pwd.disabled = false;
+        unlockBtn.textContent = "Unlock";
+        if (focusPassword) pwd.focus();
+      }
+    };
+
+    unlockBtn.addEventListener("click", unlock);
+    pwd.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      unlock();
     });
 
     return h("div", { class: "row" }, [
       h("div", { class: "muted", text: "Wallet locked. Unlock to proceed." }),
       h("div", { class: "row" }, [pwd]),
+      errBox,
       h("div", { class: "btnrow" }, [unlockBtn]),
     ]);
   };
