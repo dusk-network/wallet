@@ -333,7 +333,7 @@ vi.mock("@dusk/w3sper", () => {
 
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-const NETWORK_KEY = "https://testnet.nodes.dusk.network";
+const NETWORK_KEY = "https://nodes.dusk.network";
 const WALLET_ID = "acct0";
 
 describe("walletEngine", () => {

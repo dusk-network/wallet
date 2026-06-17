@@ -216,9 +216,9 @@ async function withTimeout(promise, ms, message, onTimeout) {
 // We keep it in a small mutable object so we can reconfigure network routing
 // without restarting the whole engine.
 let engineConfig = {
-  nodeUrl: "https://testnet.nodes.dusk.network",
-  proverUrl: "https://testnet.provers.dusk.network",
-  archiverUrl: "https://testnet.nodes.dusk.network",
+  nodeUrl: "https://nodes.dusk.network",
+  proverUrl: "https://provers.dusk.network",
+  archiverUrl: "https://nodes.dusk.network",
   accountCount: 2,
   selectedAccountIndex: 0,
 };
