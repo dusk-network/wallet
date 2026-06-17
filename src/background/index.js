@@ -13,6 +13,7 @@ import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { detectPresetIdFromNodeUrl, networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
+import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { bytesToHex } from "../shared/bytes.js";
 import { classifyTxPresence } from "../shared/txLifecycle.js";
 
@@ -364,7 +365,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // Ensure any dApp port(s) opened from this tab are bound to the same
         // origin so provider push events (connect/chainChanged/...) work
         // reliably.
-        bindPortsForSenderOrigin(sender, origin);
+        if (isAllowedDappOrigin(origin)) {
+          bindPortsForSenderOrigin(sender, origin);
+        }
 
         const id = message.id;
         const result = await handleRpc(origin, message.request);
