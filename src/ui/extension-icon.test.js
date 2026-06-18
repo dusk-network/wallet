@@ -11,6 +11,9 @@ describe("extension icon assets", () => {
     const firefoxManifest = JSON.parse(
       await readFile(path.resolve(root, "config", "manifest.firefox.json"), "utf8")
     );
+    const pkg = JSON.parse(
+      await readFile(path.resolve(root, "package.json"), "utf8")
+    );
     const source = await readFile(
       path.resolve(root, "public", "icons", "dusk-extension-icon.svg"),
       "utf8"
@@ -21,6 +24,7 @@ describe("extension icon assets", () => {
     );
 
     for (const manifest of [chromeManifest, firefoxManifest]) {
+      expect(manifest.version).toBe(pkg.version);
       expect(manifest.action.default_icon).toEqual({
         16: "icons/dusk-16.png",
         32: "icons/dusk-32.png",
