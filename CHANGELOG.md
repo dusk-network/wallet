@@ -7,14 +7,33 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-18
+
 ### Added
 
 - Added a repository privacy policy document for wallet extension store submissions. ([#29])
-- Added Sozu liquid staking support, native staking owner flows, and updated staking transaction review UX. ([#32], [#33])
+- Added owner-aware native staking position flows. ([#32])
+- Added Sozu liquid staking support with hub discovery and live pool reads. ([#33])
+- Added a Shield action to the full wallet view navigation. ([#43])
 
 ### Changed
 
 - Changed the default wallet network from Testnet to Mainnet.
+- Updated wallet-core to 1.7.1. ([#47])
+- Updated dashboard action icons and extension icon contrast. ([#42], [#46])
+- Clarified the transfer amount control and connected-site status UI. ([#44], [#45])
+- Polished wallet copy across staking and other user-facing flows. ([#52])
+- Updated the audited development toolchain so `npm audit` is clean. ([#55])
+
+### Fixed
+
+- Allowed users to retry approval unlocks after entering a wrong password. ([#41])
+- Refreshed full-view lock state when the wallet auto-locks in the background. ([#51])
+- Scoped provider bridge messages to Dusk Wallet so another installed Dusk provider does not receive the same dApp request. ([#53])
+
+### Security
+
+- Restricted dApp RPC and custom node switching to HTTPS origins/endpoints or local HTTP development endpoints. ([#54])
 
 ## [0.1.0] - 2026-05-28
 
@@ -62,5 +81,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Prevented Phoenix pending-nullifier reservations from being automatically released on timeout, unknown status, removed status, or a single missing mempool poll.
 - Prevented provider responses from leaking local pending nullifiers.
 
-[Unreleased]: https://github.com/dusk-network/wallet/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dusk-network/wallet/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dusk-network/wallet/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dusk-network/wallet/releases/tag/v0.1.0
