@@ -489,7 +489,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       st.loaded = false;
       st.loading = false;
       state.highlightTx = hash || null;
-      state.route = "activity";
+      state.route = "home";
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
     } catch (e) {

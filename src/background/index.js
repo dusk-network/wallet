@@ -853,8 +853,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           permissions = null;
         }
 
-        // Recent activity (transaction list). This is used by the Home +
-        // Activity screens to provide MetaMask-like feedback instead of
+        // Recent activity (transaction list). This is used by the dashboard
+        // to provide MetaMask-like feedback instead of
         // ephemeral toasts.
         let txs = [];
         try {

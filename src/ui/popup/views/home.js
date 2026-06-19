@@ -5,7 +5,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { explorerTxUrl } from "../../../shared/explorer.js";
+import { explorerAccountUrl, explorerTxUrl } from "../../../shared/explorer.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
@@ -13,6 +13,8 @@ import { openUrl } from "../../../platform/index.js";
 import { assetsSectionsView } from "./assets.js";
 import { txActivityStatusLabel, txKindRailLabel, txStatusTone } from "./txDisplay.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
+import { subnav } from "../../components/Subnav.js";
+import { actionIcon } from "../../components/ActionIcon.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -49,35 +51,6 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
   }
 
   return frac ? `${intPart}.${frac}` : intPart;
-}
-
-function actionIcon(name) {
-  const paths = {
-    send: [
-      '<path d="m5 12 14-7-5 14-2.8-5.2Z"/>',
-      '<path d="m11.2 13.8 3.2 5.2"/>',
-    ],
-    receive: [
-      '<path d="M4 13v4.5A2.5 2.5 0 0 0 6.5 20h11A2.5 2.5 0 0 0 20 17.5V13"/>',
-      '<path d="M12 4v10"/>',
-      '<path d="m7.5 9.5 4.5 4.5 4.5-4.5"/>',
-    ],
-    shield: [
-      '<path d="M3.7 12s3-5 8.3-5 8.3 5 8.3 5-3 5-8.3 5-8.3-5-8.3-5Z"/>',
-      '<circle cx="12" cy="12" r="2.4"/>',
-      '<path d="M19.5 4.5 4.5 19.5"/>',
-    ],
-    stake: [
-      '<path d="M12 3.5 20 8l-8 4.5L4 8Z"/>',
-      '<path d="m4 12 8 4.5 8-4.5"/>',
-      '<path d="m4 16 8 4.5 8-4.5"/>',
-    ],
-  };
-
-  return h("div", {
-    class: "action-btn-ico",
-    html: `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name]?.join("") ?? ""}</svg>`,
-  });
 }
 
 export function homeView(ov, { state, actions } = {}) {
@@ -148,16 +121,6 @@ export function homeView(ov, { state, actions } = {}) {
     shieldStatusTitle = `Reserved ${formatLuxShort(reservedLux, UI_DISPLAY_DECIMALS)} DUSK`;
   }
 
-  // MetaMask-like main tabs. We keep the route as the source of truth so
-  // deep-links like `?route=activity&tx=...` continue to work.
-  const activeTab = state?.route === "activity" ? "activity" : "assets";
-  const switchTab = (tab) => {
-    if (!state) return;
-    state.highlightTx = null;
-    state.route = tab === "activity" ? "activity" : "home";
-    actions?.render?.().catch(() => {});
-  };
-
   // Home hero shows the total once shielded is available.
   const heroAmt = hasTotal ? totalDusk : balDusk;
   const heroAmtTitle = hasTotal ? totalFull : balFull;
@@ -218,7 +181,7 @@ export function homeView(ov, { state, actions } = {}) {
   ]);
 
   const dashboardTopbar = h("div", { class: "dashboard-topbar" }, [
-    bracketTitle({ class: "dashboard-title", text: activeTab === "activity" ? "History" : "Dashboard" }),
+    bracketTitle({ class: "dashboard-title", text: "Dashboard" }),
     h("div", { class: "dashboard-top-actions" }, [
       h("button", {
         class: "btn-outline dashboard-top-action",
@@ -254,12 +217,10 @@ export function homeView(ov, { state, actions } = {}) {
   // Activity list
   const txs = Array.isArray(ov?.txs) ? ov.txs : [];
   const nodeUrl = String(ov?.nodeUrl ?? "");
-
-  // Pending count (for a small Activity tab badge).
-  const pendingCount = txs.reduce((n, tx) => {
-    const s = String(tx?.status ?? "submitted").toLowerCase();
-    return s === "submitted" || s === "mempool" ? n + 1 : n;
-  }, 0);
+  const accountIndexRaw = Number(ov?.selectedAccountIndex ?? 0);
+  const accountIndex = Number.isFinite(accountIndexRaw) && accountIndexRaw >= 0 ? Math.floor(accountIndexRaw) : 0;
+  const publicAccount = String(ov?.accounts?.[accountIndex] ?? ov?.accounts?.[0] ?? "").trim();
+  const publicHistoryUrl = explorerAccountUrl(nodeUrl, publicAccount);
 
   const statusClass = (status) => {
     return `status-dot status-dot--${txStatusTone(status)}`;
@@ -475,7 +436,7 @@ export function homeView(ov, { state, actions } = {}) {
       try {
         if (state) {
           state.txDetailHash = hash;
-          state.txDetailFrom = state.route || "activity";
+          state.txDetailFrom = state.route === "activity" ? "activity" : "home";
           state.route = "tx";
           actions?.render?.().catch(() => {});
           return;
@@ -511,63 +472,70 @@ export function homeView(ov, { state, actions } = {}) {
     );
   };
 
-  const viewAll = h("button", {
-    class: "activity-view-all",
-    text: "View all →",
-    onclick: (e) => {
+  const publicHistoryButton = h("button", {
+    class: "btn-outline activity-public-history",
+    text: "History ↗",
+    onclick: async (e) => {
       e?.stopPropagation?.();
-      switchTab("activity");
+      const ok = await openUrl(publicHistoryUrl);
+      if (!ok) actions?.showToast?.("Explorer unavailable");
     },
   });
 
-  const activityFull = h("div", { class: "activity-card activity-card--tx" }, [
-    h("div", { class: "activity-card-head" }, [
-      bracketTitle({ class: "activity-section-label", text: "Recent transactions" }),
-      viewAll,
-    ]),
-    txs.length
-      ? h("div", { class: "activity-list" }, txs.map((tx) => txRow(tx)))
-      : h("div", { class: "muted", text: "No activity yet." }),
-  ]);
-
-  const tabs = h(
-    "div",
-    {
-      class: "tabs",
-      style: `--seg-index: ${activeTab === "assets" ? 0 : 1};`,
+  const viewAllButton = h("button", {
+    class: "activity-view-all",
+    text: "View all",
+    onclick: (e) => {
+      e?.stopPropagation?.();
+      state.route = "activity";
+      actions?.render?.().catch(() => {});
     },
-    [
-    h(
-      "button",
-      {
-        class: activeTab === "assets" ? "tab is-active" : "tab",
-        onclick: () => switchTab("assets"),
-      },
-      [h("span", { text: "Assets" })]
-    ),
-    h(
-      "button",
-      {
-        class: activeTab === "activity" ? "tab is-active" : "tab",
-        onclick: () => switchTab("activity"),
-      },
-      [
-        h("span", { text: "Activity" }),
-        pendingCount > 0
-          ? h("span", {
-              class: "tab-badge",
-              text: pendingCount > 9 ? "9+" : String(pendingCount),
-              title: `${pendingCount} pending`,
-            })
-          : null,
-      ].filter(Boolean)
-    ),
-    ]
-  );
+  });
 
-  const tabContent = activeTab === "activity"
-    ? [activityFull]
-    : assetsSectionsView(ov, { state, actions });
+  const activityHeader = ({ actions: headerActions, title, note }) =>
+    h("div", { class: "activity-card-head" }, [
+      h("div", { class: "activity-head-copy" }, [
+        bracketTitle({ class: "activity-section-label", text: title }),
+        note ? h("div", { class: "activity-head-note", text: note }) : null,
+      ].filter(Boolean)),
+      headerActions?.length ? h("div", { class: "activity-head-actions" }, headerActions) : null,
+    ].filter(Boolean));
+
+  const activityList = (items, emptyText) =>
+    items.length
+      ? h("div", { class: "activity-list" }, items.map((tx) => txRow(tx)))
+      : h("div", { class: "muted", text: emptyText });
+
+  if (state?.route === "activity") {
+    const onBack = () => {
+      state.route = "home";
+      actions?.render?.().catch(() => {});
+    };
+
+    return [
+      subnav({
+        title: "Activity",
+        onBack,
+        backText: "← Dashboard",
+        actions: [publicHistoryButton],
+      }),
+      h("div", { class: "wallet-dashboard" }, [
+        h("div", { class: "activity-card activity-card--tx" }, [
+          activityList(txs, "No local wallet activity yet."),
+        ]),
+      ]),
+    ];
+  }
+
+  const recentTxs = txs.slice(0, 5);
+  const activityFull = h("div", { class: "activity-card activity-card--tx" }, [
+    activityHeader({
+      title: "Recent activity",
+      actions: [publicHistoryButton],
+    }),
+    activityList(recentTxs, "No local wallet activity yet."),
+    h("div", { class: "activity-card-footer" }, [viewAllButton]),
+  ]);
 
   // Full mode should feel like an app dashboard, while popup remains a compact
   // single-column wallet. CSS handles the responsive collapse.
@@ -579,8 +547,8 @@ export function homeView(ov, { state, actions } = {}) {
         bracketTitle({ class: "dashboard-section-label", text: "Actions" }),
         actionBar,
       ]),
-      tabs,
-      ...tabContent,
+      ...assetsSectionsView(ov, { state, actions }),
+      activityFull,
     ]),
   ];
 }

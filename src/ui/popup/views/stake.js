@@ -823,7 +823,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
 
       state.stakeDraft = null;
       state.highlightTx = hash || null;
-      state.route = "activity";
+      state.route = "home";
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
     } catch (e) {

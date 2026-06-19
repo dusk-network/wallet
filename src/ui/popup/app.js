@@ -186,9 +186,7 @@ function setApp(children) {
       // Keep lastAnimatedRoute in sync even if we skip animation.
       lastAnimatedRoute = r;
 
-      // Assets/Activity are tabs inside the same "home" surface.
-      // Switching between them should feel like a segmented toggle, not a
-      // full view transition.
+      // Activity is an internal dashboard subview, not a top-level nav item.
       const isHomeTab = (x) => x === "home" || x === "activity";
       if (!(isHomeTab(prev) && isHomeTab(r))) {
         pulseViewAnimation();
@@ -218,7 +216,7 @@ function updateFullNav() {
       rawRoute === "convert_confirm"
         ? "convert"
         : rawRoute === "activity"
-        ? "activity"
+        ? "home"
         : rawRoute;
     for (const item of fullNav.querySelectorAll("[data-route]")) {
       const itemRoute = item.getAttribute("data-route");
@@ -242,7 +240,7 @@ if (fullNav) {
     acctMenu.close();
     state.route = route;
     state.needsRefresh = true;
-    if (route !== "activity") state.highlightTx = null;
+    if (route !== "home") state.highlightTx = null;
     await render({ forceRefresh: true });
   });
 }
@@ -318,7 +316,7 @@ function activeSiteBar(ov) {
 
 // --- Shielded sync UI polling ----------------------------------------------
 // Shielded note scanning can take some time, and we don't have a push channel
-// for progress yet. While the user is on the Home/Activity tabs, we lightly
+// for progress yet. While the user is on the dashboard, we lightly
 // poll overview so the Shielded row can show "Syncing 12%" style feedback.
 let shieldedPollTimer = null;
 function scheduleShieldedPoll(ov) {
@@ -656,7 +654,7 @@ async function onExpand() {
     if (origin) qs.set("origin", origin);
 
     // Preserve the current in-app route when expanding popup -> full view.
-    // This keeps Settings/Activity/etc. consistent and avoids surprising jumps.
+    // This keeps Settings/etc. consistent and avoids surprising jumps.
     try {
       const r = String(state?.route ?? "");
       if (r) qs.set("route", r);
@@ -666,8 +664,8 @@ async function onExpand() {
         qs.set("hash", String(state.txDetailHash));
       }
 
-      // Preserve Activity highlight (used when opened from a notification).
-      if (r === "activity" && state?.highlightTx) {
+      // Preserve transaction highlight (used when opened from a notification).
+      if ((r === "home" || r === "activity") && state?.highlightTx) {
         qs.set("tx", String(state.highlightTx));
       }
     } catch {
@@ -718,7 +716,7 @@ export async function render({ forceRefresh = false } = {}) {
   renderHeader(ov);
   updateFullNav();
 
-  // Keep shielded sync progress visible while on home/activity.
+  // Keep shielded sync progress visible while on the dashboard.
   scheduleShieldedPoll(ov);
   schedulePendingTxPoll(ov);
 

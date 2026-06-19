@@ -131,11 +131,11 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const txs = Array.isArray(ov?.txs) ? ov.txs : [];
   const tx = txs.find((t) => String(t?.hash ?? "") === hash) || null;
 
-  const backRoute = state?.txDetailFrom || "activity";
+  const backRoute = state?.txDetailFrom || "home";
   const onBack = () => {
     state.txDetailHash = null;
     state.txDetailFrom = null;
-    state.route = backRoute === "home" ? "home" : "activity";
+    state.route = backRoute;
     actions?.render?.().catch(() => {});
   };
 
@@ -310,7 +310,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
       : null;
 
   return [
-    subnav({ title: "Transaction", onBack, backText: "← Activity" }),
+    subnav({ title: "Transaction", onBack, backText: backRoute === "activity" ? "← Activity" : "← Dashboard" }),
     h("div", { class: "row" }, [
       chips,
       errorBox,
