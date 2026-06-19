@@ -1,9 +1,8 @@
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
-import { qrCodeEl } from "../../components/QrCode.js";
+import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
 import { identiconEl } from "../../components/Identicon.js";
-import { truncateMiddle } from "../../lib/strings.js";
 import { decimalInput, textInput } from "../../components/FormControls.js";
 import { parseDuskToLux } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
@@ -48,6 +47,11 @@ function isTauriMobileLike() {
   } catch {
     return false;
   }
+}
+
+function qrFilename({ request, tab } = {}) {
+  const rail = tab === "public" ? "public" : "shielded";
+  return request ? `dusk-${rail}-request-qr.png` : `dusk-${rail}-receive-qr.png`;
 }
 
 export function receiveView(ov, { state, actions } = {}) {
@@ -117,7 +121,9 @@ export function receiveView(ov, { state, actions } = {}) {
   const qrCard = h("div", { class: "box qr-box receive-qr-card" });
 
   const chipIcon = h("div", { class: "receive-chip-icon" });
-  const chipText = h("div", { class: "receive-chip-text" });
+  const chipKind = h("div", { class: "receive-chip-kind" });
+  const chipText = h("code", { class: "receive-chip-text" });
+  const chipMain = h("div", { class: "receive-chip-main" }, [chipKind, chipText]);
   const chipCopy = h("div", { class: "receive-chip-copy", text: "⧉" });
   const addressChip = h(
     "button",
@@ -131,7 +137,7 @@ export function receiveView(ov, { state, actions } = {}) {
         actions?.showToast?.(ok ? `Copied ${recipientLabel}` : "Copy failed");
       },
     },
-    [chipIcon, chipText, chipCopy]
+    [chipIcon, chipMain, chipCopy]
   );
 
   // --- Request payment (progressive disclosure) -----------------------
@@ -194,9 +200,68 @@ export function receiveView(ov, { state, actions } = {}) {
   // --- Actions ---------------------------------------------------------
   let curRecipient = recipient || "";
   let curUri = "";
+  let curQrValue = recipient || "";
   let curCopyValue = recipient || "";
   let curCopyToast = tab === "public" ? "Copied account" : "Copied address";
   let wantRequest = false;
+  let qrMenuOpen = false;
+
+  const qrMenu = h("div", { class: "qr-context-menu", style: "display:none" });
+
+  const downloadCurrentQr = async () => {
+    if (!curQrValue) return;
+    try {
+      await downloadQrPng(curQrValue, qrFilename({ request: wantRequest, tab: r.tab }));
+      actions?.showToast?.("Downloaded QR PNG");
+    } catch (e) {
+      actions?.showToast?.(e?.message ?? "QR download failed", 2500);
+    }
+  };
+
+  const hideQrMenu = () => {
+    qrMenuOpen = false;
+    qrMenu.style.display = "none";
+    document.removeEventListener("click", closeQrMenuFromDocument);
+    document.removeEventListener("keydown", closeQrMenuFromKeyboard);
+  };
+
+  const closeQrMenuFromDocument = (e) => {
+    if (qrMenu.contains(e.target)) return;
+    hideQrMenu();
+  };
+
+  const closeQrMenuFromKeyboard = (e) => {
+    if (e.key === "Escape") hideQrMenu();
+  };
+
+  const showQrMenu = (event) => {
+    if (!curQrValue) return;
+    event.preventDefault();
+    qrMenuOpen = true;
+    qrMenu.style.display = "block";
+    qrMenu.style.left = `${Math.max(8, event.clientX)}px`;
+    qrMenu.style.top = `${Math.max(8, event.clientY)}px`;
+    setTimeout(() => {
+      document.addEventListener("click", closeQrMenuFromDocument);
+      document.addEventListener("keydown", closeQrMenuFromKeyboard);
+    }, 0);
+  };
+
+  const downloadMenuItem = h("button", {
+    class: "qr-context-menu__item",
+    type: "button",
+    text: "Download QR PNG",
+    onclick: () => {
+      hideQrMenu();
+      downloadCurrentQr();
+    },
+  });
+  qrMenu.appendChild(downloadMenuItem);
+
+  qrCard.title = "Right-click for QR options";
+  qrCard.addEventListener("contextmenu", (e) => {
+    showQrMenu(e);
+  });
 
   const copyBtn = h("button", {
     class: "btn-primary",
@@ -236,10 +301,16 @@ export function receiveView(ov, { state, actions } = {}) {
       })
     : null;
 
+  const downloadBtn = h("button", {
+    class: "btn-outline",
+    text: "Download QR PNG",
+    onclick: downloadCurrentQr,
+  });
+
   const btnRow = h(
     "div",
-    { class: shareBtn ? "btnrow btnrow--grid" : "btnrow" },
-    shareBtn ? [copyBtn, shareBtn] : [copyBtn]
+    { class: "btnrow btnrow--grid" },
+    shareBtn ? [copyBtn, shareBtn, downloadBtn] : [copyBtn, downloadBtn]
   );
 
   // --- Live update -----------------------------------------------------
@@ -268,9 +339,8 @@ export function receiveView(ov, { state, actions } = {}) {
 
     // Update chip
     chipIcon.replaceChildren(identiconEl(curRecipient || "dusk"));
-    chipText.textContent = curRecipient
-      ? truncateMiddle(curRecipient, 10, 8)
-      : "—";
+    chipKind.textContent = r.tab === "public" ? "Public account" : "Shielded address";
+    chipText.textContent = curRecipient || "—";
     addressChip.title = curRecipient || "";
 
     // Validate request fields
@@ -302,6 +372,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
     // QR encodes the request only when the request panel is open and has content.
     const qrValue = wantRequest ? curUri : curRecipient;
+    curQrValue = qrValue || "";
     qrCard.replaceChildren(qrCodeEl(qrValue || ""));
 
     // Copy button is smart: address by default, request when configured.
@@ -322,6 +393,8 @@ export function receiveView(ov, { state, actions } = {}) {
     }
 
     copyBtn.disabled = !curCopyValue;
+    downloadBtn.disabled = !curQrValue;
+    if (!curQrValue) hideQrMenu();
     addressChip.disabled = !curRecipient;
     if (shareBtn) shareBtn.disabled = !curRecipient;
   }
@@ -349,6 +422,7 @@ export function receiveView(ov, { state, actions } = {}) {
       btnRow,
       requestDetails,
       note,
+      qrMenu,
     ]),
   ].filter(Boolean);
 }
