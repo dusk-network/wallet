@@ -11,6 +11,7 @@ import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { sozuLiquidStakingView } from "./sozu.js";
+import { bracketTitle } from "../../components/BracketTitle.js";
 import { decimalInput, submitOnGasEnter } from "../../components/FormControls.js";
 
 const FUNDING_PUBLIC = "account";
@@ -449,7 +450,7 @@ export function stakeFormView(ov, { state, actions } = {}) {
 
   const nativeView = [
     statusLine,
-    h("div", { class: "staking-section-title", text: "Stake positions" }),
+    bracketTitle({ class: "staking-section-title", text: "Stake positions" }),
     positions.length
       ? h("div", { class: "stake-position-list" }, positions.map(positionCard))
       : h("div", { class: "box muted", text: "No local stake positions found." }),

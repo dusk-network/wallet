@@ -4,6 +4,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
+import { bracketTitle } from "../../components/BracketTitle.js";
 import { integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
 
@@ -292,7 +293,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
 
   const tokensCard = h("div", { class: "box asset-section-card" }, [
     h("div", { class: "hrow" }, [
-      h("div", { class: "asset-section-title", text: "Tokens" }),
+      bracketTitle({ class: "asset-section-title", text: "Tokens" }),
       h("button", { class: "btn-outline", text: "Add token", onclick: openAddToken }),
     ]),
     st?.loading ? h("div", { class: "muted", text: "Loading…" }) : null,
@@ -302,7 +303,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
 
   const nftCard = h("div", { class: "box asset-section-card" }, [
     h("div", { class: "hrow" }, [
-      h("div", { class: "asset-section-title", text: "NFTs" }),
+      bracketTitle({ class: "asset-section-title", text: "NFTs" }),
       h("button", { class: "btn-outline", text: "Import NFT", onclick: openAddNft }),
     ]),
     nftRows.length ? h("div", { class: "activity-list" }, nftRows) : h("div", { class: "muted", text: "No NFTs added." }),

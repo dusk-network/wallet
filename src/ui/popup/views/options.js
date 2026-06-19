@@ -9,6 +9,7 @@ import { platform } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
+import { bracketTitle } from "../../components/BracketTitle.js";
 import { textInput, urlInput } from "../../components/FormControls.js";
 
 export function optionsView(ov, { state, actions } = {}) {
@@ -389,7 +390,7 @@ export function optionsView(ov, { state, actions } = {}) {
 
   const settingsSection = (title, children = []) =>
     h("section", { class: "settings-section" }, [
-      h("div", { class: "settings-section-title", text: title }),
+      bracketTitle({ class: "settings-section-title", text: title }),
       ...children.filter(Boolean),
     ]);
 
