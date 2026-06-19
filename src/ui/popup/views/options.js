@@ -9,6 +9,7 @@ import { platform } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
+import { textInput, urlInput } from "../../components/FormControls.js";
 
 export function optionsView(ov, { state, actions } = {}) {
   const currentNodeUrl = String(ov?.nodeUrl ?? "").trim();
@@ -82,7 +83,7 @@ export function optionsView(ov, { state, actions } = {}) {
     ? h("div", { class: "row" }, [
         h("label", { text: "Profile names" }),
         ...displayAccounts.map((acct, i) => {
-          const input = h("input", {
+          const input = textInput({
             placeholder: `Profile ${i + 1} name (optional)`,
             value: String(nameMap?.[String(i)] ?? ""),
           });
@@ -142,19 +143,22 @@ export function optionsView(ov, { state, actions } = {}) {
     }
   });
 
-  const nodeUrlInput = h("input", {
+  const nodeUrlInput = urlInput({
     value: currentNodeUrl,
     placeholder: "https://nodes.dusk.network",
+    onEnter: () => saveBtn.click(),
   });
 
-  const proverUrlInput = h("input", {
+  const proverUrlInput = urlInput({
     value: currentProverUrl,
     placeholder: "https://provers.dusk.network",
+    onEnter: () => saveBtn.click(),
   });
 
-  const archiverUrlInput = h("input", {
+  const archiverUrlInput = urlInput({
     value: currentArchiverUrl,
     placeholder: "https://nodes.dusk.network",
+    onEnter: () => saveBtn.click(),
   });
 
   const networkSelect = h(

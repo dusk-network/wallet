@@ -11,6 +11,7 @@ import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { sozuLiquidStakingView } from "./sozu.js";
+import { decimalInput, submitOnGasEnter } from "../../components/FormControls.js";
 
 const FUNDING_PUBLIC = "account";
 const FUNDING_SHIELDED = "address";
@@ -557,11 +558,12 @@ function actionEditor(pos, st, { state, actions, minLux }) {
       : "Stake amount";
 
   const actionLabel = stakeKindLabel(kind, { hasStake: pos.hasStake });
-  const input = h("input", {
+  const input = decimalInput({
     id: "stake-action-amount",
     name: "stakeActionAmount",
     placeholder: `${amountLabel} (DUSK)`,
     value: String(amountValue ?? ""),
+    onEnter: () => reviewButton.click(),
     oninput: (e) => {
       st.amountMode = "custom";
       setAmountValue(String(e?.target?.value ?? ""));
@@ -829,6 +831,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
       confirmBtn.textContent = "Confirm";
     }
   });
+  submitOnGasEnter(gasEditor, confirmBtn);
 
   return [
     subnav({ title: "Review", onBack: goBack }),

@@ -12,6 +12,7 @@ import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
+import { submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import { identiconEl } from "../../components/Identicon.js";
 
 import { listAddressBook } from "../../../shared/addressBook.js";
@@ -23,9 +24,10 @@ import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
 export function sendFormView(ov, { state, actions } = {}) {
   const draft = state.draft || {};
 
-  const to = h("input", {
+  const to = textInput({
     placeholder: "Recipient (account or shielded address)",
     value: typeof draft.to === "string" ? draft.to : "",
+    onEnter: () => amount.focus(),
   });
 
   // Optional inline contact chip (shown when the recipient matches a saved contact).
@@ -37,9 +39,10 @@ export function sendFormView(ov, { state, actions } = {}) {
     [toChipIco, toChipName]
   );
   const toWrap = h("div", { class: "to-input-wrap" }, [toChip, to]);
-  const memo = h("input", {
+  const memo = textInput({
     placeholder: "Memo (optional)",
     value: typeof draft.memo === "string" ? draft.memo : "",
+    onEnter: () => nextBtn.click(),
   });
 
   // Assigned later (we want to pass it into components as a live closure).
@@ -87,6 +90,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     actions,
     onAmountInput: () => syncDraft(),
     onAmountChange: () => syncDraft(),
+    onEnter: () => nextBtn.click(),
     children: [amountMeta],
     maxUnavailableToast: "Enter a valid recipient to calculate max",
   });
@@ -786,6 +790,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       confirmBtn.textContent = "Confirm";
     }
   });
+  submitOnGasEnter(gasEditor, confirmBtn);
 
   return [
     subnav({

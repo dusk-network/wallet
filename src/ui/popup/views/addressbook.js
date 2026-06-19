@@ -3,6 +3,7 @@ import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import { identiconEl } from "../../components/Identicon.js";
 import { truncateMiddle } from "../../lib/strings.js";
+import { searchInput, textInput } from "../../components/FormControls.js";
 import { TX_KIND } from "../../../shared/constants.js";
 
 import {
@@ -98,7 +99,7 @@ export function addressBookView(ov, { state, actions } = {}) {
 
     const title = ab.mode === "pick" ? "Select contact" : "Contacts";
 
-    const search = h("input", {
+    const search = searchInput({
       placeholder: "Search name or address…",
       value: String(ab.query ?? ""),
       oninput: (e) => {
@@ -293,17 +294,19 @@ export function addressBookView(ov, { state, actions } = {}) {
   const renderEdit = () => {
     const isNew = !ab.editId;
 
-    const nameInput = h("input", {
+    const nameInput = textInput({
       placeholder: "Name (e.g. Alice)",
       value: String(ab.editName ?? ""),
+      onEnter: () => addrInput.focus(),
       oninput: (e) => {
         ab.editName = String(e?.target?.value ?? "");
       },
     });
 
-    const addrInput = h("input", {
+    const addrInput = textInput({
       placeholder: "Address (public account or shielded)",
       value: String(ab.editAddress ?? ""),
+      onEnter: () => saveBtn.click(),
       oninput: (e) => {
         ab.editAddress = String(e?.target?.value ?? "");
         // Re-render to update detection pill.

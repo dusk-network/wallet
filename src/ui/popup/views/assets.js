@@ -4,6 +4,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
+import { integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
 
 const MAX_U64 = 18446744073709551615n;
@@ -323,9 +324,10 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
     meta: null,
   });
 
-  const input = h("input", {
+  const input = textInput({
     placeholder: "Contract ID (0x…)",
     value: String(st.contractId ?? ""),
+    onEnter: () => lookupBtn.click(),
     oninput: (e) => {
       st.contractId = String(e?.target?.value ?? "");
     },
@@ -383,7 +385,6 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
       }
     },
   });
-
   const metaBox = st.meta
     ? h("div", { class: "box" }, [
         h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Name" }), h("code", { text: String(st.meta?.name ?? "—") })]),
@@ -419,17 +420,19 @@ export function assetAddNftView(ov, { state, actions } = {}) {
     info: null, // { meta, owner, tokenUri }
   });
 
-  const contractInput = h("input", {
+  const contractInput = textInput({
     placeholder: "Contract ID (0x…)",
     value: String(st.contractId ?? ""),
+    onEnter: () => tokenIdInput.focus(),
     oninput: (e) => {
       st.contractId = String(e?.target?.value ?? "");
     },
   });
 
-  const tokenIdInput = h("input", {
+  const tokenIdInput = integerInput({
     placeholder: "Token ID (u64)",
     value: String(st.tokenId ?? ""),
+    onEnter: () => lookupBtn.click(),
     oninput: (e) => {
       st.tokenId = String(e?.target?.value ?? "");
     },
@@ -509,7 +512,6 @@ export function assetAddNftView(ov, { state, actions } = {}) {
       }
     },
   });
-
   const infoBox = st.info
     ? (() => {
         const me = String(ov?.accounts?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "").trim();
@@ -714,32 +716,40 @@ export function assetTokenView(ov, { state, actions } = {}) {
     ].filter(Boolean)),
   ]);
 
+  const transferToInput = textInput({
+    id: "asset-token-to",
+    name: "assetTokenRecipient",
+    placeholder: "Recipient (base58… or 0x…)",
+    value: String(form.to ?? ""),
+    onEnter: () => transferAmountInput.focus(),
+    oninput: (e) => {
+      form.to = String(e?.target?.value ?? "");
+    },
+  });
+  const transferAmountInput = textInput({
+    id: "asset-token-amount",
+    name: "assetTokenAmount",
+    placeholder: `Amount (${sym})`,
+    value: String(form.amount ?? ""),
+    numericMode: dec > 0 ? "decimal" : "integer",
+    onEnter: () => reviewTransferBtn.click(),
+    oninput: (e) => {
+      form.amount = String(e?.target?.value ?? "");
+    },
+  });
+
+  const reviewTransferBtn = h("button", { class: "btn-primary", text: "Review transfer", onclick: reviewTransfer });
+
   const sendSection = h("div", { class: "box asset-action-section" }, [
     h("div", { class: "asset-action-head" }, [
       h("div", { class: "asset-action-title", text: "Send" }),
       h("div", { class: "asset-action-subtitle", text: `Transfer ${sym} to another account or contract.` }),
     ]),
     h("label", { for: "asset-token-to", text: "Recipient" }),
-    h("input", {
-      id: "asset-token-to",
-      name: "assetTokenRecipient",
-      placeholder: "Recipient (base58… or 0x…)",
-      value: String(form.to ?? ""),
-      oninput: (e) => {
-        form.to = String(e?.target?.value ?? "");
-      },
-    }),
+    transferToInput,
     h("label", { for: "asset-token-amount", text: "Amount" }),
-    h("input", {
-      id: "asset-token-amount",
-      name: "assetTokenAmount",
-      placeholder: `Amount (${sym})`,
-      value: String(form.amount ?? ""),
-      oninput: (e) => {
-        form.amount = String(e?.target?.value ?? "");
-      },
-    }),
-    h("button", { class: "btn-primary", text: "Review transfer", onclick: reviewTransfer }),
+    transferAmountInput,
+    reviewTransferBtn,
   ]);
 
   const approveMaxBtn = h("button", {
@@ -749,35 +759,46 @@ export function assetTokenView(ov, { state, actions } = {}) {
     onclick: async () => reviewApprove({ max: true }),
   });
 
+  const approveSpenderInput = textInput({
+    id: "asset-token-spender",
+    name: "assetTokenSpender",
+    placeholder: "Spender (base58… or 0x…)",
+    value: String(form.spender ?? ""),
+    onEnter: () => approveAmountInput.focus(),
+    oninput: (e) => {
+      form.spender = String(e?.target?.value ?? "");
+    },
+  });
+  const approveAmountInput = textInput({
+    id: "asset-token-approve-amount",
+    name: "assetTokenApproveAmount",
+    placeholder: `Amount (${sym})`,
+    value: String(form.approveAmount ?? ""),
+    numericMode: dec > 0 ? "decimal" : "integer",
+    onEnter: () => reviewApproveBtn.click(),
+    oninput: (e) => {
+      form.approveAmount = String(e?.target?.value ?? "");
+    },
+  });
+
+  const reviewApproveBtn = h("button", {
+    class: "btn-primary",
+    text: "Review approval",
+    onclick: () => reviewApprove({ max: false }),
+  });
   const approveSection = h("div", { class: "box asset-action-section" }, [
     h("div", { class: "asset-action-head" }, [
       h("div", { class: "asset-action-title", text: "Approve" }),
       h("div", { class: "asset-action-subtitle", text: `Let another account or contract spend ${sym}.` }),
     ]),
     h("label", { for: "asset-token-spender", text: "Spender" }),
-    h("input", {
-      id: "asset-token-spender",
-      name: "assetTokenSpender",
-      placeholder: "Spender (base58… or 0x…)",
-      value: String(form.spender ?? ""),
-      oninput: (e) => {
-        form.spender = String(e?.target?.value ?? "");
-      },
-    }),
+    approveSpenderInput,
     h("label", { for: "asset-token-approve-amount", text: "Allowance" }),
     h("div", { class: "hrow" }, [
-      h("input", {
-        id: "asset-token-approve-amount",
-        name: "assetTokenApproveAmount",
-        placeholder: `Amount (${sym})`,
-        value: String(form.approveAmount ?? ""),
-        oninput: (e) => {
-          form.approveAmount = String(e?.target?.value ?? "");
-        },
-      }),
+      approveAmountInput,
       approveMaxBtn,
     ]),
-    h("button", { class: "btn-primary", text: "Review approval", onclick: () => reviewApprove({ max: false }) }),
+    reviewApproveBtn,
     h("div", {
       class: "asset-action-note",
       text: "MAX approvals grant broad spending permission. Prefer exact amounts.",
@@ -916,6 +937,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
       confirmBtn.textContent = "Confirm";
     }
   });
+  submitOnGasEnter(gasEditor, confirmBtn);
 
   return [
     subnav({ title: "Review", onBack }),

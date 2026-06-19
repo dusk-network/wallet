@@ -32,6 +32,7 @@ export function createMnemonicInput({
   allowWordCountToggle = true,
   label12 = "12 words",
   label24 = "24 words",
+  onComplete,
 } = {}) {
   const MAX = 24;
   let count = wordCount === 24 ? 24 : 12;
@@ -148,7 +149,11 @@ export function createMnemonicInput({
     if (e.key === "Enter" || e.key === " ") {
       if (String(inputs[i].value ?? "").trim()) {
         e.preventDefault();
-        focusIndex(i + 1);
+        if (i >= count - 1) {
+          onComplete?.();
+        } else {
+          focusIndex(i + 1);
+        }
       }
       return;
     }

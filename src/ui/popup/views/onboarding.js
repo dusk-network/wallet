@@ -4,6 +4,7 @@ import { bytesToHex } from "../../../shared/bytes.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
+import { checkboxInput, passwordInput } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 
@@ -89,9 +90,15 @@ export function onboardingWelcomeView({ state, actions } = {}) {
 }
 
 export function onboardingCreatePasswordView({ state, actions } = {}) {
-  const pwd = h("input", { type: "password", placeholder: "Create password (min 8 chars)" });
-  const pwd2 = h("input", { type: "password", placeholder: "Confirm password" });
-  const agree = h("input", { type: "checkbox" });
+  const pwd = passwordInput({
+    placeholder: "Create password (min 8 chars)",
+    onEnter: () => pwd2.focus(),
+  });
+  const pwd2 = passwordInput({
+    placeholder: "Confirm password",
+    onEnter: () => (agree.checked ? next.click() : agree.focus()),
+  });
+  const agree = checkboxInput({ onEnter: () => next.click() });
 
   const err = h("div", { class: "err", style: "display:none" });
   const setErr = (txt) => {
@@ -125,7 +132,6 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
       }
     },
   });
-
   return [
     subnav({
       title: "Create",
@@ -225,9 +231,11 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
   }
 
   const expectedWordCount = normalizeMnemonic(mnemonic).split(" ").filter(Boolean).length || 12;
+  let createBtn;
   const confirmInput = createMnemonicInput({
     wordCount: expectedWordCount,
     allowWordCountToggle: false,
+    onComplete: () => createBtn?.click(),
   });
 
   const err = h("div", { class: "err", style: "display:none" });
@@ -260,7 +268,6 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
   const backBtn = nav.querySelector("button");
 
   let busy = false;
-  let createBtn;
   const setBusy = (isBusy, msg) => {
     busy = Boolean(isBusy);
     if (msg) busyBody.textContent = String(msg);
@@ -347,9 +354,16 @@ export function onboardingImportView({ state, actions } = {}) {
   const mnemonicInput = createMnemonicInput({
     wordCount: 12,
     allowWordCountToggle: true,
+    onComplete: () => pwd.focus(),
   });
-  const pwd = h("input", { type: "password", placeholder: "Create password (min 8 chars)" });
-  const pwd2 = h("input", { type: "password", placeholder: "Confirm password" });
+  const pwd = passwordInput({
+    placeholder: "Create password (min 8 chars)",
+    onEnter: () => pwd2.focus(),
+  });
+  const pwd2 = passwordInput({
+    placeholder: "Confirm password",
+    onEnter: () => btn.click(),
+  });
 
   const err = h("div", { class: "err", style: "display:none" });
   const setErr = (txt) => {
@@ -436,7 +450,6 @@ export function onboardingImportView({ state, actions } = {}) {
       }
     },
   });
-
   return [
     nav,
     h("div", { class: "row" }, [

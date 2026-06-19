@@ -1,5 +1,6 @@
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { h } from "../lib/dom.js";
+import { integerInput } from "./FormControls.js";
 
 function maxFeeFromGasStrings(limitStr, priceStr) {
   const l = String(limitStr ?? "").trim();
@@ -110,13 +111,15 @@ export class DuskGasEditor extends HTMLElement {
     // Build DOM only once, keep references.
     this.innerHTML = "";
 
-    this.#limitInput = h("input", {
+    this.#limitInput = integerInput({
       placeholder: "Gas limit (optional)",
-      inputmode: "numeric",
+      onEnter: () => this.#priceInput?.focus?.(),
     });
-    this.#priceInput = h("input", {
+    this.#priceInput = integerInput({
       placeholder: "Gas price (optional)",
-      inputmode: "numeric",
+      onEnter: () => {
+        this.dispatchEvent(new CustomEvent("dusk-gas-enter", { bubbles: true }));
+      },
     });
 
     this.#feeCode = h("code", { text: "Auto" });
