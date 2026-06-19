@@ -94,14 +94,16 @@ export const state = {
     // Prefill value when adding a new contact
     prefillAddress: "",
     // UI state
-    view: "list", // "list" | "edit"
+    view: "list", // "list" | "detail" | "edit"
     query: "",
     loaded: false,
     loading: false,
     error: null,
     items: null,
+    detailId: null,
     // edit form
     editId: null,
+    editReturnView: "list",
     editName: "",
     editAddress: "",
   },

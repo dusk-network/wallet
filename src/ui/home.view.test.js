@@ -64,6 +64,9 @@ describe("home dashboard action icons", () => {
     expect(source).toContain("activity-head-actions");
     expect(source).toContain("activity-card-footer");
     expect(source).toContain("activityList(txs");
+    expect(source).toContain("listAddressBook()");
+    expect(source).toContain("contactForTx(tx)");
+    expect(source).toContain("activity-contact-badge");
     expect(source).not.toContain("Cached activity");
     expect(source).not.toContain('h("span", { text: "Activity" })');
     expect(source).not.toContain('class: "tabs"');
