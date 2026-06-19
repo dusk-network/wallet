@@ -7,6 +7,27 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-23
+
+### Added
+
+- Added contact detail views with full saved addresses, Edit and Send actions, filtered local activity, and public explorer History links. ([#61])
+- Added full receive-address display and QR PNG export from the receive view. ([#60])
+- Added saved-contact badges to recent activity when the outgoing recipient matches an address book contact. ([#61])
+
+### Changed
+
+- Replaced the History tab with inline recent activity and explorer History access. ([#59])
+- Componentized popup subnav headings and transfer recipient badges for more consistent wallet UI. ([#58], [#62])
+- Improved public, shielded, and contact recipient badges across send, shield, and unshield flows. ([#62])
+- Tightened wallet form behavior so value fields reject text input and Enter continues supported flows. ([#57])
+
+### Fixed
+
+- Fixed extension worker loading under browser extension content security policies. ([#62])
+- Fixed auto-lock activity tracking across background worker restarts and preserved connected dApp locked-state profile events. ([#70])
+- Kept account-type detection pills compact when adding or editing contacts. ([#61])
+
 ## [0.2.0] - 2026-06-18
 
 ### Added
@@ -81,6 +102,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Prevented Phoenix pending-nullifier reservations from being automatically released on timeout, unknown status, removed status, or a single missing mempool poll.
 - Prevented provider responses from leaking local pending nullifiers.
 
-[Unreleased]: https://github.com/dusk-network/wallet/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/dusk-network/wallet/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/dusk-network/wallet/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dusk-network/wallet/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dusk-network/wallet/releases/tag/v0.1.0
