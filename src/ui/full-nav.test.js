@@ -16,6 +16,8 @@ describe("full wallet navigation", () => {
       const nav = source.match(/<nav class="full-nav"[\s\S]*?<\/nav>/)?.[0] ?? "";
 
       expect(nav).toContain('data-route="convert">Shield');
+      expect(nav).not.toContain('data-route="activity"');
+      expect(nav).not.toContain(">History<");
       expect(nav.indexOf('data-route="receive"')).toBeLessThan(nav.indexOf('data-route="convert"'));
       expect(nav.indexOf('data-route="convert"')).toBeLessThan(nav.indexOf('data-route="stake"'));
     }
@@ -32,6 +34,7 @@ describe("full wallet navigation", () => {
     const source = await readFile(path.resolve(process.cwd(), "scripts", "generate-shells.js"), "utf8");
 
     expect(source).toContain('data-route="convert">Shield');
+    expect(source).not.toContain('data-route="activity">History');
   });
 
   it("refreshes stale lock state from full-view navigation and profile switching", async () => {

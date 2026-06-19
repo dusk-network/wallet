@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { explorerTxUrl } from "./explorer.js";
+import { explorerAccountUrl, explorerTxUrl } from "./explorer.js";
 
 describe("explorerTxUrl", () => {
   it("returns mainnet explorer URL", () => {
@@ -39,5 +39,27 @@ describe("explorerTxUrl", () => {
   it("handles hash with 0x prefix", () => {
     const url = explorerTxUrl("https://nodes.dusk.network", "0xabcdef123456");
     expect(url).toContain("id=0xabcdef123456");
+  });
+});
+
+describe("explorerAccountUrl", () => {
+  it("returns mainnet account history on duskexplorer.com", () => {
+    const url = explorerAccountUrl(
+      "https://nodes.dusk.network",
+      "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927"
+    );
+
+    expect(url).toBe(
+      "https://duskexplorer.com/address/26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927/"
+    );
+  });
+
+  it("falls back to address list when account history is not supported", () => {
+    expect(explorerAccountUrl("https://testnet.nodes.dusk.network", "acct1")).toBe(
+      "https://duskexplorer.com/addresses/"
+    );
+    expect(explorerAccountUrl("https://my-custom-node.example.com", "acct1")).toBe(
+      "https://duskexplorer.com/addresses/"
+    );
   });
 });

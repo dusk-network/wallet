@@ -7,6 +7,7 @@ import { normalizeMnemonic } from "../../lib/strings.js";
 import { checkboxInput, passwordInput } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
+import { actionIcon } from "../../components/ActionIcon.js";
 
 function generateMnemonic12() {
   const entropy = new Uint8Array(16);
@@ -48,7 +49,7 @@ export function onboardingWelcomeView({ state, actions } = {}) {
       },
     },
     [
-      h("div", { class: "action-icon", text: "+" }),
+      actionIcon("create", { className: "action-icon" }),
       h("div", { class: "action-title", text: "Create wallet" }),
     ]
   );
@@ -67,7 +68,7 @@ export function onboardingWelcomeView({ state, actions } = {}) {
       },
     },
     [
-      h("div", { class: "action-icon", text: "↧" }),
+      actionIcon("import", { className: "action-icon" }),
       h("div", { class: "action-title", text: "Import wallet" }),
     ]
   );
@@ -82,10 +83,6 @@ export function onboardingWelcomeView({ state, actions } = {}) {
       }),
     ]),
     h("div", { class: "actions" }, [createBtn, importBtn]),
-    h("div", {
-      class: "muted",
-      text: "Testing? Create a wallet, then request funds from the faucet.",
-    }),
   ].filter(Boolean);
 }
 

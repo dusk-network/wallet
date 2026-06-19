@@ -58,7 +58,6 @@ function fullNav() {
     `  <button class="full-nav-item" type="button" data-route="receive">Receive</button>`,
     `  <button class="full-nav-item" type="button" data-route="convert">Shield</button>`,
     `  <button class="full-nav-item" type="button" data-route="stake">Stake</button>`,
-    `  <button class="full-nav-item" type="button" data-route="activity">History</button>`,
     `  <button class="full-nav-item" type="button" data-route="contacts">Contacts</button>`,
     `</nav>`,
   ];
@@ -212,7 +211,6 @@ ${devComment}
             <button class="full-nav-item" type="button" data-route="receive">Receive</button>
             <button class="full-nav-item" type="button" data-route="convert">Shield</button>
             <button class="full-nav-item" type="button" data-route="stake">Stake</button>
-            <button class="full-nav-item" type="button" data-route="activity">History</button>
             <button class="full-nav-item" type="button" data-route="contacts">Contacts</button>
           </nav>
 

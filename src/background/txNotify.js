@@ -48,7 +48,7 @@ export function registerTxNotificationHandlers() {
         }
 
         const walletUrl = runtimeGetURL(
-          `full.html?route=activity${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`
+          `full.html?route=home${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`
         );
         tabsCreate({ url: walletUrl }).catch(() => {});
       } catch {
@@ -79,9 +79,9 @@ export function registerTxNotificationHandlers() {
             }
           }
 
-          // Fallback: open wallet (activity) so the user can see the tx.
+          // Fallback: open wallet dashboard so the user can see the tx.
           const walletUrl = runtimeGetURL(
-            `full.html?route=activity${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`
+            `full.html?route=home${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`
           );
           tabsCreate({ url: walletUrl }).catch(() => {});
         } catch {

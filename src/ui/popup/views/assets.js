@@ -929,7 +929,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
 
       state.assetTxDraft = null;
       state.highlightTx = hash || null;
-      state.route = "activity";
+      state.route = "home";
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
     } catch (e) {

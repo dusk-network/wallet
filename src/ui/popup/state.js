@@ -42,7 +42,7 @@ export const state = {
     }
     return "home";
   })(),
-  // Optional highlight for Activity screen (e.g. opened from notifications)
+  // Optional dashboard transaction highlight (e.g. opened from notifications)
   highlightTx: (() => {
     try {
       return new URLSearchParams(location.search).get("tx") || null;
