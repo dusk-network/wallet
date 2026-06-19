@@ -5,6 +5,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
+import { listAddressBook } from "../../../shared/addressBook.js";
 import { explorerAccountUrl, explorerTxUrl } from "../../../shared/explorer.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
@@ -13,6 +14,7 @@ import { openUrl } from "../../../platform/index.js";
 import { assetsSectionsView } from "./assets.js";
 import { txActivityStatusLabel, txKindRailLabel, txStatusTone } from "./txDisplay.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
+import { recipientBadge } from "../../components/RecipientBadge.js";
 import { subnav } from "../../components/Subnav.js";
 import { actionIcon } from "../../components/ActionIcon.js";
 
@@ -222,6 +224,42 @@ export function homeView(ov, { state, actions } = {}) {
   const publicAccount = String(ov?.accounts?.[accountIndex] ?? ov?.accounts?.[0] ?? "").trim();
   const publicHistoryUrl = explorerAccountUrl(nodeUrl, publicAccount);
 
+  const contactByAddress = new Map();
+  try {
+    const ab = state?.addressBook;
+    if (ab?.loaded && Array.isArray(ab.items)) {
+      for (const entry of ab.items) {
+        const addr = String(entry?.address ?? "").trim();
+        if (!addr) continue;
+        contactByAddress.set(addr.toLowerCase(), entry);
+      }
+    } else if (state && !ab?.loading) {
+      state.addressBook = {
+        ...(ab || {}),
+        loading: true,
+      };
+      listAddressBook()
+        .then((items) => {
+          state.addressBook = {
+            ...(state.addressBook || {}),
+            loaded: true,
+            loading: false,
+            error: null,
+            items,
+          };
+          actions?.render?.().catch(() => {});
+        })
+        .catch(() => {
+          state.addressBook = {
+            ...(state.addressBook || {}),
+            loading: false,
+          };
+        });
+    }
+  } catch {
+    // ignore contact badge loading failures
+  }
+
   const statusClass = (status) => {
     return `status-dot status-dot--${txStatusTone(status)}`;
   };
@@ -353,6 +391,16 @@ export function homeView(ov, { state, actions } = {}) {
     return { title: "Transaction", sub: "", amount: "—", tone: "neutral", icon: "•" };
   };
 
+  const contactForTx = (tx) => {
+    const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
+    const addr = String(tx?.to || asset?.to || "").trim();
+    if (!addr) return null;
+    const entry = contactByAddress.get(addr.toLowerCase());
+    const name = String(entry?.name ?? "").trim();
+    if (!name) return null;
+    return { address: addr, name };
+  };
+
   const pulseClassFor = (hash) => {
     try {
       const p = state?.txPulse;
@@ -367,6 +415,7 @@ export function homeView(ov, { state, actions } = {}) {
 
   const txRow = (tx) => {
     const { title, sub, amount, tone, icon } = describe(tx);
+    const contact = contactForTx(tx);
     const hash = String(tx?.hash ?? "");
     const st = String(tx?.status ?? "submitted");
     const stLower = st.toLowerCase();
@@ -399,8 +448,17 @@ export function homeView(ov, { state, actions } = {}) {
     const main = h("div", { class: "activity-main" }, [
       h("div", { class: "activity-title" }, [
         h("span", { text: title }),
+        contact
+          ? recipientBadge({
+              kind: "contact",
+              label: contact.name,
+              seed: contact.address,
+              title: `Saved contact: ${contact.name}`,
+              className: "activity-contact-badge",
+            })
+          : null,
         h("span", { class: `activity-status activity-status--${isPending ? "pending" : stLower}`, text: statusLabel(st) }),
-      ]),
+      ].filter(Boolean)),
       h("div", { class: "activity-sub" }, [
         h("span", { text: subText }),
         stLower === "failed" && tx?.error

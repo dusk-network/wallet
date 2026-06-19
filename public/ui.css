@@ -2254,6 +2254,91 @@ body.page--popup .site-bar-action {
   transition: background 120ms ease, transform 120ms ease;
 }
 
+.contact-address-line {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.contact-detail {
+  gap: 12px;
+}
+
+.contact-detail-head {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.contact-detail-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.contact-detail-icon .identicon {
+  width: 44px;
+  height: 44px;
+}
+
+.contact-detail-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.contact-detail-name {
+  min-width: 0;
+  color: var(--foreground);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.contact-detail-address {
+  padding: 10px 12px;
+}
+
+.contact-detail-address code {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.contact-detail .btn-primary {
+  width: auto;
+}
+
+.contact-detect-pill {
+  align-self: flex-start;
+}
+
+.activity-contact-badge {
+  flex: 0 1 auto;
+  max-width: 140px;
+  padding: 4px 8px;
+}
+
+.activity-contact-badge .recipient-badge__icon,
+.activity-contact-badge .recipient-badge__icon .identicon {
+  width: 16px;
+  height: 16px;
+}
+
+.contact-activity-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.contact-activity-tail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
 .activity-tx-item {
   position: relative;
   grid-template-columns: 36px minmax(0, 1fr) minmax(120px, auto) 42px;

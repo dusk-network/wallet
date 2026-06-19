@@ -1,4 +1,7 @@
 import { ProfileGenerator } from "@dusk/w3sper";
+import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../../shared/amount.js";
+import { explorerAccountUrl } from "../../../shared/explorer.js";
+import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import { identiconEl } from "../../components/Identicon.js";
@@ -29,6 +32,98 @@ function normalizeRecipient(raw) {
   return s;
 }
 
+function sameAddress(a, b) {
+  const aa = String(a ?? "").trim().toLowerCase();
+  const bb = String(b ?? "").trim().toLowerCase();
+  return !!aa && !!bb && aa === bb;
+}
+
+function txAddresses(tx) {
+  const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
+  return [
+    tx?.to,
+    tx?.from,
+    asset?.to,
+    asset?.from,
+    asset?.spender,
+  ].filter((v) => typeof v === "string" && v.trim());
+}
+
+function contactTxs(txs, address) {
+  const addr = String(address ?? "").trim();
+  if (!addr) return [];
+  return (Array.isArray(txs) ? txs : []).filter((tx) =>
+    txAddresses(tx).some((candidate) => sameAddress(candidate, addr))
+  );
+}
+
+function timeAgo(ts) {
+  const t = Number(ts || 0);
+  if (!t) return "";
+  const ms = Date.now() - t;
+  if (ms < 0) return "";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${Math.max(1, s)}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const hhr = Math.floor(m / 60);
+  if (hhr < 24) return `${hhr}h`;
+  return `${Math.floor(hhr / 24)}d`;
+}
+
+function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
+  const u = safeBigInt(units, 0n);
+  let d = Number(decimals ?? 0);
+  if (!Number.isFinite(d) || d < 0) d = 0;
+  d = Math.min(64, Math.floor(d));
+
+  const s = u.toString();
+  if (d === 0) return s;
+
+  const pad = s.length <= d ? "0".repeat(d - s.length + 1) + s : s;
+  const intPart = pad.slice(0, -d) || "0";
+  let frac = pad.slice(-d).replace(/0+$/, "");
+  if (typeof maxFrac === "number" && maxFrac >= 0 && frac.length > maxFrac) {
+    frac = frac.slice(0, maxFrac).replace(/0+$/, "");
+  }
+  return frac ? `${intPart}.${frac}` : intPart;
+}
+
+function describeContactTx(tx, address) {
+  const kind = String(tx?.kind ?? "").toLowerCase();
+  const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
+  const symbol = String(asset?.symbol ?? "").trim();
+  const assetOp = String(asset?.op ?? "").toLowerCase();
+
+  if (asset && String(asset?.type ?? "") === "DRC20" && assetOp === "transfer") {
+    const amt = formatTokenUnits(asset?.valueUnits ?? asset?.value ?? "0", asset?.decimals ?? 0);
+    return {
+      title: sameAddress(asset?.to, address) ? `Sent ${symbol || "token"}` : `${symbol || "Token"} transfer`,
+      sub: "Token transfer",
+      amount: amt ? `-${amt} ${symbol || "units"}` : "—",
+    };
+  }
+
+  if (kind === TX_KIND.TRANSFER) {
+    const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
+    const outgoing = sameAddress(tx?.to, address);
+    const incoming = sameAddress(tx?.from, address);
+    return {
+      title: outgoing ? "Sent DUSK" : incoming ? "Received DUSK" : "Transfer",
+      sub: String(tx?.privacy ?? "").toLowerCase() === "shielded" ? "Shielded" : "Public",
+      amount: amt ? `${outgoing ? "-" : incoming ? "+" : ""}${amt} DUSK` : "—",
+    };
+  }
+
+  const deposit = safeBigInt(tx?.deposit, 0n);
+  const dep = deposit > 0n ? formatLuxShort(deposit, UI_DISPLAY_DECIMALS) : "";
+  return {
+    title: tx?.fnName ? `Call ${String(tx.fnName)}` : "Transaction",
+    sub: String(tx?.kind ?? ""),
+    amount: dep ? `-${dep} DUSK` : "—",
+  };
+}
+
 export function addressBookView(ov, { state, actions } = {}) {
   const ab = (state.addressBook ??= {
     mode: "manage",
@@ -41,7 +136,9 @@ export function addressBookView(ov, { state, actions } = {}) {
     loading: false,
     error: null,
     items: null,
+    detailId: null,
     editId: null,
+    editReturnView: "list",
     editName: "",
     editAddress: "",
   });
@@ -75,10 +172,11 @@ export function addressBookView(ov, { state, actions } = {}) {
 
   ensureLoaded();
 
-  const startEdit = async (entry = null) => {
+  const startEdit = async (entry = null, returnView = "list") => {
     ab.view = "edit";
     ab.error = null;
     ab.editId = entry?.id ?? null;
+    ab.editReturnView = returnView;
     ab.editName = entry?.name ?? "";
     ab.editAddress = entry?.address ?? normalizeRecipient(ab.prefillAddress ?? "");
     actions?.render?.().catch(() => {});
@@ -259,7 +357,9 @@ export function addressBookView(ov, { state, actions } = {}) {
                 actions?.render?.().catch(() => {});
                 return;
               }
-              await startEdit(entry);
+              ab.detailId = entry?.id ?? null;
+              ab.view = "detail";
+              actions?.render?.().catch(() => {});
             },
           },
           [
@@ -269,8 +369,9 @@ export function addressBookView(ov, { state, actions } = {}) {
                 h("span", { text: String(entry?.name ?? "") || "(Unnamed)" }),
               ]),
               h("div", {
-                class: "activity-sub",
-                text: addr ? truncateMiddle(addr, 10, 8) : "—",
+                class: "activity-sub contact-address-line",
+                text: addr || "—",
+                title: addr || "",
               }),
             ]),
             h("div", { class: "activity-right" }, [pill, chevron]),
@@ -288,6 +389,124 @@ export function addressBookView(ov, { state, actions } = {}) {
       }),
       topRow,
       h("div", { class: "row" }, [list]),
+    ];
+  };
+
+  const renderDetail = () => {
+    const items = Array.isArray(ab.items) ? ab.items : [];
+    const entry = items.find((e) => String(e?.id ?? "") === String(ab.detailId ?? "")) || null;
+
+    if (!entry) {
+      return [
+        subnav({
+          title: "Contact",
+          onBack: () => {
+            ab.view = "list";
+            actions?.render?.().catch(() => {});
+          },
+        }),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Contact not found." }),
+        ]),
+      ];
+    }
+
+    const addr = String(entry?.address ?? "").trim();
+    const typ = entry?.type || ProfileGenerator.typeOf(addr) || "unknown";
+    const txs = contactTxs(ov?.txs, addr);
+    const nodeUrl = String(ov?.nodeUrl ?? "");
+
+    const editBtn = h("button", {
+      class: "btn-outline",
+      text: "Edit",
+      onclick: () => startEdit(entry, "detail"),
+    });
+
+    const sendBtn = h("button", {
+      class: "btn-primary",
+      text: "Send",
+      onclick: () => {
+        state.draft = {
+          ...(state.draft || {}),
+          to: addr,
+        };
+        state.route = "send";
+        actions?.render?.().catch(() => {});
+      },
+    });
+
+    const historyBtn = typ === "account"
+      ? h("button", {
+          class: "btn-outline",
+          text: "History ↗",
+          onclick: async () => {
+            const ok = await openUrl(explorerAccountUrl(nodeUrl, addr));
+            if (!ok) actions?.showToast?.("Explorer unavailable");
+          },
+        })
+      : null;
+
+    const txRow = (tx) => {
+      const { title, sub, amount } = describeContactTx(tx, addr);
+      const hash = String(tx?.hash ?? "");
+      const openDetails = () => {
+        if (!hash) return;
+        state.txDetailHash = hash;
+        state.txDetailFrom = "contacts";
+        state.route = "tx";
+        actions?.render?.().catch(() => {});
+      };
+
+      return h(
+        "button",
+        {
+          class: "activity-item contact-activity-item",
+          type: "button",
+          disabled: !hash,
+          onclick: openDetails,
+        },
+        [
+          h("div", { class: "activity-main" }, [
+            h("div", { class: "activity-title" }, [h("span", { text: title })]),
+            h("div", { class: "activity-sub", text: sub || (hash ? truncateMiddle(hash, 10, 8) : "") }),
+          ]),
+          h("div", { class: "activity-right" }, [
+            h("div", { class: "contact-activity-tail" }, [
+              h("div", { class: "activity-amount", text: amount }),
+              h("div", { class: "activity-time", text: tx?.submittedAt ? timeAgo(tx.submittedAt) : "" }),
+            ]),
+            hash ? h("span", { class: "activity-chevron", text: "›" }) : null,
+          ].filter(Boolean)),
+        ]
+      );
+    };
+
+    return [
+      subnav({
+        title: "Contact",
+        onBack: () => {
+          ab.view = "list";
+          actions?.render?.().catch(() => {});
+        },
+      }),
+      h("div", { class: "row contact-detail" }, [
+        h("div", { class: "contact-detail-head" }, [
+          h("div", { class: "activity-ico contact-detail-icon" }, [identiconEl(addr || "dusk")]),
+          h("div", { class: "contact-detail-main" }, [
+            h("div", { class: "contact-detail-name", text: String(entry?.name ?? "") || "(Unnamed)" }),
+            h("span", { class: "meta-pill", text: typeLabel(typ) }),
+          ]),
+        ]),
+        h("label", { text: "Address" }),
+        h("div", { class: "box contact-detail-address" }, [h("code", { text: addr || "—" })]),
+        h("div", { class: "btnrow" }, [editBtn, historyBtn, sendBtn].filter(Boolean)),
+      ]),
+      h("div", { class: "row contact-activity" }, [
+        h("label", { text: "Activity" }),
+        txs.length
+          ? h("div", { class: "activity-list" }, txs.map((tx) => txRow(tx)))
+          : h("div", { class: "muted", text: "No local wallet activity for this contact." }),
+      ]),
     ];
   };
 
@@ -319,7 +538,7 @@ export function addressBookView(ov, { state, actions } = {}) {
 
     const detectPill = addrRaw
       ? h("span", {
-          class: "meta-pill",
+          class: "meta-pill contact-detect-pill",
           text: t === "address" ? "Shielded address" : t === "account" ? "Public account" : "Unknown format",
         })
       : null;
@@ -388,7 +607,12 @@ export function addressBookView(ov, { state, actions } = {}) {
           }
 
           actions?.showToast?.("Saved contact", 1600);
-          ab.view = "list";
+          if (!isNew && ab.editReturnView === "detail") {
+            ab.detailId = saved.id;
+            ab.view = "detail";
+          } else {
+            ab.view = "list";
+          }
           actions?.render?.().catch(() => {});
         } catch (e) {
           setErr(e?.message ?? String(e));
@@ -400,7 +624,7 @@ export function addressBookView(ov, { state, actions } = {}) {
       class: "btn-outline",
       text: "Cancel",
       onclick: () => {
-        ab.view = "list";
+        ab.view = ab.editReturnView === "detail" ? "detail" : "list";
         actions?.render?.().catch(() => {});
       },
     });
@@ -437,7 +661,7 @@ export function addressBookView(ov, { state, actions } = {}) {
       subnav({
         title: isNew ? "New contact" : "Edit contact",
         onBack: () => {
-          ab.view = "list";
+          ab.view = ab.editReturnView === "detail" ? "detail" : "list";
           actions?.render?.().catch(() => {});
         },
       }),
@@ -453,5 +677,5 @@ export function addressBookView(ov, { state, actions } = {}) {
     ];
   };
 
-  return (ab.view === "edit" ? renderEdit() : renderList()).filter(Boolean);
+  return (ab.view === "edit" ? renderEdit() : ab.view === "detail" ? renderDetail() : renderList()).filter(Boolean);
 }
