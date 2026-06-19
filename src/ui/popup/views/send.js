@@ -13,7 +13,12 @@ import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
 import { submitOnGasEnter, textInput } from "../../components/FormControls.js";
-import { identiconEl } from "../../components/Identicon.js";
+import {
+  hideRecipientBadge,
+  recipientBadge,
+  recipientTypeBadgeOptions,
+  setRecipientBadge,
+} from "../../components/RecipientBadge.js";
 
 import { listAddressBook } from "../../../shared/addressBook.js";
 
@@ -30,14 +35,12 @@ export function sendFormView(ov, { state, actions } = {}) {
     onEnter: () => amount.focus(),
   });
 
-  // Optional inline contact chip (shown when the recipient matches a saved contact).
-  const toChipIco = h("span", { class: "to-chip__ico" });
-  const toChipName = h("span", { class: "to-chip__name", text: "" });
-  const toChip = h(
-    "div",
-    { class: "to-chip", style: "display:none" },
-    [toChipIco, toChipName]
-  );
+  // Optional inline contact badge (shown when the recipient matches a saved contact).
+  const toChip = recipientBadge({
+    kind: "contact",
+    className: "to-chip",
+    hidden: true,
+  });
   const toWrap = h("div", { class: "to-input-wrap" }, [toChip, to]);
   const memo = textInput({
     placeholder: "Memo (optional)",
@@ -214,7 +217,11 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   // Lightweight recipient-type detection (public account vs shielded address)
   // so the user understands what kind of transfer they'll create.
-  const toTypePill = h("div", { class: "meta-pill", style: "display:none" });
+  const toTypePill = recipientBadge({
+    kind: "neutral",
+    className: "recipient-type-badge",
+    hidden: true,
+  });
 
   // If the recipient matches a saved contact, show it inline in the recipient field.
   let contactsIndex = null; // Map<lowercase address, entry>
@@ -273,14 +280,16 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   ensureContactsLoaded();
 
+  const hideContactBadge = () => {
+    hideRecipientBadge(toChip);
+    toWrap.classList.remove("has-chip");
+    toWrap.style.removeProperty("--chip-w");
+  };
+
   const updateContactMatch = (addr, typ) => {
     try {
       if (!addr || (typ !== "account" && typ !== "address")) {
-        toChip.style.display = "none";
-        toChipName.textContent = "";
-        toChipIco.innerHTML = "";
-        toWrap.classList.remove("has-chip");
-        toWrap.style.removeProperty("--chip-w");
+        hideContactBadge();
         return;
       }
 
@@ -288,22 +297,20 @@ export function sendFormView(ov, { state, actions } = {}) {
       const hit = contactsIndex?.get(String(addr).toLowerCase());
       const name = String(hit?.name ?? "").trim();
       if (!name) {
-        toChip.style.display = "none";
-        toChipName.textContent = "";
-        toChipIco.innerHTML = "";
-        toWrap.classList.remove("has-chip");
-        toWrap.style.removeProperty("--chip-w");
+        hideContactBadge();
         return;
       }
 
-      // Render chip
-      toChipName.textContent = name;
-      toChipIco.innerHTML = "";
-      toChipIco.appendChild(identiconEl(addr));
-      toChip.style.display = "flex";
+      setRecipientBadge(toChip, {
+        kind: "contact",
+        label: name,
+        seed: addr,
+        title: `Saved contact: ${name}`,
+        className: "to-chip",
+      });
       toWrap.classList.add("has-chip");
 
-      // Measure and shift input text so it doesn't overlap the chip.
+      // Measure and shift input text so it doesn't overlap the badge.
       requestAnimationFrame(() => {
         try {
           const w = Math.ceil(toChip.getBoundingClientRect().width);
@@ -313,18 +320,13 @@ export function sendFormView(ov, { state, actions } = {}) {
         }
       });
     } catch {
-      toChip.style.display = "none";
-      toChipName.textContent = "";
-      toChipIco.innerHTML = "";
-      toWrap.classList.remove("has-chip");
-      toWrap.style.removeProperty("--chip-w");
+      hideContactBadge();
     }
   };
   const updateToType = () => {
     const v = String(to.value || "").trim();
     if (!v) {
-      toTypePill.style.display = "none";
-      toTypePill.textContent = "";
+      hideRecipientBadge(toTypePill);
       detectedRecipientType = null;
       updateContactMatch("", null);
       updateAmountHelpers();
@@ -333,8 +335,13 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     // Give quick feedback when the user pastes a dusk: request link.
     if (/^dusk:/i.test(v)) {
-      toTypePill.style.display = "inline-flex";
-      toTypePill.textContent = "Dusk request link";
+      setRecipientBadge(toTypePill, {
+        kind: "request",
+        icon: "request",
+        label: "Request",
+        title: "Dusk request link",
+        className: "recipient-type-badge",
+      });
       detectedRecipientType = null;
       updateContactMatch("", null);
       updateAmountHelpers();
@@ -343,8 +350,10 @@ export function sendFormView(ov, { state, actions } = {}) {
     const t = ProfileGenerator.typeOf(v);
 
     if (t === "account" || t === "address") {
-      toTypePill.style.display = "inline-flex";
-      toTypePill.textContent = t === "address" ? "Shielded address" : "Public account";
+      setRecipientBadge(toTypePill, {
+        ...recipientTypeBadgeOptions(t),
+        className: "recipient-type-badge",
+      });
       detectedRecipientType = t;
       updateContactMatch(v, t);
       updateAmountHelpers();
@@ -352,8 +361,13 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
 
     // Fallback: unknown format
-    toTypePill.style.display = "inline-flex";
-    toTypePill.textContent = "Unknown address format";
+    setRecipientBadge(toTypePill, {
+      kind: "unknown",
+      icon: "?",
+      label: "Unknown",
+      title: "Unknown address format",
+      className: "recipient-type-badge",
+    });
     detectedRecipientType = null;
     updateContactMatch("", null);
     updateAmountHelpers();
@@ -541,13 +555,27 @@ export function sendConfirmView(ov, { state, actions } = {}) {
 
   const recType = ProfileGenerator.typeOf(String(d.to || "").trim());
   const txTypeLabel = recType === "address" ? "Shielded transfer" : "Public transfer";
+  const txTypeBadge = recipientBadge({
+    ...(recipientTypeBadgeOptions(recType) || {
+      kind: "unknown",
+      icon: "?",
+      label: "Unknown",
+      title: "Unknown transfer",
+    }),
+    className: "recipient-type-badge",
+    title: txTypeLabel,
+  });
 
   // ------------------------------------------------------------
   // Contacts helper
   // ------------------------------------------------------------
   const toAddr = String(d.to || "").trim();
 
-  const contactPill = h("div", { class: "meta-pill", style: "display:none" });
+  const contactPill = recipientBadge({
+    kind: "contact",
+    className: "confirm-contact-badge",
+    hidden: true,
+  });
   const saveContactBtn = h("button", {
     class: "btn-outline",
     type: "button",
@@ -602,12 +630,16 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const refreshContactUI = (items) => {
     const name = findContactName(items);
     if (name) {
-      contactPill.style.display = "inline-flex";
-      contactPill.textContent = `Contact: ${name}`;
+      setRecipientBadge(contactPill, {
+        kind: "contact",
+        label: name,
+        seed: toAddr,
+        title: `Saved contact: ${name}`,
+        className: "confirm-contact-badge",
+      });
       saveContactBtn.style.display = "none";
     } else {
-      contactPill.style.display = "none";
-      contactPill.textContent = "";
+      hideRecipientBadge(contactPill);
       saveContactBtn.style.display = "inline-flex";
     }
   };
@@ -801,7 +833,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       },
     }),
     h("div", { class: "row" }, [
-      h("div", { class: "meta-pill", text: txTypeLabel }),
+      txTypeBadge,
       h("div", { class: "home-balance" }, [
         h("div", {
           class: "balance-amount",

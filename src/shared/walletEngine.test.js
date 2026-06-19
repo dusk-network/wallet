@@ -403,6 +403,29 @@ describe("walletEngine", () => {
     expect(engine.getSelectedAccountIndex()).toBe(1);
   });
 
+  it("selectAccountIndex invalidates stale shielded sync status", async () => {
+    engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    const started = await engine.startShieldedSync({ force: true });
+    expect(started.started).toBe(true);
+    expect(engine.getShieldedStatus().state).toBe("syncing");
+
+    await engine.selectAccountIndex({ index: 1 });
+    expect(engine.getSelectedAccountIndex()).toBe(1);
+    expect(engine.getShieldedStatus()).toMatchObject({
+      state: "idle",
+      progress: 0,
+      notes: 0,
+      cursorBookmark: "0",
+      cursorBlock: "0",
+      lastError: "",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(engine.getShieldedStatus().state).toBe("idle");
+  });
+
   it("signMessage signs a domain-separated envelope (uses selected profileIndex)", async () => {
     engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);

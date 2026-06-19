@@ -12,6 +12,10 @@ import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
 import { submitOnGasEnter } from "../../components/FormControls.js";
+import {
+  privacyFlowBadgeOptions,
+  recipientBadge,
+} from "../../components/RecipientBadge.js";
 
 function fmtAvail(lux) {
   try {
@@ -90,7 +94,10 @@ export function convertFormView(ov, { state, actions } = {}) {
   amountCtl.setMaxLux(avail);
 
   const info = h("div", { class: "box" }, [
-    h("div", { class: "meta-pill", text: `${fromLabel} → ${toLabel}` }),
+    recipientBadge({
+      ...privacyFlowBadgeOptions({ from: fromLabel, to: toLabel }),
+      className: "recipient-type-badge",
+    }),
     h("div", {
       class: "muted",
       style: "margin-top:6px",
@@ -325,7 +332,10 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       },
     }),
     h("div", { class: "row" }, [
-      h("div", { class: "meta-pill", text: `${fromLabel} → ${toLabel}` }),
+      recipientBadge({
+        ...privacyFlowBadgeOptions({ from: fromLabel, to: toLabel }),
+        className: "recipient-type-badge",
+      }),
       h("div", { class: "home-balance" }, [
         h("div", {
           class: "balance-amount",
