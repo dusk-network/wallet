@@ -33,4 +33,35 @@ describe("send view", () => {
     expect(sendBlock?.[1]).toContain('"shielded"');
     expect(sendBlock?.[1]).toContain('"public"');
   });
+
+  it("uses shared recipient badges for send contact and privacy indicators", async () => {
+    const sendView = await readFile(
+      path.resolve(process.cwd(), "src", "ui", "popup", "views", "send.js"),
+      "utf8"
+    );
+    const badgeComponent = await readFile(
+      path.resolve(process.cwd(), "src", "ui", "components", "RecipientBadge.js"),
+      "utf8"
+    );
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+
+    expect(sendView).toContain("RecipientBadge.js");
+    expect(sendView).toContain("recipientTypeBadgeOptions");
+    expect(sendView).toContain('kind: "contact"');
+    expect(sendView).toContain('className: "to-chip"');
+
+    expect(badgeComponent).toContain("recipientBadge");
+    expect(badgeComponent).toContain('label: "Public"');
+    expect(badgeComponent).toContain('label: "Shielded"');
+    expect(badgeComponent).toContain('icon: "public"');
+    expect(badgeComponent).toContain('icon: "shielded"');
+    expect(badgeComponent).not.toContain('icon: "P"');
+    expect(badgeComponent).not.toContain('icon: "S"');
+
+    expect(css).toContain(".recipient-badge--contact");
+    expect(css).toMatch(/\.recipient-badge--contact\s*\{[^}]*var\(--ok\)/s);
+    expect(css).toContain(".recipient-badge--rail");
+    expect(css).toMatch(/\.recipient-badge--rail\s*\{[^}]*var\(--primary\)/s);
+    expect(css).toContain(".recipient-badge__glyph--svg svg");
+  });
 });

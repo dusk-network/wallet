@@ -45,6 +45,24 @@ import {
 
 const phoenixSpendLocks = new Map();
 
+const isExtensionBackend =
+  typeof __DUSK_BACKEND__ !== "undefined" && __DUSK_BACKEND__ === "extension";
+
+const ADDRESS_SYNCER_OPTIONS = Object.freeze(
+  isExtensionBackend
+    ? {
+        // W3sper's parallel ownership scanner creates a nested worker. Browser
+        // extension CSP blocks that worker path, so keep extension scanning in
+        // the already-running engine context.
+        ownershipWorkers: 1,
+      }
+    : {}
+);
+
+function createAddressSyncer(network) {
+  return new AddressSyncer(network, ADDRESS_SYNCER_OPTIONS);
+}
+
 // Read the current Transfer Contract note-tree size (bookmark) from the node.
 //
 // IMPORTANT:
@@ -885,8 +903,26 @@ export async function selectAccountIndex({ index } = {}) {
   if (idx >= MAX_ACCOUNT_COUNT) {
     throw new Error(`Only ${MAX_ACCOUNT_COUNT} accounts are supported right now`);
   }
+  const previousIndex = state.currentIndex;
   await ensureProfileIndex(idx);
   state.currentIndex = idx;
+  if (idx !== previousIndex) {
+    try {
+      state.shielded.epoch++;
+    } catch {}
+    state.shielded.syncPromise = null;
+    state.shielded.starting = false;
+    state.shielded.status = {
+      state: "idle",
+      progress: 0,
+      notes: 0,
+      cursorBookmark: "0",
+      cursorBlock: "0",
+      lastError: "",
+      updatedAt: Date.now(),
+    };
+    broadcastShieldedStatus("account_changed");
+  }
   return {
     selectedAccountIndex: state.currentIndex,
     accounts: getAccounts(),
@@ -2097,7 +2133,7 @@ export async function startShieldedSync({ force = false } = {}) {
           // spent/unspent state (e.g. after submitting a phoenix tx that spends
           // our notes, the cursor may remain at tip but nullifiers will change).
           try {
-            const syncer = new AddressSyncer(state.network);
+            const syncer = createAddressSyncer(state.network);
             await reconcileSpentNotes(syncer, { netKey, walletId, profileIndex: idx });
           } catch {
             // ignore
@@ -2156,7 +2192,7 @@ export async function startShieldedSync({ force = false } = {}) {
 
     const run = async () => {
       await ensureNetwork();
-      const syncer = new AddressSyncer(state.network);
+      const syncer = createAddressSyncer(state.network);
 
       let shouldStop = false;
 
@@ -2194,7 +2230,9 @@ export async function startShieldedSync({ force = false } = {}) {
         });
       };
 
-      syncer.addEventListener("synciteration", onIter);
+      try {
+        syncer.addEventListener?.("synciteration", onIter);
+      } catch {}
 
       try {
         // Refresh target bookmark after we have a connected network (in case it
@@ -2275,6 +2313,15 @@ export async function startShieldedSync({ force = false } = {}) {
 
               const { done, value } = await reader.read();
               if (done) break;
+              if (isStale()) {
+                try {
+                  controller.abort();
+                } catch {}
+                try {
+                  await reader.cancel();
+                } catch {}
+                return;
+              }
               await processChunk(value);
 
               if (shouldStop) {
@@ -2313,10 +2360,16 @@ export async function startShieldedSync({ force = false } = {}) {
           throw new Error("AddressSyncer.notes() did not return a stream");
         }
 
+        if (isStale()) return;
+
         // After discovery, reconcile spent/unspent state.
         await reconcileSpentNotes(syncer, { netKey, walletId, profileIndex: idx });
 
+        if (isStale()) return;
+
         const n = await countNotes(netKey, walletId, idx);
+        if (isStale()) return;
+
         setShieldedStatus({
           state: "done",
           progress: 1,
@@ -2325,6 +2378,7 @@ export async function startShieldedSync({ force = false } = {}) {
         });
         broadcastShieldedStatus("done");
       } catch (e) {
+        if (epoch !== state.shielded.epoch) return;
         setShieldedStatus({
           state: "error",
           lastError: e?.message ? String(e.message) : String(e),
@@ -2332,7 +2386,7 @@ export async function startShieldedSync({ force = false } = {}) {
         broadcastShieldedStatus("error");
       } finally {
         try {
-          syncer.removeEventListener("synciteration", onIter);
+          syncer.removeEventListener?.("synciteration", onIter);
         } catch {}
         if (epoch === state.shielded.epoch) {
           state.shielded.syncPromise = null;

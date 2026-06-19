@@ -418,38 +418,108 @@ input:focus, textarea:focus, select:focus {
   padding-left: calc(12px + var(--chip-w, 0px) + 10px);
 }
 
-.to-chip {
-  position: absolute;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
+.recipient-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
+  min-width: 0;
   padding: 5px 9px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(0,0,0,0.26);
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--muted) 78%, transparent);
+  color: var(--muted-foreground);
   box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset;
-  max-width: 170px;
-  pointer-events: none;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
 }
 
-.to-chip__ico .identicon {
+.recipient-badge__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+}
+
+.recipient-badge__icon .identicon {
   width: 18px;
   height: 18px;
   border-radius: 6px;
   overflow: hidden;
 }
 
-.to-chip__name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--foreground);
+.recipient-badge__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, currentColor 32%, transparent);
+  background: color-mix(in oklab, currentColor 13%, transparent);
+  color: inherit;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.recipient-badge__glyph--svg svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.recipient-badge__text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 130px;
+}
+
+.recipient-badge--contact {
+  border-color: color-mix(in oklab, var(--ok) 42%, var(--border));
+  background: color-mix(in oklab, var(--ok) 16%, rgba(0,0,0,0.18));
+  color: color-mix(in oklab, var(--ok) 86%, white);
+}
+
+.recipient-badge--rail {
+  border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
+  background: color-mix(in oklab, var(--primary) 16%, rgba(0,0,0,0.18));
+  color: color-mix(in oklab, var(--primary) 84%, white);
+}
+
+.recipient-badge--request {
+  border-color: color-mix(in oklab, var(--muted-foreground) 28%, var(--border));
+  background: color-mix(in oklab, var(--muted) 72%, rgba(0,0,0,0.2));
+  color: var(--muted-foreground);
+}
+
+.recipient-badge--unknown {
+  border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
+  background: color-mix(in oklab, var(--warn) 13%, rgba(0,0,0,0.18));
+  color: color-mix(in oklab, var(--warn) 86%, white);
+}
+
+.recipient-type-badge,
+.confirm-contact-badge {
+  align-self: flex-start;
+}
+
+.to-chip {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 170px;
+  pointer-events: none;
 }
 
 .input-row > .icon-btn {
