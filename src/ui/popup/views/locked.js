@@ -1,7 +1,11 @@
 import { h } from "../../lib/dom.js";
+import { passwordInput } from "../../components/FormControls.js";
 
 export function lockedView({ state, actions } = {}) {
-  const pwd = h("input", { type: "password", placeholder: "Password" });
+  const pwd = passwordInput({
+    placeholder: "Password",
+    onEnter: () => btn.click(),
+  });
 
   const busyTitle = h("div", { class: "callout-title", text: "Unlocking…" });
   const busyBody = h("div", {
@@ -39,7 +43,6 @@ export function lockedView({ state, actions } = {}) {
       await actions?.render?.({ forceRefresh: true });
     },
   });
-
   return [
     h("div", { class: "muted", text: "Wallet is locked." }),
     h("div", { class: "row" }, [h("label", { text: "Password" }), pwd]),

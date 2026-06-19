@@ -2,6 +2,7 @@ import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/am
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { h } from "../lib/dom.js";
+import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { truncateMiddle } from "../lib/strings.js";
 import "../components/GasEditor.js";
 import {
@@ -199,7 +200,7 @@ export async function renderNotification() {
   }
 
   const lockBox = () => {
-    const pwd = h("input", { type: "password", placeholder: "Password" });
+    const pwd = passwordInput({ placeholder: "Password", onEnter: () => unlock() });
     const errBox = h("div", { class: "err", style: "display:none" });
 
     const unlockBtn = h("button", {
@@ -242,11 +243,6 @@ export async function renderNotification() {
     };
 
     unlockBtn.addEventListener("click", unlock);
-    pwd.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
-      event.preventDefault();
-      unlock();
-    });
 
     return h("div", { class: "row" }, [
       h("div", { class: "muted", text: "Wallet locked. Unlock to proceed." }),
@@ -699,6 +695,8 @@ export async function renderNotification() {
       gasEditor.helpText =
         "Max fee shown is limit × price. If left blank, the protocol/node may choose defaults.";
       gasEditor.setGas(gas);
+      const approveRow = decisionButtons("Approve", () => gasEditor.readOverrideGas(gas));
+      submitOnGasEnter(gasEditor, approveRow.querySelector(".btn-primary"));
 
       setApp([
         header,
@@ -729,7 +727,7 @@ export async function renderNotification() {
             ])
           : h("div"),
         gasEditor,
-        decisionButtons("Approve", () => gasEditor.readOverrideGas(gas)),
+        approveRow,
       ]);
       return;
     }
@@ -872,8 +870,9 @@ export async function renderNotification() {
         const isMax =
           isApprove && safeBigInt(valueUnitsStr, -1n) === MAX_U64;
 
-        const ackInput = h("input", {
+        const ackInput = textInput({
           placeholder: "Type MAX to confirm",
+          onEnter: () => add.approveBtn.click(),
           oninput: () => {
             const ok = String(ackInput.value ?? "")
               .trim()
@@ -888,6 +887,7 @@ export async function renderNotification() {
           approveTitle: isMax ? "Type MAX to enable approval" : "",
           getApprovedParams: () => gasEditor.readOverrideGas(gas),
         });
+        submitOnGasEnter(gasEditor, add.approveBtn);
 
         setApp([
           header,
@@ -1010,6 +1010,7 @@ export async function renderNotification() {
           approveText: isTransferFrom ? "Approve transfer" : isApprove ? "Approve" : "Approve",
           getApprovedParams: () => gasEditor.readOverrideGas(gas),
         });
+        submitOnGasEnter(gasEditor, add.approveBtn);
 
         setApp([
           header,
@@ -1115,6 +1116,9 @@ export async function renderNotification() {
         return;
       }
 
+      const approveRow = decisionButtons("Approve", () => gasEditor.readOverrideGas(gas));
+      submitOnGasEnter(gasEditor, approveRow.querySelector(".btn-primary"));
+
       setApp([
         header,
         networkRow,
@@ -1173,7 +1177,7 @@ export async function renderNotification() {
           class: "muted",
           text: "Warning: Contract args are opaque bytes. Verify details in the dApp before approving.",
         }),
-        decisionButtons("Approve", () => gasEditor.readOverrideGas(gas)),
+        approveRow,
       ]);
       return;
     }

@@ -11,6 +11,7 @@ import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
+import { submitOnGasEnter } from "../../components/FormControls.js";
 
 function fmtAvail(lux) {
   try {
@@ -39,6 +40,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     actions,
     onAmountInput: () => syncDraft(),
     onAmountChange: () => syncDraft(),
+    onEnter: () => nextBtn.click(),
   });
 
   const amount = amountCtl.amountInput;
@@ -128,7 +130,6 @@ export function convertFormView(ov, { state, actions } = {}) {
       }
     },
   });
-
   const modeTabs = h("div", { class: "tabs", style: `--seg-index: ${kind === TX_KIND.SHIELD ? 0 : 1};` }, [
     h(
       "button",
@@ -313,6 +314,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       confirmBtn.textContent = "Confirm";
     }
   });
+  submitOnGasEnter(gasEditor, confirmBtn);
 
   return [
     subnav({

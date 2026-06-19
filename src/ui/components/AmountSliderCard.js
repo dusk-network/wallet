@@ -1,5 +1,6 @@
 import { UI_DISPLAY_DECIMALS, formatLuxShort, parseDuskToLux } from "../../shared/amount.js";
 import { h } from "../lib/dom.js";
+import { decimalInput } from "./FormControls.js";
 
 // Slider resolution (0–100% in 0.1% steps).
 const SLIDER_MAX = 1000;
@@ -47,6 +48,8 @@ export function createAmountSliderCard({
   onAmountInput,
   // Called when the component programmatically sets the amount (MAX/slider).
   onAmountChange,
+  // Called when the user presses Enter in the amount input.
+  onEnter,
   // Optional extra node(s) to place between the input row and slider.
   children = [],
   // Message shown when user taps MAX while max isn't available.
@@ -54,10 +57,11 @@ export function createAmountSliderCard({
 } = {}) {
   let maxLux = null;
 
-  const amount = h("input", {
+  const amount = decimalInput({
     class: "amount-input",
     placeholder,
     value: typeof initialAmountDusk === "string" ? initialAmountDusk : "",
+    onEnter,
   });
 
   const maxBtn = h("button", {

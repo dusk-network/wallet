@@ -18,6 +18,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
+import { decimalInput, submitOnGasEnter } from "../../components/FormControls.js";
 
 function networkKey(ov) {
   const name = String(ov?.networkName ?? "").trim().toLowerCase();
@@ -290,12 +291,13 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
     else st.depositAmountDusk = formatLuxToDusk(maxActionLux);
     actions?.render?.().catch(() => {});
   };
-  const amountInput = h("input", {
+  const amountInput = decimalInput({
     id: "sozu-action-amount",
     name: "sozuActionAmount",
     placeholder: `${isWithdraw ? "Unstake" : "Stake"} amount (DUSK)`,
     value: isWithdraw ? st.withdrawAmountDusk : st.depositAmountDusk,
     disabled: !cfg,
+    onEnter: () => reviewBtn.click(),
     oninput: (e) => {
       if (isWithdraw) st.withdrawAmountDusk = String(e?.target?.value ?? "");
       else st.depositAmountDusk = String(e?.target?.value ?? "");
@@ -319,6 +321,12 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
+  const reviewBtn = h("button", {
+    class: "btn-primary",
+    text: isWithdraw ? "Review Sozu unstake" : "Review Sozu stake",
+    disabled: !cfg,
+    onclick: () => makeDraft(isWithdraw ? "withdraw" : "deposit"),
+  });
   return h("div", { class: "box sozu-panel" }, [
     h("div", { class: "sozu-hero" }, [
       h("div", { class: "sozu-brand-row" }, [
@@ -400,12 +408,7 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
           onclick: setMaxAmount,
         }),
       ]),
-      h("button", {
-        class: "btn-primary",
-        text: isWithdraw ? "Review Sozu unstake" : "Review Sozu stake",
-        disabled: !cfg,
-        onclick: () => makeDraft(isWithdraw ? "withdraw" : "deposit"),
-      }),
+      reviewBtn,
     ]),
   ].filter(Boolean));
 }
@@ -497,6 +500,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       st.submitting = false;
     }
   });
+  submitOnGasEnter(gasEditor, confirmBtn);
 
   return [
     subnav({ title: "Review", onBack: goBack }),
