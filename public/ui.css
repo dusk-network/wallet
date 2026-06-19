@@ -1179,8 +1179,12 @@ body.page--popup .site-bar-action {
   gap: var(--section-gap);
 }
 
-.dashboard-section-label {
-  color: var(--muted-foreground);
+.bracket-title {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--foreground);
   font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   font-weight: 500;
@@ -1189,12 +1193,17 @@ body.page--popup .site-bar-action {
   text-transform: uppercase;
 }
 
-.dashboard-section-label::before {
-  content: "[ ";
+.bracket-title__bracket {
+  color: var(--primary);
 }
 
-.dashboard-section-label::after {
-  content: " ]";
+.bracket-title__text {
+  min-width: 0;
+  color: var(--foreground);
+}
+
+.dashboard-section-label {
+  color: var(--foreground);
 }
 
 /* -------------------------------------------------------
@@ -1350,24 +1359,6 @@ body.page--popup .site-bar-action {
     gap: 18px;
   }
 
-  body.page--full .dashboard-title {
-    color: var(--muted-foreground);
-    font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-  }
-
-  body.page--full .dashboard-title::before {
-    content: "[ ";
-  }
-
-  body.page--full .dashboard-title::after {
-    content: " ]";
-  }
-
   body.page--full .dashboard-top-actions {
     display: inline-flex;
     align-items: center;
@@ -1457,19 +1448,7 @@ body.page--popup .site-bar-action {
 }
 
 .balance-label {
-  font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.balance-label::before {
-  content: "[ ";
-}
-
-.balance-label::after {
-  content: " ]";
+  color: var(--foreground);
 }
 
 /* Compact one-line row above the main balance (label + connection) */
@@ -1752,21 +1731,7 @@ body.page--popup .site-bar-action {
 }
 
 .asset-section-title {
-  color: var(--muted-foreground);
-  font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.asset-section-title::before {
-  content: "[ ";
-}
-
-.asset-section-title::after {
-  content: " ]";
+  color: var(--foreground);
 }
 
 .asset-row--main {
@@ -2130,21 +2095,7 @@ body.page--popup .site-bar-action {
 }
 
 .activity-section-label {
-  color: var(--muted-foreground);
-  font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.activity-section-label::before {
-  content: "[ ";
-}
-
-.activity-section-label::after {
-  content: " ]";
+  color: var(--foreground);
 }
 
 .activity-head {
@@ -2570,9 +2521,17 @@ body.page--popup .site-bar-action {
 
 .subnav {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
+}
+
+.subnav-left {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
 }
 
 .subnav-actions {
@@ -2584,22 +2543,16 @@ body.page--popup .site-bar-action {
 }
 
 .subnav-title {
-  min-width: 0;
-  color: var(--muted-foreground);
-  font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  justify-self: center;
+  text-align: center;
+  white-space: nowrap;
 }
 
-.subnav-title::before {
-  content: "[ ";
-}
-
-.subnav-title::after {
-  content: " ]";
+.subnav-back {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Small temporary message */
@@ -2670,21 +2623,7 @@ body.page--popup .site-bar-action {
 }
 
 .settings-section-title {
-  color: var(--muted-foreground);
-  font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.settings-section-title::before {
-  content: "[ ";
-}
-
-.settings-section-title::after {
-  content: " ]";
+  color: var(--foreground);
 }
 
 .settings-actions {
@@ -3233,11 +3172,7 @@ body.page--popup .staking-shell .box {
 }
 
 .staking-section-title {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  margin-top: 2px;
 }
 
 .stake-card,

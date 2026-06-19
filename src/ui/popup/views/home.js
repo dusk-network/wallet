@@ -12,6 +12,7 @@ import { truncateMiddle } from "../../lib/strings.js";
 import { openUrl } from "../../../platform/index.js";
 import { assetsSectionsView } from "./assets.js";
 import { txActivityStatusLabel, txKindRailLabel, txStatusTone } from "./txDisplay.js";
+import { bracketTitle } from "../../components/BracketTitle.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -162,7 +163,7 @@ export function homeView(ov, { state, actions } = {}) {
   const heroAmtTitle = hasTotal ? totalFull : balFull;
   const heroLabel = hasTotal ? "Total balance" : "Public balance";
 
-  const balanceLabel = h("div", { class: "balance-sub balance-label" }, [h("span", { text: heroLabel })]);
+  const balanceLabel = bracketTitle({ class: "balance-sub balance-label", text: heroLabel });
 
   const balanceSubRow = h("div", { class: "balance-subrow" }, [balanceLabel]);
   const balanceSplit = h("div", { class: "balance-split" }, [
@@ -217,7 +218,7 @@ export function homeView(ov, { state, actions } = {}) {
   ]);
 
   const dashboardTopbar = h("div", { class: "dashboard-topbar" }, [
-    h("div", { class: "dashboard-title", text: activeTab === "activity" ? "History" : "Dashboard" }),
+    bracketTitle({ class: "dashboard-title", text: activeTab === "activity" ? "History" : "Dashboard" }),
     h("div", { class: "dashboard-top-actions" }, [
       h("button", {
         class: "btn-outline dashboard-top-action",
@@ -521,7 +522,7 @@ export function homeView(ov, { state, actions } = {}) {
 
   const activityFull = h("div", { class: "activity-card activity-card--tx" }, [
     h("div", { class: "activity-card-head" }, [
-      h("div", { class: "activity-section-label", text: "Recent transactions" }),
+      bracketTitle({ class: "activity-section-label", text: "Recent transactions" }),
       viewAll,
     ]),
     txs.length
@@ -575,7 +576,7 @@ export function homeView(ov, { state, actions } = {}) {
       dashboardTopbar,
       hero,
       h("div", { class: "dashboard-actions" }, [
-        h("div", { class: "dashboard-section-label", text: "Actions" }),
+        bracketTitle({ class: "dashboard-section-label", text: "Actions" }),
         actionBar,
       ]),
       tabs,
