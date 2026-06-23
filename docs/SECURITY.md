@@ -73,6 +73,9 @@ The wallet automatically locks after a configurable timeout:
 | Default | 5 minutes |
 
 Implementation uses `chrome.alarms` API for reliable timing even when service worker sleeps.
+The last activity timestamp is persisted in extension session storage when available
+(falling back to local storage outside extension contexts), so a restarted background
+service worker does not immediately lock an otherwise active unlocked wallet.
 
 ### 3. dApp Permissions
 
