@@ -139,6 +139,18 @@ export function storageLocalClear() {
   return callApi(raw?.storage?.local?.clear, [], raw?.storage?.local);
 }
 
+export function storageSessionGet(keys) {
+  return callApi(raw?.storage?.session?.get, [keys ?? null], raw?.storage?.session);
+}
+
+export function storageSessionSet(items) {
+  return callApi(raw?.storage?.session?.set, [items], raw?.storage?.session);
+}
+
+export function storageSessionRemove(keys) {
+  return callApi(raw?.storage?.session?.remove, [keys], raw?.storage?.session);
+}
+
 export function offscreenCreateDocument(options) {
   return callApi(raw?.offscreen?.createDocument, [options], raw?.offscreen);
 }

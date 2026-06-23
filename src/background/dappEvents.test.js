@@ -212,6 +212,15 @@ describe("dappEvents", () => {
       (m) => m?.type === "DUSK_PROVIDER_EVENT" && m?.name === "profilesChanged"
     );
     expect(profileMsgs.at(-1)?.data).toEqual([]);
+
+    const lockedPort = new FakePort("https://dapp.example", 2);
+    ev.registerDappPort(lockedPort);
+    await new Promise((r) => setTimeout(r, 0));
+    const lockedStateMsg = lockedPort.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE");
+    expect(lockedStateMsg?.state).toMatchObject({
+      isConnected: true,
+      profiles: [],
+    });
   });
 
   it("does not bind non-local HTTP sender origins even when permission exists", async () => {

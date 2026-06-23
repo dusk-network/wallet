@@ -217,6 +217,48 @@ describe("background rpc handler", () => {
     expect(approveOrigin).not.toHaveBeenCalled();
   });
 
+  it("connected-but-locked dApps can request profiles to trigger unlock and reconnect UX", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = {
+      profileId: "account:0:acct0",
+      accountIndex: 0,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    engineStatus = {
+      isUnlocked: false,
+      accounts: ["acct0"],
+      addresses: ["addr0"],
+      selectedAccountIndex: 0,
+    };
+    requestUserApproval.mockImplementationOnce(async () => {
+      engineStatus = {
+        isUnlocked: true,
+        accounts: ["acct0"],
+        addresses: ["addr0"],
+        selectedAccountIndex: 0,
+      };
+      return { accountIndex: 0 };
+    });
+
+    const profiles = await handleRpc("https://dapp.example", { method: "dusk_requestProfiles" });
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "connect",
+      "https://dapp.example",
+      expect.objectContaining({
+        requestedProfiles: true,
+        currentProfileId: "account:0:acct0",
+        currentAccountIndex: 0,
+      })
+    );
+    expect(profiles).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
+  });
+
   it("dusk_requestProfiles stores a profile-scoped public-account grant", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

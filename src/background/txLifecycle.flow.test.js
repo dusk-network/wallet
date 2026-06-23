@@ -124,6 +124,9 @@ vi.mock("../platform/extensionApi.js", () => ({
     mocks.sentMessages.push(message);
     return { ok: true };
   }),
+  storageSessionGet: vi.fn(async () => ({})),
+  storageSessionSet: vi.fn(async () => {}),
+  storageSessionRemove: vi.fn(async () => {}),
   tabsCreate: vi.fn(async () => ({ id: 1 })),
 }));
 

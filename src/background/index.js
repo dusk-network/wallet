@@ -8,6 +8,7 @@ import {
   revokeOrigin,
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
+import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
@@ -59,6 +60,9 @@ import {
   getExtensionApi,
   runtimeGetURL,
   runtimeSendMessage,
+  storageSessionGet,
+  storageSessionRemove,
+  storageSessionSet,
   tabsCreate,
 } from "../platform/extensionApi.js";
 
@@ -70,13 +74,120 @@ const ext = getExtensionApi();
 // Auto-lock timer
 // ------------------------------
 const AUTO_LOCK_ALARM_NAME = "dusk_auto_lock_check";
+const AUTO_LOCK_ACTIVITY_KEY = STORAGE_KEYS.AUTO_LOCK_ACTIVITY;
+const DAPP_ACTIVITY_METHODS = new Set([
+  "dusk_sendTransaction",
+  "dusk_watchAsset",
+  "dusk_signMessage",
+  "dusk_signAuth",
+]);
 
-/** Last activity timestamp in memory (reset on unlock, updated on activity). */
+/** Last activity timestamp cache; persisted storage survives worker restarts. */
 let lastActivityTimestamp = 0;
 
+function normalizeActivityTimestamp(value) {
+  const raw = value && typeof value === "object" ? value.lastActivityAt : value;
+  const n = Number(raw ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+async function readStoredActivityTimestamp() {
+  try {
+    const items = await storageSessionGet(AUTO_LOCK_ACTIVITY_KEY);
+    return normalizeActivityTimestamp(items?.[AUTO_LOCK_ACTIVITY_KEY]);
+  } catch {
+    // fall back below
+  }
+  try {
+    const items = await storage.get(AUTO_LOCK_ACTIVITY_KEY);
+    return normalizeActivityTimestamp(items?.[AUTO_LOCK_ACTIVITY_KEY]);
+  } catch {
+    return 0;
+  }
+}
+
+async function writeStoredActivityTimestamp(timestamp) {
+  const record = { lastActivityAt: timestamp };
+  try {
+    await storageSessionSet({ [AUTO_LOCK_ACTIVITY_KEY]: record });
+    return;
+  } catch {
+    // fall back below
+  }
+  try {
+    await storage.set({ [AUTO_LOCK_ACTIVITY_KEY]: record });
+  } catch {
+    // Best effort; the in-memory timestamp still protects this worker instance.
+  }
+}
+
+async function removeStoredActivityTimestamp() {
+  try {
+    await storageSessionRemove(AUTO_LOCK_ACTIVITY_KEY);
+    return;
+  } catch {
+    // fall back below
+  }
+  try {
+    await storage.remove(AUTO_LOCK_ACTIVITY_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+async function readActivityTimestamp() {
+  if (lastActivityTimestamp > 0) return lastActivityTimestamp;
+  lastActivityTimestamp = await readStoredActivityTimestamp();
+  return lastActivityTimestamp;
+}
+
 /** Update activity timestamp to prevent auto-lock. */
-function updateActivity() {
-  lastActivityTimestamp = Date.now();
+async function updateActivity(timestamp = Date.now()) {
+  lastActivityTimestamp = timestamp;
+  await writeStoredActivityTimestamp(timestamp);
+}
+
+async function clearActivity() {
+  lastActivityTimestamp = 0;
+  await removeStoredActivityTimestamp();
+}
+
+async function ensureActivityTimestamp() {
+  const current = await readActivityTimestamp();
+  if (current > 0) return current;
+  const now = Date.now();
+  await updateActivity(now);
+  return now;
+}
+
+async function ensureActivityTimestampIfUnlocked() {
+  const status = await getEngineStatus();
+  if (!status?.isUnlocked) return 0;
+  return await ensureActivityTimestamp();
+}
+
+async function prepareDappActivityContext(request) {
+  const method = String(request?.method ?? "");
+  if (method !== "dusk_switchNetwork") return null;
+  try {
+    const settings = await getSettings();
+    return { nodeUrl: String(settings?.nodeUrl ?? "") };
+  } catch {
+    return { nodeUrl: "" };
+  }
+}
+
+async function updateDappActivity(request, context = null) {
+  const method = String(request?.method ?? "");
+  if (!DAPP_ACTIVITY_METHODS.has(method)) {
+    if (method !== "dusk_switchNetwork") return;
+    const beforeNodeUrl = String(context?.nodeUrl ?? "");
+    const afterNodeUrl = String((await getSettings())?.nodeUrl ?? "");
+    if (!beforeNodeUrl || !afterNodeUrl || beforeNodeUrl === afterNodeUrl) return;
+  }
+  const status = await getEngineStatus();
+  if (!status?.isUnlocked) return;
+  await updateActivity();
 }
 
 function nullifierHexes(value) {
@@ -229,13 +340,20 @@ async function handleAutoLockAlarm() {
   const status = await getEngineStatus();
   if (!status?.isUnlocked) return; // Already locked.
 
-  const elapsed = Date.now() - lastActivityTimestamp;
+  const lastActivityAt = await readActivityTimestamp();
+  if (!lastActivityAt) {
+    await updateActivity();
+    return;
+  }
+
+  const elapsed = Date.now() - lastActivityAt;
   const timeoutMs = timeout * 60 * 1000;
 
   if (elapsed >= timeoutMs) {
     console.log("[Dusk] Auto-locking wallet due to inactivity.");
     try {
       await engineCall("engine_lock");
+      await clearActivity();
       emitUiLockState(false, "auto_lock").catch(() => {});
       broadcastProfilesChangedAll().catch(() => {});
     } catch (e) {
@@ -353,7 +471,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
     try {
       // UI heartbeat to reset auto-lock timer.
       if (message?.type === "DUSK_UI_ACTIVITY") {
-        updateActivity();
+        await updateActivity();
         sendResponse({ ok: true });
         return;
       }
@@ -370,7 +488,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
 
         const id = message.id;
+        const activityContext = await prepareDappActivityContext(message.request);
         const result = await handleRpc(origin, message.request);
+        await updateDappActivity(message.request, activityContext);
         sendResponse({ id, result });
         return;
       }
@@ -542,7 +662,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           : (await getEngineStatus()).accounts;
 
         // Reset activity timer and ensure auto-lock alarm is running.
-        updateActivity();
+        await updateActivity();
         setupAutoLockAlarm().catch(console.error);
 
         // Notify dApps that profiles are now available.
@@ -556,6 +676,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       // UI wants to lock
       if (message?.type === "DUSK_UI_LOCK") {
         await engineCall("engine_lock");
+        await clearActivity();
 
         // Notify dApps that profiles are no longer available.
         broadcastProfilesChangedAll().catch(() => {});
@@ -789,6 +910,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       if (message?.type === "DUSK_UI_SET_AUTO_LOCK") {
         const timeout = Number(message.autoLockTimeoutMinutes ?? 0);
         await setSettings({ autoLockTimeoutMinutes: timeout });
+        if (timeout > 0) {
+          await ensureActivityTimestampIfUnlocked();
+        } else {
+          await clearActivity();
+        }
         await setupAutoLockAlarm();
         sendResponse({ ok: true, autoLockTimeoutMinutes: timeout });
         return;
