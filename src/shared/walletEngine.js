@@ -865,13 +865,13 @@ export async function unlockWithMnemonic(mnemonic) {
 }
 
 export function getCurrentProfile() {
-  const p = state.profiles[state.currentIndex];
+  const p = getLoadedProfiles()[getSelectedProfileIndex()];
   if (!p) throw new Error("Wallet not unlocked");
   return p;
 }
 
 export function getSelectedAccountIndex() {
-  return Number(state.currentIndex) || 0;
+  return getSelectedProfileIndex();
 }
 
 function normalizeProfileIndex(v, fallback = 0) {
@@ -880,21 +880,38 @@ function normalizeProfileIndex(v, fallback = 0) {
   return Math.floor(n);
 }
 
+function getSelectedProfileIndex() {
+  return Number(state.currentIndex) || 0;
+}
+
+function resolveProfileIndex(profileIndex, fallback = getSelectedProfileIndex()) {
+  return normalizeProfileIndex(profileIndex, fallback);
+}
+
+function getLoadedProfiles() {
+  return state.profiles;
+}
+
+function getLoadedProfileSnapshot() {
+  return getLoadedProfiles().slice();
+}
+
 async function ensureProfileIndex(idx) {
   if (!state.unlocked) throw new Error("Wallet locked");
-  const i = normalizeProfileIndex(idx, state.currentIndex || 0);
+  const i = resolveProfileIndex(idx);
   if (i >= MAX_ACCOUNT_COUNT) {
     throw new Error(`Only ${MAX_ACCOUNT_COUNT} accounts are supported right now`);
   }
-  if (state.profiles[i]) return state.profiles[i];
+  const profiles = getLoadedProfiles();
+  if (profiles[i]) return profiles[i];
   if (!state.profileGenerator) throw new Error("No profile generator (wallet not unlocked?)");
 
   // Derive missing profiles sequentially.
   await ensureProtocolDriverLoaded();
-  while (state.profiles.length <= i) {
-    state.profiles.push(await state.profileGenerator.next());
+  while (profiles.length <= i) {
+    profiles.push(await state.profileGenerator.next());
   }
-  return state.profiles[i];
+  return profiles[i];
 }
 
 export async function selectAccountIndex({ index } = {}) {
@@ -903,7 +920,7 @@ export async function selectAccountIndex({ index } = {}) {
   if (idx >= MAX_ACCOUNT_COUNT) {
     throw new Error(`Only ${MAX_ACCOUNT_COUNT} accounts are supported right now`);
   }
-  const previousIndex = state.currentIndex;
+  const previousIndex = getSelectedProfileIndex();
   await ensureProfileIndex(idx);
   state.currentIndex = idx;
   if (idx !== previousIndex) {
@@ -924,7 +941,7 @@ export async function selectAccountIndex({ index } = {}) {
     broadcastShieldedStatus("account_changed");
   }
   return {
-    selectedAccountIndex: state.currentIndex,
+    selectedAccountIndex: getSelectedProfileIndex(),
     accounts: getAccounts(),
     addresses: getAddresses(),
   };
@@ -932,11 +949,11 @@ export async function selectAccountIndex({ index } = {}) {
 
 export function getAccounts() {
   // Return public account identifiers (base58)
-  return state.profiles.map((p) => p.account.toString());
+  return getLoadedProfiles().map((p) => p.account.toString());
 }
 
 export function getAddresses() {
-  return state.profiles.map((p) => p.address.toString());
+  return getLoadedProfiles().map((p) => p.address.toString());
 }
 
 async function ensureProtocolDriverLoaded() {
@@ -1102,15 +1119,16 @@ export async function ensureNetwork() {
   // new wallet, the network can remain connected. We must still ensure the
   // treasury/bookkeeper are bound to the current profiles, otherwise we end
   // up showing the old wallet's balances.
-  state.treasury = state.treasury ?? new RemoteTreasury(state.network, state.profiles, {
+  const profiles = getLoadedProfiles();
+  state.treasury = state.treasury ?? new RemoteTreasury(state.network, profiles, {
     includePending: false,
   });
-  state.treasuryAll = state.treasuryAll ?? new RemoteTreasury(state.network, state.profiles, {
+  state.treasuryAll = state.treasuryAll ?? new RemoteTreasury(state.network, profiles, {
     includePending: true,
   });
 
-  state.treasury.setProfiles(state.profiles);
-  state.treasuryAll.setProfiles(state.profiles);
+  state.treasury.setProfiles(profiles);
+  state.treasuryAll.setProfiles(profiles);
 
   state.bookkeeper = state.bookkeeper ?? new Bookkeeper(state.treasury);
   state.bookkeeperAll = state.bookkeeperAll ?? new Bookkeeper(state.treasuryAll);
@@ -1295,7 +1313,7 @@ function formatWsError(err, nodeUrl) {
 export async function getPublicBalance({ profileIndex } = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   await ensureNetwork();
-  const profile = await ensureProfileIndex(profileIndex ?? state.currentIndex);
+  const profile = await ensureProfileIndex(profileIndex ?? getSelectedProfileIndex());
   return await withTimeout(
     state.bookkeeper.balance(profile.account),
     12_000,
@@ -1313,7 +1331,7 @@ export async function getMinimumStake() {
 export async function getStakeInfo({ profileIndex } = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   await ensureNetwork();
-  const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
+  const idx = resolveProfileIndex(profileIndex);
   const profile = await ensureProfileIndex(idx);
   return await withTimeout(
     state.bookkeeper.stakeInfo(profile.account),
@@ -1358,7 +1376,7 @@ function contractOwnerString(owner) {
 function localOwnerProfileIndex(ownerAccount) {
   const account = String(ownerAccount ?? "");
   if (!account) return null;
-  const idx = state.profiles.findIndex((p) => p?.account?.toString?.() === account);
+  const idx = getLoadedProfiles().findIndex((p) => p?.account?.toString?.() === account);
   return idx >= 0 ? idx : null;
 }
 
@@ -1455,11 +1473,11 @@ async function loadStakePosition(profile, profileIndex) {
 export async function getStakeOwnerStatus({ profileIndex } = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   await ensureNetwork();
-  const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
+  const idx = resolveProfileIndex(profileIndex);
   const profile = await ensureProfileIndex(idx);
   const selected = await loadStakePosition(profile, idx);
   const positions = await Promise.all(
-    state.profiles.map((p, i) => (i === idx ? selected : loadStakePosition(p, i)))
+    getLoadedProfiles().map((p, i) => (i === idx ? selected : loadStakePosition(p, i)))
   );
   const relatedStakes = positions.filter((pos) =>
     pos.hasStake && (pos.profileIndex === idx || pos.ownerProfileIndex === idx)
@@ -1478,7 +1496,7 @@ export async function getStakeOwnerStatus({ profileIndex } = {}) {
     manageable: selected.manageable,
     reason: selected.reason,
     relatedStakes,
-    profiles: state.profiles.map((p, i) => ({
+    profiles: getLoadedProfiles().map((p, i) => ({
       profileIndex: i,
       account: p.account.toString(),
       publicBalance: positions[i]?.publicBalance ?? null,
@@ -1583,7 +1601,7 @@ export async function getDrc20Balance(params = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   const contractIdBytes = toContractIdBytes(params?.contractId);
 
-  const idx = normalizeProfileIndex(params?.profileIndex, state.currentIndex || 0);
+  const idx = resolveProfileIndex(params?.profileIndex);
   const profile = await ensureProfileIndex(idx);
 
   const network = await ensureNetwork();
@@ -1734,7 +1752,7 @@ async function readSozuPosition(network, config, profile) {
 export async function getSozuStatus(params = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   const network = await ensureNetwork();
-  const idx = normalizeProfileIndex(params?.profileIndex, state.currentIndex || 0);
+  const idx = resolveProfileIndex(params?.profileIndex);
   const profile = await ensureProfileIndex(idx);
   const networkKey = detectPresetIdFromNodeUrl(engineConfig.nodeUrl);
   const bootstrap = getSozuHubBootstrap(networkKey);
@@ -1915,12 +1933,12 @@ function broadcastShieldedStatus(reason = "") {
   try {
     runtimeSendMessage(
       {
-      type: "DUSK_UI_SHIELDED_STATUS",
-      reason,
-      status: getShieldedStatus(),
-      walletId: getWalletId(),
-      networkKey: getNetworkKey(),
-      profileIndex: state.currentIndex || 0,
+        type: "DUSK_UI_SHIELDED_STATUS",
+        reason,
+        status: getShieldedStatus(),
+        walletId: getWalletId(),
+        networkKey: getNetworkKey(),
+        profileIndex: getSelectedProfileIndex(),
       },
       { allowLastError: true }
     ).catch(() => {});
@@ -2002,7 +2020,7 @@ async function ensureShieldedMetaForIndex(profileIndex) {
   const netKey = getNetworkKey();
   const walletId = getWalletId();
   if (!walletId) throw new Error("No walletId (wallet locked?)");
-  const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
+  const idx = resolveProfileIndex(profileIndex);
   let meta;
   try {
     meta = await ensureShieldedMeta(netKey, walletId, idx, {
@@ -2038,7 +2056,7 @@ async function ensureShieldedMetaForIndex(profileIndex) {
 }
 
 async function ensureShieldedMetaForCurrent() {
-  return await ensureShieldedMetaForIndex(state.currentIndex || 0);
+  return await ensureShieldedMetaForIndex(getSelectedProfileIndex());
 }
 
 export async function setShieldedCheckpointNow({ profileIndex = 0 } = {}) {
@@ -2109,7 +2127,7 @@ export async function startShieldedSync({ force = false } = {}) {
     if (!walletId) throw new Error("No walletId (wallet locked?)");
 
     const netKey = getNetworkKey();
-    const idx = state.currentIndex || 0;
+    const idx = getSelectedProfileIndex();
 
     const meta = await ensureShieldedMeta(netKey, walletId, idx);
     const cursor = metaCursor(meta);
@@ -2247,11 +2265,12 @@ export async function startShieldedSync({ force = false } = {}) {
         // async iterable depending on runtime/version.
         const controller = new AbortController();
 
+        const profiles = getLoadedProfiles();
         let notesStream;
         try {
-          notesStream = await syncer.notes(state.profiles, { from, signal: controller.signal });
+          notesStream = await syncer.notes(profiles, { from, signal: controller.signal });
         } catch {
-          notesStream = await syncer.notes(state.profiles, { from });
+          notesStream = await syncer.notes(profiles, { from });
         }
 
         const processChunk = async (value) => {
@@ -2466,7 +2485,7 @@ function isShieldedPayment(params) {
 
 async function stakeOwnerOptions(params, stakeProfile) {
   const options = {
-    ownerProfiles: state.profiles.slice(),
+    ownerProfiles: getLoadedProfileSnapshot(),
     payment: isShieldedPayment(params) ? "address" : "account",
   };
 
@@ -2524,7 +2543,7 @@ export async function transfer(params) {
   const isShieldedTransfer = privacyRaw === "shielded";
 
   const network = await ensureNetwork();
-  const idx = normalizeProfileIndex(profileIndex, state.currentIndex || 0);
+  const idx = resolveProfileIndex(profileIndex);
   const profile = await ensureProfileIndex(idx);
 
   if (isShieldedTransfer) {
@@ -2652,7 +2671,7 @@ export async function sendTransaction(params) {
 
   // Common
   const network = await ensureNetwork();
-  const idx = normalizeProfileIndex(params?.profileIndex, state.currentIndex || 0);
+  const idx = resolveProfileIndex(params?.profileIndex);
   const profile = await ensureProfileIndex(idx);
 
   if (kind === TX_KIND.TRANSFER) {
@@ -3021,7 +3040,7 @@ export async function signMessage(params) {
   const messageLen = messageBytes.length;
   const messageHash = await sha256Hex(messageBytes);
 
-  const profile = await ensureProfileIndex(params.profileIndex ?? state.currentIndex);
+  const profile = await ensureProfileIndex(params.profileIndex ?? getSelectedProfileIndex());
   const memo = [
     "Dusk Connect SignMessage v1",
     `Origin: ${origin}`,
@@ -3074,7 +3093,7 @@ export async function signAuth(params) {
     expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   }
 
-  const profile = await ensureProfileIndex(params.profileIndex ?? state.currentIndex);
+  const profile = await ensureProfileIndex(params.profileIndex ?? getSelectedProfileIndex());
   const lines = [
     "Dusk Connect SignAuth v1",
     `Account: ${profile.account.toString()}`,
