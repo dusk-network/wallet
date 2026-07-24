@@ -54,7 +54,7 @@ export function executionEventOk(event) {
 export function executionEventError(event) {
   try {
     for (const layer of eventLayers(event)) {
-      const message = errorMessage(layer.err ?? layer.error);
+      const message = errorMessage(layer.err) || errorMessage(layer.error);
       if (message) return message;
       if (layer.success === false) return GENERIC_EXECUTION_ERROR;
     }

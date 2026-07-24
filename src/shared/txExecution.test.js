@@ -34,6 +34,11 @@ describe("transaction execution events", () => {
     [{ error: "reverted" }, "reverted"],
     [{ result: { err: { message: "contract panic" } } }, "contract panic"],
     [{ payload: { result: { error: "nested failure" } } }, "nested failure"],
+    [
+      { payload: { err: false, error: "contract reverted" } },
+      "contract reverted",
+    ],
+    [{ payload: { err: "", error: "out of gas" } }, "out of gas"],
   ])("keeps compatibility with alternate event shape %#", (event, message) => {
     expect(executionEventOk(event)).toBe(false);
     expect(executionEventError(event)).toBe(message);
