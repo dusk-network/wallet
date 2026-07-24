@@ -12,6 +12,7 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
 import { bytesToHex } from "../shared/bytes.js";
+import { executionEventError, executionEventOk } from "../shared/txExecution.js";
 import { handleUiCommand } from "./uiCommands.js";
 import {
   configure,
@@ -458,15 +459,8 @@ export async function localSend(message) {
               }
 
               const executedEvent = lifecycle?.event;
-              const ok = !(executedEvent && typeof executedEvent === "object") ||
-                !(executedEvent.success === false || executedEvent.err || executedEvent.error || executedEvent.result?.err || executedEvent.result?.error);
-              const err =
-                executedEvent?.err ??
-                executedEvent?.error ??
-                executedEvent?.result?.err ??
-                executedEvent?.result?.error;
-              const error =
-                ok ? "" : typeof err === "string" ? err : typeof err?.message === "string" ? err.message : err ? JSON.stringify(err) : "";
+              const ok = executionEventOk(executedEvent);
+              const error = ok ? "" : executionEventError(executedEvent);
 
               await patchTxMeta(hash, {
                 status: ok ? "executed" : "failed",

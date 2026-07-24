@@ -38,6 +38,7 @@ import {
 
 import { ERROR_CODES } from "../shared/errors.js";
 import { bytesToHex } from "../shared/bytes.js";
+import { executionEventError, executionEventOk } from "../shared/txExecution.js";
 import { getExtensionApi, runtimeSendMessage } from "../platform/extensionApi.js";
 
 function serializeError(err) {
@@ -102,42 +103,6 @@ setEngineDebugHook((payload) => {
   }
 });
 
-function inferTxOk(executedEvent) {
-  // The exact shape depends on w3sper/node versions.
-  // Common patterns:
-  // - { err: ... }
-  // - { error: ... }
-  // - { success: false }
-  try {
-    if (!executedEvent || typeof executedEvent !== "object") return true;
-    if (executedEvent.success === false) return false;
-    if (executedEvent.err) return false;
-    if (executedEvent.error) return false;
-    if (executedEvent.result?.err) return false;
-    if (executedEvent.result?.error) return false;
-    return true;
-  } catch {
-    return true;
-  }
-}
-
-function inferTxError(executedEvent) {
-  try {
-    if (!executedEvent || typeof executedEvent !== "object") return "";
-    const err =
-      executedEvent.err ??
-      executedEvent.error ??
-      executedEvent.result?.err ??
-      executedEvent.result?.error;
-    if (!err) return "";
-    if (typeof err === "string") return err;
-    if (typeof err?.message === "string") return err.message;
-    return JSON.stringify(err);
-  } catch {
-    return "";
-  }
-}
-
 async function watchTxExecuted(hash) {
   if (!hash || typeof hash !== "string") return;
   if (activeTxWatches.has(hash)) return;
@@ -163,7 +128,7 @@ async function watchTxExecuted(hash) {
         await runtimeSendMessage({
           type: "DUSK_TX_REMOVED",
           hash,
-          reason: inferTxError(lifecycle.event) || "removed",
+          reason: executionEventError(lifecycle.event) || "removed",
         });
       } catch {
         // ignore
@@ -171,8 +136,8 @@ async function watchTxExecuted(hash) {
       return;
     }
 
-    const ok = inferTxOk(lifecycle?.event);
-    const error = ok ? "" : inferTxError(lifecycle?.event);
+    const ok = executionEventOk(lifecycle?.event);
+    const error = ok ? "" : executionEventError(lifecycle?.event);
 
     try {
       await runtimeSendMessage({
