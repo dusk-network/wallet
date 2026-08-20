@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => {
       autoLockTimeoutMinutes: 5,
       nodeUrl: "https://testnet.nodes.dusk.network",
     },
+    approvalGeneration: 0,
     engineUnlocked: true,
     now: 1_000_000,
     sentMessages: [],
@@ -56,6 +57,10 @@ const mocks = vi.hoisted(() => {
       selectedAccountIndex: 0,
     })),
     broadcastProfilesChangedAll: vi.fn(async () => {}),
+    captureApprovalGeneration: vi.fn(() => mocks.approvalGeneration),
+    rejectAllPendingApprovals: vi.fn(async () => {
+      mocks.approvalGeneration += 1;
+    }),
     handleRpc: vi.fn(async (_origin, request) => {
       if (request?.method === "dusk_switchNetwork") {
         const nextNodeUrl = String(request?.params?.nodeUrl ?? "").trim();
@@ -121,7 +126,9 @@ vi.mock("./rpc.js", () => ({
 }));
 
 vi.mock("./pending.js", () => ({
+  captureApprovalGeneration: mocks.captureApprovalGeneration,
   getPending: vi.fn(() => null),
+  rejectAllPendingApprovals: mocks.rejectAllPendingApprovals,
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
 }));
 
@@ -239,6 +246,7 @@ describe("background auto-lock activity", () => {
       autoLockTimeoutMinutes: 5,
       nodeUrl: "https://testnet.nodes.dusk.network",
     };
+    mocks.approvalGeneration = 0;
     mocks.engineUnlocked = true;
     mocks.now = 1_000_000;
     mocks.sentMessages = [];
@@ -283,6 +291,7 @@ describe("background auto-lock activity", () => {
     await fireAutoLockAlarm();
 
     expect(mocks.engineCall).toHaveBeenCalledWith("engine_lock");
+    expect(mocks.rejectAllPendingApprovals).toHaveBeenCalledTimes(1);
     expect(mocks.broadcastProfilesChangedAll).toHaveBeenCalledTimes(1);
     expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({
@@ -300,6 +309,7 @@ describe("background auto-lock activity", () => {
     await expect(sendBackgroundMessage({ type: "DUSK_UI_LOCK" })).resolves.toEqual({ ok: true });
 
     expect(mocks.engineCall).toHaveBeenCalledWith("engine_lock");
+    expect(mocks.rejectAllPendingApprovals).toHaveBeenCalledTimes(1);
     expect(mocks.broadcastProfilesChangedAll).toHaveBeenCalledTimes(1);
     expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({
@@ -309,6 +319,51 @@ describe("background auto-lock activity", () => {
       })
     );
     expect(activityRecord()).toBeUndefined();
+  });
+
+  it("invalidates an RPC that entered before locking but reaches approval afterward", async () => {
+    let releasePreApproval;
+    let signalPreApproval;
+    let approvalCreated = false;
+    const reachedPreApproval = new Promise((resolve) => {
+      signalPreApproval = resolve;
+    });
+    const preApprovalGate = new Promise((resolve) => {
+      releasePreApproval = resolve;
+    });
+
+    mocks.handleRpc.mockImplementationOnce(async (_origin, request, context) => {
+      signalPreApproval();
+      await preApprovalGate;
+      if (context?.approvalGeneration !== mocks.approvalGeneration) {
+        const error = new Error("Wallet locked; approval request cancelled");
+        error.code = 4100;
+        throw error;
+      }
+      approvalCreated = true;
+      return { method: request?.method ?? "" };
+    });
+
+    const rpc = sendBackgroundMessage(
+      {
+        type: "DUSK_RPC_REQUEST",
+        id: "pre-lock-rpc",
+        request: { method: "dusk_sendTransaction" },
+      },
+      { url: "https://dapp.example/page", tab: { url: "https://dapp.example/page" } }
+    );
+
+    await reachedPreApproval;
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_LOCK" })).resolves.toEqual({ ok: true });
+    releasePreApproval();
+
+    await expect(rpc).resolves.toMatchObject({
+      error: {
+        code: 4100,
+        message: "Wallet locked; approval request cancelled",
+      },
+    });
+    expect(approvalCreated).toBe(false);
   });
 
   it("initializes missing activity for an unlocked wallet instead of locking immediately", async () => {

@@ -35,7 +35,7 @@ import {
 import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
-export async function handleRpc(origin, request) {
+export async function handleRpc(origin, request, context = {}) {
   origin = String(origin ?? "").trim();
   if (!isAllowedDappOrigin(origin)) {
     throw rpcError(
@@ -45,6 +45,18 @@ export async function handleRpc(origin, request) {
   }
 
   const { method, params } = request || {};
+  const expectedApprovalGeneration = context?.approvalGeneration;
+
+  function requestApproval(kind, approvalParams) {
+    return expectedApprovalGeneration === undefined
+      ? requestUserApproval(kind, origin, approvalParams)
+      : requestUserApproval(
+          kind,
+          origin,
+          approvalParams,
+          expectedApprovalGeneration
+        );
+  }
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
   const MAX_U64 = 18446744073709551615n;
@@ -320,7 +332,7 @@ export async function handleRpc(origin, request) {
       requestedShieldedGrant ||
       (sameProfilePermission(existing, selectedProfile) && hasShieldedGrant(existing));
 
-    const approved = await requestUserApproval("connect", origin, {
+    const approved = await requestApproval("connect", {
       requestedProfiles: true,
       shieldedReceiveAddress: requestedShieldedGrant,
       effectiveShieldedReceiveAddress: effectiveShieldedGrant,
@@ -534,7 +546,7 @@ export async function handleRpc(origin, request) {
       };
 
       // Ask user approval.
-      await requestUserApproval("switch_network", origin, { from, to });
+      await requestApproval("switch_network", { from, to });
 
       // Apply new settings and reconfigure engine.
       await setSettings({ nodeUrl: targetNodeUrl });
@@ -660,7 +672,7 @@ export async function handleRpc(origin, request) {
 
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
-      const overrides = await requestUserApproval("send_tx", origin, approvalParams);
+      const overrides = await requestApproval("send_tx", approvalParams);
       const finalParams = applyTxDefaultsForRpc(mergeTxParams(baseParams, overrides), { dynamicPrice });
       finalParams.gas = validateGasShape(finalParams.gas);
 
@@ -782,7 +794,7 @@ export async function handleRpc(origin, request) {
       }
 
       // Ask the user to approve adding this asset (approval UI includes unlock).
-      await requestUserApproval("watch_asset", origin, {
+      await requestApproval("watch_asset", {
         type,
         options: {
           ...options,
@@ -868,7 +880,7 @@ export async function handleRpc(origin, request) {
       const settings = await getSettings();
       const chainId = chainIdFromNodeUrl(settings?.nodeUrl ?? "");
 
-      await requestUserApproval("sign_message", origin, {
+      await requestApproval("sign_message", {
         chainId,
         messageHash: `0x${messageHash}`,
         messageLen,
@@ -921,7 +933,7 @@ export async function handleRpc(origin, request) {
       const settings = await getSettings();
       const chainId = chainIdFromNodeUrl(settings?.nodeUrl ?? "");
 
-      await requestUserApproval("sign_auth", origin, {
+      await requestApproval("sign_auth", {
         chainId,
         nonce,
         statement,

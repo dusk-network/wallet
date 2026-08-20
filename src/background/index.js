@@ -25,7 +25,12 @@ import {
   handleEngineReady,
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
-import { getPending, resolvePendingDecision } from "./pending.js";
+import {
+  captureApprovalGeneration,
+  getPending,
+  rejectAllPendingApprovals,
+  resolvePendingDecision,
+} from "./pending.js";
 import {
   broadcastChainChangedAll,
   broadcastProfilesChangedAll,
@@ -74,6 +79,15 @@ const DAPP_ACTIVITY_METHODS = new Set([
   "dusk_signMessage",
   "dusk_signAuth",
 ]);
+
+async function lockWallet() {
+  const pendingRejection = rejectAllPendingApprovals();
+  try {
+    await engineCall("engine_lock");
+  } finally {
+    await pendingRejection;
+  }
+}
 
 /** Last activity timestamp cache; persisted storage survives worker restarts. */
 let lastActivityTimestamp = 0;
@@ -345,7 +359,7 @@ async function handleAutoLockAlarm() {
   if (elapsed >= timeoutMs) {
     console.log("[Dusk] Auto-locking wallet due to inactivity.");
     try {
-      await engineCall("engine_lock");
+      await lockWallet();
       await clearActivity();
       emitUiLockState(false, "auto_lock").catch(() => {});
       broadcastProfilesChangedAll().catch(() => {});
@@ -462,6 +476,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // RPC messages from contentScript
       if (message?.type === "DUSK_RPC_REQUEST") {
+        const approvalGeneration = captureApprovalGeneration();
         const origin = getOriginFromSender(sender) || message.origin || "";
 
         // Ensure any dApp port(s) opened from this tab are bound to the same
@@ -473,7 +488,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         const id = message.id;
         const activityContext = await prepareDappActivityContext(message.request);
-        const result = await handleRpc(origin, message.request);
+        const result = await handleRpc(origin, message.request, {
+          approvalGeneration,
+        });
         await updateDappActivity(message.request, activityContext);
         sendResponse({ id, result });
         return;
@@ -659,7 +676,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI wants to lock
       if (message?.type === "DUSK_UI_LOCK") {
-        await engineCall("engine_lock");
+        await lockWallet();
         await clearActivity();
 
         // Notify dApps that profiles are no longer available.

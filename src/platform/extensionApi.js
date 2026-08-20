@@ -114,6 +114,10 @@ export function windowsCreate(options) {
   return callApi(raw?.windows?.create, [options], raw?.windows);
 }
 
+export function windowsRemove(windowId) {
+  return callApi(raw?.windows?.remove, [windowId], raw?.windows);
+}
+
 export function alarmsClear(name) {
   if (!raw?.alarms?.clear) return Promise.resolve(false);
   return callApi(raw.alarms.clear, [name], raw.alarms);

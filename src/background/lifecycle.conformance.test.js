@@ -7,10 +7,13 @@ describe("background lock lifecycle conformance", () => {
     const source = await readFile(path.resolve(process.cwd(), "src/background/index.js"), "utf8");
 
     expect(source).toMatch(
-      /message\?\.type === "DUSK_UI_LOCK"[\s\S]*?engineCall\("engine_lock"\)[\s\S]*?broadcastProfilesChangedAll/
+      /message\?\.type === "DUSK_UI_LOCK"[\s\S]*?lockWallet\(\)[\s\S]*?broadcastProfilesChangedAll/
     );
     expect(source).toMatch(
-      /if \(elapsed >= timeoutMs\) \{[\s\S]*?engineCall\("engine_lock"\)[\s\S]*?broadcastProfilesChangedAll/
+      /if \(elapsed >= timeoutMs\) \{[\s\S]*?lockWallet\(\)[\s\S]*?broadcastProfilesChangedAll/
+    );
+    expect(source).toMatch(
+      /async function lockWallet\(\)[\s\S]*?rejectAllPendingApprovals\(\)[\s\S]*?engineCall\("engine_lock"\)/
     );
   });
 

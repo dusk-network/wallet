@@ -480,17 +480,21 @@ describe("background rpc handler", () => {
     vaultValue = { v: 1 };
     engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
 
-    const tx = await handleRpc("https://dapp.example", {
-      method: "dusk_sendTransaction",
-      params: {
-        kind: "transfer",
-        privacy: "public",
-        to: PUBLIC_ACCOUNT,
-        amount: "1",
-        memo: "hi",
-        profileIndex: 999,
+    const tx = await handleRpc(
+      "https://dapp.example",
+      {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "transfer",
+          privacy: "public",
+          to: PUBLIC_ACCOUNT,
+          amount: "1",
+          memo: "hi",
+          profileIndex: 999,
+        },
       },
-    });
+      { approvalGeneration: 7 }
+    );
 
     expect(tx).toMatchObject({ hash: "0xhash", nonce: "5" });
     expect(requestUserApproval).toHaveBeenCalledWith(
@@ -505,7 +509,8 @@ describe("background rpc handler", () => {
         networkName: "Testnet",
         nodeUrl: "https://testnet.nodes.dusk.network",
         gas: { limit: "2000000", price: "1" },
-      })
+      }),
+      7
     );
 
     const call = engineCall.mock.calls.find(([m]) => m === "dusk_sendTransaction");
