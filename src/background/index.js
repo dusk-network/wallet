@@ -12,8 +12,7 @@ import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
-import { detectPresetIdFromNodeUrl, networkNameFromNodeUrl } from "../shared/network.js";
-import { NETWORK_PRESETS } from "../shared/networkPresets.js";
+import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { bytesToHex } from "../shared/bytes.js";
 import { classifyTxPresence } from "../shared/txLifecycle.js";
@@ -418,25 +417,6 @@ function getOriginFromSender(sender) {
 }
 
 // ------------------------------
-// Endpoint helpers
-// ------------------------------
-
-function inferEndpointsFromNodeUrl(nodeUrl) {
-  const id = detectPresetIdFromNodeUrl(nodeUrl);
-  const preset = NETWORK_PRESETS.find((p) => p.id === id) ?? null;
-  if (preset && preset.id !== "custom") {
-    return {
-      proverUrl: preset.proverUrl || nodeUrl,
-      archiverUrl: preset.archiverUrl || nodeUrl,
-    };
-  }
-  return {
-    proverUrl: nodeUrl,
-    archiverUrl: nodeUrl,
-  };
-}
-
-// ------------------------------
 // Message bus
 // ------------------------------
 ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
@@ -831,12 +811,6 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           message?.archiverUrl !== undefined && message?.archiverUrl !== null
             ? String(message.archiverUrl).trim()
             : "";
-
-        // Compute the effective endpoints the engine will use (mirrors the
-        // inference logic in shared/settings.js).
-        const inferred = inferEndpointsFromNodeUrl(nodeUrl);
-        const effectiveProverUrl = proverUrl || inferred.proverUrl;
-        const effectiveArchiverUrl = archiverUrl || inferred.archiverUrl;
 
         // Only validate URL format (not reachability) - we accept any URL
         // and do background polling for status.

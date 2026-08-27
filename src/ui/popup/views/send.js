@@ -13,6 +13,7 @@ import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
 import { submitOnGasEnter, textInput } from "../../components/FormControls.js";
+import { createGasQuickControls } from "../../components/GasQuickControls.js";
 import {
   hideRecipientBadge,
   recipientBadge,
@@ -706,75 +707,13 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // price stats and set a recommended default (median).
   gasEditor.setGas(d?.gas ?? null);
 
-  const gasHint = h("div", { class: "muted", text: "Loading gas price suggestion…" });
-  const btnAuto = h("button", {
-    class: "btn-outline",
-    type: "button",
-    text: "Auto",
-    onclick: () => gasEditor.setGas(null),
+  const { gasHint, gasQuickRow } = createGasQuickControls({
+    actions,
+    defaultLimit,
+    fallbackPrice,
+    gas: d?.gas,
+    gasEditor,
   });
-  const btnLow = h("button", { class: "btn-outline", type: "button", text: "Low", disabled: true });
-  const btnRec = h("button", { class: "btn-outline", type: "button", text: "Recommended", disabled: true });
-  const btnHigh = h("button", { class: "btn-outline", type: "button", text: "High", disabled: true });
-
-  const gasQuickRow = h(
-    "div",
-    { style: "display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;" },
-    [btnAuto, btnLow, btnRec, btnHigh]
-  );
-
-  // Fire-and-forget: fetch suggested prices (cached for 30s).
-  (async () => {
-    try {
-      if (d?.gas) {
-        gasHint.textContent = defaultLimit && fallbackPrice
-          ? `Default gas: ${defaultLimit} limit · ${fallbackPrice} price (LUX)`
-          : "Gas is set.";
-        btnLow.disabled = true;
-        btnRec.disabled = true;
-        btnHigh.disabled = true;
-        return;
-      }
-
-      const resp = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
-      if (resp?.error) throw new Error(resp.error.message ?? "Failed to fetch gas price");
-      const stats = resp?.result ?? resp;
-
-      const min = String(stats?.min ?? "1");
-      const median = String(stats?.median ?? stats?.average ?? "1");
-      const max = String(stats?.max ?? median);
-
-      gasHint.textContent = `Gas price (LUX): min ${min} · median ${median} · max ${max}`;
-      gasEditor.helpText =
-        (defaultLimit
-          ? `Suggested gas price comes from the node mempool. Default limit: ${defaultLimit}. `
-          : "Suggested gas price comes from the node mempool. ") +
-        "Max fee shown is limit × price. Clear both to use wallet defaults.";
-
-      const apply = (price) => {
-        if (!defaultLimit) return;
-        gasEditor.setGas({ limit: defaultLimit, price: String(price ?? "") });
-      };
-
-      btnLow.disabled = !defaultLimit;
-      btnRec.disabled = !defaultLimit;
-      btnHigh.disabled = !defaultLimit;
-      btnLow.onclick = () => apply(min);
-      btnRec.onclick = () => apply(median);
-      btnHigh.onclick = () => apply(max);
-
-      // Default to median (recommended) for a predictable UX.
-      if (defaultLimit) {
-        gasEditor.setGas({ limit: defaultLimit, price: median });
-      }
-    } catch (e) {
-      gasHint.textContent = "Gas price unavailable (using defaults).";
-      // Fall back to static defaults so the user still sees a max fee.
-      if (defaultLimit && fallbackPrice) {
-        gasEditor.setGas({ limit: defaultLimit, price: fallbackPrice });
-      }
-    }
-  })().catch(() => {});
 
   confirmBtn.addEventListener("click", async () => {
     confirmBtn.disabled = true;

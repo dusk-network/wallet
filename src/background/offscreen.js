@@ -1,15 +1,14 @@
 // Offscreen engine bridge.
 // Splits out the offscreen-document lifecycle + message retries from background/index.
 
-import { getSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import {
   getExtensionApi,
   offscreenCreateDocument,
   runtimeGetContexts,
   runtimeGetURL,
-  runtimeSendMessage,
 } from "../platform/extensionApi.js";
+import { createEngineBridge } from "./engineBridge.js";
 
 const OFFSCREEN_PATH = "offscreen.html";
 
@@ -19,18 +18,7 @@ const OFFSCREEN_PATH = "offscreen.html";
  */
 let offscreenCreating = null;
 
-/**
- * Cache the last config we pushed into the engine.
- * @type {{ nodeUrl: string, proverUrl?: string, archiverUrl?: string, accountCount?: number, selectedAccountIndex?: number } | null}
- */
-let lastEngineConfig = null;
-
-let engineMsgSeq = 0;
 const ext = getExtensionApi();
-
-function delay(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 async function hasOffscreenDocument() {
   const offscreenUrl = runtimeGetURL(OFFSCREEN_PATH);
@@ -90,98 +78,14 @@ async function ensureOffscreenDocument() {
   }
 }
 
-function withTimeout(promise, timeoutMs, label = "Engine call timed out") {
-  if (!timeoutMs) return promise;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(label)), timeoutMs);
-    }),
-  ]);
-}
+const bridge = createEngineBridge({
+  ensureHost: ensureOffscreenDocument,
+  noResponseMessage: "No response from offscreen engine",
+});
 
-export async function engineCall(method, params, options = {}) {
-  await ensureOffscreenDocument();
-
-  const id = `${Date.now()}_${++engineMsgSeq}`;
-  const payload = { type: "DUSK_ENGINE_CALL", id, method, params };
-  const timeoutMs = Number(options?.timeoutMs || 0);
-
-  // Right after createDocument(), the offscreen page can be in the middle of loading.
-  // A short retry loop makes this much less flaky.
-  let lastErr = null;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const resp = await withTimeout(runtimeSendMessage(payload), timeoutMs);
-
-      if (!resp) throw new Error("No response from offscreen engine");
-      if (resp.error) throw resp.error;
-      return resp.result;
-    } catch (e) {
-      lastErr = e;
-      const msg = e?.message ?? String(e);
-
-      // Common transient errors while the offscreen doc is starting.
-      const transient =
-        msg.includes("Receiving end does not exist") ||
-        msg.includes("Could not establish connection") ||
-        msg.includes("The message port closed") ||
-        msg.includes("Promised response from onMessage listener went out of scope");
-
-      const canRetry =
-        transient && attempt < 4 && String(method) !== "dusk_sendTransaction";
-
-      if (canRetry) {
-        await delay(50 * (attempt + 1));
-        continue;
-      }
-
-      throw e;
-    }
-  }
-
-  throw lastErr ?? new Error("Engine call failed");
-}
-
-export function invalidateEngineConfig() {
-  lastEngineConfig = null;
-}
-
-export async function ensureEngineConfigured() {
-  const settings = await getSettings();
-  const nodeUrl = settings?.nodeUrl;
-  if (!nodeUrl) return;
-
-  const proverUrl = settings?.proverUrl;
-  const archiverUrl = settings?.archiverUrl;
-  const accountCount = settings?.accountCount;
-  const selectedAccountIndex = settings?.selectedAccountIndex;
-
-  const next = { nodeUrl, proverUrl, archiverUrl, accountCount, selectedAccountIndex };
-
-  if (
-    !lastEngineConfig ||
-    lastEngineConfig.nodeUrl !== next.nodeUrl ||
-    lastEngineConfig.proverUrl !== next.proverUrl ||
-    lastEngineConfig.archiverUrl !== next.archiverUrl ||
-    lastEngineConfig.accountCount !== next.accountCount ||
-    lastEngineConfig.selectedAccountIndex !== next.selectedAccountIndex
-  ) {
-    lastEngineConfig = next;
-    await engineCall("engine_config", next);
-  }
-}
-
-export async function getEngineStatus() {
-  try {
-    const status = await engineCall("engine_status");
-    return {
-      isUnlocked: Boolean(status?.isUnlocked),
-      accounts: Array.isArray(status?.accounts) ? status.accounts : [],
-      addresses: Array.isArray(status?.addresses) ? status.addresses : [],
-      selectedAccountIndex: Number(status?.selectedAccountIndex ?? 0) || 0,
-    };
-  } catch {
-    return { isUnlocked: false, accounts: [], addresses: [], selectedAccountIndex: 0 };
-  }
-}
+export const {
+  engineCall,
+  ensureEngineConfigured,
+  getEngineStatus,
+  invalidateEngineConfig,
+} = bridge;
