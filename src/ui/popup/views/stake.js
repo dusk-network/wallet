@@ -13,6 +13,7 @@ import "../../components/GasEditor.js";
 import { sozuLiquidStakingView } from "./sozu.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { decimalInput, submitOnGasEnter } from "../../components/FormControls.js";
+import { createGasQuickControls } from "../../components/GasQuickControls.js";
 
 const FUNDING_PUBLIC = "account";
 const FUNDING_SHIELDED = "address";
@@ -725,59 +726,13 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   gasEditor.amountLux = kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0";
   gasEditor.setGas(d?.gas ?? null);
 
-  const gasHint = h("div", { class: "muted", text: "Loading gas price suggestion…" });
-  const btnAuto = h("button", {
-    class: "btn-outline",
-    type: "button",
-    text: "Auto",
-    onclick: () => gasEditor.setGas(null),
+  const { gasHint, gasQuickRow } = createGasQuickControls({
+    actions,
+    defaultLimit,
+    fallbackPrice,
+    gas: d?.gas,
+    gasEditor,
   });
-  const btnLow = h("button", { class: "btn-outline", type: "button", text: "Low", disabled: true });
-  const btnRec = h("button", { class: "btn-outline", type: "button", text: "Recommended", disabled: true });
-  const btnHigh = h("button", { class: "btn-outline", type: "button", text: "High", disabled: true });
-  const gasQuickRow = h("div", { class: "gas-quick-row" }, [btnAuto, btnLow, btnRec, btnHigh]);
-
-  (async () => {
-    try {
-      if (d?.gas) {
-        gasHint.textContent = defaultLimit && fallbackPrice
-          ? `Default gas: ${defaultLimit} limit · ${fallbackPrice} price (LUX)`
-          : "Gas is set.";
-        return;
-      }
-      const resp = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
-      if (resp?.error) throw new Error(resp.error.message ?? "Failed to fetch gas price");
-      const stats = resp?.result ?? resp;
-      const min = String(stats?.min ?? "1");
-      const median = String(stats?.median ?? stats?.average ?? "1");
-      const max = String(stats?.max ?? median);
-      gasHint.textContent = `Gas price (LUX): min ${min} · median ${median} · max ${max}`;
-      gasEditor.helpText =
-        (defaultLimit
-          ? `Suggested gas price comes from the node mempool. Default limit: ${defaultLimit}. `
-          : "Suggested gas price comes from the node mempool. ") +
-        "Max fee shown is limit × price. Clear both to use wallet defaults.";
-
-      const apply = (price) => {
-        if (!defaultLimit) return;
-        gasEditor.setGas({ limit: defaultLimit, price: String(price ?? "") });
-      };
-      btnLow.disabled = !defaultLimit;
-      btnRec.disabled = !defaultLimit;
-      btnHigh.disabled = !defaultLimit;
-      btnLow.onclick = () => apply(min);
-      btnRec.onclick = () => apply(median);
-      btnHigh.onclick = () => apply(max);
-
-      if (defaultLimit) gasEditor.setGas({ limit: defaultLimit, price: median });
-      else if (fallbackPrice) gasEditor.setGas({ limit: defaultLimit, price: fallbackPrice });
-    } catch {
-      gasHint.textContent = "Gas price unavailable (using defaults).";
-      if (defaultLimit && fallbackPrice) {
-        gasEditor.setGas({ limit: defaultLimit, price: fallbackPrice });
-      }
-    }
-  })().catch(() => {});
 
   const amountLine = () => {
     if (kind === TX_KIND.UNSTAKE) {
