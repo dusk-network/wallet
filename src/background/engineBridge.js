@@ -29,9 +29,7 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
   let lastConfig = null;
   let messageSequence = 0;
 
-  async function engineCall(method, params, options = {}) {
-    await ensureHost();
-
+  async function callReadyEngine(method, params, options = {}) {
     const payload = {
       type: "DUSK_ENGINE_CALL",
       id: `${Date.now()}_${++messageSequence}`,
@@ -65,7 +63,7 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
     lastConfig = null;
   }
 
-  async function ensureEngineConfigured() {
+  async function configureReadyEngine(hostGeneration) {
     const settings = await getSettings();
     if (!settings?.nodeUrl) return;
 
@@ -76,11 +74,27 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
       accountCount: settings.accountCount,
       selectedAccountIndex: settings.selectedAccountIndex,
     };
-    const changed = !lastConfig || Object.keys(next).some((key) => lastConfig[key] !== next[key]);
+    const changed =
+      !lastConfig ||
+      lastConfig.hostGeneration !== hostGeneration ||
+      Object.keys(next).some((key) => lastConfig.settings[key] !== next[key]);
     if (!changed) return;
 
-    lastConfig = next;
-    await engineCall("engine_config", next);
+    await callReadyEngine("engine_config", next);
+    lastConfig = { hostGeneration, settings: next };
+  }
+
+  async function engineCall(method, params, options = {}) {
+    const hostGeneration = await ensureHost();
+    if (lastConfig && lastConfig.hostGeneration !== hostGeneration) {
+      await configureReadyEngine(hostGeneration);
+    }
+    return callReadyEngine(method, params, options);
+  }
+
+  async function ensureEngineConfigured() {
+    const hostGeneration = await ensureHost();
+    await configureReadyEngine(hostGeneration);
   }
 
   async function getEngineStatus() {

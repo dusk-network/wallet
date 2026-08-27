@@ -25,6 +25,7 @@ const ENGINE_PAGE_PATH = "engine.html";
 let engineCreating = null;
 
 let engineTabId = null;
+let engineHostGeneration = 0;
 const ext = getExtensionApi();
 let engineReady = false;
 let engineReadyPromise = null;
@@ -57,7 +58,7 @@ async function findExistingEngineTab() {
 async function ensureEnginePage() {
   if (engineCreating) {
     await engineCreating;
-    return;
+    return engineHostGeneration;
   }
 
   if (engineTabId != null) {
@@ -66,7 +67,7 @@ async function ensureEnginePage() {
       if (!engineReady) {
         await waitForEngineReady();
       }
-      return;
+      return engineHostGeneration;
     } catch {
       engineTabId = null;
     }
@@ -80,7 +81,8 @@ async function ensureEnginePage() {
     engineReadyPromise = null;
     await hideEngineTab(engineTabId);
     await waitForEngineReady();
-    return;
+    engineHostGeneration += 1;
+    return engineHostGeneration;
   }
 
   engineCreating = (async () => {
@@ -96,6 +98,7 @@ async function ensureEnginePage() {
     engineReadyPromise = null;
     await hideEngineTab(engineTabId);
     await waitForEngineReady();
+    engineHostGeneration += 1;
   })();
 
   try {
@@ -103,6 +106,8 @@ async function ensureEnginePage() {
   } finally {
     engineCreating = null;
   }
+
+  return engineHostGeneration;
 }
 
 if (ext?.tabs?.onRemoved) {
@@ -151,6 +156,9 @@ function waitForEngineReady(timeoutMs = 120_000) {
 }
 
 export function handleEngineReady(message) {
+  if (message?.type === "DUSK_ENGINE_READY" && engineReady) {
+    engineHostGeneration += 1;
+  }
   engineReady = true;
   if (message?.ok === false) {
     engineReadyError = new Error(
@@ -175,8 +183,9 @@ function withTimeout(promise, timeoutMs, label = "Engine call timed out") {
 
 const bridge = createEngineBridge({
   ensureHost: async () => {
-    await ensureEnginePage();
+    const hostGeneration = await ensureEnginePage();
     if (engineReadyError) throw engineReadyError;
+    return hostGeneration;
   },
   noResponseMessage: "No response from engine page",
 });

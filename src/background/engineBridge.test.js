@@ -28,20 +28,69 @@ describe("engine bridge", () => {
   });
 
   it("starts the host and caches engine configuration", async () => {
-    const ensureHost = vi.fn(async () => {});
+    const ensureHost = vi.fn(async () => 1);
     mocks.runtimeSendMessage.mockResolvedValue({ result: true });
     const bridge = createEngineBridge({ ensureHost, noResponseMessage: "No engine" });
 
     await bridge.ensureEngineConfigured();
     await bridge.ensureEngineConfigured();
 
-    expect(ensureHost).toHaveBeenCalledTimes(1);
+    expect(ensureHost).toHaveBeenCalledTimes(2);
     expect(mocks.runtimeSendMessage).toHaveBeenCalledTimes(1);
     expect(mocks.runtimeSendMessage.mock.calls[0][0]).toMatchObject({
       type: "DUSK_ENGINE_CALL",
       method: "engine_config",
       params: mocks.settings,
     });
+  });
+
+  it("retries configuration after a failed delivery", async () => {
+    const ensureHost = vi.fn(async () => 1);
+    const bridge = createEngineBridge({ ensureHost, noResponseMessage: "No engine" });
+    mocks.runtimeSendMessage
+      .mockRejectedValueOnce(new Error("configuration rejected"))
+      .mockResolvedValueOnce({ result: true });
+
+    await expect(bridge.ensureEngineConfigured()).rejects.toThrow("configuration rejected");
+    await expect(bridge.ensureEngineConfigured()).resolves.toBeUndefined();
+
+    expect(ensureHost).toHaveBeenCalledTimes(2);
+    expect(mocks.runtimeSendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("resends unchanged configuration when the engine host changes", async () => {
+    let hostGeneration = 1;
+    const ensureHost = vi.fn(async () => hostGeneration);
+    mocks.runtimeSendMessage.mockResolvedValue({ result: true });
+    const bridge = createEngineBridge({ ensureHost, noResponseMessage: "No engine" });
+
+    await bridge.ensureEngineConfigured();
+    hostGeneration += 1;
+    await bridge.ensureEngineConfigured();
+
+    expect(ensureHost).toHaveBeenCalledTimes(2);
+    expect(mocks.runtimeSendMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.runtimeSendMessage.mock.calls[1][0]).toMatchObject({
+      method: "engine_config",
+      params: mocks.settings,
+    });
+  });
+
+  it("reconfigures a replaced host before dispatching an engine operation", async () => {
+    let hostGeneration = 1;
+    const ensureHost = vi.fn(async () => hostGeneration);
+    mocks.runtimeSendMessage.mockResolvedValue({ result: true });
+    const bridge = createEngineBridge({ ensureHost, noResponseMessage: "No engine" });
+
+    await bridge.ensureEngineConfigured();
+    hostGeneration += 1;
+    await bridge.engineCall("engine_unlock", { mnemonic: "test mnemonic" });
+
+    expect(mocks.runtimeSendMessage.mock.calls.map(([message]) => message.method)).toEqual([
+      "engine_config",
+      "engine_config",
+      "engine_unlock",
+    ]);
   });
 
   it("retries transient calls but never retries transaction submission", async () => {

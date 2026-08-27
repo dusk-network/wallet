@@ -17,6 +17,7 @@ const OFFSCREEN_PATH = "offscreen.html";
  * @type {Promise<void> | null}
  */
 let offscreenCreating = null;
+let offscreenHostGeneration = 0;
 
 const ext = getExtensionApi();
 
@@ -55,11 +56,11 @@ async function ensureOffscreenDocument() {
     );
   }
 
-  if (await hasOffscreenDocument()) return;
+  if (await hasOffscreenDocument()) return offscreenHostGeneration;
 
   if (offscreenCreating) {
     await offscreenCreating;
-    return;
+    return offscreenHostGeneration;
   }
 
   offscreenCreating = (async () => {
@@ -69,12 +70,21 @@ async function ensureOffscreenDocument() {
       justification:
         "Run Dusk wallet engine that requires Blob URLs (URL.createObjectURL) for sandbox worker.",
     });
+    offscreenHostGeneration += 1;
   })();
 
   try {
     await offscreenCreating;
   } finally {
     offscreenCreating = null;
+  }
+
+  return offscreenHostGeneration;
+}
+
+export function handleEngineReady(message) {
+  if (message?.type === "DUSK_ENGINE_READY") {
+    offscreenHostGeneration += 1;
   }
 }
 
