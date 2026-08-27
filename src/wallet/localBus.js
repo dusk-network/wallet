@@ -12,13 +12,7 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
 import { bytesToHex } from "../shared/bytes.js";
-import {
-  getWatchedAssets,
-  watchToken,
-  unwatchToken,
-  watchNft,
-  unwatchNft,
-} from "../shared/assetsStore.js";
+import { handleUiCommand } from "./uiCommands.js";
 import {
   configure,
   getAccounts,
@@ -85,22 +79,6 @@ function serializeError(err) {
   };
 }
 
-function serializeStakeInfo(info) {
-  return {
-    amount: info?.amount
-      ? {
-          value: info.amount.value?.toString?.() ?? String(info.amount.value),
-          locked: info.amount.locked?.toString?.() ?? String(info.amount.locked),
-          eligibility: info.amount.eligibility?.toString?.() ?? String(info.amount.eligibility),
-          total: info.amount.total?.toString?.() ?? String(info.amount.total),
-        }
-      : null,
-    reward: info?.reward?.toString?.() ?? String(info?.reward ?? 0),
-    faults: Number(info?.faults ?? 0) || 0,
-    hardFaults: Number(info?.hardFaults ?? 0) || 0,
-  };
-}
-
 async function ensureEngineConfigured() {
   const settings = await getSettings();
   configure({
@@ -121,11 +99,39 @@ function engineStatus() {
   };
 }
 
+const localEngineMethods = {
+  dusk_getMinimumStake: getMinimumStake,
+  dusk_getStakeInfo: getStakeInfo,
+  dusk_getStakeOwnerStatus: getStakeOwnerStatus,
+  dusk_getSozuStatus: getSozuStatus,
+  dusk_getCachedGasPrice: getCachedGasPrice,
+  dusk_getDrc20Metadata: getDrc20Metadata,
+  dusk_getDrc20Balance: getDrc20Balance,
+  dusk_encodeDrc20Input: encodeDrc20Input,
+  dusk_decodeDrc20Input: decodeDrc20Input,
+  dusk_getDrc721Metadata: getDrc721Metadata,
+  dusk_getDrc721OwnerOf: getDrc721OwnerOf,
+  dusk_getDrc721TokenUri: getDrc721TokenUri,
+  dusk_decodeDrc721Input: decodeDrc721Input,
+  dusk_setShieldedCheckpointNow: setShieldedCheckpointNow,
+  engine_selectAccount: selectAccountIndex,
+};
+
+async function localEngineCall(method, params) {
+  return await localEngineMethods[method](params ?? {});
+}
+
 /**
  * @param {any} message
  */
 export async function localSend(message) {
   try {
+    const common = await handleUiCommand(message, {
+      engineCall: localEngineCall,
+      ensureEngineConfigured,
+      getEngineStatus: engineStatus,
+    });
+    if (common) return common;
     // UI wants to unlock
     if (message?.type === "DUSK_UI_UNLOCK") {
       // Fast path: if the engine is already unlocked, do not re-load the vault.
@@ -188,17 +194,6 @@ export async function localSend(message) {
       } finally {
         createWalletInFlight = null;
       }
-    }
-
-    // Optional: set a shielded checkpoint to "now" after creating a fresh wallet.
-    if (message?.type === "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const res = await setShieldedCheckpointNow({ profileIndex: 0 });
-      return { ok: true, result: { bookmark: res.bookmark, block: res.block } };
     }
 
     // UI checks status
@@ -266,26 +261,6 @@ export async function localSend(message) {
         archiverUrl: nextSettings.archiverUrl,
         networkName: networkNameFromNodeUrl(nextSettings.nodeUrl),
       };
-    }
-
-    // UI sets NFT metadata privacy settings
-    if (message?.type === "DUSK_UI_SET_NFT_SETTINGS") {
-      const ipfsGateway = String(message.ipfsGateway ?? "");
-      // Match the extension runtime: direct NFT metadata/media fetches are
-      // temporarily disabled until we have a trusted fetch path.
-      const next = await setSettings({ nftMetadataEnabled: false, ipfsGateway });
-      return {
-        ok: true,
-        nftMetadataEnabled: false,
-        ipfsGateway: next.ipfsGateway ?? "",
-      };
-    }
-
-    // UI fetches cached gas price stats for UX (recommended gas buttons).
-    if (message?.type === "DUSK_UI_GET_CACHED_GAS_PRICE") {
-      await ensureEngineConfigured();
-      const result = await getCachedGasPrice();
-      return { ok: true, result };
     }
 
     // UI asks for overview data (network + addresses + balance)
@@ -390,239 +365,6 @@ export async function localSend(message) {
         txs,
         accountNames,
       };
-    }
-
-    if (message?.type === "DUSK_UI_GET_MINIMUM_STAKE") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const min = await getMinimumStake();
-      return { ok: true, result: String(min) };
-    }
-
-    if (message?.type === "DUSK_UI_GET_STAKE_INFO") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const info = await getStakeInfo({ profileIndex: idx });
-      return { ok: true, result: serializeStakeInfo(info) };
-    }
-
-    if (message?.type === "DUSK_UI_GET_STAKE_OWNER_STATUS") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const result = await getStakeOwnerStatus({ profileIndex: idx });
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_GET_SOZU_STATUS") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const result = await getSozuStatus({ profileIndex: idx });
-      return { ok: true, result };
-    }
-
-    // --- Assets (DRC20 / DRC721) ----------------------------------------
-    if (message?.type === "DUSK_UI_ASSETS_GET") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      const settings = await getSettings();
-      const walletId = String(status?.accounts?.[0] ?? "").trim();
-      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
-      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const result = await getWatchedAssets(walletId, settings.nodeUrl, idx);
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_ASSETS_WATCH_TOKEN") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      const settings = await getSettings();
-      const walletId = String(status?.accounts?.[0] ?? "").trim();
-      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
-      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const result = await watchToken(walletId, settings.nodeUrl, idx, message?.token);
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_ASSETS_UNWATCH_TOKEN") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      const settings = await getSettings();
-      const walletId = String(status?.accounts?.[0] ?? "").trim();
-      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
-      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const result = await unwatchToken(walletId, settings.nodeUrl, idx, message?.contractId);
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_ASSETS_WATCH_NFT") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      const settings = await getSettings();
-      const walletId = String(status?.accounts?.[0] ?? "").trim();
-      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
-      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const result = await watchNft(walletId, settings.nodeUrl, idx, message?.nft);
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_ASSETS_UNWATCH_NFT") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      const settings = await getSettings();
-      const walletId = String(status?.accounts?.[0] ?? "").trim();
-      if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
-      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const result = await unwatchNft(
-        walletId,
-        settings.nodeUrl,
-        idx,
-        message?.contractId,
-        message?.tokenId
-      );
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_DRC20_GET_METADATA") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const result = await getDrc20Metadata({
-        contractId: message?.contractId,
-        driver: message?.driver,
-      });
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_DRC20_GET_BALANCE") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const idx = Number(message.profileIndex ?? status.selectedAccountIndex ?? 0) || 0;
-      const result = await getDrc20Balance({
-        contractId: message?.contractId,
-        profileIndex: idx,
-        driver: message?.driver,
-      });
-      return { ok: true, result: String(result ?? "0") };
-    }
-
-    if (message?.type === "DUSK_UI_DRC20_ENCODE_INPUT") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const result = await encodeDrc20Input({
-        fnName: message?.fnName,
-        args: message?.args,
-        driver: message?.driver,
-      });
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_DRC20_DECODE_INPUT") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const result = await decodeDrc20Input({
-        fnName: message?.fnName,
-        fnArgs: message?.fnArgs,
-        driver: message?.driver,
-      });
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_DRC721_GET_METADATA") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const result = await getDrc721Metadata({ contractId: message?.contractId });
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_DRC721_OWNER_OF") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const result = await getDrc721OwnerOf({ contractId: message?.contractId, tokenId: message?.tokenId });
-      return { ok: true, result };
-    }
-
-    if (message?.type === "DUSK_UI_DRC721_TOKEN_URI") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const result = await getDrc721TokenUri({ contractId: message?.contractId, tokenId: message?.tokenId });
-      return { ok: true, result: String(result ?? "") };
-    }
-
-    if (message?.type === "DUSK_UI_DRC721_DECODE_INPUT") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      await ensureEngineConfigured();
-      const result = await decodeDrc721Input({ fnName: message?.fnName, fnArgs: message?.fnArgs });
-      return { ok: true, result };
-    }
-
-    // UI selects a different local account (profile index)
-    if (message?.type === "DUSK_UI_SET_ACCOUNT_INDEX") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-
-      const idx = Number(message.index);
-      if (!Number.isFinite(idx) || idx < 0) {
-        throw rpcError(ERROR_CODES.INVALID_PARAMS, "index must be a non-negative number");
-      }
-
-      const settings = await getSettings();
-      const maxIndex = Math.max(0, Number(settings?.accountCount ?? 1) - 1);
-      const clamped = Math.min(Math.floor(idx), maxIndex);
-
-      await setSettings({ selectedAccountIndex: clamped });
-      await ensureEngineConfigured();
-      const res = await selectAccountIndex({ index: clamped });
-      return { ok: true, result: res };
     }
 
     // UI initiated transaction (from the wallet popup)
