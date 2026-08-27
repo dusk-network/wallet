@@ -31,7 +31,7 @@ Reservation metadata is separate from transaction status:
 | Reservation | Meaning |
 | --- | --- |
 | `pending` | Local nullifiers remain excluded from spendable notes. |
-| `spent` | Future state for sync-proven spent nullifiers. |
+| `spent` | Node finalization evidence was observed. Shielded sync separately proves and clears the pending nullifier rows. |
 | `recoverable` | Removed/unknown evidence suggests review may be needed, but notes are still not spendable. |
 | `released` | Future/manual state after an explicit release flow. |
 

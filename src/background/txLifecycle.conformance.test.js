@@ -13,12 +13,12 @@ describe("transaction lifecycle conformance", () => {
     expect(localBus).toMatch(/status: "unknown"/);
   });
 
-  it("background handles removed and unknown without failed notification copy", async () => {
+  it("background reconciles removed and unknown without failed notification copy", async () => {
     const source = await readFile(path.resolve(process.cwd(), "src/background/index.js"), "utf8");
 
     expect(source).toMatch(/message\?\.type === "DUSK_TX_REMOVED"/);
     expect(source).toMatch(/message\?\.type === "DUSK_TX_UNKNOWN"/);
-    expect(source).toMatch(/status: "removed"/);
+    expect(source).toMatch(/reconcileTxPresence\(hash, \{ preserveRemoved: true \}\)/);
     expect(source).toMatch(/status: "unknown"/);
   });
 });

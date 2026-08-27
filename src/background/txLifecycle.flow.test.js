@@ -248,6 +248,31 @@ describe("background Phoenix tx lifecycle flow", () => {
     );
   });
 
+  it("marks failed finalized shielded tx reservations spent", async () => {
+    const hash = "0xfailed";
+    await seedTxMeta(hash);
+
+    await sendBackgroundMessage({
+      type: "DUSK_TX_EXECUTED",
+      hash,
+      ok: false,
+      error: "OutOfGas",
+    });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      reservationStatus: "spent",
+      pendingNullifiers: ["aa"],
+    });
+    expect(mocks.notifyTxExecuted).toHaveBeenCalledWith(expect.objectContaining({
+      hash,
+      ok: false,
+      error: "OutOfGas",
+    }));
+  });
+
   it("marks removed shielded tx reservations recoverable without clearing pending nullifiers", async () => {
     const hash = "0xremoved";
     await seedTxMeta(hash);
@@ -267,6 +292,29 @@ describe("background Phoenix tx lifecycle flow", () => {
       expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "removed" })
     );
     expect(mocks.notifyTxExecuted).not.toHaveBeenCalled();
+  });
+
+  it("does not let an unverified removed event erase execution evidence", async () => {
+    const hash = "0xremoved-unavailable";
+    await seedTxMeta(hash, {
+      status: "failed",
+      error: "OutOfGas",
+      reservationStatus: "spent",
+    });
+    mocks.classifyTxPresence.mockResolvedValueOnce({
+      state: "unavailable",
+      error: "node offline",
+    });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_REMOVED", hash, reason: "removed" });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      reservationStatus: "spent",
+      recoveryReason: "node offline",
+    });
   });
 
   it("rechecks old shielded reservations without clearing pending nullifiers", async () => {
@@ -317,7 +365,7 @@ describe("background Phoenix tx lifecycle flow", () => {
     );
   });
 
-  it("rechecks old shielded reservations to finalized failure without releasing pending nullifiers", async () => {
+  it("rechecks old shielded reservations to finalized failure and marks reservations spent", async () => {
     const hash = "0xrecheck-failed";
     await seedTxMeta(hash, { status: "unknown", recoveryReason: "watcher_timeout" });
     mocks.classifyTxPresence.mockResolvedValueOnce({
@@ -335,7 +383,7 @@ describe("background Phoenix tx lifecycle flow", () => {
     await expect(getTxMeta(hash)).resolves.toMatchObject({
       status: "failed",
       error: "OutOfGas",
-      reservationStatus: "pending",
+      reservationStatus: "spent",
       pendingNullifiers: ["aa"],
     });
 

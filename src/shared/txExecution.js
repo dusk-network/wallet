@@ -20,8 +20,7 @@ function eventLayers(event) {
 }
 
 function errorMessage(value) {
-  if (!hasError(value)) return "";
-  if (value === true) return GENERIC_EXECUTION_ERROR;
+  if (!hasError(value) || value === true) return "";
   if (typeof value === "string") return value;
   if (typeof value?.message === "string") return value.message;
 
@@ -53,10 +52,13 @@ export function executionEventOk(event) {
 
 export function executionEventError(event) {
   try {
-    for (const layer of eventLayers(event)) {
+    const layers = eventLayers(event);
+    for (const layer of layers) {
       const message = errorMessage(layer.err) || errorMessage(layer.error);
       if (message) return message;
-      if (layer.success === false) return GENERIC_EXECUTION_ERROR;
+    }
+    if (layers.some((layer) => layer.success === false || layer.err === true || layer.error === true)) {
+      return GENERIC_EXECUTION_ERROR;
     }
   } catch {
     // Treat malformed event details as absent. The caller still has the

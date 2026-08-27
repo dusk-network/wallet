@@ -10,9 +10,10 @@ import { getAccountNames } from "../shared/accountNames.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
+import { getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
 import { bytesToHex } from "../shared/bytes.js";
 import { executionEventError, executionEventOk } from "../shared/txExecution.js";
+import { classifyTxPresence } from "../shared/txLifecycle.js";
 import { handleUiCommand } from "./uiCommands.js";
 import {
   configure,
@@ -450,11 +451,46 @@ export async function localSend(message) {
               ]);
 
               if (lifecycle?.type === "removed") {
-                await patchTxMeta(hash, {
-                  status: "removed",
-                  removedAt: Date.now(),
-                  recoveryReason: "removed",
-                });
+                const meta = await getTxMeta(hash);
+                const presence = await classifyTxPresence(nodeUrl, hash);
+                const now = Date.now();
+                const isShielded = pendingNullifiers.length > 0;
+
+                if (presence.state === "executed_success" || presence.state === "executed_failed") {
+                  const ok = presence.state === "executed_success";
+                  await patchTxMeta(hash, {
+                    status: ok ? "executed" : "failed",
+                    error: ok ? undefined : presence.error || undefined,
+                    executedAt: now,
+                    lastCheckedAt: now,
+                    reservationStatus: isShielded ? "spent" : meta?.reservationStatus,
+                    reservationUpdatedAt: isShielded ? now : meta?.reservationUpdatedAt,
+                  });
+                } else if (presence.state === "not_found") {
+                  await patchTxMeta(hash, {
+                    status: "removed",
+                    removedAt: now,
+                    lastCheckedAt: now,
+                    recoveryReason: "removed",
+                    reservationStatus: isShielded ? "recoverable" : meta?.reservationStatus,
+                    reservationUpdatedAt: isShielded ? now : meta?.reservationUpdatedAt,
+                  });
+                } else if (
+                  presence.state === "mempool" &&
+                  meta?.status !== "executed" &&
+                  meta?.status !== "failed"
+                ) {
+                  await patchTxMeta(hash, {
+                    status: "mempool",
+                    lastCheckedAt: now,
+                    reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
+                  });
+                } else {
+                  await patchTxMeta(hash, {
+                    lastCheckedAt: now,
+                    recoveryReason: presence.error || "removed_reconciliation_unavailable",
+                  });
+                }
                 return;
               }
 
@@ -462,13 +498,20 @@ export async function localSend(message) {
               const ok = executionEventOk(executedEvent);
               const error = ok ? "" : executionEventError(executedEvent);
 
+              const now = Date.now();
               await patchTxMeta(hash, {
                 status: ok ? "executed" : "failed",
                 error: ok ? undefined : (error || undefined),
+                executedAt: now,
+                lastCheckedAt: now,
+                reservationStatus: pendingNullifiers.length ? "spent" : undefined,
+                reservationUpdatedAt: pendingNullifiers.length ? now : undefined,
               });
             } catch (e) {
+              const meta = await getTxMeta(hash);
+              const hasExecution = meta?.status === "executed" || meta?.status === "failed";
               await patchTxMeta(hash, {
-                status: "unknown",
+                ...(hasExecution ? {} : { status: "unknown" }),
                 lastCheckedAt: Date.now(),
                 recoveryReason: /timed out/i.test(String(e?.message ?? e))
                   ? "watcher_timeout"
