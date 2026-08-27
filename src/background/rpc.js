@@ -247,20 +247,22 @@ export async function handleRpc(origin, request) {
 
   function validateNodeUrl(value) {
     const trimmed = String(value ?? "").trim();
+    let normalized;
     try {
       const url = new URL(trimmed);
       if (url.protocol !== "http:" && url.protocol !== "https:") {
         throw new Error("protocol");
       }
+      normalized = url.origin;
     } catch {
       throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid nodeUrl");
     }
 
-    if (!isAllowedDappEndpoint(trimmed)) {
+    if (!isAllowedDappEndpoint(normalized)) {
       throw rpcError(ERROR_CODES.INVALID_PARAMS, "nodeUrl must use HTTPS or local HTTP");
     }
 
-    return trimmed;
+    return normalized;
   }
 
   function profileFromStatus(status, index, includeShielded = false) {

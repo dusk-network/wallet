@@ -1178,6 +1178,28 @@ describe("background rpc handler", () => {
     expect(setSettings).not.toHaveBeenCalled();
   });
 
+  it("dusk_switchNetwork treats a trailing slash as the current node", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    settings = {
+      ...settings,
+      nodeUrl: "http://127.0.0.1:18181",
+    };
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_switchNetwork",
+        params: { nodeUrl: "http://127.0.0.1:18181/" },
+      })
+    ).resolves.toBeNull();
+
+    expect(requestUserApproval).not.toHaveBeenCalledWith("switch_network", expect.anything(), expect.anything());
+    expect(setSettings).not.toHaveBeenCalled();
+  });
+
   it("dusk_signMessage rejects malformed message params before approval", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
