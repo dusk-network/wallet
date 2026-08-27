@@ -8,5 +8,4 @@ export const ENGINE_HOST =
     ? __DUSK_ENGINE_HOST__
     : "offscreen";
 
-export const IS_CHROME = EXTENSION_TARGET === "chrome";
 export const IS_FIREFOX = EXTENSION_TARGET === "firefox";
