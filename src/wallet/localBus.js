@@ -117,17 +117,13 @@ const localEngineMethods = {
   engine_selectAccount: selectAccountIndex,
 };
 
-async function localEngineCall(method, params) {
-  return await localEngineMethods[method](params ?? {});
-}
-
 /**
  * @param {any} message
  */
 export async function localSend(message) {
   try {
     const common = await handleUiCommand(message, {
-      engineCall: localEngineCall,
+      engineCall: (method, params) => localEngineMethods[method](params ?? {}),
       ensureEngineConfigured,
       getEngineStatus: engineStatus,
     });
