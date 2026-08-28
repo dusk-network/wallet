@@ -553,7 +553,7 @@ describe("walletEngine", () => {
       maxActive = Math.max(maxActive, ++active);
       await new Promise((resolve) => setTimeout(resolve, 1));
       active--;
-      return { hash: crypto.randomUUID(), nonce: 1 };
+      return { hash: "0xhash", nonce: 1 };
     });
 
     await Promise.all([
