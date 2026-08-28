@@ -64,18 +64,34 @@ describe("pending approvals", () => {
   it("rejects every pending approval when wallet state changes", async () => {
     vi.resetModules();
     const pending = await import("./pending.js");
-    vi.spyOn(globalThis.crypto, "randomUUID")
+    const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID")
       .mockReturnValueOnce("rid-a")
       .mockReturnValueOnce("rid-b");
 
     const first = pending.requestUserApproval("send_tx", "https://a.example", {});
     const second = pending.requestUserApproval("sign_message", "https://b.example", {});
-    pending.cancelPendingApprovals("Wallet reset");
+    pending.cancelPendingApprovals(null, "Wallet reset");
 
     await expect(first).rejects.toMatchObject({ code: 4001, message: "Wallet reset" });
     await expect(second).rejects.toMatchObject({ code: 4001, message: "Wallet reset" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(pending.pendingApprovals.size).toBe(0);
     expect(windowsRemove).toHaveBeenCalledWith(999);
+    ridSpy.mockRestore();
+  });
+
+  it("bounds approvals per origin and supports targeted cancellation", async () => {
+    vi.resetModules();
+    const pending = await import("./pending.js");
+    const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("rid-3");
+    const first = pending.requestUserApproval("send_tx", "https://example.com", {});
+
+    await expect(
+      pending.requestUserApproval("sign_message", "https://example.com", {})
+    ).rejects.toMatchObject({ code: 4001 });
+
+    pending.cancelPendingApprovals("https://example.com", "Wallet locked");
+    await expect(first).rejects.toMatchObject({ code: 4001, message: "Wallet locked" });
+    ridSpy.mockRestore();
   });
 });

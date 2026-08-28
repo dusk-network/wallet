@@ -27,7 +27,7 @@ import {
   getEngineStatusStrict,
   invalidateEngineConfig,
 } from "./engineHost.js";
-import { requestUserApproval } from "./pending.js";
+import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { putTxMeta } from "../shared/txStore.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
@@ -260,7 +260,7 @@ export async function handleRpc(origin, request) {
       throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid nodeUrl");
     }
 
-    if (!isAllowedDappEndpoint(normalized)) {
+    if (!isAllowedDappEndpoint(trimmed)) {
       throw rpcError(ERROR_CODES.INVALID_PARAMS, "nodeUrl must use HTTPS or local HTTP");
     }
 
@@ -281,6 +281,31 @@ export async function handleRpc(origin, request) {
       profile.shieldedAddress = addresses[idx];
     }
     return profile;
+  }
+
+  async function captureApprovalContext(perm) {
+    const [settings, status] = await Promise.all([getSettings(), getEngineStatus()]);
+    if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+    const accounts = Array.isArray(status.accounts) ? status.accounts : [];
+    const profileIndex = sanitizeAccountIndex(perm?.accountIndex, accounts.length, 0);
+    return Object.freeze({
+      origin,
+      nodeUrl: String(settings?.nodeUrl ?? ""),
+      walletId: String(accounts[0] ?? ""),
+      account: String(accounts[profileIndex] ?? ""),
+      profileIndex,
+      permissionProfileId: String(perm?.profileId ?? ""),
+      permissionUpdatedAt: Number(perm?.updatedAt ?? 0),
+    });
+  }
+
+  async function assertApprovalContext(expected) {
+    const permission = await getPermissionForOrigin(origin);
+    const current = await captureApprovalContext(permission);
+    if (Object.keys(expected).some((key) => current[key] !== expected[key])) {
+      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet changed while awaiting approval");
+    }
+    return current;
   }
 
   function hasShieldedGrant(perm) {
@@ -521,8 +546,8 @@ export async function handleRpc(origin, request) {
 
       targetNodeUrl = validateNodeUrl(targetNodeUrl);
 
-      const settings = await getSettings();
-      const currentNodeUrl = String(settings?.nodeUrl ?? "");
+      const approvalContext = await captureApprovalContext(perm);
+      const currentNodeUrl = approvalContext.nodeUrl;
       if (currentNodeUrl === targetNodeUrl) return null;
 
       const from = {
@@ -539,6 +564,7 @@ export async function handleRpc(origin, request) {
 
       // Ask user approval.
       await requestUserApproval("switch_network", origin, { from, to });
+      await assertApprovalContext(approvalContext);
 
       // Apply new settings and reconfigure engine.
       await setSettings({ nodeUrl: targetNodeUrl });
@@ -653,8 +679,8 @@ export async function handleRpc(origin, request) {
         ...safeNormalizedParams
       } = normalizedParams;
       const baseParams = applyTxDefaultsForRpc(safeNormalizedParams, { dynamicPrice });
-      const approvalSettings = await getSettings();
-      const approvalNodeUrl = String(approvalSettings?.nodeUrl ?? "");
+      const approvalContext = await captureApprovalContext(perm);
+      const approvalNodeUrl = approvalContext.nodeUrl;
       const approvalParams = {
         ...baseParams,
         chainId: chainIdFromNodeUrl(approvalNodeUrl),
@@ -665,19 +691,16 @@ export async function handleRpc(origin, request) {
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
       const overrides = await requestUserApproval("send_tx", origin, approvalParams);
+      await assertApprovalContext(approvalContext);
       const finalParams = applyTxDefaultsForRpc(mergeTxParams(baseParams, overrides), { dynamicPrice });
       finalParams.gas = validateGasShape(finalParams.gas);
 
-      const { isUnlocked, accounts } = await getEngineStatus();
-      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-
-      const arr = Array.isArray(accounts) ? accounts : [];
-      const idx = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
-
+      const idx = approvalContext.profileIndex;
       const engineParams = {
         ...finalParams,
         // Never allow a dApp to select an arbitrary local profile.
         profileIndex: idx,
+        _approvalContext: approvalContext,
       };
       const result = await engineCall("dusk_sendTransaction", engineParams);
       const hash = result?.hash ?? "";
@@ -786,6 +809,7 @@ export async function handleRpc(origin, request) {
       }
 
       // Ask the user to approve adding this asset (approval UI includes unlock).
+      const approvalContext = await captureApprovalContext(perm);
       await requestUserApproval("watch_asset", origin, {
         type,
         options: {
@@ -795,12 +819,13 @@ export async function handleRpc(origin, request) {
         },
       });
 
+      await assertApprovalContext(approvalContext);
       const { isUnlocked, accounts } = await getEngineStatus();
       if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 
       await ensureEngineConfigured();
       const arr = Array.isArray(accounts) ? accounts : [];
-      const idx = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
+      const idx = approvalContext.profileIndex;
 
       const settings = await getSettings();
       const nodeUrl = settings?.nodeUrl ?? "";
@@ -869,8 +894,8 @@ export async function handleRpc(origin, request) {
         );
       }
 
-      const settings = await getSettings();
-      const chainId = chainIdFromNodeUrl(settings?.nodeUrl ?? "");
+      const approvalContext = await captureApprovalContext(perm);
+      const chainId = chainIdFromNodeUrl(approvalContext.nodeUrl);
 
       await requestUserApproval("sign_message", origin, {
         chainId,
@@ -879,16 +904,14 @@ export async function handleRpc(origin, request) {
         messagePreview,
       });
 
-      const { isUnlocked, accounts } = await getEngineStatus();
-      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-
+      await assertApprovalContext(approvalContext);
       await ensureEngineConfigured();
-      const arr = Array.isArray(accounts) ? accounts : [];
       return await engineCall("dusk_signMessage", {
         origin,
         chainId,
         message: params.message,
-        profileIndex: sanitizeAccountIndex(perm.accountIndex, arr.length, 0),
+        profileIndex: approvalContext.profileIndex,
+        _approvalContext: approvalContext,
       });
     }
 
@@ -922,8 +945,8 @@ export async function handleRpc(origin, request) {
         expiresAt = new Date(t).toISOString();
       }
 
-      const settings = await getSettings();
-      const chainId = chainIdFromNodeUrl(settings?.nodeUrl ?? "");
+      const approvalContext = await captureApprovalContext(perm);
+      const chainId = chainIdFromNodeUrl(approvalContext.nodeUrl);
 
       await requestUserApproval("sign_auth", origin, {
         chainId,
@@ -932,22 +955,21 @@ export async function handleRpc(origin, request) {
         expiresAt,
       });
 
-      const { isUnlocked, accounts } = await getEngineStatus();
-      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-
+      await assertApprovalContext(approvalContext);
       await ensureEngineConfigured();
-      const arr = Array.isArray(accounts) ? accounts : [];
       return await engineCall("dusk_signAuth", {
         origin,
         chainId,
         nonce,
         statement,
         expiresAt,
-        profileIndex: sanitizeAccountIndex(perm.accountIndex, arr.length, 0),
+        profileIndex: approvalContext.profileIndex,
+        _approvalContext: approvalContext,
       });
     }
 
     case "dusk_disconnect": {
+      cancelPendingApprovals(origin, "Site disconnected");
       await revokeOrigin(origin);
       return true;
     }

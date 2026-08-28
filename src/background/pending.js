@@ -16,9 +16,13 @@ import {
  */
 export const pendingApprovals = new Map();
 
+const MAX_PENDING = 20;
+const APPROVAL_TTL_MS = 5 * 60_000;
+
 function rejectPending(rid, entry, message) {
   if (!entry) return;
   pendingApprovals.delete(rid);
+  clearTimeout(entry.timer);
   if (entry.windowId !== undefined) windowsRemove(entry.windowId).catch(() => {});
   entry.reject(rpcError(ERROR_CODES.USER_REJECTED, message));
 }
@@ -27,17 +31,21 @@ function rejectPending(rid, entry, message) {
  * Open a small notification window and wait for the user's decision.
  */
 export async function requestUserApproval(kind, origin, params) {
-  const rid = crypto.randomUUID();
+  if (
+    pendingApprovals.size >= MAX_PENDING ||
+    [...pendingApprovals.values()].some((entry) => entry.origin === origin)
+  ) {
+    throw rpcError(ERROR_CODES.USER_REJECTED, "Another approval is already pending");
+  }
 
+  const rid = crypto.randomUUID();
   const promise = new Promise((resolve, reject) => {
-    pendingApprovals.set(rid, {
-      kind,
-      origin,
-      params,
-      createdAt: Date.now(),
-      resolve,
-      reject,
-    });
+    const entry = { kind, origin, params, createdAt: Date.now(), resolve, reject };
+    entry.timer = setTimeout(
+      () => rejectPending(rid, entry, "Approval request expired"),
+      APPROVAL_TTL_MS
+    );
+    pendingApprovals.set(rid, entry);
   });
 
   const url = runtimeGetURL(
@@ -45,12 +53,17 @@ export async function requestUserApproval(kind, origin, params) {
   );
 
   // Best effort: open a popup-style window.
-  const win = await windowsCreate({
-    url,
-    type: "popup",
-    width: 380,
-    height: 620,
-  });
+  let win;
+  try {
+    win = await windowsCreate({
+      url,
+      type: "popup",
+      width: 380,
+      height: 620,
+    });
+  } catch {
+    rejectPending(rid, pendingApprovals.get(rid), "Could not open approval window");
+  }
 
   // If the user closes the approval window, reject the pending request.
   const entry = pendingApprovals.get(rid);
@@ -85,6 +98,7 @@ export function resolvePendingDecision(message) {
   }
 
   pendingApprovals.delete(rid);
+  clearTimeout(entry.timer);
 
   if (decision === "approve") {
     // Optionally accept user edited parameters (e.g. gas overrides).
@@ -101,6 +115,8 @@ export function resolvePendingDecision(message) {
   return { ok: true };
 }
 
-export function cancelPendingApprovals(reason = "Wallet state changed") {
-  for (const [rid, entry] of pendingApprovals) rejectPending(rid, entry, reason);
+export function cancelPendingApprovals(origin, reason = "Wallet state changed") {
+  for (const [rid, entry] of pendingApprovals) {
+    if (!origin || entry.origin === origin) rejectPending(rid, entry, reason);
+  }
 }

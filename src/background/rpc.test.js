@@ -113,7 +113,10 @@ vi.mock("./engineHost.js", () => ({
   getEngineStatusStrict,
   invalidateEngineConfig,
 }));
-vi.mock("./pending.js", () => ({ requestUserApproval }));
+vi.mock("./pending.js", () => ({
+  cancelPendingApprovals: vi.fn(),
+  requestUserApproval,
+}));
 vi.mock("./txNotify.js", () => ({ notifyTxSubmitted }));
 vi.mock("../shared/txStore.js", () => ({ putTxMeta }));
 vi.mock("../shared/assetsStore.js", () => ({
@@ -679,6 +682,40 @@ describe("background rpc handler", () => {
     expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
     expect(putTxMeta).not.toHaveBeenCalled();
   });
+
+  it.each(["account", "network", "permission"]) (
+    "dusk_sendTransaction rejects when %s changes during approval",
+    async (changed) => {
+      vi.resetModules();
+      const { handleRpc } = await import("./rpc.js");
+      perms["https://dapp.example"] = {
+        profileId: "account:0:acct0",
+        accountIndex: 0,
+        updatedAt: 1,
+      };
+      engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+      requestUserApproval.mockImplementationOnce(async () => {
+        if (changed === "account") engineStatus.accounts[0] = "other-wallet";
+        if (changed === "network") settings.nodeUrl = "https://nodes.dusk.network";
+        if (changed === "permission") perms["https://dapp.example"].updatedAt = 2;
+        return null;
+      });
+
+      await expect(handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: {
+          kind: "transfer",
+          privacy: "public",
+          to: PUBLIC_ACCOUNT,
+          amount: "1",
+        },
+      })).rejects.toMatchObject({
+        code: ERROR_CODES.UNAUTHORIZED,
+        message: "Wallet changed while awaiting approval",
+      });
+      expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+    }
+  );
 
   it("dusk_sendTransaction preserves user rejection error codes", async () => {
     vi.resetModules();

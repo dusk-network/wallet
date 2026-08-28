@@ -533,6 +533,28 @@ describe("walletEngine", () => {
     expect(res.payload.endsWith(memoHex)).toBe(true);
   });
 
+  it("rejects signing when the approved engine context changed", async () => {
+    engine.configure({
+      nodeUrl: NETWORK_KEY,
+      accountCount: 1,
+      selectedAccountIndex: 0,
+    });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    await expect(engine.signMessage({
+      origin: "https://example.com",
+      chainId: "dusk:2",
+      message: "0x0102",
+      profileIndex: 0,
+      _approvalContext: {
+        walletId: WALLET_ID,
+        profileIndex: 0,
+        account: "acct0",
+        nodeUrl: "https://different.example",
+      },
+    })).rejects.toThrow("Wallet changed while awaiting approval");
+  });
+
   it("signAuth returns the signed canonical login envelope", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
