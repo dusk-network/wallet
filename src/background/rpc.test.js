@@ -656,6 +656,23 @@ describe("background rpc handler", () => {
     expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
   });
 
+  it("dusk_sendTransaction can unlock in the approval window", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: false, accounts: [] };
+    requestUserApproval.mockImplementationOnce(async () => {
+      engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+      return null;
+    });
+
+    await expect(handleRpc("https://dapp.example", {
+      method: "dusk_sendTransaction",
+      params: { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1" },
+    })).resolves.toMatchObject({ hash: "0xhash" });
+  });
+
   it("dusk_sendTransaction rejects if the wallet locks after approval and before send", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

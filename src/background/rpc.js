@@ -285,10 +285,12 @@ export async function handleRpc(origin, request) {
 
   async function captureApprovalContext(perm) {
     const [settings, status] = await Promise.all([getSettings(), getEngineStatus()]);
-    if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-    const accounts = Array.isArray(status.accounts) ? status.accounts : [];
-    const profileIndex = sanitizeAccountIndex(perm?.accountIndex, accounts.length, 0);
+    const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
+    const profileIndex = status?.isUnlocked
+      ? sanitizeAccountIndex(perm?.accountIndex, accounts.length, 0)
+      : Math.max(0, Math.floor(Number(perm?.accountIndex) || 0));
     return Object.freeze({
+      isUnlocked: Boolean(status?.isUnlocked),
       origin,
       nodeUrl: String(settings?.nodeUrl ?? ""),
       walletId: String(accounts[0] ?? ""),
@@ -302,7 +304,9 @@ export async function handleRpc(origin, request) {
   async function assertApprovalContext(expected) {
     const permission = await getPermissionForOrigin(origin);
     const current = await captureApprovalContext(permission);
-    if (Object.keys(expected).some((key) => current[key] !== expected[key])) {
+    const keys = ["origin", "nodeUrl", "profileIndex", "permissionProfileId", "permissionUpdatedAt"];
+    if (expected.walletId) keys.push("walletId", "account");
+    if (!current.isUnlocked || !current.walletId || keys.some((key) => current[key] !== expected[key])) {
       throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet changed while awaiting approval");
     }
     return current;
@@ -691,16 +695,16 @@ export async function handleRpc(origin, request) {
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
       const overrides = await requestUserApproval("send_tx", origin, approvalParams);
-      await assertApprovalContext(approvalContext);
+      const executionContext = await assertApprovalContext(approvalContext);
       const finalParams = applyTxDefaultsForRpc(mergeTxParams(baseParams, overrides), { dynamicPrice });
       finalParams.gas = validateGasShape(finalParams.gas);
 
-      const idx = approvalContext.profileIndex;
+      const idx = executionContext.profileIndex;
       const engineParams = {
         ...finalParams,
         // Never allow a dApp to select an arbitrary local profile.
         profileIndex: idx,
-        _approvalContext: approvalContext,
+        _approvalContext: executionContext,
       };
       const result = await engineCall("dusk_sendTransaction", engineParams);
       const hash = result?.hash ?? "";
@@ -819,13 +823,13 @@ export async function handleRpc(origin, request) {
         },
       });
 
-      await assertApprovalContext(approvalContext);
+      const executionContext = await assertApprovalContext(approvalContext);
       const { isUnlocked, accounts } = await getEngineStatus();
       if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 
       await ensureEngineConfigured();
       const arr = Array.isArray(accounts) ? accounts : [];
-      const idx = approvalContext.profileIndex;
+      const idx = executionContext.profileIndex;
 
       const settings = await getSettings();
       const nodeUrl = settings?.nodeUrl ?? "";
@@ -904,14 +908,14 @@ export async function handleRpc(origin, request) {
         messagePreview,
       });
 
-      await assertApprovalContext(approvalContext);
+      const executionContext = await assertApprovalContext(approvalContext);
       await ensureEngineConfigured();
       return await engineCall("dusk_signMessage", {
         origin,
         chainId,
         message: params.message,
-        profileIndex: approvalContext.profileIndex,
-        _approvalContext: approvalContext,
+        profileIndex: executionContext.profileIndex,
+        _approvalContext: executionContext,
       });
     }
 
@@ -955,7 +959,7 @@ export async function handleRpc(origin, request) {
         expiresAt,
       });
 
-      await assertApprovalContext(approvalContext);
+      const executionContext = await assertApprovalContext(approvalContext);
       await ensureEngineConfigured();
       return await engineCall("dusk_signAuth", {
         origin,
@@ -963,8 +967,8 @@ export async function handleRpc(origin, request) {
         nonce,
         statement,
         expiresAt,
-        profileIndex: approvalContext.profileIndex,
-        _approvalContext: approvalContext,
+        profileIndex: executionContext.profileIndex,
+        _approvalContext: executionContext,
       });
     }
 
