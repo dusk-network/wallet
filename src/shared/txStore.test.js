@@ -109,7 +109,7 @@ describe("txStore", () => {
     await expect(listTxs()).resolves.toHaveLength(50);
   });
 
-  it("clears stale removal evidence on terminal transitions", async () => {
+  it("clears stale removal evidence when the transaction returns", async () => {
     const { getTxMeta, patchTxMeta, putTxMeta } = await import("./txStore.js");
     await putTxMeta("hash-removed", {
       submittedAt: 1,
@@ -118,9 +118,18 @@ describe("txStore", () => {
       removedAt: 10,
     });
 
-    await patchTxMeta("hash-removed", { status: "executed", executedAt: 20 });
+    await patchTxMeta("hash-removed", { status: "mempool" });
+    let meta = await getTxMeta("hash-removed");
+    expect(meta.recoveryReason).toBeUndefined();
+    expect(meta.removedAt).toBeUndefined();
 
-    const meta = await getTxMeta("hash-removed");
+    await patchTxMeta("hash-removed", {
+      status: "removed",
+      recoveryReason: "removed",
+      removedAt: 20,
+    });
+    await patchTxMeta("hash-removed", { status: "executed", executedAt: 30 });
+    meta = await getTxMeta("hash-removed");
     expect(meta.status).toBe("executed");
     expect(meta.recoveryReason).toBeUndefined();
     expect(meta.removedAt).toBeUndefined();

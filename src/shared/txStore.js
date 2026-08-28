@@ -94,7 +94,8 @@ export async function patchTxMeta(hash, patch) {
     const prev = current[hash] ?? {};
     const terminal = prev.status === "executed" || prev.status === "failed";
     const weaker = patch.status && patch.status !== "executed" && patch.status !== "failed";
-    const nextPatch = patch.status === "executed" || patch.status === "failed"
+    const clearsRemoval = patch.status && patch.status !== "unknown" && patch.status !== "removed";
+    const nextPatch = clearsRemoval
       ? { ...patch, recoveryReason: undefined, removedAt: undefined }
       : patch;
     current[hash] = terminal && weaker
