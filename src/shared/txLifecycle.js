@@ -13,10 +13,11 @@ function graphqlUrl(nodeUrl) {
 }
 
 function losslessJson(text) {
-  return JSON.parse(String(text).replace(
+  const parts = String(text).split(/("(?:\\.|[^"\\])*")/g);
+  return JSON.parse(parts.map((part, index) => index % 2 ? part : part.replace(
     /([:\[,]\s*)(-?\d{16,})(?=\s*[,}\]])/g,
     (_, prefix, integer) => `${prefix}"${integer}"`
-  ));
+  )).join(""));
 }
 
 async function postGraphql(nodeUrl, query) {

@@ -274,6 +274,21 @@ describe("background Phoenix tx lifecycle flow", () => {
     })));
   });
 
+  it("still notifies when transaction storage is unavailable", async () => {
+    const getItem = globalThis.localStorage.getItem;
+    globalThis.localStorage.getItem = () => { throw new Error("storage unavailable"); };
+
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash: "0xstorage", ok: true });
+    await vi.waitFor(() => expect(mocks.notifyTxExecuted).toHaveBeenCalledWith({
+      hash: "0xstorage",
+      origin: "Wallet",
+      ok: true,
+      error: "",
+      nodeUrl: "",
+    }));
+    globalThis.localStorage.getItem = getItem;
+  });
+
   it("enriches execution from the transaction's original network", async () => {
     const hash = "0xenriched";
     await seedTxMeta(hash, { gasPrice: "1" });

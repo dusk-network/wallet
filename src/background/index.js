@@ -538,23 +538,34 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const hash = String(message.hash ?? "");
         const observedOk = message.ok !== false;
         const observedError = message.error ? String(message.error) : "";
-        const meta = await getTxMeta(hash);
-        const now = Date.now();
-
-        await patchTxMeta(hash, {
-          status: observedOk ? "executed" : "failed",
-          executedAt: now,
-          lastCheckedAt: now,
-          error: observedOk ? undefined : observedError || undefined,
-          reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
-          reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
-        });
+        const observedStatus = observedOk ? "executed" : "failed";
+        let reconciled = {
+          status: observedStatus,
+          origin: "Wallet",
+          nodeUrl: "",
+          error: observedError,
+        };
         sendResponse({ ok: true });
 
-        const reconciled = await reconcileTxPresence(hash);
+        try {
+          const meta = await getTxMeta(hash);
+          const now = Date.now();
+          await patchTxMeta(hash, {
+            status: observedStatus,
+            executedAt: now,
+            lastCheckedAt: now,
+            error: observedOk ? undefined : observedError || undefined,
+            reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
+            reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
+          });
+          reconciled = await reconcileTxPresence(hash);
+        } catch {
+          // Execution notifications remain best-effort when storage is unavailable.
+        }
+
         const finalStatus = ["executed", "failed"].includes(reconciled.status)
           ? reconciled.status
-          : observedOk ? "executed" : "failed";
+          : observedStatus;
         const ok = finalStatus === "executed";
         const error = ok ? "" : reconciled.error || observedError;
         notifyTxExecuted({

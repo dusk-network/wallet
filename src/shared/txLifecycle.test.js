@@ -66,6 +66,7 @@ describe("txLifecycle reconciliation", () => {
         tx: {
           id: "abc",
           err: null,
+          memo: "value: 9007199254740993, unchanged",
           gasSpent: "9007199254740993",
           blockHash: "block-1",
           blockHeight: "18446744073709551615",
@@ -77,6 +78,7 @@ describe("txLifecycle reconciliation", () => {
     const { classifyTxPresence, finalizedTxMetadata } = await import("./txLifecycle.js");
 
     const presence = await classifyTxPresence("https://node.example", "abc");
+    expect(presence.tx.memo).toBe("value: 9007199254740993, unchanged");
     expect(finalizedTxMetadata(presence.tx)).toMatchObject({
       gasSpent: "9007199254740993",
       gasPrice: "2",
