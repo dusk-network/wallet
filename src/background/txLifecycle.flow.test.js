@@ -301,11 +301,14 @@ describe("background Phoenix tx lifecycle flow", () => {
     await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true });
 
     const { getTxMeta } = await import("../shared/txStore.js");
-    await expect(getTxMeta(hash)).resolves.toMatchObject({
+    const meta = await getTxMeta(hash);
+    expect(meta).toMatchObject({
       status: "executed",
       reservationStatus: "spent",
       pendingNullifiers: ["aa"],
     });
+    expect(meta.recoveryReason).toBeUndefined();
+    expect(meta.removedAt).toBeUndefined();
   });
 
   it("timestamps removal only after a second not-found observation", async () => {

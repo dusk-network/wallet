@@ -79,6 +79,29 @@ describe("txStore", () => {
     expect(txs[0]).toMatchObject({ hash: "hash-1", status: "unknown" });
   });
 
+  it("keeps early execution evidence when the activity store is full", async () => {
+    const { getTxMeta, listTxs, patchTxMeta, putTxMeta } = await import("./txStore.js");
+    for (let i = 0; i < 50; i++) {
+      await putTxMeta(`hash-${i}`, { submittedAt: i, status: "submitted" });
+    }
+
+    await patchTxMeta("hash-early", { status: "failed", error: "OutOfGas", executedAt: 100 });
+    await putTxMeta("hash-early", {
+      origin: "Wallet",
+      nodeUrl: "https://testnet.nodes.dusk.network",
+      kind: "transfer",
+      submittedAt: 90,
+      status: "submitted",
+    });
+
+    await expect(getTxMeta("hash-early")).resolves.toMatchObject({
+      origin: "Wallet",
+      status: "failed",
+      error: "OutOfGas",
+    });
+    await expect(listTxs()).resolves.toHaveLength(50);
+  });
+
   it("keeps execution evidence observed before submission metadata", async () => {
     const { getTxMeta, patchTxMeta, putTxMeta } = await import("./txStore.js");
     await patchTxMeta("hash-early", { status: "failed", error: "OutOfGas", executedAt: 10 });
@@ -95,6 +118,23 @@ describe("txStore", () => {
       status: "failed",
       error: "OutOfGas",
     });
+  });
+
+  it("clears stale removal evidence on terminal transitions", async () => {
+    const { getTxMeta, patchTxMeta, putTxMeta } = await import("./txStore.js");
+    await putTxMeta("hash-removed", {
+      submittedAt: 1,
+      status: "removed",
+      recoveryReason: "removed",
+      removedAt: 10,
+    });
+
+    await patchTxMeta("hash-removed", { status: "executed", executedAt: 20 });
+
+    const meta = await getTxMeta("hash-removed");
+    expect(meta.status).toBe("executed");
+    expect(meta.recoveryReason).toBeUndefined();
+    expect(meta.removedAt).toBeUndefined();
   });
 
   it("does not downgrade terminal execution evidence", async () => {

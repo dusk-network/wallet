@@ -47,13 +47,17 @@ async function setAll(next) {
   await storage.set({ [STORAGE_KEYS.TXS]: next });
 }
 
-function prune(store, limit = 50) {
+function prune(store, protectedHash = "", limit = 50) {
   const entries = Object.entries(store);
   if (entries.length <= limit) return store;
 
-  entries.sort((a, b) => (a[1].submittedAt ?? 0) - (b[1].submittedAt ?? 0));
-  const keep = entries.slice(-limit);
-  return Object.fromEntries(keep);
+  const timestamp = (meta) => meta.submittedAt ?? meta.executedAt ?? meta.lastCheckedAt ?? 0;
+  entries.sort((a, b) => {
+    if (a[0] === protectedHash) return 1;
+    if (b[0] === protectedHash) return -1;
+    return timestamp(a[1]) - timestamp(b[1]);
+  });
+  return Object.fromEntries(entries.slice(-limit));
 }
 
 /**
@@ -66,7 +70,7 @@ export async function putTxMeta(hash, meta) {
   return mutate(async () => {
     const current = await getAll();
     current[hash] = { ...meta, ...current[hash] };
-    await setAll(prune(current));
+    await setAll(prune(current, hash));
   });
 }
 
@@ -82,10 +86,13 @@ export async function patchTxMeta(hash, patch) {
     const prev = current[hash] ?? {};
     const terminal = prev.status === "executed" || prev.status === "failed";
     const weaker = patch.status && patch.status !== "executed" && patch.status !== "failed";
+    const nextPatch = patch.status === "executed" || patch.status === "failed"
+      ? { ...patch, recoveryReason: undefined, removedAt: undefined }
+      : patch;
     current[hash] = terminal && weaker
       ? { ...prev, lastCheckedAt: patch.lastCheckedAt ?? prev.lastCheckedAt }
-      : { ...prev, ...patch };
-    await setAll(prune(current));
+      : { ...prev, ...nextPatch };
+    await setAll(prune(current, hash));
   });
 }
 
