@@ -20,7 +20,7 @@ export function isLocalHttpHostname(hostname) {
 
 export function isAllowedSecureOrLocalHttpUrl(value) {
   const url = parseUrl(value);
-  if (!url) return false;
+  if (!url || url.username || url.password) return false;
 
   if (url.protocol === "https:") return true;
   if (url.protocol === "http:") return isLocalHttpHostname(url.hostname);

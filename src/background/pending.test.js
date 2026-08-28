@@ -58,4 +58,19 @@ describe("pending approvals", () => {
 
     ridSpy.mockRestore();
   });
+
+  it("bounds approvals per origin and supports cancellation", async () => {
+    vi.resetModules();
+    const pending = await import("./pending.js");
+    const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("rid-3");
+    const first = pending.requestUserApproval("send_tx", "https://example.com", {});
+
+    await expect(
+      pending.requestUserApproval("sign_message", "https://example.com", {})
+    ).rejects.toMatchObject({ code: 4001 });
+
+    pending.cancelPendingApprovals("https://example.com", "Wallet locked");
+    await expect(first).rejects.toMatchObject({ code: 4001, message: "Wallet locked" });
+    ridSpy.mockRestore();
+  });
 });

@@ -38,6 +38,7 @@ describe("security policy", () => {
 
   it.each([
     ["https://testnet.nodes.dusk.network", true],
+    ["https://user:secret@testnet.nodes.dusk.network", false],
     ["http://localhost:8080", true],
     ["http://127.0.0.1:8080", true],
     ["http://[::1]:8080", true],

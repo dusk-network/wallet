@@ -25,7 +25,7 @@ import {
   handleEngineReady,
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
-import { getPending, resolvePendingDecision } from "./pending.js";
+import { cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
 import {
   broadcastChainChangedAll,
   broadcastProfilesChangedAll,
@@ -346,6 +346,7 @@ async function handleAutoLockAlarm() {
     console.log("[Dusk] Auto-locking wallet due to inactivity.");
     try {
       await engineCall("engine_lock");
+      cancelPendingApprovals();
       await clearActivity();
       emitUiLockState(false, "auto_lock").catch(() => {});
       broadcastProfilesChangedAll().catch(() => {});
@@ -660,6 +661,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       // UI wants to lock
       if (message?.type === "DUSK_UI_LOCK") {
         await engineCall("engine_lock");
+        cancelPendingApprovals();
         await clearActivity();
 
         // Notify dApps that profiles are no longer available.

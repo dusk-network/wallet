@@ -55,6 +55,7 @@ vi.mock("../background/engineHost.js", () => ({
 }));
 
 vi.mock("../background/pending.js", () => ({
+  cancelPendingApprovals: vi.fn(),
   getPending: vi.fn(() => null),
   requestUserApproval: mocks.requestUserApproval,
   resolvePendingDecision: vi.fn(() => ({ ok: true })),

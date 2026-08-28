@@ -121,6 +121,7 @@ vi.mock("./rpc.js", () => ({
 }));
 
 vi.mock("./pending.js", () => ({
+  cancelPendingApprovals: vi.fn(),
   getPending: vi.fn(() => null),
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
 }));

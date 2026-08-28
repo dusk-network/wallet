@@ -882,6 +882,20 @@ function resolveProfileIndex(profileIndex, fallback = getSelectedProfileIndex())
   return normalizeProfileIndex(profileIndex, fallback);
 }
 
+async function assertApprovalContext(params, profileIndex) {
+  const expected = params?._approvalContext;
+  if (!expected) return;
+  const profile = await ensureProfileIndex(profileIndex);
+  if (
+    expected.walletId !== getWalletId() ||
+    expected.profileIndex !== profileIndex ||
+    expected.account !== profile.account.toString() ||
+    expected.nodeUrl !== String(engineConfig.nodeUrl ?? "")
+  ) {
+    throw new Error("Wallet changed while awaiting approval");
+  }
+}
+
 function getLoadedProfiles() {
   return state.profiles;
 }
@@ -2493,13 +2507,17 @@ async function stakeOwnerOptions(params, stakeProfile) {
 
 async function executeStakeTransaction(idx, params, makeTx) {
   if (!isShieldedPayment(params)) {
-    const result = await state.network.execute(await makeTx());
+    const tx = await makeTx();
+    await assertApprovalContext(params, idx);
+    const result = await state.network.execute(tx);
     return { hash: result.hash, nonce: result.nonce };
   }
 
   return await withPhoenixSpendMutex(idx, async () => {
     await ensureShieldedSpendReady(idx);
-    const result = await state.network.execute(await makeTx());
+    const tx = await makeTx();
+    await assertApprovalContext(params, idx);
+    const result = await state.network.execute(tx);
     await persistPendingNullifiersForTx(result, idx);
     return { hash: result.hash, nullifiers: result.nullifiers };
   });
@@ -2588,6 +2606,7 @@ export async function transfer(params) {
         }
       }
 
+      await assertApprovalContext(params, idx);
       const result = await network.execute(tx);
       await persistPendingNullifiersForTx(result, idx);
       return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
@@ -2603,6 +2622,7 @@ export async function transfer(params) {
   const gas = normalizeGas(params.gas);
   if (gas) tx = tx.gas(gas);
 
+  await assertApprovalContext(params, idx);
   const result = await network.execute(tx);
 
   // network.execute returns the tx object returned by tx.build, frozen
@@ -2688,6 +2708,7 @@ export async function sendTransaction(params) {
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
 
+    await assertApprovalContext(params, idx);
     const result = await network.execute(tx);
     return { hash: result.hash, nonce: result.nonce };
   }
@@ -2712,6 +2733,7 @@ export async function sendTransaction(params) {
       const gas = normalizeGas(params.gas);
       if (gas) tx = tx.gas(gas);
 
+      await assertApprovalContext(params, idx);
       const result = await network.execute(tx);
       await persistPendingNullifiersForTx(result, idx);
       return { hash: result.hash, nullifiers: result.nullifiers };
@@ -2896,6 +2918,7 @@ export async function sendTransaction(params) {
           }
         }
 
+        await assertApprovalContext(params, idx);
         const result = await network.execute(tx);
         await persistPendingNullifiersForTx(result, idx);
         return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
@@ -2910,6 +2933,7 @@ export async function sendTransaction(params) {
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
 
+    await assertApprovalContext(params, idx);
     const result = await network.execute(tx);
     return { hash: result.hash, nonce: result.nonce };
   }
@@ -3034,7 +3058,8 @@ export async function signMessage(params) {
   const messageLen = messageBytes.length;
   const messageHash = await sha256Hex(messageBytes);
 
-  const profile = await ensureProfileIndex(params.profileIndex ?? getSelectedProfileIndex());
+  const profileIndex = resolveProfileIndex(params.profileIndex);
+  const profile = await ensureProfileIndex(profileIndex);
   const memo = [
     "Dusk Connect SignMessage v1",
     `Origin: ${origin}`,
@@ -3044,6 +3069,7 @@ export async function signMessage(params) {
     `Message Len: ${messageLen}`,
   ].join("\n");
 
+  await assertApprovalContext(params, profileIndex);
   const signed = await signMemoAsMoonlight(profile, memo);
   return Object.freeze({
     account: signed.account,
@@ -3087,7 +3113,8 @@ export async function signAuth(params) {
     expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   }
 
-  const profile = await ensureProfileIndex(params.profileIndex ?? getSelectedProfileIndex());
+  const profileIndex = resolveProfileIndex(params.profileIndex);
+  const profile = await ensureProfileIndex(profileIndex);
   const lines = [
     "Dusk Connect SignAuth v1",
     `Account: ${profile.account.toString()}`,
@@ -3100,6 +3127,7 @@ export async function signAuth(params) {
   ].filter(Boolean);
   const message = lines.join("\n");
 
+  await assertApprovalContext(params, profileIndex);
   const signed = await signMemoAsMoonlight(profile, message);
   return Object.freeze({
     account: signed.account,
