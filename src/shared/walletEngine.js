@@ -2915,13 +2915,16 @@ async function sendTransactionUnlocked(params) {
 
 export function sendTransaction(params) {
   const profileIndex = resolveProfileIndex(params?.profileIndex);
-  return withProfileLock(
-    transactionLocks,
-    profileIndex,
-    () => sendTransactionUnlocked(
+  const walletId = getWalletId();
+  const networkKey = getNetworkKey();
+  return withProfileLock(transactionLocks, profileIndex, () => {
+    if (getWalletId() !== walletId || getNetworkKey() !== networkKey) {
+      throw new Error("Wallet or network changed while transaction was queued");
+    }
+    return sendTransactionUnlocked(
       params && typeof params === "object" ? { ...params, profileIndex } : params
-    )
-  );
+    );
+  });
 }
 
 // ----------------------------------------------------------------------------
