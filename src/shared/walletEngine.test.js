@@ -544,23 +544,31 @@ describe("walletEngine", () => {
     ).rejects.toThrow(/Shielded transfer requires/);
   });
 
-  it("serializes concurrent transactions for one profile", async () => {
-    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+  it("serializes transactions against their initially selected profile", async () => {
+    engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
-    let active = 0;
-    let maxActive = 0;
-    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async () => {
-      maxActive = Math.max(maxActive, ++active);
-      await new Promise((resolve) => setTimeout(resolve, 1));
-      active--;
+    let releaseFirst;
+    let markFirstStarted;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const profiles = [];
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => {
+      profiles.push(Number(tx.profile));
+      if (profiles.length === 1) {
+        markFirstStarted();
+        await firstGate;
+      }
       return { hash: "0xhash", nonce: 1 };
     });
 
-    await Promise.all([
-      engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" }),
-      engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" }),
-    ]);
-    expect(maxActive).toBe(1);
+    const first = engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
+    const second = engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
+    await firstStarted;
+    await engine.selectAccountIndex({ index: 1 });
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    expect(profiles).toEqual([0, 0]);
   });
 
   it("serializes concurrent Phoenix transfers until pending nullifiers are written", async () => {

@@ -2918,7 +2918,9 @@ export function sendTransaction(params) {
   return withProfileLock(
     transactionLocks,
     profileIndex,
-    () => sendTransactionUnlocked(params)
+    () => sendTransactionUnlocked(
+      params && typeof params === "object" ? { ...params, profileIndex } : params
+    )
   );
 }
 
