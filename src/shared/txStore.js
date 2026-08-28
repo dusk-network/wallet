@@ -1,5 +1,13 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
 
+let mutations = Promise.resolve();
+
+function mutate(fn) {
+  const result = mutations.then(fn, fn);
+  mutations = result.catch(() => {});
+  return result;
+}
+
 /**
  * @typedef {Object} TxMeta
  * @property {string} origin
@@ -55,9 +63,11 @@ function prune(store, limit = 50) {
  */
 export async function putTxMeta(hash, meta) {
   if (!hash) return;
-  const current = await getAll();
-  current[hash] = meta;
-  await setAll(prune(current));
+  return mutate(async () => {
+    const current = await getAll();
+    current[hash] = { ...meta, ...current[hash] };
+    await setAll(prune(current));
+  });
 }
 
 /**
@@ -67,15 +77,16 @@ export async function putTxMeta(hash, meta) {
  */
 export async function patchTxMeta(hash, patch) {
   if (!hash) return;
-  const current = await getAll();
-  const prev = current[hash];
-  if (!prev) return;
-  const terminal = prev.status === "executed" || prev.status === "failed";
-  const weaker = patch.status && patch.status !== "executed" && patch.status !== "failed";
-  current[hash] = terminal && weaker
-    ? { ...prev, lastCheckedAt: patch.lastCheckedAt ?? prev.lastCheckedAt }
-    : { ...prev, ...patch };
-  await setAll(prune(current));
+  return mutate(async () => {
+    const current = await getAll();
+    const prev = current[hash] ?? {};
+    const terminal = prev.status === "executed" || prev.status === "failed";
+    const weaker = patch.status && patch.status !== "executed" && patch.status !== "failed";
+    current[hash] = terminal && weaker
+      ? { ...prev, lastCheckedAt: patch.lastCheckedAt ?? prev.lastCheckedAt }
+      : { ...prev, ...patch };
+    await setAll(prune(current));
+  });
 }
 
 /**
