@@ -784,7 +784,13 @@ export async function unlockWithMnemonic(mnemonic) {
 
   // Generate default profile (index 0)
   const profileStart = engineNow();
-  const p0 = await pg.default;
+  let p0;
+  try {
+    p0 = await pg.default;
+  } catch (error) {
+    seed.fill(0);
+    throw error;
+  }
   debugEngine("unlock_profile_default_ready", {
     ms: engineSince(profileStart),
     totalMs: engineSince(unlockStart),

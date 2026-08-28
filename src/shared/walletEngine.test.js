@@ -87,6 +87,9 @@ vi.mock("@dusk/w3sper", () => {
     }
 
     get default() {
+      if (globalThis.__W3SPER_FAIL_PROFILE_INDEX__ === 0) {
+        throw new Error("profile derivation failed");
+      }
       if (typeof this.#profiles[0] === "undefined") {
         this.#profiles[0] = this.#nth(0);
       }
@@ -386,10 +389,10 @@ describe("walletEngine", () => {
     expect(engine.getSelectedAccountIndex()).toBe(0);
   });
 
-  it("keeps the current wallet when replacement derivation fails", async () => {
+  it.each([0, 1])("keeps the current wallet when replacement profile %i fails", async (index) => {
     engine.configure({ accountCount: 1 });
     await engine.unlockWithMnemonic(MNEMONIC);
-    globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = 1;
+    globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = index;
     engine.configure({ accountCount: 2 });
 
     await expect(engine.unlockWithMnemonic("different mnemonic")).rejects.toThrow(

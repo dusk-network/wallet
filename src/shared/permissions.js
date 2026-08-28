@@ -1,12 +1,5 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
-
-let mutations = Promise.resolve();
-
-function mutate(fn) {
-  const result = mutations.then(fn, fn);
-  mutations = result.catch(() => {});
-  return result;
-}
+import { withStorageLock } from "./storageLock.js";
 
 /**
  * @returns {Promise<Record<string, {accountIndex:number, connectedAt:number}>>}
@@ -29,7 +22,7 @@ export async function getPermissionForOrigin(origin) {
  * @param {{ profileId?: string, accountIndex?: number, grants?: { publicAccount?: boolean, shieldedReceiveAddress?: boolean } }} grant
  */
 export function approveOrigin(origin, grant = {}) {
-  return mutate(async () => {
+  return withStorageLock(STORAGE_KEYS.PERMISSIONS, async () => {
     const permissions = await getPermissions();
     const prev = permissions[origin] ?? null;
     const accountIndex = Math.max(0, Math.floor(Number(grant?.accountIndex ?? 0) || 0));
@@ -59,7 +52,7 @@ export function approveOrigin(origin, grant = {}) {
  * @param {string} origin
  */
 export function revokeOrigin(origin) {
-  return mutate(async () => {
+  return withStorageLock(STORAGE_KEYS.PERMISSIONS, async () => {
     const permissions = await getPermissions();
     delete permissions[origin];
     await storage.set({ [STORAGE_KEYS.PERMISSIONS]: permissions });
@@ -67,5 +60,8 @@ export function revokeOrigin(origin) {
 }
 
 export function clearPermissions() {
-  return mutate(() => storage.set({ [STORAGE_KEYS.PERMISSIONS]: {} }));
+  return withStorageLock(
+    STORAGE_KEYS.PERMISSIONS,
+    () => storage.set({ [STORAGE_KEYS.PERMISSIONS]: {} })
+  );
 }

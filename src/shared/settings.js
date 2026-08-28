@@ -1,4 +1,5 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
+import { withStorageLock } from "./storageLock.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
 import { MAX_ACCOUNT_COUNT } from "./constants.js";
@@ -15,14 +16,6 @@ export const AUTO_LOCK_OPTIONS = [
   { value: 30, label: "30 minutes" },
   { value: 60, label: "1 hour" },
 ];
-
-let mutations = Promise.resolve();
-
-function mutate(fn) {
-  const result = mutations.then(fn, fn);
-  mutations = result.catch(() => {});
-  return result;
-}
 
 export const DEFAULT_SETTINGS = {
   // Default to Mainnet.
@@ -196,5 +189,5 @@ async function setSettingsUnlocked(patch) {
 }
 
 export function setSettings(patch) {
-  return mutate(() => setSettingsUnlocked(patch));
+  return withStorageLock(STORAGE_KEYS.SETTINGS, () => setSettingsUnlocked(patch));
 }
