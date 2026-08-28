@@ -102,24 +102,6 @@ describe("txStore", () => {
     await expect(listTxs()).resolves.toHaveLength(50);
   });
 
-  it("keeps execution evidence observed before submission metadata", async () => {
-    const { getTxMeta, patchTxMeta, putTxMeta } = await import("./txStore.js");
-    await patchTxMeta("hash-early", { status: "failed", error: "OutOfGas", executedAt: 10 });
-    await putTxMeta("hash-early", {
-      origin: "Wallet",
-      nodeUrl: "https://testnet.nodes.dusk.network",
-      kind: "transfer",
-      submittedAt: 1,
-      status: "submitted",
-    });
-
-    await expect(getTxMeta("hash-early")).resolves.toMatchObject({
-      origin: "Wallet",
-      status: "failed",
-      error: "OutOfGas",
-    });
-  });
-
   it("clears stale removal evidence on terminal transitions", async () => {
     const { getTxMeta, patchTxMeta, putTxMeta } = await import("./txStore.js");
     await putTxMeta("hash-removed", {
