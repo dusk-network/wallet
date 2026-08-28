@@ -44,6 +44,7 @@ import {
 } from "./shieldedStore.js";
 
 const phoenixSpendLocks = new Map();
+const transactionLocks = new Map();
 
 const isExtensionBackend =
   typeof __DUSK_BACKEND__ !== "undefined" && __DUSK_BACKEND__ === "extension";
@@ -526,25 +527,20 @@ function getWalletId() {
   return String(state.walletId || "").trim();
 }
 
-async function withPhoenixSpendMutex(profileIndex, fn) {
+async function withProfileLock(locks, profileIndex, fn) {
   const key = `${getNetworkKey()}|${getWalletId()}|${Number(profileIndex) || 0}`;
-  const previous = phoenixSpendLocks.get(key) ?? Promise.resolve();
-  let release = () => {};
-  const gate = new Promise((resolve) => {
-    release = resolve;
-  });
-  const next = previous.catch(() => {}).then(() => gate);
-  phoenixSpendLocks.set(key, next);
-
-  await previous.catch(() => {});
+  const previous = locks.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(fn);
+  locks.set(key, next);
   try {
-    return await fn();
+    return await next;
   } finally {
-    release();
-    if (phoenixSpendLocks.get(key) === next) {
-      phoenixSpendLocks.delete(key);
-    }
+    if (locks.get(key) === next) locks.delete(key);
   }
+}
+
+function withPhoenixSpendMutex(profileIndex, fn) {
+  return withProfileLock(phoenixSpendLocks, profileIndex, fn);
 }
 
 async function persistPendingNullifiersForTx(result, profileIndex) {
@@ -2654,7 +2650,7 @@ function toContractIdBytes(contractId) {
  * - { kind: 'withdraw_reward', amount?, gas? } // omit/0 amount => withdraw all
  * - { kind: 'contract_call', contractId, fnName, fnArgs, to?, amount?, deposit?, gas? }
  */
-export async function sendTransaction(params) {
+async function sendTransactionUnlocked(params) {
   if (!state.unlocked) throw new Error("Wallet locked");
   if (!params || typeof params !== "object") {
     throw new Error("Invalid params: object required");
@@ -2915,6 +2911,15 @@ export async function sendTransaction(params) {
   }
 
   throw new Error(`Unsupported transaction kind: ${params.kind}`);
+}
+
+export function sendTransaction(params) {
+  const profileIndex = resolveProfileIndex(params?.profileIndex);
+  return withProfileLock(
+    transactionLocks,
+    profileIndex,
+    () => sendTransactionUnlocked(params)
+  );
 }
 
 // ----------------------------------------------------------------------------

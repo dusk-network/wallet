@@ -544,6 +544,25 @@ describe("walletEngine", () => {
     ).rejects.toThrow(/Shielded transfer requires/);
   });
 
+  it("serializes concurrent transactions for one profile", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    let active = 0;
+    let maxActive = 0;
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async () => {
+      maxActive = Math.max(maxActive, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      return { hash: crypto.randomUUID(), nonce: 1 };
+    });
+
+    await Promise.all([
+      engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" }),
+      engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" }),
+    ]);
+    expect(maxActive).toBe(1);
+  });
+
   it("serializes concurrent Phoenix transfers until pending nullifiers are written", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
