@@ -528,6 +528,8 @@ export async function localSend(message) {
                     reservationStatus: pendingNullifiers.length ? "recoverable" : meta?.reservationStatus,
                     reservationUpdatedAt: pendingNullifiers.length ? now : meta?.reservationUpdatedAt,
                   });
+                } else {
+                  await patchTxMeta(hash, { lastCheckedAt: now });
                 }
               } else if (!hasExecution) {
                 await patchTxMeta(hash, {

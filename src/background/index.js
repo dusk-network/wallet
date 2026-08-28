@@ -242,8 +242,19 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
     ? meta.status
     : "";
 
+  if (!nodeUrl && terminalStatus) {
+    await patchTxMeta(hash, { lastCheckedAt: now });
+    return {
+      status: terminalStatus,
+      ok: terminalStatus === "executed",
+      origin,
+      nodeUrl,
+      error: meta?.error || "",
+    };
+  }
+
   if (!nodeUrl) {
-    const status = terminalStatus || (preserveRemoved ? meta?.status ?? "unknown" : "unknown");
+    const status = preserveRemoved ? meta?.status ?? "unknown" : "unknown";
     await patchTxMeta(hash, {
       status,
       lastCheckedAt: now,
