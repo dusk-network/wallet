@@ -111,14 +111,3 @@ export async function listTxs(opts = {}) {
   }
   return entries;
 }
-
-/**
- * @param {string} hash
- */
-export async function removeTxMeta(hash) {
-  if (!hash) return;
-  const current = await getAll();
-  if (!current[hash]) return;
-  delete current[hash];
-  await setAll(current);
-}

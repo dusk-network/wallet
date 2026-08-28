@@ -64,10 +64,6 @@ export function getExtensionApi() {
   return raw;
 }
 
-export function isExtensionApiAvailable() {
-  return Boolean(raw?.runtime?.id);
-}
-
 export function runtimeGetURL(path) {
   try {
     return raw?.runtime?.getURL
@@ -84,14 +80,6 @@ export function runtimeSendMessage(message, options) {
 
 export function runtimeGetContexts(options) {
   return callApi(raw?.runtime?.getContexts, [options], raw?.runtime);
-}
-
-export function runtimeConnect(options) {
-  try {
-    return raw?.runtime?.connect ? raw.runtime.connect(options) : null;
-  } catch {
-    return null;
-  }
 }
 
 export function tabsCreate(options) {

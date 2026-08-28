@@ -325,16 +325,6 @@ export async function checkAllEndpoints({ nodeUrl, proverUrl, archiverUrl }) {
 }
 
 /**
- * Get a combined status for display purposes.
- * Uses node status as the primary indicator.
- * @param {NetworkStatusState} status
- * @returns {EndpointStatus}
- */
-export function getCombinedStatus(status) {
-  return status?.nodeStatus ?? "unknown";
-}
-
-/**
  * Check if the status is stale and should be refreshed.
  * @param {NetworkStatusState} status
  * @param {number} maxAgeMs - Maximum age before considered stale (default: 30s)

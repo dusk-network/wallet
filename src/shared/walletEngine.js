@@ -685,12 +685,6 @@ export function isUnlocked() {
   return state.unlocked;
 }
 
-export function hasWallet() {
-  // wallet existence is tracked via vault in storage;
-  // engine just tells whether it's currently unlocked.
-  return true;
-}
-
 export function lock() {
   state.unlocked = false;
   state.mnemonic = null;

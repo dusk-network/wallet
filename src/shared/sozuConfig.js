@@ -83,10 +83,6 @@ export function resolveSozuConfig({
   });
 }
 
-export function listSozuConfigs() {
-  return Object.values(SOZU_CONFIGS);
-}
-
 export function hasSozuConfig(networkKeyOrChainId) {
   return Boolean(getSozuConfig(networkKeyOrChainId));
 }

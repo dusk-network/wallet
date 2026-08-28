@@ -44,18 +44,6 @@ export async function getAccountNames(walletId) {
 }
 
 /**
- * @param {string} walletId
- * @param {number} profileIndex
- * @returns {Promise<string>}
- */
-export async function getAccountName(walletId, profileIndex) {
-  const id = normalizeWalletId(walletId);
-  const idx = normalizeProfileIndex(profileIndex);
-  const names = await getAccountNames(id);
-  return String(names?.[String(idx)] ?? "").trim();
-}
-
-/**
  * Set or clear a profile name.
  *
  * - Empty/whitespace name => clears the name for that profile.
