@@ -78,4 +78,34 @@ describe("txStore", () => {
     const txs = await listTxs();
     expect(txs[0]).toMatchObject({ hash: "hash-1", status: "unknown" });
   });
+
+  it("does not downgrade terminal execution evidence", async () => {
+    const { getTxMeta, patchTxMeta, putTxMeta } = await import("./txStore.js");
+    await putTxMeta("hash-terminal", {
+      status: "failed",
+      error: "OutOfGas",
+      executedAt: 10,
+      reservationStatus: "spent",
+      reservationUpdatedAt: 10,
+      submittedAt: 1,
+    });
+
+    await patchTxMeta("hash-terminal", {
+      status: "removed",
+      error: undefined,
+      reservationStatus: "recoverable",
+      reservationUpdatedAt: 20,
+      removedAt: 20,
+    });
+
+    const meta = await getTxMeta("hash-terminal");
+    expect(meta).toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      executedAt: 10,
+      reservationStatus: "spent",
+      reservationUpdatedAt: 10,
+    });
+    expect(meta.removedAt).toBeUndefined();
+  });
 });

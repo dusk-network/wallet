@@ -38,7 +38,11 @@ import {
 
 import { ERROR_CODES } from "../shared/errors.js";
 import { bytesToHex } from "../shared/bytes.js";
-import { executionEventError, executionEventOk } from "../shared/txExecution.js";
+import {
+  executionEventError,
+  executionEventOk,
+  waitForTxExecution,
+} from "../shared/txExecution.js";
 import { getExtensionApi, runtimeSendMessage } from "../platform/extensionApi.js";
 
 function serializeError(err) {
@@ -118,26 +122,24 @@ async function watchTxExecuted(hash) {
         }
         throw e;
       });
-    const lifecycle = await Promise.race([
-      waitTxExecuted(hash, { timeoutMs }).then((event) => ({ type: "executed", event })),
+    const event = await waitForTxExecution(
+      waitTxExecuted(hash, { timeoutMs }),
       removedWatcher,
-    ]);
-
-    if (lifecycle?.type === "removed") {
-      try {
-        await runtimeSendMessage({
-          type: "DUSK_TX_REMOVED",
-          hash,
-          reason: executionEventError(lifecycle.event) || "removed",
-        });
-      } catch {
-        // ignore
+      async (removedEvent) => {
+        try {
+          await runtimeSendMessage({
+            type: "DUSK_TX_REMOVED",
+            hash,
+            reason: executionEventError(removedEvent) || "removed",
+          });
+        } catch {
+          // ignore
+        }
       }
-      return;
-    }
+    );
 
-    const ok = executionEventOk(lifecycle?.event);
-    const error = ok ? "" : executionEventError(lifecycle?.event);
+    const ok = executionEventOk(event);
+    const error = ok ? "" : executionEventError(event);
 
     try {
       await runtimeSendMessage({

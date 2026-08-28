@@ -70,7 +70,11 @@ export async function patchTxMeta(hash, patch) {
   const current = await getAll();
   const prev = current[hash];
   if (!prev) return;
-  current[hash] = { ...prev, ...patch };
+  const terminal = prev.status === "executed" || prev.status === "failed";
+  const weaker = patch.status && patch.status !== "executed" && patch.status !== "failed";
+  current[hash] = terminal && weaker
+    ? { ...prev, lastCheckedAt: patch.lastCheckedAt ?? prev.lastCheckedAt }
+    : { ...prev, ...patch };
   await setAll(prune(current));
 }
 

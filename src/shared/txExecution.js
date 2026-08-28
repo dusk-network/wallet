@@ -50,6 +50,17 @@ export function executionEventOk(event) {
   }
 }
 
+export async function waitForTxExecution(executedPromise, removedPromise, onRemoved) {
+  const executed = Promise.resolve(executedPromise);
+  const first = await Promise.race([
+    executed.then((event) => ({ type: "executed", event })),
+    Promise.resolve(removedPromise).then((event) => ({ type: "removed", event })),
+  ]);
+  if (first.type === "executed") return first.event;
+  Promise.resolve(onRemoved(first.event)).catch(() => {});
+  return executed;
+}
+
 export function executionEventError(event) {
   try {
     const layers = eventLayers(event);

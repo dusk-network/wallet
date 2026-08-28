@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { executionEventError, executionEventOk } from "./txExecution.js";
+import {
+  executionEventError,
+  executionEventOk,
+  waitForTxExecution,
+} from "./txExecution.js";
 
 describe("transaction execution events", () => {
   it("detects the error field in the current RUES payload shape", () => {
@@ -45,6 +49,19 @@ describe("transaction execution events", () => {
   ])("keeps compatibility with alternate event shape %#", (event, message) => {
     expect(executionEventOk(event)).toBe(false);
     expect(executionEventError(event)).toBe(message);
+  });
+
+  it("keeps waiting for execution when removed reconciliation hangs", async () => {
+    let resolveExecuted;
+    const executed = new Promise((resolve) => { resolveExecuted = resolve; });
+    const removed = Promise.resolve({ reason: "removed" });
+    const onRemoved = vi.fn(() => new Promise(() => {}));
+
+    const lifecycle = waitForTxExecution(executed, removed, onRemoved);
+    await vi.waitFor(() => expect(onRemoved).toHaveBeenCalledOnce());
+    resolveExecuted({ payload: { err: null } });
+
+    await expect(lifecycle).resolves.toEqual({ payload: { err: null } });
   });
 
   it("does not turn an absent or malformed event into a false failure", () => {
