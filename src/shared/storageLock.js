@@ -5,7 +5,11 @@ export function withStorageLock(key, fn) {
     return globalThis.navigator.locks.request(`dusk-wallet:${key}`, fn);
   }
 
-  const result = (queues.get(key) ?? Promise.resolve()).then(fn, fn);
-  queues.set(key, result.catch(() => {}));
+  const result = (queues.get(key) ?? Promise.resolve()).then(() => fn(), () => fn());
+  const tail = result.catch(() => {});
+  queues.set(key, tail);
+  tail.then(() => {
+    if (queues.get(key) === tail) queues.delete(key);
+  });
   return result;
 }
