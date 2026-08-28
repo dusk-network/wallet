@@ -269,16 +269,24 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
   };
   if (presence.state === "executed_success") {
     const finalized = finalizedTxMetadata(presence.tx);
+    const failed = terminalStatus === "failed";
     await patchTxMeta(hash, {
       ...finalized,
-      status: "executed",
-      error: undefined,
+      status: failed ? "failed" : "executed",
+      error: failed ? meta?.error : undefined,
       executedAt: now,
       lastCheckedAt: now,
       reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
       reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
     });
-    return { status: "executed", ok: true, origin, nodeUrl, ...finalized };
+    return {
+      status: failed ? "failed" : "executed",
+      ok: !failed,
+      origin,
+      nodeUrl,
+      error: failed ? meta?.error || "" : "",
+      ...finalized,
+    };
   }
 
   if (presence.state === "executed_failed") {

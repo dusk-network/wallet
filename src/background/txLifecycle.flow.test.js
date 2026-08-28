@@ -325,6 +325,24 @@ describe("background Phoenix tx lifecycle flow", () => {
     );
   });
 
+  it("does not replace an observed failure with successful enrichment", async () => {
+    const hash = "0xobserved-failure";
+    await seedTxMeta(hash);
+    mocks.classifyTxPresence.mockResolvedValueOnce({
+      state: "executed_success",
+      tx: { gasSpent: "1", tx: { gasPrice: "2" } },
+    });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: false, error: "OutOfGas" });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await vi.waitFor(async () => await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      feePaid: "2",
+    }));
+  });
+
   it("keeps a first removed/not-found observation provisional", async () => {
     const hash = "0xremoved";
     await seedTxMeta(hash);

@@ -505,11 +505,11 @@ export async function localSend(message) {
 
               const presence = await classifyTxPresence(nodeUrl, hash);
               if (presence.state === "executed_success" || presence.state === "executed_failed") {
-                const finalizedOk = presence.state === "executed_success";
+                const finalizedOk = ok && presence.state === "executed_success";
                 await patchTxMeta(hash, {
                   ...finalizedTxMetadata(presence.tx),
                   status: finalizedOk ? "executed" : "failed",
-                  error: finalizedOk ? undefined : presence.error || undefined,
+                  error: finalizedOk ? undefined : error || presence.error || undefined,
                   lastCheckedAt: Date.now(),
                 });
               }

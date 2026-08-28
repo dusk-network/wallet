@@ -33,7 +33,7 @@ async function postGraphql(nodeUrl, query) {
     throw new Error(`GraphQL request failed (${res.status})`);
   }
 
-  const json = res.text ? losslessJson(await res.text()) : await res.json();
+  const json = losslessJson(await res.text());
   if (Array.isArray(json?.errors) && json.errors.length) {
     const msg = json.errors.map((e) => e?.message || String(e)).join("; ");
     throw new Error(msg || "GraphQL returned errors");

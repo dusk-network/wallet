@@ -13,7 +13,7 @@ describe("txLifecycle reconciliation", () => {
     for (const body of responses) {
       fetchMock.mockResolvedValueOnce({
         ok: true,
-        json: async () => body,
+        text: async () => JSON.stringify(body),
       });
     }
     globalThis.fetch = fetchMock;
