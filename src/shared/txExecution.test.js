@@ -64,6 +64,15 @@ describe("transaction execution events", () => {
     await expect(lifecycle).resolves.toEqual({ payload: { err: null } });
   });
 
+  it("keeps waiting after removal without a callback", async () => {
+    let resolveExecuted;
+    const executed = new Promise((resolve) => { resolveExecuted = resolve; });
+    const lifecycle = waitForTxExecution(executed, Promise.resolve({ reason: "removed" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveExecuted({ payload: { err: null } });
+    await expect(lifecycle).resolves.toEqual({ payload: { err: null } });
+  });
+
   it("does not turn an absent or malformed event into a false failure", () => {
     expect(executionEventOk(null)).toBe(true);
     expect(executionEventOk("not an event")).toBe(true);

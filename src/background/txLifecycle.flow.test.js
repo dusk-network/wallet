@@ -315,6 +315,7 @@ describe("background Phoenix tx lifecycle flow", () => {
 
     await sendBackgroundMessage({ type: "DUSK_TX_REMOVED", hash, reason: "removed" });
     await sendBackgroundMessage({ type: "DUSK_TX_UNKNOWN", hash, reason: "watcher_timeout" });
+    await sendBackgroundMessage({ type: "DUSK_TX_UNKNOWN", hash, reason: "watcher_timeout" });
     await sendBackgroundMessage({ type: "DUSK_TX_RECHECK", hash });
 
     const { getTxMeta } = await import("../shared/txStore.js");

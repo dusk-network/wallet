@@ -57,7 +57,7 @@ export async function waitForTxExecution(executedPromise, removedPromise, onRemo
     Promise.resolve(removedPromise).then((event) => ({ type: "removed", event })),
   ]);
   if (first.type === "executed") return first.event;
-  Promise.resolve(onRemoved(first.event)).catch(() => {});
+  Promise.resolve().then(() => onRemoved?.(first.event)).catch(() => {});
   return executed;
 }
 

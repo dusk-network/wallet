@@ -566,17 +566,19 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const meta = await getTxMeta(hash);
         const now = Date.now();
 
-        const removedUnconfirmed = meta?.recoveryReason === "removed_unconfirmed";
+        const preserveRemoved =
+          meta?.status === "removed" || meta?.recoveryReason === "removed_unconfirmed";
         await patchTxMeta(hash, {
-          status: "unknown",
+          status: meta?.status === "removed" ? "removed" : "unknown",
           lastCheckedAt: now,
-          reservationStatus: isShieldedTxMeta(meta) ? "pending" : meta?.reservationStatus,
-          recoveryReason: removedUnconfirmed ? "removed_unconfirmed" : reason,
+          reservationStatus:
+            meta?.status === "removed" || !isShieldedTxMeta(meta)
+              ? meta?.reservationStatus
+              : "pending",
+          recoveryReason: preserveRemoved ? meta?.recoveryReason : reason,
         });
 
-        const reconciled = await reconcileTxPresence(hash, {
-          preserveRemoved: removedUnconfirmed,
-        });
+        const reconciled = await reconcileTxPresence(hash, { preserveRemoved });
         emitUiTxStatus({
           hash,
           status: reconciled.status || "unknown",
