@@ -6,6 +6,8 @@
  * less stable than finalized `tx(hash)` lookups.
  */
 
+import { fetchWithTimeout } from "./networkStatus.js";
+
 function graphqlUrl(nodeUrl) {
   const base = String(nodeUrl || "").trim();
   if (!base) throw new Error("nodeUrl is required");
@@ -21,12 +23,11 @@ function losslessJson(text) {
 }
 
 async function postGraphql(nodeUrl, query) {
-  const res = await fetch(graphqlUrl(nodeUrl), {
+  const res = await fetchWithTimeout(graphqlUrl(nodeUrl), {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: query,
-    signal: AbortSignal.timeout(5_000),
-  });
+  }, 5_000);
 
   if (!res.ok) {
     throw new Error(`GraphQL request failed (${res.status})`);
