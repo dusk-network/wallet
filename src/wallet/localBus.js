@@ -481,8 +481,10 @@ export async function localSend(message) {
                     });
                   } else {
                     await patchTxMeta(hash, {
+                      status: "unknown",
                       lastCheckedAt: now,
-                      recoveryReason: presence.error || "removed_reconciliation_unavailable",
+                      recoveryReason: "removed_unconfirmed",
+                      reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
                     });
                   }
                 }

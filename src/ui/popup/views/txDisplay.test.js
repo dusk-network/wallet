@@ -31,6 +31,7 @@ describe("tx display helpers", () => {
     expect(txRecoveryReasonLabel("watcher_timeout")).toContain("timed out");
     expect(txRecoveryReasonLabel("not_found")).toContain("not found");
     expect(txRecoveryReasonLabel("removed")).toContain("removed");
+    expect(txRecoveryReasonLabel("removed_unconfirmed")).toContain("not confirmed");
     expect(txRecoveryReasonLabel("node_url_missing")).toContain("node URL is missing");
     expect(txRecoveryReasonLabel("reconciliation_unavailable")).toContain("could not complete");
     expect(txRecoveryReasonLabel("Odd number of digits")).toBe(
