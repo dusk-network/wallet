@@ -496,8 +496,9 @@ export async function localSend(message) {
                 error: ok ? undefined : (error || undefined),
                 executedAt: now,
                 lastCheckedAt: now,
-                reservationStatus: pendingNullifiers.length ? "spent" : undefined,
-                reservationUpdatedAt: pendingNullifiers.length ? now : undefined,
+                ...(pendingNullifiers.length
+                  ? { reservationStatus: "spent", reservationUpdatedAt: now }
+                  : {}),
               });
             } catch (e) {
               const meta = await getTxMeta(hash);

@@ -346,8 +346,26 @@ describe("background Phoenix tx lifecycle flow", () => {
     });
   });
 
-  it("does not let an unverified removed event erase execution evidence", async () => {
+  it("records a provisional removal when reconciliation is unavailable", async () => {
     const hash = "0xremoved-unavailable";
+    await seedTxMeta(hash);
+    mocks.classifyTxPresence.mockResolvedValueOnce({
+      state: "unavailable",
+      error: "node offline",
+    });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_REMOVED", hash, reason: "removed" });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "unknown",
+      recoveryReason: "removed_unconfirmed",
+      reservationStatus: "pending",
+    });
+  });
+
+  it("does not let an unverified removed event erase execution evidence", async () => {
+    const hash = "0xremoved-unavailable-terminal";
     await seedTxMeta(hash, {
       status: "failed",
       error: "OutOfGas",

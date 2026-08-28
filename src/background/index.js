@@ -320,12 +320,13 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
     return { status, origin, nodeUrl };
   }
 
-  const status = preserveRemoved ? meta?.status ?? "unknown" : "unknown";
+  const confirmedRemoved = preserveRemoved && meta?.status === "removed";
+  const status = confirmedRemoved ? "removed" : "unknown";
   await patchTxMeta(hash, {
     status,
     lastCheckedAt: now,
-    recoveryReason: preserveRemoved && meta?.recoveryReason === "removed_unconfirmed"
-      ? "removed_unconfirmed"
+    recoveryReason: preserveRemoved
+      ? confirmedRemoved ? "removed" : "removed_unconfirmed"
       : presence.error || "reconciliation_unavailable",
   });
   return {

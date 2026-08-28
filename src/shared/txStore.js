@@ -57,7 +57,7 @@ function prune(store, limit = 50) {
 }
 
 /**
- * Upsert tx metadata.
+ * Add submission metadata without overwriting an earlier lifecycle observation.
  * @param {string} hash
  * @param {TxMeta} meta
  */
