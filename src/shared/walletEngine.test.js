@@ -552,13 +552,15 @@ describe("walletEngine", () => {
     const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
     const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
     const profiles = [];
+    const nonces = [];
     globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => {
       profiles.push(Number(tx.profile));
+      nonces.push(tx.nonceValue);
       if (profiles.length === 1) {
         markFirstStarted();
         await firstGate;
       }
-      return { hash: "0xhash", nonce: 1 };
+      return { hash: `0xhash${profiles.length}`, nonce: tx.nonceValue + 1n };
     });
 
     const first = engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
@@ -570,6 +572,7 @@ describe("walletEngine", () => {
     await Promise.all([first, second]);
 
     expect(profiles).toEqual([0, 0]);
+    expect(nonces).toEqual([0n, 1n]);
   });
 
   it("rejects a queued transaction after the network changes", async () => {

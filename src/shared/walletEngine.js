@@ -45,6 +45,7 @@ import {
 
 const phoenixSpendLocks = new Map();
 const transactionLocks = new Map();
+const moonlightNonces = new Map();
 
 const isExtensionBackend =
   typeof __DUSK_BACKEND__ !== "undefined" && __DUSK_BACKEND__ === "extension";
@@ -543,6 +544,21 @@ function withPhoenixSpendMutex(profileIndex, fn) {
   return withProfileLock(phoenixSpendLocks, profileIndex, fn);
 }
 
+async function executeMoonlightTransaction(network, tx, profileIndex) {
+  const key = `${getNetworkKey()}|${getWalletId()}|${Number(profileIndex) || 0}`;
+  const profile = await ensureProfileIndex(profileIndex);
+  const balance = await state.treasury.account(profile.account);
+  let nonce = BigInt(balance?.nonce ?? 0) + 1n;
+  const previous = moonlightNonces.get(key);
+  if (previous != null && previous >= nonce) nonce = previous + 1n;
+  if (typeof tx?.nonce === "function") tx = tx.nonce(nonce - 1n);
+
+  const result = await network.execute(tx);
+  // ponytail: session-local nonce memory; add a durable submission journal for restart recovery.
+  moonlightNonces.set(key, BigInt(result?.nonce ?? nonce));
+  return result;
+}
+
 async function persistPendingNullifiersForTx(result, profileIndex) {
   if (!Array.isArray(result?.nullifiers) || !result.nullifiers.length) return 0;
   const walletId = getWalletId();
@@ -714,6 +730,7 @@ export function lock() {
   state.bookkeeper = null;
   state.treasuryAll = null;
   state.bookkeeperAll = null;
+  moonlightNonces.clear();
 
   // We keep the Network instance around; it holds no secrets and can stay connected.
 }
@@ -2489,7 +2506,7 @@ async function stakeOwnerOptions(params, stakeProfile) {
 
 async function executeStakeTransaction(idx, params, makeTx) {
   if (!isShieldedPayment(params)) {
-    const result = await state.network.execute(await makeTx());
+    const result = await executeMoonlightTransaction(state.network, await makeTx(), idx);
     return { hash: result.hash, nonce: result.nonce };
   }
 
@@ -2599,7 +2616,7 @@ export async function transfer(params) {
   const gas = normalizeGas(params.gas);
   if (gas) tx = tx.gas(gas);
 
-  const result = await network.execute(tx);
+  const result = await executeMoonlightTransaction(network, tx, idx);
 
   // network.execute returns the tx object returned by tx.build, frozen
   return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
@@ -2672,7 +2689,7 @@ async function sendTransactionUnlocked(params) {
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
 
-    const result = await network.execute(tx);
+    const result = await executeMoonlightTransaction(network, tx, idx);
     return { hash: result.hash, nonce: result.nonce };
   }
 
@@ -2894,7 +2911,7 @@ async function sendTransactionUnlocked(params) {
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
 
-    const result = await network.execute(tx);
+    const result = await executeMoonlightTransaction(network, tx, idx);
     return { hash: result.hash, nonce: result.nonce };
   }
 
