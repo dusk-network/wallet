@@ -59,6 +59,33 @@ describe("txLifecycle reconciliation", () => {
     });
   });
 
+  it("preserves large GraphQL integers and derives actual fee", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({
+        tx: {
+          id: "abc",
+          err: null,
+          gasSpent: "9007199254740993",
+          blockHash: "block-1",
+          blockHeight: "18446744073709551615",
+          blockTimestamp: "1753000000",
+          tx: { gasPrice: "2" },
+        },
+      }).replace('"9007199254740993"', "9007199254740993"),
+    });
+    const { classifyTxPresence, finalizedTxMetadata } = await import("./txLifecycle.js");
+
+    const presence = await classifyTxPresence("https://node.example", "abc");
+    expect(finalizedTxMetadata(presence.tx)).toMatchObject({
+      gasSpent: "9007199254740993",
+      gasPrice: "2",
+      feePaid: "18014398509481986",
+      blockHeight: "18446744073709551615",
+      finalizedAt: 1_753_000_000_000,
+    });
+  });
+
   it("classifies unavailable when GraphQL fails", async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 503 });
     const { classifyTxPresence } = await import("./txLifecycle.js");

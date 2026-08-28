@@ -34,6 +34,12 @@ function mutate(fn) {
  * @property {number=} mempoolSeenAt
  * @property {number=} removedAt
  * @property {number=} executedAt
+ * @property {string=} gasSpent
+ * @property {string=} feePaid
+ * @property {string=} blockHash
+ * @property {string=} blockHeight
+ * @property {string=} blockTimestamp
+ * @property {number=} finalizedAt
  */
 
 async function getAll() {

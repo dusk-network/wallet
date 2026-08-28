@@ -37,7 +37,8 @@ function makeLocalStorage() {
   };
 }
 
-vi.mock("../shared/txLifecycle.js", () => ({
+vi.mock("../shared/txLifecycle.js", async (importOriginal) => ({
+  ...(await importOriginal()),
   classifyTxPresence: mocks.classifyTxPresence,
 }));
 
@@ -243,9 +244,9 @@ describe("background Phoenix tx lifecycle flow", () => {
       pendingNullifiers: ["aa"],
     });
 
-    expect(mocks.sentMessages).toContainEqual(
+    await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed" })
-    );
+    ));
   });
 
   it("marks failed finalized shielded tx reservations spent", async () => {
@@ -266,11 +267,47 @@ describe("background Phoenix tx lifecycle flow", () => {
       reservationStatus: "spent",
       pendingNullifiers: ["aa"],
     });
-    expect(mocks.notifyTxExecuted).toHaveBeenCalledWith(expect.objectContaining({
+    await vi.waitFor(() => expect(mocks.notifyTxExecuted).toHaveBeenCalledWith(expect.objectContaining({
       hash,
       ok: false,
       error: "OutOfGas",
+    })));
+  });
+
+  it("enriches execution from the transaction's original network", async () => {
+    const hash = "0xenriched";
+    await seedTxMeta(hash, { gasPrice: "1" });
+    globalThis.localStorage.setItem(
+      "dusk_settings_v1",
+      JSON.stringify({ nodeUrl: "https://nodes.dusk.network" })
+    );
+    mocks.classifyTxPresence.mockResolvedValueOnce({
+      state: "executed_failed",
+      error: "OutOfGas",
+      tx: {
+        gasSpent: "9007199254740993",
+        blockHash: "block-1",
+        blockHeight: "18446744073709551615",
+        blockTimestamp: "1753000000",
+        tx: { gasPrice: "2" },
+      },
+    });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await vi.waitFor(async () => await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      gasSpent: "9007199254740993",
+      feePaid: "18014398509481986",
+      blockHeight: "18446744073709551615",
+      finalizedAt: 1_753_000_000_000,
     }));
+    expect(mocks.classifyTxPresence).toHaveBeenCalledWith(
+      "https://testnet.nodes.dusk.network",
+      hash
+    );
   });
 
   it("keeps a first removed/not-found observation provisional", async () => {

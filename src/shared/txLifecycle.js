@@ -12,23 +12,65 @@ function graphqlUrl(nodeUrl) {
   return new URL("/on/graphql/query", base).toString();
 }
 
+function losslessJson(text) {
+  return JSON.parse(String(text).replace(
+    /([:\[,]\s*)(-?\d{16,})(?=\s*[,}\]])/g,
+    (_, prefix, integer) => `${prefix}"${integer}"`
+  ));
+}
+
 async function postGraphql(nodeUrl, query) {
   const res = await fetch(graphqlUrl(nodeUrl), {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: query,
+    signal: AbortSignal.timeout(5_000),
   });
 
   if (!res.ok) {
     throw new Error(`GraphQL request failed (${res.status})`);
   }
 
-  const json = await res.json();
+  const json = res.text ? losslessJson(await res.text()) : await res.json();
   if (Array.isArray(json?.errors) && json.errors.length) {
     const msg = json.errors.map((e) => e?.message || String(e)).join("; ");
     throw new Error(msg || "GraphQL returned errors");
   }
   return json;
+}
+
+const MAX_U64 = (1n << 64n) - 1n;
+
+function decimal(value) {
+  try {
+    if (typeof value === "number" && !Number.isSafeInteger(value)) return undefined;
+    const text = String(value ?? "").trim();
+    if (!/^\d+$/.test(text)) return undefined;
+    const integer = BigInt(text);
+    return integer <= MAX_U64 ? integer.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function finalizedTxMetadata(tx) {
+  const gasSpent = decimal(tx?.gasSpent ?? tx?.gas_spent);
+  const gasPrice = decimal(tx?.tx?.gasPrice ?? tx?.tx?.gas_price ?? tx?.gasPrice ?? tx?.gas_price);
+  const blockHeight = decimal(tx?.blockHeight ?? tx?.block_height);
+  const blockTimestamp = decimal(tx?.blockTimestamp ?? tx?.block_timestamp);
+  const blockHash = String(tx?.blockHash ?? tx?.block_hash ?? "").trim() || undefined;
+  const finalizedAt = blockTimestamp && BigInt(blockTimestamp) * 1_000n <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(BigInt(blockTimestamp) * 1_000n)
+    : undefined;
+  return Object.fromEntries(Object.entries({
+    gasSpent,
+    gasPrice,
+    feePaid: gasSpent && gasPrice ? (BigInt(gasSpent) * BigInt(gasPrice)).toString() : undefined,
+    blockHash,
+    blockHeight,
+    blockTimestamp,
+    finalizedAt,
+  }).filter(([, value]) => value !== undefined));
 }
 
 function txError(tx) {
