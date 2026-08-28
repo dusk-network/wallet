@@ -78,6 +78,9 @@ vi.mock("@dusk/w3sper", () => {
 
     next() {
       const index = this.#profiles.length || 1;
+      if (globalThis.__W3SPER_FAIL_PROFILE_INDEX__ === index) {
+        throw new Error("profile derivation failed");
+      }
       const p = this.#nth(index);
       this.#profiles[index] = p;
       return p;
@@ -347,6 +350,7 @@ describe("walletEngine", () => {
     globalThis.__W3SPER_BALANCE__ = null;
     globalThis.__W3SPER_STAKE_INFO__ = null;
     globalThis.__W3SPER_STAKE_KEYS__ = null;
+    globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = null;
 
     // walletEngine loads a WASM protocol driver via fetch() on first use.
     vi.stubGlobal(
@@ -371,6 +375,7 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_EXECUTE_IMPL__;
     delete globalThis.__W3SPER_STAKE_INFO__;
     delete globalThis.__W3SPER_STAKE_KEYS__;
+    delete globalThis.__W3SPER_FAIL_PROFILE_INDEX__;
   });
 
   it("derives the CLI-aligned two default profiles on unlock", async () => {
@@ -379,6 +384,19 @@ describe("walletEngine", () => {
     expect(engine.getAccounts()).toEqual(["acct0", "acct1"]);
     expect(engine.getAddresses()).toEqual(["addr0", "addr1"]);
     expect(engine.getSelectedAccountIndex()).toBe(0);
+  });
+
+  it("keeps the current wallet when replacement derivation fails", async () => {
+    engine.configure({ accountCount: 1 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = 1;
+    engine.configure({ accountCount: 2 });
+
+    await expect(engine.unlockWithMnemonic("different mnemonic")).rejects.toThrow(
+      "profile derivation failed"
+    );
+    expect(engine.isUnlocked()).toBe(true);
+    expect(engine.getAccounts()).toEqual(["acct0"]);
   });
 
   it("restores multiple derived accounts on unlock", async () => {

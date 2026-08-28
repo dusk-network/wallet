@@ -146,17 +146,15 @@ async function loadVaultModule() {
     await expect(vaultMod.unlockVault(password)).rejects.toThrow(/too many attempts/i);
   });
 
-  it("removes unsupported vault formats", async () => {
+  it("preserves unsupported vault formats", async () => {
     const { storageMod, vaultMod } = await loadVaultModule();
 
     const legacy = { data: "x", iv: "y", salt: "z" };
     await storageMod.storage.set({ [storageMod.STORAGE_KEYS.VAULT]: legacy });
 
     await expect(vaultMod.unlockVault("password123")).rejects.toThrow(/unsupported vault format/i);
-    expect(storageMod.storage.remove).toHaveBeenCalledWith([
-      storageMod.STORAGE_KEYS.VAULT,
-      storageMod.STORAGE_KEYS.UNLOCK_GUARD,
-    ]);
+    expect(storageMod.__getStore()[storageMod.STORAGE_KEYS.VAULT]).toEqual(legacy);
+    expect(storageMod.storage.remove).not.toHaveBeenCalled();
   });
 
   it("clears vault from storage", async () => {

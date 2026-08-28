@@ -759,19 +759,6 @@ export async function unlockWithMnemonic(mnemonic) {
     throw err;
   }
 
-  // If the engine was already unlocked, wipe previous secret state first.
-  // This prevents confusing cross-wallet caching effects.
-  if (state.unlocked) {
-    try {
-      lock();
-    } catch {
-      // ignore
-    }
-    debugEngine("unlock_state_reset", {
-      totalMs: engineSince(unlockStart),
-    });
-  }
-
   const normalizeStart = engineNow();
   mnemonic = mnemonic.trim().replace(/\s+/g, " ");
   debugEngine("unlock_mnemonic_normalized", {
@@ -803,12 +790,6 @@ export async function unlockWithMnemonic(mnemonic) {
     totalMs: engineSince(unlockStart),
   });
 
-  state.unlocked = true;
-  state.mnemonic = mnemonic;
-  state.seed = seed;
-  state.walletId = p0?.account?.toString?.() ?? "";
-  state.profileGenerator = pg;
-
   // Restore derived accounts (public + shielded) based on persisted settings.
   const targetCountRaw = Number(engineConfig.accountCount ?? 1);
   const targetCount =
@@ -818,11 +799,23 @@ export async function unlockWithMnemonic(mnemonic) {
   const cappedCount = Math.min(targetCount, MAX_ACCOUNT_COUNT);
 
   const profiles = [p0];
-  for (let i = 1; i < cappedCount; i++) {
-    // ProfileGenerator.next() skips default and generates sequential indices.
-    profiles.push(await pg.next());
+  try {
+    for (let i = 1; i < cappedCount; i++) {
+      profiles.push(await pg.next());
+    }
+  } catch (error) {
+    seed.fill(0);
+    throw error;
   }
 
+  // Commit only after every profile was derived successfully. A failed unlock
+  // leaves the previous wallet untouched.
+  if (state.unlocked) lock();
+  state.unlocked = true;
+  state.mnemonic = mnemonic;
+  state.seed = seed;
+  state.walletId = p0?.account?.toString?.() ?? "";
+  state.profileGenerator = pg;
   state.profiles = profiles;
 
   const selRaw = Number(engineConfig.selectedAccountIndex ?? 0);

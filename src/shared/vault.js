@@ -254,10 +254,8 @@ export async function unlockVault(password) {
     throw new Error("No wallet vault found. Import a mnemonic first.");
   }
 
-  // Unsupported vault formats are removed.
   if (!vault || typeof vault !== "object" || !vault.iterations) {
-    await clearVault();
-    throw new Error("Unsupported vault format. Please import your mnemonic again.");
+    throw new Error("Unsupported vault format. Reset the wallet only after preserving recovery access.");
   }
 
   const enc = deserializeEncryptInfo(vault);

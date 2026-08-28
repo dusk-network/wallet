@@ -97,6 +97,18 @@ describe("permissions", () => {
     expect(different.grants.shieldedReceiveAddress).toBe(false);
   });
 
+  it("does not lose concurrent grants", async () => {
+    const { permissionsMod } = await loadPermissionsModule();
+    await Promise.all([
+      permissionsMod.approveOrigin("https://a.example", { accountIndex: 0 }),
+      permissionsMod.approveOrigin("https://b.example", { accountIndex: 1 }),
+    ]);
+    await expect(permissionsMod.getPermissions()).resolves.toMatchObject({
+      "https://a.example": { accountIndex: 0 },
+      "https://b.example": { accountIndex: 1 },
+    });
+  });
+
   it("revokes origin", async () => {
     const { permissionsMod } = await loadPermissionsModule();
     await permissionsMod.approveOrigin("https://example.com", {

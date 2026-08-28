@@ -16,6 +16,14 @@ export const AUTO_LOCK_OPTIONS = [
   { value: 60, label: "1 hour" },
 ];
 
+let mutations = Promise.resolve();
+
+function mutate(fn) {
+  const result = mutations.then(fn, fn);
+  mutations = result.catch(() => {});
+  return result;
+}
+
 export const DEFAULT_SETTINGS = {
   // Default to Mainnet.
   nodeUrl: "https://nodes.dusk.network",
@@ -131,7 +139,7 @@ export async function getSettings() {
 /**
  * @param {Partial<typeof DEFAULT_SETTINGS>} patch
  */
-export async function setSettings(patch) {
+async function setSettingsUnlocked(patch) {
   const current = await getSettings();
   const next = { ...current, ...patch };
 
@@ -185,4 +193,8 @@ export async function setSettings(patch) {
 
   await storage.set({ [STORAGE_KEYS.SETTINGS]: next });
   return next;
+}
+
+export function setSettings(patch) {
+  return mutate(() => setSettingsUnlocked(patch));
 }
