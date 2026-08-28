@@ -2638,18 +2638,6 @@ function toContractIdBytes(contractId) {
   throw new Error("Invalid contractId (expected 32-byte hex string or number[32])");
 }
 
-/**
- * Send a transaction from the currently selected account.
- *
- * Supported kinds:
- * - { kind: 'transfer', privacy, to, amount, memo?, gas? }
- * - { kind: 'shield', amount, gas? }
- * - { kind: 'unshield', amount, gas? }
- * - { kind: 'stake', amount, gas? }
- * - { kind: 'unstake', amount?, gas? } // omit/0 amount => full unstake
- * - { kind: 'withdraw_reward', amount?, gas? } // omit/0 amount => withdraw all
- * - { kind: 'contract_call', contractId, fnName, fnArgs, to?, amount?, deposit?, gas? }
- */
 async function sendTransactionUnlocked(params) {
   if (!state.unlocked) throw new Error("Wallet locked");
   if (!params || typeof params !== "object") {
@@ -2913,6 +2901,18 @@ async function sendTransactionUnlocked(params) {
   throw new Error(`Unsupported transaction kind: ${params.kind}`);
 }
 
+/**
+ * Send a transaction from the currently selected account.
+ *
+ * Supported kinds:
+ * - { kind: 'transfer', privacy, to, amount, memo?, gas? }
+ * - { kind: 'shield', amount, gas? }
+ * - { kind: 'unshield', amount, gas? }
+ * - { kind: 'stake', amount, gas? }
+ * - { kind: 'unstake', amount?, gas? } // omit/0 amount => full unstake
+ * - { kind: 'withdraw_reward', amount?, gas? } // omit/0 amount => withdraw all
+ * - { kind: 'contract_call', contractId, fnName, fnArgs, to?, amount?, deposit?, gas? }
+ */
 export function sendTransaction(params) {
   const profileIndex = resolveProfileIndex(params?.profileIndex);
   const walletId = getWalletId();
