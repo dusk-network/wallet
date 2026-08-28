@@ -503,7 +503,6 @@ export async function localSend(message) {
                   : {}),
               });
 
-              startShieldedSync({ force: false }).catch(() => {});
               const presence = await classifyTxPresence(nodeUrl, hash);
               if (presence.state === "executed_success" || presence.state === "executed_failed") {
                 const finalizedOk = presence.state === "executed_success";
