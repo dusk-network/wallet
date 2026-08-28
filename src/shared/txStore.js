@@ -69,7 +69,15 @@ export async function putTxMeta(hash, meta) {
   if (!hash) return;
   return mutate(async () => {
     const current = await getAll();
-    current[hash] = { ...meta, ...current[hash] };
+    const next = { ...meta, ...current[hash] };
+    const terminal = next.status === "executed" || next.status === "failed";
+    const shielded = next.privacy === "shielded" ||
+      (Array.isArray(next.pendingNullifiers) && next.pendingNullifiers.length > 0);
+    if (terminal && next.executedAt != null && shielded) {
+      next.reservationStatus = "spent";
+      next.reservationUpdatedAt = next.executedAt;
+    }
+    current[hash] = next;
     await setAll(prune(current, hash));
   });
 }

@@ -90,6 +90,10 @@ describe("txStore", () => {
       origin: "Wallet",
       nodeUrl: "https://testnet.nodes.dusk.network",
       kind: "transfer",
+      privacy: "shielded",
+      pendingNullifiers: ["aa"],
+      reservationStatus: "pending",
+      reservationUpdatedAt: 90,
       submittedAt: 90,
       status: "submitted",
     });
@@ -98,6 +102,9 @@ describe("txStore", () => {
       origin: "Wallet",
       status: "failed",
       error: "OutOfGas",
+      pendingNullifiers: ["aa"],
+      reservationStatus: "spent",
+      reservationUpdatedAt: 100,
     });
     await expect(listTxs()).resolves.toHaveLength(50);
   });
