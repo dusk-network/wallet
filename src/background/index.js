@@ -300,7 +300,9 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
   }
 
   if (presence.state === "not_found") {
-    const confirmedRemoved = preserveRemoved && meta?.recoveryReason === "removed_unconfirmed";
+    const confirmedRemoved = preserveRemoved && (
+      meta?.recoveryReason === "removed_unconfirmed" || meta?.status === "removed"
+    );
     const status = confirmedRemoved ? "removed" : "unknown";
     await patchTxMeta(hash, {
       status,

@@ -115,7 +115,6 @@ async function watchTxExecuted(hash) {
   try {
     const timeoutMs = 180_000;
     const removedWatcher = waitTxRemoved(hash, { timeoutMs })
-      .then((event) => ({ type: "removed", event }))
       .catch((e) => {
         if (/removed watcher not available/i.test(String(e?.message ?? e))) {
           return new Promise(() => {});
