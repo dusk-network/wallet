@@ -19,6 +19,11 @@ import {
 } from "../shared/securityPolicy.js";
 import { bytesToHex, sha256Hex, toBytes } from "../shared/bytes.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
+import {
+  checkPolicyLimits,
+  hashTypedDataHex,
+  validateTypedDataParams,
+} from "../shared/typedDataHash.js";
 import { classifyDuskIdentifier } from "../shared/duskIdentifiers.js";
 import {
   DAPP_LIMITS,
@@ -468,6 +473,8 @@ export async function handleRpc(origin, request) {
           shieldedRecipients: true,
           shieldedReceiveAddress: true,
           signMessage: true,
+          signTypedData: true,
+          signTypedDataVersions: [1],
           signAuth: true,
           contractCallPrivacy: true,
           watchAsset: true,
@@ -943,6 +950,134 @@ export async function handleRpc(origin, request) {
           _approvalContext: executionContext,
         });
       });
+    }
+
+    case "dusk_signTypedData": {
+      // 1. Connection is required up front, same as the sibling sign_* methods -
+      // an unconnected origin should not be able to trigger any of the work below.
+      const perm = await getPermissionForOrigin(origin);
+      if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
+
+      // 2. Reject a non-object params before touching its shape any further.
+      if (!params || typeof params !== "object") {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "params must be an object");
+      }
+
+      // 3. Version check (spec 14): defaults to 1, and an unknown version is a
+      // hard reject rather than a silent fallback, so a caller that precomputed
+      // a digest locally gets a clear error instead of a mismatch.
+      const version = params.version === undefined ? 1 : params.version;
+      if (version !== 1) {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, `Unsupported typed-data version: ${version}`);
+      }
+
+      // 4. Build the exact input that will be hashed, with the wallet's own view
+      // of `origin`. The dApp MUST NOT be able to influence origin binding
+      // (spec 8): any params.origin is dropped here, and the input is assembled
+      // field by field rather than by spreading params, so a future field added
+      // to the request cannot leak into the digest.
+      //
+      // Validation runs on this assembled input rather than on raw params.
+      // Origin is a field of the hash input (spec 3) and the validator checks
+      // it, so validating raw params would demand a caller-supplied origin --
+      // exactly the field the docs tell dApps not to send.
+      const typedInput = {
+        domain: params.domain,
+        types: params.types,
+        primaryType: params.primaryType,
+        message: params.message,
+        origin,
+      };
+
+      // 5. Structural + value validation (spec 4-10). Map the shared validator's
+      // stable error code (E_*) onto INVALID_PARAMS, preserving both the message
+      // and the code so a caller/dev can tell which spec 10 rule fired.
+      try {
+        validateTypedDataParams(typedInput);
+      } catch (err) {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          err?.message || "Invalid typed data params",
+          err?.code ? { code: err.code } : undefined
+        );
+      }
+
+      // 5. Chain check, before approval: a dApp must ask for the chain the
+      // wallet is actually on. This also keeps the approval UI from ever
+      // showing a chain the wallet cannot act on.
+      const settingsBeforeApproval = await getSettings();
+      const activeChainId = chainIdFromNodeUrl(settingsBeforeApproval?.nodeUrl ?? "");
+      const requestedChainId = String(params.domain?.chainId ?? "").trim();
+      if (requestedChainId !== activeChainId) {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          `domain.chainId ${requestedChainId || "(missing)"} does not match active chain ${activeChainId}`
+        );
+      }
+
+      // 6. Signer-side resource floor (spec 11). Deliberately not part of the
+      // hash path - it must never influence the digest - so oversized payloads
+      // are rejected here, before the user ever sees an approval popup.
+      try {
+        checkPolicyLimits(typedInput);
+      } catch (err) {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          err?.message || "Typed data exceeds policy limits",
+          err?.code ? { code: err.code } : undefined
+        );
+      }
+
+      const { domain, types, primaryType, message } = typedInput;
+
+      // 8. Compute the digest over the assembled input built in step 4.
+      const digestHex = hashTypedDataHex(typedInput);
+
+      // 8. Ask the user to approve.
+      await requestUserApproval("sign_typed_data", origin, {
+        domain,
+        types,
+        primaryType,
+        message,
+        chainId: activeChainId,
+        digestHex,
+      });
+
+      // 9. Re-check the active chain after approval returns: the user may have
+      // switched networks while the popup was open, and a signature must not
+      // outlive the network context it was approved under.
+      const settingsAfterApproval = await getSettings();
+      const chainIdAfterApproval = chainIdFromNodeUrl(settingsAfterApproval?.nodeUrl ?? "");
+      if (chainIdAfterApproval !== requestedChainId) {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          `Active chain changed to ${chainIdAfterApproval} during approval; expected ${requestedChainId}`
+        );
+      }
+
+      // 10. Require unlocked wallet, same as the sibling sign_* methods.
+      const { isUnlocked, accounts } = await getEngineStatus();
+      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+
+      await ensureEngineConfigured();
+      const arr = Array.isArray(accounts) ? accounts : [];
+      const profileIndex = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
+
+      // 11. Sign via the engine over the bare digest computed above.
+      const signed = await engineCall("dusk_signTypedData", { digestHex, profileIndex });
+
+      // Result shape, spec 13. origin/chainId/primaryType are echoed so a
+      // verifier does not need to hold the original request; hex fields are
+      // lowercased defensively.
+      return {
+        account: signed?.account,
+        publicKeyHex: String(signed?.publicKeyHex ?? "").toLowerCase(),
+        origin,
+        chainId: activeChainId,
+        primaryType,
+        digestHex: digestHex.toLowerCase(),
+        signature: String(signed?.signature ?? "").toLowerCase(),
+      };
     }
 
     case "dusk_signAuth": {

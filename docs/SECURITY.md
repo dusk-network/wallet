@@ -115,6 +115,7 @@ service worker does not immediately lock an otherwise active unlocked wallet.
 | `dusk_sendTransaction` | Yes | Yes |
 | `dusk_watchAsset` | Yes | Yes |
 | `dusk_signMessage` | Yes | Yes |
+| `dusk_signTypedData` | Yes | Yes |
 | `dusk_signAuth` | Yes | Yes |
 | `dusk_disconnect` | No | No |
 
