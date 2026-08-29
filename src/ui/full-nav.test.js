@@ -57,8 +57,8 @@ describe("full wallet navigation", () => {
     const source = await readFile(path.resolve(process.cwd(), "src", "background", "index.js"), "utf8");
 
     expect(source).toContain('type: "DUSK_UI_LOCK_STATE"');
-    expect(source).toContain('emitUiLockState(false, "auto_lock")');
-    expect(source).toContain('emitUiLockState(false, "manual_lock")');
+    expect(source).toContain('lockWallet("auto_lock")');
+    expect(source).toContain('lockWallet("manual_lock")');
     expect(source).toContain('emitUiLockState(true, "unlock")');
   });
 });

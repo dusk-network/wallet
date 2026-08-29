@@ -106,6 +106,22 @@ async function loadVaultModule() {
     await expect(vaultMod.unlockVault(password)).rejects.toThrow(/too many attempts/i);
   });
 
+  it("serializes concurrent unlock attempts before updating backoff", async () => {
+    const { storageMod, vaultMod } = await loadVaultModule();
+    await vaultMod.createVault("test seed phrase", "password123");
+
+    const attempts = await Promise.allSettled([
+      vaultMod.unlockVault("wrong-one"),
+      vaultMod.unlockVault("wrong-two"),
+    ]);
+
+    expect(attempts.map((attempt) => attempt.reason?.message)).toEqual([
+      "Incorrect password",
+      expect.stringMatching(/too many attempts/i),
+    ]);
+    expect(storageMod.__getStore()[storageMod.STORAGE_KEYS.UNLOCK_GUARD].failures).toBe(1);
+  });
+
   it("returns a generic decrypt failure for wrong passwords without vault detail", async () => {
     const { vaultMod } = await loadVaultModule();
 

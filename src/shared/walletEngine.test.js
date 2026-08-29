@@ -28,6 +28,10 @@ vi.mock("@dusk/w3sper", () => {
     }
 
     toString() {
+      if (this.#prefix === "acct" && this.#index === 0 && globalThis.__W3SPER_FAIL_WALLET_ID__) {
+        globalThis.__W3SPER_FAIL_WALLET_ID__ = false;
+        throw new Error("wallet ID failed");
+      }
       return `${this.#prefix}${this.#index}`;
     }
 
@@ -70,7 +74,9 @@ vi.mock("@dusk/w3sper", () => {
   class ProfileGenerator {
     #profiles = [];
 
-    constructor(_seeder) {}
+    constructor(seeder) {
+      globalThis.__W3SPER_LAST_SEEDER__ = seeder;
+    }
 
     async #nth(n) {
       return new Profile(n);
@@ -354,6 +360,8 @@ describe("walletEngine", () => {
     globalThis.__W3SPER_STAKE_INFO__ = null;
     globalThis.__W3SPER_STAKE_KEYS__ = null;
     globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = null;
+    globalThis.__W3SPER_FAIL_WALLET_ID__ = false;
+    globalThis.__W3SPER_LAST_SEEDER__ = null;
 
     // walletEngine loads a WASM protocol driver via fetch() on first use.
     vi.stubGlobal(
@@ -379,6 +387,8 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_STAKE_INFO__;
     delete globalThis.__W3SPER_STAKE_KEYS__;
     delete globalThis.__W3SPER_FAIL_PROFILE_INDEX__;
+    delete globalThis.__W3SPER_FAIL_WALLET_ID__;
+    delete globalThis.__W3SPER_LAST_SEEDER__;
   });
 
   it("derives the CLI-aligned two default profiles on unlock", async () => {
@@ -400,6 +410,18 @@ describe("walletEngine", () => {
     );
     expect(engine.isUnlocked()).toBe(true);
     expect(engine.getAccounts()).toEqual(["acct0"]);
+  });
+
+  it("keeps the current wallet and clears the candidate seed when wallet ID derivation fails", async () => {
+    engine.configure({ accountCount: 1 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    globalThis.__W3SPER_FAIL_WALLET_ID__ = true;
+
+    await expect(engine.unlockWithMnemonic("different mnemonic")).rejects.toThrow("wallet ID failed");
+
+    expect(engine.isUnlocked()).toBe(true);
+    expect(engine.getAccounts()).toEqual(["acct0"]);
+    expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
   });
 
   it("restores multiple derived accounts on unlock", async () => {

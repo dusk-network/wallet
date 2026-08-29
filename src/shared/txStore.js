@@ -1,12 +1,7 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
+import { withStorageLock } from "./storageLock.js";
 
-let mutations = Promise.resolve();
-
-function mutate(fn) {
-  const result = mutations.then(fn, fn);
-  mutations = result.catch(() => {});
-  return result;
-}
+const mutate = (fn) => withStorageLock(STORAGE_KEYS.TXS, fn);
 
 /**
  * @typedef {Object} TxMeta

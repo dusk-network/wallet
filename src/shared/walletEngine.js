@@ -767,67 +767,63 @@ export async function unlockWithMnemonic(mnemonic) {
   });
 
   const seedStart = engineNow();
-  const seed = Uint8Array.from(mnemonicToSeedSync(mnemonic));
-  debugEngine("unlock_seed_ready", {
-    ms: engineSince(seedStart),
-    totalMs: engineSince(unlockStart),
-  });
-
-  // ProfileGenerator needs a seeder fn; return a copy each time.
-  const profileGenStart = engineNow();
-  const seeder = async () => seed.slice();
-  const pg = new ProfileGenerator(seeder);
-  debugEngine("unlock_profile_generator_ready", {
-    ms: engineSince(profileGenStart),
-    totalMs: engineSince(unlockStart),
-  });
-
-  // Generate default profile (index 0)
-  const profileStart = engineNow();
+  let seed;
+  let committed = false;
   let p0;
+
   try {
+    seed = Uint8Array.from(mnemonicToSeedSync(mnemonic));
+    debugEngine("unlock_seed_ready", {
+      ms: engineSince(seedStart),
+      totalMs: engineSince(unlockStart),
+    });
+
+    // ProfileGenerator needs a seeder fn; return a copy each time.
+    const profileGenStart = engineNow();
+    const seeder = async () => seed.slice();
+    const pg = new ProfileGenerator(seeder);
+    debugEngine("unlock_profile_generator_ready", {
+      ms: engineSince(profileGenStart),
+      totalMs: engineSince(unlockStart),
+    });
+
+    // Generate default profile (index 0)
+    const profileStart = engineNow();
     p0 = await pg.default;
-  } catch (error) {
-    seed.fill(0);
-    throw error;
+    debugEngine("unlock_profile_default_ready", {
+      ms: engineSince(profileStart),
+      totalMs: engineSince(unlockStart),
+    });
+
+    // Restore derived accounts (public + shielded) based on persisted settings.
+    const targetCountRaw = Number(engineConfig.accountCount ?? 1);
+    const targetCount =
+      Number.isFinite(targetCountRaw) && targetCountRaw >= 1
+        ? Math.floor(targetCountRaw)
+        : 1;
+    const cappedCount = Math.min(targetCount, MAX_ACCOUNT_COUNT);
+    const profiles = [p0];
+    for (let i = 1; i < cappedCount; i++) profiles.push(await pg.next());
+
+    // Finish all throwable candidate work before replacing the current wallet.
+    const walletId = p0?.account?.toString?.() ?? "";
+    if (!walletId) throw new Error("Derived profile has no wallet ID");
+    const selRaw = Number(engineConfig.selectedAccountIndex ?? 0);
+    const sel = Number.isFinite(selRaw) && selRaw >= 0 ? Math.floor(selRaw) : 0;
+    const currentIndex = Math.min(sel, Math.max(0, profiles.length - 1));
+
+    if (state.unlocked) lock();
+    state.mnemonic = mnemonic;
+    state.seed = seed;
+    state.walletId = walletId;
+    state.profileGenerator = pg;
+    state.profiles = profiles;
+    state.currentIndex = currentIndex;
+    state.unlocked = true;
+    committed = true;
+  } finally {
+    if (!committed && seed) seed.fill(0);
   }
-  debugEngine("unlock_profile_default_ready", {
-    ms: engineSince(profileStart),
-    totalMs: engineSince(unlockStart),
-  });
-
-  // Restore derived accounts (public + shielded) based on persisted settings.
-  const targetCountRaw = Number(engineConfig.accountCount ?? 1);
-  const targetCount =
-    Number.isFinite(targetCountRaw) && targetCountRaw >= 1
-      ? Math.floor(targetCountRaw)
-      : 1;
-  const cappedCount = Math.min(targetCount, MAX_ACCOUNT_COUNT);
-
-  const profiles = [p0];
-  try {
-    for (let i = 1; i < cappedCount; i++) {
-      profiles.push(await pg.next());
-    }
-  } catch (error) {
-    seed.fill(0);
-    throw error;
-  }
-
-  // Commit only after every profile was derived successfully. A failed unlock
-  // leaves the previous wallet untouched.
-  if (state.unlocked) lock();
-  state.unlocked = true;
-  state.mnemonic = mnemonic;
-  state.seed = seed;
-  state.walletId = p0?.account?.toString?.() ?? "";
-  state.profileGenerator = pg;
-  state.profiles = profiles;
-
-  const selRaw = Number(engineConfig.selectedAccountIndex ?? 0);
-  const sel =
-    Number.isFinite(selRaw) && selRaw >= 0 ? Math.floor(selRaw) : 0;
-  state.currentIndex = Math.min(sel, Math.max(0, profiles.length - 1));
   debugEngine("unlock_state_set", {
     totalMs: engineSince(unlockStart),
   });

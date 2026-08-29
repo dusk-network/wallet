@@ -1,8 +1,9 @@
 // Background service worker entry.
 
-import { createVault, loadVault, unlockVault } from "../shared/vault.js";
+import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import {
   approveOrigin,
+  clearPermissions,
   getPermissionForOrigin,
   getPermissions,
   revokeOrigin,
@@ -16,6 +17,7 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { bytesToHex } from "../shared/bytes.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
+import { withStorageLock } from "../shared/storageLock.js";
 
 import {
   engineCall,
@@ -68,6 +70,7 @@ const ext = getExtensionApi();
 // ------------------------------
 const AUTO_LOCK_ALARM_NAME = "dusk_auto_lock_check";
 const AUTO_LOCK_ACTIVITY_KEY = STORAGE_KEYS.AUTO_LOCK_ACTIVITY;
+const WALLET_LIFECYCLE_LOCK = "wallet-lifecycle";
 const DAPP_ACTIVITY_METHODS = new Set([
   "dusk_sendTransaction",
   "dusk_watchAsset",
@@ -151,6 +154,14 @@ async function ensureActivityTimestamp() {
   const now = Date.now();
   await updateActivity(now);
   return now;
+}
+
+async function lockWallet(reason) {
+  await engineCall("engine_lock");
+  if ((await getEngineStatus())?.isUnlocked) throw new Error("Wallet lock did not complete");
+  await clearActivity();
+  broadcastProfilesChangedAll().catch(() => {});
+  emitUiLockState(false, reason).catch(() => {});
 }
 
 async function ensureActivityTimestampIfUnlocked() {
@@ -407,10 +418,7 @@ async function handleAutoLockAlarm() {
   if (elapsed >= timeoutMs) {
     console.log("[Dusk] Auto-locking wallet due to inactivity.");
     try {
-      await engineCall("engine_lock");
-      await clearActivity();
-      emitUiLockState(false, "auto_lock").catch(() => {});
-      broadcastProfilesChangedAll().catch(() => {});
+      await withStorageLock(WALLET_LIFECYCLE_LOCK, () => lockWallet("auto_lock"));
     } catch (e) {
       console.error("[Dusk] Auto-lock failed:", e);
     }
@@ -693,27 +701,29 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       // UI wants to unlock
       if (message?.type === "DUSK_UI_UNLOCK") {
         const password = message.password;
-        const mnemonic = await unlockVault(password);
+        const accounts = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const current = await getEngineStatus();
+          if (current?.isUnlocked) {
+            await updateActivity();
+            setupAutoLockAlarm().catch(console.error);
+            return current.accounts ?? [];
+          }
 
-        await ensureEngineConfigured();
-        const result = await engineCall(
-          "engine_unlock",
-          { mnemonic },
-          { timeoutMs: 120_000 }
-        );
-
-        // result is expected to contain accounts, if not, ask status.
-        const accounts = Array.isArray(result?.accounts)
-          ? result.accounts
-          : (await getEngineStatus()).accounts;
-
-        // Reset activity timer and ensure auto-lock alarm is running.
-        await updateActivity();
-        setupAutoLockAlarm().catch(console.error);
-
-        // Notify dApps that profiles are now available.
-        broadcastProfilesChangedAll().catch(() => {});
-        emitUiLockState(true, "unlock").catch(() => {});
+          const mnemonic = await unlockVault(password);
+          await ensureEngineConfigured();
+          const result = await engineCall(
+            "engine_unlock",
+            { mnemonic },
+            { timeoutMs: 120_000 }
+          );
+          await updateActivity();
+          setupAutoLockAlarm().catch(console.error);
+          broadcastProfilesChangedAll().catch(() => {});
+          emitUiLockState(true, "unlock").catch(() => {});
+          return Array.isArray(result?.accounts)
+            ? result.accounts
+            : (await getEngineStatus()).accounts;
+        });
 
         sendResponse({ ok: true, accounts });
         return;
@@ -721,12 +731,17 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI wants to lock
       if (message?.type === "DUSK_UI_LOCK") {
-        await engineCall("engine_lock");
-        await clearActivity();
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, () => lockWallet("manual_lock"));
+        sendResponse({ ok: true });
+        return;
+      }
 
-        // Notify dApps that profiles are no longer available.
-        broadcastProfilesChangedAll().catch(() => {});
-        emitUiLockState(false, "manual_lock").catch(() => {});
+      if (message?.type === "DUSK_UI_RESET_WALLET") {
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          await lockWallet("reset");
+          await clearPermissions();
+          await clearVault();
+        });
         sendResponse({ ok: true });
         return;
       }
@@ -801,18 +816,34 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      // UI creates/imports wallet
+      // UI creates/imports and unlocks a wallet as one serialized lifecycle operation.
       if (message?.type === "DUSK_UI_CREATE_WALLET") {
-        const { mnemonic, password } = message;
-        if (!mnemonic || !password) {
-          throw rpcError(
-            ERROR_CODES.INVALID_PARAMS,
-            "mnemonic and password required"
+        const accounts = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const { mnemonic, password } = message;
+          if (!mnemonic || !password) {
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "mnemonic and password required");
+          }
+          if ((await getEngineStatus())?.isUnlocked) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock or reset the current wallet first");
+          }
+
+          await createVault(mnemonic, password);
+          await ensureEngineConfigured();
+          const result = await engineCall(
+            "engine_unlock",
+            { mnemonic: String(mnemonic) },
+            { timeoutMs: 120_000 }
           );
-        }
-        await createVault(mnemonic, password);
-        // Do not auto-unlock, keep locked until user unlocks.
-        sendResponse({ ok: true });
+          await updateActivity();
+          setupAutoLockAlarm().catch(console.error);
+          broadcastProfilesChangedAll().catch(() => {});
+          emitUiLockState(true, "create").catch(() => {});
+          return Array.isArray(result?.accounts)
+            ? result.accounts
+            : (await getEngineStatus()).accounts;
+        });
+
+        sendResponse({ ok: true, accounts });
         return;
       }
 

@@ -40,6 +40,9 @@ const mocks = vi.hoisted(() => {
     sentMessages: [],
     alarmsClear: vi.fn(async () => true),
     alarmsCreate: vi.fn(() => {}),
+    clearVault: vi.fn(async () => {}),
+    createVault: vi.fn(async () => true),
+    clearPermissions: vi.fn(async () => {}),
     engineCall: vi.fn(async (method) => {
       if (method === "engine_unlock") {
         return { accounts: ["acct0"] };
@@ -92,13 +95,15 @@ vi.mock("../shared/settings.js", () => ({
 }));
 
 vi.mock("../shared/vault.js", () => ({
-  createVault: vi.fn(async () => true),
+  clearVault: mocks.clearVault,
+  createVault: mocks.createVault,
   loadVault: vi.fn(async () => ({ v: 1 })),
   unlockVault: vi.fn(async () => "mnemonic"),
 }));
 
 vi.mock("../shared/permissions.js", () => ({
   approveOrigin: vi.fn(async () => true),
+  clearPermissions: mocks.clearPermissions,
   getPermissionForOrigin: vi.fn(async () => ({
     profileId: "account:0:acct0",
     accountIndex: 0,
@@ -309,6 +314,57 @@ describe("background auto-lock activity", () => {
       })
     );
     expect(activityRecord()).toBeUndefined();
+  });
+
+  it("does not clear the vault when reset cannot lock the engine", async () => {
+    mocks.engineCall.mockRejectedValueOnce(new Error("lock transport failed"));
+
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET" });
+
+    expect(response.error.message).toBe("lock transport failed");
+    expect(mocks.clearVault).not.toHaveBeenCalled();
+    expect(mocks.clearPermissions).not.toHaveBeenCalled();
+    expect(mocks.engineUnlocked).toBe(true);
+  });
+
+  it("rejects wallet replacement while the current engine is unlocked", async () => {
+    const response = await sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+
+    expect(response.error.message).toMatch(/lock or reset/i);
+    expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
+  it("serializes create behind an in-flight unlock", async () => {
+    mocks.engineUnlocked = false;
+    let releaseUnlock;
+    let markUnlockStarted;
+    const unlockGate = new Promise((resolve) => { releaseUnlock = resolve; });
+    const unlockStarted = new Promise((resolve) => { markUnlockStarted = resolve; });
+    mocks.engineCall.mockImplementationOnce(async (method) => {
+      expect(method).toBe("engine_unlock");
+      markUnlockStarted();
+      await unlockGate;
+      mocks.engineUnlocked = true;
+      return { accounts: ["acct0"] };
+    });
+
+    const unlock = sendBackgroundMessage({ type: "DUSK_UI_UNLOCK", password: "pw" });
+    await unlockStarted;
+    const create = sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+    expect(mocks.createVault).not.toHaveBeenCalled();
+
+    releaseUnlock();
+    await expect(unlock).resolves.toEqual({ ok: true, accounts: ["acct0"] });
+    await expect(create).resolves.toMatchObject({ error: { message: expect.stringMatching(/lock or reset/i) } });
+    expect(mocks.createVault).not.toHaveBeenCalled();
   });
 
   it("initializes missing activity for an unlocked wallet instead of locking immediately", async () => {

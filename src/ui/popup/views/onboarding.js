@@ -297,18 +297,13 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
         const password = state.onboard.password;
         if (!password) throw new Error("Missing password");
 
-        busyBody.textContent = "Writing encrypted vault…";
+        busyBody.textContent = "Securing and unlocking wallet…";
         const res = await actions?.send?.({
           type: "DUSK_UI_CREATE_WALLET",
           mnemonic: expected,
           password,
         });
         if (res?.error) throw new Error(res.error.message ?? "Failed to create wallet");
-
-        // Auto-unlock to match MetaMask onboarding UX
-        busyBody.textContent = "Unlocking wallet…";
-        const unlockRes = await actions?.send?.({ type: "DUSK_UI_UNLOCK", password });
-        if (unlockRes?.error) throw new Error(unlockRes.error.message ?? "Unlock failed");
 
         // Fresh wallet: set a shielded checkpoint to "now" so we don't have to
         // sync shielded notes from genesis. This is best-effort.
@@ -424,17 +419,13 @@ export function onboardingImportView({ state, actions } = {}) {
         if ((pwd.value || "").length < 8) throw new Error("Password must be at least 8 characters");
         if (pwd.value !== pwd2.value) throw new Error("Passwords do not match");
 
-        busyBody.textContent = "Writing encrypted vault…";
+        busyBody.textContent = "Securing and unlocking wallet…";
         const res = await actions?.send?.({
           type: "DUSK_UI_CREATE_WALLET",
           mnemonic: m,
           password: pwd.value,
         });
         if (res?.error) throw new Error(res.error.message ?? "Failed to import wallet");
-
-        busyBody.textContent = "Unlocking wallet…";
-        const unlockRes = await actions?.send?.({ type: "DUSK_UI_UNLOCK", password: pwd.value });
-        if (unlockRes?.error) throw new Error(unlockRes.error.message ?? "Unlock failed");
 
         busyBody.textContent = "Finalizing…";
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };

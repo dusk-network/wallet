@@ -1,5 +1,6 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { isTauriRuntime } from "../platform/runtime.js";
+import { withStorageLock } from "./storageLock.js";
 import {
   decryptMnemonic,
   deserializeEncryptInfo,
@@ -203,7 +204,7 @@ export async function createVault(mnemonic, password) {
  * @param {string} password
  * @returns {Promise<string>} mnemonic
  */
-export async function unlockVault(password) {
+async function unlockVaultUnlocked(password) {
   const p = String(password ?? "");
 
   if (isTauriRuntime()) {
@@ -269,6 +270,10 @@ export async function unlockVault(password) {
     await recordUnlockFailure();
     throw new Error("Incorrect password");
   }
+}
+
+export function unlockVault(password) {
+  return withStorageLock(STORAGE_KEYS.UNLOCK_GUARD, () => unlockVaultUnlocked(password));
 }
 
 export async function clearVault() {
