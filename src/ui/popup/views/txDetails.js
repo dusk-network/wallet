@@ -170,6 +170,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     typeof gasLimit === "bigint" && typeof gasPrice === "bigint" && gasLimit > 0n && gasPrice > 0n
       ? gasLimit * gasPrice
       : null;
+  const actualFeeLux = tx?.feePaid != null ? safeBigInt(tx.feePaid, 0n) : null;
 
   const btnRow = h("div", { class: "btnrow" }, [
     h("button", {
@@ -240,6 +241,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
     tx?.fnName ? kvRow("Method", String(tx.fnName), { mono: true }) : null,
     tx?.deposit != null ? kvRow("Deposit", `${formatLuxShort(tx.deposit, UI_DISPLAY_DECIMALS)} DUSK`) : null,
     tx?.amount != null ? kvRow("Amount", `${formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS)} DUSK`) : null,
+    actualFeeLux != null
+      ? kvRow("Actual fee", `${formatLuxShort(actualFeeLux, UI_DISPLAY_DECIMALS)} DUSK`)
+      : null,
     maxFeeLux != null
       ? kvRow("Max fee", `${formatLuxShort(maxFeeLux, UI_DISPLAY_DECIMALS)} DUSK`)
       : gasLimit != null || gasPrice != null
@@ -253,6 +257,10 @@ export function txDetailsView(ov, { state, actions } = {}) {
     tx?.mempoolSeenAt ? kvRow("Mempool seen", fmtDate(tx.mempoolSeenAt)) : null,
     tx?.lastCheckedAt ? kvRow("Last checked", fmtDate(tx.lastCheckedAt)) : null,
     tx?.removedAt ? kvRow("Removed", fmtDate(tx.removedAt)) : null,
+    tx?.gasSpent != null ? kvRow("Gas spent", tx.gasSpent, { mono: true }) : null,
+    tx?.blockHeight != null ? kvRow("Block height", tx.blockHeight, { mono: true }) : null,
+    tx?.blockHash ? kvRow("Block hash", tx.blockHash, { mono: true }) : null,
+    tx?.finalizedAt != null ? kvRow("Finalized", fmtDate(tx.finalizedAt)) : null,
     tx?.executedAt ? kvRow("Executed", fmtDate(tx.executedAt)) : null,
     tx?.reservationStatus ? kvRow("Shielded reservation", String(tx.reservationStatus)) : null,
     tx?.recoveryReason ? kvRow("Recovery reason", txRecoveryReasonLabel(tx.recoveryReason)) : null,

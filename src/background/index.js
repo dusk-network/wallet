@@ -15,7 +15,7 @@ import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { bytesToHex } from "../shared/bytes.js";
-import { classifyTxPresence } from "../shared/txLifecycle.js";
+import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 
 import {
   engineCall,
@@ -263,21 +263,36 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
     return { status, origin, nodeUrl, error: "node_url_missing" };
   }
 
-  const presence = await classifyTxPresence(nodeUrl, hash);
+  const presence = await classifyTxPresence(nodeUrl, hash) ?? {
+    state: "unavailable",
+    error: "reconciliation_unavailable",
+  };
   if (presence.state === "executed_success") {
+    const finalized = finalizedTxMetadata(presence.tx);
+    const failed = terminalStatus === "failed";
     await patchTxMeta(hash, {
-      status: "executed",
-      error: undefined,
+      ...finalized,
+      status: failed ? "failed" : "executed",
+      error: failed ? meta?.error : undefined,
       executedAt: now,
       lastCheckedAt: now,
       reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
       reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
     });
-    return { status: "executed", ok: true, origin, nodeUrl };
+    return {
+      status: failed ? "failed" : "executed",
+      ok: !failed,
+      origin,
+      nodeUrl,
+      error: failed ? meta?.error || "" : "",
+      ...finalized,
+    };
   }
 
   if (presence.state === "executed_failed") {
+    const finalized = finalizedTxMetadata(presence.tx);
     await patchTxMeta(hash, {
+      ...finalized,
       status: "failed",
       error: presence.error || undefined,
       executedAt: now,
@@ -285,7 +300,14 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
       reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
       reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
     });
-    return { status: "failed", ok: false, origin, nodeUrl, error: presence.error || "" };
+    return {
+      status: "failed",
+      ok: false,
+      origin,
+      nodeUrl,
+      error: presence.error || "",
+      ...finalized,
+    };
   }
 
   if (terminalStatus) {
@@ -522,39 +544,46 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       // Offscreen notifies us when a tx lifecycle event is observed (best-effort).
       if (message?.type === "DUSK_TX_EXECUTED") {
         const hash = String(message.hash ?? "");
-        const ok = message.ok !== false; // default true
-        const error = message.error ? String(message.error) : "";
+        const observedOk = message.ok !== false;
+        const observedError = message.error ? String(message.error) : "";
+        const observedStatus = observedOk ? "executed" : "failed";
+        let reconciled = {
+          status: observedStatus,
+          origin: "Wallet",
+          nodeUrl: "",
+          error: observedError,
+        };
+        sendResponse({ ok: true });
 
         try {
           const meta = await getTxMeta(hash);
-          const origin = meta?.origin ?? "Wallet";
-          const nodeUrl = meta?.nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
           const now = Date.now();
-
           await patchTxMeta(hash, {
-            status: ok ? "executed" : "failed",
+            status: observedStatus,
             executedAt: now,
             lastCheckedAt: now,
-            error: ok ? undefined : error || undefined,
+            error: observedOk ? undefined : observedError || undefined,
             reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
             reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
           });
-
-          notifyTxExecuted({ hash, origin, ok, error, nodeUrl }).catch(() => {});
+          reconciled = await reconcileTxPresence(hash);
         } catch {
-          // Still notify even if metadata lookup fails.
-          notifyTxExecuted({ hash, origin: "Wallet", ok, error }).catch(() => {});
+          // Execution notifications remain best-effort when storage is unavailable.
         }
 
-        // Also broadcast to any open UI views so they can show a toast.
-        emitUiTxStatus({
+        const finalStatus = ["executed", "failed"].includes(reconciled.status)
+          ? reconciled.status
+          : observedStatus;
+        const ok = finalStatus === "executed";
+        const error = ok ? "" : reconciled.error || observedError;
+        notifyTxExecuted({
           hash,
-          status: ok ? "executed" : "failed",
+          origin: reconciled.origin,
           ok,
           error,
+          nodeUrl: reconciled.nodeUrl,
         }).catch(() => {});
-
-        sendResponse({ ok: true });
+        emitUiTxStatus({ hash, ...reconciled, status: finalStatus, ok, error }).catch(() => {});
         return;
       }
 

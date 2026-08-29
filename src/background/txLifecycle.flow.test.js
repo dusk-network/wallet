@@ -37,7 +37,8 @@ function makeLocalStorage() {
   };
 }
 
-vi.mock("../shared/txLifecycle.js", () => ({
+vi.mock("../shared/txLifecycle.js", async (importOriginal) => ({
+  ...(await importOriginal()),
   classifyTxPresence: mocks.classifyTxPresence,
 }));
 
@@ -243,9 +244,9 @@ describe("background Phoenix tx lifecycle flow", () => {
       pendingNullifiers: ["aa"],
     });
 
-    expect(mocks.sentMessages).toContainEqual(
+    await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed" })
-    );
+    ));
   });
 
   it("marks failed finalized shielded tx reservations spent", async () => {
@@ -266,10 +267,79 @@ describe("background Phoenix tx lifecycle flow", () => {
       reservationStatus: "spent",
       pendingNullifiers: ["aa"],
     });
-    expect(mocks.notifyTxExecuted).toHaveBeenCalledWith(expect.objectContaining({
+    await vi.waitFor(() => expect(mocks.notifyTxExecuted).toHaveBeenCalledWith(expect.objectContaining({
       hash,
       ok: false,
       error: "OutOfGas",
+    })));
+  });
+
+  it("still notifies when transaction storage is unavailable", async () => {
+    const getItem = globalThis.localStorage.getItem;
+    globalThis.localStorage.getItem = () => { throw new Error("storage unavailable"); };
+
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash: "0xstorage", ok: true });
+    await vi.waitFor(() => expect(mocks.notifyTxExecuted).toHaveBeenCalledWith({
+      hash: "0xstorage",
+      origin: "Wallet",
+      ok: true,
+      error: "",
+      nodeUrl: "",
+    }));
+    globalThis.localStorage.getItem = getItem;
+  });
+
+  it("enriches execution from the transaction's original network", async () => {
+    const hash = "0xenriched";
+    await seedTxMeta(hash, { gasPrice: "1" });
+    globalThis.localStorage.setItem(
+      "dusk_settings_v1",
+      JSON.stringify({ nodeUrl: "https://nodes.dusk.network" })
+    );
+    mocks.classifyTxPresence.mockResolvedValueOnce({
+      state: "executed_failed",
+      error: "OutOfGas",
+      tx: {
+        gasSpent: "9007199254740993",
+        blockHash: "block-1",
+        blockHeight: "18446744073709551615",
+        blockTimestamp: "1753000000",
+        tx: { gasPrice: "2" },
+      },
+    });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await vi.waitFor(async () => await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      gasSpent: "9007199254740993",
+      feePaid: "18014398509481986",
+      blockHeight: "18446744073709551615",
+      finalizedAt: 1_753_000_000_000,
+    }));
+    expect(mocks.classifyTxPresence).toHaveBeenCalledWith(
+      "https://testnet.nodes.dusk.network",
+      hash
+    );
+  });
+
+  it("does not replace an observed failure with successful enrichment", async () => {
+    const hash = "0xobserved-failure";
+    await seedTxMeta(hash);
+    mocks.classifyTxPresence.mockResolvedValueOnce({
+      state: "executed_success",
+      tx: { gasSpent: "1", tx: { gasPrice: "2" } },
+    });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: false, error: "OutOfGas" });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await vi.waitFor(async () => await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      feePaid: "2",
     }));
   });
 

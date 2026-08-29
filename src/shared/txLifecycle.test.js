@@ -13,7 +13,7 @@ describe("txLifecycle reconciliation", () => {
     for (const body of responses) {
       fetchMock.mockResolvedValueOnce({
         ok: true,
-        json: async () => body,
+        text: async () => JSON.stringify(body),
       });
     }
     globalThis.fetch = fetchMock;
@@ -56,6 +56,35 @@ describe("txLifecycle reconciliation", () => {
 
     await expect(classifyTxPresence("https://node.example", "abc")).resolves.toMatchObject({
       state: "not_found",
+    });
+  });
+
+  it("preserves large GraphQL integers and derives actual fee", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({
+        tx: {
+          id: "abc",
+          err: null,
+          memo: "value: 9007199254740993, unchanged",
+          gasSpent: "9007199254740993",
+          blockHash: "block-1",
+          blockHeight: "18446744073709551615",
+          blockTimestamp: "1753000000",
+          tx: { gasPrice: "2" },
+        },
+      }).replace('"9007199254740993"', "9007199254740993"),
+    });
+    const { classifyTxPresence, finalizedTxMetadata } = await import("./txLifecycle.js");
+
+    const presence = await classifyTxPresence("https://node.example", "abc");
+    expect(presence.tx.memo).toBe("value: 9007199254740993, unchanged");
+    expect(finalizedTxMetadata(presence.tx)).toMatchObject({
+      gasSpent: "9007199254740993",
+      gasPrice: "2",
+      feePaid: "18014398509481986",
+      blockHeight: "18446744073709551615",
+      finalizedAt: 1_753_000_000_000,
     });
   });
 

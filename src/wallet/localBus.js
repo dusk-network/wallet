@@ -17,7 +17,7 @@ import {
   executionEventOk,
   waitForTxExecution,
 } from "../shared/txExecution.js";
-import { classifyTxPresence } from "../shared/txLifecycle.js";
+import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { handleUiCommand } from "./uiCommands.js";
 import {
   configure,
@@ -502,6 +502,17 @@ export async function localSend(message) {
                   ? { reservationStatus: "spent", reservationUpdatedAt: now }
                   : {}),
               });
+
+              const presence = await classifyTxPresence(nodeUrl, hash);
+              if (presence.state === "executed_success" || presence.state === "executed_failed") {
+                const finalizedOk = ok && presence.state === "executed_success";
+                await patchTxMeta(hash, {
+                  ...finalizedTxMetadata(presence.tx),
+                  status: finalizedOk ? "executed" : "failed",
+                  error: finalizedOk ? undefined : error || presence.error || undefined,
+                  lastCheckedAt: Date.now(),
+                });
+              }
             } catch (e) {
               const meta = await getTxMeta(hash);
               const hasExecution = meta?.status === "executed" || meta?.status === "failed";

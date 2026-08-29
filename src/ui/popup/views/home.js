@@ -436,7 +436,10 @@ export function homeView(ov, { state, actions } = {}) {
       acctLabel = "";
     }
 
-    const subText = [sub || (hash ? truncateMiddle(hash, 10, 8) : ""), acctLabel]
+    const fee = tx?.feePaid != null
+      ? `${formatLuxShort(tx.feePaid, UI_DISPLAY_DECIMALS)} DUSK fee`
+      : "";
+    const subText = [sub || (hash ? truncateMiddle(hash, 10, 8) : ""), acctLabel, fee]
       .filter(Boolean)
       .join(" · ");
 
