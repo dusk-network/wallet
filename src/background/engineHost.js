@@ -9,6 +9,7 @@ const host = ENGINE_HOST === "enginePage" ? enginePageHost : offscreenHost;
 export const engineCall = (...args) => host.engineCall(...args);
 export const ensureEngineConfigured = (...args) => host.ensureEngineConfigured(...args);
 export const getEngineStatus = (...args) => host.getEngineStatus(...args);
+export const getEngineStatusStrict = (...args) => host.getEngineStatusStrict(...args);
 export const invalidateEngineConfig = (...args) =>
   host.invalidateEngineConfig(...args);
 export const handleEngineReady = (...args) =>

@@ -1,8 +1,9 @@
 // Background service worker entry.
 
-import { createVault, loadVault, unlockVault } from "../shared/vault.js";
+import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import {
   approveOrigin,
+  clearPermissions,
   getPermissionForOrigin,
   getPermissions,
   revokeOrigin,
@@ -16,16 +17,18 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { bytesToHex } from "../shared/bytes.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
+import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 
 import {
   engineCall,
   ensureEngineConfigured,
   getEngineStatus,
+  getEngineStatusStrict,
   invalidateEngineConfig,
   handleEngineReady,
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
-import { getPending, resolvePendingDecision } from "./pending.js";
+import { cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
 import {
   broadcastChainChangedAll,
   broadcastProfilesChangedAll,
@@ -151,6 +154,31 @@ async function ensureActivityTimestamp() {
   const now = Date.now();
   await updateActivity(now);
   return now;
+}
+
+async function lockWallet(reason) {
+  await engineCall("engine_lock");
+  if ((await getEngineStatusStrict())?.isUnlocked) throw new Error("Wallet lock did not complete");
+  cancelPendingApprovals();
+  await clearActivity();
+  broadcastProfilesChangedAll().catch(() => {});
+  emitUiLockState(false, reason).catch(() => {});
+}
+
+async function unlockEngine(mnemonic) {
+  try {
+    return await engineCall(
+      "engine_unlock",
+      { mnemonic },
+      { timeoutMs: 120_000 }
+    );
+  } catch (error) {
+    await engineCall("engine_lock");
+    if ((await getEngineStatusStrict())?.isUnlocked) {
+      throw new Error("Wallet lock did not complete after unlock failure");
+    }
+    throw error;
+  }
 }
 
 async function ensureActivityTimestampIfUnlocked() {
@@ -407,10 +435,7 @@ async function handleAutoLockAlarm() {
   if (elapsed >= timeoutMs) {
     console.log("[Dusk] Auto-locking wallet due to inactivity.");
     try {
-      await engineCall("engine_lock");
-      await clearActivity();
-      emitUiLockState(false, "auto_lock").catch(() => {});
-      broadcastProfilesChangedAll().catch(() => {});
+      await withStorageLock(WALLET_LIFECYCLE_LOCK, () => lockWallet("auto_lock"));
     } catch (e) {
       console.error("[Dusk] Auto-lock failed:", e);
     }
@@ -517,6 +542,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI heartbeat to reset auto-lock timer.
       if (message?.type === "DUSK_UI_ACTIVITY") {
+        const rid = String(message.rid ?? "");
+        if (rid && !getPending(rid)) {
+          sendResponse({ ok: false });
+          return;
+        }
         await updateActivity();
         sendResponse({ ok: true });
         return;
@@ -693,27 +723,25 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       // UI wants to unlock
       if (message?.type === "DUSK_UI_UNLOCK") {
         const password = message.password;
-        const mnemonic = await unlockVault(password);
+        const accounts = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const current = await getEngineStatusStrict();
+          if (current?.isUnlocked) {
+            await updateActivity();
+            setupAutoLockAlarm().catch(console.error);
+            return current.accounts ?? [];
+          }
 
-        await ensureEngineConfigured();
-        const result = await engineCall(
-          "engine_unlock",
-          { mnemonic },
-          { timeoutMs: 120_000 }
-        );
-
-        // result is expected to contain accounts, if not, ask status.
-        const accounts = Array.isArray(result?.accounts)
-          ? result.accounts
-          : (await getEngineStatus()).accounts;
-
-        // Reset activity timer and ensure auto-lock alarm is running.
-        await updateActivity();
-        setupAutoLockAlarm().catch(console.error);
-
-        // Notify dApps that profiles are now available.
-        broadcastProfilesChangedAll().catch(() => {});
-        emitUiLockState(true, "unlock").catch(() => {});
+          const mnemonic = await unlockVault(password);
+          await ensureEngineConfigured();
+          const result = await unlockEngine(mnemonic);
+          await updateActivity();
+          setupAutoLockAlarm().catch(console.error);
+          broadcastProfilesChangedAll().catch(() => {});
+          emitUiLockState(true, "unlock").catch(() => {});
+          return Array.isArray(result?.accounts)
+            ? result.accounts
+            : (await getEngineStatusStrict()).accounts;
+        });
 
         sendResponse({ ok: true, accounts });
         return;
@@ -721,12 +749,17 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI wants to lock
       if (message?.type === "DUSK_UI_LOCK") {
-        await engineCall("engine_lock");
-        await clearActivity();
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, () => lockWallet("manual_lock"));
+        sendResponse({ ok: true });
+        return;
+      }
 
-        // Notify dApps that profiles are no longer available.
-        broadcastProfilesChangedAll().catch(() => {});
-        emitUiLockState(false, "manual_lock").catch(() => {});
+      if (message?.type === "DUSK_UI_RESET_WALLET") {
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          await lockWallet("reset");
+          await clearPermissions();
+          await clearVault();
+        });
         sendResponse({ ok: true });
         return;
       }
@@ -746,12 +779,21 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const maxIndex = Math.max(0, Number(settings?.accountCount ?? 1) - 1);
         const clamped = Math.min(Math.floor(accountIndex), maxIndex);
 
-        const status = await getEngineStatus();
-        const account = Array.isArray(status?.accounts) ? status.accounts[clamped] : "";
-        await approveOrigin(origin, {
-          profileId: `account:${clamped}:${account || ""}`,
-          accountIndex: clamped,
-          grants: { publicAccount: true, shieldedReceiveAddress: false },
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const status = await getEngineStatusStrict();
+          if (!status.isUnlocked) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+          }
+          const account = Array.isArray(status.accounts) ? status.accounts[clamped] : "";
+          if (!account) {
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Account is not available");
+          }
+          cancelPendingApprovals(origin, "Connected profile changed");
+          await approveOrigin(origin, {
+            profileId: `account:${clamped}:${account}`,
+            accountIndex: clamped,
+            grants: { publicAccount: true, shieldedReceiveAddress: false },
+          });
         });
         sendResponse({ ok: true });
         return;
@@ -764,26 +806,32 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "origin is required");
         }
 
-        const status = await getEngineStatus();
-        if (!status.isUnlocked) {
-          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-        }
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const status = await getEngineStatusStrict();
+          if (!status.isUnlocked) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+          }
 
-        const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
-        const idxRaw =
-          status.selectedAccountIndex !== undefined && status.selectedAccountIndex !== null
-            ? Number(status.selectedAccountIndex)
-            : Number((await getSettings())?.selectedAccountIndex ?? 0);
-        const idx = Math.max(
-          0,
-          Math.min(Math.floor(idxRaw) || 0, Math.max(0, accounts.length - 1))
-        );
-        const account = accounts[idx] ?? "";
+          const accounts = Array.isArray(status.accounts) ? status.accounts : [];
+          const idxRaw =
+            status.selectedAccountIndex !== undefined && status.selectedAccountIndex !== null
+              ? Number(status.selectedAccountIndex)
+              : Number((await getSettings())?.selectedAccountIndex ?? 0);
+          const idx = Math.max(
+            0,
+            Math.min(Math.floor(idxRaw) || 0, Math.max(0, accounts.length - 1))
+          );
+          const account = accounts[idx] ?? "";
+          if (!account) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "No wallet profile is available");
+          }
 
-        await approveOrigin(origin, {
-          profileId: `account:${idx}:${account || ""}`,
-          accountIndex: idx,
-          grants: { publicAccount: true, shieldedReceiveAddress: false },
+          cancelPendingApprovals(origin, "Connected profile changed");
+          await approveOrigin(origin, {
+            profileId: `account:${idx}:${account}`,
+            accountIndex: idx,
+            grants: { publicAccount: true, shieldedReceiveAddress: false },
+          });
         });
         sendResponse({ ok: true });
         return;
@@ -796,23 +844,50 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "origin is required");
         }
 
-        await revokeOrigin(origin);
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          cancelPendingApprovals(origin, "Site disconnected");
+          await revokeOrigin(origin);
+        });
         sendResponse({ ok: true });
         return;
       }
 
-      // UI creates/imports wallet
-      if (message?.type === "DUSK_UI_CREATE_WALLET") {
-        const { mnemonic, password } = message;
-        if (!mnemonic || !password) {
-          throw rpcError(
-            ERROR_CODES.INVALID_PARAMS,
-            "mnemonic and password required"
-          );
-        }
-        await createVault(mnemonic, password);
-        // Do not auto-unlock, keep locked until user unlocks.
+      if (message?.type === "DUSK_UI_CLEAR_PERMISSIONS") {
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          cancelPendingApprovals(null, "Sites disconnected");
+          await clearPermissions();
+        });
         sendResponse({ ok: true });
+        return;
+      }
+
+      // UI creates/imports and unlocks a wallet as one serialized lifecycle operation.
+      if (message?.type === "DUSK_UI_CREATE_WALLET") {
+        const accounts = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const { mnemonic, password } = message;
+          if (!mnemonic || !password) {
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "mnemonic and password required");
+          }
+          if (await loadVault()) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Reset the existing wallet before replacing it");
+          }
+          if ((await getEngineStatusStrict())?.isUnlocked) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock or reset the current wallet first");
+          }
+
+          await createVault(mnemonic, password);
+          await ensureEngineConfigured();
+          const result = await unlockEngine(String(mnemonic));
+          await updateActivity();
+          setupAutoLockAlarm().catch(console.error);
+          broadcastProfilesChangedAll().catch(() => {});
+          emitUiLockState(true, "create").catch(() => {});
+          return Array.isArray(result?.accounts)
+            ? result.accounts
+            : (await getEngineStatusStrict()).accounts;
+        });
+
+        sendResponse({ ok: true, accounts });
         return;
       }
 
@@ -867,43 +942,46 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
-        // Reset network status when endpoints change (will be checked in background)
-        await resetNetworkStatus();
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          cancelPendingApprovals(null, "Network changed");
+          // Reset network status when endpoints change (will be checked in background)
+          await resetNetworkStatus();
 
-        // Store endpoints (prover/archiver may be inferred inside setSettings
-        // when omitted).
-        const nextSettings = await setSettings({
-          nodeUrl,
-          ...(proverUrl ? { proverUrl } : {}),
-          ...(archiverUrl ? { archiverUrl } : {}),
-        });
+          // Store endpoints (prover/archiver may be inferred inside setSettings
+          // when omitted).
+          const nextSettings = await setSettings({
+            nodeUrl,
+            ...(proverUrl ? { proverUrl } : {}),
+            ...(archiverUrl ? { archiverUrl } : {}),
+          });
 
-        // Force the engine to pick up the new config immediately.
-        // We no longer roll back on failure - the UI will show offline status.
-        try {
-          invalidateEngineConfig();
-          await ensureEngineConfigured();
-        } catch {
-          // Engine config failed, but we still save the settings.
-          // The UI will show offline status via polling.
-        }
+          // Force the engine to pick up the new config immediately.
+          // We no longer roll back on failure - the UI will show offline status.
+          try {
+            invalidateEngineConfig();
+            await ensureEngineConfigured();
+          } catch {
+            // Engine config failed, but we still save the settings.
+            // The UI will show offline status via polling.
+          }
 
-        // Notify dApps that the chain has changed.
-        broadcastChainChangedAll().catch(() => {});
+          // Notify dApps that the chain has changed.
+          broadcastChainChangedAll().catch(() => {});
 
-        // Kick off a background status check (don't await).
-        checkAllEndpoints({
-          nodeUrl: nextSettings.nodeUrl,
-          proverUrl: nextSettings.proverUrl,
-          archiverUrl: nextSettings.archiverUrl,
-        }).catch(() => {});
+          // Kick off a background status check (don't await).
+          checkAllEndpoints({
+            nodeUrl: nextSettings.nodeUrl,
+            proverUrl: nextSettings.proverUrl,
+            archiverUrl: nextSettings.archiverUrl,
+          }).catch(() => {});
 
-        sendResponse({
-          ok: true,
-          nodeUrl: nextSettings.nodeUrl,
-          proverUrl: nextSettings.proverUrl,
-          archiverUrl: nextSettings.archiverUrl,
-          networkName: networkNameFromNodeUrl(nextSettings.nodeUrl),
+          sendResponse({
+            ok: true,
+            nodeUrl: nextSettings.nodeUrl,
+            proverUrl: nextSettings.proverUrl,
+            archiverUrl: nextSettings.archiverUrl,
+            networkName: networkNameFromNodeUrl(nextSettings.nodeUrl),
+          });
         });
         return;
       }

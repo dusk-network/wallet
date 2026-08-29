@@ -7,10 +7,13 @@ describe("background lock lifecycle conformance", () => {
     const source = await readFile(path.resolve(process.cwd(), "src/background/index.js"), "utf8");
 
     expect(source).toMatch(
-      /message\?\.type === "DUSK_UI_LOCK"[\s\S]*?engineCall\("engine_lock"\)[\s\S]*?broadcastProfilesChangedAll/
+      /async function lockWallet[\s\S]*?engineCall\("engine_lock"\)[\s\S]*?broadcastProfilesChangedAll/
     );
     expect(source).toMatch(
-      /if \(elapsed >= timeoutMs\) \{[\s\S]*?engineCall\("engine_lock"\)[\s\S]*?broadcastProfilesChangedAll/
+      /message\?\.type === "DUSK_UI_LOCK"[\s\S]*?lockWallet\("manual_lock"\)/
+    );
+    expect(source).toMatch(
+      /if \(elapsed >= timeoutMs\) \{[\s\S]*?lockWallet\("auto_lock"\)/
     );
   });
 
@@ -18,7 +21,7 @@ describe("background lock lifecycle conformance", () => {
     const source = await readFile(path.resolve(process.cwd(), "src/background/index.js"), "utf8");
 
     expect(source).toMatch(
-      /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockVault\(password\)[\s\S]*?engineCall\(\s*"engine_unlock"[\s\S]*?broadcastProfilesChangedAll/
+      /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockVault\(password\)[\s\S]*?unlockEngine\(mnemonic\)[\s\S]*?broadcastProfilesChangedAll/
     );
   });
 });

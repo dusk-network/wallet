@@ -50,7 +50,8 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
         const canRetry =
           isTransientMessageError(error) &&
           attempt < 4 &&
-          String(method) !== "dusk_sendTransaction";
+          String(method) !== "dusk_sendTransaction" &&
+          String(method) !== "engine_unlock";
         if (!canRetry) throw error;
         await delay(50 * (attempt + 1));
       }
@@ -85,7 +86,7 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
   }
 
   async function engineCall(method, params, options = {}) {
-    const hostGeneration = await ensureHost();
+    const hostGeneration = await ensureHost(method);
     if (lastConfig && lastConfig.hostGeneration !== hostGeneration) {
       await configureReadyEngine(hostGeneration);
     }
@@ -93,19 +94,23 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
   }
 
   async function ensureEngineConfigured() {
-    const hostGeneration = await ensureHost();
+    const hostGeneration = await ensureHost("engine_config");
     await configureReadyEngine(hostGeneration);
+  }
+
+  async function getEngineStatusStrict() {
+    const status = await engineCall("engine_status");
+    return {
+      isUnlocked: Boolean(status?.isUnlocked),
+      accounts: Array.isArray(status?.accounts) ? status.accounts : [],
+      addresses: Array.isArray(status?.addresses) ? status.addresses : [],
+      selectedAccountIndex: Number(status?.selectedAccountIndex ?? 0) || 0,
+    };
   }
 
   async function getEngineStatus() {
     try {
-      const status = await engineCall("engine_status");
-      return {
-        isUnlocked: Boolean(status?.isUnlocked),
-        accounts: Array.isArray(status?.accounts) ? status.accounts : [],
-        addresses: Array.isArray(status?.addresses) ? status.addresses : [],
-        selectedAccountIndex: Number(status?.selectedAccountIndex ?? 0) || 0,
-      };
+      return await getEngineStatusStrict();
     } catch {
       return { isUnlocked: false, accounts: [], addresses: [], selectedAccountIndex: 0 };
     }
@@ -115,6 +120,7 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
     engineCall,
     ensureEngineConfigured,
     getEngineStatus,
+    getEngineStatusStrict,
     invalidateEngineConfig,
   };
 }

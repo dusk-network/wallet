@@ -4,9 +4,11 @@
 // This lets the same UI (popup/full) run without chrome.runtime messaging,
 // which is how we reuse it in Tauri desktop/mobile.
 
-import { createVault, loadVault, unlockVault } from "../shared/vault.js";
+import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import { getSettings, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
+import { clearPermissions } from "../shared/permissions.js";
+import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
@@ -51,12 +53,6 @@ import {
   getStakeOwnerStatus,
   getSozuStatus,
 } from "../shared/walletEngine.js";
-
-// Prevent users from accidentally triggering expensive vault / stronghold
-// operations multiple times (e.g. double-clicking "Create wallet" while
-// Argon2 + snapshot encryption is running).
-let unlockInFlight = null;
-let createWalletInFlight = null;
 
 function nullifierHexes(value) {
   const out = [];
@@ -134,68 +130,53 @@ export async function localSend(message) {
       getEngineStatus: engineStatus,
     });
     if (common) return common;
-    // UI wants to unlock
+    // Wallet lifecycle operations share one lock so persisted and in-memory
+    // identities cannot be changed independently.
     if (message?.type === "DUSK_UI_UNLOCK") {
-      // Fast path: if the engine is already unlocked, do not re-load the vault.
-      // This helps onboarding flows where we may have just created/imported a
-      // wallet and already unlocked it locally.
-      if (isUnlocked()) {
-        return { ok: true, accounts: getAccounts() };
-      }
-
-      // Coalesce multiple unlock clicks into one expensive vault decrypt.
-      if (unlockInFlight) {
-        return await unlockInFlight;
-      }
-
-      unlockInFlight = (async () => {
-        const password = message.password;
-        const mnemonic = await unlockVault(password);
+      return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        if (isUnlocked()) return { ok: true, accounts: getAccounts() };
+        const mnemonic = await unlockVault(message.password);
         await ensureEngineConfigured();
-        // Unlock uses the decrypted mnemonic.
         await unlockWithMnemonic(mnemonic);
         return { ok: true, accounts: getAccounts() };
-      })();
-
-      try {
-        return await unlockInFlight;
-      } finally {
-        unlockInFlight = null;
-      }
+      });
     }
 
-    // UI wants to lock
     if (message?.type === "DUSK_UI_LOCK") {
-      lock();
-      return { ok: true };
+      return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        lock();
+        if (isUnlocked()) throw new Error("Wallet lock did not complete");
+        return { ok: true };
+      });
     }
 
-    // UI creates/imports wallet
-    if (message?.type === "DUSK_UI_CREATE_WALLET") {
-      // Coalesce multiple create/import clicks into one Stronghold write.
-      if (createWalletInFlight) {
-        return await createWalletInFlight;
-      }
+    if (message?.type === "DUSK_UI_RESET_WALLET") {
+      return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        lock();
+        if (isUnlocked()) throw new Error("Wallet lock did not complete");
+        await clearPermissions();
+        await clearVault();
+        return { ok: true };
+      });
+    }
 
-      createWalletInFlight = (async () => {
+    if (message?.type === "DUSK_UI_CREATE_WALLET") {
+      return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         const { mnemonic, password } = message;
         if (!mnemonic || !password) {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "mnemonic and password required");
         }
+        if (await loadVault()) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Reset the existing wallet before replacing it");
+        }
+        if (isUnlocked()) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock or reset the current wallet first");
+        }
         await createVault(mnemonic, password);
-        // UX improvement for local runtimes (Tauri/mobile/desktop): immediately
-        // unlock the engine with the provided mnemonic. This avoids an extra
-        // round-trip to Stronghold and makes onboarding feel instant.
         await ensureEngineConfigured();
         await unlockWithMnemonic(String(mnemonic));
         return { ok: true, accounts: getAccounts() };
-      })();
-
-      try {
-        return await createWalletInFlight;
-      } finally {
-        createWalletInFlight = null;
-      }
+      });
     }
 
     // UI checks status

@@ -102,10 +102,12 @@ describe("engine bridge", () => {
     await expect(bridge.engineCall("engine_status")).resolves.toBe("ready");
     expect(mocks.runtimeSendMessage).toHaveBeenCalledTimes(2);
 
-    mocks.runtimeSendMessage.mockReset();
-    mocks.runtimeSendMessage.mockRejectedValue(new Error("Receiving end does not exist"));
-    await expect(bridge.engineCall("dusk_sendTransaction")).rejects.toThrow("Receiving end does not exist");
-    expect(mocks.runtimeSendMessage).toHaveBeenCalledTimes(1);
+    for (const method of ["dusk_sendTransaction", "engine_unlock"]) {
+      mocks.runtimeSendMessage.mockReset();
+      mocks.runtimeSendMessage.mockRejectedValue(new Error("Receiving end does not exist"));
+      await expect(bridge.engineCall(method)).rejects.toThrow("Receiving end does not exist");
+      expect(mocks.runtimeSendMessage).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("normalizes engine status and falls back to locked", async () => {
@@ -128,5 +130,18 @@ describe("engine bridge", () => {
       addresses: [],
       selectedAccountIndex: 0,
     });
+
+    mocks.runtimeSendMessage.mockRejectedValueOnce(new Error("offline"));
+    await expect(bridge.getEngineStatusStrict()).rejects.toThrow("offline");
+  });
+
+  it("tells the host which method needs transport", async () => {
+    const ensureHost = vi.fn(async () => 1);
+    mocks.runtimeSendMessage.mockResolvedValue({ result: true });
+    const bridge = createEngineBridge({ ensureHost, noResponseMessage: "No engine" });
+
+    await bridge.engineCall("engine_lock");
+
+    expect(ensureHost).toHaveBeenCalledWith("engine_lock");
   });
 });

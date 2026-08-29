@@ -523,6 +523,8 @@ const state = {
   },
 };
 
+let unlockGeneration = 0;
+
 function getWalletId() {
   // Empty when locked.
   return String(state.walletId || "").trim();
@@ -697,7 +699,7 @@ export function isUnlocked() {
   return state.unlocked;
 }
 
-export function lock() {
+function clearWalletState() {
   state.unlocked = false;
   state.mnemonic = null;
   state.walletId = "";
@@ -735,11 +737,17 @@ export function lock() {
   // We keep the Network instance around; it holds no secrets and can stay connected.
 }
 
+export function lock() {
+  unlockGeneration += 1;
+  clearWalletState();
+}
+
 /**
  * Unlock engine with mnemonic (already decrypted from vault)
  * @param {string} mnemonic
  */
 export async function unlockWithMnemonic(mnemonic) {
+  const generation = ++unlockGeneration;
   const unlockStart = engineNow();
   debugEngine("unlock_start");
   try {
@@ -759,19 +767,6 @@ export async function unlockWithMnemonic(mnemonic) {
     throw err;
   }
 
-  // If the engine was already unlocked, wipe previous secret state first.
-  // This prevents confusing cross-wallet caching effects.
-  if (state.unlocked) {
-    try {
-      lock();
-    } catch {
-      // ignore
-    }
-    debugEngine("unlock_state_reset", {
-      totalMs: engineSince(unlockStart),
-    });
-  }
-
   const normalizeStart = engineNow();
   mnemonic = mnemonic.trim().replace(/\s+/g, " ");
   debugEngine("unlock_mnemonic_normalized", {
@@ -780,55 +775,64 @@ export async function unlockWithMnemonic(mnemonic) {
   });
 
   const seedStart = engineNow();
-  const seed = Uint8Array.from(mnemonicToSeedSync(mnemonic));
-  debugEngine("unlock_seed_ready", {
-    ms: engineSince(seedStart),
-    totalMs: engineSince(unlockStart),
-  });
+  let seed;
+  let committed = false;
+  let p0;
 
-  // ProfileGenerator needs a seeder fn; return a copy each time.
-  const profileGenStart = engineNow();
-  const seeder = async () => seed.slice();
-  const pg = new ProfileGenerator(seeder);
-  debugEngine("unlock_profile_generator_ready", {
-    ms: engineSince(profileGenStart),
-    totalMs: engineSince(unlockStart),
-  });
+  try {
+    seed = Uint8Array.from(mnemonicToSeedSync(mnemonic));
+    debugEngine("unlock_seed_ready", {
+      ms: engineSince(seedStart),
+      totalMs: engineSince(unlockStart),
+    });
 
-  // Generate default profile (index 0)
-  const profileStart = engineNow();
-  const p0 = await pg.default;
-  debugEngine("unlock_profile_default_ready", {
-    ms: engineSince(profileStart),
-    totalMs: engineSince(unlockStart),
-  });
+    // ProfileGenerator needs a seeder fn; return a copy each time.
+    const profileGenStart = engineNow();
+    const seeder = async () => seed.slice();
+    const pg = new ProfileGenerator(seeder);
+    debugEngine("unlock_profile_generator_ready", {
+      ms: engineSince(profileGenStart),
+      totalMs: engineSince(unlockStart),
+    });
 
-  state.unlocked = true;
-  state.mnemonic = mnemonic;
-  state.seed = seed;
-  state.walletId = p0?.account?.toString?.() ?? "";
-  state.profileGenerator = pg;
+    // Generate default profile (index 0)
+    const profileStart = engineNow();
+    p0 = await pg.default;
+    debugEngine("unlock_profile_default_ready", {
+      ms: engineSince(profileStart),
+      totalMs: engineSince(unlockStart),
+    });
 
-  // Restore derived accounts (public + shielded) based on persisted settings.
-  const targetCountRaw = Number(engineConfig.accountCount ?? 1);
-  const targetCount =
-    Number.isFinite(targetCountRaw) && targetCountRaw >= 1
-      ? Math.floor(targetCountRaw)
-      : 1;
-  const cappedCount = Math.min(targetCount, MAX_ACCOUNT_COUNT);
+    // Restore derived accounts (public + shielded) based on persisted settings.
+    const targetCountRaw = Number(engineConfig.accountCount ?? 1);
+    const targetCount =
+      Number.isFinite(targetCountRaw) && targetCountRaw >= 1
+        ? Math.floor(targetCountRaw)
+        : 1;
+    const cappedCount = Math.min(targetCount, MAX_ACCOUNT_COUNT);
+    const profiles = [p0];
+    for (let i = 1; i < cappedCount; i++) profiles.push(await pg.next());
 
-  const profiles = [p0];
-  for (let i = 1; i < cappedCount; i++) {
-    // ProfileGenerator.next() skips default and generates sequential indices.
-    profiles.push(await pg.next());
+    // Finish all throwable candidate work before replacing the current wallet.
+    const walletId = p0?.account?.toString?.() ?? "";
+    if (!walletId) throw new Error("Derived profile has no wallet ID");
+    const selRaw = Number(engineConfig.selectedAccountIndex ?? 0);
+    const sel = Number.isFinite(selRaw) && selRaw >= 0 ? Math.floor(selRaw) : 0;
+    const currentIndex = Math.min(sel, Math.max(0, profiles.length - 1));
+
+    if (generation !== unlockGeneration) throw new Error("Unlock superseded");
+    if (state.unlocked) clearWalletState();
+    state.mnemonic = mnemonic;
+    state.seed = seed;
+    state.walletId = walletId;
+    state.profileGenerator = pg;
+    state.profiles = profiles;
+    state.currentIndex = currentIndex;
+    state.unlocked = true;
+    committed = true;
+  } finally {
+    if (!committed && seed) seed.fill(0);
   }
-
-  state.profiles = profiles;
-
-  const selRaw = Number(engineConfig.selectedAccountIndex ?? 0);
-  const sel =
-    Number.isFinite(selRaw) && selRaw >= 0 ? Math.floor(selRaw) : 0;
-  state.currentIndex = Math.min(sel, Math.max(0, profiles.length - 1));
   debugEngine("unlock_state_set", {
     totalMs: engineSince(unlockStart),
   });
@@ -893,6 +897,20 @@ function getSelectedProfileIndex() {
 
 function resolveProfileIndex(profileIndex, fallback = getSelectedProfileIndex()) {
   return normalizeProfileIndex(profileIndex, fallback);
+}
+
+async function assertApprovalContext(params, profileIndex) {
+  const expected = params?._approvalContext;
+  if (!expected) return;
+  const profile = await ensureProfileIndex(profileIndex);
+  if (
+    expected.walletId !== getWalletId() ||
+    expected.profileIndex !== profileIndex ||
+    expected.account !== profile.account.toString() ||
+    expected.nodeUrl !== String(engineConfig.nodeUrl ?? "")
+  ) {
+    throw new Error("Wallet changed while awaiting approval");
+  }
 }
 
 function getLoadedProfiles() {
@@ -1317,10 +1335,12 @@ function formatWsError(err, nodeUrl) {
   return `Failed to connect to node ${nodeUrl} (unknown websocket error)`;
 }
 
-export async function getPublicBalance({ profileIndex } = {}) {
+export async function getPublicBalance(params = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   await ensureNetwork();
-  const profile = await ensureProfileIndex(profileIndex ?? getSelectedProfileIndex());
+  const profileIndex = resolveProfileIndex(params.profileIndex);
+  const profile = await ensureProfileIndex(profileIndex);
+  await assertApprovalContext(params, profileIndex);
   return await withTimeout(
     state.bookkeeper.balance(profile.account),
     12_000,
@@ -2506,13 +2526,17 @@ async function stakeOwnerOptions(params, stakeProfile) {
 
 async function executeStakeTransaction(idx, params, makeTx) {
   if (!isShieldedPayment(params)) {
-    const result = await executeMoonlightTransaction(state.network, await makeTx(), idx);
+    const tx = await makeTx();
+    await assertApprovalContext(params, idx);
+    const result = await executeMoonlightTransaction(state.network, tx, idx);
     return { hash: result.hash, nonce: result.nonce };
   }
 
   return await withPhoenixSpendMutex(idx, async () => {
     await ensureShieldedSpendReady(idx);
-    const result = await state.network.execute(await makeTx());
+    const tx = await makeTx();
+    await assertApprovalContext(params, idx);
+    const result = await state.network.execute(tx);
     await persistPendingNullifiersForTx(result, idx);
     return { hash: result.hash, nullifiers: result.nullifiers };
   });
@@ -2601,6 +2625,7 @@ export async function transfer(params) {
         }
       }
 
+      await assertApprovalContext(params, idx);
       const result = await network.execute(tx);
       await persistPendingNullifiersForTx(result, idx);
       return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
@@ -2616,6 +2641,7 @@ export async function transfer(params) {
   const gas = normalizeGas(params.gas);
   if (gas) tx = tx.gas(gas);
 
+  await assertApprovalContext(params, idx);
   const result = await executeMoonlightTransaction(network, tx, idx);
 
   // network.execute returns the tx object returned by tx.build, frozen
@@ -2689,6 +2715,7 @@ async function sendTransactionUnlocked(params) {
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
 
+    await assertApprovalContext(params, idx);
     const result = await executeMoonlightTransaction(network, tx, idx);
     return { hash: result.hash, nonce: result.nonce };
   }
@@ -2713,6 +2740,7 @@ async function sendTransactionUnlocked(params) {
       const gas = normalizeGas(params.gas);
       if (gas) tx = tx.gas(gas);
 
+      await assertApprovalContext(params, idx);
       const result = await network.execute(tx);
       await persistPendingNullifiersForTx(result, idx);
       return { hash: result.hash, nullifiers: result.nullifiers };
@@ -2897,6 +2925,7 @@ async function sendTransactionUnlocked(params) {
           }
         }
 
+        await assertApprovalContext(params, idx);
         const result = await network.execute(tx);
         await persistPendingNullifiersForTx(result, idx);
         return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
@@ -2911,6 +2940,7 @@ async function sendTransactionUnlocked(params) {
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
 
+    await assertApprovalContext(params, idx);
     const result = await executeMoonlightTransaction(network, tx, idx);
     return { hash: result.hash, nonce: result.nonce };
   }
@@ -3061,7 +3091,8 @@ export async function signMessage(params) {
   const messageLen = messageBytes.length;
   const messageHash = await sha256Hex(messageBytes);
 
-  const profile = await ensureProfileIndex(params.profileIndex ?? getSelectedProfileIndex());
+  const profileIndex = resolveProfileIndex(params.profileIndex);
+  const profile = await ensureProfileIndex(profileIndex);
   const memo = [
     "Dusk Connect SignMessage v1",
     `Origin: ${origin}`,
@@ -3071,6 +3102,7 @@ export async function signMessage(params) {
     `Message Len: ${messageLen}`,
   ].join("\n");
 
+  await assertApprovalContext(params, profileIndex);
   const signed = await signMemoAsMoonlight(profile, memo);
   return Object.freeze({
     account: signed.account,
@@ -3114,7 +3146,8 @@ export async function signAuth(params) {
     expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   }
 
-  const profile = await ensureProfileIndex(params.profileIndex ?? getSelectedProfileIndex());
+  const profileIndex = resolveProfileIndex(params.profileIndex);
+  const profile = await ensureProfileIndex(profileIndex);
   const lines = [
     "Dusk Connect SignAuth v1",
     `Account: ${profile.account.toString()}`,
@@ -3127,6 +3160,7 @@ export async function signAuth(params) {
   ].filter(Boolean);
   const message = lines.join("\n");
 
+  await assertApprovalContext(params, profileIndex);
   const signed = await signMemoAsMoonlight(profile, message);
   return Object.freeze({
     account: signed.account,

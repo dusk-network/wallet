@@ -51,11 +51,18 @@ vi.mock("../background/engineHost.js", () => ({
     addresses: ["addr0"],
     selectedAccountIndex: 0,
   })),
+  getEngineStatusStrict: vi.fn(async () => ({
+    isUnlocked: true,
+    accounts: ["acct0"],
+    addresses: ["addr0"],
+    selectedAccountIndex: 0,
+  })),
   invalidateEngineConfig: vi.fn(() => {}),
   handleEngineReady: vi.fn(() => {}),
 }));
 
 vi.mock("../background/pending.js", () => ({
+  cancelPendingApprovals: vi.fn(),
   getPending: vi.fn(() => null),
   requestUserApproval: mocks.requestUserApproval,
   resolvePendingDecision: vi.fn(() => ({ ok: true })),

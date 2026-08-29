@@ -97,5 +97,6 @@ export const {
   engineCall,
   ensureEngineConfigured,
   getEngineStatus,
+  getEngineStatusStrict,
   invalidateEngineConfig,
 } = bridge;

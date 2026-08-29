@@ -28,6 +28,10 @@ vi.mock("@dusk/w3sper", () => {
     }
 
     toString() {
+      if (this.#prefix === "acct" && this.#index === 0 && globalThis.__W3SPER_FAIL_WALLET_ID__) {
+        globalThis.__W3SPER_FAIL_WALLET_ID__ = false;
+        throw new Error("wallet ID failed");
+      }
       return `${this.#prefix}${this.#index}`;
     }
 
@@ -70,20 +74,29 @@ vi.mock("@dusk/w3sper", () => {
   class ProfileGenerator {
     #profiles = [];
 
-    constructor(_seeder) {}
+    constructor(seeder) {
+      globalThis.__W3SPER_LAST_SEEDER__ = seeder;
+    }
 
     async #nth(n) {
+      await globalThis.__W3SPER_PROFILE_GATE__?.(n);
       return new Profile(n);
     }
 
     next() {
       const index = this.#profiles.length || 1;
+      if (globalThis.__W3SPER_FAIL_PROFILE_INDEX__ === index) {
+        throw new Error("profile derivation failed");
+      }
       const p = this.#nth(index);
       this.#profiles[index] = p;
       return p;
     }
 
     get default() {
+      if (globalThis.__W3SPER_FAIL_PROFILE_INDEX__ === 0) {
+        throw new Error("profile derivation failed");
+      }
       if (typeof this.#profiles[0] === "undefined") {
         this.#profiles[0] = this.#nth(0);
       }
@@ -347,6 +360,10 @@ describe("walletEngine", () => {
     globalThis.__W3SPER_BALANCE__ = null;
     globalThis.__W3SPER_STAKE_INFO__ = null;
     globalThis.__W3SPER_STAKE_KEYS__ = null;
+    globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = null;
+    globalThis.__W3SPER_FAIL_WALLET_ID__ = false;
+    globalThis.__W3SPER_LAST_SEEDER__ = null;
+    globalThis.__W3SPER_PROFILE_GATE__ = null;
 
     // walletEngine loads a WASM protocol driver via fetch() on first use.
     vi.stubGlobal(
@@ -371,6 +388,10 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_EXECUTE_IMPL__;
     delete globalThis.__W3SPER_STAKE_INFO__;
     delete globalThis.__W3SPER_STAKE_KEYS__;
+    delete globalThis.__W3SPER_FAIL_PROFILE_INDEX__;
+    delete globalThis.__W3SPER_FAIL_WALLET_ID__;
+    delete globalThis.__W3SPER_LAST_SEEDER__;
+    delete globalThis.__W3SPER_PROFILE_GATE__;
   });
 
   it("derives the CLI-aligned two default profiles on unlock", async () => {
@@ -379,6 +400,52 @@ describe("walletEngine", () => {
     expect(engine.getAccounts()).toEqual(["acct0", "acct1"]);
     expect(engine.getAddresses()).toEqual(["addr0", "addr1"]);
     expect(engine.getSelectedAccountIndex()).toBe(0);
+  });
+
+  it.each([0, 1])("keeps the current wallet when replacement profile %i fails", async (index) => {
+    engine.configure({ accountCount: 1 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = index;
+    engine.configure({ accountCount: 2 });
+
+    await expect(engine.unlockWithMnemonic("different mnemonic")).rejects.toThrow(
+      "profile derivation failed"
+    );
+    expect(engine.isUnlocked()).toBe(true);
+    expect(engine.getAccounts()).toEqual(["acct0"]);
+  });
+
+  it("keeps the current wallet and clears the candidate seed when wallet ID derivation fails", async () => {
+    engine.configure({ accountCount: 1 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    globalThis.__W3SPER_FAIL_WALLET_ID__ = true;
+
+    await expect(engine.unlockWithMnemonic("different mnemonic")).rejects.toThrow("wallet ID failed");
+
+    expect(engine.isUnlocked()).toBe(true);
+    expect(engine.getAccounts()).toEqual(["acct0"]);
+    expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
+  });
+
+  it("does not let a superseded unlock commit after lock", async () => {
+    let releaseProfile;
+    let profileStarted;
+    const started = new Promise((resolve) => { profileStarted = resolve; });
+    globalThis.__W3SPER_PROFILE_GATE__ = async (index) => {
+      if (index !== 0) return;
+      profileStarted();
+      await new Promise((resolve) => { releaseProfile = resolve; });
+    };
+
+    const unlock = engine.unlockWithMnemonic(MNEMONIC);
+    await started;
+    engine.lock();
+    releaseProfile();
+
+    await expect(unlock).rejects.toThrow("Unlock superseded");
+    expect(engine.isUnlocked()).toBe(false);
+    expect(engine.getAccounts()).toEqual([]);
+    expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
   });
 
   it("restores multiple derived accounts on unlock", async () => {
@@ -464,6 +531,47 @@ describe("walletEngine", () => {
 
     const memoHex = bytesToHex(new TextEncoder().encode(memo));
     expect(res.payload.endsWith(memoHex)).toBe(true);
+  });
+
+  it("rejects a public balance read when the approved engine context changed", async () => {
+    engine.configure({
+      nodeUrl: NETWORK_KEY,
+      accountCount: 1,
+      selectedAccountIndex: 0,
+    });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    await expect(engine.getPublicBalance({
+      profileIndex: 0,
+      _approvalContext: {
+        walletId: WALLET_ID,
+        profileIndex: 0,
+        account: "acct0",
+        nodeUrl: "https://different.example",
+      },
+    })).rejects.toThrow("Wallet changed while awaiting approval");
+  });
+
+  it("rejects signing when the approved engine context changed", async () => {
+    engine.configure({
+      nodeUrl: NETWORK_KEY,
+      accountCount: 1,
+      selectedAccountIndex: 0,
+    });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    await expect(engine.signMessage({
+      origin: "https://example.com",
+      chainId: "dusk:2",
+      message: "0x0102",
+      profileIndex: 0,
+      _approvalContext: {
+        walletId: WALLET_ID,
+        profileIndex: 0,
+        account: "acct0",
+        nodeUrl: "https://different.example",
+      },
+    })).rejects.toThrow("Wallet changed while awaiting approval");
   });
 
   it("signAuth returns the signed canonical login envelope", async () => {

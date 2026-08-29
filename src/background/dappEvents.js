@@ -4,7 +4,7 @@
 // content scripts and broadcasts provider events like profilesChanged, chainChanged.
 
 import { getSettings } from "../shared/settings.js";
-import { getPermissions } from "../shared/permissions.js";
+import { getPermissions, permissionProfileState } from "../shared/permissions.js";
 import { STORAGE_KEYS } from "../shared/storage.js";
 import { chainIdFromNodeUrl } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
@@ -150,46 +150,21 @@ async function buildProviderState(origin) {
 
   const perms = await getPermissions();
   const perm = perms?.[origin];
-  const hasPermission = Boolean(perm);
-
   const status = await getEngineStatus();
-  const profiles = hasPermission && status.isUnlocked ? profileSnapshotForPermission(perm, status) : [];
+  const permission = permissionProfileState(
+    perm,
+    status,
+    Boolean(perm?.grants?.shieldedReceiveAddress)
+  );
 
   return {
     chainId,
     networkName,
     nodeUrl,
-    // "Connected" in the sense of site permission (not chain transport!).
-    isConnected: hasPermission,
-    profiles,
+    // A valid permission remains connected while locked, but exposes no profile.
+    isConnected: permission.isValid,
+    profiles: permission.profile ? [permission.profile] : [],
   };
-}
-
-function normalizeAccountIndex(value) {
-  const idxRaw = Number(value ?? 0);
-  return Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
-}
-
-function hasShieldedGrant(perm) {
-  return Boolean(perm?.grants?.shieldedReceiveAddress);
-}
-
-function profileSnapshotForPermission(perm, status) {
-  if (!perm || !status?.isUnlocked) return [];
-  const accounts = Array.isArray(status.accounts) ? status.accounts : [];
-  const addresses = Array.isArray(status.addresses) ? status.addresses : [];
-  const idx = normalizeAccountIndex(perm.accountIndex);
-  const account = accounts[idx];
-  if (!account) return [];
-
-  const profile = {
-    profileId: String(perm.profileId || `account:${idx}:${account}`),
-    account,
-  };
-  if (hasShieldedGrant(perm) && addresses[idx]) {
-    profile.shieldedAddress = addresses[idx];
-  }
-  return [profile];
 }
 
 /**
@@ -319,7 +294,12 @@ export async function broadcastProfilesChangedAll() {
 
   for (const [origin, set] of portsByOrigin.entries()) {
     const perm = perms?.[origin];
-    const visible = profileSnapshotForPermission(perm, status);
+    const permission = permissionProfileState(
+      perm,
+      status,
+      Boolean(perm?.grants?.shieldedReceiveAddress)
+    );
+    const visible = permission.profile ? [permission.profile] : [];
     for (const port of set) {
       safePost(port, { type: "DUSK_PROVIDER_EVENT", name: "profilesChanged", data: visible });
     }
@@ -335,7 +315,12 @@ export async function broadcastProfilesChangedForOrigin(origin) {
   const perms = await getPermissions();
   const status = await getEngineStatus();
   const perm = perms?.[origin];
-  broadcastToOrigin(origin, "profilesChanged", profileSnapshotForPermission(perm, status));
+  const permission = permissionProfileState(
+    perm,
+    status,
+    Boolean(perm?.grants?.shieldedReceiveAddress)
+  );
+  broadcastToOrigin(origin, "profilesChanged", permission.profile ? [permission.profile] : []);
 }
 
 /**
@@ -390,16 +375,18 @@ export async function handlePermissionsDiff(oldPerms, newPerms) {
   const removed = [];
   const added = [];
   const changed = [];
+  const status = await getEngineStatus();
+  const origins = new Set([...Object.keys(oldP), ...Object.keys(newP)]);
 
-  for (const origin of Object.keys(oldP)) {
-    if (!newP[origin]) removed.push(origin);
-  }
-  for (const origin of Object.keys(newP)) {
-    if (!oldP[origin]) added.push(origin);
-  }
-  for (const origin of Object.keys(newP)) {
-    if (!oldP[origin]) continue;
-    if (permissionProfileKey(oldP[origin]) !== permissionProfileKey(newP[origin])) {
+  for (const origin of origins) {
+    const oldValid = permissionProfileState(oldP[origin], status).isValid;
+    const newValid = permissionProfileState(newP[origin], status).isValid;
+    if (oldValid && !newValid) removed.push(origin);
+    else if (!oldValid && newValid) added.push(origin);
+    else if (
+      oldValid &&
+      permissionProfileKey(oldP[origin]) !== permissionProfileKey(newP[origin])
+    ) {
       changed.push(origin);
     }
   }
@@ -435,7 +422,8 @@ function permissionProfileKey(perm) {
   if (!perm) return "";
   return JSON.stringify({
     profileId: perm.profileId ?? "",
-    accountIndex: normalizeAccountIndex(perm.accountIndex),
+    accountIndex: Number.isInteger(perm.accountIndex) ? perm.accountIndex : null,
+    updatedAt: Number(perm.updatedAt) || 0,
     publicAccount: Boolean(perm.grants?.publicAccount),
     shieldedReceiveAddress: Boolean(perm.grants?.shieldedReceiveAddress),
   });

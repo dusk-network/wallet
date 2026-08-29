@@ -62,10 +62,14 @@ vi.mock("../background/engineHost.js", () => ({
   engineCall,
   ensureEngineConfigured: vi.fn(async () => true),
   getEngineStatus: vi.fn(async () => engineStatus),
+  getEngineStatusStrict: vi.fn(async () => engineStatus),
   invalidateEngineConfig: vi.fn(() => {}),
 }));
 
-vi.mock("../background/pending.js", () => ({ requestUserApproval }));
+vi.mock("../background/pending.js", () => ({
+  cancelPendingApprovals: vi.fn(),
+  requestUserApproval,
+}));
 
 vi.mock("../background/txNotify.js", () => ({ notifyTxSubmitted: vi.fn(async () => true) }));
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ERROR_CODES } from "../shared/errors.js";
 
 const AUTO_LOCK_ACTIVITY_KEY = "dusk_auto_lock_activity_v1";
 const AUTO_LOCK_ALARM_NAME = "dusk_auto_lock_check";
@@ -36,10 +37,16 @@ const mocks = vi.hoisted(() => {
       nodeUrl: "https://testnet.nodes.dusk.network",
     },
     engineUnlocked: true,
+    settingsError: null,
     now: 1_000_000,
     sentMessages: [],
     alarmsClear: vi.fn(async () => true),
     alarmsCreate: vi.fn(() => {}),
+    vault: { v: 1 },
+    clearVault: vi.fn(async () => {}),
+    createVault: vi.fn(async () => true),
+    clearPermissions: vi.fn(async () => {}),
+    cancelPendingApprovals: vi.fn(),
     engineCall: vi.fn(async (method) => {
       if (method === "engine_unlock") {
         return { accounts: ["acct0"] };
@@ -86,19 +93,22 @@ const mocks = vi.hoisted(() => {
 vi.mock("../shared/settings.js", () => ({
   getSettings: vi.fn(async () => mocks.settings),
   setSettings: vi.fn(async (patch) => {
+    if (mocks.settingsError) throw mocks.settingsError;
     mocks.settings = { ...mocks.settings, ...patch };
     return mocks.settings;
   }),
 }));
 
 vi.mock("../shared/vault.js", () => ({
-  createVault: vi.fn(async () => true),
-  loadVault: vi.fn(async () => ({ v: 1 })),
+  clearVault: mocks.clearVault,
+  createVault: mocks.createVault,
+  loadVault: vi.fn(async () => mocks.vault),
   unlockVault: vi.fn(async () => "mnemonic"),
 }));
 
 vi.mock("../shared/permissions.js", () => ({
   approveOrigin: vi.fn(async () => true),
+  clearPermissions: mocks.clearPermissions,
   getPermissionForOrigin: vi.fn(async () => ({
     profileId: "account:0:acct0",
     accountIndex: 0,
@@ -112,6 +122,7 @@ vi.mock("./engineHost.js", () => ({
   engineCall: mocks.engineCall,
   ensureEngineConfigured: vi.fn(async () => true),
   getEngineStatus: mocks.getEngineStatus,
+  getEngineStatusStrict: mocks.getEngineStatus,
   invalidateEngineConfig: vi.fn(() => {}),
   handleEngineReady: vi.fn(() => {}),
 }));
@@ -121,6 +132,7 @@ vi.mock("./rpc.js", () => ({
 }));
 
 vi.mock("./pending.js", () => ({
+  cancelPendingApprovals: mocks.cancelPendingApprovals,
   getPending: vi.fn(() => null),
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
 }));
@@ -240,6 +252,8 @@ describe("background auto-lock activity", () => {
       nodeUrl: "https://testnet.nodes.dusk.network",
     };
     mocks.engineUnlocked = true;
+    mocks.settingsError = null;
+    mocks.vault = { v: 1 };
     mocks.now = 1_000_000;
     mocks.sentMessages = [];
     dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => mocks.now);
@@ -284,6 +298,7 @@ describe("background auto-lock activity", () => {
 
     expect(mocks.engineCall).toHaveBeenCalledWith("engine_lock");
     expect(mocks.broadcastProfilesChangedAll).toHaveBeenCalledTimes(1);
+    expect(mocks.cancelPendingApprovals).toHaveBeenCalledTimes(1);
     expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({
         type: "DUSK_UI_LOCK_STATE",
@@ -301,6 +316,7 @@ describe("background auto-lock activity", () => {
 
     expect(mocks.engineCall).toHaveBeenCalledWith("engine_lock");
     expect(mocks.broadcastProfilesChangedAll).toHaveBeenCalledTimes(1);
+    expect(mocks.cancelPendingApprovals).toHaveBeenCalledTimes(1);
     expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({
         type: "DUSK_UI_LOCK_STATE",
@@ -309,6 +325,122 @@ describe("background auto-lock activity", () => {
       })
     );
     expect(activityRecord()).toBeUndefined();
+  });
+
+  it("does not clear the vault when reset cannot lock the engine", async () => {
+    mocks.engineCall.mockRejectedValueOnce(new Error("lock transport failed"));
+
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET" });
+
+    expect(response.error.message).toBe("lock transport failed");
+    expect(mocks.clearVault).not.toHaveBeenCalled();
+    expect(mocks.clearPermissions).not.toHaveBeenCalled();
+    expect(mocks.cancelPendingApprovals).not.toHaveBeenCalled();
+    expect(mocks.engineUnlocked).toBe(true);
+  });
+
+  it("rejects replacement of an existing locked vault", async () => {
+    mocks.engineUnlocked = false;
+
+    const response = await sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+
+    expect(response.error.message).toMatch(/reset the existing wallet/i);
+    expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
+  it("rejects wallet creation while an engine is already unlocked", async () => {
+    mocks.vault = null;
+
+    const response = await sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+
+    expect(response.error.message).toMatch(/lock or reset/i);
+    expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
+  it("does not create a vault when strict engine status is unavailable", async () => {
+    mocks.vault = null;
+    mocks.getEngineStatus.mockRejectedValueOnce(new Error("engine unavailable"));
+
+    const response = await sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+
+    expect(response.error.message).toBe("engine unavailable");
+    expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
+  it("preserves a newly written vault when its first unlock fails", async () => {
+    mocks.vault = null;
+    mocks.engineUnlocked = false;
+    mocks.createVault.mockImplementationOnce(async () => {
+      mocks.vault = { v: 1 };
+    });
+    mocks.engineCall.mockRejectedValueOnce(new Error("unlock failed"));
+
+    const response = await sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+
+    expect(response.error.message).toBe("unlock failed");
+    expect(mocks.vault).toEqual({ v: 1 });
+    expect(mocks.clearVault).not.toHaveBeenCalled();
+  });
+
+  it("locks the engine before returning an unlock timeout", async () => {
+    mocks.engineUnlocked = false;
+    mocks.engineCall.mockRejectedValueOnce(new Error("Engine call timed out"));
+
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_UNLOCK", password: "pw" });
+
+    expect(response.error.message).toBe("Engine call timed out");
+    expect(mocks.engineCall.mock.calls.map(([method]) => method)).toEqual([
+      "engine_unlock",
+      "engine_lock",
+    ]);
+    expect(mocks.engineUnlocked).toBe(false);
+  });
+
+  it("serializes create behind an in-flight unlock", async () => {
+    mocks.engineUnlocked = false;
+    let releaseUnlock;
+    let markUnlockStarted;
+    const unlockGate = new Promise((resolve) => { releaseUnlock = resolve; });
+    const unlockStarted = new Promise((resolve) => { markUnlockStarted = resolve; });
+    mocks.engineCall.mockImplementationOnce(async (method) => {
+      expect(method).toBe("engine_unlock");
+      markUnlockStarted();
+      await unlockGate;
+      mocks.engineUnlocked = true;
+      return { accounts: ["acct0"] };
+    });
+
+    const unlock = sendBackgroundMessage({ type: "DUSK_UI_UNLOCK", password: "pw" });
+    await unlockStarted;
+    const create = sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+    expect(mocks.createVault).not.toHaveBeenCalled();
+
+    releaseUnlock();
+    await expect(unlock).resolves.toEqual({ ok: true, accounts: ["acct0"] });
+    await expect(create).resolves.toMatchObject({
+      error: { message: expect.stringMatching(/reset the existing wallet/i) },
+    });
+    expect(mocks.createVault).not.toHaveBeenCalled();
   });
 
   it("initializes missing activity for an unlocked wallet instead of locking immediately", async () => {
@@ -327,6 +459,33 @@ describe("background auto-lock activity", () => {
     await expect(sendBackgroundMessage({ type: "DUSK_UI_ACTIVITY" })).resolves.toEqual({ ok: true });
 
     expect(activityRecord()).toEqual({ lastActivityAt: 1_234_567 });
+  });
+
+  it("ignores activity from an orphaned approval window", async () => {
+    mocks.now = 1_234_567;
+
+    await expect(
+      sendBackgroundMessage(
+        { type: "DUSK_UI_ACTIVITY", rid: "missing" },
+        {}
+      )
+    ).resolves.toEqual({ ok: false });
+
+    expect(activityRecord()).toBeUndefined();
+  });
+
+  it("returns structured errors when changing network settings fails", async () => {
+    mocks.settingsError = new Error("storage unavailable");
+
+    await expect(sendBackgroundMessage({
+      type: "DUSK_UI_SET_NODE_URL",
+      nodeUrl: "https://nodes.dusk.network",
+    })).resolves.toEqual({
+      error: {
+        code: ERROR_CODES.INTERNAL,
+        message: "storage unavailable",
+      },
+    });
   });
 
   it("changing auto-lock setting restarts the alarm and keeps sane unlocked activity", async () => {

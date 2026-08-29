@@ -8,7 +8,8 @@ vi.mock("../shared/settings.js", () => ({
   getSettings: vi.fn(async () => settings),
 }));
 
-vi.mock("../shared/permissions.js", () => ({
+vi.mock("../shared/permissions.js", async (importOriginal) => ({
+  ...(await importOriginal()),
   getPermissions: vi.fn(async () => permissions),
 }));
 
@@ -87,7 +88,7 @@ describe("dappEvents", () => {
     const stateMsg = port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE");
     expect(stateMsg).toBeTruthy();
     expect(stateMsg.state).toMatchObject({
-      isConnected: true,
+      isConnected: false,
       profiles: [],
       chainId: "dusk:2",
     });
@@ -98,6 +99,82 @@ describe("dappEvents", () => {
       (m) => m?.type === "DUSK_PROVIDER_EVENT" && m?.name === "profilesChanged"
     );
     expect(profileMsgs.at(-1)?.data).toEqual([]);
+  });
+
+  it("disconnects a stale permission without exposing a replacement wallet", async () => {
+    permissions = {
+      "https://dapp.example": {
+        profileId: "account:0:wallet-a",
+        accountIndex: 0,
+        grants: { publicAccount: true, shieldedReceiveAddress: true },
+        updatedAt: 1,
+      },
+    };
+    engineStatus = {
+      isUnlocked: true,
+      accounts: ["wallet-b"],
+      addresses: ["wallet-b-shielded"],
+    };
+
+    const ev = await import("./dappEvents.js");
+    const port = new FakePort("https://dapp.example");
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const state = port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE")?.state;
+    expect(state).toMatchObject({ isConnected: false, profiles: [] });
+    expect(JSON.stringify(state)).not.toContain("wallet-b");
+  });
+
+  it.each([
+    ["profileId", { accountIndex: 0, updatedAt: 1 }],
+    ["updatedAt", { profileId: "account:0:acct0", accountIndex: 0 }],
+  ])("disconnects a permission missing %s", async (_field, permission) => {
+    permissions = { "https://dapp.example": permission };
+    const ev = await import("./dappEvents.js");
+    const port = new FakePort("https://dapp.example");
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE")?.state).toMatchObject({
+      isConnected: false,
+      profiles: [],
+    });
+  });
+
+  it("refreshes provider state when a legacy permission is migrated", async () => {
+    const oldPermissions = {
+      "https://dapp.example": {
+        profileId: "account:0:acct0",
+        accountIndex: 0,
+        grants: { publicAccount: true, shieldedReceiveAddress: false },
+      },
+    };
+    permissions = {
+      "https://dapp.example": {
+        ...oldPermissions["https://dapp.example"],
+        updatedAt: 1,
+      },
+    };
+
+    const ev = await import("./dappEvents.js");
+    const port = new FakePort("https://dapp.example");
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+    port.messages = [];
+
+    await ev.handlePermissionsDiff(oldPermissions, permissions);
+
+    expect(port.messages).toContainEqual({
+      type: "DUSK_PROVIDER_EVENT",
+      name: "connect",
+      data: { chainId: "dusk:2" },
+    });
+    expect(port.messages).toContainEqual({
+      type: "DUSK_PROVIDER_EVENT",
+      name: "profilesChanged",
+      data: [{ profileId: "account:0:acct0", account: "acct0" }],
+    });
   });
 
   it("emits profilesChanged when an origin's selected profile changes", async () => {

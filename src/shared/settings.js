@@ -1,4 +1,5 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
+import { withStorageLock } from "./storageLock.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
 import { MAX_ACCOUNT_COUNT } from "./constants.js";
@@ -131,7 +132,7 @@ export async function getSettings() {
 /**
  * @param {Partial<typeof DEFAULT_SETTINGS>} patch
  */
-export async function setSettings(patch) {
+async function setSettingsUnlocked(patch) {
   const current = await getSettings();
   const next = { ...current, ...patch };
 
@@ -185,4 +186,8 @@ export async function setSettings(patch) {
 
   await storage.set({ [STORAGE_KEYS.SETTINGS]: next });
   return next;
+}
+
+export function setSettings(patch) {
+  return withStorageLock(STORAGE_KEYS.SETTINGS, () => setSettingsUnlocked(patch));
 }

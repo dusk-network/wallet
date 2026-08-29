@@ -1,7 +1,5 @@
 import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
-import { clearPermissions } from "../../../shared/permissions.js";
-import { clearVault } from "../../../shared/vault.js";
 import { AUTO_LOCK_OPTIONS } from "../../../shared/settings.js";
 import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { setAccountName } from "../../../shared/accountNames.js";
@@ -267,7 +265,8 @@ export function optionsView(ov, { state, actions } = {}) {
     text: "Clear connected sites",
     onclick: async () => {
       try {
-        await clearPermissions();
+        const response = await actions?.send?.({ type: "DUSK_UI_CLEAR_PERMISSIONS" });
+        if (response?.error) throw new Error(response.error.message ?? "Failed to clear sites");
         actions?.showToast?.("Cleared connected sites.");
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
@@ -343,15 +342,8 @@ export function optionsView(ov, { state, actions } = {}) {
       if (!ok) return;
 
       try {
-        // Best-effort lock (engine can still be running).
-        try {
-          await actions?.send?.({ type: "DUSK_UI_LOCK" });
-        } catch {
-          // ignore
-        }
-
-        await clearPermissions();
-        await clearVault();
+        const res = await actions?.send?.({ type: "DUSK_UI_RESET_WALLET" });
+        if (res?.error) throw new Error(res.error.message ?? "Wallet reset failed");
 
         actions?.showToast?.("Wallet reset. Import again to continue.", 2500);
         state.route = "home";
