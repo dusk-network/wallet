@@ -20,7 +20,12 @@ import {
 import { bytesToHex, sha256Hex, toBytes } from "../shared/bytes.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import { classifyDuskIdentifier } from "../shared/duskIdentifiers.js";
-import { DAPP_LIMITS, DAPP_RPC_METHODS, DAPP_TX_KINDS } from "../shared/providerSurface.js";
+import {
+  DAPP_LIMITS,
+  DAPP_RPC_METHODS,
+  DAPP_TOMBSTONED_METHODS,
+  DAPP_TX_KINDS,
+} from "../shared/providerSurface.js";
 import {
   engineCall,
   ensureEngineConfigured,
@@ -48,6 +53,16 @@ export async function handleRpc(origin, request) {
   }
 
   const { method, params } = request || {};
+
+  // Fail closed: a method reaches the switch below only if it is on the canonical
+  // surface, or is explicitly tombstoned so its handler can explain the refusal.
+  // Without this, every `case` added for internal or test use would be publicly
+  // callable by any connected dApp regardless of what capabilities advertise.
+  // Rejecting here also means an unrecognized method costs no permission lookup,
+  // settings read, or approval prompt.
+  if (!DAPP_RPC_METHODS.includes(method) && !DAPP_TOMBSTONED_METHODS.includes(method)) {
+    throw rpcError(ERROR_CODES.METHOD_NOT_FOUND, `Unknown method: ${method}`);
+  }
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
   const MAX_U64 = 18446744073709551615n;
