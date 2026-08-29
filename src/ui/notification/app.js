@@ -1,6 +1,7 @@
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
+import { flattenTypedMessage } from "../../shared/typedDataDisplay.js";
 import { h } from "../lib/dom.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { truncateMiddle } from "../lib/strings.js";
@@ -561,6 +562,117 @@ export async function renderNotification() {
       }),
       decisionButtons("Sign in"),
     ]);
+    return;
+  }
+
+  if (kindNorm === "sign_typed_data") {
+    const domain = params?.domain && typeof params.domain === "object" ? params.domain : {};
+    const domainName = String(domain?.name ?? "");
+    const domainVersion = String(domain?.version ?? "");
+    const domainChainId = String(domain?.chainId ?? "");
+    const verifyingContract = String(domain?.verifyingContract ?? "").trim();
+    const primaryType = String(params?.primaryType ?? "");
+    const digestHex = String(params?.digestHex ?? "");
+
+    const { rows, truncated } = await flattenTypedMessage({
+      types: params?.types,
+      primaryType,
+      message: params?.message,
+    });
+    // Only the flags that indicate deceptive *content* warrant the spoofing
+    // warning. A value cut at the length cap, or a subtree cut for depth, is a
+    // display limit rather than something hostile about the characters, and
+    // lumping them together would train users to ignore the real warning.
+    const unsafeTextFlags = ["control_chars", "bidi_control", "invalid_surrogate"];
+    const hasTextSafetyWarning = rows.some((row) =>
+      (row.flags ?? []).some((flag) => unsafeTextFlags.includes(flag))
+    );
+
+    const fieldRows = rows.map((row) =>
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: `${row.path} · ${row.type}` }),
+        h("div", { class: "box" }, [
+          h("code", { text: row.display, title: row.flags.length ? row.flags.join(", ") : "" }),
+        ]),
+      ])
+    );
+
+    setApp(
+      [
+        header,
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Approve typed data signature" }),
+        ]),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Account" }),
+          h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+        ]),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Domain name" }),
+          h("div", { class: "box" }, [h("code", { text: domainName || "—" })]),
+        ]),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Domain version" }),
+          h("div", { class: "box" }, [h("code", { text: domainVersion || "—" })]),
+        ]),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Chain ID" }),
+          h("div", { class: "box" }, [h("code", { text: domainChainId || "—" })]),
+        ]),
+        verifyingContract
+          ? h("div", { class: "row" }, [
+              h("div", { class: "muted", text: "Verifying contract" }),
+              h("div", { class: "box" }, [h("code", { text: verifyingContract })]),
+            ])
+          : null,
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Primary type" }),
+          h("div", { class: "box" }, [h("code", { text: primaryType || "—" })]),
+        ]),
+        h("div", { class: "muted", text: "Message fields" }),
+        ...fieldRows,
+        truncated
+          ? h("div", {
+              class: "muted",
+              text: [
+                truncated.omittedCount > 0
+                  ? `${truncated.omittedCount} more field(s) not shown.`
+                  : "",
+                truncated.depthLimited
+                  ? "Some fields are nested deeper than this screen displays."
+                  : "",
+                "The digest below covers the whole message.",
+              ]
+                .filter(Boolean)
+                .join(" "),
+            })
+          : null,
+        h("div", { class: "row" }, [
+          h("details", { class: "box" }, [
+            h("summary", { text: "Digest (verify against the dApp)" }),
+            h("div", { class: "muted", style: "margin-top:8px;" }, [
+              h("code", { text: digestHex || "—" }),
+            ]),
+          ]),
+        ]),
+        hasTextSafetyWarning
+          ? h("div", { class: "callout warn" }, [
+              h("div", { class: "callout-title", text: "Hidden characters detected" }),
+              h("div", {
+                class: "muted",
+                text:
+                  "One or more message fields contain hidden, non-printable, or directional-override characters. They are shown here replaced with a placeholder. Review carefully before signing.",
+              }),
+            ])
+          : null,
+        h("div", {
+          class: "muted",
+          text:
+            "Signing authorizes this exact message for the site shown above. It does not submit a transaction. A malicious site can request a signature that references contracts or fields you don't intend to trust — verify every field before continuing.",
+        }),
+        decisionButtons("Sign"),
+      ].filter(Boolean)
+    );
     return;
   }
 
