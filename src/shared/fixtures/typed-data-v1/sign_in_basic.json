@@ -1,0 +1,29 @@
+{
+  "description": "minimal SignIn-like: domain + string fields; origin as given (no trailing-slash normalization)",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        { "name": "name", "type": "string" },
+        { "name": "version", "type": "string" },
+        { "name": "chainId", "type": "string" },
+        { "name": "verifyingContract", "type": "bytes32" }
+      ],
+      "SignIn": [
+        { "name": "address", "type": "string" },
+        { "name": "statement", "type": "string" }
+      ]
+    },
+    "primaryType": "SignIn",
+    "message": {
+      "address": "dusk1example",
+      "statement": "Sign in to Example"
+    },
+    "origin": "https://app.example"
+  },
+  "digestHex": "0xd3dab612801f69836e2ededfe33863d797f1c1e1d6a7902bb6bd642fea5cf350"
+}

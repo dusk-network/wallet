@@ -1,0 +1,32 @@
+{
+  "description": "nested struct Apple inside Envelope; typeHash sorts encodeType strings by UTF-8 (Apple before Envelope, not primaryType-first)",
+  "input": {
+    "domain": {
+      "name": "Nest",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        { "name": "name", "type": "string" },
+        { "name": "version", "type": "string" },
+        { "name": "chainId", "type": "string" },
+        { "name": "verifyingContract", "type": "bytes32" }
+      ],
+      "Apple": [
+        { "name": "name", "type": "string" }
+      ],
+      "Envelope": [
+        { "name": "inner", "type": "Apple" },
+        { "name": "note", "type": "string" }
+      ]
+    },
+    "primaryType": "Envelope",
+    "message": {
+      "inner": { "name": "fuji" },
+      "note": "hello"
+    },
+    "origin": "https://app.example"
+  },
+  "digestHex": "0xbe6552d6f14611a24c0bfa65313eb7227079842ee98f2a21ff891246486370f0"
+}

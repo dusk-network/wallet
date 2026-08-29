@@ -1,0 +1,30 @@
+{
+  "description": "bytes32 field plus non-zero verifyingContract; origin exact (no slash normalize)",
+  "input": {
+    "domain": {
+      "name": "Lock",
+      "version": "1",
+      "chainId": "dusk:1",
+      "verifyingContract": "0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        { "name": "name", "type": "string" },
+        { "name": "version", "type": "string" },
+        { "name": "chainId", "type": "string" },
+        { "name": "verifyingContract", "type": "bytes32" }
+      ],
+      "Lock": [
+        { "name": "assetId", "type": "bytes32" },
+        { "name": "amount", "type": "uint64" }
+      ]
+    },
+    "primaryType": "Lock",
+    "message": {
+      "assetId": "0xaabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+      "amount": "42"
+    },
+    "origin": "https://app.example"
+  },
+  "digestHex": "0xa8e90d6f0324e947081cba0be196ec0b8218c73d288fc1a8e8846b779393ae90"
+}

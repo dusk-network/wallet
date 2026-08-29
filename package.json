@@ -37,10 +37,13 @@
     "storybook": "storybook dev -p 6006",
     "storybook:build": "storybook build",
     "e2e": "playwright test",
-    "e2e:rusk": "node scripts/e2e-with-rusk.js"
+    "e2e:rusk": "node scripts/e2e-with-rusk.js",
+    "test:typed-data-parity": "node scripts/check-typed-data-fixture-parity.mjs"
   },
   "dependencies": {
     "@dusk/w3sper": "npm:@jsr/dusk__w3sper@1.7.0-rc.0",
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.0.0",
     "@tauri-apps/plugin-store": "^2.0.0",
