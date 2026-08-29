@@ -2,6 +2,7 @@ import { loadVault } from "../shared/vault.js";
 import {
   approveOrigin,
   getPermissionForOrigin,
+  permissionProfileState,
   revokeOrigin,
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
@@ -284,47 +285,25 @@ export async function handleRpc(origin, request) {
   }
 
   function profileFromPermission(status, perm, includeShielded = false) {
-    const index = Number(perm?.accountIndex);
-    const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
-    const addresses = Array.isArray(status?.addresses) ? status.addresses : [];
-    const account = Number.isInteger(index) && index >= 0 ? accounts[index] : "";
-    const profileId = account ? `account:${index}:${account}` : "";
-    if (!profileId || profileId !== perm?.profileId || Number(perm?.updatedAt) <= 0) return null;
-    return {
-      profileId,
-      account,
-      ...(includeShielded && addresses[index] ? { shieldedAddress: addresses[index] } : {}),
-    };
+    return permissionProfileState(perm, status, includeShielded).profile;
   }
 
   async function captureApprovalContext(perm) {
     const [settings, status] = await Promise.all([getSettings(), getEngineStatusStrict()]);
+    const permission = permissionProfileState(perm, status);
+    if (!permission.isValid) {
+      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Connected profile is no longer available");
+    }
     const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
-    const profileIndex = Number(perm?.accountIndex);
-    const permissionProfileId = String(perm?.profileId ?? "");
-    const permissionUpdatedAt = Number(perm?.updatedAt);
-    if (
-      !Number.isInteger(profileIndex) ||
-      profileIndex < 0 ||
-      !permissionProfileId ||
-      !Number.isFinite(permissionUpdatedAt) ||
-      permissionUpdatedAt <= 0
-    ) {
-      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Connected profile is no longer available");
-    }
-    const account = String(accounts[profileIndex] ?? "");
-    if (status?.isUnlocked && (!account || permissionProfileId !== `account:${profileIndex}:${account}`)) {
-      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Connected profile is no longer available");
-    }
     return Object.freeze({
       isUnlocked: Boolean(status?.isUnlocked),
       origin,
       nodeUrl: String(settings?.nodeUrl ?? ""),
       walletId: String(accounts[0] ?? ""),
-      account,
-      profileIndex,
-      permissionProfileId,
-      permissionUpdatedAt,
+      account: permission.profile?.account ?? "",
+      profileIndex: perm.accountIndex,
+      permissionProfileId: perm.profileId,
+      permissionUpdatedAt: Number(perm.updatedAt),
     });
   }
 
@@ -615,12 +594,16 @@ export async function handleRpc(origin, request) {
       const perm = await getPermissionForOrigin(origin);
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
-      const context = await captureApprovalContext(perm);
-      if (!context.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      const approvalContext = await captureApprovalContext(perm);
+      if (!approvalContext.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 
-      await ensureEngineConfigured();
-      return await engineCall("dusk_getPublicBalance", {
-        profileIndex: context.profileIndex,
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        const executionContext = await assertApprovalContext(approvalContext);
+        await ensureEngineConfigured();
+        return engineCall("dusk_getPublicBalance", {
+          profileIndex: executionContext.profileIndex,
+          _approvalContext: executionContext,
+        });
       });
     }
 

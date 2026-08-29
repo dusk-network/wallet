@@ -109,7 +109,8 @@ const getExtensionApi = vi.fn(() => ({
 }));
 
 vi.mock("../shared/vault.js", () => ({ loadVault }));
-vi.mock("../shared/permissions.js", () => ({
+vi.mock("../shared/permissions.js", async (importOriginal) => ({
+  ...(await importOriginal()),
   approveOrigin,
   getPermissionForOrigin,
   revokeOrigin,
@@ -526,7 +527,44 @@ describe("background rpc handler", () => {
     engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
 
     const res = await handleRpc("https://dapp.example", { method: "dusk_getPublicBalance" });
-    expect(res.__params).toEqual({ profileIndex: 1 });
+    expect(res.__params).toMatchObject({
+      profileIndex: 1,
+      _approvalContext: { account: "acct1", walletId: "acct0" },
+    });
+  });
+
+  it("does not read a replacement wallet balance after context capture", async () => {
+    vi.resetModules();
+    const [{ handleRpc }, { WALLET_LIFECYCLE_LOCK, withStorageLock }] = await Promise.all([
+      import("./rpc.js"),
+      import("../shared/storageLock.js"),
+    ]);
+    perms["https://dapp.example"] = {
+      profileId: "account:0:acct0",
+      accountIndex: 0,
+      updatedAt: 1,
+    };
+    let releaseLifecycle;
+    let lifecycleStarted;
+    const started = new Promise((resolve) => { lifecycleStarted = resolve; });
+    const lifecycle = withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      lifecycleStarted();
+      await new Promise((resolve) => { releaseLifecycle = resolve; });
+    });
+    await started;
+
+    const request = handleRpc("https://dapp.example", { method: "dusk_getPublicBalance" });
+    await vi.waitFor(() => expect(getEngineStatusStrict).toHaveBeenCalled());
+    engineStatus = { isUnlocked: true, accounts: ["wallet-b"] };
+    perms = {};
+    releaseLifecycle();
+    await lifecycle;
+
+    await expect(request).rejects.toMatchObject({
+      code: ERROR_CODES.UNAUTHORIZED,
+      message: "Wallet changed while awaiting approval",
+    });
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_getPublicBalance", expect.anything());
   });
 
   it("dusk_sendTransaction overwrites any dApp-supplied profileIndex and records tx meta", async () => {

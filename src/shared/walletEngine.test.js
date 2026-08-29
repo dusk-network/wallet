@@ -533,6 +533,25 @@ describe("walletEngine", () => {
     expect(res.payload.endsWith(memoHex)).toBe(true);
   });
 
+  it("rejects a public balance read when the approved engine context changed", async () => {
+    engine.configure({
+      nodeUrl: NETWORK_KEY,
+      accountCount: 1,
+      selectedAccountIndex: 0,
+    });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    await expect(engine.getPublicBalance({
+      profileIndex: 0,
+      _approvalContext: {
+        walletId: WALLET_ID,
+        profileIndex: 0,
+        account: "acct0",
+        nodeUrl: "https://different.example",
+      },
+    })).rejects.toThrow("Wallet changed while awaiting approval");
+  });
+
   it("rejects signing when the approved engine context changed", async () => {
     engine.configure({
       nodeUrl: NETWORK_KEY,

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ERROR_CODES } from "../shared/errors.js";
 
 const AUTO_LOCK_ACTIVITY_KEY = "dusk_auto_lock_activity_v1";
 const AUTO_LOCK_ALARM_NAME = "dusk_auto_lock_check";
@@ -36,6 +37,7 @@ const mocks = vi.hoisted(() => {
       nodeUrl: "https://testnet.nodes.dusk.network",
     },
     engineUnlocked: true,
+    settingsError: null,
     now: 1_000_000,
     sentMessages: [],
     alarmsClear: vi.fn(async () => true),
@@ -91,6 +93,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("../shared/settings.js", () => ({
   getSettings: vi.fn(async () => mocks.settings),
   setSettings: vi.fn(async (patch) => {
+    if (mocks.settingsError) throw mocks.settingsError;
     mocks.settings = { ...mocks.settings, ...patch };
     return mocks.settings;
   }),
@@ -249,6 +252,7 @@ describe("background auto-lock activity", () => {
       nodeUrl: "https://testnet.nodes.dusk.network",
     };
     mocks.engineUnlocked = true;
+    mocks.settingsError = null;
     mocks.vault = { v: 1 };
     mocks.now = 1_000_000;
     mocks.sentMessages = [];
@@ -463,11 +467,25 @@ describe("background auto-lock activity", () => {
     await expect(
       sendBackgroundMessage(
         { type: "DUSK_UI_ACTIVITY", rid: "missing" },
-        { url: "chrome-extension://wallet/notification.html?rid=missing" }
+        {}
       )
     ).resolves.toEqual({ ok: false });
 
     expect(activityRecord()).toBeUndefined();
+  });
+
+  it("returns structured errors when changing network settings fails", async () => {
+    mocks.settingsError = new Error("storage unavailable");
+
+    await expect(sendBackgroundMessage({
+      type: "DUSK_UI_SET_NODE_URL",
+      nodeUrl: "https://nodes.dusk.network",
+    })).resolves.toEqual({
+      error: {
+        code: ERROR_CODES.INTERNAL,
+        message: "storage unavailable",
+      },
+    });
   });
 
   it("changing auto-lock setting restarts the alarm and keeps sane unlocked activity", async () => {

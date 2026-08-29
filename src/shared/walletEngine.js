@@ -1335,10 +1335,12 @@ function formatWsError(err, nodeUrl) {
   return `Failed to connect to node ${nodeUrl} (unknown websocket error)`;
 }
 
-export async function getPublicBalance({ profileIndex } = {}) {
+export async function getPublicBalance(params = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   await ensureNetwork();
-  const profile = await ensureProfileIndex(profileIndex ?? getSelectedProfileIndex());
+  const profileIndex = resolveProfileIndex(params.profileIndex);
+  const profile = await ensureProfileIndex(profileIndex);
+  await assertApprovalContext(params, profileIndex);
   return await withTimeout(
     state.bookkeeper.balance(profile.account),
     12_000,

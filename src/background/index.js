@@ -542,8 +542,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI heartbeat to reset auto-lock timer.
       if (message?.type === "DUSK_UI_ACTIVITY") {
-        const notification = String(sender?.url ?? "").includes("/notification.html");
-        if (notification && !getPending(String(message.rid ?? ""))) {
+        const rid = String(message.rid ?? "");
+        if (rid && !getPending(rid)) {
           sendResponse({ ok: false });
           return;
         }
@@ -942,47 +942,48 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
-        return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-        cancelPendingApprovals(null, "Network changed");
-        // Reset network status when endpoints change (will be checked in background)
-        await resetNetworkStatus();
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          cancelPendingApprovals(null, "Network changed");
+          // Reset network status when endpoints change (will be checked in background)
+          await resetNetworkStatus();
 
-        // Store endpoints (prover/archiver may be inferred inside setSettings
-        // when omitted).
-        const nextSettings = await setSettings({
-          nodeUrl,
-          ...(proverUrl ? { proverUrl } : {}),
-          ...(archiverUrl ? { archiverUrl } : {}),
+          // Store endpoints (prover/archiver may be inferred inside setSettings
+          // when omitted).
+          const nextSettings = await setSettings({
+            nodeUrl,
+            ...(proverUrl ? { proverUrl } : {}),
+            ...(archiverUrl ? { archiverUrl } : {}),
+          });
+
+          // Force the engine to pick up the new config immediately.
+          // We no longer roll back on failure - the UI will show offline status.
+          try {
+            invalidateEngineConfig();
+            await ensureEngineConfigured();
+          } catch {
+            // Engine config failed, but we still save the settings.
+            // The UI will show offline status via polling.
+          }
+
+          // Notify dApps that the chain has changed.
+          broadcastChainChangedAll().catch(() => {});
+
+          // Kick off a background status check (don't await).
+          checkAllEndpoints({
+            nodeUrl: nextSettings.nodeUrl,
+            proverUrl: nextSettings.proverUrl,
+            archiverUrl: nextSettings.archiverUrl,
+          }).catch(() => {});
+
+          sendResponse({
+            ok: true,
+            nodeUrl: nextSettings.nodeUrl,
+            proverUrl: nextSettings.proverUrl,
+            archiverUrl: nextSettings.archiverUrl,
+            networkName: networkNameFromNodeUrl(nextSettings.nodeUrl),
+          });
         });
-
-        // Force the engine to pick up the new config immediately.
-        // We no longer roll back on failure - the UI will show offline status.
-        try {
-          invalidateEngineConfig();
-          await ensureEngineConfigured();
-        } catch {
-          // Engine config failed, but we still save the settings.
-          // The UI will show offline status via polling.
-        }
-
-        // Notify dApps that the chain has changed.
-        broadcastChainChangedAll().catch(() => {});
-
-        // Kick off a background status check (don't await).
-        checkAllEndpoints({
-          nodeUrl: nextSettings.nodeUrl,
-          proverUrl: nextSettings.proverUrl,
-          archiverUrl: nextSettings.archiverUrl,
-        }).catch(() => {});
-
-        sendResponse({
-          ok: true,
-          nodeUrl: nextSettings.nodeUrl,
-          proverUrl: nextSettings.proverUrl,
-          archiverUrl: nextSettings.archiverUrl,
-          networkName: networkNameFromNodeUrl(nextSettings.nodeUrl),
-        });
-        });
+        return;
       }
 
       // UI sets auto-lock timeout
