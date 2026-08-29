@@ -289,7 +289,7 @@ export async function handleRpc(origin, request) {
     const addresses = Array.isArray(status?.addresses) ? status.addresses : [];
     const account = Number.isInteger(index) && index >= 0 ? accounts[index] : "";
     const profileId = account ? `account:${index}:${account}` : "";
-    if (!profileId || profileId !== perm?.profileId) return null;
+    if (!profileId || profileId !== perm?.profileId || Number(perm?.updatedAt) <= 0) return null;
     return {
       profileId,
       account,
@@ -302,7 +302,14 @@ export async function handleRpc(origin, request) {
     const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
     const profileIndex = Number(perm?.accountIndex);
     const permissionProfileId = String(perm?.profileId ?? "");
-    if (!Number.isInteger(profileIndex) || profileIndex < 0 || !permissionProfileId) {
+    const permissionUpdatedAt = Number(perm?.updatedAt);
+    if (
+      !Number.isInteger(profileIndex) ||
+      profileIndex < 0 ||
+      !permissionProfileId ||
+      !Number.isFinite(permissionUpdatedAt) ||
+      permissionUpdatedAt <= 0
+    ) {
       throw rpcError(ERROR_CODES.UNAUTHORIZED, "Connected profile is no longer available");
     }
     const account = String(accounts[profileIndex] ?? "");
@@ -317,7 +324,7 @@ export async function handleRpc(origin, request) {
       account,
       profileIndex,
       permissionProfileId,
-      permissionUpdatedAt: Number(perm?.updatedAt ?? 0),
+      permissionUpdatedAt,
     });
   }
 

@@ -49,7 +49,7 @@ const getPermissionForOrigin = vi.fn(async (origin) => {
   const accountIndex = Number(permission.accountIndex) || 0;
   return {
     profileId: `account:${accountIndex}:acct${accountIndex}`,
-    updatedAt: 0,
+    updatedAt: 1,
     ...permission,
   };
 });
