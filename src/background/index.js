@@ -788,6 +788,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           if (!account) {
             throw rpcError(ERROR_CODES.INVALID_PARAMS, "Account is not available");
           }
+          cancelPendingApprovals(origin, "Connected profile changed");
           await approveOrigin(origin, {
             profileId: `account:${clamped}:${account}`,
             accountIndex: clamped,
@@ -825,6 +826,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             throw rpcError(ERROR_CODES.UNAUTHORIZED, "No wallet profile is available");
           }
 
+          cancelPendingApprovals(origin, "Connected profile changed");
           await approveOrigin(origin, {
             profileId: `account:${idx}:${account}`,
             accountIndex: idx,
@@ -842,7 +844,19 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "origin is required");
         }
 
-        await revokeOrigin(origin);
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          cancelPendingApprovals(origin, "Site disconnected");
+          await revokeOrigin(origin);
+        });
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (message?.type === "DUSK_UI_CLEAR_PERMISSIONS") {
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          cancelPendingApprovals(null, "Sites disconnected");
+          await clearPermissions();
+        });
         sendResponse({ ok: true });
         return;
       }
@@ -928,6 +942,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
+        return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        cancelPendingApprovals(null, "Network changed");
         // Reset network status when endpoints change (will be checked in background)
         await resetNetworkStatus();
 
@@ -966,7 +982,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           archiverUrl: nextSettings.archiverUrl,
           networkName: networkNameFromNodeUrl(nextSettings.nodeUrl),
         });
-        return;
+        });
       }
 
       // UI sets auto-lock timeout

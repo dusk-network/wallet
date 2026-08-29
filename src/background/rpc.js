@@ -283,27 +283,52 @@ export async function handleRpc(origin, request) {
     return profile;
   }
 
-  async function captureApprovalContext(perm) {
-    const [settings, status] = await Promise.all([getSettings(), getEngineStatus()]);
+  function profileFromPermission(status, perm, includeShielded = false) {
+    const index = Number(perm?.accountIndex);
     const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
-    const profileIndex = status?.isUnlocked
-      ? sanitizeAccountIndex(perm?.accountIndex, accounts.length, 0)
-      : Math.max(0, Math.floor(Number(perm?.accountIndex) || 0));
+    const addresses = Array.isArray(status?.addresses) ? status.addresses : [];
+    const account = Number.isInteger(index) && index >= 0 ? accounts[index] : "";
+    const profileId = account ? `account:${index}:${account}` : "";
+    if (!profileId || profileId !== perm?.profileId) return null;
+    return {
+      profileId,
+      account,
+      ...(includeShielded && addresses[index] ? { shieldedAddress: addresses[index] } : {}),
+    };
+  }
+
+  async function captureApprovalContext(perm) {
+    const [settings, status] = await Promise.all([getSettings(), getEngineStatusStrict()]);
+    const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
+    const profileIndex = Number(perm?.accountIndex);
+    const permissionProfileId = String(perm?.profileId ?? "");
+    if (!Number.isInteger(profileIndex) || profileIndex < 0 || !permissionProfileId) {
+      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Connected profile is no longer available");
+    }
+    const account = String(accounts[profileIndex] ?? "");
+    if (status?.isUnlocked && (!account || permissionProfileId !== `account:${profileIndex}:${account}`)) {
+      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Connected profile is no longer available");
+    }
     return Object.freeze({
       isUnlocked: Boolean(status?.isUnlocked),
       origin,
       nodeUrl: String(settings?.nodeUrl ?? ""),
       walletId: String(accounts[0] ?? ""),
-      account: String(accounts[profileIndex] ?? ""),
+      account,
       profileIndex,
-      permissionProfileId: String(perm?.profileId ?? ""),
+      permissionProfileId,
       permissionUpdatedAt: Number(perm?.updatedAt ?? 0),
     });
   }
 
   async function assertApprovalContext(expected) {
     const permission = await getPermissionForOrigin(origin);
-    const current = await captureApprovalContext(permission);
+    let current;
+    try {
+      current = await captureApprovalContext(permission);
+    } catch {
+      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet changed while awaiting approval");
+    }
     const keys = ["origin", "nodeUrl", "profileIndex", "permissionProfileId", "permissionUpdatedAt"];
     if (expected.walletId) keys.push("walletId", "account");
     if (!current.isUnlocked || !current.walletId || keys.some((key) => current[key] !== expected[key])) {
@@ -452,7 +477,7 @@ export async function handleRpc(origin, request) {
     case "dusk_requestProfiles": {
       const options = firstParamObject(params);
       const { perm, status } = await requestProfileConnection(options);
-      const profile = profileFromStatus(status, perm.accountIndex, hasShieldedGrant(perm));
+      const profile = profileFromPermission(status, perm, hasShieldedGrant(perm));
       return profile ? [profile] : [];
     }
 
@@ -461,7 +486,7 @@ export async function handleRpc(origin, request) {
       if (!perm) return [];
       const status = await getEngineStatus();
       if (!status?.isUnlocked) return [];
-      const profile = profileFromStatus(status, perm.accountIndex, hasShieldedGrant(perm));
+      const profile = profileFromPermission(status, perm, hasShieldedGrant(perm));
       return profile ? [profile] : [];
     }
 
@@ -470,7 +495,7 @@ export async function handleRpc(origin, request) {
       const existing = await getPermissionForOrigin(origin);
       const status0 = await getEngineStatus();
       const existingProfile = existing && status0?.isUnlocked
-        ? profileFromStatus(status0, existing.accountIndex, true)
+        ? profileFromPermission(status0, existing, true)
         : null;
       const { perm, status } = existingProfile && sameProfilePermission(existing, existingProfile) && hasShieldedGrant(existing)
         ? { perm: existing, status: status0 }
@@ -478,7 +503,7 @@ export async function handleRpc(origin, request) {
             ...options,
             shieldedReceiveAddress: true,
           });
-      const profile = profileFromStatus(status, perm.accountIndex, true);
+      const profile = profileFromPermission(status, perm, true);
       if (!profile?.shieldedAddress) {
         throw rpcError(ERROR_CODES.UNAUTHORIZED, "No shielded receive address is available");
       }
@@ -568,30 +593,27 @@ export async function handleRpc(origin, request) {
 
       // Ask user approval.
       await requestUserApproval("switch_network", origin, { from, to });
-      await assertApprovalContext(approvalContext);
-
-      // Apply new settings and reconfigure engine.
-      await setSettings({ nodeUrl: targetNodeUrl });
-      invalidateEngineConfig();
-      await ensureEngineConfigured();
-
-      // Notify all dApps that chain changed.
-      broadcastChainChangedAll().catch(() => {});
-
-      return null;
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        await assertApprovalContext(approvalContext);
+        cancelPendingApprovals(null, "Network changed");
+        await setSettings({ nodeUrl: targetNodeUrl });
+        invalidateEngineConfig();
+        await ensureEngineConfigured();
+        broadcastChainChangedAll().catch(() => {});
+        return null;
+      });
     }
 
     case "dusk_getPublicBalance": {
       const perm = await getPermissionForOrigin(origin);
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
-      const { isUnlocked, accounts } = await getEngineStatus();
-      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      const context = await captureApprovalContext(perm);
+      if (!context.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
 
       await ensureEngineConfigured();
-      const arr = Array.isArray(accounts) ? accounts : [];
       return await engineCall("dusk_getPublicBalance", {
-        profileIndex: sanitizeAccountIndex(perm.accountIndex, arr.length, 0),
+        profileIndex: context.profileIndex,
       });
     }
 
@@ -695,6 +717,7 @@ export async function handleRpc(origin, request) {
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
       const overrides = await requestUserApproval("send_tx", origin, approvalParams);
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
       const executionContext = await assertApprovalContext(approvalContext);
       const finalParams = applyTxDefaultsForRpc(mergeTxParams(baseParams, overrides), { dynamicPrice });
       finalParams.gas = validateGasShape(finalParams.gas);
@@ -712,8 +735,7 @@ export async function handleRpc(origin, request) {
       // Persist minimal metadata so we can later show an "executed" notification
       // and link to the right explorer even if the user switches networks.
       try {
-        const settings = await getSettings();
-        const nodeUrl = settings?.nodeUrl ?? "";
+        const nodeUrl = executionContext.nodeUrl;
         if (hash) {
           const pendingNullifiers = nullifierHexes(result?.nullifiers);
           await putTxMeta(hash, {
@@ -760,6 +782,7 @@ export async function handleRpc(origin, request) {
         response.nonce = result.nonce?.toString?.() ?? String(result.nonce);
       }
       return response;
+      });
     }
 
     case "dusk_watchAsset": {
@@ -823,18 +846,13 @@ export async function handleRpc(origin, request) {
         },
       });
 
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
       const executionContext = await assertApprovalContext(approvalContext);
-      const { isUnlocked, accounts } = await getEngineStatus();
-      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-
       await ensureEngineConfigured();
-      const arr = Array.isArray(accounts) ? accounts : [];
       const idx = executionContext.profileIndex;
-
-      const settings = await getSettings();
-      const nodeUrl = settings?.nodeUrl ?? "";
-      const walletId = String(arr?.[0] ?? "").trim();
-      const account = String(arr?.[idx] ?? "").trim();
+      const nodeUrl = executionContext.nodeUrl;
+      const walletId = executionContext.walletId;
+      const account = executionContext.account;
 
       if (!walletId) throw rpcError(ERROR_CODES.INTERNAL, "Wallet ID unavailable");
       if (!account) throw rpcError(ERROR_CODES.INTERNAL, "Account unavailable");
@@ -869,6 +887,7 @@ export async function handleRpc(origin, request) {
       });
 
       return true;
+      });
     }
 
     case "dusk_signMessage": {
@@ -908,14 +927,16 @@ export async function handleRpc(origin, request) {
         messagePreview,
       });
 
-      const executionContext = await assertApprovalContext(approvalContext);
-      await ensureEngineConfigured();
-      return await engineCall("dusk_signMessage", {
-        origin,
-        chainId,
-        message: params.message,
-        profileIndex: executionContext.profileIndex,
-        _approvalContext: executionContext,
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        const executionContext = await assertApprovalContext(approvalContext);
+        await ensureEngineConfigured();
+        return engineCall("dusk_signMessage", {
+          origin,
+          chainId,
+          message: params.message,
+          profileIndex: executionContext.profileIndex,
+          _approvalContext: executionContext,
+        });
       });
     }
 
@@ -959,23 +980,27 @@ export async function handleRpc(origin, request) {
         expiresAt,
       });
 
-      const executionContext = await assertApprovalContext(approvalContext);
-      await ensureEngineConfigured();
-      return await engineCall("dusk_signAuth", {
-        origin,
-        chainId,
-        nonce,
-        statement,
-        expiresAt,
-        profileIndex: executionContext.profileIndex,
-        _approvalContext: executionContext,
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        const executionContext = await assertApprovalContext(approvalContext);
+        await ensureEngineConfigured();
+        return engineCall("dusk_signAuth", {
+          origin,
+          chainId,
+          nonce,
+          statement,
+          expiresAt,
+          profileIndex: executionContext.profileIndex,
+          _approvalContext: executionContext,
+        });
       });
     }
 
     case "dusk_disconnect": {
-      cancelPendingApprovals(origin, "Site disconnected");
-      await revokeOrigin(origin);
-      return true;
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        cancelPendingApprovals(origin, "Site disconnected");
+        await revokeOrigin(origin);
+        return true;
+      });
     }
 
     case "dusk_getAddresses": {

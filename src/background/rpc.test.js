@@ -43,7 +43,16 @@ const approveOrigin = vi.fn(async (origin, grant = {}) => {
   return perms[origin];
 });
 
-const getPermissionForOrigin = vi.fn(async (origin) => perms[origin] ?? null);
+const getPermissionForOrigin = vi.fn(async (origin) => {
+  const permission = perms[origin];
+  if (!permission) return null;
+  const accountIndex = Number(permission.accountIndex) || 0;
+  return {
+    profileId: `account:${accountIndex}:acct${accountIndex}`,
+    updatedAt: 0,
+    ...permission,
+  };
+});
 const revokeOrigin = vi.fn(async (origin) => {
   delete perms[origin];
 });
@@ -495,6 +504,20 @@ describe("background rpc handler", () => {
     expect(perms["https://dapp.example"].grants.shieldedReceiveAddress).toBe(false);
   });
 
+  it("does not expose profiles through a stale permission", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    perms["https://dapp.example"] = {
+      profileId: "account:0:another-wallet",
+      accountIndex: 0,
+      updatedAt: 1,
+    };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_profiles" })
+    ).resolves.toEqual([]);
+  });
+
   it("dusk_getPublicBalance passes the permitted profileIndex to the engine", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -733,6 +756,43 @@ describe("background rpc handler", () => {
       expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
     }
   );
+
+  it("rejects a resolved approval if reset wins the lifecycle lock", async () => {
+    vi.resetModules();
+    const [{ handleRpc }, { WALLET_LIFECYCLE_LOCK, withStorageLock }] = await Promise.all([
+      import("./rpc.js"),
+      import("../shared/storageLock.js"),
+    ]);
+    perms["https://dapp.example"] = {
+      profileId: "account:0:acct0",
+      accountIndex: 0,
+      updatedAt: 1,
+    };
+    let releaseLifecycle;
+    let lifecycleStarted;
+    const started = new Promise((resolve) => { lifecycleStarted = resolve; });
+    const lifecycle = withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      lifecycleStarted();
+      await new Promise((resolve) => { releaseLifecycle = resolve; });
+    });
+    await started;
+
+    const request = handleRpc("https://dapp.example", {
+      method: "dusk_sendTransaction",
+      params: { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    engineStatus = { isUnlocked: true, accounts: ["wallet-b"] };
+    perms = {};
+    releaseLifecycle();
+    await lifecycle;
+
+    await expect(request).rejects.toMatchObject({
+      code: ERROR_CODES.UNAUTHORIZED,
+      message: "Wallet changed while awaiting approval",
+    });
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+  });
 
   it("dusk_sendTransaction preserves user rejection error codes", async () => {
     vi.resetModules();

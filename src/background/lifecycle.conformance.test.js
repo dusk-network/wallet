@@ -21,7 +21,7 @@ describe("background lock lifecycle conformance", () => {
     const source = await readFile(path.resolve(process.cwd(), "src/background/index.js"), "utf8");
 
     expect(source).toMatch(
-      /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockVault\(password\)[\s\S]*?engineCall\(\s*"engine_unlock"[\s\S]*?broadcastProfilesChangedAll/
+      /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockVault\(password\)[\s\S]*?unlockEngine\(mnemonic\)[\s\S]*?broadcastProfilesChangedAll/
     );
   });
 });
