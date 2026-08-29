@@ -1,5 +1,13 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
 
+let mutations = Promise.resolve();
+
+function mutate(fn) {
+  const result = mutations.then(fn, fn);
+  mutations = result.catch(() => {});
+  return result;
+}
+
 /**
  * @typedef {Object} TxMeta
  * @property {string} origin
@@ -39,25 +47,39 @@ async function setAll(next) {
   await storage.set({ [STORAGE_KEYS.TXS]: next });
 }
 
-function prune(store, limit = 50) {
+function prune(store, protectedHash = "", limit = 50) {
   const entries = Object.entries(store);
   if (entries.length <= limit) return store;
 
-  entries.sort((a, b) => (a[1].submittedAt ?? 0) - (b[1].submittedAt ?? 0));
-  const keep = entries.slice(-limit);
-  return Object.fromEntries(keep);
+  const timestamp = (meta) => meta.submittedAt ?? meta.executedAt ?? meta.lastCheckedAt ?? 0;
+  entries.sort((a, b) => {
+    if (a[0] === protectedHash) return 1;
+    if (b[0] === protectedHash) return -1;
+    return timestamp(a[1]) - timestamp(b[1]);
+  });
+  return Object.fromEntries(entries.slice(-limit));
 }
 
 /**
- * Upsert tx metadata.
+ * Add submission metadata without overwriting an earlier lifecycle observation.
  * @param {string} hash
  * @param {TxMeta} meta
  */
 export async function putTxMeta(hash, meta) {
   if (!hash) return;
-  const current = await getAll();
-  current[hash] = meta;
-  await setAll(prune(current));
+  return mutate(async () => {
+    const current = await getAll();
+    const next = { ...meta, ...current[hash] };
+    const terminal = next.status === "executed" || next.status === "failed";
+    const shielded = next.privacy === "shielded" ||
+      (Array.isArray(next.pendingNullifiers) && next.pendingNullifiers.length > 0);
+    if (terminal && next.executedAt != null && shielded) {
+      next.reservationStatus = "spent";
+      next.reservationUpdatedAt = next.executedAt;
+    }
+    current[hash] = next;
+    await setAll(prune(current, hash));
+  });
 }
 
 /**
@@ -67,11 +89,20 @@ export async function putTxMeta(hash, meta) {
  */
 export async function patchTxMeta(hash, patch) {
   if (!hash) return;
-  const current = await getAll();
-  const prev = current[hash];
-  if (!prev) return;
-  current[hash] = { ...prev, ...patch };
-  await setAll(prune(current));
+  return mutate(async () => {
+    const current = await getAll();
+    const prev = current[hash] ?? {};
+    const terminal = prev.status === "executed" || prev.status === "failed";
+    const weaker = patch.status && patch.status !== "executed" && patch.status !== "failed";
+    const clearsRemoval = patch.status && patch.status !== "unknown" && patch.status !== "removed";
+    const nextPatch = clearsRemoval
+      ? { ...patch, recoveryReason: undefined, removedAt: undefined }
+      : patch;
+    current[hash] = terminal && weaker
+      ? { ...prev, lastCheckedAt: patch.lastCheckedAt ?? prev.lastCheckedAt }
+      : { ...prev, ...nextPatch };
+    await setAll(prune(current, hash));
+  });
 }
 
 /**

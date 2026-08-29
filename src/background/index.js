@@ -238,14 +238,29 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
   const nodeUrl = meta?.nodeUrl ?? settings?.nodeUrl ?? "";
   const origin = meta?.origin ?? "Wallet";
   const now = Date.now();
+  const terminalStatus = meta?.status === "executed" || meta?.status === "failed"
+    ? meta.status
+    : "";
+
+  if (!nodeUrl && terminalStatus) {
+    await patchTxMeta(hash, { lastCheckedAt: now });
+    return {
+      status: terminalStatus,
+      ok: terminalStatus === "executed",
+      origin,
+      nodeUrl,
+      error: meta?.error || "",
+    };
+  }
 
   if (!nodeUrl) {
+    const status = preserveRemoved ? meta?.status ?? "unknown" : "unknown";
     await patchTxMeta(hash, {
-      status: preserveRemoved ? "removed" : "unknown",
+      status,
       lastCheckedAt: now,
       recoveryReason: "node_url_missing",
     });
-    return { status: preserveRemoved ? "removed" : "unknown", origin, nodeUrl, error: "node_url_missing" };
+    return { status, origin, nodeUrl, error: "node_url_missing" };
   }
 
   const presence = await classifyTxPresence(nodeUrl, hash);
@@ -267,8 +282,21 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
       error: presence.error || undefined,
       executedAt: now,
       lastCheckedAt: now,
+      reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
+      reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
     });
     return { status: "failed", ok: false, origin, nodeUrl, error: presence.error || "" };
+  }
+
+  if (terminalStatus) {
+    await patchTxMeta(hash, { lastCheckedAt: now });
+    return {
+      status: terminalStatus,
+      ok: terminalStatus === "executed",
+      origin,
+      nodeUrl,
+      error: meta?.error || "",
+    };
   }
 
   if (presence.state === "mempool") {
@@ -283,25 +311,37 @@ async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
   }
 
   if (presence.state === "not_found") {
-    const status = preserveRemoved ? "removed" : "unknown";
+    const confirmedRemoved = preserveRemoved && (
+      meta?.recoveryReason === "removed_unconfirmed" || meta?.status === "removed"
+    );
+    const status = confirmedRemoved ? "removed" : "unknown";
     await patchTxMeta(hash, {
       status,
       lastCheckedAt: now,
-      recoveryReason: preserveRemoved ? "removed" : "not_found",
-      reservationStatus: preserveRemoved && isShieldedTxMeta(meta)
+      recoveryReason: preserveRemoved
+        ? confirmedRemoved ? "removed" : "removed_unconfirmed"
+        : "not_found",
+      reservationStatus: confirmedRemoved && isShieldedTxMeta(meta)
         ? "recoverable"
         : meta?.reservationStatus,
+      removedAt: confirmedRemoved ? now : meta?.removedAt,
+      reservationUpdatedAt:
+        confirmedRemoved && isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
     });
     return { status, origin, nodeUrl };
   }
 
+  const confirmedRemoved = preserveRemoved && meta?.status === "removed";
+  const status = confirmedRemoved ? "removed" : "unknown";
   await patchTxMeta(hash, {
-    status: preserveRemoved ? "removed" : "unknown",
+    status,
     lastCheckedAt: now,
-    recoveryReason: presence.error || "reconciliation_unavailable",
+    recoveryReason: preserveRemoved
+      ? confirmedRemoved ? "removed" : "removed_unconfirmed"
+      : presence.error || "reconciliation_unavailable",
   });
   return {
-    status: preserveRemoved ? "removed" : "unknown",
+    status,
     origin,
     nodeUrl,
     error: presence.error || "reconciliation_unavailable",
@@ -496,8 +536,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             executedAt: now,
             lastCheckedAt: now,
             error: ok ? undefined : error || undefined,
-            reservationStatus: ok && isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
-            reservationUpdatedAt: ok && isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
+            reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
+            reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
           });
 
           notifyTxExecuted({ hash, origin, ok, error, nodeUrl }).catch(() => {});
@@ -520,19 +560,6 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       if (message?.type === "DUSK_TX_REMOVED") {
         const hash = String(message.hash ?? "");
-        const reason = message.reason ? String(message.reason) : "removed";
-        const meta = await getTxMeta(hash);
-        const now = Date.now();
-
-        await patchTxMeta(hash, {
-          status: "removed",
-          removedAt: now,
-          lastCheckedAt: now,
-          reservationStatus: isShieldedTxMeta(meta) ? "recoverable" : meta?.reservationStatus,
-          reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
-          recoveryReason: reason,
-        });
-
         const reconciled = await reconcileTxPresence(hash, { preserveRemoved: true });
         emitUiTxStatus({
           hash,
@@ -550,14 +577,19 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const meta = await getTxMeta(hash);
         const now = Date.now();
 
+        const preserveRemoved =
+          meta?.status === "removed" || meta?.recoveryReason === "removed_unconfirmed";
         await patchTxMeta(hash, {
-          status: "unknown",
+          status: meta?.status === "removed" ? "removed" : "unknown",
           lastCheckedAt: now,
-          reservationStatus: isShieldedTxMeta(meta) ? "pending" : meta?.reservationStatus,
-          recoveryReason: reason,
+          reservationStatus:
+            meta?.status === "removed" || !isShieldedTxMeta(meta)
+              ? meta?.reservationStatus
+              : "pending",
+          recoveryReason: preserveRemoved ? meta?.recoveryReason : reason,
         });
 
-        const reconciled = await reconcileTxPresence(hash);
+        const reconciled = await reconcileTxPresence(hash, { preserveRemoved });
         emitUiTxStatus({
           hash,
           status: reconciled.status || "unknown",
@@ -576,7 +608,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         const meta = await getTxMeta(hash);
         const reconciled = await reconcileTxPresence(hash, {
-          preserveRemoved: meta?.status === "removed",
+          preserveRemoved:
+            meta?.status === "removed" || meta?.recoveryReason === "removed_unconfirmed",
         });
         emitUiTxStatus({
           hash,

@@ -10,8 +10,14 @@ import { getAccountNames } from "../shared/accountNames.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
+import { getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
 import { bytesToHex } from "../shared/bytes.js";
+import {
+  executionEventError,
+  executionEventOk,
+  waitForTxExecution,
+} from "../shared/txExecution.js";
+import { classifyTxPresence } from "../shared/txLifecycle.js";
 import { handleUiCommand } from "./uiCommands.js";
 import {
   configure,
@@ -435,51 +441,103 @@ export async function localSend(message) {
           (async () => {
             try {
               const timeoutMs = 180_000;
-              const removedWatcher = waitTxRemoved(hash, { timeoutMs })
-                .then((event) => ({ type: "removed", event }))
-                .catch((e) => {
-                  if (/removed watcher not available/i.test(String(e?.message ?? e))) {
-                    return new Promise(() => {});
-                  }
-                  throw e;
-                });
-              const lifecycle = await Promise.race([
-                waitTxExecuted(hash, { timeoutMs }).then((event) => ({ type: "executed", event })),
+              const removedWatcher = waitTxRemoved(hash, { timeoutMs }).catch((e) => {
+                if (/removed watcher not available/i.test(String(e?.message ?? e))) {
+                  return new Promise(() => {});
+                }
+                throw e;
+              });
+              const executedEvent = await waitForTxExecution(
+                waitTxExecuted(hash, { timeoutMs }),
                 removedWatcher,
-              ]);
+                async () => {
+                  const meta = await getTxMeta(hash);
+                  const presence = await classifyTxPresence(nodeUrl, hash);
+                  const now = Date.now();
+                  const isShielded = pendingNullifiers.length > 0;
 
-              if (lifecycle?.type === "removed") {
-                await patchTxMeta(hash, {
-                  status: "removed",
-                  removedAt: Date.now(),
-                  recoveryReason: "removed",
-                });
-                return;
-              }
+                  if (presence.state === "executed_success" || presence.state === "executed_failed") {
+                    const ok = presence.state === "executed_success";
+                    await patchTxMeta(hash, {
+                      status: ok ? "executed" : "failed",
+                      error: ok ? undefined : presence.error || undefined,
+                      executedAt: now,
+                      lastCheckedAt: now,
+                      reservationStatus: isShielded ? "spent" : meta?.reservationStatus,
+                      reservationUpdatedAt: isShielded ? now : meta?.reservationUpdatedAt,
+                    });
+                  } else if (presence.state === "not_found") {
+                    await patchTxMeta(hash, {
+                      status: "unknown",
+                      lastCheckedAt: now,
+                      recoveryReason: "removed_unconfirmed",
+                      reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
+                    });
+                  } else if (presence.state === "mempool") {
+                    await patchTxMeta(hash, {
+                      status: "mempool",
+                      lastCheckedAt: now,
+                      reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
+                    });
+                  } else {
+                    await patchTxMeta(hash, {
+                      status: "unknown",
+                      lastCheckedAt: now,
+                      recoveryReason: "removed_unconfirmed",
+                      reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
+                    });
+                  }
+                }
+              );
+              const ok = executionEventOk(executedEvent);
+              const error = ok ? "" : executionEventError(executedEvent);
 
-              const executedEvent = lifecycle?.event;
-              const ok = !(executedEvent && typeof executedEvent === "object") ||
-                !(executedEvent.success === false || executedEvent.err || executedEvent.error || executedEvent.result?.err || executedEvent.result?.error);
-              const err =
-                executedEvent?.err ??
-                executedEvent?.error ??
-                executedEvent?.result?.err ??
-                executedEvent?.result?.error;
-              const error =
-                ok ? "" : typeof err === "string" ? err : typeof err?.message === "string" ? err.message : err ? JSON.stringify(err) : "";
-
+              const now = Date.now();
               await patchTxMeta(hash, {
                 status: ok ? "executed" : "failed",
                 error: ok ? undefined : (error || undefined),
+                executedAt: now,
+                lastCheckedAt: now,
+                ...(pendingNullifiers.length
+                  ? { reservationStatus: "spent", reservationUpdatedAt: now }
+                  : {}),
               });
             } catch (e) {
-              await patchTxMeta(hash, {
-                status: "unknown",
-                lastCheckedAt: Date.now(),
-                recoveryReason: /timed out/i.test(String(e?.message ?? e))
-                  ? "watcher_timeout"
-                  : "watcher_unavailable",
-              });
+              const meta = await getTxMeta(hash);
+              const hasExecution = meta?.status === "executed" || meta?.status === "failed";
+              const timedOut = /timed out/i.test(String(e?.message ?? e));
+              if (!hasExecution && timedOut && meta?.recoveryReason === "removed_unconfirmed") {
+                const presence = await classifyTxPresence(nodeUrl, hash);
+                const now = Date.now();
+                if (presence.state === "executed_success" || presence.state === "executed_failed") {
+                  const ok = presence.state === "executed_success";
+                  await patchTxMeta(hash, {
+                    status: ok ? "executed" : "failed",
+                    error: ok ? undefined : presence.error || undefined,
+                    executedAt: now,
+                    lastCheckedAt: now,
+                    reservationStatus: pendingNullifiers.length ? "spent" : meta?.reservationStatus,
+                    reservationUpdatedAt: pendingNullifiers.length ? now : meta?.reservationUpdatedAt,
+                  });
+                } else if (presence.state === "not_found") {
+                  await patchTxMeta(hash, {
+                    status: "removed",
+                    removedAt: now,
+                    lastCheckedAt: now,
+                    recoveryReason: "removed",
+                    reservationStatus: pendingNullifiers.length ? "recoverable" : meta?.reservationStatus,
+                    reservationUpdatedAt: pendingNullifiers.length ? now : meta?.reservationUpdatedAt,
+                  });
+                } else {
+                  await patchTxMeta(hash, { lastCheckedAt: now });
+                }
+              } else if (!hasExecution) {
+                await patchTxMeta(hash, {
+                  status: "unknown",
+                  lastCheckedAt: Date.now(),
+                  recoveryReason: timedOut ? "watcher_timeout" : "watcher_unavailable",
+                });
+              }
             } finally {
               // Reconcile shielded state after tx execution.
               startShieldedSync({ force: false }).catch(() => {});

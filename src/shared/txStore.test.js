@@ -78,4 +78,90 @@ describe("txStore", () => {
     const txs = await listTxs();
     expect(txs[0]).toMatchObject({ hash: "hash-1", status: "unknown" });
   });
+
+  it("keeps early execution evidence when the activity store is full", async () => {
+    const { getTxMeta, listTxs, patchTxMeta, putTxMeta } = await import("./txStore.js");
+    for (let i = 0; i < 50; i++) {
+      await putTxMeta(`hash-${i}`, { submittedAt: i, status: "submitted" });
+    }
+
+    await patchTxMeta("hash-early", { status: "failed", error: "OutOfGas", executedAt: 100 });
+    await putTxMeta("hash-early", {
+      origin: "Wallet",
+      nodeUrl: "https://testnet.nodes.dusk.network",
+      kind: "transfer",
+      privacy: "shielded",
+      pendingNullifiers: ["aa"],
+      reservationStatus: "pending",
+      reservationUpdatedAt: 90,
+      submittedAt: 90,
+      status: "submitted",
+    });
+
+    await expect(getTxMeta("hash-early")).resolves.toMatchObject({
+      origin: "Wallet",
+      status: "failed",
+      error: "OutOfGas",
+      pendingNullifiers: ["aa"],
+      reservationStatus: "spent",
+      reservationUpdatedAt: 100,
+    });
+    await expect(listTxs()).resolves.toHaveLength(50);
+  });
+
+  it("clears stale removal evidence when the transaction returns", async () => {
+    const { getTxMeta, patchTxMeta, putTxMeta } = await import("./txStore.js");
+    await putTxMeta("hash-removed", {
+      submittedAt: 1,
+      status: "removed",
+      recoveryReason: "removed",
+      removedAt: 10,
+    });
+
+    await patchTxMeta("hash-removed", { status: "mempool" });
+    let meta = await getTxMeta("hash-removed");
+    expect(meta.recoveryReason).toBeUndefined();
+    expect(meta.removedAt).toBeUndefined();
+
+    await patchTxMeta("hash-removed", {
+      status: "removed",
+      recoveryReason: "removed",
+      removedAt: 20,
+    });
+    await patchTxMeta("hash-removed", { status: "executed", executedAt: 30 });
+    meta = await getTxMeta("hash-removed");
+    expect(meta.status).toBe("executed");
+    expect(meta.recoveryReason).toBeUndefined();
+    expect(meta.removedAt).toBeUndefined();
+  });
+
+  it("does not downgrade terminal execution evidence", async () => {
+    const { getTxMeta, patchTxMeta, putTxMeta } = await import("./txStore.js");
+    await putTxMeta("hash-terminal", {
+      status: "failed",
+      error: "OutOfGas",
+      executedAt: 10,
+      reservationStatus: "spent",
+      reservationUpdatedAt: 10,
+      submittedAt: 1,
+    });
+
+    await patchTxMeta("hash-terminal", {
+      status: "removed",
+      error: undefined,
+      reservationStatus: "recoverable",
+      reservationUpdatedAt: 20,
+      removedAt: 20,
+    });
+
+    const meta = await getTxMeta("hash-terminal");
+    expect(meta).toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      executedAt: 10,
+      reservationStatus: "spent",
+      reservationUpdatedAt: 10,
+    });
+    expect(meta.removedAt).toBeUndefined();
+  });
 });

@@ -42,6 +42,9 @@ export function txRecoveryReasonLabel(reason) {
   if (key === "not_found") {
     return "The transaction was not found in the node's chain or mempool response.";
   }
+  if (key === "removed_unconfirmed") {
+    return "The node reported removal, but the wallet has not confirmed it yet.";
+  }
   if (key === "removed") {
     return "The node reported that this transaction was removed from the mempool.";
   }

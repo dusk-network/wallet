@@ -13,8 +13,8 @@ Wallet-local transaction metadata may use:
 | `mempool` | Best-effort GraphQL reconciliation observed the hash in node mempool. |
 | `executed` | The node reported execution without an error. |
 | `failed` | Submission/preverify failed, or execution reported an error. Watcher timeout is not failure. |
-| `removed` | A removed event was observed, or reconciliation after that event did not find the tx. |
-| `unknown` | Watcher timed out or reconciliation could not prove chain/mempool state. |
+| `removed` | A removed event was observed and a later reconciliation still did not find the tx. |
+| `unknown` | Watcher timed out, removal is still provisional, or reconciliation could not prove chain/mempool state. |
 
 User-facing copy must not tell users to retry or raise gas for `unknown`
 Phoenix transactions. A tx can still be live in mempool after the wallet
@@ -31,7 +31,7 @@ Reservation metadata is separate from transaction status:
 | Reservation | Meaning |
 | --- | --- |
 | `pending` | Local nullifiers remain excluded from spendable notes. |
-| `spent` | Future state for sync-proven spent nullifiers. |
+| `spent` | Node finalization evidence was observed. Shielded sync separately proves and clears the pending nullifier rows. |
 | `recoverable` | Removed/unknown evidence suggests review may be needed, but notes are still not spendable. |
 | `released` | Future/manual state after an explicit release flow. |
 
@@ -72,8 +72,10 @@ query {
 ```
 
 Runtime watchers use `executed` and, when exposed by the current w3sper/node
-surface, `removed`. If `removed` is unavailable, timeout falls back to
-`unknown` plus GraphQL reconciliation.
+surface, `removed`. A removed event is provisional: the executed watcher stays
+alive until its existing timeout, and a later execution event supersedes it.
+If `removed` is unavailable, timeout falls back to `unknown` plus GraphQL
+reconciliation.
 
 ## Remaining Work
 

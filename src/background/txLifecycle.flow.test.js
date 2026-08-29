@@ -248,7 +248,32 @@ describe("background Phoenix tx lifecycle flow", () => {
     );
   });
 
-  it("marks removed shielded tx reservations recoverable without clearing pending nullifiers", async () => {
+  it("marks failed finalized shielded tx reservations spent", async () => {
+    const hash = "0xfailed";
+    await seedTxMeta(hash);
+
+    await sendBackgroundMessage({
+      type: "DUSK_TX_EXECUTED",
+      hash,
+      ok: false,
+      error: "OutOfGas",
+    });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      reservationStatus: "spent",
+      pendingNullifiers: ["aa"],
+    });
+    expect(mocks.notifyTxExecuted).toHaveBeenCalledWith(expect.objectContaining({
+      hash,
+      ok: false,
+      error: "OutOfGas",
+    }));
+  });
+
+  it("keeps a first removed/not-found observation provisional", async () => {
     const hash = "0xremoved";
     await seedTxMeta(hash);
     mocks.classifyTxPresence.mockResolvedValueOnce({ state: "not_found" });
@@ -256,17 +281,113 @@ describe("background Phoenix tx lifecycle flow", () => {
     await sendBackgroundMessage({ type: "DUSK_TX_REMOVED", hash, reason: "removed" });
 
     const { getTxMeta } = await import("../shared/txStore.js");
+    const meta = await getTxMeta(hash);
+    expect(meta).toMatchObject({
+      status: "unknown",
+      reservationStatus: "pending",
+      pendingNullifiers: ["aa"],
+      recoveryReason: "removed_unconfirmed",
+    });
+    expect(meta.removedAt).toBeUndefined();
+    expect(mocks.notifyTxExecuted).not.toHaveBeenCalled();
+  });
+
+  it("lets a later executed event supersede provisional removal", async () => {
+    const hash = "0xremoved-then-executed";
+    await seedTxMeta(hash);
+    mocks.classifyTxPresence.mockResolvedValueOnce({ state: "not_found" });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_REMOVED", hash, reason: "removed" });
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    const meta = await getTxMeta(hash);
+    expect(meta).toMatchObject({
+      status: "executed",
+      reservationStatus: "spent",
+      pendingNullifiers: ["aa"],
+    });
+    expect(meta.recoveryReason).toBeUndefined();
+    expect(meta.removedAt).toBeUndefined();
+  });
+
+  it("timestamps removal only after a second not-found observation", async () => {
+    const hash = "0xconfirmed-removed";
+    await seedTxMeta(hash);
+    mocks.classifyTxPresence.mockResolvedValue({ state: "not_found" });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_REMOVED", hash, reason: "removed" });
+    await sendBackgroundMessage({ type: "DUSK_TX_UNKNOWN", hash, reason: "watcher_timeout" });
+    await sendBackgroundMessage({ type: "DUSK_TX_UNKNOWN", hash, reason: "watcher_timeout" });
+    await sendBackgroundMessage({ type: "DUSK_TX_RECHECK", hash });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
     await expect(getTxMeta(hash)).resolves.toMatchObject({
       status: "removed",
       reservationStatus: "recoverable",
-      pendingNullifiers: ["aa"],
       recoveryReason: "removed",
+      removedAt: expect.any(Number),
+      reservationUpdatedAt: expect.any(Number),
+    });
+  });
+
+  it("does not let not-found removal evidence erase execution evidence", async () => {
+    const hash = "0xremoved-after-failed";
+    await seedTxMeta(hash, {
+      status: "failed",
+      error: "OutOfGas",
+      reservationStatus: "spent",
+    });
+    mocks.classifyTxPresence.mockResolvedValueOnce({ state: "not_found" });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_REMOVED", hash, reason: "removed" });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      reservationStatus: "spent",
+    });
+  });
+
+  it("records a provisional removal when reconciliation is unavailable", async () => {
+    const hash = "0xremoved-unavailable";
+    await seedTxMeta(hash);
+    mocks.classifyTxPresence.mockResolvedValueOnce({
+      state: "unavailable",
+      error: "node offline",
     });
 
-    expect(mocks.sentMessages).toContainEqual(
-      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "removed" })
-    );
-    expect(mocks.notifyTxExecuted).not.toHaveBeenCalled();
+    await sendBackgroundMessage({ type: "DUSK_TX_REMOVED", hash, reason: "removed" });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "unknown",
+      recoveryReason: "removed_unconfirmed",
+      reservationStatus: "pending",
+    });
+  });
+
+  it("does not let an unverified removed event erase execution evidence", async () => {
+    const hash = "0xremoved-unavailable-terminal";
+    await seedTxMeta(hash, {
+      status: "failed",
+      error: "OutOfGas",
+      reservationStatus: "spent",
+    });
+    mocks.classifyTxPresence.mockResolvedValueOnce({
+      state: "unavailable",
+      error: "node offline",
+    });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_REMOVED", hash, reason: "removed" });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await expect(getTxMeta(hash)).resolves.toMatchObject({
+      status: "failed",
+      error: "OutOfGas",
+      reservationStatus: "spent",
+    });
   });
 
   it("rechecks old shielded reservations without clearing pending nullifiers", async () => {
@@ -317,7 +438,7 @@ describe("background Phoenix tx lifecycle flow", () => {
     );
   });
 
-  it("rechecks old shielded reservations to finalized failure without releasing pending nullifiers", async () => {
+  it("rechecks old shielded reservations to finalized failure and marks reservations spent", async () => {
     const hash = "0xrecheck-failed";
     await seedTxMeta(hash, { status: "unknown", recoveryReason: "watcher_timeout" });
     mocks.classifyTxPresence.mockResolvedValueOnce({
@@ -335,7 +456,7 @@ describe("background Phoenix tx lifecycle flow", () => {
     await expect(getTxMeta(hash)).resolves.toMatchObject({
       status: "failed",
       error: "OutOfGas",
-      reservationStatus: "pending",
+      reservationStatus: "spent",
       pendingNullifiers: ["aa"],
     });
 
