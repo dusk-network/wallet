@@ -256,7 +256,7 @@ async function unlockVaultUnlocked(password) {
   }
 
   if (!vault || typeof vault !== "object" || !vault.iterations) {
-    throw new Error("Unsupported vault format. Reset the wallet only after preserving recovery access.");
+    throw new Error("Unsupported vault format. Confirm you have your recovery phrase, then use Settings → Reset wallet and import it again.");
   }
 
   const enc = deserializeEncryptInfo(vault);
