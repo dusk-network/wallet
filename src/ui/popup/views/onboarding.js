@@ -15,6 +15,16 @@ function generateMnemonic12() {
   return entropyToMnemonic(bytesToHex(entropy));
 }
 
+async function showPersistedVault(state, actions) {
+  const status = await actions?.send?.({ type: "DUSK_UI_STATUS" }).catch(() => null);
+  if (!status?.hasVault) return false;
+  state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
+  state.route = "home";
+  state.needsRefresh = true;
+  await actions?.render?.({ forceRefresh: true });
+  return true;
+}
+
 function srpGridEl(mnemonic, { blurred = false } = {}) {
   const words = normalizeMnemonic(mnemonic)
     .split(" ")
@@ -320,6 +330,7 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
+        if (await showPersistedVault(state, actions)) return;
         setErr(e?.message ?? String(e));
         setBusy(false);
       }
@@ -433,6 +444,7 @@ export function onboardingImportView({ state, actions } = {}) {
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
+        if (await showPersistedVault(state, actions)) return;
         setErr(e?.message ?? String(e));
         setBusy(false);
       }

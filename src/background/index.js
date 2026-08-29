@@ -17,12 +17,13 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { bytesToHex } from "../shared/bytes.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
-import { withStorageLock } from "../shared/storageLock.js";
+import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 
 import {
   engineCall,
   ensureEngineConfigured,
   getEngineStatus,
+  getEngineStatusStrict,
   invalidateEngineConfig,
   handleEngineReady,
 } from "./engineHost.js";
@@ -70,7 +71,6 @@ const ext = getExtensionApi();
 // ------------------------------
 const AUTO_LOCK_ALARM_NAME = "dusk_auto_lock_check";
 const AUTO_LOCK_ACTIVITY_KEY = STORAGE_KEYS.AUTO_LOCK_ACTIVITY;
-const WALLET_LIFECYCLE_LOCK = "wallet-lifecycle";
 const DAPP_ACTIVITY_METHODS = new Set([
   "dusk_sendTransaction",
   "dusk_watchAsset",
@@ -158,7 +158,7 @@ async function ensureActivityTimestamp() {
 
 async function lockWallet(reason) {
   await engineCall("engine_lock");
-  if ((await getEngineStatus())?.isUnlocked) throw new Error("Wallet lock did not complete");
+  if ((await getEngineStatusStrict())?.isUnlocked) throw new Error("Wallet lock did not complete");
   await clearActivity();
   broadcastProfilesChangedAll().catch(() => {});
   emitUiLockState(false, reason).catch(() => {});
@@ -702,7 +702,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       if (message?.type === "DUSK_UI_UNLOCK") {
         const password = message.password;
         const accounts = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-          const current = await getEngineStatus();
+          const current = await getEngineStatusStrict();
           if (current?.isUnlocked) {
             await updateActivity();
             setupAutoLockAlarm().catch(console.error);
@@ -722,7 +722,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           emitUiLockState(true, "unlock").catch(() => {});
           return Array.isArray(result?.accounts)
             ? result.accounts
-            : (await getEngineStatus()).accounts;
+            : (await getEngineStatusStrict()).accounts;
         });
 
         sendResponse({ ok: true, accounts });
@@ -761,12 +761,20 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const maxIndex = Math.max(0, Number(settings?.accountCount ?? 1) - 1);
         const clamped = Math.min(Math.floor(accountIndex), maxIndex);
 
-        const status = await getEngineStatus();
-        const account = Array.isArray(status?.accounts) ? status.accounts[clamped] : "";
-        await approveOrigin(origin, {
-          profileId: `account:${clamped}:${account || ""}`,
-          accountIndex: clamped,
-          grants: { publicAccount: true, shieldedReceiveAddress: false },
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const status = await getEngineStatusStrict();
+          if (!status.isUnlocked) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+          }
+          const account = Array.isArray(status.accounts) ? status.accounts[clamped] : "";
+          if (!account) {
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Account is not available");
+          }
+          await approveOrigin(origin, {
+            profileId: `account:${clamped}:${account}`,
+            accountIndex: clamped,
+            grants: { publicAccount: true, shieldedReceiveAddress: false },
+          });
         });
         sendResponse({ ok: true });
         return;
@@ -779,26 +787,31 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "origin is required");
         }
 
-        const status = await getEngineStatus();
-        if (!status.isUnlocked) {
-          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-        }
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const status = await getEngineStatusStrict();
+          if (!status.isUnlocked) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+          }
 
-        const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
-        const idxRaw =
-          status.selectedAccountIndex !== undefined && status.selectedAccountIndex !== null
-            ? Number(status.selectedAccountIndex)
-            : Number((await getSettings())?.selectedAccountIndex ?? 0);
-        const idx = Math.max(
-          0,
-          Math.min(Math.floor(idxRaw) || 0, Math.max(0, accounts.length - 1))
-        );
-        const account = accounts[idx] ?? "";
+          const accounts = Array.isArray(status.accounts) ? status.accounts : [];
+          const idxRaw =
+            status.selectedAccountIndex !== undefined && status.selectedAccountIndex !== null
+              ? Number(status.selectedAccountIndex)
+              : Number((await getSettings())?.selectedAccountIndex ?? 0);
+          const idx = Math.max(
+            0,
+            Math.min(Math.floor(idxRaw) || 0, Math.max(0, accounts.length - 1))
+          );
+          const account = accounts[idx] ?? "";
+          if (!account) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "No wallet profile is available");
+          }
 
-        await approveOrigin(origin, {
-          profileId: `account:${idx}:${account || ""}`,
-          accountIndex: idx,
-          grants: { publicAccount: true, shieldedReceiveAddress: false },
+          await approveOrigin(origin, {
+            profileId: `account:${idx}:${account}`,
+            accountIndex: idx,
+            grants: { publicAccount: true, shieldedReceiveAddress: false },
+          });
         });
         sendResponse({ ok: true });
         return;
@@ -823,7 +836,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           if (!mnemonic || !password) {
             throw rpcError(ERROR_CODES.INVALID_PARAMS, "mnemonic and password required");
           }
-          if ((await getEngineStatus())?.isUnlocked) {
+          if (await loadVault()) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Reset the existing wallet before replacing it");
+          }
+          if ((await getEngineStatusStrict())?.isUnlocked) {
             throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock or reset the current wallet first");
           }
 
@@ -840,7 +856,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           emitUiLockState(true, "create").catch(() => {});
           return Array.isArray(result?.accounts)
             ? result.accounts
-            : (await getEngineStatus()).accounts;
+            : (await getEngineStatusStrict()).accounts;
         });
 
         sendResponse({ ok: true, accounts });

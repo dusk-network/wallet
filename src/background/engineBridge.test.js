@@ -128,5 +128,18 @@ describe("engine bridge", () => {
       addresses: [],
       selectedAccountIndex: 0,
     });
+
+    mocks.runtimeSendMessage.mockRejectedValueOnce(new Error("offline"));
+    await expect(bridge.getEngineStatusStrict()).rejects.toThrow("offline");
+  });
+
+  it("tells the host which method needs transport", async () => {
+    const ensureHost = vi.fn(async () => 1);
+    mocks.runtimeSendMessage.mockResolvedValue({ result: true });
+    const bridge = createEngineBridge({ ensureHost, noResponseMessage: "No engine" });
+
+    await bridge.engineCall("engine_lock");
+
+    expect(ensureHost).toHaveBeenCalledWith("engine_lock");
   });
 });

@@ -5,6 +5,7 @@ import {
   revokeOrigin,
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
+import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
@@ -23,6 +24,7 @@ import {
   engineCall,
   ensureEngineConfigured,
   getEngineStatus,
+  getEngineStatusStrict,
   invalidateEngineConfig,
 } from "./engineHost.js";
 import { requestUserApproval } from "./pending.js";
@@ -334,26 +336,28 @@ export async function handleRpc(origin, request) {
       label: options?.label,
     });
 
-    const status = await getEngineStatus();
-    if (!status?.isUnlocked) {
-      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet is still locked. Unlock to access accounts.");
-    }
+    return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      const status = await getEngineStatusStrict();
+      if (!status?.isUnlocked) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet is still locked. Unlock to access accounts.");
+      }
 
-    const arr = Array.isArray(status.accounts) ? status.accounts : [];
-    const idx = sanitizeAccountIndex(approved?.accountIndex, arr.length, 0);
-    const profile = profileFromStatus(status, idx, false);
-    if (!profile) throw rpcError(ERROR_CODES.UNAUTHORIZED, "No wallet profile is available");
-    const sameProfile = sameProfilePermission(existing, profile);
-    const effectiveGrant = requestedShieldedGrant || (sameProfile && hasShieldedGrant(existing));
-    const perm = await approveOrigin(origin, {
-      profileId: profile.profileId,
-      accountIndex: idx,
-      grants: {
-        publicAccount: true,
-        shieldedReceiveAddress: effectiveGrant,
-      },
+      const arr = Array.isArray(status.accounts) ? status.accounts : [];
+      const idx = sanitizeAccountIndex(approved?.accountIndex, arr.length, 0);
+      const profile = profileFromStatus(status, idx, false);
+      if (!profile) throw rpcError(ERROR_CODES.UNAUTHORIZED, "No wallet profile is available");
+      const sameProfile = sameProfilePermission(existing, profile);
+      const effectiveGrant = requestedShieldedGrant || (sameProfile && hasShieldedGrant(existing));
+      const perm = await approveOrigin(origin, {
+        profileId: profile.profileId,
+        accountIndex: idx,
+        grants: {
+          publicAccount: true,
+          shieldedReceiveAddress: effectiveGrant,
+        },
+      });
+      return { perm, status };
     });
-    return { perm, status };
   }
 
   function validateTransferPrivacy(params) {

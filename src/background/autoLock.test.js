@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
     sentMessages: [],
     alarmsClear: vi.fn(async () => true),
     alarmsCreate: vi.fn(() => {}),
+    vault: { v: 1 },
     clearVault: vi.fn(async () => {}),
     createVault: vi.fn(async () => true),
     clearPermissions: vi.fn(async () => {}),
@@ -97,7 +98,7 @@ vi.mock("../shared/settings.js", () => ({
 vi.mock("../shared/vault.js", () => ({
   clearVault: mocks.clearVault,
   createVault: mocks.createVault,
-  loadVault: vi.fn(async () => ({ v: 1 })),
+  loadVault: vi.fn(async () => mocks.vault),
   unlockVault: vi.fn(async () => "mnemonic"),
 }));
 
@@ -117,6 +118,7 @@ vi.mock("./engineHost.js", () => ({
   engineCall: mocks.engineCall,
   ensureEngineConfigured: vi.fn(async () => true),
   getEngineStatus: mocks.getEngineStatus,
+  getEngineStatusStrict: mocks.getEngineStatus,
   invalidateEngineConfig: vi.fn(() => {}),
   handleEngineReady: vi.fn(() => {}),
 }));
@@ -245,6 +247,7 @@ describe("background auto-lock activity", () => {
       nodeUrl: "https://testnet.nodes.dusk.network",
     };
     mocks.engineUnlocked = true;
+    mocks.vault = { v: 1 };
     mocks.now = 1_000_000;
     mocks.sentMessages = [];
     dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => mocks.now);
@@ -327,7 +330,22 @@ describe("background auto-lock activity", () => {
     expect(mocks.engineUnlocked).toBe(true);
   });
 
-  it("rejects wallet replacement while the current engine is unlocked", async () => {
+  it("rejects replacement of an existing locked vault", async () => {
+    mocks.engineUnlocked = false;
+
+    const response = await sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+
+    expect(response.error.message).toMatch(/reset the existing wallet/i);
+    expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
+  it("rejects wallet creation while an engine is already unlocked", async () => {
+    mocks.vault = null;
+
     const response = await sendBackgroundMessage({
       type: "DUSK_UI_CREATE_WALLET",
       mnemonic: "wallet B",
@@ -336,6 +354,39 @@ describe("background auto-lock activity", () => {
 
     expect(response.error.message).toMatch(/lock or reset/i);
     expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
+  it("does not create a vault when strict engine status is unavailable", async () => {
+    mocks.vault = null;
+    mocks.getEngineStatus.mockRejectedValueOnce(new Error("engine unavailable"));
+
+    const response = await sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+
+    expect(response.error.message).toBe("engine unavailable");
+    expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
+  it("preserves a newly written vault when its first unlock fails", async () => {
+    mocks.vault = null;
+    mocks.engineUnlocked = false;
+    mocks.createVault.mockImplementationOnce(async () => {
+      mocks.vault = { v: 1 };
+    });
+    mocks.engineCall.mockRejectedValueOnce(new Error("unlock failed"));
+
+    const response = await sendBackgroundMessage({
+      type: "DUSK_UI_CREATE_WALLET",
+      mnemonic: "wallet B",
+      password: "password123",
+    });
+
+    expect(response.error.message).toBe("unlock failed");
+    expect(mocks.vault).toEqual({ v: 1 });
+    expect(mocks.clearVault).not.toHaveBeenCalled();
   });
 
   it("serializes create behind an in-flight unlock", async () => {
@@ -363,7 +414,9 @@ describe("background auto-lock activity", () => {
 
     releaseUnlock();
     await expect(unlock).resolves.toEqual({ ok: true, accounts: ["acct0"] });
-    await expect(create).resolves.toMatchObject({ error: { message: expect.stringMatching(/lock or reset/i) } });
+    await expect(create).resolves.toMatchObject({
+      error: { message: expect.stringMatching(/reset the existing wallet/i) },
+    });
     expect(mocks.createVault).not.toHaveBeenCalled();
   });
 

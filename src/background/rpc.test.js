@@ -76,6 +76,7 @@ const engineCall = vi.fn(async (method, params) => {
 
 const ensureEngineConfigured = vi.fn(async () => true);
 const getEngineStatus = vi.fn(async () => engineStatus);
+const getEngineStatusStrict = vi.fn(async () => engineStatus);
 const invalidateEngineConfig = vi.fn(() => {});
 
 const requestUserApproval = vi.fn(async () => null);
@@ -109,6 +110,7 @@ vi.mock("./engineHost.js", () => ({
   engineCall,
   ensureEngineConfigured,
   getEngineStatus,
+  getEngineStatusStrict,
   invalidateEngineConfig,
 }));
 vi.mock("./pending.js", () => ({ requestUserApproval }));
@@ -214,6 +216,35 @@ describe("background rpc handler", () => {
       handleRpc("https://dapp.example", { method: "dusk_requestProfiles" })
     ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
 
+    expect(approveOrigin).not.toHaveBeenCalled();
+  });
+
+  it("does not commit a connection grant during a wallet lifecycle mutation", async () => {
+    vi.resetModules();
+    const [{ handleRpc }, { WALLET_LIFECYCLE_LOCK, withStorageLock }] = await Promise.all([
+      import("./rpc.js"),
+      import("../shared/storageLock.js"),
+    ]);
+
+    vaultValue = { v: 1 };
+    requestUserApproval.mockResolvedValueOnce({ accountIndex: 0 });
+    let releaseLifecycle;
+    let lifecycleStarted;
+    const started = new Promise((resolve) => { lifecycleStarted = resolve; });
+    const lifecycle = withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      lifecycleStarted();
+      await new Promise((resolve) => { releaseLifecycle = resolve; });
+    });
+    await started;
+
+    const request = handleRpc("https://dapp.example", { method: "dusk_requestProfiles" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(approveOrigin).not.toHaveBeenCalled();
+
+    engineStatus = { isUnlocked: false, accounts: [], addresses: [], selectedAccountIndex: 0 };
+    releaseLifecycle();
+    await lifecycle;
+    await expect(request).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
     expect(approveOrigin).not.toHaveBeenCalled();
   });
 

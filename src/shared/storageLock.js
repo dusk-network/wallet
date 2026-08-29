@@ -1,5 +1,7 @@
 const queues = new Map();
 
+export const WALLET_LIFECYCLE_LOCK = "wallet-lifecycle";
+
 export function withStorageLock(key, fn) {
   if (globalThis.navigator?.locks?.request) {
     return globalThis.navigator.locks.request(`dusk-wallet:${key}`, () => fn());

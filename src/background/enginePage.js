@@ -55,58 +55,46 @@ async function findExistingEngineTab() {
   return null;
 }
 
-async function ensureEnginePage() {
-  if (engineCreating) {
-    await engineCreating;
-    return engineHostGeneration;
-  }
-
+async function ensureEnginePage(transportOnly = false) {
   if (engineTabId != null) {
     try {
       await tabsGet(engineTabId);
-      if (!engineReady) {
-        await waitForEngineReady();
-      }
-      return engineHostGeneration;
     } catch {
       engineTabId = null;
     }
   }
 
-  const existing = await findExistingEngineTab();
-  if (existing?.id != null) {
-    engineTabId = existing.id;
-    engineReady = false;
-    engineReadyError = null;
-    engineReadyPromise = null;
-    await hideEngineTab(engineTabId);
-    await waitForEngineReady();
-    engineHostGeneration += 1;
-    return engineHostGeneration;
+  if (engineTabId == null && !engineCreating) {
+    engineCreating = (async () => {
+      const existing = await findExistingEngineTab();
+      if (existing?.id != null) {
+        engineTabId = existing.id;
+      } else {
+        const url = runtimeGetURL(ENGINE_PAGE_PATH);
+        if (!url) {
+          throw rpcError(ERROR_CODES.INTERNAL, "Engine page URL not available");
+        }
+        const tab = await tabsCreate({ url, active: false });
+        engineTabId = tab?.id ?? null;
+      }
+
+      engineReady = false;
+      engineReadyError = null;
+      engineReadyPromise = null;
+      await hideEngineTab(engineTabId);
+      engineHostGeneration += 1;
+    })();
   }
 
-  engineCreating = (async () => {
-    const url = runtimeGetURL(ENGINE_PAGE_PATH);
-    if (!url) {
-      throw rpcError(ERROR_CODES.INTERNAL, "Engine page URL not available");
+  if (engineCreating) {
+    try {
+      await engineCreating;
+    } finally {
+      engineCreating = null;
     }
-
-    const tab = await tabsCreate({ url, active: false });
-    engineTabId = tab?.id ?? null;
-    engineReady = false;
-    engineReadyError = null;
-    engineReadyPromise = null;
-    await hideEngineTab(engineTabId);
-    await waitForEngineReady();
-    engineHostGeneration += 1;
-  })();
-
-  try {
-    await engineCreating;
-  } finally {
-    engineCreating = null;
   }
 
+  await (transportOnly ? waitForEngineTransport() : waitForEngineReady());
   return engineHostGeneration;
 }
 
@@ -123,6 +111,22 @@ if (ext?.tabs?.onRemoved) {
   } catch {
     // ignore
   }
+}
+
+async function waitForEngineTransport() {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      const response = await withTimeout(
+        runtimeSendMessage({ type: "DUSK_ENGINE_PING" }),
+        1000
+      );
+      if (response?.ok) return;
+    } catch {
+      // The tab may still be loading.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Engine page did not start in time");
 }
 
 function waitForEngineReady(timeoutMs = 120_000) {
@@ -182,9 +186,10 @@ function withTimeout(promise, timeoutMs, label = "Engine call timed out") {
 }
 
 const bridge = createEngineBridge({
-  ensureHost: async () => {
-    const hostGeneration = await ensureEnginePage();
-    if (engineReadyError) throw engineReadyError;
+  ensureHost: async (method) => {
+    const transportOnly = method === "engine_status" || method === "engine_lock";
+    const hostGeneration = await ensureEnginePage(transportOnly);
+    if (engineReadyError && !transportOnly) throw engineReadyError;
     return hostGeneration;
   },
   noResponseMessage: "No response from engine page",
@@ -194,5 +199,6 @@ export const {
   engineCall,
   ensureEngineConfigured,
   getEngineStatus,
+  getEngineStatusStrict,
   invalidateEngineConfig,
 } = bridge;

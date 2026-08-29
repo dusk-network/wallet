@@ -62,6 +62,7 @@ vi.mock("../background/engineHost.js", () => ({
   engineCall,
   ensureEngineConfigured: vi.fn(async () => true),
   getEngineStatus: vi.fn(async () => engineStatus),
+  getEngineStatusStrict: vi.fn(async () => engineStatus),
   invalidateEngineConfig: vi.fn(() => {}),
 }));
 

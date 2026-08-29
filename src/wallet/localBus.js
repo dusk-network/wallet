@@ -8,7 +8,7 @@ import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault
 import { getSettings, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearPermissions } from "../shared/permissions.js";
-import { withStorageLock } from "../shared/storageLock.js";
+import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
@@ -53,8 +53,6 @@ import {
   getStakeOwnerStatus,
   getSozuStatus,
 } from "../shared/walletEngine.js";
-
-const WALLET_LIFECYCLE_LOCK = "wallet-lifecycle";
 
 function nullifierHexes(value) {
   const out = [];
@@ -167,6 +165,9 @@ export async function localSend(message) {
         const { mnemonic, password } = message;
         if (!mnemonic || !password) {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "mnemonic and password required");
+        }
+        if (await loadVault()) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Reset the existing wallet before replacing it");
         }
         if (isUnlocked()) {
           throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock or reset the current wallet first");
