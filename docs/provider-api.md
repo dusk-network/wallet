@@ -405,6 +405,60 @@ const sig = await dusk.request({
 
 ---
 
+### `dusk_signTypedData`
+
+Sign **structured, human-renderable data** — the Dusk analogue of `eth_signTypedData_v4`. Prefer this over `dusk_signMessage` whenever the payload has shape (an order, a permit, a login envelope with typed fields), since the approval UI can render the fields instead of a raw byte preview.
+
+Requires connection + unlocked wallet.
+
+Full normative spec (type expressions, encoding, domain separator, origin binding, digest, limits, versioning): https://github.com/dusk-network/connect/blob/main/docs/typed-data-v1.md
+
+```js
+const result = await dusk.request({
+  method: "dusk_signTypedData",
+  params: {
+    version: 1, // optional, defaults to 1; an unrecognized version is rejected rather than silently downgraded
+    domain: {
+      name: "Example dApp",
+      version: "1",
+      chainId: "dusk:2", // MUST match the wallet's active chain, checked both before and after approval
+      // verifyingContract: "0x..." // optional, 32-byte hex; defaults to 32 zero bytes
+    },
+    types: {
+      DuskTypedDataDomain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "string" },
+        { name: "verifyingContract", type: "bytes32" },
+      ],
+      Mail: [
+        { name: "to", type: "string" },
+        { name: "contents", type: "string" },
+      ],
+    },
+    primaryType: "Mail",
+    message: { to: "alice", contents: "hello" },
+    // `origin` is NOT a caller-supplied field: the wallet injects its own
+    // trusted view of the requesting page and ignores/overwrites anything
+    // sent here.
+  },
+});
+// → { account, publicKeyHex, origin, chainId, primaryType, digestHex, signature }
+```
+
+The result:
+
+- `account` / `publicKeyHex` — the signing Moonlight account, base58 and raw compressed-G2-hex forms of the same key.
+- `origin` — the exact origin string the wallet bound into the digest (spec section 8). Echoed because it is a digest input the caller does not control.
+- `chainId` — the CAIP-2 chain the signer was on when it signed.
+- `primaryType` — the `primaryType` that was signed.
+- `digestHex` — the bare 32-byte digest (spec section 9), suitable for display and cross-checking. The signature itself covers a tagged wrapper around this digest, not the bare digest.
+- `signature` — `0x`-hex compressed G1 short signature.
+
+The wallet advertises supported versions as an array via `dusk_getCapabilities().features.signTypedDataVersions` (currently `[1]`), not a single scalar, so a caller can pick the highest version it understands and detect when a version it relies on is deprecated.
+
+---
+
 ### `dusk_signAuth`
 
 Sign a canonical login envelope (origin + chainId + nonce + timestamps).

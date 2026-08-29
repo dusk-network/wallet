@@ -30,6 +30,7 @@ export const DAPP_RPC_METHODS = Object.freeze([
   "dusk_sendTransaction",
   "dusk_watchAsset",
   "dusk_signMessage",
+  "dusk_signTypedData",
   "dusk_signAuth",
   "dusk_disconnect",
 ]);
