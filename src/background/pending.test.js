@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 let onRemovedCb = null;
+const windowsRemove = vi.fn(async () => {});
 
 vi.mock("../platform/extensionApi.js", () => {
   return {
@@ -15,6 +16,7 @@ vi.mock("../platform/extensionApi.js", () => {
     }),
     runtimeGetURL: (path) => `chrome-extension://test/${String(path ?? "")}`,
     windowsCreate: vi.fn(async () => ({ id: 999 })),
+    windowsRemove,
   };
 });
 
@@ -72,6 +74,8 @@ describe("pending approvals", () => {
 
     await expect(first).rejects.toMatchObject({ code: 4001, message: "Wallet reset" });
     await expect(second).rejects.toMatchObject({ code: 4001, message: "Wallet reset" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(pending.pendingApprovals.size).toBe(0);
+    expect(windowsRemove).toHaveBeenCalledWith(999);
   });
 });

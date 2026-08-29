@@ -394,6 +394,20 @@ describe("background auto-lock activity", () => {
     expect(mocks.clearVault).not.toHaveBeenCalled();
   });
 
+  it("locks the engine before returning an unlock timeout", async () => {
+    mocks.engineUnlocked = false;
+    mocks.engineCall.mockRejectedValueOnce(new Error("Engine call timed out"));
+
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_UNLOCK", password: "pw" });
+
+    expect(response.error.message).toBe("Engine call timed out");
+    expect(mocks.engineCall.mock.calls.map(([method]) => method)).toEqual([
+      "engine_unlock",
+      "engine_lock",
+    ]);
+    expect(mocks.engineUnlocked).toBe(false);
+  });
+
   it("serializes create behind an in-flight unlock", async () => {
     mocks.engineUnlocked = false;
     let releaseUnlock;
@@ -441,6 +455,19 @@ describe("background auto-lock activity", () => {
     await expect(sendBackgroundMessage({ type: "DUSK_UI_ACTIVITY" })).resolves.toEqual({ ok: true });
 
     expect(activityRecord()).toEqual({ lastActivityAt: 1_234_567 });
+  });
+
+  it("ignores activity from an orphaned approval window", async () => {
+    mocks.now = 1_234_567;
+
+    await expect(
+      sendBackgroundMessage(
+        { type: "DUSK_UI_ACTIVITY", rid: "missing" },
+        { url: "chrome-extension://wallet/notification.html?rid=missing" }
+      )
+    ).resolves.toEqual({ ok: false });
+
+    expect(activityRecord()).toBeUndefined();
   });
 
   it("changing auto-lock setting restarts the alarm and keeps sane unlocked activity", async () => {

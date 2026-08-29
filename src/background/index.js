@@ -165,6 +165,22 @@ async function lockWallet(reason) {
   emitUiLockState(false, reason).catch(() => {});
 }
 
+async function unlockEngine(mnemonic) {
+  try {
+    return await engineCall(
+      "engine_unlock",
+      { mnemonic },
+      { timeoutMs: 120_000 }
+    );
+  } catch (error) {
+    await engineCall("engine_lock");
+    if ((await getEngineStatusStrict())?.isUnlocked) {
+      throw new Error("Wallet lock did not complete after unlock failure");
+    }
+    throw error;
+  }
+}
+
 async function ensureActivityTimestampIfUnlocked() {
   const status = await getEngineStatus();
   if (!status?.isUnlocked) return 0;
@@ -526,6 +542,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI heartbeat to reset auto-lock timer.
       if (message?.type === "DUSK_UI_ACTIVITY") {
+        const notification = String(sender?.url ?? "").includes("/notification.html");
+        if (notification && !getPending(String(message.rid ?? ""))) {
+          sendResponse({ ok: false });
+          return;
+        }
         await updateActivity();
         sendResponse({ ok: true });
         return;
@@ -712,11 +733,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
           const mnemonic = await unlockVault(password);
           await ensureEngineConfigured();
-          const result = await engineCall(
-            "engine_unlock",
-            { mnemonic },
-            { timeoutMs: 120_000 }
-          );
+          const result = await unlockEngine(mnemonic);
           await updateActivity();
           setupAutoLockAlarm().catch(console.error);
           broadcastProfilesChangedAll().catch(() => {});
@@ -846,11 +863,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
           await createVault(mnemonic, password);
           await ensureEngineConfigured();
-          const result = await engineCall(
-            "engine_unlock",
-            { mnemonic: String(mnemonic) },
-            { timeoutMs: 120_000 }
-          );
+          const result = await unlockEngine(String(mnemonic));
           await updateActivity();
           setupAutoLockAlarm().catch(console.error);
           broadcastProfilesChangedAll().catch(() => {});

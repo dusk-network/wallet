@@ -3,6 +3,7 @@ import {
   getExtensionApi,
   runtimeGetURL,
   windowsCreate,
+  windowsRemove,
 } from "../platform/extensionApi.js";
 
 /**
@@ -18,6 +19,7 @@ export const pendingApprovals = new Map();
 function rejectPending(rid, entry, message) {
   if (!entry) return;
   pendingApprovals.delete(rid);
+  if (entry.windowId !== undefined) windowsRemove(entry.windowId).catch(() => {});
   entry.reject(rpcError(ERROR_CODES.USER_REJECTED, message));
 }
 
@@ -54,6 +56,8 @@ export async function requestUserApproval(kind, origin, params) {
   const entry = pendingApprovals.get(rid);
   if (entry && win?.id !== undefined) {
     entry.windowId = win.id;
+  } else if (!entry && win?.id !== undefined) {
+    windowsRemove(win.id).catch(() => {});
   }
 
   return promise;

@@ -28,6 +28,8 @@ function getRid() {
   return url.searchParams.get("rid") || "";
 }
 
+const rid = getRid();
+
 function renderError(text) {
   setApp([h("div", { class: "err", text })]);
 }
@@ -90,15 +92,19 @@ async function sendResult(message) {
   return Object.prototype.hasOwnProperty.call(res, "result") ? res.result : res;
 }
 
-// Keep the approval window alive while the user is actively reviewing it.
+// Keep a live approval window active while the user is reviewing it.
 let activityHeartbeatTimer = null;
+let approvalLive = false;
+
+async function sendActivity() {
+  const response = await send({ type: "DUSK_UI_ACTIVITY", rid }).catch(() => null);
+  if (response?.ok === false) stopActivityHeartbeat();
+}
 
 function startActivityHeartbeat() {
-  if (activityHeartbeatTimer) return;
-  send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
-  activityHeartbeatTimer = setInterval(() => {
-    send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
-  }, 30_000);
+  if (activityHeartbeatTimer || !approvalLive) return;
+  sendActivity();
+  activityHeartbeatTimer = setInterval(sendActivity, 30_000);
 }
 
 function stopActivityHeartbeat() {
@@ -106,8 +112,6 @@ function stopActivityHeartbeat() {
   clearInterval(activityHeartbeatTimer);
   activityHeartbeatTimer = null;
 }
-
-startActivityHeartbeat();
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
@@ -120,13 +124,12 @@ document.addEventListener("visibilitychange", () => {
 document.addEventListener(
   "click",
   () => {
-    send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
+    if (approvalLive) sendActivity();
   },
   { passive: true }
 );
 
 export async function renderNotification() {
-  const rid = getRid();
   if (!rid) {
     renderError("Missing request id.");
     return;
@@ -134,9 +137,14 @@ export async function renderNotification() {
 
   const pending = await send({ type: "DUSK_GET_PENDING", rid });
   if (!pending) {
+    approvalLive = false;
+    stopActivityHeartbeat();
     renderError("Request not found (maybe already handled). You can close this window.");
     return;
   }
+
+  approvalLive = true;
+  startActivityHeartbeat();
 
   const {
     kind,
