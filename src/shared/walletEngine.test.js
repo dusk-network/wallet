@@ -544,6 +544,62 @@ describe("walletEngine", () => {
     ).rejects.toThrow(/Shielded transfer requires/);
   });
 
+  it("serializes transactions against their initially selected profile", async () => {
+    engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    let releaseFirst;
+    let markFirstStarted;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const profiles = [];
+    const nonces = [];
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => {
+      profiles.push(Number(tx.profile));
+      nonces.push(tx.nonceValue);
+      if (profiles.length === 1) {
+        markFirstStarted();
+        await firstGate;
+      }
+      return { hash: `0xhash${profiles.length}`, nonce: tx.nonceValue + 1n };
+    });
+
+    const first = engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
+    const second = engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
+    await firstStarted;
+    expect(profiles).toEqual([0]);
+    await engine.selectAccountIndex({ index: 1 });
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    expect(profiles).toEqual([0, 0]);
+    expect(nonces).toEqual([0n, 1n]);
+  });
+
+  it("rejects a queued transaction after the network changes", async () => {
+    engine.configure({ accountCount: 1, nodeUrl: "https://node-a.example" });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    let releaseFirst;
+    let markFirstStarted;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async () => {
+      markFirstStarted();
+      await firstGate;
+      return { hash: "0xhash", nonce: 1 };
+    });
+    const params = { kind: "transfer", privacy: "public", to: "acct0", amount: "1" };
+
+    const first = engine.sendTransaction(params);
+    const second = engine.sendTransaction(params);
+    await firstStarted;
+    engine.configure({ nodeUrl: "https://node-b.example" });
+    releaseFirst();
+
+    await expect(first).resolves.toMatchObject({ hash: "0xhash" });
+    await expect(second).rejects.toThrow("Wallet or network changed");
+    expect(globalThis.__W3SPER_EXECUTE_IMPL__).toHaveBeenCalledOnce();
+  });
+
   it("serializes concurrent Phoenix transfers until pending nullifiers are written", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);

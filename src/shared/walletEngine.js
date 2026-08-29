@@ -44,6 +44,8 @@ import {
 } from "./shieldedStore.js";
 
 const phoenixSpendLocks = new Map();
+const transactionLocks = new Map();
+const moonlightNonces = new Map();
 
 const isExtensionBackend =
   typeof __DUSK_BACKEND__ !== "undefined" && __DUSK_BACKEND__ === "extension";
@@ -526,25 +528,35 @@ function getWalletId() {
   return String(state.walletId || "").trim();
 }
 
-async function withPhoenixSpendMutex(profileIndex, fn) {
+async function withProfileLock(locks, profileIndex, fn) {
   const key = `${getNetworkKey()}|${getWalletId()}|${Number(profileIndex) || 0}`;
-  const previous = phoenixSpendLocks.get(key) ?? Promise.resolve();
-  let release = () => {};
-  const gate = new Promise((resolve) => {
-    release = resolve;
-  });
-  const next = previous.catch(() => {}).then(() => gate);
-  phoenixSpendLocks.set(key, next);
-
-  await previous.catch(() => {});
+  const previous = locks.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(fn);
+  locks.set(key, next);
   try {
-    return await fn();
+    return await next;
   } finally {
-    release();
-    if (phoenixSpendLocks.get(key) === next) {
-      phoenixSpendLocks.delete(key);
-    }
+    if (locks.get(key) === next) locks.delete(key);
   }
+}
+
+function withPhoenixSpendMutex(profileIndex, fn) {
+  return withProfileLock(phoenixSpendLocks, profileIndex, fn);
+}
+
+async function executeMoonlightTransaction(network, tx, profileIndex) {
+  const key = `${getNetworkKey()}|${getWalletId()}|${Number(profileIndex) || 0}`;
+  const profile = await ensureProfileIndex(profileIndex);
+  const balance = await state.treasury.account(profile.account);
+  let nonce = BigInt(balance?.nonce ?? 0) + 1n;
+  const previous = moonlightNonces.get(key);
+  if (previous != null && previous >= nonce) nonce = previous + 1n;
+  if (typeof tx?.nonce === "function") tx = tx.nonce(nonce - 1n);
+
+  const result = await network.execute(tx);
+  // ponytail: session-local nonce memory; add a durable submission journal for restart recovery.
+  moonlightNonces.set(key, BigInt(result?.nonce ?? nonce));
+  return result;
 }
 
 async function persistPendingNullifiersForTx(result, profileIndex) {
@@ -718,6 +730,7 @@ export function lock() {
   state.bookkeeper = null;
   state.treasuryAll = null;
   state.bookkeeperAll = null;
+  moonlightNonces.clear();
 
   // We keep the Network instance around; it holds no secrets and can stay connected.
 }
@@ -2493,7 +2506,7 @@ async function stakeOwnerOptions(params, stakeProfile) {
 
 async function executeStakeTransaction(idx, params, makeTx) {
   if (!isShieldedPayment(params)) {
-    const result = await state.network.execute(await makeTx());
+    const result = await executeMoonlightTransaction(state.network, await makeTx(), idx);
     return { hash: result.hash, nonce: result.nonce };
   }
 
@@ -2603,7 +2616,7 @@ export async function transfer(params) {
   const gas = normalizeGas(params.gas);
   if (gas) tx = tx.gas(gas);
 
-  const result = await network.execute(tx);
+  const result = await executeMoonlightTransaction(network, tx, idx);
 
   // network.execute returns the tx object returned by tx.build, frozen
   return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
@@ -2642,19 +2655,7 @@ function toContractIdBytes(contractId) {
   throw new Error("Invalid contractId (expected 32-byte hex string or number[32])");
 }
 
-/**
- * Send a transaction from the currently selected account.
- *
- * Supported kinds:
- * - { kind: 'transfer', privacy, to, amount, memo?, gas? }
- * - { kind: 'shield', amount, gas? }
- * - { kind: 'unshield', amount, gas? }
- * - { kind: 'stake', amount, gas? }
- * - { kind: 'unstake', amount?, gas? } // omit/0 amount => full unstake
- * - { kind: 'withdraw_reward', amount?, gas? } // omit/0 amount => withdraw all
- * - { kind: 'contract_call', contractId, fnName, fnArgs, to?, amount?, deposit?, gas? }
- */
-export async function sendTransaction(params) {
+async function sendTransactionUnlocked(params) {
   if (!state.unlocked) throw new Error("Wallet locked");
   if (!params || typeof params !== "object") {
     throw new Error("Invalid params: object required");
@@ -2688,7 +2689,7 @@ export async function sendTransaction(params) {
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
 
-    const result = await network.execute(tx);
+    const result = await executeMoonlightTransaction(network, tx, idx);
     return { hash: result.hash, nonce: result.nonce };
   }
 
@@ -2910,11 +2911,37 @@ export async function sendTransaction(params) {
     const gas = normalizeGas(params.gas);
     if (gas) tx = tx.gas(gas);
 
-    const result = await network.execute(tx);
+    const result = await executeMoonlightTransaction(network, tx, idx);
     return { hash: result.hash, nonce: result.nonce };
   }
 
   throw new Error(`Unsupported transaction kind: ${params.kind}`);
+}
+
+/**
+ * Send a transaction from the currently selected account.
+ *
+ * Supported kinds:
+ * - { kind: 'transfer', privacy, to, amount, memo?, gas? }
+ * - { kind: 'shield', amount, gas? }
+ * - { kind: 'unshield', amount, gas? }
+ * - { kind: 'stake', amount, gas? }
+ * - { kind: 'unstake', amount?, gas? } // omit/0 amount => full unstake
+ * - { kind: 'withdraw_reward', amount?, gas? } // omit/0 amount => withdraw all
+ * - { kind: 'contract_call', contractId, fnName, fnArgs, to?, amount?, deposit?, gas? }
+ */
+export function sendTransaction(params) {
+  const profileIndex = resolveProfileIndex(params?.profileIndex);
+  const walletId = getWalletId();
+  const networkKey = getNetworkKey();
+  return withProfileLock(transactionLocks, profileIndex, () => {
+    if (getWalletId() !== walletId || getNetworkKey() !== networkKey) {
+      throw new Error("Wallet or network changed while transaction was queued");
+    }
+    return sendTransactionUnlocked(
+      params && typeof params === "object" ? { ...params, profileIndex } : params
+    );
+  });
 }
 
 // ----------------------------------------------------------------------------
