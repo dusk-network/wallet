@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { sha256Hex } from "../shared/bytes.js";
 import { ERROR_CODES } from "../shared/errors.js";
+import { DAPP_RPC_METHODS } from "../shared/providerSurface.js";
 
 const PUBLIC_ACCOUNT =
   "M8vMuVUZZrHCW3LBFKEctWFJerYmT2HghQNuGHKrgV6BQqgkYK1A4FZLX3Nm9Rri63RZwL4gQCMhLyJRJQE5MQouqqu77Dr1rQnHqk1W7zAf4WKZqr6MgdxzkxFwFjo8ZM";
@@ -201,6 +202,83 @@ describe("background rpc handler", () => {
 
     expect(getPermissionForOrigin).not.toHaveBeenCalled();
     expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("rejects dusk_signBlsDigest with METHOD_NOT_FOUND even from a connected origin", async () => {
+    // dusk_signBlsDigest is a raw-digest signing oracle: it must never be
+    // reachable, whether or not the dApp is connected/permitted.
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signBlsDigest", params: {} })
+    ).rejects.toMatchObject({ code: ERROR_CODES.METHOD_NOT_FOUND });
+  });
+
+  it("rejects an invented method name with METHOD_NOT_FOUND", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_notARealMethod", params: {} })
+    ).rejects.toMatchObject({ code: ERROR_CODES.METHOD_NOT_FOUND });
+  });
+
+  it("rejects unknown methods before any permission lookup or user approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signBlsDigest", params: {} })
+    ).rejects.toMatchObject({ code: ERROR_CODES.METHOD_NOT_FOUND });
+
+    // An unknown method must cost nothing: no permission lookup, no approval prompt.
+    expect(getPermissionForOrigin).not.toHaveBeenCalled();
+    expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("keeps tombstoned methods explaining themselves instead of reporting METHOD_NOT_FOUND", async () => {
+    // dusk_getAddresses is deliberately refused so dApps cannot enumerate shielded
+    // addresses. The allowlist must not flatten that into "Unknown method": the
+    // method is known, it is declined, and the caller should be told which.
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_getAddresses", params: {} })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNSUPPORTED });
+  });
+
+  it("never rejects a canonical DAPP_RPC_METHODS entry with METHOD_NOT_FOUND", async () => {
+    // Guards against a typo in the allowlist silently disabling a real method.
+    // Other failures (missing permission, locked wallet, invalid params, ...)
+    // are expected and fine here -- only METHOD_NOT_FOUND is disallowed.
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = {
+      isUnlocked: true,
+      accounts: ["acct0", "acct1"],
+      addresses: ["addr0", "addr1"],
+      selectedAccountIndex: 0,
+    };
+
+    for (const method of DAPP_RPC_METHODS) {
+      vi.resetModules();
+      const { handleRpc } = await import("./rpc.js");
+      try {
+        await handleRpc("https://dapp.example", { method, params: {} });
+      } catch (err) {
+        expect(err?.code).not.toBe(ERROR_CODES.METHOD_NOT_FOUND);
+      }
+    }
   });
 
   it("dusk_requestProfiles rejects when no vault exists (opens onboarding)", async () => {
