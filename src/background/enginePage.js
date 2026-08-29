@@ -141,7 +141,13 @@ function waitForEngineReady(timeoutMs = 120_000) {
   if (engineTabId != null) {
     withTimeout(runtimeSendMessage({ type: "DUSK_ENGINE_PING" }), 2000).then(
       (resp) => {
-        if (resp?.ready) handleEngineReady(resp);
+        if (resp?.ready || resp?.error) {
+          handleEngineReady({
+            type: "DUSK_ENGINE_READY",
+            ok: Boolean(resp.ready) && !resp.error,
+            error: resp.error ?? "",
+          });
+        }
       },
       () => {}
     );

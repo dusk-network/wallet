@@ -50,7 +50,8 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
         const canRetry =
           isTransientMessageError(error) &&
           attempt < 4 &&
-          String(method) !== "dusk_sendTransaction";
+          String(method) !== "dusk_sendTransaction" &&
+          String(method) !== "engine_unlock";
         if (!canRetry) throw error;
         await delay(50 * (attempt + 1));
       }

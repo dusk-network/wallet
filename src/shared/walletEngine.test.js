@@ -79,6 +79,7 @@ vi.mock("@dusk/w3sper", () => {
     }
 
     async #nth(n) {
+      await globalThis.__W3SPER_PROFILE_GATE__?.(n);
       return new Profile(n);
     }
 
@@ -362,6 +363,7 @@ describe("walletEngine", () => {
     globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = null;
     globalThis.__W3SPER_FAIL_WALLET_ID__ = false;
     globalThis.__W3SPER_LAST_SEEDER__ = null;
+    globalThis.__W3SPER_PROFILE_GATE__ = null;
 
     // walletEngine loads a WASM protocol driver via fetch() on first use.
     vi.stubGlobal(
@@ -389,6 +391,7 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_FAIL_PROFILE_INDEX__;
     delete globalThis.__W3SPER_FAIL_WALLET_ID__;
     delete globalThis.__W3SPER_LAST_SEEDER__;
+    delete globalThis.__W3SPER_PROFILE_GATE__;
   });
 
   it("derives the CLI-aligned two default profiles on unlock", async () => {
@@ -421,6 +424,27 @@ describe("walletEngine", () => {
 
     expect(engine.isUnlocked()).toBe(true);
     expect(engine.getAccounts()).toEqual(["acct0"]);
+    expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
+  });
+
+  it("does not let a superseded unlock commit after lock", async () => {
+    let releaseProfile;
+    let profileStarted;
+    const started = new Promise((resolve) => { profileStarted = resolve; });
+    globalThis.__W3SPER_PROFILE_GATE__ = async (index) => {
+      if (index !== 0) return;
+      profileStarted();
+      await new Promise((resolve) => { releaseProfile = resolve; });
+    };
+
+    const unlock = engine.unlockWithMnemonic(MNEMONIC);
+    await started;
+    engine.lock();
+    releaseProfile();
+
+    await expect(unlock).rejects.toThrow("Unlock superseded");
+    expect(engine.isUnlocked()).toBe(false);
+    expect(engine.getAccounts()).toEqual([]);
     expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
   });
 

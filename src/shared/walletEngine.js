@@ -523,6 +523,8 @@ const state = {
   },
 };
 
+let unlockGeneration = 0;
+
 function getWalletId() {
   // Empty when locked.
   return String(state.walletId || "").trim();
@@ -697,7 +699,7 @@ export function isUnlocked() {
   return state.unlocked;
 }
 
-export function lock() {
+function clearWalletState() {
   state.unlocked = false;
   state.mnemonic = null;
   state.walletId = "";
@@ -735,11 +737,17 @@ export function lock() {
   // We keep the Network instance around; it holds no secrets and can stay connected.
 }
 
+export function lock() {
+  unlockGeneration += 1;
+  clearWalletState();
+}
+
 /**
  * Unlock engine with mnemonic (already decrypted from vault)
  * @param {string} mnemonic
  */
 export async function unlockWithMnemonic(mnemonic) {
+  const generation = ++unlockGeneration;
   const unlockStart = engineNow();
   debugEngine("unlock_start");
   try {
@@ -812,7 +820,8 @@ export async function unlockWithMnemonic(mnemonic) {
     const sel = Number.isFinite(selRaw) && selRaw >= 0 ? Math.floor(selRaw) : 0;
     const currentIndex = Math.min(sel, Math.max(0, profiles.length - 1));
 
-    if (state.unlocked) lock();
+    if (generation !== unlockGeneration) throw new Error("Unlock superseded");
+    if (state.unlocked) clearWalletState();
     state.mnemonic = mnemonic;
     state.seed = seed;
     state.walletId = walletId;

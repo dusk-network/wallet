@@ -44,6 +44,7 @@ const mocks = vi.hoisted(() => {
     clearVault: vi.fn(async () => {}),
     createVault: vi.fn(async () => true),
     clearPermissions: vi.fn(async () => {}),
+    cancelPendingApprovals: vi.fn(),
     engineCall: vi.fn(async (method) => {
       if (method === "engine_unlock") {
         return { accounts: ["acct0"] };
@@ -128,6 +129,7 @@ vi.mock("./rpc.js", () => ({
 }));
 
 vi.mock("./pending.js", () => ({
+  cancelPendingApprovals: mocks.cancelPendingApprovals,
   getPending: vi.fn(() => null),
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
 }));
@@ -292,6 +294,7 @@ describe("background auto-lock activity", () => {
 
     expect(mocks.engineCall).toHaveBeenCalledWith("engine_lock");
     expect(mocks.broadcastProfilesChangedAll).toHaveBeenCalledTimes(1);
+    expect(mocks.cancelPendingApprovals).toHaveBeenCalledTimes(1);
     expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({
         type: "DUSK_UI_LOCK_STATE",
@@ -309,6 +312,7 @@ describe("background auto-lock activity", () => {
 
     expect(mocks.engineCall).toHaveBeenCalledWith("engine_lock");
     expect(mocks.broadcastProfilesChangedAll).toHaveBeenCalledTimes(1);
+    expect(mocks.cancelPendingApprovals).toHaveBeenCalledTimes(1);
     expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({
         type: "DUSK_UI_LOCK_STATE",
@@ -327,6 +331,7 @@ describe("background auto-lock activity", () => {
     expect(response.error.message).toBe("lock transport failed");
     expect(mocks.clearVault).not.toHaveBeenCalled();
     expect(mocks.clearPermissions).not.toHaveBeenCalled();
+    expect(mocks.cancelPendingApprovals).not.toHaveBeenCalled();
     expect(mocks.engineUnlocked).toBe(true);
   });
 

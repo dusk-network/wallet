@@ -58,4 +58,20 @@ describe("pending approvals", () => {
 
     ridSpy.mockRestore();
   });
+
+  it("rejects every pending approval when wallet state changes", async () => {
+    vi.resetModules();
+    const pending = await import("./pending.js");
+    vi.spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("rid-a")
+      .mockReturnValueOnce("rid-b");
+
+    const first = pending.requestUserApproval("send_tx", "https://a.example", {});
+    const second = pending.requestUserApproval("sign_message", "https://b.example", {});
+    pending.cancelPendingApprovals("Wallet reset");
+
+    await expect(first).rejects.toMatchObject({ code: 4001, message: "Wallet reset" });
+    await expect(second).rejects.toMatchObject({ code: 4001, message: "Wallet reset" });
+    expect(pending.pendingApprovals.size).toBe(0);
+  });
 });

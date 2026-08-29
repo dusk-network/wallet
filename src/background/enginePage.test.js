@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   tabsCreate: vi.fn(async () => ({ id: 7 })),
   tabsGet: vi.fn(async () => ({ id: 7 })),
   tabsQuery: vi.fn(async () => []),
+  pingError: "",
 }));
 
 vi.mock("../shared/settings.js", () => ({
@@ -30,8 +31,12 @@ describe("Firefox engine page", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mocks.pingError = "";
+    mocks.tabsQuery.mockResolvedValue([]);
     mocks.runtimeSendMessage.mockImplementation(async (message) => {
-      if (message.type === "DUSK_ENGINE_PING") return { ok: true, ready: false };
+      if (message.type === "DUSK_ENGINE_PING") {
+        return { ok: true, ready: false, error: mocks.pingError };
+      }
       if (message.method === "engine_status") {
         return { result: { isUnlocked: true, accounts: ["acct0"] } };
       }
@@ -56,5 +61,18 @@ describe("Firefox engine page", () => {
 
     await expect(page.engineCall("engine_lock")).resolves.toBe(true);
     await expect(page.engineCall("engine_config", {})).rejects.toThrow("protocol preload failed");
+  });
+
+  it("recovers an existing engine tab's preload error from ping", async () => {
+    mocks.tabsQuery.mockResolvedValue([{ id: 7 }]);
+    mocks.pingError = "protocol preload failed";
+    const page = await import("./enginePage.js");
+
+    await expect(page.engineCall("engine_config", {})).rejects.toThrow("protocol preload failed");
+    await expect(page.getEngineStatusStrict()).resolves.toMatchObject({
+      isUnlocked: true,
+      accounts: ["acct0"],
+    });
+    await expect(page.engineCall("engine_lock")).resolves.toBe(true);
   });
 });

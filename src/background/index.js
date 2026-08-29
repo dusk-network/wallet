@@ -28,7 +28,7 @@ import {
   handleEngineReady,
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
-import { getPending, resolvePendingDecision } from "./pending.js";
+import { cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
 import {
   broadcastChainChangedAll,
   broadcastProfilesChangedAll,
@@ -159,6 +159,7 @@ async function ensureActivityTimestamp() {
 async function lockWallet(reason) {
   await engineCall("engine_lock");
   if ((await getEngineStatusStrict())?.isUnlocked) throw new Error("Wallet lock did not complete");
+  cancelPendingApprovals();
   await clearActivity();
   broadcastProfilesChangedAll().catch(() => {});
   emitUiLockState(false, reason).catch(() => {});

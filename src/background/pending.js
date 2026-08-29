@@ -15,6 +15,12 @@ import {
  */
 export const pendingApprovals = new Map();
 
+function rejectPending(rid, entry, message) {
+  if (!entry) return;
+  pendingApprovals.delete(rid);
+  entry.reject(rpcError(ERROR_CODES.USER_REJECTED, message));
+}
+
 /**
  * Open a small notification window and wait for the user's decision.
  */
@@ -58,10 +64,7 @@ const ext = getExtensionApi();
 ext?.windows?.onRemoved?.addListener((windowId) => {
   for (const [rid, entry] of pendingApprovals.entries()) {
     if (entry.windowId === windowId) {
-      pendingApprovals.delete(rid);
-      entry.reject(
-        rpcError(ERROR_CODES.USER_REJECTED, "User closed the approval window")
-      );
+      rejectPending(rid, entry, "User closed the approval window");
     }
   }
 });
@@ -92,4 +95,8 @@ export function resolvePendingDecision(message) {
 
   entry.reject(rpcError(ERROR_CODES.USER_REJECTED, "User rejected the request"));
   return { ok: true };
+}
+
+export function cancelPendingApprovals(reason = "Wallet state changed") {
+  for (const [rid, entry] of pendingApprovals) rejectPending(rid, entry, reason);
 }
