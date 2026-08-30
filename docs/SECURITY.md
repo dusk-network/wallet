@@ -118,6 +118,11 @@ service worker does not immediately lock an otherwise active unlocked wallet.
 | `dusk_signAuth` | Yes | Yes |
 | `dusk_disconnect` | No | No |
 
+`dusk_signMessage` and `dusk_signAuth` sign domain-separated Moonlight memo
+envelopes. They are not raw BLS digest-signing methods and must not be used for
+on-chain verification against a caller-supplied digest. Raw-digest signing is
+tracked in [wallet issue #90](https://github.com/dusk-network/wallet/issues/90).
+
 #### User Approval for Transactions
 
 All `dusk_sendTransaction` calls require explicit user approval via a popup window. Users can:

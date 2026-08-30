@@ -6,17 +6,38 @@ The canonical discovery protocol is documented in [`@dusk-network/connect`](http
 
 ## Quick Start
 
+Run this example in a JavaScript module or inside an async function; it uses
+top-level `await` while collecting announcements.
+
 ```js
-const providers = [];
+const providers = new Map();
 
 window.addEventListener("dusk:announceProvider", (event) => {
-  providers.push(event.detail);
+  providers.set(event.detail.info.uuid, event.detail);
 });
 
 window.dispatchEvent(new Event("dusk:requestProvider"));
+await new Promise((resolve) => setTimeout(resolve, 100));
 
-const dusk = providers[0]?.provider;
+const announced = [...providers.values()];
+const official = announced.find(
+  ({ info }) => info.rdns === "network.dusk.wallet",
+);
+if (!official && announced.length > 1) {
+  throw new Error("Ask the user to choose a Dusk wallet");
+}
+const dusk = (official ?? announced[0])?.provider;
 if (!dusk) throw new Error("Dusk wallet not installed");
+
+const { methods } = await dusk.request({ method: "dusk_getCapabilities" });
+const required = [
+  "dusk_requestProfiles",
+  "dusk_getPublicBalance",
+  "dusk_sendTransaction",
+];
+if (!required.every((method) => methods.includes(method))) {
+  throw new Error("Selected wallet lacks required capabilities");
+}
 
 // Connect to one wallet profile (prompts user)
 const [profile] = await dusk.request({ method: "dusk_requestProfiles" });
@@ -76,6 +97,17 @@ Announced provider metadata:
 
 Wallets may also expose a wallet-specific namespace for debugging or internal use, but dApps should treat the discovery events as the canonical integration surface.
 
+Do not bind to the first announcement. Collect announcements for a short window,
+deduplicate them by `info.uuid`, and let the user choose when multiple wallets
+remain. The official extension uses `info.rdns === "network.dusk.wallet"`.
+After selecting by identity or user choice, call the permissionless
+`dusk_getCapabilities` method and confirm that `methods` contains every RPC the
+dApp needs before using the provider.
+
+Only one official Dusk extension build should be enabled per browser profile.
+Official store and unpacked builds share an in-page installation key, so the
+first injected build owns the official provider slot.
+
 ## Provider Surface
 
 ```js
@@ -113,7 +145,17 @@ The provider starts emitting events after the first `request()` call or `on()` s
 | `LuxString` | Decimal string (u64) | `"1000000000"` (= 1 DUSK) |
 | `ChainId` | CAIP-2 `dusk:<id>` | `"dusk:1"` (mainnet) |
 
-**Chain IDs:** `dusk:1` mainnet, `dusk:2` testnet, `dusk:3` devnet, `dusk:0` local. Custom nodes get `dusk:` + FNV-1a32 hash of origin (decimal).
+**Chain IDs:** `dusk:1` mainnet, `dusk:2` testnet, `dusk:3` devnet, `dusk:0` local. Custom nodes get `dusk:` + the FNV-1a32 hash of the node URL origin (decimal). Treat the value as CAIP-2, not as a bare decimal or hexadecimal number:
+
+```js
+const match = /^dusk:(\d+)$/.exec(chainId);
+if (!match) throw new Error(`Unsupported Dusk chain ID: ${chainId}`);
+const numericChainId = Number(match[1]);
+```
+
+**Byte strings:** Returned byte fields such as `signature` and `payload` use
+`0x`-prefixed hexadecimal. If an ABI requires bare hex, normalize with
+`value.replace(/^0x/, "")` at that boundary.
 
 **Gas:** `{ limit: LuxString, price: LuxString }` or omit for wallet defaults. Transfer defaults are privacy-aware: public transfers use a lower Moonlight default, while shielded transfers use a higher Phoenix default.
 
@@ -271,7 +313,7 @@ const tx = await dusk.request({
     privacy: "public",        // "public" | "shielded"
     contractId: "0x02000...",  // 32 bytes
     fnName: "stake",
-    fnArgs: "0x...",           // bytes (hex, array, or Uint8Array)
+    fnArgs: "0x...",           // bytes; prefer hex, base64, or number[] for transport
     amount: "0",               // transfer value
     deposit: "1000000000",     // deposit amount
     gas: { limit: "500000000", price: "1" },
@@ -281,6 +323,18 @@ const tx = await dusk.request({
 ```
 
 `fnArgs` max: 64 KiB. Memo not allowed for contract calls.
+
+At the provider boundary, send `fnArgs` as `0x`-hex, base64, or `number[]`.
+Do not rely on a `Uint8Array` surviving extension messaging: Chrome serializes
+extension messages and can turn typed arrays into plain objects. Convert encoded
+arguments before calling the provider; Firefox structured cloning may otherwise
+hide this portability bug.
+
+`display` is an optional JSON-serializable object. The wallet renders the whole
+object as **site-provided, unverified** details; it does not interpret a stable
+field schema. A short `{ label: "Human-readable action" }` is the recommended
+minimum for custom calls with opaque arguments. Users must still verify the
+contract ID, function, amounts, and deposit shown separately by the wallet.
 
 ---
 
@@ -333,7 +387,7 @@ Sign arbitrary **bytes** for low-level off-chain use.
 
 Requires connection + unlocked wallet.
 
-> Note: The wallet signs a **domain-separated SHA-256 hash** of your message bytes (origin + chainId are included in the signed envelope). The approval UI may show a readable UTF-8 preview when safe; binary, invalid, or large messages are shown as opaque bytes with hash and length. Prefer `dusk_signAuth` for login/session authentication flows.
+> The wallet does **not** sign the caller's bytes directly. It signs a Moonlight memo whose text begins with `Dusk Connect SignMessage v1` and includes the origin, chain ID, account, SHA-256 message hash, and message length. The resulting signature will not verify as a raw BLS short-signature over a caller-supplied 32-byte digest. Do not use this method for on-chain digest verification; raw-digest signing is tracked in [#90](https://github.com/dusk-network/wallet/issues/90). The approval UI may show a readable UTF-8 preview when safe; binary, invalid, or large messages are shown as opaque bytes with hash and length. Prefer `dusk_signAuth` for login/session authentication flows.
 
 ```js
 const sig = await dusk.request({
@@ -350,6 +404,12 @@ const sig = await dusk.request({
 Sign a canonical login envelope (origin + chainId + nonce + timestamps).
 
 Requires connection + unlocked wallet.
+
+The signed Moonlight memo begins with `Dusk Connect SignAuth v1` and contains
+the account, optional statement, origin URI, chain ID, nonce, issue time, and
+expiration time. It is a login envelope, not a raw BLS signature over a dApp or
+contract digest. Do not use it for on-chain digest verification; see
+[#90](https://github.com/dusk-network/wallet/issues/90).
 
 ```js
 const auth = await dusk.request({
@@ -412,17 +472,37 @@ Errors are thrown as `Error` objects with `.code`, `.message`, and optional `.da
 
 ## Full Example
 
+Run this example in a JavaScript module or inside an async function.
+
 ```js
-const providers = [];
+const providers = new Map();
 
 window.addEventListener("dusk:announceProvider", (event) => {
-  providers.push(event.detail);
+  providers.set(event.detail.info.uuid, event.detail);
 });
 
 window.dispatchEvent(new Event("dusk:requestProvider"));
+await new Promise((resolve) => setTimeout(resolve, 100));
 
-const dusk = providers[0]?.provider;
+const announced = [...providers.values()];
+const official = announced.find(
+  ({ info }) => info.rdns === "network.dusk.wallet",
+);
+if (!official && announced.length > 1) {
+  throw new Error("Ask the user to choose a Dusk wallet");
+}
+const dusk = (official ?? announced[0])?.provider;
 if (!dusk) throw new Error("Dusk wallet not installed");
+
+const { methods } = await dusk.request({ method: "dusk_getCapabilities" });
+const required = [
+  "dusk_requestProfiles",
+  "dusk_getPublicBalance",
+  "dusk_sendTransaction",
+];
+if (!required.every((method) => methods.includes(method))) {
+  throw new Error("Selected wallet lacks required capabilities");
+}
 
 // Subscribe to state changes
 dusk.on("chainChanged", id => console.log("Chain:", id));
