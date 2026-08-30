@@ -11,6 +11,11 @@ The normative specification lives in Connect:
 [`docs/typed-data-v1.md`](https://github.com/dusk-network/connect/blob/main/docs/typed-data-v1.md).
 This document does not restate it; it explains how it got that shape.
 
+This work was written with AI assistance under human direction and review. The
+specification was agreed before the implementation, and the digest was checked
+against an implementation written independently from the specification text, so
+the two agree on every intermediate value rather than only on the final result.
+
 ---
 
 ## Where this started
