@@ -23,6 +23,10 @@ export function bytesToHex(bytes) {
   return s;
 }
 
+export function bytesToTransportHex(bytes) {
+  return `0x${bytesToHex(bytes)}`;
+}
+
 export function base64ToBytes(b64) {
   const s = String(b64 || "").trim().replace(/^base64:/i, "");
   if (!s) return new Uint8Array();
