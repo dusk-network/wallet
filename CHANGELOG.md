@@ -18,14 +18,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Security
 
-- Typed-data signatures cover a domain-separated message rather than the bare 32-byte digest, so they cannot be produced by, or replayed as, a signature over a caller-supplied digest. ([#90])
+- Typed-data signatures cover a domain-separated message rather than the bare 32-byte digest, so they cannot be produced by, or replayed as, a signature over a caller-supplied digest.
 
 ### Fixed
 
 - Serialized DRC20 and DRC721 encoded call arguments before browser extension messaging. ([#79])
 
 [#22]: https://github.com/dusk-network/wallet/issues/22
-[#90]: https://github.com/dusk-network/wallet/issues/90
 
 ## [0.3.0] - 2026-06-23
 

@@ -75,8 +75,11 @@ lookup, settings read, or approval prompt, so an unknown method costs nothing. T
 raw method is not on the public surface, and the conformance test now asserts its
 *absence*.
 
-This also changed the answer to #90. It is no longer "defer the hard delete" —
-see Question 3, which removes the need to rely on that decision holding.
+This does not settle #90, which remains open and undesigned. What it changes is the
+constraint #90 has to satisfy: whatever raw-digest capability is eventually offered,
+if any, must be reachable only through a path that is deliberately on the surface,
+because "present in the dispatcher" no longer implies "callable". Question 3 removes
+the remaining coupling between the two.
 
 ### A smaller thing the allowlist surfaced
 
@@ -184,10 +187,11 @@ signed. A signer restricted to exactly 32 bytes cannot produce a 55-byte tagged
 message, so the two spaces are disjoint. `hashToCurve` accepts arbitrary-length
 input, so on-chain verification is unaffected.
 
-This is what lets #90 be answered on the merits rather than deferred. The typed
-path supersedes it as the public API, and if a raw-digest capability is ever
-reintroduced for internal or contract-specific use, it still cannot forge a
-typed-data signature. The separation no longer depends on remembering.
+This decouples the two issues. Whatever #90 eventually concludes — a gated method,
+an internal-only capability, or nothing — a signature over a caller-supplied
+32-byte digest cannot be a valid typed-data signature, and a typed-data signature
+cannot be presented as one. #90 can therefore be designed on its own merits rather
+than as a constraint on this one. The separation does not depend on remembering.
 
 Both directions are asserted end to end — a bare-digest signature is rejected by
 the typed-data verifier, and a typed-data signature is rejected by the bare-digest
