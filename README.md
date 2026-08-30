@@ -93,9 +93,50 @@ dusk.on("profilesChanged", console.log);
 dusk.on("chainChanged", console.log);
 ```
 
+### Typed-data signing
+
+`dusk_signTypedData` signs structured, wallet-rendered data rather than an opaque
+digest — the Dusk analogue of `eth_signTypedData_v4`, not of `eth_sign`. The approval
+screen shows the domain, the primary type, and every message field, so the user sees
+what they are authorizing.
+
+```js
+const result = await dusk.request({
+  method: "dusk_signTypedData",
+  params: {
+    domain: { name: "Example", version: "1", chainId: "dusk:1" },
+    types: {
+      DuskTypedDataDomain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "string" },
+        { name: "verifyingContract", type: "bytes32" },
+      ],
+      SignIn: [{ name: "address", type: "string" }],
+    },
+    primaryType: "SignIn",
+    message: { address: profile.account },
+  },
+});
+// → { account, publicKeyHex, origin, chainId, primaryType, digestHex, signature }
+```
+
+Two things to know before integrating:
+
+- **Do not send `origin`.** The wallet injects its own view of the requesting origin
+  into the digest, and returns the exact string it used. A caller able to set it could
+  obtain a signature attributable to a site it does not control.
+- **`domain.chainId` must match the wallet's active chain**, or the request is rejected
+  before the user sees anything.
+
+Verify signatures with [`@dusk/connect/bls`](https://github.com/dusk-network/connect/blob/main/docs/typed-data-v1.md#12-signing-and-verification).
+The signature covers a tagged wrapper around `digestHex`, not the bare digest — verifying
+the bare digest would accept signatures produced by any raw 32-byte signing path.
+
 Canonical v0.1 docs:
 
 - Provider API: [docs/provider-api.md](docs/provider-api.md)
+- Typed-data v1 specification: [dusk-network/connect docs/typed-data-v1.md](https://github.com/dusk-network/connect/blob/main/docs/typed-data-v1.md)
 - Discovery protocol: [dusk-network/connect docs/wallet-discovery.md](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md)
 - Connect SDK usage: [dusk-network/connect README.md](https://github.com/dusk-network/connect/blob/main/README.md)
 - Wallet implementer guidance: [dusk-network/connect docs/wallet-implementer.md](https://github.com/dusk-network/connect/blob/main/docs/wallet-implementer.md)
