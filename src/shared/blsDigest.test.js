@@ -4,10 +4,14 @@ import { bls12_381 } from "@noble/curves/bls12-381";
 
 import { hexToBytes } from "./bytes.js";
 import {
+  TYPED_DATA_SIG_TAG,
+  buildTypedDataSignedMessage,
   deriveBlsSecretKeyFromSeed,
   signBlsMessageBytes,
   signProfileBlsDigest,
+  signProfileTypedDataDigest,
   verifyBlsDigestSignature,
+  verifyTypedDataDigestSignature,
 } from "./blsDigest.js";
 
 const MNEMONIC =
@@ -100,5 +104,97 @@ describe("blsDigest", () => {
     const signature = signBlsMessageBytes(digest, skScalar);
 
     expect(verifyBlsDigestSignature(fundsPkBytes, other, signature)).toBe(false);
+  });
+});
+
+describe("typed-data signed message (spec §12.1)", () => {
+  /**
+   * `SIG_TAG = utf8("DUSK_TYPED_DATA_SIG_V1\0")`, pinned byte-for-byte so the
+   * tag cannot silently drift. Independent of the source's own TextEncoder call.
+   */
+  const EXPECTED_SIG_TAG_BYTES = Uint8Array.from([
+    68, 85, 83, 75, 95, 84, 89, 80, 69, 68, 95, 68, 65, 84, 65, 95, 83, 73, 71, 95, 86, 49, 0,
+  ]);
+
+  it("pins the exact tag string and byte length", () => {
+    expect(TYPED_DATA_SIG_TAG).toBe("DUSK_TYPED_DATA_SIG_V1\0");
+    expect(TYPED_DATA_SIG_TAG).toHaveLength(23);
+    expect(new TextEncoder().encode(TYPED_DATA_SIG_TAG)).toEqual(EXPECTED_SIG_TAG_BYTES);
+  });
+
+  it("builds a 55-byte signed message as SIG_TAG || digest", () => {
+    const digest = new Uint8Array(32);
+    digest[0] = 0xaa;
+    digest[31] = 0xbb;
+
+    const signedMessage = buildTypedDataSignedMessage(digest);
+    expect(signedMessage).toHaveLength(55);
+    expect(signedMessage.slice(0, 23)).toEqual(EXPECTED_SIG_TAG_BYTES);
+    expect(signedMessage.slice(23)).toEqual(digest);
+  });
+
+  it("throws on a non-32-byte digest", () => {
+    expect(() => buildTypedDataSignedMessage(new Uint8Array(31))).toThrow();
+    expect(() => buildTypedDataSignedMessage(new Uint8Array(33))).toThrow();
+    expect(() => buildTypedDataSignedMessage(new Uint8Array(0))).toThrow();
+  });
+
+  it("signProfileTypedDataDigest validates digest length", async () => {
+    const seed = mnemonicToSeedSync(MNEMONIC);
+    const accountBytes = derivedFundsPkBytes(seed, 0);
+    const profile = mockProfile(seed, 0, accountBytes);
+
+    await expect(signProfileTypedDataDigest(profile, new Uint8Array(31))).rejects.toThrow();
+  });
+
+  it("a tagged signature verifies under the tagged verifier, and matches the derived pk", async () => {
+    const seed = mnemonicToSeedSync(MNEMONIC);
+    const profileIndex = 2;
+    const accountBytes = derivedFundsPkBytes(seed, profileIndex);
+    const profile = mockProfile(seed, profileIndex, accountBytes);
+
+    const digest = new Uint8Array(32);
+    digest[0] = 0x01;
+    digest[15] = 0x42;
+    digest[31] = 0xff;
+
+    const signed = await signProfileTypedDataDigest(profile, digest);
+    const signatureBytes = hexToBytes(signed.signatureHex);
+    const publicKeyBytes = hexToBytes(signed.publicKeyHex);
+
+    expect(signatureBytes).toHaveLength(48);
+    expect(publicKeyBytes).toEqual(accountBytes);
+    expect(verifyTypedDataDigestSignature(publicKeyBytes, digest, signatureBytes)).toBe(true);
+  });
+
+  // This pair is the entire point of the phase: a raw-digest oracle must not be
+  // able to forge a typed-data signature, and a typed-data signature must not be
+  // replayable as a raw digest.
+  it("a tagged signature is REJECTED by the bare-digest verifier", async () => {
+    const seed = mnemonicToSeedSync(MNEMONIC);
+    const profileIndex = 3;
+    const accountBytes = derivedFundsPkBytes(seed, profileIndex);
+    const profile = mockProfile(seed, profileIndex, accountBytes);
+
+    const digest = new Uint8Array(32).fill(0x33);
+
+    const signed = await signProfileTypedDataDigest(profile, digest);
+    const signatureBytes = hexToBytes(signed.signatureHex);
+    const publicKeyBytes = hexToBytes(signed.publicKeyHex);
+
+    expect(verifyBlsDigestSignature(publicKeyBytes, digest, signatureBytes)).toBe(false);
+  });
+
+  it("a signature over the BARE digest is REJECTED by the tagged verifier", () => {
+    const seed = mnemonicToSeedSync(MNEMONIC);
+    const profileIndex = 4;
+    const skScalar = deriveBlsSecretKeyFromSeed(seed, profileIndex);
+    const publicKeyBytes = derivedFundsPkBytes(seed, profileIndex);
+
+    const digest = new Uint8Array(32).fill(0x44);
+    const bareSignature = signBlsMessageBytes(digest, skScalar);
+
+    expect(verifyBlsDigestSignature(publicKeyBytes, digest, bareSignature)).toBe(true);
+    expect(verifyTypedDataDigestSignature(publicKeyBytes, digest, bareSignature)).toBe(false);
   });
 });

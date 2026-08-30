@@ -13,6 +13,7 @@ import {
   useAsProtocolDriver,
 } from "@dusk/w3sper";
 import { bytesToHex, hexToBytes, sha256Hex, toBytes } from "./bytes.js";
+import { signProfileTypedDataDigest } from "./blsDigest.js";
 import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
 import { assetUrl } from "../platform/assets.js";
@@ -3172,6 +3173,39 @@ export async function signAuth(params) {
     message,
     signature: signed.signature,
     payload: signed.payload,
+  });
+}
+
+/**
+ * Sign a typed-data digest (Dusk Connect typed-data v1, spec §12) for the
+ * dApp-facing `dusk_signTypedData` RPC.
+ *
+ * The digest is signed via the tagged form (`SIG_TAG || digest`, see
+ * `signProfileTypedDataDigest` in ./blsDigest.js) — never as a bare 32-byte
+ * digest. There is deliberately no raw-digest signing export on this surface;
+ * a previous phase removed that path on purpose, since a caller able to get an
+ * arbitrary 32-byte value signed under this key/DST could forge a typed-data
+ * signature.
+ *
+ * @param {{ digestHex: string, profileIndex?: number }} params
+ * @returns {Promise<{account:string, publicKeyHex:string, signature:string}>}
+ */
+export async function signTypedData(params) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  if (!params || typeof params !== "object") throw new Error("Invalid params: object required");
+
+  const digestBytes = hexToBytes(params.digestHex);
+  if (!(digestBytes instanceof Uint8Array) || digestBytes.length !== 32) {
+    throw new Error("digestHex must decode to exactly 32 bytes");
+  }
+
+  const profile = await ensureProfileIndex(params.profileIndex ?? getSelectedProfileIndex());
+  const signed = await signProfileTypedDataDigest(profile, digestBytes);
+
+  return Object.freeze({
+    account: profile.account.toString(),
+    publicKeyHex: signed.publicKeyHex,
+    signature: signed.signatureHex,
   });
 }
 

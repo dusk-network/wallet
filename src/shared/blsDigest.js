@@ -94,6 +94,14 @@ export function signBlsMessageBytes(message, skScalar) {
 }
 
 /**
+ * Verify a signature over a BARE 32-byte digest.
+ *
+ * DANGER: this is the raw-digest path (typed-data spec §12.1's whole reason for
+ * existing). It MUST NOT be reachable from any dApp-facing RPC (e.g.
+ * `dusk_signTypedData`) — a caller that can get an arbitrary 32-byte value signed
+ * through this path can forge a typed-data signature, since both share the same
+ * key and the same DST. Use `verifyTypedDataDigestSignature` for typed-data.
+ *
  * @param {Uint8Array} fundsPkBytes 96-byte G2 compressed public key
  * @param {Uint8Array} digestBytes 32-byte digest
  * @param {Uint8Array} signatureBytes 48-byte G1 compressed signature
@@ -105,6 +113,15 @@ export function verifyBlsDigestSignature(fundsPkBytes, digestBytes, signatureByt
 }
 
 /**
+ * Sign a BARE 32-byte digest.
+ *
+ * DANGER: this is the raw-digest path (typed-data spec §12.1's whole reason for
+ * existing). It MUST NOT be reachable from any dApp-facing RPC (e.g.
+ * `dusk_signTypedData`) — signing arbitrary caller-supplied 32-byte values under
+ * this key/DST is precisely what would let a caller forge a typed-data signature.
+ * It is used only internally (e.g. Moonlight pay-auth). Use
+ * `signProfileTypedDataDigest` for typed-data.
+ *
  * @param {import("@dusk/w3sper").Profile} profile
  * @param {Uint8Array} digestBytes
  */
@@ -124,4 +141,87 @@ export async function signProfileBlsDigest(profile, digestBytes) {
     signatureHex: `0x${bytesToHex(signatureBytes)}`,
     digestHex: `0x${bytesToHex(digestBytes)}`,
   };
+}
+
+/**
+ * Typed-data signature domain tag (spec §12.1).
+ *
+ *   SIG_TAG = utf8("DUSK_TYPED_DATA_SIG_V1\0")   // 23 bytes, includes the
+ *                                                 // trailing NUL byte
+ *
+ * The signature is computed over `SIG_TAG || digest` (55 bytes), never over the
+ * bare 32-byte digest. The digest alone is indistinguishable from any other
+ * 32-byte value the same Moonlight BLS key might be asked to sign under the same
+ * DST (e.g. pay-auth digests); the tag makes the typed-data signed-message space
+ * structurally disjoint from every bare 32-byte message space, so a signature
+ * from one path can never be replayed as valid on the other.
+ */
+export const TYPED_DATA_SIG_TAG = "DUSK_TYPED_DATA_SIG_V1\0";
+
+const TYPED_DATA_SIG_TAG_BYTES = new TextEncoder().encode(TYPED_DATA_SIG_TAG);
+
+function assertDigest32(digestBytes) {
+  if (!(digestBytes instanceof Uint8Array) || digestBytes.length !== 32) {
+    throw new Error("digest must be exactly 32 bytes");
+  }
+}
+
+/**
+ * Build the tagged message that is actually signed for typed-data (spec §12.1):
+ *
+ *   signedMessage = SIG_TAG || digest   // 23 + 32 = 55 bytes
+ *
+ * @param {Uint8Array} digestBytes 32-byte typed-data digest (spec §9)
+ * @returns {Uint8Array} 55-byte tagged message
+ */
+export function buildTypedDataSignedMessage(digestBytes) {
+  assertDigest32(digestBytes);
+  const out = new Uint8Array(TYPED_DATA_SIG_TAG_BYTES.length + digestBytes.length);
+  out.set(TYPED_DATA_SIG_TAG_BYTES, 0);
+  out.set(digestBytes, TYPED_DATA_SIG_TAG_BYTES.length);
+  return out;
+}
+
+/**
+ * Sign a typed-data digest for a profile, over the tagged message (spec
+ * §12.1-12.2). This is the only typed-data-facing signing path: it must never be
+ * used to produce a signature over a bare digest, and the raw-digest path
+ * (`signProfileBlsDigest`) must never be used for typed-data.
+ *
+ * @param {import("@dusk/w3sper").Profile} profile
+ * @param {Uint8Array} digestBytes 32-byte typed-data digest (spec §9)
+ * @returns {Promise<{publicKeyHex:string, signatureHex:string, digestHex:string}>}
+ */
+export async function signProfileTypedDataDigest(profile, digestBytes) {
+  assertDigest32(digestBytes);
+
+  const seed = new Uint8Array(await profile.seed);
+  const profileIndex = Number(profile);
+  const skScalar = deriveBlsSecretKeyFromSeed(seed, profileIndex);
+  const publicKeyBytes = profile.account.valueOf();
+  const signedMessage = buildTypedDataSignedMessage(digestBytes);
+  const signatureBytes = signBlsMessageBytes(signedMessage, skScalar);
+
+  return {
+    publicKeyHex: `0x${bytesToHex(publicKeyBytes)}`,
+    signatureHex: `0x${bytesToHex(signatureBytes)}`,
+    digestHex: `0x${bytesToHex(digestBytes)}`,
+  };
+}
+
+/**
+ * Verify a typed-data signature over the tagged message form (spec §12.3). A
+ * verifier MUST use this — not `verifyBlsDigestSignature` — to check typed-data
+ * signatures; verifying over the bare digest would accept signatures produced by
+ * any raw-32-byte signing path.
+ *
+ * @param {Uint8Array} publicKeyBytes 96-byte G2 compressed public key
+ * @param {Uint8Array} digestBytes 32-byte typed-data digest (spec §9)
+ * @param {Uint8Array} signatureBytes 48-byte G1 compressed signature
+ */
+export function verifyTypedDataDigestSignature(publicKeyBytes, digestBytes, signatureBytes) {
+  const signedMessage = buildTypedDataSignedMessage(digestBytes);
+  return bls12_381.verifyShortSignature(signatureBytes, signedMessage, publicKeyBytes, {
+    DST: BLS_SIGN_DST,
+  });
 }
