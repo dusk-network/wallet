@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mnemonicToSeedSync } from "bip39";
 import { bls12_381 } from "@noble/curves/bls12-381";
 
+import * as blsDigestModule from "./blsDigest.js";
 import { hexToBytes } from "./bytes.js";
 import {
   TYPED_DATA_SIG_TAG,
@@ -50,6 +51,40 @@ function mockProfile(seed, profileIndex, accountBytes) {
     },
   };
 }
+
+describe("blsDigest module surface", () => {
+  // Tripwire. Signing with the profile key is a capability, so growing this
+  // module's surface should be a deliberate, reviewed act rather than a side
+  // effect of another change. Adding an export fails here until someone updates
+  // this list, which is the point.
+  //
+  // Notably absent: any profile-level signer for BARE 32-byte digests. That is
+  // the subject of issue #90 and is intentionally not offered here, so that #90
+  // can decide its own key derivation, DST, and result shape. A change that adds
+  // one must delete it from the forbidden list below, making the decision
+  // visible in review instead of implicit in a diff.
+  it("exports exactly the expected surface", () => {
+    expect(Object.keys(blsDigestModule).sort()).toEqual([
+      "BLS_SIGN_DST",
+      "TYPED_DATA_SIG_TAG",
+      "buildTypedDataSignedMessage",
+      "deriveBlsSecretKeyFromSeed",
+      "signBlsMessageBytes",
+      "signProfileTypedDataDigest",
+      "verifyBlsDigestSignature",
+      "verifyTypedDataDigestSignature",
+    ]);
+  });
+
+  it("offers exactly one profile-level signing path, and it is the typed one", () => {
+    const profileSigners = Object.keys(blsDigestModule).filter(
+      (name) => name.startsWith("signProfile")
+    );
+
+    expect(profileSigners).toEqual(["signProfileTypedDataDigest"]);
+    expect(blsDigestModule.signProfileBlsDigest).toBeUndefined();
+  });
+});
 
 describe("blsDigest", () => {
   it("deriveBlsSecretKeyFromSeed matches wallet-core rusk golden vector", () => {
