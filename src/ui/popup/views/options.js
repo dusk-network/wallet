@@ -4,6 +4,7 @@ import { AUTO_LOCK_OPTIONS } from "../../../shared/settings.js";
 import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { setAccountName } from "../../../shared/accountNames.js";
 import { platform } from "../../../platform/index.js";
+import { getExtensionApi } from "../../../platform/extensionApi.js";
 import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
@@ -15,6 +16,9 @@ export function optionsView(ov, { state, actions } = {}) {
   const currentProverUrl = String(ov?.proverUrl ?? "").trim();
   const currentArchiverUrl = String(ov?.archiverUrl ?? "").trim();
   const currentAutoLock = Number(ov?.autoLockTimeoutMinutes ?? 5);
+  const installedVersion = String(
+    getExtensionApi()?.runtime?.getManifest?.()?.version ?? ""
+  ).trim();
 
   const lockBtn = ov?.isUnlocked
     ? h("button", {
@@ -446,5 +450,12 @@ export function optionsView(ov, { state, actions } = {}) {
       ),
       connectedSitesEl,
     ]),
+    installedVersion
+      ? settingsSection("About", [
+          h("div", { class: "row" }, [
+            h("div", { class: "muted", text: `Dusk Wallet v${installedVersion}` }),
+          ]),
+        ])
+      : null,
   ].filter(Boolean);
 }
