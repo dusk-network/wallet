@@ -191,6 +191,12 @@ const profiles = await dusk.request({
 
 The approval dialog shows the effective disclosure in one prompt: either public account only, or public account plus shareable shielded receive address. The shielded receive address is included only when requested and approved for that profile.
 
+`account` is the Base58 encoding of the profile's 96-byte compressed Moonlight
+BLS public key, not a separate address derived from that key. Decode `account`
+when a contract ABI or cryptographic library needs the raw public-key bytes; no
+additional wallet RPC or approval is required. The account remains unavailable
+while the connected profile is locked.
+
 ---
 
 ### `dusk_profiles`
