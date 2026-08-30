@@ -241,6 +241,17 @@ describe("Provider Surface Conformance", () => {
     expect(md).not.toContain("accountsChanged");
   });
 
+  it("docs/ARCHITECTURE.md RPC table covers the canonical dApp RPC methods", async () => {
+    // This table drifted once already: a method was added to the surface, to
+    // provider-api.md and to SECURITY.md (both enforced below) but not here,
+    // because nothing checked it. Enforce it rather than remember it.
+    const docPath = path.resolve(process.cwd(), "docs", "ARCHITECTURE.md");
+    const md = await readFile(docPath, "utf8");
+    const tableMethods = uniqSorted(extractMarkdownTableMethods(md));
+
+    expect(tableMethods).toEqual(uniqSorted(DAPP_RPC_METHODS));
+  });
+
   it("docs/SECURITY.md permission table covers the canonical dApp RPC methods", async () => {
     const docPath = path.resolve(process.cwd(), "docs", "SECURITY.md");
     const md = await readFile(docPath, "utf8");
