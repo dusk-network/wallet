@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Displayed the installed extension version in Settings. ([#80])
+
 ### Fixed
 
 - Serialized DRC20 and DRC721 encoded call arguments before browser extension messaging. ([#79])
@@ -108,6 +112,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 [Unreleased]: https://github.com/dusk-network/wallet/compare/v0.3.0...HEAD
 [#79]: https://github.com/dusk-network/wallet/issues/79
+[#80]: https://github.com/dusk-network/wallet/issues/80
 [0.3.0]: https://github.com/dusk-network/wallet/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dusk-network/wallet/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dusk-network/wallet/releases/tag/v0.1.0
