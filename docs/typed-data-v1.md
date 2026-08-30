@@ -20,6 +20,8 @@ The cost of a twin is drift. That is contained by:
 Change the hash in Connect first, regenerate vectors there, then sync here. Never
 the other way around.
 
-See [`docs/typed-data-v1-implementation-plan.md`](./typed-data-v1-implementation-plan.md)
-for the cross-repo rollout, and [`docs/provider-api.md`](./provider-api.md) for the
-`dusk_signTypedData` RPC surface.
+See [`docs/provider-api.md`](./provider-api.md) for the `dusk_signTypedData` RPC
+surface, and
+[`docs/investigations/typed-data-signing.md`](./investigations/typed-data-signing.md)
+for how the design was reached — the reasoning behind the encoding, the signing
+tag, the approval screen, and the vector corpus.
