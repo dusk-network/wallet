@@ -3,6 +3,7 @@ import {
   isHexString,
   hexToBytes,
   bytesToHex,
+  bytesToTransportHex,
   base64ToBytes,
   toBytes,
 } from "./bytes.js";
@@ -77,6 +78,18 @@ describe("bytesToHex", () => {
   it("handles null/undefined", () => {
     expect(bytesToHex(null)).toBe("");
     expect(bytesToHex(undefined)).toBe("");
+  });
+});
+
+describe("bytesToTransportHex", () => {
+  it("survives Chrome's JSON message serialization as valid bytes", () => {
+    const transported = JSON.parse(JSON.stringify(bytesToTransportHex(new Uint8Array([0, 255]))));
+
+    expect(transported).toBe("0x00ff");
+    expect(toBytes(transported)).toEqual(new Uint8Array([0, 255]));
+    expect(() => toBytes(JSON.parse(JSON.stringify(new Uint8Array([0, 255]))))).toThrow(
+      "Unsupported byte encoding"
+    );
   });
 });
 

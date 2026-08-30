@@ -37,7 +37,7 @@ import {
 } from "../shared/walletEngine.js";
 
 import { ERROR_CODES } from "../shared/errors.js";
-import { bytesToHex } from "../shared/bytes.js";
+import { bytesToHex, bytesToTransportHex } from "../shared/bytes.js";
 import {
   executionEventError,
   executionEventOk,
@@ -285,7 +285,7 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
 
         case "dusk_encodeDrc20Input": {
           const out = await encodeDrc20Input(params ?? {});
-          sendResponse({ id, result: out });
+          sendResponse({ id, result: bytesToTransportHex(out) });
           return;
         }
 
@@ -297,7 +297,7 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
 
         case "dusk_encodeDrc721Input": {
           const out = await encodeDrc721Input(params ?? {});
-          sendResponse({ id, result: out });
+          sendResponse({ id, result: bytesToTransportHex(out) });
           return;
         }
 

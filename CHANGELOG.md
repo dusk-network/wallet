@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- Serialized DRC20 and DRC721 encoded call arguments before browser extension messaging. ([#79])
+
 ## [0.3.0] - 2026-06-23
 
 ### Added
@@ -103,6 +107,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Prevented provider responses from leaking local pending nullifiers.
 
 [Unreleased]: https://github.com/dusk-network/wallet/compare/v0.3.0...HEAD
+[#79]: https://github.com/dusk-network/wallet/issues/79
 [0.3.0]: https://github.com/dusk-network/wallet/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dusk-network/wallet/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dusk-network/wallet/releases/tag/v0.1.0
