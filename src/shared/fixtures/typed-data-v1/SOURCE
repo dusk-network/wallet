@@ -1,5 +1,5 @@
 Vectors in this directory (and reject/) are vendored verbatim from the Connect
-repository, commit dbed16d387b88cbe028f73c451f0d6079da09ee9.
+repository, commit a2ca2b646938c5b9bab4d02fd0c20df97b65ae47.
 
   https://github.com/dusk-network/connect
   vectors/typed-data-v1/*.json

@@ -20,7 +20,14 @@
  *   - Every accept vector is checked stage-by-stage (each struct's typeHash,
  *     domainSeparator, originBind, structHash, digestHex) via
  *     hashTypedDataDebug, so a mismatch names the stage that diverged
- *     instead of only reporting "digest mismatch".
+ *     instead of only reporting "digest mismatch". signedMessageHex (spec
+ *     §12.1: SIG_TAG || digest) is checked the same way, but is recomputed
+ *     from the vector's own digest via the wallet's own
+ *     buildTypedDataSignedMessage (src/shared/blsDigest.js) rather than via
+ *     hashTypedDataDebug - this is a deliberate cross-module check: it ties
+ *     the vendored corpus to the wallet's TYPED_DATA_SIG_TAG, so the gate
+ *     fails if that tag ever drifts from Connect's. A vector missing
+ *     signedMessageHex entirely is its own failure, not "nothing to check".
  *   - Every reject vector must make hashTypedData throw with exactly the
  *     recorded error code.
  *   - CONNECT_TYPED_DATA_FIXTURES is an OPTIONAL extra check: when set, the
@@ -36,6 +43,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { hashTypedData, hashTypedDataDebug } from "../src/shared/typedDataHash.js";
+import { buildTypedDataSignedMessage } from "../src/shared/blsDigest.js";
+import { bytesToHex, hexToBytes } from "../src/shared/bytes.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES_DIR = path.join(ROOT, "src/shared/fixtures/typed-data-v1");
@@ -181,6 +190,27 @@ function checkAcceptVector(filePath, failures) {
   for (const stage of DEBUG_STAGES) {
     if (vector[stage] !== debug[stage]) {
       stageFailures.push(`${stage} mismatch: vector=${vector[stage]} computed=${debug[stage]}`);
+    }
+  }
+
+  // signedMessageHex (spec §12.1): recomputed from this vector's own digest
+  // via the wallet's own buildTypedDataSignedMessage/TYPED_DATA_SIG_TAG
+  // (src/shared/blsDigest.js) - not via hashTypedDataDebug, which knows
+  // nothing about signing. This is what ties the vendored corpus to the
+  // wallet's tag constant: if it ever drifts from Connect's, every accept
+  // vector fails here. A vector silently missing the field is a failure in
+  // its own right, named as its own stage, never treated as "nothing to
+  // check" (the same class of gap this gate was rewritten to eliminate).
+  if (typeof vector.signedMessageHex !== "string") {
+    stageFailures.push(
+      "signedMessageHex is missing from the vector (spec section 15 requires it on every accept vector)"
+    );
+  } else {
+    const computedSignedMessageHex = `0x${bytesToHex(buildTypedDataSignedMessage(hexToBytes(debug.digestHex)))}`;
+    if (vector.signedMessageHex !== computedSignedMessageHex) {
+      stageFailures.push(
+        `signedMessageHex mismatch: vector=${vector.signedMessageHex} computed=${computedSignedMessageHex}`
+      );
     }
   }
 
