@@ -1,0 +1,42 @@
+{
+  "description": "a bytes32 value does not decode to exactly 32 bytes",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "b",
+          "type": "bytes32"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "b": "0xaabb"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_BYTES32_LENGTH"
+}

@@ -1,0 +1,79 @@
+{
+  "description": "every atomic type (string, bytes, bytes32, uint64, uint32, uint8, bool) in one struct",
+  "input": {
+    "domain": {
+      "name": "Kitchen",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "Sink": [
+        {
+          "name": "s",
+          "type": "string"
+        },
+        {
+          "name": "b",
+          "type": "bytes"
+        },
+        {
+          "name": "b32",
+          "type": "bytes32"
+        },
+        {
+          "name": "u64",
+          "type": "uint64"
+        },
+        {
+          "name": "u32",
+          "type": "uint32"
+        },
+        {
+          "name": "u8",
+          "type": "uint8"
+        },
+        {
+          "name": "flag",
+          "type": "bool"
+        }
+      ]
+    },
+    "primaryType": "Sink",
+    "message": {
+      "s": "hello",
+      "b": "0xdeadbeef",
+      "b32": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "u64": "1234567890123456789",
+      "u32": 4000000000,
+      "u8": 255,
+      "flag": true
+    },
+    "origin": "https://app.example"
+  },
+  "typeHashes": {
+    "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
+    "Sink": "0xb1e5aaec3790109ddd90a83c0a5c8a432ed009e9854c24cf1291175916cc5857"
+  },
+  "domainSeparator": "0xe182c07abaffb93b9ba92ebb7a5da2a68222db2da4b58d19f211160a05c8830f",
+  "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
+  "structHash": "0xfbb4be00be31f3c624f3660f489085f94d91d56c6c368ba3cef7c3055e61210e",
+  "digestHex": "0x1344efbb68ac3e168651a2946f2117b4679c262937a0822926bcd20b1854c459"
+}

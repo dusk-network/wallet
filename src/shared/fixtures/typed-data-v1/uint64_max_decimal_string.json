@@ -1,8 +1,8 @@
 {
-  "description": "minimal SignIn-like: domain + string fields; origin as given (no trailing-slash normalization)",
+  "description": "uint64 at its maximum value 2^64-1, given as a decimal string (required above 2^53-1)",
   "input": {
     "domain": {
-      "name": "Example",
+      "name": "Counter",
       "version": "1",
       "chainId": "dusk:1"
     },
@@ -25,30 +25,25 @@
           "type": "bytes32"
         }
       ],
-      "SignIn": [
+      "Counter": [
         {
-          "name": "address",
-          "type": "string"
-        },
-        {
-          "name": "statement",
-          "type": "string"
+          "name": "n",
+          "type": "uint64"
         }
       ]
     },
-    "primaryType": "SignIn",
+    "primaryType": "Counter",
     "message": {
-      "address": "dusk1example",
-      "statement": "Sign in to Example"
+      "n": "18446744073709551615"
     },
     "origin": "https://app.example"
   },
   "typeHashes": {
     "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
-    "SignIn": "0x497d7ae3e0e626a021a60b02545c7e7b5f72c31dc39ebd976e7e75fa872b58e5"
+    "Counter": "0x21fb511a8d35d2bc321a30dc341c86aab3b869526a2922f647d415b3d554e4f0"
   },
-  "domainSeparator": "0xc2e0aac14865ef8180a316dc0dfd4d4f8631ef93336857614e33140b9dff910f",
+  "domainSeparator": "0xd49693323aa135be0efa4f01913383e91258e4af38cd0e95a928abf2a9bd7a82",
   "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
-  "structHash": "0x95a7a8ba21235ac4b2ff39f25f8d6ffc3612bd2da657e286903c8556b1c689c0",
-  "digestHex": "0x045d458739fb98b0ada8c6a2acff46c9839069fad575239d5814c3ae3052900f"
+  "structHash": "0x00922f0e9634d3c3fab38b4f0265d0bad9214135c826f4a961c2a1aa94a9b443",
+  "digestHex": "0x8d4a66c9a0a213526363288c7d7269b811cc1a72afe781987e7934080a7d89ad"
 }

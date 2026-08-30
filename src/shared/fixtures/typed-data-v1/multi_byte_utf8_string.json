@@ -1,8 +1,8 @@
 {
-  "description": "minimal SignIn-like: domain + string fields; origin as given (no trailing-slash normalization)",
+  "description": "multi-byte UTF-8 string containing a combining-character sequence (e + U+0301 combining acute) and an emoji; hashed over raw UTF-8 bytes with no normalization (spec section 5.1)",
   "input": {
     "domain": {
-      "name": "Example",
+      "name": "Message",
       "version": "1",
       "chainId": "dusk:1"
     },
@@ -25,30 +25,25 @@
           "type": "bytes32"
         }
       ],
-      "SignIn": [
+      "Message": [
         {
-          "name": "address",
-          "type": "string"
-        },
-        {
-          "name": "statement",
+          "name": "text",
           "type": "string"
         }
       ]
     },
-    "primaryType": "SignIn",
+    "primaryType": "Message",
     "message": {
-      "address": "dusk1example",
-      "statement": "Sign in to Example"
+      "text": "Café 😀 Zurich"
     },
     "origin": "https://app.example"
   },
   "typeHashes": {
     "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
-    "SignIn": "0x497d7ae3e0e626a021a60b02545c7e7b5f72c31dc39ebd976e7e75fa872b58e5"
+    "Message": "0x4d18e59c0150692d4cf83ad1764bc4a36f5e538cc8b1b348a1add7f92c8179b3"
   },
-  "domainSeparator": "0xc2e0aac14865ef8180a316dc0dfd4d4f8631ef93336857614e33140b9dff910f",
+  "domainSeparator": "0xe29269d80e0763c4b36546d08a1723dc051d907bcdba42bb8bf0e8a411170fec",
   "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
-  "structHash": "0x95a7a8ba21235ac4b2ff39f25f8d6ffc3612bd2da657e286903c8556b1c689c0",
-  "digestHex": "0x045d458739fb98b0ada8c6a2acff46c9839069fad575239d5814c3ae3052900f"
+  "structHash": "0xc3ec92d8ea381c595bbb78072324207dce8dd4be0e0f73dfed7060fe6e83ccf9",
+  "digestHex": "0xd773a14c48a7f1b35ca12f2bdda88752223a3e3c8a5b7786c8faa995a72cbace"
 }

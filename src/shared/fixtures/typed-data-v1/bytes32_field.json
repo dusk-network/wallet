@@ -9,14 +9,32 @@
     },
     "types": {
       "DuskTypedDataDomain": [
-        { "name": "name", "type": "string" },
-        { "name": "version", "type": "string" },
-        { "name": "chainId", "type": "string" },
-        { "name": "verifyingContract", "type": "bytes32" }
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
       ],
       "Lock": [
-        { "name": "assetId", "type": "bytes32" },
-        { "name": "amount", "type": "uint64" }
+        {
+          "name": "assetId",
+          "type": "bytes32"
+        },
+        {
+          "name": "amount",
+          "type": "uint64"
+        }
       ]
     },
     "primaryType": "Lock",

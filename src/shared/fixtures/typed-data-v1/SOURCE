@@ -1,0 +1,22 @@
+Vectors in this directory (and reject/) are vendored verbatim from the Connect
+repository, commit dbed16d387b88cbe028f73c451f0d6079da09ee9.
+
+  https://github.com/dusk-network/connect
+  vectors/typed-data-v1/*.json
+  vectors/typed-data-v1/reject/*.json
+
+They are generated in Connect by scripts/generate-typed-data-vectors.ts from
+Connect's own reference implementation (src/typed-data/hash.ts) and copied
+here byte-for-byte. Do NOT hand-edit any file in this directory or its
+reject/ subdirectory, and do NOT regenerate them from the wallet side.
+
+If a digest, intermediate, or error code needs to change, the change starts
+in Connect: update the spec (docs/typed-data-v1.md) and/or the generator's
+declarative vector list, regenerate there, let Connect's own byte-identity
+test (that regenerates in memory and diffs against the committed JSON) pass,
+commit, and only then copy the updated files here verbatim and bump the SHA
+recorded in this file.
+
+scripts/check-typed-data-fixture-parity.mjs (run via `npm run
+test:typed-data-parity` and as part of `npm run test:run`) checks these
+vectors against src/shared/typedDataHash.js on every run.

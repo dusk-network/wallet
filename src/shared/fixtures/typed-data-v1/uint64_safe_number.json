@@ -1,0 +1,49 @@
+{
+  "description": "uint64 given as a JSON number instead of a string, at the top of the safe-integer range (Number.MAX_SAFE_INTEGER = 2^53-1); the JSON-number path cannot represent the full uint64 range (spec section 5.2), so this intentionally does not reuse the 2^64-1 value from uint64_max_decimal_string.json",
+  "input": {
+    "domain": {
+      "name": "Counter",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "Counter": [
+        {
+          "name": "n",
+          "type": "uint64"
+        }
+      ]
+    },
+    "primaryType": "Counter",
+    "message": {
+      "n": 9007199254740991
+    },
+    "origin": "https://app.example"
+  },
+  "typeHashes": {
+    "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
+    "Counter": "0x21fb511a8d35d2bc321a30dc341c86aab3b869526a2922f647d415b3d554e4f0"
+  },
+  "domainSeparator": "0xd49693323aa135be0efa4f01913383e91258e4af38cd0e95a928abf2a9bd7a82",
+  "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
+  "structHash": "0x6746aebe75ee7f45f48bbaf763b56c65858e5869a085b978c026a9757d9d7a27",
+  "digestHex": "0x377c97e2ea6c25d17addc3f8e2a252ee3e40d85854579ac32fc9aef8bbce340c"
+}

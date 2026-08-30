@@ -1,0 +1,46 @@
+{
+  "description": "a declared field is not present on the message value",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "a",
+          "type": "string"
+        },
+        {
+          "name": "b",
+          "type": "string"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "a": "hi"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_FIELD_MISSING"
+}

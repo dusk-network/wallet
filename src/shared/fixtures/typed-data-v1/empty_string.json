@@ -1,8 +1,8 @@
 {
-  "description": "minimal SignIn-like: domain + string fields; origin as given (no trailing-slash normalization)",
+  "description": "empty string field: encodes as sha256(\"\"), a well-defined constant (spec section 5.1)",
   "input": {
     "domain": {
-      "name": "Example",
+      "name": "Note",
       "version": "1",
       "chainId": "dusk:1"
     },
@@ -25,30 +25,25 @@
           "type": "bytes32"
         }
       ],
-      "SignIn": [
+      "Note": [
         {
-          "name": "address",
-          "type": "string"
-        },
-        {
-          "name": "statement",
+          "name": "text",
           "type": "string"
         }
       ]
     },
-    "primaryType": "SignIn",
+    "primaryType": "Note",
     "message": {
-      "address": "dusk1example",
-      "statement": "Sign in to Example"
+      "text": ""
     },
     "origin": "https://app.example"
   },
   "typeHashes": {
     "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
-    "SignIn": "0x497d7ae3e0e626a021a60b02545c7e7b5f72c31dc39ebd976e7e75fa872b58e5"
+    "Note": "0xf8e12379b851b720145a339ca87278b48cbfa7b9d06a7574bef3758bb1d4d08b"
   },
-  "domainSeparator": "0xc2e0aac14865ef8180a316dc0dfd4d4f8631ef93336857614e33140b9dff910f",
+  "domainSeparator": "0x6aa73c504930874aae2c0eb2b1fcad976f3b1de40831144e7e63bffa9fe86033",
   "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
-  "structHash": "0x95a7a8ba21235ac4b2ff39f25f8d6ffc3612bd2da657e286903c8556b1c689c0",
-  "digestHex": "0x045d458739fb98b0ada8c6a2acff46c9839069fad575239d5814c3ae3052900f"
+  "structHash": "0x6355a061a767117cbb87bd09c6d5bee38a10ecdc0d6b8b84af7583e698e9f91a",
+  "digestHex": "0xa7a77546348a3e10de62670e5a3bf3a0f47ca443f8a44a6704ced8e403b5371c"
 }

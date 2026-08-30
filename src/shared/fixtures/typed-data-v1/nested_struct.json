@@ -8,22 +8,45 @@
     },
     "types": {
       "DuskTypedDataDomain": [
-        { "name": "name", "type": "string" },
-        { "name": "version", "type": "string" },
-        { "name": "chainId", "type": "string" },
-        { "name": "verifyingContract", "type": "bytes32" }
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
       ],
       "Apple": [
-        { "name": "name", "type": "string" }
+        {
+          "name": "name",
+          "type": "string"
+        }
       ],
       "Envelope": [
-        { "name": "inner", "type": "Apple" },
-        { "name": "note", "type": "string" }
+        {
+          "name": "inner",
+          "type": "Apple"
+        },
+        {
+          "name": "note",
+          "type": "string"
+        }
       ]
     },
     "primaryType": "Envelope",
     "message": {
-      "inner": { "name": "fuji" },
+      "inner": {
+        "name": "fuji"
+      },
       "note": "hello"
     },
     "origin": "https://app.example"

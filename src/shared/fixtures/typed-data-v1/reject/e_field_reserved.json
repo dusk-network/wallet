@@ -1,0 +1,42 @@
+{
+  "description": "a field is declared with the reserved name __proto__",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "__proto__",
+          "type": "string"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "__proto__": "hi"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_FIELD_RESERVED"
+}

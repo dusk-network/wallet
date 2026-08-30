@@ -1,0 +1,42 @@
+{
+  "description": "a uint8 value exceeds 2^8-1",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "n",
+          "type": "uint8"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "n": 256
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_UINT_RANGE"
+}

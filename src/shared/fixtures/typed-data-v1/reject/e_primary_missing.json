@@ -1,0 +1,41 @@
+{
+  "description": "primaryType is absent from the input",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "text",
+          "type": "string"
+        }
+      ]
+    },
+    "message": {
+      "text": "hi"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_PRIMARY_MISSING"
+}
