@@ -112,36 +112,12 @@ export function verifyBlsDigestSignature(fundsPkBytes, digestBytes, signatureByt
   });
 }
 
-/**
- * Sign a BARE 32-byte digest.
- *
- * DANGER: this is the raw-digest path (typed-data spec §12.1's whole reason for
- * existing). It MUST NOT be reachable from any dApp-facing RPC (e.g.
- * `dusk_signTypedData`) — signing arbitrary caller-supplied 32-byte values under
- * this key/DST is precisely what would let a caller forge a typed-data signature.
- * It is used only internally (e.g. Moonlight pay-auth). Use
- * `signProfileTypedDataDigest` for typed-data.
- *
- * @param {import("@dusk/w3sper").Profile} profile
- * @param {Uint8Array} digestBytes
- */
-export async function signProfileBlsDigest(profile, digestBytes) {
-  if (!(digestBytes instanceof Uint8Array) || digestBytes.length !== 32) {
-    throw new Error("digest must be exactly 32 bytes");
-  }
-
-  const seed = new Uint8Array(await profile.seed);
-  const profileIndex = Number(profile);
-  const skScalar = deriveBlsSecretKeyFromSeed(seed, profileIndex);
-  const fundsPkBytes = profile.account.valueOf();
-  const signatureBytes = signBlsMessageBytes(digestBytes, skScalar);
-
-  return {
-    fundsPkHex: `0x${bytesToHex(fundsPkBytes)}`,
-    signatureHex: `0x${bytesToHex(signatureBytes)}`,
-    digestHex: `0x${bytesToHex(digestBytes)}`,
-  };
-}
+// There is deliberately no profile-level signer for BARE 32-byte digests here.
+// Signing caller-supplied digests under this key and DST is the subject of a
+// separate, undecided design question (issue #90), so this module offers no
+// ready-made capability for it. `signBlsMessageBytes` remains as the low-level
+// primitive, used by the typed-data path and by tests that need to construct a
+// bare-digest signature in order to assert it is rejected.
 
 /**
  * Typed-data signature domain tag (spec §12.1).
@@ -184,9 +160,8 @@ export function buildTypedDataSignedMessage(digestBytes) {
 
 /**
  * Sign a typed-data digest for a profile, over the tagged message (spec
- * §12.1-12.2). This is the only typed-data-facing signing path: it must never be
- * used to produce a signature over a bare digest, and the raw-digest path
- * (`signProfileBlsDigest`) must never be used for typed-data.
+ * §12.1-12.2). This is the only profile-level signing path in this module, and
+ * it always signs SIG_TAG || digest — never a bare digest.
  *
  * @param {import("@dusk/w3sper").Profile} profile
  * @param {Uint8Array} digestBytes 32-byte typed-data digest (spec §9)

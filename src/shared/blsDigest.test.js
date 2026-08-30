@@ -8,7 +8,6 @@ import {
   buildTypedDataSignedMessage,
   deriveBlsSecretKeyFromSeed,
   signBlsMessageBytes,
-  signProfileBlsDigest,
   signProfileTypedDataDigest,
   verifyBlsDigestSignature,
   verifyTypedDataDigestSignature,
@@ -57,26 +56,6 @@ describe("blsDigest", () => {
     const seed = new Uint8Array(64);
     const skScalar = deriveBlsSecretKeyFromSeed(seed, 42);
     expect(skScalarToBytes(skScalar)).toEqual(RUSK_DERIVE_BLS_SK_GOLDEN);
-  });
-
-  it("signProfileBlsDigest verifies and derived G2 pk matches profile account", async () => {
-    const seed = mnemonicToSeedSync(MNEMONIC);
-    const profileIndex = 0;
-    const accountBytes = derivedFundsPkBytes(seed, profileIndex);
-    const profile = mockProfile(seed, profileIndex, accountBytes);
-
-    const digest = new Uint8Array(32);
-    digest[0] = 0xde;
-    digest[31] = 0xad;
-
-    const signed = await signProfileBlsDigest(profile, digest);
-    const signatureBytes = hexToBytes(signed.signatureHex);
-    const fundsPkFromProfile = profile.account.valueOf();
-
-    expect(signatureBytes).toHaveLength(48);
-    expect(verifyBlsDigestSignature(fundsPkFromProfile, digest, signatureBytes)).toBe(true);
-    expect(derivedFundsPkBytes(seed, profileIndex)).toEqual(fundsPkFromProfile);
-    expect(hexToBytes(signed.fundsPkHex)).toEqual(fundsPkFromProfile);
   });
 
   it("signs a 32-byte digest and verifies with derived funds pk", () => {
