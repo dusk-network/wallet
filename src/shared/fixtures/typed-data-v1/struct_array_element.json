@@ -1,0 +1,64 @@
+{
+  "description": "struct type reached through an array element (Item[2] inside Basket)",
+  "input": {
+    "domain": {
+      "name": "Basket",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "Item": [
+        {
+          "name": "label",
+          "type": "string"
+        }
+      ],
+      "Basket": [
+        {
+          "name": "items",
+          "type": "Item[2]"
+        }
+      ]
+    },
+    "primaryType": "Basket",
+    "message": {
+      "items": [
+        {
+          "label": "apple"
+        },
+        {
+          "label": "pear"
+        }
+      ]
+    },
+    "origin": "https://app.example"
+  },
+  "typeHashes": {
+    "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
+    "Item": "0x30d820a30df3539cf9707c3ecf6a0aad1fc6dd6d395c02b83be1a058bf91e18f",
+    "Basket": "0xddf731714d4ec977b597e18dcde1ba1ddb95a09ce3c4f7f563cc64cb9998276e"
+  },
+  "domainSeparator": "0x2932624a6281e6c8fb3bc4aa4623634dd6687bb8e18dfa90f344f55f8d54df0a",
+  "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
+  "structHash": "0x0aba47fb9dba66764d42c1dc1b61c341ed1706f2712561c29377fc5d88eea5ff",
+  "digestHex": "0x80bec91e77be4bdb0cc82db8bc9d4338078bbb9e1a6d37dd7be9215a9b0d1b2f",
+  "signedMessageHex": "0x4455534b5f54595045445f444154415f5349475f56310080bec91e77be4bdb0cc82db8bc9d4338078bbb9e1a6d37dd7be9215a9b0d1b2f"
+}

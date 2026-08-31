@@ -19,8 +19,18 @@ import {
 } from "../shared/securityPolicy.js";
 import { bytesToHex, sha256Hex, toBytes } from "../shared/bytes.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
+import {
+  checkPolicyLimits,
+  hashTypedDataHex,
+  validateTypedDataParams,
+} from "../shared/typedDataHash.js";
 import { classifyDuskIdentifier } from "../shared/duskIdentifiers.js";
-import { DAPP_LIMITS, DAPP_RPC_METHODS, DAPP_TX_KINDS } from "../shared/providerSurface.js";
+import {
+  DAPP_LIMITS,
+  DAPP_RPC_METHODS,
+  DAPP_TOMBSTONED_METHODS,
+  DAPP_TX_KINDS,
+} from "../shared/providerSurface.js";
 import {
   engineCall,
   ensureEngineConfigured,
@@ -48,6 +58,16 @@ export async function handleRpc(origin, request) {
   }
 
   const { method, params } = request || {};
+
+  // Fail closed: a method reaches the switch below only if it is on the canonical
+  // surface, or is explicitly tombstoned so its handler can explain the refusal.
+  // Without this, every `case` added for internal or test use would be publicly
+  // callable by any connected dApp regardless of what capabilities advertise.
+  // Rejecting here also means an unrecognized method costs no permission lookup,
+  // settings read, or approval prompt.
+  if (!DAPP_RPC_METHODS.includes(method) && !DAPP_TOMBSTONED_METHODS.includes(method)) {
+    throw rpcError(ERROR_CODES.METHOD_NOT_FOUND, `Unknown method: ${method}`);
+  }
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
   const MAX_U64 = 18446744073709551615n;
@@ -453,6 +473,8 @@ export async function handleRpc(origin, request) {
           shieldedRecipients: true,
           shieldedReceiveAddress: true,
           signMessage: true,
+          signTypedData: true,
+          signTypedDataVersions: [1],
           signAuth: true,
           contractCallPrivacy: true,
           watchAsset: true,
@@ -927,6 +949,136 @@ export async function handleRpc(origin, request) {
           profileIndex: executionContext.profileIndex,
           _approvalContext: executionContext,
         });
+      });
+    }
+
+    case "dusk_signTypedData": {
+      // Connection is required up front, same as the sibling sign_* methods -
+      // an unconnected origin should not be able to trigger any of the work below.
+      const perm = await getPermissionForOrigin(origin);
+      if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
+
+      // Reject a non-object params before touching its shape any further.
+      if (!params || typeof params !== "object") {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, "params must be an object");
+      }
+
+      // Version check (spec 14): defaults to 1, and an unknown version is a
+      // hard reject rather than a silent fallback, so a caller that precomputed
+      // a digest locally gets a clear error instead of a mismatch.
+      const version = params.version === undefined ? 1 : params.version;
+      if (version !== 1) {
+        throw rpcError(ERROR_CODES.INVALID_PARAMS, `Unsupported typed-data version: ${version}`);
+      }
+
+      // Build the exact input that will be hashed, with the wallet's own view
+      // of `origin`. The dApp MUST NOT be able to influence origin binding
+      // (spec 8): any params.origin is dropped here, and the input is assembled
+      // field by field rather than by spreading params, so a future field added
+      // to the request cannot leak into the digest.
+      //
+      // Validation runs on this assembled input rather than on raw params.
+      // Origin is a field of the hash input (spec 3) and the validator checks
+      // it, so validating raw params would demand a caller-supplied origin --
+      // exactly the field the docs tell dApps not to send.
+      const typedInput = {
+        domain: params.domain,
+        types: params.types,
+        primaryType: params.primaryType,
+        message: params.message,
+        origin,
+      };
+
+      // Structural + value validation (spec 4-10). Map the shared validator's
+      // stable error code (E_*) onto INVALID_PARAMS, preserving both the message
+      // and the code so a caller/dev can tell which spec 10 rule fired.
+      try {
+        validateTypedDataParams(typedInput);
+      } catch (err) {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          err?.message || "Invalid typed data params",
+          err?.code ? { code: err.code } : undefined
+        );
+      }
+
+      // Chain check, before approval: a dApp must ask for the chain the
+      // wallet is actually on. This also keeps the approval UI from ever
+      // showing a chain the wallet cannot act on.
+      //
+      // The chain comes from the approval context rather than a bare settings
+      // read, so the value compared here is the same one re-verified after
+      // approval. Note this is the *wallet's* chain, used only to reject a
+      // mismatch and to display/echo — the digest binds the dApp's
+      // `domain.chainId`, never this.
+      const approvalContext = await captureApprovalContext(perm);
+      const activeChainId = chainIdFromNodeUrl(approvalContext.nodeUrl);
+      const requestedChainId = String(params.domain?.chainId ?? "").trim();
+      if (requestedChainId !== activeChainId) {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          `domain.chainId ${requestedChainId || "(missing)"} does not match active chain ${activeChainId}`
+        );
+      }
+
+      // Signer-side resource floor (spec 11). Deliberately not part of the
+      // hash path - it must never influence the digest - so oversized payloads
+      // are rejected here, before the user ever sees an approval popup.
+      try {
+        checkPolicyLimits(typedInput);
+      } catch (err) {
+        throw rpcError(
+          ERROR_CODES.INVALID_PARAMS,
+          err?.message || "Typed data exceeds policy limits",
+          err?.code ? { code: err.code } : undefined
+        );
+      }
+
+      const { domain, types, primaryType, message } = typedInput;
+
+      // Compute the digest over the assembled input, not over raw params.
+      const digestHex = hashTypedDataHex(typedInput);
+
+      // Ask the user to approve.
+      await requestUserApproval("sign_typed_data", origin, {
+        domain,
+        types,
+        primaryType,
+        message,
+        chainId: activeChainId,
+        digestHex,
+      });
+
+      // Sign under the wallet lifecycle lock, re-verifying that nothing the
+      // approval depended on changed while the popup was open. A user can
+      // switch network, lock, or change the connected profile mid-approval, and
+      // a signature must not outlive the context it was approved under.
+      // `assertApprovalContext` covers node URL (hence chain), profile index,
+      // permission identity, wallet identity, and unlock state; the engine
+      // re-checks its own view via `_approvalContext`.
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        const executionContext = await assertApprovalContext(approvalContext);
+        await ensureEngineConfigured();
+
+        // Sign via the engine over the bare digest computed above.
+        const signed = await engineCall("dusk_signTypedData", {
+          digestHex,
+          profileIndex: executionContext.profileIndex,
+          _approvalContext: executionContext,
+        });
+
+        // Result shape, spec 13. origin/chainId/primaryType are echoed so a
+        // verifier does not need to hold the original request; hex fields are
+        // lowercased defensively.
+        return {
+          account: signed?.account,
+          publicKeyHex: String(signed?.publicKeyHex ?? "").toLowerCase(),
+          origin,
+          chainId: activeChainId,
+          primaryType,
+          digestHex: digestHex.toLowerCase(),
+          signature: String(signed?.signature ?? "").toLowerCase(),
+        };
       });
     }
 

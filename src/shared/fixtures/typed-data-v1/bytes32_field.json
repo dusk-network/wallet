@@ -1,0 +1,56 @@
+{
+  "description": "bytes32 field plus non-zero verifyingContract; origin exact (no slash normalize)",
+  "input": {
+    "domain": {
+      "name": "Lock",
+      "version": "1",
+      "chainId": "dusk:1",
+      "verifyingContract": "0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "Lock": [
+        {
+          "name": "assetId",
+          "type": "bytes32"
+        },
+        {
+          "name": "amount",
+          "type": "uint64"
+        }
+      ]
+    },
+    "primaryType": "Lock",
+    "message": {
+      "assetId": "0xaabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+      "amount": "42"
+    },
+    "origin": "https://app.example"
+  },
+  "typeHashes": {
+    "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
+    "Lock": "0x8d1e130078de2f47a3cc9eeddb990c07d4442fae008f297d7565e5a604a69dd0"
+  },
+  "domainSeparator": "0xf70241af151c3d37d4e3acfeed83fd009f037d4049f2da981d46f140e4d99180",
+  "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
+  "structHash": "0xee5ab5f3f2ceb200a72b61bd26276d437ebcebabdafd760b04c661078a14f9ec",
+  "digestHex": "0x7c293c61ef2728c565dcf867c1d7427636245bc11e799d038aa2fd1ec80b2925",
+  "signedMessageHex": "0x4455534b5f54595045445f444154415f5349475f5631007c293c61ef2728c565dcf867c1d7427636245bc11e799d038aa2fd1ec80b2925"
+}

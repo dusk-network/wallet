@@ -10,10 +10,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - Displayed the installed extension version in Settings. ([#80])
+- Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and every message field with its declared type — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])
+
+### Changed
+
+- Gated dApp RPC requests on the canonical method list before any permission lookup or approval prompt, so methods absent from the advertised surface are unreachable rather than merely undocumented. Deliberately refused methods still report why instead of "Unknown method".
+
+### Security
+
+- Typed-data signatures cover a domain-separated message rather than the bare 32-byte digest, so they cannot be produced by, or replayed as, a signature over a caller-supplied digest.
 
 ### Fixed
 
 - Serialized DRC20 and DRC721 encoded call arguments before browser extension messaging. ([#79])
+
+[#22]: https://github.com/dusk-network/wallet/issues/22
 
 ## [0.3.0] - 2026-06-23
 

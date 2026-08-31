@@ -1,0 +1,43 @@
+{
+  "description": "the message value has an own property not declared by its struct type",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "text",
+          "type": "string"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "text": "hi",
+      "bogus": "nope"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_FIELD_EXTRA"
+}

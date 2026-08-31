@@ -1,0 +1,42 @@
+{
+  "description": "a self-referencing struct type admits no finite value",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "A": [
+        {
+          "name": "next",
+          "type": "A"
+        }
+      ]
+    },
+    "primaryType": "A",
+    "message": {
+      "next": {}
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_TYPE_CYCLE"
+}

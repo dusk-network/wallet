@@ -1,0 +1,5 @@
+{
+  "description": "input is not an object at all (a bare string)",
+  "input": "nope",
+  "error": "E_PARAMS_SHAPE"
+}

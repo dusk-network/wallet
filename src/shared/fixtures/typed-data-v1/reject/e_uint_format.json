@@ -1,0 +1,42 @@
+{
+  "description": "a uint decimal string has a leading zero",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "n",
+          "type": "uint64"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "n": "007"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_UINT_FORMAT"
+}

@@ -1,0 +1,41 @@
+{
+  "description": "a field definition is missing its type",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "text"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "text": "hi"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_FIELD_DEF"
+}

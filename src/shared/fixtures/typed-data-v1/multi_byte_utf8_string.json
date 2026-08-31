@@ -1,0 +1,50 @@
+{
+  "description": "multi-byte UTF-8 string containing a combining-character sequence (e + U+0301 combining acute) and an emoji; hashed over raw UTF-8 bytes with no normalization (spec section 5.1)",
+  "input": {
+    "domain": {
+      "name": "Message",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "Message": [
+        {
+          "name": "text",
+          "type": "string"
+        }
+      ]
+    },
+    "primaryType": "Message",
+    "message": {
+      "text": "Café 😀 Zurich"
+    },
+    "origin": "https://app.example"
+  },
+  "typeHashes": {
+    "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
+    "Message": "0x4d18e59c0150692d4cf83ad1764bc4a36f5e538cc8b1b348a1add7f92c8179b3"
+  },
+  "domainSeparator": "0xe29269d80e0763c4b36546d08a1723dc051d907bcdba42bb8bf0e8a411170fec",
+  "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
+  "structHash": "0xc3ec92d8ea381c595bbb78072324207dce8dd4be0e0f73dfed7060fe6e83ccf9",
+  "digestHex": "0xd773a14c48a7f1b35ca12f2bdda88752223a3e3c8a5b7786c8faa995a72cbace",
+  "signedMessageHex": "0x4455534b5f54595045445f444154415f5349475f563100d773a14c48a7f1b35ca12f2bdda88752223a3e3c8a5b7786c8faa995a72cbace"
+}

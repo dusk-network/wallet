@@ -30,9 +30,16 @@ export const DAPP_RPC_METHODS = Object.freeze([
   "dusk_sendTransaction",
   "dusk_watchAsset",
   "dusk_signMessage",
+  "dusk_signTypedData",
   "dusk_signAuth",
   "dusk_disconnect",
 ]);
+
+// Methods a dApp may call but that are deliberately refused, so the caller gets a
+// specific reason instead of "Unknown method". They are not part of the supported
+// surface: they are absent from DAPP_RPC_METHODS, from the advertised capabilities,
+// and from docs/provider-api.md. Their handlers must throw a descriptive error.
+export const DAPP_TOMBSTONED_METHODS = Object.freeze(["dusk_getAddresses"]);
 
 export const DAPP_TX_KINDS = Object.freeze([TX_KIND.TRANSFER, TX_KIND.CONTRACT_CALL]);
 

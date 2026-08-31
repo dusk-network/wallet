@@ -27,6 +27,7 @@ import {
   selectAccountIndex,
   signAuth,
   signMessage,
+  signTypedData,
   setShieldedCheckpointNow,
   startShieldedSync,
   waitTxExecuted,
@@ -417,6 +418,12 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
 
         case "dusk_signAuth": {
           const result = await signAuth(params ?? {});
+          sendResponse({ id, result });
+          return;
+        }
+
+        case "dusk_signTypedData": {
+          const result = await signTypedData(params ?? {});
           sendResponse({ id, result });
           return;
         }

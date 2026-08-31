@@ -6,6 +6,7 @@ import {
   DAPP_DISCOVERY_EVENTS,
   DAPP_DISCOVERY_INFO_FIELDS,
   DAPP_RPC_METHODS,
+  DAPP_TOMBSTONED_METHODS,
 } from "./providerSurface.js";
 
 function uniqSorted(arr) {
@@ -129,6 +130,63 @@ describe("Provider Surface Conformance", () => {
     }
   });
 
+  it("does not advertise raw BLS digest signing on the public provider surface", async () => {
+    // dusk_signBlsDigest is a raw-digest signing oracle: it must never be
+    // reachable from a dApp, whether via the canonical method list or as a
+    // live switch case in the RPC handler. See "Close the raw-digest
+    // signing oracle" hardening work.
+    const rpcPath = path.resolve(process.cwd(), "src", "background", "rpc.js");
+    const js = await readFile(rpcPath, "utf8");
+    const impl = new Set(extractRpcSwitchCases(js));
+
+    expect(DAPP_RPC_METHODS).not.toContain("dusk_signBlsDigest");
+    expect(impl.has("dusk_signBlsDigest")).toBe(false);
+  });
+
+  it("handleRpc gates on the canonical method list before dispatching", async () => {
+    // Behavioural tests cannot distinguish the allowlist from the switch's
+    // `default:` case, since today both answer METHOD_NOT_FOUND — the allowlist
+    // earns its keep on cases added *later*, which `default:` would not catch
+    // because they would match a case. Assert it structurally instead.
+    const rpcPath = path.resolve(process.cwd(), "src", "background", "rpc.js");
+    const js = await readFile(rpcPath, "utf8");
+
+    const guardAt = js.indexOf("DAPP_RPC_METHODS.includes(method)");
+    const switchAt = js.indexOf("switch (method)");
+
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(switchAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(switchAt);
+  });
+
+  it("every dusk_ switch case in rpc.js is either canonical or explicitly tombstoned", async () => {
+    // The RPC handler rejects any method that is on neither list before it reaches
+    // the switch, so a case that is on neither is dead code — and, before the
+    // allowlist existed, was silently public. Keep the two views in agreement.
+    const rpcPath = path.resolve(process.cwd(), "src", "background", "rpc.js");
+    const js = await readFile(rpcPath, "utf8");
+    const reachable = new Set([...DAPP_RPC_METHODS, ...DAPP_TOMBSTONED_METHODS]);
+    const orphans = extractRpcSwitchCases(js)
+      .filter((c) => c.startsWith("dusk_"))
+      .filter((c) => !reachable.has(c));
+
+    expect(orphans).toEqual([]);
+  });
+
+  it("tombstoned methods are refused, not advertised, and still have a handler", async () => {
+    const rpcPath = path.resolve(process.cwd(), "src", "background", "rpc.js");
+    const js = await readFile(rpcPath, "utf8");
+    const impl = new Set(extractRpcSwitchCases(js));
+
+    for (const method of DAPP_TOMBSTONED_METHODS) {
+      // Absent from the supported surface, so it never reaches docs or capabilities.
+      expect(DAPP_RPC_METHODS).not.toContain(method);
+      // Present as a case, so the caller gets the specific reason for the refusal
+      // rather than a misleading "Unknown method".
+      expect(impl.has(method)).toBe(true);
+    }
+  });
+
   it("src/inpage.js implements the canonical discovery events and provider metadata fields", async () => {
     const inpagePath = path.resolve(process.cwd(), "src", "inpage.js");
     const js = await readFile(inpagePath, "utf8");
@@ -181,6 +239,17 @@ describe("Provider Surface Conformance", () => {
     expect(md).toContain("profilesChanged");
     expect(md).not.toContain("dusk_requestAccounts");
     expect(md).not.toContain("accountsChanged");
+  });
+
+  it("docs/ARCHITECTURE.md RPC table covers the canonical dApp RPC methods", async () => {
+    // This table drifted once already: a method was added to the surface, to
+    // provider-api.md and to SECURITY.md (both enforced below) but not here,
+    // because nothing checked it. Enforce it rather than remember it.
+    const docPath = path.resolve(process.cwd(), "docs", "ARCHITECTURE.md");
+    const md = await readFile(docPath, "utf8");
+    const tableMethods = uniqSorted(extractMarkdownTableMethods(md));
+
+    expect(tableMethods).toEqual(uniqSorted(DAPP_RPC_METHODS));
   });
 
   it("docs/SECURITY.md permission table covers the canonical dApp RPC methods", async () => {

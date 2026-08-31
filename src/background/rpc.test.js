@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { sha256Hex } from "../shared/bytes.js";
 import { ERROR_CODES } from "../shared/errors.js";
+import { DAPP_RPC_METHODS } from "../shared/providerSurface.js";
+import { hashTypedDataHex } from "../shared/typedDataHash.js";
 
 const PUBLIC_ACCOUNT =
   "M8vMuVUZZrHCW3LBFKEctWFJerYmT2HghQNuGHKrgV6BQqgkYK1A4FZLX3Nm9Rri63RZwL4gQCMhLyJRJQE5MQouqqu77Dr1rQnHqk1W7zAf4WKZqr6MgdxzkxFwFjo8ZM";
@@ -79,6 +81,14 @@ const engineCall = vi.fn(async (method, params) => {
   }
   if (method === "dusk_signAuth") {
     return { ok: true, __params: params };
+  }
+  if (method === "dusk_signTypedData") {
+    return {
+      account: PUBLIC_ACCOUNT,
+      publicKeyHex: `0X${"AB".repeat(96)}`,
+      signature: `0X${"CD".repeat(48)}`,
+      __params: params,
+    };
   }
   throw new Error(`Unexpected engineCall(${method}) in test`);
 });
@@ -201,6 +211,83 @@ describe("background rpc handler", () => {
 
     expect(getPermissionForOrigin).not.toHaveBeenCalled();
     expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("rejects dusk_signBlsDigest with METHOD_NOT_FOUND even from a connected origin", async () => {
+    // dusk_signBlsDigest is a raw-digest signing oracle: it must never be
+    // reachable, whether or not the dApp is connected/permitted.
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signBlsDigest", params: {} })
+    ).rejects.toMatchObject({ code: ERROR_CODES.METHOD_NOT_FOUND });
+  });
+
+  it("rejects an invented method name with METHOD_NOT_FOUND", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_notARealMethod", params: {} })
+    ).rejects.toMatchObject({ code: ERROR_CODES.METHOD_NOT_FOUND });
+  });
+
+  it("rejects unknown methods before any permission lookup or user approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signBlsDigest", params: {} })
+    ).rejects.toMatchObject({ code: ERROR_CODES.METHOD_NOT_FOUND });
+
+    // An unknown method must cost nothing: no permission lookup, no approval prompt.
+    expect(getPermissionForOrigin).not.toHaveBeenCalled();
+    expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("keeps tombstoned methods explaining themselves instead of reporting METHOD_NOT_FOUND", async () => {
+    // dusk_getAddresses is deliberately refused so dApps cannot enumerate shielded
+    // addresses. The allowlist must not flatten that into "Unknown method": the
+    // method is known, it is declined, and the caller should be told which.
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_getAddresses", params: {} })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNSUPPORTED });
+  });
+
+  it("never rejects a canonical DAPP_RPC_METHODS entry with METHOD_NOT_FOUND", async () => {
+    // Guards against a typo in the allowlist silently disabling a real method.
+    // Other failures (missing permission, locked wallet, invalid params, ...)
+    // are expected and fine here -- only METHOD_NOT_FOUND is disallowed.
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = {
+      isUnlocked: true,
+      accounts: ["acct0", "acct1"],
+      addresses: ["addr0", "addr1"],
+      selectedAccountIndex: 0,
+    };
+
+    for (const method of DAPP_RPC_METHODS) {
+      vi.resetModules();
+      const { handleRpc } = await import("./rpc.js");
+      try {
+        await handleRpc("https://dapp.example", { method, params: {} });
+      } catch (err) {
+        expect(err?.code).not.toBe(ERROR_CODES.METHOD_NOT_FOUND);
+      }
+    }
   });
 
   it("dusk_requestProfiles rejects when no vault exists (opens onboarding)", async () => {
@@ -1490,5 +1577,292 @@ describe("background rpc handler", () => {
         profileIndex: 0,
       })
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // dusk_signTypedData
+  // ---------------------------------------------------------------------------
+
+  const TYPED_DATA_DOMAIN_FIELDS = [
+    { name: "name", type: "string" },
+    { name: "version", type: "string" },
+    { name: "chainId", type: "string" },
+    { name: "verifyingContract", type: "bytes32" },
+  ];
+
+  const TYPED_DATA_DOMAIN = { name: "Example dApp", version: "1", chainId: "dusk:2" };
+  const TYPED_DATA_TYPES = {
+    DuskTypedDataDomain: TYPED_DATA_DOMAIN_FIELDS,
+    Mail: [
+      { name: "to", type: "string" },
+      { name: "contents", type: "string" },
+    ],
+  };
+  const TYPED_DATA_PRIMARY_TYPE = "Mail";
+  const TYPED_DATA_MESSAGE = { to: "alice", contents: "hello" };
+
+  function typedDataParams({ domain, types, ...rest } = {}) {
+    return {
+      domain: { ...TYPED_DATA_DOMAIN, ...domain },
+      types: { ...TYPED_DATA_TYPES, ...types },
+      primaryType: TYPED_DATA_PRIMARY_TYPE,
+      message: TYPED_DATA_MESSAGE,
+      // No `origin` by default: the wallet injects it (spec 8) and the docs tell
+      // dApps not to send one, so this is the shape a conforming caller uses.
+      // Defaulting it here would mean no test ever exercised the documented
+      // request, and a validator that demanded a caller-supplied origin would
+      // pass every test while rejecting every real dApp. Origin injection has
+      // its own test that passes one explicitly.
+      ...rest,
+    };
+  }
+
+  function connectDapp(accountIndex = 0) {
+    perms["https://dapp.example"] = {
+      profileId: `account:${accountIndex}:acct${accountIndex}`,
+      accountIndex,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+  }
+
+  it("dusk_signTypedData returns the exact spec section 13 result shape", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    connectDapp(0);
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    const params = typedDataParams();
+    const result = await handleRpc("https://dapp.example", {
+      method: "dusk_signTypedData",
+      params,
+    });
+
+    const expectedDigest = hashTypedDataHex({
+      domain: TYPED_DATA_DOMAIN,
+      types: TYPED_DATA_TYPES,
+      primaryType: TYPED_DATA_PRIMARY_TYPE,
+      message: TYPED_DATA_MESSAGE,
+      origin: "https://dapp.example",
+    });
+
+    expect(Object.keys(result).sort()).toEqual(
+      ["account", "chainId", "digestHex", "origin", "primaryType", "publicKeyHex", "signature"].sort()
+    );
+    expect(result).toEqual({
+      account: PUBLIC_ACCOUNT,
+      publicKeyHex: `0x${"ab".repeat(96)}`,
+      origin: "https://dapp.example",
+      chainId: "dusk:2",
+      primaryType: "Mail",
+      digestHex: expectedDigest,
+      signature: `0x${"cd".repeat(48)}`,
+    });
+
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "sign_typed_data",
+      "https://dapp.example",
+      expect.objectContaining({
+        domain: TYPED_DATA_DOMAIN,
+        types: TYPED_DATA_TYPES,
+        primaryType: TYPED_DATA_PRIMARY_TYPE,
+        message: TYPED_DATA_MESSAGE,
+        chainId: "dusk:2",
+        digestHex: expectedDigest,
+      })
+    );
+  });
+
+  it("dusk_signTypedData accepts a request that omits origin, as the docs instruct", async () => {
+    // docs/provider-api.md tells dApps the wallet injects origin and they must
+    // not supply it. Validating the caller's raw params instead of the input the
+    // wallet assembles made a caller-supplied origin mandatory, so every
+    // conforming dApp got INVALID_PARAMS while the suite stayed green. Pin the
+    // documented shape so the contract and the code cannot drift apart again.
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    connectDapp(0);
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    const params = typedDataParams();
+    expect(params).not.toHaveProperty("origin");
+
+    const result = await handleRpc("https://dapp.example", {
+      method: "dusk_signTypedData",
+      params,
+    });
+
+    expect(result.origin).toBe("https://dapp.example");
+    expect(result.digestHex).toBe(
+      hashTypedDataHex({
+        domain: TYPED_DATA_DOMAIN,
+        types: TYPED_DATA_TYPES,
+        primaryType: TYPED_DATA_PRIMARY_TYPE,
+        message: TYPED_DATA_MESSAGE,
+        origin: "https://dapp.example",
+      })
+    );
+  });
+
+  it("dusk_signTypedData ignores a dApp-supplied params.origin when computing the digest", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    connectDapp(0);
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    const params = typedDataParams({ origin: "https://attacker.example" });
+    const result = await handleRpc("https://dapp.example", {
+      method: "dusk_signTypedData",
+      params,
+    });
+
+    const digestWithHandlerOrigin = hashTypedDataHex({
+      domain: TYPED_DATA_DOMAIN,
+      types: TYPED_DATA_TYPES,
+      primaryType: TYPED_DATA_PRIMARY_TYPE,
+      message: TYPED_DATA_MESSAGE,
+      origin: "https://dapp.example",
+    });
+    const digestWithAttackerOrigin = hashTypedDataHex({
+      domain: TYPED_DATA_DOMAIN,
+      types: TYPED_DATA_TYPES,
+      primaryType: TYPED_DATA_PRIMARY_TYPE,
+      message: TYPED_DATA_MESSAGE,
+      origin: "https://attacker.example",
+    });
+
+    // Sanity: the two origins really do produce different digests, so the
+    // assertions below are meaningful.
+    expect(digestWithHandlerOrigin).not.toBe(digestWithAttackerOrigin);
+
+    expect(result.digestHex).toBe(digestWithHandlerOrigin);
+    expect(result.origin).toBe("https://dapp.example");
+  });
+
+  it("dusk_signTypedData rejects wrong domain.chainId before approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    connectDapp(0);
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    const params = typedDataParams({ domain: { chainId: "dusk:999" } });
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("dusk_signTypedData rejects an unknown params.version before approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    connectDapp(0);
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    const params = typedDataParams({ version: 2 });
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "missing primaryType",
+      typedDataParams({ primaryType: undefined }),
+    ],
+    [
+      "malformed types (unknown struct reference)",
+      typedDataParams({
+        types: { Mail: [{ name: "to", type: "string" }, { name: "contents", type: "Bogus" }] },
+      }),
+    ],
+  ])("dusk_signTypedData rejects %s with INVALID_PARAMS before approval", async (_label, params) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    connectDapp(0);
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("dusk_signTypedData rejects a payload exceeding the policy floor before approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    connectDapp(0);
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    const params = typedDataParams({
+      message: { to: "alice", contents: "a".repeat(70_000) },
+    });
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("dusk_signTypedData rejects if the network changes while approval is pending", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    connectDapp(0);
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+    requestUserApproval.mockImplementationOnce(async () => {
+      // Simulate the user switching networks while the approval popup is open.
+      // The context captured before approval recorded the old nodeUrl, so
+      // assertApprovalContext sees the mismatch when it re-reads afterwards.
+      settings = { ...settings, nodeUrl: "https://devnet.nodes.dusk.network" };
+      return null;
+    });
+
+    const params = typedDataParams();
+
+    // UNAUTHORIZED rather than INVALID_PARAMS: nothing is wrong with the
+    // request, the wallet moved out from under an approval it had already
+    // granted. Same classification the sibling sign_* methods use.
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_signTypedData", expect.anything());
+  });
+
+  it("dusk_signTypedData rejects an unconnected origin with UNAUTHORIZED", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+    const params = typedDataParams();
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+    expect(requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("dusk_signTypedData rejects a locked wallet", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    connectDapp(0);
+    engineStatus = { isUnlocked: false, accounts: ["acct0"] };
+    const params = typedDataParams();
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_signTypedData", expect.anything());
   });
 });

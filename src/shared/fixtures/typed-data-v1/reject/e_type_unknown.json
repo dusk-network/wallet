@@ -1,0 +1,42 @@
+{
+  "description": "a field type references a struct name that is not a key of types",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "inner",
+          "type": "Undeclared"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "inner": {}
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_TYPE_UNKNOWN"
+}

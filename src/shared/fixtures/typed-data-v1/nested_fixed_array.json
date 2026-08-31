@@ -1,0 +1,63 @@
+{
+  "description": "nested fixed array uint8[2][3]: T[n][m] parses the inner expression first (spec section 4), so this is an array of 3 arrays of 2 uint8",
+  "input": {
+    "domain": {
+      "name": "Grid",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "Grid": [
+        {
+          "name": "cells",
+          "type": "uint8[2][3]"
+        }
+      ]
+    },
+    "primaryType": "Grid",
+    "message": {
+      "cells": [
+        [
+          1,
+          2
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          5,
+          6
+        ]
+      ]
+    },
+    "origin": "https://app.example"
+  },
+  "typeHashes": {
+    "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
+    "Grid": "0xb755d8af7b61e13bf36b4135b18ea39f8030afaad09de837e9c53cb66d1b1f33"
+  },
+  "domainSeparator": "0x5ffac021faff0711bd6b30b69d65ed4ebf9577197d41e1c1a483aa63c6fc2e3f",
+  "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
+  "structHash": "0xb5138f46379a12fbae672842af97ecc2d4ebd37298572c3cd04efcfda5b9ac39",
+  "digestHex": "0x4e665e319292b4f0bffefa87a3d8689841f714d0daddf8bfcd66f85cf8ba91c8",
+  "signedMessageHex": "0x4455534b5f54595045445f444154415f5349475f5631004e665e319292b4f0bffefa87a3d8689841f714d0daddf8bfcd66f85cf8ba91c8"
+}
