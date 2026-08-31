@@ -953,17 +953,17 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_signTypedData": {
-      // 1. Connection is required up front, same as the sibling sign_* methods -
+      // Connection is required up front, same as the sibling sign_* methods -
       // an unconnected origin should not be able to trigger any of the work below.
       const perm = await getPermissionForOrigin(origin);
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
-      // 2. Reject a non-object params before touching its shape any further.
+      // Reject a non-object params before touching its shape any further.
       if (!params || typeof params !== "object") {
         throw rpcError(ERROR_CODES.INVALID_PARAMS, "params must be an object");
       }
 
-      // 3. Version check (spec 14): defaults to 1, and an unknown version is a
+      // Version check (spec 14): defaults to 1, and an unknown version is a
       // hard reject rather than a silent fallback, so a caller that precomputed
       // a digest locally gets a clear error instead of a mismatch.
       const version = params.version === undefined ? 1 : params.version;
@@ -971,7 +971,7 @@ export async function handleRpc(origin, request) {
         throw rpcError(ERROR_CODES.INVALID_PARAMS, `Unsupported typed-data version: ${version}`);
       }
 
-      // 4. Build the exact input that will be hashed, with the wallet's own view
+      // Build the exact input that will be hashed, with the wallet's own view
       // of `origin`. The dApp MUST NOT be able to influence origin binding
       // (spec 8): any params.origin is dropped here, and the input is assembled
       // field by field rather than by spreading params, so a future field added
@@ -989,7 +989,7 @@ export async function handleRpc(origin, request) {
         origin,
       };
 
-      // 5. Structural + value validation (spec 4-10). Map the shared validator's
+      // Structural + value validation (spec 4-10). Map the shared validator's
       // stable error code (E_*) onto INVALID_PARAMS, preserving both the message
       // and the code so a caller/dev can tell which spec 10 rule fired.
       try {
@@ -1002,7 +1002,7 @@ export async function handleRpc(origin, request) {
         );
       }
 
-      // 5. Chain check, before approval: a dApp must ask for the chain the
+      // Chain check, before approval: a dApp must ask for the chain the
       // wallet is actually on. This also keeps the approval UI from ever
       // showing a chain the wallet cannot act on.
       //
@@ -1021,7 +1021,7 @@ export async function handleRpc(origin, request) {
         );
       }
 
-      // 6. Signer-side resource floor (spec 11). Deliberately not part of the
+      // Signer-side resource floor (spec 11). Deliberately not part of the
       // hash path - it must never influence the digest - so oversized payloads
       // are rejected here, before the user ever sees an approval popup.
       try {
@@ -1036,10 +1036,10 @@ export async function handleRpc(origin, request) {
 
       const { domain, types, primaryType, message } = typedInput;
 
-      // 8. Compute the digest over the assembled input built in step 4.
+      // Compute the digest over the assembled input, not over raw params.
       const digestHex = hashTypedDataHex(typedInput);
 
-      // 8. Ask the user to approve.
+      // Ask the user to approve.
       await requestUserApproval("sign_typed_data", origin, {
         domain,
         types,
@@ -1049,7 +1049,7 @@ export async function handleRpc(origin, request) {
         digestHex,
       });
 
-      // 9. Sign under the wallet lifecycle lock, re-verifying that nothing the
+      // Sign under the wallet lifecycle lock, re-verifying that nothing the
       // approval depended on changed while the popup was open. A user can
       // switch network, lock, or change the connected profile mid-approval, and
       // a signature must not outlive the context it was approved under.
@@ -1060,7 +1060,7 @@ export async function handleRpc(origin, request) {
         const executionContext = await assertApprovalContext(approvalContext);
         await ensureEngineConfigured();
 
-        // 10. Sign via the engine over the bare digest computed above.
+        // Sign via the engine over the bare digest computed above.
         const signed = await engineCall("dusk_signTypedData", {
           digestHex,
           profileIndex: executionContext.profileIndex,
