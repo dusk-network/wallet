@@ -533,15 +533,18 @@ export function homeView(ov, { state, actions } = {}) {
     );
   };
 
-  const publicHistoryButton = h("button", {
-    class: "btn-outline activity-public-history",
-    text: "History ↗",
-    onclick: async (e) => {
-      e?.stopPropagation?.();
-      const ok = await openUrl(publicHistoryUrl);
-      if (!ok) actions?.showToast?.("Explorer unavailable");
-    },
-  });
+  const publicHistoryButton = publicHistoryUrl
+    ? h("button", {
+        class: "btn-outline activity-public-history",
+        text: "History ↗",
+        onclick: async (e) => {
+          e?.stopPropagation?.();
+          const ok = await openUrl(publicHistoryUrl);
+          if (!ok) actions?.showToast?.("Explorer unavailable");
+        },
+      })
+    : null;
+  const publicHistoryActions = publicHistoryButton ? [publicHistoryButton] : [];
 
   const viewAllButton = h("button", {
     class: "activity-view-all",
@@ -578,7 +581,7 @@ export function homeView(ov, { state, actions } = {}) {
         title: "Activity",
         onBack,
         backText: "← Dashboard",
-        actions: [publicHistoryButton],
+        actions: publicHistoryActions,
       }),
       h("div", { class: "wallet-dashboard" }, [
         h("div", { class: "activity-card activity-card--tx" }, [
@@ -592,7 +595,7 @@ export function homeView(ov, { state, actions } = {}) {
   const activityFull = h("div", { class: "activity-card activity-card--tx" }, [
     activityHeader({
       title: "Recent activity",
-      actions: [publicHistoryButton],
+      actions: publicHistoryActions,
     }),
     activityList(recentTxs, "No local wallet activity yet."),
     h("div", { class: "activity-card-footer" }, [viewAllButton]),

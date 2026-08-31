@@ -1,7 +1,10 @@
 import { detectPresetIdFromNodeUrl } from "./network.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
 
-const DUSK_EXPLORER_BASE = "https://duskexplorer.com";
+const DUSKSCAN_BASES = {
+  mainnet: "https://duskscan.net",
+  testnet: "https://testnet.duskscan.net",
+};
 
 /**
  * Returns a URL to view a transaction on the official Dusk explorer.
@@ -24,21 +27,14 @@ export function explorerTxUrl(nodeUrl, hash) {
 }
 
 /**
- * Returns a URL to view public account history on duskexplorer.com.
- *
- * The DUDE currently tracks mainnet public/Moonlight accounts. For other
- * networks we fall back to the explorer's address list instead of implying an
- * account-specific testnet/devnet history exists there.
+ * Returns a URL to view public account history on DuskScan.
  *
  * @param {string} nodeUrl
  * @param {string} account
- * @returns {string}
+ * @returns {string|null}
  */
 export function explorerAccountUrl(nodeUrl, account) {
-  const presetId = detectPresetIdFromNodeUrl(nodeUrl);
+  const base = DUSKSCAN_BASES[detectPresetIdFromNodeUrl(nodeUrl)];
   const acct = typeof account === "string" ? account.trim() : "";
-  if (presetId === "mainnet" && acct) {
-    return `${DUSK_EXPLORER_BASE}/address/${acct}/`;
-  }
-  return `${DUSK_EXPLORER_BASE}/addresses/`;
+  return base && acct ? `${base}/address/${encodeURIComponent(acct)}` : null;
 }
