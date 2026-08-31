@@ -1005,8 +1005,14 @@ export async function handleRpc(origin, request) {
       // 5. Chain check, before approval: a dApp must ask for the chain the
       // wallet is actually on. This also keeps the approval UI from ever
       // showing a chain the wallet cannot act on.
-      const settingsBeforeApproval = await getSettings();
-      const activeChainId = chainIdFromNodeUrl(settingsBeforeApproval?.nodeUrl ?? "");
+      //
+      // The chain comes from the approval context rather than a bare settings
+      // read, so the value compared here is the same one re-verified after
+      // approval. Note this is the *wallet's* chain, used only to reject a
+      // mismatch and to display/echo — the digest binds the dApp's
+      // `domain.chainId`, never this.
+      const approvalContext = await captureApprovalContext(perm);
+      const activeChainId = chainIdFromNodeUrl(approvalContext.nodeUrl);
       const requestedChainId = String(params.domain?.chainId ?? "").trim();
       if (requestedChainId !== activeChainId) {
         throw rpcError(
@@ -1043,41 +1049,37 @@ export async function handleRpc(origin, request) {
         digestHex,
       });
 
-      // 9. Re-check the active chain after approval returns: the user may have
-      // switched networks while the popup was open, and a signature must not
-      // outlive the network context it was approved under.
-      const settingsAfterApproval = await getSettings();
-      const chainIdAfterApproval = chainIdFromNodeUrl(settingsAfterApproval?.nodeUrl ?? "");
-      if (chainIdAfterApproval !== requestedChainId) {
-        throw rpcError(
-          ERROR_CODES.INVALID_PARAMS,
-          `Active chain changed to ${chainIdAfterApproval} during approval; expected ${requestedChainId}`
-        );
-      }
+      // 9. Sign under the wallet lifecycle lock, re-verifying that nothing the
+      // approval depended on changed while the popup was open. A user can
+      // switch network, lock, or change the connected profile mid-approval, and
+      // a signature must not outlive the context it was approved under.
+      // `assertApprovalContext` covers node URL (hence chain), profile index,
+      // permission identity, wallet identity, and unlock state; the engine
+      // re-checks its own view via `_approvalContext`.
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        const executionContext = await assertApprovalContext(approvalContext);
+        await ensureEngineConfigured();
 
-      // 10. Require unlocked wallet, same as the sibling sign_* methods.
-      const { isUnlocked, accounts } = await getEngineStatus();
-      if (!isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        // 10. Sign via the engine over the bare digest computed above.
+        const signed = await engineCall("dusk_signTypedData", {
+          digestHex,
+          profileIndex: executionContext.profileIndex,
+          _approvalContext: executionContext,
+        });
 
-      await ensureEngineConfigured();
-      const arr = Array.isArray(accounts) ? accounts : [];
-      const profileIndex = sanitizeAccountIndex(perm.accountIndex, arr.length, 0);
-
-      // 11. Sign via the engine over the bare digest computed above.
-      const signed = await engineCall("dusk_signTypedData", { digestHex, profileIndex });
-
-      // Result shape, spec 13. origin/chainId/primaryType are echoed so a
-      // verifier does not need to hold the original request; hex fields are
-      // lowercased defensively.
-      return {
-        account: signed?.account,
-        publicKeyHex: String(signed?.publicKeyHex ?? "").toLowerCase(),
-        origin,
-        chainId: activeChainId,
-        primaryType,
-        digestHex: digestHex.toLowerCase(),
-        signature: String(signed?.signature ?? "").toLowerCase(),
-      };
+        // Result shape, spec 13. origin/chainId/primaryType are echoed so a
+        // verifier does not need to hold the original request; hex fields are
+        // lowercased defensively.
+        return {
+          account: signed?.account,
+          publicKeyHex: String(signed?.publicKeyHex ?? "").toLowerCase(),
+          origin,
+          chainId: activeChainId,
+          primaryType,
+          digestHex: digestHex.toLowerCase(),
+          signature: String(signed?.signature ?? "").toLowerCase(),
+        };
+      });
     }
 
     case "dusk_signAuth": {
