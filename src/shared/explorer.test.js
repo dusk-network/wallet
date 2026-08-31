@@ -43,23 +43,32 @@ describe("explorerTxUrl", () => {
 });
 
 describe("explorerAccountUrl", () => {
-  it("returns mainnet account history on duskexplorer.com", () => {
+  it("returns mainnet account history on DuskScan", () => {
     const url = explorerAccountUrl(
       "https://nodes.dusk.network",
       "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927"
     );
 
     expect(url).toBe(
-      "https://duskexplorer.com/address/26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927/"
+      "https://duskscan.net/address/26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927"
     );
   });
 
-  it("falls back to address list when account history is not supported", () => {
+  it("returns testnet account history on DuskScan", () => {
     expect(explorerAccountUrl("https://testnet.nodes.dusk.network", "acct1")).toBe(
-      "https://duskexplorer.com/addresses/"
+      "https://testnet.duskscan.net/address/acct1"
     );
-    expect(explorerAccountUrl("https://my-custom-node.example.com", "acct1")).toBe(
-      "https://duskexplorer.com/addresses/"
+  });
+
+  it("encodes reserved characters in accounts", () => {
+    expect(explorerAccountUrl("https://nodes.dusk.network", "acct/1")).toBe(
+      "https://duskscan.net/address/acct%2F1"
     );
+  });
+
+  it("returns null when account history is not supported", () => {
+    expect(explorerAccountUrl("https://devnet.nodes.dusk.network", "acct1")).toBeNull();
+    expect(explorerAccountUrl("https://my-custom-node.example.com", "acct1")).toBeNull();
+    expect(explorerAccountUrl("https://nodes.dusk.network", "")).toBeNull();
   });
 });

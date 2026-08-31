@@ -435,12 +435,13 @@ export function addressBookView(ov, { state, actions } = {}) {
       },
     });
 
-    const historyBtn = typ === "account"
+    const historyUrl = typ === "account" ? explorerAccountUrl(nodeUrl, addr) : null;
+    const historyBtn = historyUrl
       ? h("button", {
           class: "btn-outline",
           text: "History ↗",
           onclick: async () => {
-            const ok = await openUrl(explorerAccountUrl(nodeUrl, addr));
+            const ok = await openUrl(historyUrl);
             if (!ok) actions?.showToast?.("Explorer unavailable");
           },
         })
