@@ -3199,7 +3199,16 @@ export async function signTypedData(params) {
     throw new Error("digestHex must decode to exactly 32 bytes");
   }
 
-  const profile = await ensureProfileIndex(params.profileIndex ?? getSelectedProfileIndex());
+  const profileIndex = resolveProfileIndex(params.profileIndex);
+  const profile = await ensureProfileIndex(profileIndex);
+
+  // Second, independent check that the wallet has not changed since the user
+  // approved: the RPC layer compares its own snapshot, this compares the
+  // engine's view (walletId, profile index, account, node URL). Sibling signing
+  // paths do the same. Note the guard is a no-op when `_approvalContext` is
+  // absent, so it protects only callers that pass one.
+  await assertApprovalContext(params, profileIndex);
+
   const signed = await signProfileTypedDataDigest(profile, digestBytes);
 
   return Object.freeze({

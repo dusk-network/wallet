@@ -1821,18 +1821,21 @@ describe("background rpc handler", () => {
     connectDapp(0);
     engineStatus = { isUnlocked: true, accounts: ["acct0"] };
     requestUserApproval.mockImplementationOnce(async () => {
-      // Simulate the user switching networks while the approval popup is open:
-      // the second getSettings() read (post-approval) now sees a different
-      // nodeUrl than the first (pre-approval) read did.
+      // Simulate the user switching networks while the approval popup is open.
+      // The context captured before approval recorded the old nodeUrl, so
+      // assertApprovalContext sees the mismatch when it re-reads afterwards.
       settings = { ...settings, nodeUrl: "https://devnet.nodes.dusk.network" };
       return null;
     });
 
     const params = typedDataParams();
 
+    // UNAUTHORIZED rather than INVALID_PARAMS: nothing is wrong with the
+    // request, the wallet moved out from under an approval it had already
+    // granted. Same classification the sibling sign_* methods use.
     await expect(
       handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
-    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
     expect(engineCall).not.toHaveBeenCalledWith("dusk_signTypedData", expect.anything());
   });
 
