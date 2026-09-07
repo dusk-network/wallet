@@ -2291,6 +2291,7 @@ export async function startShieldedSync({ force = false } = {}) {
           if (b === null || h === null || b <= lastBookmark || h < 0n) throw new Error("Invalid shielded scan cursor");
           // Do not cache a tail newer than the head we anchored before scanning.
           if (h > tipHeight) throw new Error("Chain advanced during sync; retry to scan the remaining notes");
+          // ponytail: one header RPC per chunk; batch verified commits if latency dominates.
           await assertAnchor();
           if (!(owned?.[0] instanceof Map)) throw new Error("Invalid shielded notes");
           await putNotesMap(netKey, walletId, idx, owned[0], signal, {
