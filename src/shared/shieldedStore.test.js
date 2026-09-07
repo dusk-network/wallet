@@ -22,7 +22,7 @@ describe("shieldedStore (IndexedDB)", () => {
     const original = IDBObjectStore.prototype.put;
     const abort = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (value, ...args) {
       const request = original.call(this, value, ...args);
-      if (this.name === "notes") this.transaction.abort();
+      if (this.name === "notes") request.onsuccess = () => this.transaction.abort();
       return request;
     });
     try {
@@ -33,6 +33,19 @@ describe("shieldedStore (IndexedDB)", () => {
     } finally { abort.mockRestore(); }
     expect((await store.getNotesMap(networkKey, walletId, profileIndex)).size).toBe(0);
     expect(await store.getShieldedMeta(networkKey, walletId, profileIndex)).toEqual(meta);
+  });
+
+  it("creates the first notes and anchor when there is no previous metadata", async () => {
+    const { networkKey, walletId, profileIndex } = nextOwner();
+    expect(await store.getShieldedMeta(networkKey, walletId, profileIndex)).toBeNull();
+    await store.putNotesMap(networkKey, walletId, profileIndex,
+      new Map([[new Uint8Array([1]), new Uint8Array([2])]]), undefined,
+      { cursorBookmark: "1", anchorBlock: "10", anchorHash: "block-10" }
+    );
+    expect((await store.getNotesMap(networkKey, walletId, profileIndex)).size).toBe(1);
+    expect(await store.getShieldedMeta(networkKey, walletId, profileIndex)).toMatchObject({
+      cursorBookmark: "1", anchorBlock: "10", anchorHash: "block-10",
+    });
   });
 
   it("does not create cache writes from cancelled sync work", async () => {

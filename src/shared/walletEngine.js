@@ -2319,27 +2319,10 @@ export async function startShieldedSync({ force = false } = {}) {
           signal.addEventListener("abort", cancel, { once: true });
           try {
             while (true) {
-              if (isStale()) {
-                try {
-                  controller.abort();
-                } catch {}
-                try {
-                  await reader.cancel();
-                } catch {}
-                return;
-              }
-
+              if (isStale()) return;
               const { done, value } = await reader.read();
               if (done) break;
-              if (isStale()) {
-                try {
-                  controller.abort();
-                } catch {}
-                try {
-                  await reader.cancel();
-                } catch {}
-                return;
-              }
+              if (isStale()) return;
               await processChunk(value);
 
               if (shouldStop) {
@@ -2358,12 +2341,7 @@ export async function startShieldedSync({ force = false } = {}) {
           }
         } else if (notesStream && typeof notesStream?.[Symbol.asyncIterator] === "function") {
           for await (const value of notesStream) {
-            if (isStale()) {
-              try {
-                controller.abort();
-              } catch {}
-              break;
-            }
+            if (isStale()) break;
             await processChunk(value);
 
             if (shouldStop) break;
