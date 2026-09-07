@@ -482,13 +482,11 @@ describe("walletEngine", () => {
     try {
       await engine.startShieldedSync({ force });
       await vi.waitFor(() => expect(engine.getShieldedStatus().state).not.toBe("syncing"));
-      console.log("rollback probe", {
-        force, tip: "9", status: engine.getShieldedStatus().state,
-        cursor: engine.getShieldedStatus().cursorBookmark,
-        scannedFrom: notes.mock.calls.map(([, options]) => options.from.asUint().toString()),
-        cachedNotes: (await store.getNotesMap(NETWORK_KEY, WALLET_ID, 0)).size,
-      });
-      expect(engine.getShieldedStatus()).not.toMatchObject({ state: "done", cursorBookmark: "10" });
+      expect(engine.getShieldedStatus().state).toBe("error");
+      expect(engine.getShieldedStatus().lastError).toContain("behind");
+      expect(store.metaCursor(await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0)).bookmark).toBe(10n);
+      expect(notes).not.toHaveBeenCalled();
+      expect((await store.getNotesMap(NETWORK_KEY, WALLET_ID, 0)).size).toBe(1);
     } finally { notes.mockRestore(); }
   });
 
@@ -538,6 +536,23 @@ describe("walletEngine", () => {
       expect(engine.getShieldedStatus().state).toBe("idle");
       expect(await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0)).toMatchObject({ cursorBookmark: "10" });
     } finally { gate.resolve({ block: { header: { hash: "block-100" } } }); await pending; query.mockRestore(); }
+  });
+
+  it("cancels a blocked note reader on lock without waiting for another chunk", async () => {
+    await prepareReviewCache(11n);
+    const { AddressSyncer } = await import("@dusk/w3sper");
+    const cancel = vi.fn();
+    let controller;
+    const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockResolvedValue(new ReadableStream({
+      start(c) { controller = c; }, cancel,
+    }));
+    try {
+      await engine.startShieldedSync();
+      await vi.waitFor(() => expect(notes).toHaveBeenCalled());
+      engine.lock();
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalled());
+      expect(engine.getShieldedStatus().state).toBe("idle");
+    } finally { if (!cancel.mock.calls.length) controller.close(); notes.mockRestore(); }
   });
 
   it("rejects scan data when the captured chain anchor changes mid-scan", async () => {

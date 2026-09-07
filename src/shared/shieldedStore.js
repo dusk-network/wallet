@@ -136,7 +136,7 @@ export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPa
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_META], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to write meta"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to write meta"));
     tx.objectStore(STORE_META).put(next);
   });
 
@@ -166,7 +166,7 @@ export async function ensureShieldedMeta(networkKey, walletId, profileIndex = 0,
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_META], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to create meta"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to create meta"));
     tx.objectStore(STORE_META).put(created);
   });
   return created;
@@ -240,7 +240,7 @@ export async function putNotesMap(networkKey, walletId, profileIndex, notesMap, 
   await new Promise((resolve, reject) => {
     const tx = db.transaction(syncMeta ? [STORE_NOTES, STORE_META] : [STORE_NOTES], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to write notes"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to write notes"));
 
     if (syncMeta) {
       tx.objectStore(STORE_META).put({
@@ -461,7 +461,7 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () =>
+    tx.onerror = tx.onabort = () =>
       reject(tx.error || new Error("Failed to write pending"));
 
     const store = tx.objectStore(STORE_PENDING);
@@ -494,7 +494,7 @@ export async function markPendingNullifiersRecoverable(networkKey, walletId, pro
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to mark pending recoverable"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to mark pending recoverable"));
 
     const store = tx.objectStore(STORE_PENDING);
     const now = Date.now();
@@ -524,7 +524,7 @@ export async function clearPendingNullifiersForTx(networkKey, walletId, profileI
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to clear pending tx rows"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to clear pending tx rows"));
 
     const store = tx.objectStore(STORE_PENDING);
     for (const row of rows) store.delete(row.id);
@@ -557,7 +557,7 @@ export async function markNullifiersSpent(networkKey, walletId, profileIndex, nu
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NOTES, STORE_SPENT, STORE_PENDING], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () =>
+    tx.onerror = tx.onabort = () =>
       reject(tx.error || new Error("Failed to mark spent"));
 
     const notes = tx.objectStore(STORE_NOTES);
@@ -621,7 +621,7 @@ export async function unspendNullifiers(networkKey, walletId, profileIndex, null
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_SPENT, STORE_NOTES], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to unspend"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to unspend"));
 
     const spent = tx.objectStore(STORE_SPENT);
     const notes = tx.objectStore(STORE_NOTES);
