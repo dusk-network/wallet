@@ -16,18 +16,19 @@ function nextOwner() {
 }
 
 describe("shieldedStore (IndexedDB)", () => {
-  it("commits scanned notes and their anchor in one transaction", async () => {
+  it.each(["transaction", "signal"])("rolls back notes and anchor on %s cancellation", async (mode) => {
     const { networkKey, walletId, profileIndex } = nextOwner();
     const meta = await store.ensureShieldedMeta(networkKey, walletId, profileIndex);
+    const controller = new AbortController();
     const original = IDBObjectStore.prototype.put;
     const abort = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (value, ...args) {
       const request = original.call(this, value, ...args);
-      if (this.name === "notes") request.onsuccess = () => this.transaction.abort();
+      if (this.name === "notes") request.onsuccess = () => mode === "signal" ? controller.abort() : this.transaction.abort();
       return request;
     });
     try {
       await expect(store.putNotesMap(networkKey, walletId, profileIndex,
-        new Map([[new Uint8Array([1]), new Uint8Array([2])]]), undefined,
+        new Map([[new Uint8Array([1]), new Uint8Array([2])]]), controller.signal,
         { cursorBookmark: "1", anchorBlock: "10", anchorHash: "block-10" }
       )).rejects.toThrow();
     } finally { abort.mockRestore(); }
