@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import "fake-indexeddb/auto";
 
@@ -16,6 +16,44 @@ function nextOwner() {
 }
 
 describe("shieldedStore (IndexedDB)", () => {
+  it("commits scanned notes and their anchor in one transaction", async () => {
+    const { networkKey, walletId, profileIndex } = nextOwner();
+    const meta = await store.ensureShieldedMeta(networkKey, walletId, profileIndex);
+    const original = IDBObjectStore.prototype.put;
+    const abort = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (value, ...args) {
+      const request = original.call(this, value, ...args);
+      if (this.name === "notes") this.transaction.abort();
+      return request;
+    });
+    try {
+      await expect(store.putNotesMap(networkKey, walletId, profileIndex,
+        new Map([[new Uint8Array([1]), new Uint8Array([2])]]), undefined,
+        { cursorBookmark: "1", anchorBlock: "10", anchorHash: "block-10" }
+      )).rejects.toThrow();
+    } finally { abort.mockRestore(); }
+    expect((await store.getNotesMap(networkKey, walletId, profileIndex)).size).toBe(0);
+    expect(await store.getShieldedMeta(networkKey, walletId, profileIndex)).toEqual(meta);
+  });
+
+  it("does not create cache writes from cancelled sync work", async () => {
+    const { networkKey, walletId, profileIndex } = nextOwner();
+    const key = new Uint8Array([1]), notes = new Map([[key, key]]);
+    await store.putNotesMap(networkKey, walletId, profileIndex, notes);
+    const meta = await store.ensureShieldedMeta(networkKey, walletId, profileIndex);
+    const controller = new AbortController(); controller.abort();
+    const { signal } = controller;
+    const writes = [
+      store.putNotesMap(networkKey, walletId, profileIndex, notes, signal),
+      store.putShieldedMeta(networkKey, walletId, profileIndex, { cursorBookmark: "99" }, signal),
+      store.markNullifiersSpent(networkKey, walletId, profileIndex, [key], signal),
+      store.unspendNullifiers(networkKey, walletId, profileIndex, [key], signal),
+      store.clearNotes(networkKey, walletId, profileIndex, { signal, resetMeta: true }),
+    ];
+    expect((await Promise.allSettled(writes)).map(r => r.status)).toEqual(writes.map(() => "rejected"));
+    expect((await store.getNotesMap(networkKey, walletId, profileIndex)).size).toBe(1);
+    expect(await store.getShieldedMeta(networkKey, walletId, profileIndex)).toEqual(meta);
+  });
+
   it("creates meta with defaults and returns cursor", async () => {
     const { networkKey, walletId, profileIndex } = nextOwner();
 
