@@ -111,7 +111,7 @@ export async function getShieldedMeta(networkKey, walletId, profileIndex = 0) {
   });
 }
 
-export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPatch) {
+export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPatch, signal) {
   const db = await openDb();
   const key = ownerKey(networkKey, walletId, profileIndex);
 
@@ -122,6 +122,7 @@ export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPa
     profileIndex: Number(profileIndex),
   };
 
+  signal?.throwIfAborted();
   const next = {
     ...prev,
     ...metaPatch,
@@ -182,37 +183,35 @@ export function metaCursor(meta) {
 // Notes
 // ---------------------------------------------------------------------------
 
-async function clearStoreByOwner(db, storeName, ownerKeyStr) {
-  return await new Promise((resolve, reject) => {
-    const tx = db.transaction([storeName], "readwrite");
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () =>
-      reject(tx.error || new Error(`Failed to clear ${storeName}`));
+export async function clearNotes(networkKey, walletId, profileIndex = 0, { signal, resetMeta = false, preservePending = false } = {}) {
+  const db = await openDb();
+  signal?.throwIfAborted();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+  const stores = [STORE_SPENT, STORE_NOTES];
+  if (!preservePending) stores.push(STORE_PENDING);
 
-    const store = tx.objectStore(storeName);
-    const index = store.index("byOwner");
-    const req = index.openCursor(IDBKeyRange.only(ownerKeyStr));
-    req.onsuccess = () => {
-      const cursor = req.result;
-      if (!cursor) return;
-      cursor.delete();
-      cursor.continue();
-    };
+  // Clear notes and their cursor atomically. Reorg recovery keeps reservations
+  // until the transaction lifecycle decides whether they can be released.
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(resetMeta ? [...stores, STORE_META] : stores, "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to clear shielded cache"));
+    if (resetMeta) tx.objectStore(STORE_META).delete(ok);
+    for (const name of stores) {
+      const req = tx.objectStore(name).index("byOwner").openCursor(IDBKeyRange.only(ok));
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) return;
+        cursor.delete();
+        cursor.continue();
+      };
+    }
   });
 }
 
-export async function clearNotes(networkKey, walletId, profileIndex = 0) {
+export async function putNotesMap(networkKey, walletId, profileIndex, notesMap, signal, syncMeta) {
   const db = await openDb();
-  const ok = ownerKey(networkKey, walletId, profileIndex);
-
-  // Clear all shielded caches for this owner (unspent, spent, pending).
-  await clearStoreByOwner(db, STORE_PENDING, ok).catch(() => {});
-  await clearStoreByOwner(db, STORE_SPENT, ok).catch(() => {});
-  await clearStoreByOwner(db, STORE_NOTES, ok).catch(() => {});
-}
-
-export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) {
-  const db = await openDb();
+  signal?.throwIfAborted();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   // notesMap is Map<Uint8Array, Uint8Array>
@@ -233,13 +232,22 @@ export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) 
     return 0;
   }
 
-  if (!entries.length) return 0;
+  if (!entries.length && !syncMeta) return 0;
+  const previousMeta = syncMeta ? await getShieldedMeta(networkKey, walletId, profileIndex) : null;
+  signal?.throwIfAborted();
 
+  // Discovered notes must never be committed without their matching chain anchor.
   await new Promise((resolve, reject) => {
-    const tx = db.transaction([STORE_NOTES], "readwrite");
+    const tx = db.transaction(syncMeta ? [STORE_NOTES, STORE_META] : [STORE_NOTES], "readwrite");
     tx.oncomplete = () => resolve(true);
     tx.onerror = () => reject(tx.error || new Error("Failed to write notes"));
 
+    if (syncMeta) {
+      tx.objectStore(STORE_META).put({
+        ...previousMeta, ...syncMeta, ownerKey: ok, networkKey: String(networkKey),
+        walletId: String(walletId || ""), profileIndex: Number(profileIndex), updatedAt: Date.now(),
+      });
+    }
     const store = tx.objectStore(STORE_NOTES);
     for (const e of entries) {
       store.put({
@@ -529,8 +537,9 @@ export async function clearPendingNullifiersForTx(networkKey, walletId, profileI
  * Move notes from unspent -> spent for the provided nullifiers, and clear any
  * pending reservation for them.
  */
-export async function markNullifiersSpent(networkKey, walletId, profileIndex, nullifiers) {
+export async function markNullifiersSpent(networkKey, walletId, profileIndex, nullifiers, signal) {
   const db = await openDb();
+  signal?.throwIfAborted();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   const hexes = [];
@@ -592,8 +601,9 @@ export async function markNullifiersSpent(networkKey, walletId, profileIndex, nu
 /**
  * Move notes from spent -> unspent.
  */
-export async function unspendNullifiers(networkKey, walletId, profileIndex, nullifiers) {
+export async function unspendNullifiers(networkKey, walletId, profileIndex, nullifiers, signal) {
   const db = await openDb();
+  signal?.throwIfAborted();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   const hexes = [];

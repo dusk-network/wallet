@@ -258,6 +258,9 @@ vi.mock("@dusk/w3sper", () => {
 
     constructor(url) {
       this.url = url;
+      this.blockHeight = 100n;
+      this.contracts = { transferContract: { call: { num_notes: async () => 0n } } };
+      this.query = async (query) => ({ block: { header: { hash: `block-${query.match(/height: (\d+)/)[1]}` } } });
 
       // Wallet code expects a tx watcher surface for waitTxExecuted.
       this.transactions = {
@@ -297,6 +300,7 @@ vi.mock("@dusk/w3sper", () => {
   }
 
   class Bookmark {
+    static from(n) { return new Bookmark(n); }
     constructor(n) {
       this._n = BigInt(n ?? 0);
     }
@@ -307,6 +311,8 @@ vi.mock("@dusk/w3sper", () => {
 
   class AddressSyncer {
     constructor(_network) {}
+    async spent() { return []; }
+    async notes() { return new ReadableStream({ start(controller) { controller.close(); } }); }
     get root() {
       return Promise.resolve(new Uint8Array([0]));
     }
@@ -378,12 +384,14 @@ describe("walletEngine", () => {
     engine = await import("./walletEngine.js");
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     try {
       engine?.lock?.();
     } catch {
       // ignore
     }
+    const store = await import("./shieldedStore.js");
+    for (const index of [0, 1]) await store.clearNotes(NETWORK_KEY, WALLET_ID, index, { resetMeta: true });
     vi.unstubAllGlobals();
     delete globalThis.__W3SPER_EXECUTE_IMPL__;
     delete globalThis.__W3SPER_STAKE_INFO__;
@@ -392,6 +400,180 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_FAIL_WALLET_ID__;
     delete globalThis.__W3SPER_LAST_SEEDER__;
     delete globalThis.__W3SPER_PROFILE_GATE__;
+  });
+
+  async function prepareReviewCache(tip = 10n) {
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const store = await import("./shieldedStore.js");
+    await store.clearNotes(NETWORK_KEY, WALLET_ID, 0);
+    await store.putShieldedMeta(NETWORK_KEY, WALLET_ID, 0, {
+      checkpointBookmark: "0", checkpointBlock: "0", cursorBookmark: "10", cursorBlock: "100",
+      anchorBlock: "100", anchorHash: "block-100",
+    });
+    const network = await engine.ensureNetwork();
+    network.contracts = { transferContract: { call: { num_notes: async () => tip } } };
+    return store;
+  }
+
+  it("review: reconciles distinct spent and unspent sets correctly", async () => {
+    const store = await prepareReviewCache();
+    const a = new Uint8Array([0xaa]), b = new Uint8Array([0xbb]), c = new Uint8Array([0xcc]);
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([[a, a], [b, b], [c, c]]));
+    await store.markNullifiersSpent(NETWORK_KEY, WALLET_ID, 0, [a, b]);
+    const { AddressSyncer } = await import("@dusk/w3sper");
+    const spent = vi.spyOn(AddressSyncer.prototype, "spent").mockImplementation(async (nullifiers) =>
+      nullifiers.filter(n => bytesToHex(n) === "bb").map(n => n.buffer)
+    );
+    try {
+      await engine.startShieldedSync();
+      expect((await store.getUnspentNullifiers(NETWORK_KEY, WALLET_ID, 0)).map(bytesToHex).sort()).toEqual(["aa", "cc"]);
+      expect((await store.getSpentNullifiers(NETWORK_KEY, WALLET_ID, 0)).map(bytesToHex)).toEqual(["bb"]);
+    } finally { spent.mockRestore(); }
+  });
+
+  it("review: does not report up-to-date when spent reconciliation fails", async () => {
+    const store = await prepareReviewCache();
+    const a = new Uint8Array([0xaa]);
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([[a, a]]));
+    const { AddressSyncer } = await import("@dusk/w3sper");
+    const spent = vi.spyOn(AddressSyncer.prototype, "spent").mockRejectedValue(new Error("Offline during nullifier check"));
+    try {
+      await engine.startShieldedSync();
+      expect(spent).toHaveBeenCalled();
+      expect(engine.getShieldedStatus().state).toBe("error");
+      spent.mockResolvedValue([]);
+      await engine.startShieldedSync();
+      expect(engine.getShieldedStatus()).toMatchObject({ state: "done", lastError: "" });
+    } finally { spent.mockRestore(); }
+  });
+
+  it.each(["lock", "profile", "network"])("caught-up reconciliation cannot write after %s changes", async (change) => {
+    const store = await prepareReviewCache();
+    const a = new Uint8Array([0xaa]);
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([[a, a]]));
+    const { AddressSyncer } = await import("@dusk/w3sper");
+    const gate = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    const spent = vi.spyOn(AddressSyncer.prototype, "spent").mockImplementation(async () => {
+      entered.resolve();
+      return await gate.promise;
+    });
+    const pending = engine.startShieldedSync();
+    try {
+      await entered.promise;
+      if (change === "lock") engine.lock();
+      else if (change === "profile") await engine.selectAccountIndex({ index: 1 });
+      else engine.configure({ nodeUrl: "https://testnet.nodes.dusk.network" });
+      expect(engine.getShieldedStatus().state).toBe("idle");
+      gate.resolve([a.buffer]);
+      await pending;
+      expect(engine.isUnlocked()).toBe(change !== "lock");
+      expect(engine.getShieldedStatus().state).toBe("idle");
+      expect((await store.getUnspentNullifiers(NETWORK_KEY, WALLET_ID, 0)).map(bytesToHex)).toEqual(["aa"]);
+    } finally { gate.resolve([]); await pending; spent.mockRestore(); }
+  });
+
+  it.each([false, true])("review: a cursor beyond the chain tip is not considered caught up (force=%s)", async (force) => {
+    const store = await prepareReviewCache(9n);
+    const orphan = new Uint8Array([0xaa]);
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([[orphan, orphan]]));
+    const { AddressSyncer } = await import("@dusk/w3sper");
+    const notes = vi.spyOn(AddressSyncer.prototype, "notes");
+    try {
+      await engine.startShieldedSync({ force });
+      await vi.waitFor(() => expect(engine.getShieldedStatus().state).not.toBe("syncing"));
+      console.log("rollback probe", {
+        force, tip: "9", status: engine.getShieldedStatus().state,
+        cursor: engine.getShieldedStatus().cursorBookmark,
+        scannedFrom: notes.mock.calls.map(([, options]) => options.from.asUint().toString()),
+        cachedNotes: (await store.getNotesMap(NETWORK_KEY, WALLET_ID, 0)).size,
+      });
+      expect(engine.getShieldedStatus()).not.toMatchObject({ state: "done", cursorBookmark: "10" });
+    } finally { notes.mockRestore(); }
+  });
+
+  it.each([[false, 1n], [false, 9n], [true, 9n], [false, 10n], [true, 10n]])(
+    "rebuilds a replaced branch, preserving reservations and other profiles (force=%s, tip=%s)",
+    async (force, tip) => {
+      const store = await prepareReviewCache(tip);
+      await store.putShieldedMeta(NETWORK_KEY, WALLET_ID, 0, { anchorHash: "old-branch" });
+      const orphan = new Uint8Array([0xaa]), replacement = new Uint8Array([0xbb]);
+      await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([[orphan, orphan]]));
+      await store.putNotesMap(NETWORK_KEY, WALLET_ID, 1, new Map([[orphan, orphan]]));
+      await store.putPendingNullifiers(NETWORK_KEY, WALLET_ID, 0, [orphan], "pending-tx");
+      const { AddressSyncer } = await import("@dusk/w3sper");
+      const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockResolvedValueOnce(new ReadableStream({
+        start(controller) {
+          controller.enqueue([[new Map([[replacement, replacement]])], { bookmark: tip - 1n, blockHeight: 100n }]);
+          controller.close();
+        },
+      }));
+      try {
+        expect((await engine.startShieldedSync({ force })).started).toBe(true);
+        await vi.waitFor(() => expect(engine.getShieldedStatus().state).toBe("done"));
+        expect(notes.mock.calls[0][1].from.asUint()).toBe(0n);
+        expect(notes.mock.calls[0][0].map(profile => +profile)).toEqual([0]);
+        expect((await store.getUnspentNullifiers(NETWORK_KEY, WALLET_ID, 0)).map(bytesToHex)).toEqual(["bb"]);
+        expect((await store.getUnspentNullifiers(NETWORK_KEY, WALLET_ID, 1)).map(bytesToHex)).toEqual(["aa"]);
+        expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "pending-tx")).toEqual(["aa"]);
+        expect(await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0)).toMatchObject({ cursorBookmark: tip.toString(), anchorBlock: "100", anchorHash: "block-100" });
+      } finally { notes.mockRestore(); }
+    }
+  );
+
+  it("does not publish caught-up status after cancellation during preflight", async () => {
+    const store = await prepareReviewCache();
+    const network = await engine.ensureNetwork();
+    const gate = Promise.withResolvers(), entered = Promise.withResolvers();
+    const query = vi.spyOn(network, "query").mockImplementation(async () => {
+      entered.resolve();
+      return await gate.promise;
+    });
+    const pending = engine.startShieldedSync();
+    try {
+      await entered.promise;
+      engine.lock();
+      gate.resolve({ block: { header: { hash: "block-100" } } });
+      await pending;
+      expect(engine.getShieldedStatus().state).toBe("idle");
+      expect(await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0)).toMatchObject({ cursorBookmark: "10" });
+    } finally { gate.resolve({ block: { header: { hash: "block-100" } } }); await pending; query.mockRestore(); }
+  });
+
+  it("rejects scan data when the captured chain anchor changes mid-scan", async () => {
+    const store = await prepareReviewCache(11n);
+    const network = await engine.ensureNetwork();
+    const { AddressSyncer } = await import("@dusk/w3sper");
+    const query = vi.spyOn(network, "query");
+    const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockImplementationOnce(async () => {
+      query.mockResolvedValue({ block: { header: { hash: "replacement-branch" } } });
+      return new ReadableStream({ start(controller) {
+        controller.enqueue([[new Map()], { bookmark: 10n, blockHeight: 100n }]);
+        controller.close();
+      } });
+    });
+    try {
+      await engine.startShieldedSync();
+      await vi.waitFor(() => expect(engine.getShieldedStatus().state).toBe("error"));
+      expect(engine.getShieldedStatus().lastError).toContain("Chain changed");
+      expect(await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0)).toBeNull();
+    } finally { notes.mockRestore(); query.mockRestore(); }
+  });
+
+  it("allows a balance read to finish when only a newer sync supersedes its metadata read", async () => {
+    const store = await prepareReviewCache();
+    const gate = Promise.withResolvers(), entered = Promise.withResolvers();
+    const count = vi.spyOn(store, "countNotes").mockImplementationOnce(async () => {
+      entered.resolve(); return await gate.promise;
+    });
+    const balance = engine.getShieldedBalance();
+    try {
+      await entered.promise;
+      await engine.startShieldedSync();
+      gate.resolve(0);
+      await expect(balance).resolves.toMatchObject({ value: 0n });
+      expect(engine.getShieldedStatus().state).toBe("done");
+    } finally { gate.resolve(0); await balance.catch(() => {}); count.mockRestore(); }
   });
 
   it("derives the CLI-aligned two default profiles on unlock", async () => {

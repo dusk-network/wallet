@@ -13,6 +13,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Validated shielded cache anchors and rebuilt invalidated notes/cursors together after a reorg, preserving pending reservations. Cursors now represent the next note position. ([#106](https://github.com/dusk-network/wallet/issues/106))
+- Surfaced failed spent-note reconciliation instead of reporting a healthy sync. ([#107](https://github.com/dusk-network/wallet/issues/107))
+- Cancelled stale shielded sync work after lock, profile or network changes, including preflight and cache writes. ([#108](https://github.com/dusk-network/wallet/issues/108))
 - Serialized DRC20 and DRC721 encoded call arguments before browser extension messaging. ([#79])
 
 ## [0.3.0] - 2026-06-23
