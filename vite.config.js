@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import inject from "@rollup/plugin-inject";
-import { localW3sperAlias } from "./vite.local-w3sper.js";
+import { localW3sperAlias, w3sperStreamCompat } from "./vite.local-w3sper.js";
 import {
   exuSandboxWorkerPlugin,
   w3sperOwnedWorkerPlugin,
@@ -9,7 +9,7 @@ import {
 const engineDebug = process.env.DUSK_ENGINE_DEBUG === "1";
 
 export default defineConfig({
-  plugins: [w3sperOwnedWorkerPlugin(), exuSandboxWorkerPlugin()],
+  plugins: [w3sperStreamCompat(), w3sperOwnedWorkerPlugin(), exuSandboxWorkerPlugin()],
   resolve: {
     alias: localW3sperAlias(),
   },

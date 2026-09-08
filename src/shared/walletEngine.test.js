@@ -309,8 +309,8 @@ vi.mock("@dusk/w3sper", () => {
     }
   }
 
-  class AddressSyncer {
-    constructor(_network) {}
+  class AddressSyncer extends EventTarget {
+    constructor(_network) { super(); }
     async spent() { return []; }
     async notes() { return new ReadableStream({ start(controller) { controller.close(); } }); }
     get root() {
@@ -555,6 +555,39 @@ describe("walletEngine", () => {
     } finally { if (!cancel.mock.calls.length) controller.close(); notes.mockRestore(); }
   });
 
+  it("commits the prefetched final chunk before stopping at the scan target", async () => {
+    const store = await prepareReviewCache(12n);
+    const network = await engine.ensureNetwork();
+    const { AddressSyncer } = await import("@dusk/w3sper");
+    const ahead = Promise.withResolvers();
+    let scanning = false;
+    const query = vi.spyOn(network, "query").mockImplementation(async () => {
+      if (scanning) await ahead.promise;
+      return { block: { header: { hash: "block-100" } } };
+    });
+    const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockImplementation(async function () {
+      scanning = true;
+      const syncer = this;
+      let position = 10n;
+      return new ReadableStream({ pull(controller) {
+        const event = new Event("synciteration");
+        Object.defineProperty(event, "detail", { value: {
+          bookmarks: { current: position }, blocks: { current: 100n }, progress: Number(position) / 12,
+        } });
+        syncer.dispatchEvent(event);
+        const note = new Uint8Array([Number(position)]);
+        controller.enqueue([[new Map([[note, note]])], { bookmark: position, blockHeight: 100n }]);
+        if (position++ === 11n) { ahead.resolve(); controller.close(); }
+      } });
+    });
+    try {
+      await engine.startShieldedSync();
+      await vi.waitFor(() => expect(engine.getShieldedStatus().state).toBe("done"));
+      expect(await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0)).toMatchObject({ cursorBookmark: "12" });
+      expect((await store.getNotesMap(NETWORK_KEY, WALLET_ID, 0)).size).toBe(2);
+    } finally { ahead.resolve(); notes.mockRestore(); query.mockRestore(); }
+  });
+
   it("rejects scan data when the captured chain anchor changes mid-scan", async () => {
     const store = await prepareReviewCache(11n);
     const network = await engine.ensureNetwork();
@@ -573,6 +606,39 @@ describe("walletEngine", () => {
       expect(engine.getShieldedStatus().lastError).toContain("Chain changed");
       expect(await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0)).toBeNull();
     } finally { notes.mockRestore(); query.mockRestore(); }
+  });
+
+  it.each(["lock", "profile", "network", "sync"])("does not publish abandoned unlock metadata errors after %s changes", async (change) => {
+    const store = await import("./shieldedStore.js");
+    const gate = Promise.withResolvers(), entered = Promise.withResolvers();
+    const init = vi.spyOn(store, "ensureShieldedMeta").mockImplementationOnce(async () => {
+      entered.resolve(); return await gate.promise;
+    });
+    try {
+      await engine.unlockWithMnemonic(MNEMONIC);
+      await entered.promise;
+      if (change === "lock") engine.lock();
+      else if (change === "profile") await engine.selectAccountIndex({ index: 1 });
+      else if (change === "network") engine.configure({ nodeUrl: "https://testnet.nodes.dusk.network" });
+      else {
+        const network = await engine.ensureNetwork();
+        network.contracts = { transferContract: { call: { num_notes: async () => 0n } } };
+        await engine.startShieldedSync();
+      }
+      const status = engine.getShieldedStatus();
+      gate.reject(new Error("Late metadata failure"));
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(engine.getShieldedStatus()).toEqual(status);
+    } finally { gate.resolve(null); init.mockRestore(); }
+  });
+
+  it("still surfaces a current unlock metadata failure", async () => {
+    const store = await import("./shieldedStore.js");
+    const init = vi.spyOn(store, "ensureShieldedMeta").mockRejectedValueOnce(new Error("Metadata unavailable"));
+    try {
+      await engine.unlockWithMnemonic(MNEMONIC);
+      await vi.waitFor(() => expect(engine.getShieldedStatus()).toMatchObject({ state: "error", lastError: "Metadata unavailable" }));
+    } finally { init.mockRestore(); }
   });
 
   it("allows a balance read to finish when only a newer sync supersedes its metadata read", async () => {
