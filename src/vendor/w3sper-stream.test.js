@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { createServer } from "vite";
 import { getBYOBReader } from "./w3sper-stream.js";
 import { w3sperStreamCompat } from "../../vite.local-w3sper.js";
 import chrome from "../../vite.config.js";
@@ -17,6 +18,21 @@ it("backports only the pinned SDK reader in every build target", () => {
   for (const config of [chrome, firefox, tauri]) {
     expect(config.plugins.some(p => p.name === plugin.name)).toBe(true);
   }
+});
+
+it("uses the backport for versioned Vite development requests", async () => {
+  const entry = createRequire(import.meta.url).resolve("@dusk/w3sper");
+  const target = path.join(path.dirname(entry), "protocol-driver/stream.js");
+  const plugin = w3sperStreamCompat();
+  const server = await createServer({ root: path.dirname(entry), configFile: false, plugins: [plugin],
+    server: { middlewareMode: true, hmr: false, watch: null }, optimizeDeps: { noDiscovery: true },
+  });
+  try {
+    const result = await server.transformRequest(`${target}?v=reader-test`);
+    expect(result.code).toContain("const chunk = await reader.read()");
+    expect(plugin.load(`${target}?raw`)).toBeNull();
+    expect(plugin.load(`${target}?url`)).toBeNull();
+  } finally { await server.close(); }
 });
 
 it("rejects a partially filled read and reader.closed when the source fails", async () => {
