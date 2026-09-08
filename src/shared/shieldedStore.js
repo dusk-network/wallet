@@ -17,6 +17,16 @@ const STORE_PENDING = "pending";
 /** @type {Promise<IDBDatabase> | null} */
 let dbPromise = null;
 
+function abortWithSignal(tx, signal) {
+  if (!signal) return;
+  const abort = () => { try { tx.abort(); } catch {} }; // Already committed/aborted is harmless.
+  const cleanup = () => signal.removeEventListener("abort", abort);
+  tx.addEventListener("complete", cleanup, { once: true });
+  tx.addEventListener("abort", cleanup, { once: true });
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+}
+
 function openDb() {
   if (dbPromise) return dbPromise;
 
@@ -111,7 +121,7 @@ export async function getShieldedMeta(networkKey, walletId, profileIndex = 0) {
   });
 }
 
-export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPatch) {
+export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPatch, signal) {
   const db = await openDb();
   const key = ownerKey(networkKey, walletId, profileIndex);
 
@@ -122,6 +132,7 @@ export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPa
     profileIndex: Number(profileIndex),
   };
 
+  signal?.throwIfAborted();
   const next = {
     ...prev,
     ...metaPatch,
@@ -135,7 +146,8 @@ export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPa
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_META], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to write meta"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to write meta"));
+    abortWithSignal(tx, signal);
     tx.objectStore(STORE_META).put(next);
   });
 
@@ -143,7 +155,7 @@ export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPa
 }
 
 export async function ensureShieldedMeta(networkKey, walletId, profileIndex = 0, defaults = {}) {
-  const cur = await getShieldedMeta(networkKey, walletId, profileIndex);
+  let cur = await getShieldedMeta(networkKey, walletId, profileIndex);
   if (cur) return cur;
 
   // defaults:
@@ -165,10 +177,17 @@ export async function ensureShieldedMeta(networkKey, walletId, profileIndex = 0,
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_META], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to create meta"));
-    tx.objectStore(STORE_META).put(created);
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to create meta"));
+    // Recheck within the write transaction: a sync may have committed since
+    // the initial lookup. Never replace its cursor/anchor with defaults.
+    const store = tx.objectStore(STORE_META);
+    const request = store.get(created.ownerKey);
+    request.onsuccess = () => {
+      cur = request.result;
+      if (!cur) store.put(created);
+    };
   });
-  return created;
+  return cur || created;
 }
 
 export function metaCursor(meta) {
@@ -182,37 +201,36 @@ export function metaCursor(meta) {
 // Notes
 // ---------------------------------------------------------------------------
 
-async function clearStoreByOwner(db, storeName, ownerKeyStr) {
-  return await new Promise((resolve, reject) => {
-    const tx = db.transaction([storeName], "readwrite");
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () =>
-      reject(tx.error || new Error(`Failed to clear ${storeName}`));
+export async function clearNotes(networkKey, walletId, profileIndex = 0, { signal, resetMeta = false, preservePending = false } = {}) {
+  const db = await openDb();
+  signal?.throwIfAborted();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+  const stores = [STORE_SPENT, STORE_NOTES];
+  if (!preservePending) stores.push(STORE_PENDING);
 
-    const store = tx.objectStore(storeName);
-    const index = store.index("byOwner");
-    const req = index.openCursor(IDBKeyRange.only(ownerKeyStr));
-    req.onsuccess = () => {
-      const cursor = req.result;
-      if (!cursor) return;
-      cursor.delete();
-      cursor.continue();
-    };
+  // Clear notes and their cursor atomically. Reorg recovery keeps reservations
+  // until the transaction lifecycle decides whether they can be released.
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(resetMeta ? [...stores, STORE_META] : stores, "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to clear shielded cache"));
+    abortWithSignal(tx, signal);
+    if (resetMeta) tx.objectStore(STORE_META).delete(ok);
+    for (const name of stores) {
+      const req = tx.objectStore(name).index("byOwner").openCursor(IDBKeyRange.only(ok));
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) return;
+        cursor.delete();
+        cursor.continue();
+      };
+    }
   });
 }
 
-export async function clearNotes(networkKey, walletId, profileIndex = 0) {
+export async function putNotesMap(networkKey, walletId, profileIndex, notesMap, signal, syncMeta) {
   const db = await openDb();
-  const ok = ownerKey(networkKey, walletId, profileIndex);
-
-  // Clear all shielded caches for this owner (unspent, spent, pending).
-  await clearStoreByOwner(db, STORE_PENDING, ok).catch(() => {});
-  await clearStoreByOwner(db, STORE_SPENT, ok).catch(() => {});
-  await clearStoreByOwner(db, STORE_NOTES, ok).catch(() => {});
-}
-
-export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) {
-  const db = await openDb();
+  signal?.throwIfAborted();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   // notesMap is Map<Uint8Array, Uint8Array>
@@ -233,13 +251,23 @@ export async function putNotesMap(networkKey, walletId, profileIndex, notesMap) 
     return 0;
   }
 
-  if (!entries.length) return 0;
+  if (!entries.length && !syncMeta) return 0;
+  const previousMeta = syncMeta ? await getShieldedMeta(networkKey, walletId, profileIndex) : null;
+  signal?.throwIfAborted();
 
+  // Discovered notes must never be committed without their matching chain anchor.
   await new Promise((resolve, reject) => {
-    const tx = db.transaction([STORE_NOTES], "readwrite");
+    const tx = db.transaction(syncMeta ? [STORE_NOTES, STORE_META] : [STORE_NOTES], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to write notes"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to write notes"));
+    abortWithSignal(tx, signal);
 
+    if (syncMeta) {
+      tx.objectStore(STORE_META).put({
+        ...previousMeta, ...syncMeta, ownerKey: ok, networkKey: String(networkKey),
+        walletId: String(walletId || ""), profileIndex: Number(profileIndex), updatedAt: Date.now(),
+      });
+    }
     const store = tx.objectStore(STORE_NOTES);
     for (const e of entries) {
       store.put({
@@ -453,7 +481,7 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () =>
+    tx.onerror = tx.onabort = () =>
       reject(tx.error || new Error("Failed to write pending"));
 
     const store = tx.objectStore(STORE_PENDING);
@@ -486,7 +514,7 @@ export async function markPendingNullifiersRecoverable(networkKey, walletId, pro
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to mark pending recoverable"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to mark pending recoverable"));
 
     const store = tx.objectStore(STORE_PENDING);
     const now = Date.now();
@@ -516,7 +544,7 @@ export async function clearPendingNullifiersForTx(networkKey, walletId, profileI
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to clear pending tx rows"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to clear pending tx rows"));
 
     const store = tx.objectStore(STORE_PENDING);
     for (const row of rows) store.delete(row.id);
@@ -529,8 +557,9 @@ export async function clearPendingNullifiersForTx(networkKey, walletId, profileI
  * Move notes from unspent -> spent for the provided nullifiers, and clear any
  * pending reservation for them.
  */
-export async function markNullifiersSpent(networkKey, walletId, profileIndex, nullifiers) {
+export async function markNullifiersSpent(networkKey, walletId, profileIndex, nullifiers, signal) {
   const db = await openDb();
+  signal?.throwIfAborted();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   const hexes = [];
@@ -548,8 +577,9 @@ export async function markNullifiersSpent(networkKey, walletId, profileIndex, nu
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NOTES, STORE_SPENT, STORE_PENDING], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () =>
+    tx.onerror = tx.onabort = () =>
       reject(tx.error || new Error("Failed to mark spent"));
+    abortWithSignal(tx, signal);
 
     const notes = tx.objectStore(STORE_NOTES);
     const spent = tx.objectStore(STORE_SPENT);
@@ -592,8 +622,9 @@ export async function markNullifiersSpent(networkKey, walletId, profileIndex, nu
 /**
  * Move notes from spent -> unspent.
  */
-export async function unspendNullifiers(networkKey, walletId, profileIndex, nullifiers) {
+export async function unspendNullifiers(networkKey, walletId, profileIndex, nullifiers, signal) {
   const db = await openDb();
+  signal?.throwIfAborted();
   const ok = ownerKey(networkKey, walletId, profileIndex);
 
   const hexes = [];
@@ -611,7 +642,8 @@ export async function unspendNullifiers(networkKey, walletId, profileIndex, null
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_SPENT, STORE_NOTES], "readwrite");
     tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error("Failed to unspend"));
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to unspend"));
+    abortWithSignal(tx, signal);
 
     const spent = tx.objectStore(STORE_SPENT);
     const notes = tx.objectStore(STORE_NOTES);

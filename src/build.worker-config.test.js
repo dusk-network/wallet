@@ -33,7 +33,7 @@ describe("extension worker build config", () => {
     expect(firefoxConfig).toContain("w3sperOwnedWorkerPlugin()");
     expect(firefoxConfig).toContain("exuSandboxWorkerPlugin()");
     expect(walletEngine).toContain("ownershipWorkers: 1");
-    expect(walletEngine).toContain("createAddressSyncer(state.network)");
+    expect(walletEngine).toContain("createAddressSyncer(network)");
     expect(chromeManifest.content_security_policy.extension_pages).toContain("worker-src 'self'");
     expect(firefoxManifest.content_security_policy.extension_pages).toContain("worker-src 'self'");
   });

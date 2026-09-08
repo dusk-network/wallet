@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { defineConfig } from "vite";
 import inject from "@rollup/plugin-inject";
-import { localW3sperAlias } from "./vite.local-w3sper.js";
+import { localW3sperAlias, w3sperStreamCompat } from "./vite.local-w3sper.js";
 import {
   exuSandboxWorkerPlugin,
   w3sperOwnedWorkerPlugin,
@@ -25,7 +25,7 @@ function manifestPlugin() {
 }
 
 export default defineConfig({
-  plugins: [w3sperOwnedWorkerPlugin(), exuSandboxWorkerPlugin(), manifestPlugin()],
+  plugins: [w3sperStreamCompat(), w3sperOwnedWorkerPlugin(), exuSandboxWorkerPlugin(), manifestPlugin()],
   resolve: {
     alias: localW3sperAlias(),
   },

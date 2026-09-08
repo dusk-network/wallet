@@ -35,6 +35,7 @@ import {
   getSpendableNotesMap,
   getUnspentNullifiers,
   getSpentNullifiers,
+  getShieldedMeta,
   putPendingNullifiers,
   markNullifiersSpent,
   unspendNullifiers,
@@ -121,6 +122,17 @@ async function readTransferContractBookmark(network) {
   } catch {
     return null;
   }
+}
+
+async function readBlockHash(network, height) {
+  const result = await withTimeout(
+    network.query(`block(height: ${height}) { header { hash } }`),
+    10_000,
+    "Timed out validating shielded cache"
+  );
+  const hash = result?.block?.header?.hash;
+  if (typeof hash !== "string" || !hash) throw new Error("Cannot validate shielded cache against this node");
+  return hash;
 }
 
 function toBigIntLike(v) {
@@ -312,10 +324,7 @@ export function configure(patch = {}) {
       state.bookkeeperAll = null;
 
       // Network changed -> shielded state must be reloaded for the new network.
-      try {
-        state.shielded.epoch++;
-      } catch {}
-      state.shielded.syncPromise = null;
+      invalidateShieldedSync();
       state.shielded.status = {
         state: "idle",
         progress: 0,
@@ -508,6 +517,7 @@ const state = {
   shielded: {
     // Incremented whenever we should cancel/ignore in-flight work.
     epoch: 0,
+    controller: null,
     syncPromise: null,
     starting: false,
     // Current live status exposed to UI.
@@ -699,6 +709,14 @@ export function isUnlocked() {
   return state.unlocked;
 }
 
+function invalidateShieldedSync() {
+  state.shielded.controller?.abort();
+  state.shielded.controller = null;
+  state.shielded.epoch++;
+  state.shielded.syncPromise = null;
+  state.shielded.starting = false;
+}
+
 function clearWalletState() {
   state.unlocked = false;
   state.mnemonic = null;
@@ -714,10 +732,7 @@ function clearWalletState() {
   state.currentIndex = 0;
 
   // Cancel/clear shielded state.
-  try {
-    state.shielded.epoch++;
-  } catch {}
-  state.shielded.syncPromise = null;
+  invalidateShieldedSync();
   state.shielded.status = {
     state: "idle",
     progress: 0,
@@ -843,6 +858,7 @@ export async function unlockWithMnemonic(mnemonic) {
   // hang in some environments (IndexedDB). Run it in the background with a
   // hard timeout and surface errors via status.
   const shieldedStart = engineNow();
+  const metadataEpoch = state.shielded.epoch;
   debugEngine("shielded_meta_init_start", {
     totalMs: engineSince(unlockStart),
   });
@@ -858,6 +874,7 @@ export async function unlockWithMnemonic(mnemonic) {
       });
     })
     .catch((err) => {
+      if (metadataEpoch !== state.shielded.epoch) return;
       debugEngine("shielded_meta_init_error", {
         ms: engineSince(shieldedStart),
         totalMs: engineSince(unlockStart),
@@ -869,6 +886,7 @@ export async function unlockWithMnemonic(mnemonic) {
       });
     })
     .finally(() => {
+      if (metadataEpoch !== state.shielded.epoch) return;
       broadcastShieldedStatus("shielded_meta_ready");
     });
 
@@ -949,11 +967,7 @@ export async function selectAccountIndex({ index } = {}) {
   await ensureProfileIndex(idx);
   state.currentIndex = idx;
   if (idx !== previousIndex) {
-    try {
-      state.shielded.epoch++;
-    } catch {}
-    state.shielded.syncPromise = null;
-    state.shielded.starting = false;
+    invalidateShieldedSync();
     state.shielded.status = {
       state: "idle",
       progress: 0,
@@ -2005,36 +2019,23 @@ function normalizeNullifierList(list) {
  * - spent reconciliation checks which cached nullifiers are now spent on chain
  *   (and can also "unspend" on reorg).
  */
-async function reconcileSpentNotes(syncer, { netKey, walletId, profileIndex }) {
-  try {
-    const idx = Number(profileIndex) || 0;
+async function reconcileSpentNotes(syncer, { netKey, walletId, profileIndex, signal }) {
+  const idx = Number(profileIndex) || 0;
+  const unspent = await getUnspentNullifiers(netKey, walletId, idx);
+  signal.throwIfAborted();
+  if (unspent.length) {
+    const spent = normalizeNullifierList(await syncer.spent(unspent));
+    await markNullifiersSpent(netKey, walletId, idx, spent, signal);
+  }
 
-    const unspent = await getUnspentNullifiers(netKey, walletId, idx).catch(() => []);
-    if (unspent.length) {
-      const spentBufs = await syncer.spent(unspent);
-      const spent = normalizeNullifierList(spentBufs);
-      if (spent.length) {
-        await markNullifiersSpent(netKey, walletId, idx, spent);
-      }
-    }
-
-    const spentCached = await getSpentNullifiers(netKey, walletId, idx).catch(() => []);
-    if (spentCached.length) {
-      const stillSpentBufs = await syncer.spent(spentCached);
-      const stillSpent = normalizeNullifierList(stillSpentBufs);
-      const stillSet = new Set(stillSpent.map((u8) => bytesToHex(u8)));
-
-      const toRestore = [];
-      for (const n of spentCached) {
-        const hex = bytesToHex(n);
-        if (!stillSet.has(hex)) toRestore.push(n);
-      }
-      if (toRestore.length) {
-        await unspendNullifiers(netKey, walletId, idx, toRestore);
-      }
-    }
-  } catch {
-    // best-effort; we don't want spent reconciliation to break the whole sync
+  const spentCached = await getSpentNullifiers(netKey, walletId, idx);
+  signal.throwIfAborted();
+  if (spentCached.length) {
+    const stillSpent = normalizeNullifierList(await syncer.spent(spentCached));
+    signal.throwIfAborted();
+    const stillSet = new Set(stillSpent.map((u8) => bytesToHex(u8)));
+    const toRestore = spentCached.filter((n) => !stillSet.has(bytesToHex(n)));
+    await unspendNullifiers(netKey, walletId, idx, toRestore, signal);
   }
 }
 
@@ -2044,9 +2045,12 @@ export function getShieldedStatus() {
 }
 
 async function ensureShieldedMetaForIndex(profileIndex) {
+  const epoch = state.shielded.epoch;
   const netKey = getNetworkKey();
   const walletId = getWalletId();
   if (!walletId) throw new Error("No walletId (wallet locked?)");
+  const profile = getCurrentProfile();
+  const isCurrent = () => state.unlocked && getWalletId() === walletId && getNetworkKey() === netKey && getLoadedProfiles()[getSelectedProfileIndex()] === profile;
   const idx = resolveProfileIndex(profileIndex);
   let meta;
   try {
@@ -2057,7 +2061,8 @@ async function ensureShieldedMetaForIndex(profileIndex) {
       cursorBlock: 0n,
     });
   } catch (err) {
-    // Surface meta init failures explicitly; they otherwise get swallowed by callers.
+    // Surface current meta failures without republishing an invalidated session.
+    if (!isCurrent() || epoch !== state.shielded.epoch) throw err;
     setShieldedStatus({
       state: "error",
       lastError: err?.message ?? String(err),
@@ -2073,11 +2078,14 @@ async function ensureShieldedMetaForIndex(profileIndex) {
     n = 0;
   }
 
-  setShieldedStatus({
-    cursorBookmark: cursor.bookmark.toString(),
-    cursorBlock: cursor.block.toString(),
-    notes: n,
-  });
+  if (!isCurrent()) throw new Error("Shielded metadata read was superseded");
+  if (epoch === state.shielded.epoch && idx === getSelectedProfileIndex()) {
+    setShieldedStatus({
+      cursorBookmark: cursor.bookmark.toString(),
+      cursorBlock: cursor.block.toString(),
+      notes: n,
+    });
+  }
 
   return meta;
 }
@@ -2088,42 +2096,43 @@ async function ensureShieldedMetaForCurrent() {
 
 export async function setShieldedCheckpointNow({ profileIndex = 0 } = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
-  await ensureNetwork();
-
+  invalidateShieldedSync();
+  const controller = new AbortController();
+  state.shielded.controller = controller;
+  const { signal } = controller;
+  const epoch = state.shielded.epoch;
   const netKey = getNetworkKey();
   const walletId = getWalletId();
-  if (!walletId) throw new Error("No walletId (wallet locked?)");
-  const idx = Number(profileIndex) || 0;
+  const idx = resolveProfileIndex(profileIndex);
+  state.shielded.starting = true;
+  try {
+    const network = await ensureNetwork();
+    signal.throwIfAborted();
+    const block = toBigIntLike(await network.blockHeight);
+    if (block === null || block < 0n) throw new Error("Cannot read chain height");
+    const anchorHash = await readBlockHash(network, block);
+    const bookmark = await readTransferContractBookmark(network);
+    if (typeof bookmark !== "bigint" || bookmark < 0n) throw new Error("Cannot read note-tree size");
+    if (toBigIntLike(await network.blockHeight) !== block || await readBlockHash(network, block) !== anchorHash) {
+      throw new Error("Chain changed while creating checkpoint; retry");
+    }
+    signal.throwIfAborted();
 
-  // num_notes() returns the current size of the note tree.
-  // In w3sper this may be returned as a bigint/number directly.
-  const bookmark = await readTransferContractBookmark(state.network);
-  if (typeof bookmark !== "bigint") {
-    throw new Error("Failed to read transfer contract num_notes() bookmark");
+    // Only newly created wallets deliberately skip historical notes.
+    await clearNotes(netKey, walletId, idx, { signal, resetMeta: true });
+    await putShieldedMeta(netKey, walletId, idx, {
+      checkpointBookmark: bookmark.toString(), checkpointBlock: block.toString(),
+      cursorBookmark: bookmark.toString(), cursorBlock: block.toString(),
+      anchorBlock: block.toString(), anchorHash,
+    }, signal);
+    signal.throwIfAborted();
+    if (idx === getSelectedProfileIndex()) {
+      setShieldedStatus({ state: "idle", progress: 0, notes: 0, cursorBookmark: bookmark.toString(), cursorBlock: block.toString(), lastError: "" });
+    }
+    return { bookmark: bookmark.toString(), block: block.toString() };
+  } finally {
+    if (epoch === state.shielded.epoch) state.shielded.starting = false;
   }
-  const block = await state.network.blockHeight;
-
-  // Starting from a checkpoint implies ignoring any historical shielded notes.
-  // This is ideal for newly created wallets.
-  await clearNotes(netKey, walletId, idx);
-
-  await putShieldedMeta(netKey, walletId, idx, {
-    checkpointBookmark: bookmark.toString(),
-    checkpointBlock: block.toString(),
-    cursorBookmark: bookmark.toString(),
-    cursorBlock: block.toString(),
-  });
-
-  setShieldedStatus({
-    state: "idle",
-    progress: 0,
-    notes: 0,
-    cursorBookmark: bookmark.toString(),
-    cursorBlock: block.toString(),
-    lastError: "",
-  });
-
-  return { bookmark: bookmark.toString(), block: block.toString() };
 }
 
 export async function startShieldedSync({ force = false } = {}) {
@@ -2141,91 +2150,76 @@ export async function startShieldedSync({ force = false } = {}) {
     }
   }
 
+  invalidateShieldedSync();
+  const controller = new AbortController();
+  state.shielded.controller = controller;
+  const { signal } = controller;
+  const epoch = state.shielded.epoch;
+  const walletId = getWalletId();
+  const netKey = getNetworkKey();
+  const idx = getSelectedProfileIndex();
+  const profile = getCurrentProfile();
   state.shielded.starting = true;
   try {
-    try {
-      await ensureShieldedMetaForCurrent();
-    } catch {
-      broadcastShieldedStatus("error");
-      return { started: false, status: getShieldedStatus() };
-    }
+    const network = await ensureNetwork();
+    signal.throwIfAborted();
+    const meta = await getShieldedMeta(netKey, walletId, idx);
+    signal.throwIfAborted();
+    let cursor = metaCursor(meta);
+    const tipHeight = toBigIntLike(await network.blockHeight);
+    if (tipHeight === null || tipHeight < 0n) throw new Error("Cannot read chain height");
+    const anchor = { anchorBlock: tipHeight.toString(), anchorHash: await readBlockHash(network, tipHeight) };
+    const targetBookmark = await readTransferContractBookmark(network);
+    signal.throwIfAborted();
+    if (targetBookmark === null || targetBookmark < 0n) throw new Error("Cannot read note-tree size");
 
-    const walletId = getWalletId();
-    if (!walletId) throw new Error("No walletId (wallet locked?)");
-
-    const netKey = getNetworkKey();
-    const idx = getSelectedProfileIndex();
-
-    const meta = await ensureShieldedMeta(netKey, walletId, idx);
-    const cursor = metaCursor(meta);
-
-    // If a sync started while we were awaiting meta, don't start another.
-    if (state.shielded.syncPromise && !force) {
-      return { started: false, status: getShieldedStatus() };
-    }
-
-    // Fast-path: if we are already caught up (cursor bookmark >= current
-    // transfer-contract bookmark), do NOT flip the UI back into a "syncing 0%"
-    // state. This fixes a UX issue where the background overview handler calls
-    // `dusk_syncShielded` frequently.
-    if (!force) {
-      try {
-        await ensureNetwork();
-        const tipBookmark = await readTransferContractBookmark(state.network);
-
-        if (typeof tipBookmark === "bigint" && cursor.bookmark >= tipBookmark) {
-          // Even if we are caught up on discovery, we still want to reconcile
-          // spent/unspent state (e.g. after submitting a phoenix tx that spends
-          // our notes, the cursor may remain at tip but nullifiers will change).
-          try {
-            const syncer = createAddressSyncer(state.network);
-            await reconcileSpentNotes(syncer, { netKey, walletId, profileIndex: idx });
-          } catch {
-            // ignore
-          }
-
-          const n = await countNotes(netKey, walletId, idx);
-          setShieldedStatus({
-            state: "done",
-            progress: 1,
-            notes: n,
-            cursorBookmark: cursor.bookmark.toString(),
-            cursorBlock: cursor.block.toString(),
-            lastError: "",
-          });
-          broadcastShieldedStatus("up_to_date");
-          state.shielded.syncPromise = null;
-          return { started: false, status: getShieldedStatus() };
-        }
-      } catch (e) {
-        setShieldedStatus({
-          state: "error",
-          lastError: e?.message ? String(e.message) : String(e),
-        });
-        broadcastShieldedStatus("error");
-        return { started: false, status: getShieldedStatus() };
+    const resetCache = () => clearNotes(netKey, walletId, idx, { signal, resetMeta: true, preservePending: true });
+    const assertAnchor = async () => {
+      const hash = await readBlockHash(network, tipHeight);
+      signal.throwIfAborted();
+      if (hash !== anchor.anchorHash) {
+        await resetCache();
+        throw new Error("Chain changed during synchronization; retry to rebuild shielded notes");
       }
+    };
+    if (meta?.anchorHash) {
+      const previousHeight = toBigIntLike(meta.anchorBlock);
+      if (previousHeight === null || tipHeight < previousHeight) {
+        throw new Error("Node is behind the shielded cache checkpoint; retry with a caught-up node");
+      }
+      const previousHash = await readBlockHash(network, previousHeight);
+      signal.throwIfAborted();
+      if (previousHash !== meta.anchorHash) {
+        // ponytail: rare reorgs rebuild from genesis; per-note rollback metadata
+        // is only needed if a full rescan becomes too expensive.
+        await resetCache();
+        cursor = { bookmark: 0n, block: 0n };
+      }
+    } else if (cursor.bookmark > 0n || await countNotes(netKey, walletId, idx)) {
+      // Legacy caches have no verifiable chain anchor. Rebuild once.
+      await resetCache();
+      cursor = { bookmark: 0n, block: 0n };
     }
+    signal.throwIfAborted();
+    if (cursor.bookmark > targetBookmark) throw new Error("Node note tree is behind the validated shielded cursor");
 
-    // Cancel/ignore any in-flight sync (force) and start a new one.
-    state.shielded.epoch++;
-    const epoch = state.shielded.epoch;
+    // Avoid a syncing flash when discovery is caught up, but still verify spends.
+    if (!force && cursor.bookmark === targetBookmark) {
+      await reconcileSpentNotes(createAddressSyncer(network), { netKey, walletId, profileIndex: idx, signal });
+      await assertAnchor();
+      const n = await countNotes(netKey, walletId, idx);
+      signal.throwIfAborted();
+      await putShieldedMeta(netKey, walletId, idx, { ...anchor, cursorBookmark: cursor.bookmark.toString(), cursorBlock: cursor.block.toString() }, signal);
+      signal.throwIfAborted();
+      setShieldedStatus({ state: "done", progress: 1, notes: n, cursorBookmark: cursor.bookmark.toString(), cursorBlock: cursor.block.toString(), lastError: "" });
+      broadcastShieldedStatus("up_to_date");
+      return { started: false, status: getShieldedStatus() };
+    }
 
     // Snapshot the start cursor so we can compute progress even if the
     // `synciteration` event doesn't provide it.
     const startBookmark = cursor.bookmark;
     const startBlock = cursor.block;
-
-    // Snapshot the current tip bookmark; we'll sync up to this point and then
-    // stop (new notes after this will be picked up by the next sync).
-    let targetBookmark = null;
-    try {
-      if (state.network?.connected) {
-        targetBookmark = await readTransferContractBookmark(state.network);
-      }
-    } catch {
-      targetBookmark = null;
-    }
 
     setShieldedStatus({
       state: "syncing",
@@ -2236,8 +2230,8 @@ export async function startShieldedSync({ force = false } = {}) {
     });
 
     const run = async () => {
-      await ensureNetwork();
-      const syncer = createAddressSyncer(state.network);
+      const syncer = createAddressSyncer(network);
+      let lastBookmark = startBookmark;
 
       let shouldStop = false;
 
@@ -2246,7 +2240,8 @@ export async function startShieldedSync({ force = false } = {}) {
         const d = ev?.detail || {};
 
         const evProg = toProgress01(d.progress);
-        const curB = toBigIntLike(d.bookmarks?.current);
+        const position = toBigIntLike(d.bookmarks?.current);
+        const curB = position === null ? null : position + 1n;
         const curH = toBigIntLike(d.blocks?.current);
 
         // Compute progress from bookmarks if needed.
@@ -2262,10 +2257,8 @@ export async function startShieldedSync({ force = false } = {}) {
 
         if (prog === null) prog = 0;
 
-        // If we've reached the snapshot target, request stop.
-        if (typeof targetBookmark === "bigint" && typeof curB === "bigint" && curB >= targetBookmark) {
-          shouldStop = true;
-        }
+        // Producer events may describe a prefetched chunk. Stop only after
+        // processChunk commits the matching cursor, not on preview progress.
 
         setShieldedStatus({
           state: "syncing",
@@ -2280,64 +2273,43 @@ export async function startShieldedSync({ force = false } = {}) {
       } catch {}
 
       try {
-        // Refresh target bookmark after we have a connected network (in case it
-        // was null during the pre-connect snapshot).
-        if (targetBookmark === null) {
-          targetBookmark = await readTransferContractBookmark(state.network);
-        }
-
         const from = Bookmark.from(startBookmark);
-
-        // w3sper's AddressSyncer.notes() can be either a ReadableStream or an
-        // async iterable depending on runtime/version.
-        const controller = new AbortController();
-
-        const profiles = getLoadedProfiles();
-        let notesStream;
-        try {
-          notesStream = await syncer.notes(profiles, { from, signal: controller.signal });
-        } catch {
-          notesStream = await syncer.notes(profiles, { from });
-        }
+        // ponytail: profile-local scans keep cache/anchor ownership aligned;
+        // batch profiles only with matching per-profile cursor commits.
+        const notesStream = await syncer.notes([profile], { from, signal });
 
         const processChunk = async (value) => {
           const owned = value?.[0];
           const syncInfo = value?.[1];
 
-          // owned is an array of Maps (one per profile)
-          if (Array.isArray(owned)) {
-            for (let i = 0; i < owned.length; i++) {
-              const m = owned[i];
-              if (m && typeof m.size === "number" && m.size > 0) {
-                await putNotesMap(netKey, walletId, i, m);
-              }
-            }
-          }
-
-          const b = toBigIntLike(syncInfo?.bookmark);
+          signal.throwIfAborted();
+          // W3sper reports the last scanned note's zero-based position, while
+          // num_notes() is a count. Persist the NEXT position to avoid rescanning
+          // the last note forever (and to handle the first note at position zero).
+          const position = toBigIntLike(syncInfo?.bookmark);
+          const b = position === null ? null : position + 1n;
           const h = toBigIntLike(syncInfo?.blockHeight);
+          if (b === null || h === null || b <= lastBookmark || h < 0n) throw new Error("Invalid shielded scan cursor");
+          // Do not cache a tail newer than the head we anchored before scanning.
+          if (h > tipHeight) throw new Error("Chain advanced during sync; retry to scan the remaining notes");
+          // ponytail: one header RPC per chunk; batch verified commits if latency dominates.
+          await assertAnchor();
+          if (!(owned?.[0] instanceof Map)) throw new Error("Invalid shielded notes");
+          await putNotesMap(netKey, walletId, idx, owned[0], signal, {
+            ...anchor,
+            cursorBookmark: b.toString(),
+            cursorBlock: h.toString(),
+          });
+          signal.throwIfAborted();
+          lastBookmark = b;
 
-          if (typeof b === "bigint" && typeof h === "bigint") {
-            await putShieldedMeta(netKey, walletId, idx, {
-              cursorBookmark: b.toString(),
-              cursorBlock: h.toString(),
-            });
-
-            // Update progress even if the event-based `detail.progress` isn't provided.
-            if (typeof targetBookmark === "bigint" && targetBookmark > startBookmark) {
-              const p = ratioBigInt(b - startBookmark, targetBookmark - startBookmark);
-              setShieldedStatus({ progress: Math.max(state.shielded.status.progress || 0, p) });
-            }
-
-            setShieldedStatus({
-              cursorBookmark: b.toString(),
-              cursorBlock: h.toString(),
-            });
-
-            if (typeof targetBookmark === "bigint" && b >= targetBookmark) {
-              shouldStop = true;
-            }
+          // Update progress even if the event-based detail is unavailable.
+          if (targetBookmark > startBookmark) {
+            const p = ratioBigInt(b - startBookmark, targetBookmark - startBookmark);
+            setShieldedStatus({ progress: Math.max(state.shielded.status.progress || 0, p) });
           }
+          setShieldedStatus({ cursorBookmark: b.toString(), cursorBlock: h.toString() });
+          if (b >= targetBookmark) shouldStop = true;
         };
 
         const isStale = () => epoch !== state.shielded.epoch;
@@ -2345,35 +2317,17 @@ export async function startShieldedSync({ force = false } = {}) {
         // Prefer the reader API if available (ReadableStream).
         if (notesStream && typeof notesStream.getReader === "function") {
           const reader = notesStream.getReader();
+          const cancel = () => { void reader.cancel().catch(() => {}); };
+          signal.addEventListener("abort", cancel, { once: true });
           try {
             while (true) {
-              if (isStale()) {
-                try {
-                  controller.abort();
-                } catch {}
-                try {
-                  await reader.cancel();
-                } catch {}
-                return;
-              }
-
+              if (isStale()) return;
               const { done, value } = await reader.read();
               if (done) break;
-              if (isStale()) {
-                try {
-                  controller.abort();
-                } catch {}
-                try {
-                  await reader.cancel();
-                } catch {}
-                return;
-              }
+              if (isStale()) return;
               await processChunk(value);
 
               if (shouldStop) {
-                try {
-                  controller.abort();
-                } catch {}
                 try {
                   await reader.cancel();
                 } catch {}
@@ -2381,26 +2335,18 @@ export async function startShieldedSync({ force = false } = {}) {
               }
             }
           } finally {
+            signal.removeEventListener("abort", cancel);
+            try { await reader.cancel(); } catch {}
             try {
               reader.releaseLock?.();
             } catch {}
           }
         } else if (notesStream && typeof notesStream?.[Symbol.asyncIterator] === "function") {
           for await (const value of notesStream) {
-            if (isStale()) {
-              try {
-                controller.abort();
-              } catch {}
-              break;
-            }
+            if (isStale()) break;
             await processChunk(value);
 
-            if (shouldStop) {
-              try {
-                controller.abort();
-              } catch {}
-              break;
-            }
+            if (shouldStop) break;
           }
         } else {
           throw new Error("AddressSyncer.notes() did not return a stream");
@@ -2408,8 +2354,10 @@ export async function startShieldedSync({ force = false } = {}) {
 
         if (isStale()) return;
 
+        if (lastBookmark < targetBookmark) throw new Error("Node did not provide notes through the scan target");
         // After discovery, reconcile spent/unspent state.
-        await reconcileSpentNotes(syncer, { netKey, walletId, profileIndex: idx });
+        await reconcileSpentNotes(syncer, { netKey, walletId, profileIndex: idx, signal });
+        await assertAnchor();
 
         if (isStale()) return;
 
@@ -2444,8 +2392,14 @@ export async function startShieldedSync({ force = false } = {}) {
     state.shielded.syncPromise = run();
 
     return { started: true, status: getShieldedStatus() };
+  } catch (e) {
+    if (!signal.aborted) {
+      setShieldedStatus({ state: "error", lastError: e?.message ?? String(e) });
+      broadcastShieldedStatus("error");
+    }
+    return { started: false, status: getShieldedStatus() };
   } finally {
-    state.shielded.starting = false;
+    if (epoch === state.shielded.epoch) state.shielded.starting = false;
   }
 }
 
