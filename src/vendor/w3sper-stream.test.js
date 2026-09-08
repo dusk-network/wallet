@@ -11,6 +11,7 @@ it("backports only the pinned SDK reader in every build target", () => {
   const entry = createRequire(import.meta.url).resolve("@dusk/w3sper");
   const plugin = w3sperStreamCompat();
   expect(plugin.load(path.join(path.dirname(entry), "protocol-driver/stream.js"))).toContain("const chunk = await reader.read()");
+  expect(plugin.load(path.join(path.dirname(entry), "protocol-driver/stream.js").replaceAll("/", "\\"))).toContain("const chunk = await reader.read()");
   expect(plugin.load("/unrelated/stream.js")).toBeNull();
   expect(plugin.config().optimizeDeps.exclude).toContain("@dusk/w3sper");
   for (const config of [chrome, firefox, tauri]) {
