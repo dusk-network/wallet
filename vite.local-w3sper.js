@@ -12,7 +12,10 @@ export function w3sperStreamCompat() {
     // Dev dependency prebundling would otherwise bypass the module load hook.
     config: () => ({ optimizeDeps: { exclude: ["@dusk/w3sper"] } }),
     load(id) {
-      if (id.replaceAll("\\", "/") !== target) return null;
+      const [file, query = ""] = id.split("?");
+      if (file.replaceAll("\\", "/") !== target) return null;
+      // Version/HMR module requests still need the fix; raw/URL assets do not.
+      if ([...new URLSearchParams(query).keys()].some(key => !["v", "t", "import"].includes(key))) return null;
       const pkg = JSON.parse(readFileSync(path.join(path.dirname(entry), "../package.json"), "utf8"));
       if (pkg.version !== "1.7.0-rc.0") {
         throw new Error("Review/remove the W3sper stream backport when upgrading the SDK");
