@@ -155,7 +155,7 @@ export async function putShieldedMeta(networkKey, walletId, profileIndex, metaPa
 }
 
 export async function ensureShieldedMeta(networkKey, walletId, profileIndex = 0, defaults = {}) {
-  const cur = await getShieldedMeta(networkKey, walletId, profileIndex);
+  let cur = await getShieldedMeta(networkKey, walletId, profileIndex);
   if (cur) return cur;
 
   // defaults:
@@ -178,9 +178,16 @@ export async function ensureShieldedMeta(networkKey, walletId, profileIndex = 0,
     const tx = db.transaction([STORE_META], "readwrite");
     tx.oncomplete = () => resolve(true);
     tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to create meta"));
-    tx.objectStore(STORE_META).put(created);
+    // Recheck within the write transaction: a sync may have committed since
+    // the initial lookup. Never replace its cursor/anchor with defaults.
+    const store = tx.objectStore(STORE_META);
+    const request = store.get(created.ownerKey);
+    request.onsuccess = () => {
+      cur = request.result;
+      if (!cur) store.put(created);
+    };
   });
-  return created;
+  return cur || created;
 }
 
 export function metaCursor(meta) {

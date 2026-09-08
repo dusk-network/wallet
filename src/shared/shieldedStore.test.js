@@ -68,6 +68,18 @@ describe("shieldedStore (IndexedDB)", () => {
     expect(await store.getShieldedMeta(networkKey, walletId, profileIndex)).toEqual(meta);
   });
 
+  it("does not overwrite a concurrently committed checkpoint with default metadata", async () => {
+    const { networkKey, walletId, profileIndex } = nextOwner();
+    await store.getShieldedMeta(networkKey, walletId, profileIndex);
+    const checkpoint = { cursorBookmark: "512", anchorBlock: "10", anchorHash: "block-10" };
+    const committing = store.putNotesMap(networkKey, walletId, profileIndex, new Map(), undefined, checkpoint);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const creating = store.ensureShieldedMeta(networkKey, walletId, profileIndex);
+    const [, meta] = await Promise.all([committing, creating]);
+    expect(meta).toMatchObject(checkpoint);
+    expect(await store.getShieldedMeta(networkKey, walletId, profileIndex)).toMatchObject(checkpoint);
+  });
+
   it("creates meta with defaults and returns cursor", async () => {
     const { networkKey, walletId, profileIndex } = nextOwner();
 

@@ -858,6 +858,7 @@ export async function unlockWithMnemonic(mnemonic) {
   // hang in some environments (IndexedDB). Run it in the background with a
   // hard timeout and surface errors via status.
   const shieldedStart = engineNow();
+  const metadataEpoch = state.shielded.epoch;
   debugEngine("shielded_meta_init_start", {
     totalMs: engineSince(unlockStart),
   });
@@ -873,6 +874,7 @@ export async function unlockWithMnemonic(mnemonic) {
       });
     })
     .catch((err) => {
+      if (metadataEpoch !== state.shielded.epoch) return;
       debugEngine("shielded_meta_init_error", {
         ms: engineSince(shieldedStart),
         totalMs: engineSince(unlockStart),
@@ -884,6 +886,7 @@ export async function unlockWithMnemonic(mnemonic) {
       });
     })
     .finally(() => {
+      if (metadataEpoch !== state.shielded.epoch) return;
       broadcastShieldedStatus("shielded_meta_ready");
     });
 
@@ -2254,10 +2257,8 @@ export async function startShieldedSync({ force = false } = {}) {
 
         if (prog === null) prog = 0;
 
-        // If we've reached the snapshot target, request stop.
-        if (typeof targetBookmark === "bigint" && typeof curB === "bigint" && curB >= targetBookmark) {
-          shouldStop = true;
-        }
+        // Producer events may describe a prefetched chunk. Stop only after
+        // processChunk commits the matching cursor, not on preview progress.
 
         setShieldedStatus({
           state: "syncing",
