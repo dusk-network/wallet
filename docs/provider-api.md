@@ -455,6 +455,10 @@ The result:
 - `digestHex` — the bare 32-byte digest (spec section 9), suitable for display and cross-checking. The signature itself covers a tagged wrapper around this digest, not the bare digest.
 - `signature` — `0x`-hex compressed G1 short signature.
 
+Field names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. String values must be
+well-formed Unicode: unpaired UTF-16 surrogates are rejected, not replaced with
+U+FFFD. Valid Unicode is hashed without normalization.
+
 The wallet advertises supported versions as an array via `dusk_getCapabilities().features.signTypedDataVersions` (currently `[1]`), not a single scalar, so a caller can pick the highest version it understands and detect when a version it relies on is deprecated.
 
 ---

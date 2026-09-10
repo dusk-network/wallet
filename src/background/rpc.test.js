@@ -1784,6 +1784,17 @@ describe("background rpc handler", () => {
         types: { Mail: [{ name: "to", type: "string" }, { name: "contents", type: "Bogus" }] },
       }),
     ],
+    [
+      "non-identifier field name",
+      typedDataParams({
+        types: { Mail: [{ name: "to,string contents", type: "string" }] },
+        message: { "to,string contents": "hello" },
+      }),
+    ],
+    [
+      "unpaired surrogate",
+      typedDataParams({ message: { to: "alice", contents: "\ud800" } }),
+    ],
   ])("dusk_signTypedData rejects %s with INVALID_PARAMS before approval", async (_label, params) => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
