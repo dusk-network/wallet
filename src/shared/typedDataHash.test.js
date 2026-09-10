@@ -14,6 +14,7 @@ import {
 import {
   checkPolicyLimits,
   hashTypedData,
+  hashTypedDataDebug,
   hashTypedDataHex,
   validateTypedDataParams,
 } from "./typedDataHash.js";
@@ -557,5 +558,54 @@ describe("checkPolicyLimits (spec section 11)", () => {
       origin,
     };
     expectCode(() => checkPolicyLimits(input), "E_POLICY_LIMIT");
+  });
+});
+
+describe("encoding boundaries", () => {
+  it.each([
+    ["a,uint8 b", "c"],
+    ["a", "b,uint8 c"],
+    ["", "c"],
+    ["9a", "c"],
+    ["a\n", "c"],
+  ])("rejects non-identifier field names %j / %j", (first, second) => {
+    expectCode(() => hashTypedData({
+      domain, origin, primaryType: "S",
+      types: { ...domainTypes, S: [first, second].map(name => ({ name, type: "uint8" })) },
+      message: { [first]: 1, [second]: 2 },
+    }), "E_FIELD_DEF");
+  });
+
+  const textInput = {
+    domain, origin, primaryType: "S",
+    types: { ...domainTypes, S: [{ name: "text", type: "string" }] },
+    message: { text: "" },
+  };
+
+  it.each([
+    ["high surrogate", { message: { text: "\ud800" } }],
+    ["low surrogate", { message: { text: "\udfff" } }],
+    ["domain", { domain: { ...domain, name: "\ud800" } }],
+    ["origin", { origin: "\udfff" }],
+  ])("rejects ill-formed Unicode in %s", (_label, overrides) => {
+    expectCode(() => hashTypedData({ ...textInput, ...overrides }), "E_UTF8");
+  });
+
+  it("preserves valid Unicode without normalization", () => {
+    const hashText = text => hashTypedDataHex({ ...textInput, message: { text } });
+    expect(hashText("\ufffd")).toBe("0x7067f98b33dd88ed2bef97cea668e7d438ec0013e85ad89505845162fa1d720c");
+    expect(() => hashText("\ud83d\ude00")).not.toThrow();
+    expect(hashText("\u00e9")).not.toBe(hashText("e\u0301"));
+  });
+
+  it("returns an own typeHash for the valid __proto__ struct name", () => {
+    const input = {
+      domain, origin, primaryType: "__proto__",
+      types: { ...domainTypes, ["__proto__"]: [] }, message: {},
+    };
+    const debug = hashTypedDataDebug(input);
+    expect(Object.hasOwn(debug.typeHashes, "__proto__")).toBe(true);
+    expect(debug.typeHashes["__proto__"]).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(debug.digestHex).toBe(hashTypedDataHex(input));
   });
 });

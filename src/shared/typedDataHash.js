@@ -228,7 +228,7 @@ export function hashTypedDataDebug(input) {
   const reachable = new Set();
   collectStructDeps(DOMAIN_TYPE, types, reachable, new Set());
   collectStructDeps(input.primaryType, types, reachable, new Set());
-  const typeHashes = {};
+  const typeHashes = Object.create(null);
   for (const name of reachable) {
     typeHashes[name] = toHex(typeHash(name, types));
   }
@@ -373,7 +373,7 @@ function structFields(typeName, types) {
 function checkFieldDefs(typeName, fields) {
   const names = new Set();
   for (const f of fields) {
-    if (!f || typeof f !== "object" || typeof f.name !== "string" || typeof f.type !== "string") {
+    if (!f || typeof f !== "object" || typeof f.name !== "string" || !IDENT.test(f.name) || typeof f.type !== "string") {
       fail("E_FIELD_DEF", `${typeName}: bad field definition`);
     }
     if (RESERVED_FIELD_NAMES.has(f.name)) {
@@ -583,6 +583,10 @@ function decodeHex(value, label) {
 }
 
 function utf8(s) {
+  // Unicode mode matches lone surrogates, not valid surrogate pairs.
+  if (/[\uD800-\uDFFF]/u.test(s)) {
+    fail("E_UTF8", "UTF-8 input contains an unpaired surrogate");
+  }
   return new TextEncoder().encode(s);
 }
 

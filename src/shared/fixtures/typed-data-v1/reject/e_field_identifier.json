@@ -1,0 +1,47 @@
+{
+  "description": "field names cannot inject delimiters into encodeType",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "a,uint8 b",
+          "type": "uint8"
+        },
+        {
+          "name": "c",
+          "type": "uint8"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "a,uint8 b": 1,
+      "c": 2
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_FIELD_DEF"
+}
