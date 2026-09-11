@@ -429,6 +429,28 @@ describe("validation error codes (spec section 10)", () => {
     );
   });
 
+  it("E_FIELD_EXTRA: a non-enumerable own property is still an extra field", () => {
+    // Presence is tested with hasOwnProperty, which sees non-enumerable own
+    // properties. The extra-key rule must use the same notion of "own", or such
+    // a property counts as present and is never rejected as undeclared
+    // (spec section 6.3). Unreachable from JSON.parse, reachable in process.
+    const message = {};
+    Object.defineProperty(message, "text", { value: "hi", enumerable: true });
+    Object.defineProperty(message, "hidden", { value: "nope", enumerable: false });
+
+    expectCode(
+      () =>
+        hashTypedData({
+          domain,
+          types: { ...domainTypes, S: [{ name: "text", type: "string" }] },
+          primaryType: "S",
+          message,
+          origin,
+        }),
+      "E_FIELD_EXTRA"
+    );
+  });
+
   it("E_VALUE_TYPE: bool field given a string value", () => {
     expectCode(
       () =>
