@@ -464,13 +464,10 @@ function structHash(typeName, values, types) {
     seen.add(f.name);
     parts.push(encodeValue(f.type, values[f.name], types));
   }
-  // getOwnPropertyNames, not Object.keys: presence is tested with hasOwn above,
-  // which sees non-enumerable own properties too. Using the enumerable-only list
-  // here would let a non-enumerable own property escape the extra-key rule while
-  // still counting as present (spec section 6.3).
-  for (const k of Object.getOwnPropertyNames(values)) {
-    if (!seen.has(k)) {
-      fail("E_FIELD_EXTRA", `unexpected field ${typeName}.${k}`);
+  // Include non-enumerable and symbol keys in the own-property check (spec 6.3).
+  for (const k of Reflect.ownKeys(values)) {
+    if (typeof k !== "string" || !seen.has(k)) {
+      fail("E_FIELD_EXTRA", `unexpected field ${typeName}.${String(k)}`);
     }
   }
   return sha256(concat(...parts));

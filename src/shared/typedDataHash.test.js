@@ -429,26 +429,26 @@ describe("validation error codes (spec section 10)", () => {
     );
   });
 
-  it("E_FIELD_EXTRA: a non-enumerable own property is still an extra field", () => {
-    // Presence is tested with hasOwnProperty, which sees non-enumerable own
-    // properties. The extra-key rule must use the same notion of "own", or such
-    // a property counts as present and is never rejected as undeclared
-    // (spec section 6.3). Unreachable from JSON.parse, reachable in process.
-    const message = {};
-    Object.defineProperty(message, "text", { value: "hi", enumerable: true });
-    Object.defineProperty(message, "hidden", { value: "nope", enumerable: false });
+  it.each([
+    ["non-enumerable string", "hidden", false],
+    ["enumerable symbol", Symbol("hidden"), true],
+    ["non-enumerable symbol", Symbol("hidden"), false],
+  ])("E_FIELD_EXTRA: rejects an undeclared %s property", (_label, key, enumerable) => {
+    const fixture = loadFixture("sign_in_basic.json");
+    Object.defineProperty(fixture.input.message, key, { value: "extra", enumerable });
+    for (const hash of [hashTypedData, hashTypedDataHex, hashTypedDataDebug]) {
+      expectCode(() => hash(fixture.input), "E_FIELD_EXTRA");
+    }
+  });
 
-    expectCode(
-      () =>
-        hashTypedData({
-          domain,
-          types: { ...domainTypes, S: [{ name: "text", type: "string" }] },
-          primaryType: "S",
-          message,
-          origin,
-        }),
-      "E_FIELD_EXTRA"
-    );
+  it("accepts a declared non-enumerable own field", () => {
+    const fixture = loadFixture("sign_in_basic.json");
+    const plain = loadFixture("sign_in_basic.json");
+    Object.defineProperty(fixture.input.message, "address", { enumerable: false });
+    expect(hashTypedDataHex(fixture.input)).toBe(fixture.digestHex);
+    for (const hash of [hashTypedData, hashTypedDataDebug]) {
+      expect(hash(fixture.input)).toEqual(hash(plain.input));
+    }
   });
 
   it("E_VALUE_TYPE: bool field given a string value", () => {
