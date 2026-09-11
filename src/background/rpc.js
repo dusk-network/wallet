@@ -989,7 +989,7 @@ export async function handleRpc(origin, request) {
         origin,
       };
 
-      // Structural + value validation (spec 4-10). Map the shared validator's
+      // Initial structural validation (spec 4-10). Map the shared validator's
       // stable error code (E_*) onto INVALID_PARAMS, preserving both the message
       // and the code so a caller/dev can tell which spec 10 rule fired.
       try {
@@ -1024,20 +1024,20 @@ export async function handleRpc(origin, request) {
       // Signer-side resource floor (spec 11). Deliberately not part of the
       // hash path - it must never influence the digest - so oversized payloads
       // are rejected here, before the user ever sees an approval popup.
+      let digestHex;
       try {
         checkPolicyLimits(typedInput);
+        // Hashing completes value validation; translate its errors too.
+        digestHex = hashTypedDataHex(typedInput);
       } catch (err) {
         throw rpcError(
           ERROR_CODES.INVALID_PARAMS,
-          err?.message || "Typed data exceeds policy limits",
+          err?.message || "Invalid typed data params",
           err?.code ? { code: err.code } : undefined
         );
       }
 
       const { domain, types, primaryType, message } = typedInput;
-
-      // Compute the digest over the assembled input, not over raw params.
-      const digestHex = hashTypedDataHex(typedInput);
 
       // Ask the user to approve.
       await requestUserApproval("sign_typed_data", origin, {

@@ -23,6 +23,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Fixed
 
 - Rejected undeclared non-enumerable and symbol-keyed fields in typed-data structs. ([#22])
+- Returned `INVALID_PARAMS` with the typed-data error code for hash-time value validation failures. ([#22])
+- Visibly disclosed truncated strings in typed-data approval previews. ([#22])
 - Required identifier field names in typed-data schemas. ([#22])
 - Rejected unpaired UTF-16 surrogates in typed-data strings. ([#22])
 - Serialized DRC20 and DRC721 encoded call arguments before browser extension messaging. ([#79])

@@ -1808,6 +1808,28 @@ describe("background rpc handler", () => {
     expect(requestUserApproval).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["uint8", 256, "E_UINT_RANGE"],
+    ["bool", "false", "E_VALUE_TYPE"],
+    ["uint8[3]", [0, 1], "E_ARRAY_LENGTH"],
+    ["bytes32", "0x11", "E_BYTES32_LENGTH"],
+  ])("dusk_signTypedData maps %s value errors before approval", async (type, value, code) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    connectDapp(0);
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+    const params = typedDataParams({
+      types: { Mail: [{ name: "value", type }] },
+      message: { value },
+    });
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS, data: { code } });
+    expect(requestUserApproval).not.toHaveBeenCalled();
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_signTypedData", expect.anything());
+  });
+
   it("dusk_signTypedData rejects a payload exceeding the policy floor before approval", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

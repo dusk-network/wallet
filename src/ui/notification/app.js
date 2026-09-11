@@ -594,6 +594,9 @@ export async function renderNotification() {
         h("div", { class: "box" }, [
           h("code", { text: row.display, title: row.flags.length ? row.flags.join(", ") : "" }),
         ]),
+        row.flags.includes("truncated")
+          ? h("div", { class: "muted", text: "Text truncated; the full value is signed." })
+          : null,
       ])
     );
 
