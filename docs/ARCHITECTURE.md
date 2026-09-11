@@ -324,7 +324,9 @@ window.dispatchEvent(new Event("dusk:requestProvider"));
 | `dusk_getPublicBalance` | Get balance |
 | `dusk_estimateGas` | Get gas prices |
 | `dusk_sendTransaction` | Send transaction |
+| `dusk_watchAsset` | Track a token or NFT in the wallet |
 | `dusk_signMessage` | Sign an off-chain message |
+| `dusk_signTypedData` | Sign structured typed data the wallet renders |
 | `dusk_signAuth` | Sign a login/auth envelope |
 | `dusk_disconnect` | Revoke permission |
 

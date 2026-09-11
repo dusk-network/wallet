@@ -1,0 +1,42 @@
+{
+  "description": "a bool field is given a JSON string instead of a boolean",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "flag",
+          "type": "bool"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "flag": "true"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_VALUE_TYPE"
+}

@@ -5,12 +5,23 @@ function toCodePoints(text) {
   return Array.from(String(text ?? ""));
 }
 
+/**
+ * True for a C0 control code point that is unsafe to render as-is on an
+ * approval screen (excludes the whitespace controls tab/lf/cr, which are
+ * fine in free text). Exported so typedDataDisplay.js shares this exact
+ * definition of "unsafe control character" for per-field string leaves
+ * instead of maintaining a second, potentially drifting copy.
+ */
+export function isUnsafeC0ControlCodePoint(code) {
+  if (code === 0x09 || code === 0x0a || code === 0x0d) return false;
+  return code < 0x20 || code === 0x7f;
+}
+
 function hasUnsafeControlCharacters(text) {
   for (const ch of String(text ?? "")) {
     const code = ch.codePointAt(0);
     if (code == null) continue;
-    if (code === 0x09 || code === 0x0a || code === 0x0d) continue;
-    if (code < 0x20 || code === 0x7f) return true;
+    if (isUnsafeC0ControlCodePoint(code)) return true;
   }
   return false;
 }

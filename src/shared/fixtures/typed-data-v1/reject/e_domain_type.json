@@ -1,0 +1,24 @@
+{
+  "description": "types.DuskTypedDataDomain is missing entirely",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "S": [
+        {
+          "name": "text",
+          "type": "string"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "text": "hi"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_DOMAIN_TYPE"
+}

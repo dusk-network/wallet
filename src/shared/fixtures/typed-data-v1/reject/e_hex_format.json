@@ -1,0 +1,42 @@
+{
+  "description": "a bytes value has odd-length hex",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "b",
+          "type": "bytes"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "b": "0xabc"
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_HEX_FORMAT"
+}

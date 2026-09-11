@@ -1,0 +1,44 @@
+{
+  "description": "dynamic array type T[] is rejected (only fixed T[n] is permitted)",
+  "input": {
+    "domain": {
+      "name": "Example",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "S": [
+        {
+          "name": "items",
+          "type": "uint8[]"
+        }
+      ]
+    },
+    "primaryType": "S",
+    "message": {
+      "items": [
+        1
+      ]
+    },
+    "origin": "https://app.example"
+  },
+  "error": "E_TYPE_INVALID"
+}

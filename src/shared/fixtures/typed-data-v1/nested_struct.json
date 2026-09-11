@@ -1,0 +1,64 @@
+{
+  "description": "nested struct Apple inside Envelope; encodeType(Envelope) puts Envelope's own encodeType first, then sorted dependencies (Apple)",
+  "input": {
+    "domain": {
+      "name": "Nest",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "Apple": [
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ],
+      "Envelope": [
+        {
+          "name": "inner",
+          "type": "Apple"
+        },
+        {
+          "name": "note",
+          "type": "string"
+        }
+      ]
+    },
+    "primaryType": "Envelope",
+    "message": {
+      "inner": {
+        "name": "fuji"
+      },
+      "note": "hello"
+    },
+    "origin": "https://app.example"
+  },
+  "typeHashes": {
+    "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
+    "Apple": "0x21d943644901bab36a3180678dc855c9e47ebddbc040fe3bc2e4c5454d94703b",
+    "Envelope": "0x43f88afa3421f0af80418ae67df5a8c7f8f569a41a53fcb1cacdf68107adbaa4"
+  },
+  "domainSeparator": "0xd190629c9a9e8295c1f8db1f6e2d937587a67b9e9841c061b59b155698ba0292",
+  "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
+  "structHash": "0xd9cd805986d49586cb1bc47bca5ba6cec1e344148dbfc3a327596950a401aa42",
+  "digestHex": "0x085c40ef06d26efbc57e58b996ea367e458f1477775a066ea895f040e4b12029",
+  "signedMessageHex": "0x4455534b5f54595045445f444154415f5349475f563100085c40ef06d26efbc57e58b996ea367e458f1477775a066ea895f040e4b12029"
+}

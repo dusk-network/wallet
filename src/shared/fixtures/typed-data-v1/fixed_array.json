@@ -1,0 +1,54 @@
+{
+  "description": "fixed array field (uint32[3]), including the max uint32 value",
+  "input": {
+    "domain": {
+      "name": "Array",
+      "version": "1",
+      "chainId": "dusk:1"
+    },
+    "types": {
+      "DuskTypedDataDomain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "string"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "bytes32"
+        }
+      ],
+      "Numbers": [
+        {
+          "name": "values",
+          "type": "uint32[3]"
+        }
+      ]
+    },
+    "primaryType": "Numbers",
+    "message": {
+      "values": [
+        1,
+        2,
+        4294967295
+      ]
+    },
+    "origin": "https://app.example"
+  },
+  "typeHashes": {
+    "DuskTypedDataDomain": "0x41724a131dca5eeeaab4ab1579c1fd55df38a48cf919e7fa61035c89c3b443ed",
+    "Numbers": "0x9821fe2eb6803129f076d91f64cba79c0f40a2e9f967f2926b535766b9777127"
+  },
+  "domainSeparator": "0xfa2a72c419b8fe968ca2b08073e3131d7a64812f67c48af33cc2ecbaff13d6c5",
+  "originBind": "0x5ea8b21078b8e6ccb8c07f28b5f81885d159e9076112c4294c0761c1035bce3e",
+  "structHash": "0x9af0011908cd9931d7b01a8f3d01451bb8fdeb59f377505aa0462a1f472206ef",
+  "digestHex": "0x1fc211fe4d622c679abc1a4ddc1871cb65c5e4769d96b0e628e82d4b6f0d44a9",
+  "signedMessageHex": "0x4455534b5f54595045445f444154415f5349475f5631001fc211fe4d622c679abc1a4ddc1871cb65c5e4769d96b0e628e82d4b6f0d44a9"
+}
