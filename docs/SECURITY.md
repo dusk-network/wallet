@@ -32,6 +32,14 @@ Dusk Wallet is a self-custody wallet — users control their own keys. This docu
 
 ## Security Measures
 
+### Cryptographic Dependencies
+
+`@noble/curves` and `@noble/hashes` execute in key derivation and signing paths,
+so their direct dependency versions are pinned exactly to make upgrades an
+explicit review decision. The lockfile already fixes versions for `npm ci`;
+exact manifest pins also constrain resolution when a lockfile is created or
+updated. Pins and integrity checks do not replace dependency review.
+
 ### 1. Mnemonic Protection
 
 #### Encryption at Rest

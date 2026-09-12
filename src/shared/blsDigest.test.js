@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { mnemonicToSeedSync } from "bip39";
 import { bls12_381 } from "@noble/curves/bls12-381";
@@ -23,8 +24,16 @@ const RUSK_DERIVE_BLS_SK_GOLDEN = Uint8Array.from([
   195, 79, 95, 193, 58, 36, 189, 0, 99, 230, 86,
 ]);
 
+// Rust BlsScalar::to_bytes is little-endian, independent of Noble's field encoding.
 function skScalarToBytes(skScalar) {
-  return bls12_381.fields.Fr.toBytes(skScalar);
+  const out = new Uint8Array(32);
+  let rest = skScalar;
+  for (let i = 0; i < 32; i++) {
+    out[i] = Number(rest & 0xffn);
+    rest >>= 8n;
+  }
+  if (rest !== 0n) throw new Error("scalar does not fit in 32 bytes");
+  return out;
 }
 
 function derivedFundsPkBytes(seed, profileIndex) {
@@ -53,6 +62,16 @@ function mockProfile(seed, profileIndex, accountBytes) {
 }
 
 describe("blsDigest module surface", () => {
+  it("pins Noble dependencies to the reviewed locked versions", () => {
+    const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+    const lock = JSON.parse(readFileSync(new URL("../../package-lock.json", import.meta.url), "utf8"));
+    for (const [name, version] of Object.entries({ "@noble/curves": "1.9.7", "@noble/hashes": "1.8.0" })) {
+      expect(manifest.dependencies[name]).toBe(version);
+      expect(lock.packages[""].dependencies[name]).toBe(version);
+      expect(lock.packages[`node_modules/${name}`].version).toBe(version);
+    }
+  });
+
   // Tripwire. Signing with the profile key is a capability, so growing this
   // module's surface should be a deliberate, reviewed act rather than a side
   // effect of another change. Adding an export fails here until someone updates
@@ -87,6 +106,17 @@ describe("blsDigest module surface", () => {
 });
 
 describe("blsDigest", () => {
+  it("serializes 32-byte little-endian scalars without truncation", () => {
+    const expected = new Uint8Array(32);
+    expected.set([4, 3, 2, 1]);
+    expected[31] = 0x40;
+    expect(skScalarToBytes((0x40n << 248n) | 0x01020304n)).toEqual(expected);
+    expect(skScalarToBytes(0n)).toEqual(new Uint8Array(32));
+    for (const invalid of [-1n, 1n << 256n]) {
+      expect(() => skScalarToBytes(invalid)).toThrow();
+    }
+  });
+
   it("deriveBlsSecretKeyFromSeed matches wallet-core rusk golden vector", () => {
     const seed = new Uint8Array(64);
     const skScalar = deriveBlsSecretKeyFromSeed(seed, 42);
