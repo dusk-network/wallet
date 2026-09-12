@@ -23,6 +23,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Counted completed typed-data signing requests as auto-lock activity. ([#22])
 - Matched typed-data byte previews to every accepted hex spelling. ([#22])
 - Applied message-preview safeguards to typed-data domain strings. ([#22])
 - Required an exact typed-data chain match before approval. ([#22])
