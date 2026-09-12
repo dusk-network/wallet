@@ -20,10 +20,10 @@ import {
 import { bytesToHex, sha256Hex, toBytes } from "../shared/bytes.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import {
-  checkPolicyLimits,
   hashTypedDataHex,
   validateTypedDataParams,
 } from "@dusk/typed-data";
+import { checkPolicyLimits } from "@dusk/typed-data/policy";
 import { classifyDuskIdentifier } from "../shared/duskIdentifiers.js";
 import {
   DAPP_LIMITS,

@@ -2,6 +2,8 @@
 
 Wallet uses [`@dusk/typed-data`](https://github.com/dusk-network/typed-data) for validation, hashing, signer resource limits and tagged-message construction. The shared library owns the [specification](https://github.com/dusk-network/typed-data/blob/main/docs/typed-data-v1.md), encoder and vector corpus; Wallet has no second encoder or vendored corpus.
 
+Signer resource checks use `checkPolicyLimits` from `@dusk/typed-data/policy`, not the hashing entrypoint. Wallet rejects requests above the spec's resource floor before approval; the limits do not change the digest.
+
 Wallet owns keys and signing, trusted origin/chain checks, permissions and account selection, RPC error translation, approval display and lifecycle rechecks. Display clipping never changes the signed input. See [the provider API](provider-api.md#dusk_signtypeddata) for request/result fields.
 
 Applications verify with `verifyTypedDataSignature` from `@dusk/typed-data/bls`, using trusted chain/origin expectations and checking `result.ok`. Signer identity, authorization, nonce and expiry checks remain application responsibilities.
