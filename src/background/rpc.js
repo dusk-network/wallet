@@ -23,7 +23,7 @@ import {
   checkPolicyLimits,
   hashTypedDataHex,
   validateTypedDataParams,
-} from "../shared/typedDataHash.js";
+} from "@dusk/typed-data";
 import { classifyDuskIdentifier } from "../shared/duskIdentifiers.js";
 import {
   DAPP_LIMITS,
@@ -1013,7 +1013,7 @@ export async function handleRpc(origin, request) {
       // `domain.chainId`, never this.
       const approvalContext = await captureApprovalContext(perm);
       const activeChainId = chainIdFromNodeUrl(approvalContext.nodeUrl);
-      const requestedChainId = String(params.domain?.chainId ?? "").trim();
+      const requestedChainId = String(params.domain?.chainId ?? "");
       if (requestedChainId !== activeChainId) {
         throw rpcError(
           ERROR_CODES.INVALID_PARAMS,
@@ -1060,16 +1060,15 @@ export async function handleRpc(origin, request) {
         const executionContext = await assertApprovalContext(approvalContext);
         await ensureEngineConfigured();
 
-        // Sign via the engine over the bare digest computed above.
+        // The engine wraps this digest with the shared typed-data signature tag.
         const signed = await engineCall("dusk_signTypedData", {
           digestHex,
           profileIndex: executionContext.profileIndex,
           _approvalContext: executionContext,
         });
 
-        // Result shape, spec 13. origin/chainId/primaryType are echoed so a
-        // verifier does not need to hold the original request; hex fields are
-        // lowercased defensively.
+        // Result shape, spec 13. Echo the wallet's context; verifiers still need
+        // the original request and their own expected policy. Normalize hex case.
         return {
           account: signed?.account,
           publicKeyHex: String(signed?.publicKeyHex ?? "").toLowerCase(),

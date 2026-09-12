@@ -129,14 +129,17 @@ Two things to know before integrating:
 - **`domain.chainId` must match the wallet's active chain**, or the request is rejected
   before the user sees anything.
 
-Verify signatures with [`@dusk/connect/bls`](https://github.com/dusk-network/connect/blob/main/docs/typed-data-v1.md#12-signing-and-verification).
+Verify signatures with [`@dusk/typed-data/bls`](https://github.com/dusk-network/typed-data#usage),
+passing trusted chain/origin expectations and checking `result.ok`. Reconstruct the
+hash input with the wallet-returned `origin`. Also check the expected signer,
+authorization and replay protection.
 The signature covers a tagged wrapper around `digestHex`, not the bare digest — verifying
 the bare digest would accept signatures produced by any raw 32-byte signing path.
 
 Canonical v0.1 docs:
 
 - Provider API: [docs/provider-api.md](docs/provider-api.md)
-- Typed-data v1 specification: [dusk-network/connect docs/typed-data-v1.md](https://github.com/dusk-network/connect/blob/main/docs/typed-data-v1.md)
+- Typed-data v1 specification and integration: [docs/typed-data-v1.md](docs/typed-data-v1.md)
 - Discovery protocol: [dusk-network/connect docs/wallet-discovery.md](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md)
 - Connect SDK usage: [dusk-network/connect README.md](https://github.com/dusk-network/connect/blob/main/README.md)
 - Wallet implementer guidance: [dusk-network/connect docs/wallet-implementer.md](https://github.com/dusk-network/connect/blob/main/docs/wallet-implementer.md)

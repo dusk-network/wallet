@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { sha256Hex } from "../shared/bytes.js";
 import { ERROR_CODES } from "../shared/errors.js";
 import { DAPP_RPC_METHODS } from "../shared/providerSurface.js";
-import { hashTypedDataHex } from "../shared/typedDataHash.js";
+import { hashTypedDataHex } from "@dusk/typed-data";
 
 const PUBLIC_ACCOUNT =
   "M8vMuVUZZrHCW3LBFKEctWFJerYmT2HghQNuGHKrgV6BQqgkYK1A4FZLX3Nm9Rri63RZwL4gQCMhLyJRJQE5MQouqqu77Dr1rQnHqk1W7zAf4WKZqr6MgdxzkxFwFjo8ZM";
@@ -1743,14 +1743,14 @@ describe("background rpc handler", () => {
     expect(result.origin).toBe("https://dapp.example");
   });
 
-  it("dusk_signTypedData rejects wrong domain.chainId before approval", async () => {
+  it.each(["dusk:999", " dusk:2 "])("dusk_signTypedData rejects non-matching domain.chainId %s before approval", async (chainId) => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
 
     connectDapp(0);
     engineStatus = { isUnlocked: true, accounts: ["acct0"] };
 
-    const params = typedDataParams({ domain: { chainId: "dusk:999" } });
+    const params = typedDataParams({ domain: { chainId } });
 
     await expect(
       handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })

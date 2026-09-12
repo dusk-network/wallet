@@ -14,6 +14,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Used `@dusk/typed-data` for typed-data validation, hashing and signed-message construction. ([#22])
 - Gated dApp RPC requests on the canonical method list before any permission lookup or approval prompt, so methods absent from the advertised surface are unreachable rather than merely undocumented. Deliberately refused methods still report why instead of "Unknown method".
 
 ### Security
@@ -22,6 +23,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Required an exact typed-data chain match before approval. ([#22])
 - Rejected undeclared non-enumerable and symbol-keyed fields in typed-data structs. ([#22])
 - Returned `INVALID_PARAMS` with the typed-data error code for hash-time value validation failures. ([#22])
 - Visibly disclosed truncated strings in typed-data approval previews. ([#22])

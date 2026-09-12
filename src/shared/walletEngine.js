@@ -3183,9 +3183,7 @@ export async function signAuth(params) {
  * The digest is signed via the tagged form (`SIG_TAG || digest`, see
  * `signProfileTypedDataDigest` in ./blsDigest.js) — never as a bare 32-byte
  * digest. There is deliberately no raw-digest signing export on this surface;
- * a previous phase removed that path on purpose, since a caller able to get an
- * arbitrary 32-byte value signed under this key/DST could forge a typed-data
- * signature.
+ * that is a separate design question tracked in issue #90.
  *
  * @param {{ digestHex: string, profileIndex?: number }} params
  * @returns {Promise<{account:string, publicKeyHex:string, signature:string}>}

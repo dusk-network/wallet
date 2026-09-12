@@ -1,5 +1,5 @@
 /**
- * Raw BLS12-381 digest signing for Dusk Connect pay-auth / Moonlight-open flows.
+ * Wallet-owned BLS12-381 key derivation and typed-data signing.
  *
  * Key derivation matches wallet-core (`derive_bls_sk`, `rng_with_index`).
  * Signing uses Dusk V2 hash-to-curve DST (same as dusk-core `BlsVersion::V2`).
@@ -8,7 +8,8 @@ import { sha256 } from "@noble/hashes/sha2";
 import { bls12_381 } from "@noble/curves/bls12-381";
 import { bytesToHex } from "./bytes.js";
 
-export const BLS_SIGN_DST = "BLS_SIG_BLS12381G1_XMD:SHA-256_DUSK_V2";
+import { BLS_SIGN_DST, buildTypedDataSignedMessage } from "@dusk/typed-data/bls";
+export { BLS_SIGN_DST, TYPED_DATA_SIG_TAG, buildTypedDataSignedMessage } from "@dusk/typed-data/bls";
 
 const Fr_ORDER = bls12_381.fields.Fr.ORDER;
 
@@ -96,11 +97,9 @@ export function signBlsMessageBytes(message, skScalar) {
 /**
  * Verify a signature over a BARE 32-byte digest.
  *
- * DANGER: this is the raw-digest path (typed-data spec §12.1's whole reason for
- * existing). It MUST NOT be reachable from any dApp-facing RPC (e.g.
- * `dusk_signTypedData`) — a caller that can get an arbitrary 32-byte value signed
- * through this path can forge a typed-data signature, since both share the same
- * key and the same DST. Use `verifyTypedDataDigestSignature` for typed-data.
+ * Test helper, not a typed-data verifier: a bare-digest signature does not cover
+ * the typed-data tag. Application verifiers must use the shared library's
+ * `verifyTypedDataSignature` with their trusted policy.
  *
  * @param {Uint8Array} fundsPkBytes 96-byte G2 compressed public key
  * @param {Uint8Array} digestBytes 32-byte digest
@@ -119,43 +118,10 @@ export function verifyBlsDigestSignature(fundsPkBytes, digestBytes, signatureByt
 // primitive, used by the typed-data path and by tests that need to construct a
 // bare-digest signature in order to assert it is rejected.
 
-/**
- * Typed-data signature domain tag (spec §12.1).
- *
- *   SIG_TAG = utf8("DUSK_TYPED_DATA_SIG_V1\0")   // 23 bytes, includes the
- *                                                 // trailing NUL byte
- *
- * The signature is computed over `SIG_TAG || digest` (55 bytes), never over the
- * bare 32-byte digest. The digest alone is indistinguishable from any other
- * 32-byte value the same Moonlight BLS key might be asked to sign under the same
- * DST (e.g. pay-auth digests); the tag makes the typed-data signed-message space
- * structurally disjoint from every bare 32-byte message space, so a signature
- * from one path can never be replayed as valid on the other.
- */
-export const TYPED_DATA_SIG_TAG = "DUSK_TYPED_DATA_SIG_V1\0";
-
-const TYPED_DATA_SIG_TAG_BYTES = new TextEncoder().encode(TYPED_DATA_SIG_TAG);
-
 function assertDigest32(digestBytes) {
   if (!(digestBytes instanceof Uint8Array) || digestBytes.length !== 32) {
     throw new Error("digest must be exactly 32 bytes");
   }
-}
-
-/**
- * Build the tagged message that is actually signed for typed-data (spec §12.1):
- *
- *   signedMessage = SIG_TAG || digest   // 23 + 32 = 55 bytes
- *
- * @param {Uint8Array} digestBytes 32-byte typed-data digest (spec §9)
- * @returns {Uint8Array} 55-byte tagged message
- */
-export function buildTypedDataSignedMessage(digestBytes) {
-  assertDigest32(digestBytes);
-  const out = new Uint8Array(TYPED_DATA_SIG_TAG_BYTES.length + digestBytes.length);
-  out.set(TYPED_DATA_SIG_TAG_BYTES, 0);
-  out.set(digestBytes, TYPED_DATA_SIG_TAG_BYTES.length);
-  return out;
 }
 
 /**
@@ -185,10 +151,9 @@ export async function signProfileTypedDataDigest(profile, digestBytes) {
 }
 
 /**
- * Verify a typed-data signature over the tagged message form (spec §12.3). A
- * verifier MUST use this — not `verifyBlsDigestSignature` — to check typed-data
- * signatures; verifying over the bare digest would accept signatures produced by
- * any raw-32-byte signing path.
+ * Low-level test helper for the tagged message form. This does not check the
+ * chain/origin policy; application verifiers use `verifyTypedDataSignature`
+ * from `@dusk/typed-data/bls`.
  *
  * @param {Uint8Array} publicKeyBytes 96-byte G2 compressed public key
  * @param {Uint8Array} digestBytes 32-byte typed-data digest (spec §9)

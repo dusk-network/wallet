@@ -411,7 +411,8 @@ Sign **structured, human-renderable data** — the Dusk analogue of `eth_signTyp
 
 Requires connection + unlocked wallet.
 
-Full normative spec (type expressions, encoding, domain separator, origin binding, digest, limits, versioning): https://github.com/dusk-network/connect/blob/main/docs/typed-data-v1.md
+Full normative spec (type expressions, encoding, domain separator, origin binding, digest, limits, versioning): [Dusk Typed Data](https://github.com/dusk-network/typed-data/blob/main/docs/typed-data-v1.md).
+Wallet consumes the shared package; see [integration and provenance](typed-data-v1.md).
 
 ```js
 const result = await dusk.request({
@@ -460,6 +461,12 @@ well-formed Unicode: unpaired UTF-16 surrogates are rejected, not replaced with
 U+FFFD. Valid Unicode is hashed without normalization.
 
 The wallet advertises supported versions as an array via `dusk_getCapabilities().features.signTypedDataVersions` (currently `[1]`), not a single scalar, so a caller can pick the highest version it understands and detect when a version it relies on is deprecated.
+
+Use `verifyTypedDataSignature` from `@dusk/typed-data/bls` with trusted
+`{ chainId, origin }` expectations and check `result.ok`, not the truthiness of the
+result object. Hash the original request with the wallet-returned origin; do not
+trust the returned `digestHex` alone. The application still owns signer identity,
+authorization and replay/expiry checks.
 
 ---
 

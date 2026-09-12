@@ -1,7 +1,7 @@
 /**
  * Display-only flattening of a `dusk_signTypedData` message for the approval
  * popup. This module never validates signing-hash correctness (that lives in
- * typedDataHash.js) and never throws on malformed input - the whole `types`
+ * @dusk/typed-data) and never throws on malformed input - the whole `types`
  * table and `message` value come straight from the requesting dApp, and a
  * thrown error here would blank the approval screen instead of showing it.
  *
@@ -21,7 +21,7 @@ export const TYPED_DATA_DISPLAY_MAX_STRING_CHARS = 2048;
 
 const ATOMIC_TYPES = new Set(["string", "bytes", "bytes32", "uint64", "uint32", "uint8", "bool"]);
 const ARRAY_FIXED = /^(.+)\[([1-9][0-9]*)\]$/;
-// Same shadowing hazard as typedDataHash.js: a field literally named
+// Same shadowing hazard as the protocol: a field literally named
 // "__proto__" must not be treated as a live object-property lookup.
 const RESERVED_FIELD_NAMES = new Set(["__proto__", "constructor", "prototype"]);
 const REPLACEMENT_CHAR = "�";
