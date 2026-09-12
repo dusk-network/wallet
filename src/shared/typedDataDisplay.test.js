@@ -1,6 +1,6 @@
+import { createHash } from "node:crypto";
+import { hashTypedDataHex } from "@dusk/typed-data";
 import { describe, expect, it } from "vitest";
-
-import { sha256Hex, toBytes } from "./bytes.js";
 import {
   TYPED_DATA_DISPLAY_MAX_STRING_CHARS,
   flattenTypedMessage,
@@ -272,21 +272,37 @@ describe("flattenTypedMessage", () => {
     expect(rows[0]).toMatchObject({ path: "age", display: "(unexpected type)" });
   });
 
-  it("formats bytes/bytes32 leaves as a byte count plus sha256 preview", async () => {
-    const types = { Blob: [{ name: "data", type: "bytes" }] };
-    const hex = "0xdeadbeef";
-
-    const { rows } = await flattenTypedMessage({
-      types,
-      primaryType: "Blob",
-      message: { data: hex },
-    });
-
-    const expectedHash = await sha256Hex(toBytes(hex));
-    expect(rows[0].display).toBe(
-      `4 bytes · sha256=${expectedHash.slice(0, 12)}…${expectedHash.slice(-8)}`
-    );
-  });
+  it.each([["bytes", "00"], ["bytes32", "ab".repeat(32)], ["bytes", ""]])(
+    "describes the signed bytes for every accepted hex spelling: %s %s",
+    async (type, hex) => {
+      const input = {
+        domain: { name: "Preview", version: "1", chainId: "dusk:0" },
+        origin: "https://dapp.example",
+        types: {
+          DuskTypedDataDomain: [
+            { name: "name", type: "string" },
+            { name: "version", type: "string" },
+            { name: "chainId", type: "string" },
+            { name: "verifyingContract", type: "bytes32" },
+          ],
+          Blob: [{ name: "data", type }],
+        },
+        primaryType: "Blob",
+        message: { data: `0x${hex}` },
+      };
+      const digest = hashTypedDataHex(input);
+      const expectedHash = createHash("sha256").update(Buffer.from(hex, "hex")).digest("hex");
+      for (const value of [`0x${hex}`, `0X${hex.toUpperCase()}`, hex]) {
+        const candidate = { ...input, message: { data: value } };
+        expect(hashTypedDataHex(candidate)).toBe(digest);
+        const { rows } = await flattenTypedMessage(candidate);
+        expect(rows).toEqual([{
+          path: "data", type, flags: [],
+          display: `${hex.length / 2} bytes · sha256=${expectedHash.slice(0, 12)}…${expectedHash.slice(-8)}`,
+        }]);
+      }
+    }
+  );
 
   it("renders an empty string leaf without flags", async () => {
     const types = { Note: [{ name: "text", type: "string" }] };

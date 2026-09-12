@@ -43,7 +43,7 @@ describe("notification approval UI", () => {
     const body = block[1];
 
     // Must flatten via the shared display module rather than dumping raw JSON.
-    expect(source).toContain('import { flattenTypedMessage } from "../../shared/typedDataDisplay.js"');
+    expect(source).toContain('import { flattenTypedMessage, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js"');
     expect(body).toContain("flattenTypedMessage(");
     expect(body).not.toContain("JSON.stringify(params?.message");
     expect(body).not.toContain("JSON.stringify(message");

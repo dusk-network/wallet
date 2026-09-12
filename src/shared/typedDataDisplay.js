@@ -13,7 +13,7 @@
  * signMessagePreview.js presents untrusted bytes safely rather than raw.
  */
 import { isUnsafeC0ControlCodePoint } from "./signMessagePreview.js";
-import { sha256Hex, toBytes } from "./bytes.js";
+import { hexToBytes, sha256Hex } from "./bytes.js";
 
 export const TYPED_DATA_DISPLAY_MAX_DEPTH = 8;
 export const TYPED_DATA_DISPLAY_MAX_ROWS = 200;
@@ -61,7 +61,7 @@ function makeRow(path, type, display, flags) {
  * dropped, so the displayed length still roughly tracks the source and the
  * substitution itself is visible to the user.
  */
-function sanitizeStringForDisplay(raw, maxChars) {
+export function sanitizeStringForDisplay(raw, maxChars = TYPED_DATA_DISPLAY_MAX_STRING_CHARS) {
   const flags = [];
   let hasControl = false;
   let hasBidi = false;
@@ -129,12 +129,12 @@ function describeStringLeaf(value, type, path, limits) {
 }
 
 async function describeBytesLeaf(value, type, path) {
-  if (typeof value !== "string" || !/^0x/i.test(value.trim())) {
+  if (typeof value !== "string") {
     return makeRow(path, type, "(unexpected type)", []);
   }
   let bytes;
   try {
-    bytes = toBytes(value.trim());
+    bytes = hexToBytes(value);
   } catch {
     return makeRow(path, type, "(unexpected type)", []);
   }

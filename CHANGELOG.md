@@ -23,6 +23,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Matched typed-data byte previews to every accepted hex spelling. ([#22])
+- Applied message-preview safeguards to typed-data domain strings. ([#22])
 - Required an exact typed-data chain match before approval. ([#22])
 - Rejected undeclared non-enumerable and symbol-keyed fields in typed-data structs. ([#22])
 - Returned `INVALID_PARAMS` with the typed-data error code for hash-time value validation failures. ([#22])

@@ -1,7 +1,7 @@
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
-import { flattenTypedMessage } from "../../shared/typedDataDisplay.js";
+import { flattenTypedMessage, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { h } from "../lib/dom.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { truncateMiddle } from "../lib/strings.js";
@@ -567,8 +567,8 @@ export async function renderNotification() {
 
   if (kindNorm === "sign_typed_data") {
     const domain = params?.domain && typeof params.domain === "object" ? params.domain : {};
-    const domainName = String(domain?.name ?? "");
-    const domainVersion = String(domain?.version ?? "");
+    const domainName = sanitizeStringForDisplay(String(domain?.name ?? "") || "—");
+    const domainVersion = sanitizeStringForDisplay(String(domain?.version ?? "") || "—");
     const domainChainId = String(domain?.chainId ?? "");
     const verifyingContract = String(domain?.verifyingContract ?? "").trim();
     const primaryType = String(params?.primaryType ?? "");
@@ -584,21 +584,20 @@ export async function renderNotification() {
     // display limit rather than something hostile about the characters, and
     // lumping them together would train users to ignore the real warning.
     const unsafeTextFlags = ["control_chars", "bidi_control", "invalid_surrogate"];
-    const hasTextSafetyWarning = rows.some((row) =>
+    const hasTextSafetyWarning = [domainName, domainVersion, ...rows].some((row) =>
       (row.flags ?? []).some((flag) => unsafeTextFlags.includes(flag))
     );
 
-    const fieldRows = rows.map((row) =>
+    const displayRow = (label, row) =>
       h("div", { class: "row" }, [
-        h("div", { class: "muted", text: `${row.path} · ${row.type}` }),
+        h("div", { class: "muted", text: label }),
         h("div", { class: "box" }, [
           h("code", { text: row.display, title: row.flags.length ? row.flags.join(", ") : "" }),
         ]),
         row.flags.includes("truncated")
           ? h("div", { class: "muted", text: "Text truncated; the full value is signed." })
           : null,
-      ])
-    );
+      ]);
 
     setApp(
       [
@@ -610,14 +609,8 @@ export async function renderNotification() {
           h("div", { class: "muted", text: "Account" }),
           h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
         ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Domain name" }),
-          h("div", { class: "box" }, [h("code", { text: domainName || "—" })]),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Domain version" }),
-          h("div", { class: "box" }, [h("code", { text: domainVersion || "—" })]),
-        ]),
+        displayRow("Domain name", domainName),
+        displayRow("Domain version", domainVersion),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "Chain ID" }),
           h("div", { class: "box" }, [h("code", { text: domainChainId || "—" })]),
@@ -633,7 +626,7 @@ export async function renderNotification() {
           h("div", { class: "box" }, [h("code", { text: primaryType || "—" })]),
         ]),
         h("div", { class: "muted", text: "Message fields" }),
-        ...fieldRows,
+        ...rows.map((row) => displayRow(`${row.path} · ${row.type}`, row)),
         truncated
           ? h("div", {
               class: "muted",
@@ -664,7 +657,7 @@ export async function renderNotification() {
               h("div", {
                 class: "muted",
                 text:
-                  "One or more message fields contain hidden, non-printable, or directional-override characters. They are shown here replaced with a placeholder. Review carefully before signing.",
+                  "One or more domain or message fields contain hidden, non-printable, or directional-override characters. They are shown here replaced with a placeholder. Review carefully before signing.",
               }),
             ])
           : null,
