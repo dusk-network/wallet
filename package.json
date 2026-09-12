@@ -40,7 +40,10 @@
     "e2e:rusk": "node scripts/e2e-with-rusk.js"
   },
   "dependencies": {
+    "@dusk/typed-data": "0.1.0-next.0",
     "@dusk/w3sper": "npm:@jsr/dusk__w3sper@1.7.0-rc.0",
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.0.0",
     "@tauri-apps/plugin-store": "^2.0.0",
