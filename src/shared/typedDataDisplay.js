@@ -1,17 +1,11 @@
 /**
- * Display-only flattening of a `dusk_signTypedData` message for the approval
- * popup. This module never validates signing-hash correctness (that lives in
- * @dusk/typed-data) and never throws on malformed input - the whole `types`
- * table and `message` value come straight from the requesting dApp, and a
- * thrown error here would blank the approval screen instead of showing it.
- *
- * Design note: nested typed-data values are not rendered with
- * JSON.stringify. Pretty-printed JSON blows up vertical space in a small
- * popup and encourages scrolling past content without reading it - the exact
- * failure this screen exists to prevent. Instead every leaf value is
- * flattened to one row keyed by a dotted/bracketed path, mirroring how
- * signMessagePreview.js presents untrusted bytes safely rather than raw.
+ * Wallet-owned typed-data disclosure, never signing input. A bounded leaf
+ * preview accompanies a lossless escaped JSON view, checked against the pending
+ * digest by @dusk/typed-data. Approval must fail closed if preparation throws.
+ * The flattener remains tolerant of missing/wrong-typed values; its dotted paths
+ * are unambiguous only for schema names accepted by the shared validator.
  */
+import { hashTypedDataHex } from "@dusk/typed-data";
 import { isUnsafeC0ControlCodePoint } from "./signMessagePreview.js";
 import { hexToBytes, sha256Hex } from "./bytes.js";
 
@@ -26,13 +20,39 @@ const ARRAY_FIXED = /^(.+)\[([1-9][0-9]*)\]$/;
 const RESERVED_FIELD_NAMES = new Set(["__proto__", "constructor", "prototype"]);
 const REPLACEMENT_CHAR = "�";
 
-// U+202A-U+202E (LRE/RLE/PDF/LRO/RLO), U+2066-U+2069 (LRI/RLI/FSI/PDI),
-// U+200E/U+200F (LRM/RLM), U+061C (ALM). A right-to-left override can make
-// "send 1 DUSK" paint as something else entirely on a signing screen, so
-// these are always neutralised, never passed through raw.
-const BIDI_CONTROL_CODEPOINTS = new Set([
-  0x061c, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x200e, 0x200f,
-]);
+const BIDI_CONTROL = /\p{Bidi_Control}/u;
+const FORMAT_CONTROL = /\p{Cf}/u;
+const LINE_SEPARATOR = /[\n\r\u2028\u2029]/u;
+// ponytail: one 2 MiB text view; use pagination if legitimate requests exceed it.
+const MAX_DISCLOSURE_CHARS = 2 * 1024 * 1024;
+
+function escapeCodeUnit(char) {
+  return `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+}
+
+/**
+ * Prepare a JSON snapshot and its full ASCII-only disclosure. JSON escapes
+ * preserve original Unicode, including combining sequences and literal escapes.
+ * Throws on size/serialization/validation failure or a mismatch with the digest
+ * already computed by the signer. Callers must not enable signing on failure.
+ */
+export function prepareTypedDataDisclosure(input, digestHex) {
+  let budget = MAX_DISCLOSURE_CHARS;
+  const parents = [];
+  const json = JSON.stringify(input, function (key, value) {
+    // Bound construction work, including indentation of unused schema metadata
+    // (which protocol validation deliberately does not traverse).
+    while (parents.length && parents.at(-1) !== this) parents.pop();
+    budget -= key.length + (typeof value === "string" ? value.length : 1) + 2 * parents.length;
+    if (budget < 0) throw new Error("Signing request is too large to disclose in full");
+    if (value && typeof value === "object") parents.push(value);
+    return value;
+  }, 2).replace(/[\u007f-\uffff]/g, escapeCodeUnit);
+  if (json.length > MAX_DISCLOSURE_CHARS) throw new Error("Signing request is too large to disclose in full");
+  const snapshot = JSON.parse(json);
+  if (hashTypedDataHex(snapshot) !== digestHex) throw new Error("Signing request does not match its digest");
+  return { json, input: snapshot };
+}
 
 function isC1ControlCodePoint(code) {
   return code === 0x7f || (code >= 0x80 && code <= 0x9f);
@@ -55,71 +75,35 @@ function makeRow(path, type, display, flags) {
 }
 
 /**
- * Neutralise and flag anything in a string leaf that a signing screen must
- * not render raw: control characters, bidi overrides, and lone (unpaired)
- * UTF-16 surrogates. Unsafe code units are replaced with U+FFFD rather than
- * dropped, so the displayed length still roughly tracks the source and the
- * substitution itself is visible to the user.
+ * Bound a readable preview by source code points without splitting pairs.
+ * Replace unsafe controls and visibly escape formatting/line separators.
+ * Non-NFC sequences are flagged, never normalized. Originals remain available
+ * in the full JSON view; these display substitutions must never be signed.
  */
 export function sanitizeStringForDisplay(raw, maxChars = TYPED_DATA_DISPLAY_MAX_STRING_CHARS) {
-  const flags = [];
-  let hasControl = false;
-  let hasBidi = false;
-  let hasInvalidSurrogate = false;
-
+  const flags = new Set();
   const out = [];
-  let i = 0;
-  while (i < raw.length) {
-    const code = raw.charCodeAt(i);
-
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const next = i + 1 < raw.length ? raw.charCodeAt(i + 1) : 0;
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        out.push(raw.slice(i, i + 2));
-        i += 2;
-        continue;
-      }
-      hasInvalidSurrogate = true;
+  for (const char of raw) {
+    const code = char.codePointAt(0);
+    if (code >= 0xd800 && code <= 0xdfff) {
+      flags.add("invalid_surrogate");
       out.push(REPLACEMENT_CHAR);
-      i += 1;
-      continue;
-    }
-    if (code >= 0xdc00 && code <= 0xdfff) {
-      hasInvalidSurrogate = true;
+    } else if (BIDI_CONTROL.test(char)) {
+      flags.add("bidi_control");
       out.push(REPLACEMENT_CHAR);
-      i += 1;
-      continue;
-    }
-
-    if (BIDI_CONTROL_CODEPOINTS.has(code)) {
-      hasBidi = true;
+    } else if (FORMAT_CONTROL.test(char) || LINE_SEPARATOR.test(char)) {
+      flags.add(LINE_SEPARATOR.test(char) ? "line_separator" : "invisible_format");
+      out.push(char.replace(/[\s\S]/g, escapeCodeUnit));
+    } else if (code === 0x09 || isUnsafeC0ControlCodePoint(code) || isC1ControlCodePoint(code)) {
+      flags.add("control_chars");
       out.push(REPLACEMENT_CHAR);
-      i += 1;
-      continue;
+    } else {
+      out.push(char);
     }
-
-    if (isUnsafeC0ControlCodePoint(code) || isC1ControlCodePoint(code)) {
-      hasControl = true;
-      out.push(REPLACEMENT_CHAR);
-      i += 1;
-      continue;
-    }
-
-    out.push(raw[i]);
-    i += 1;
   }
-
-  if (hasControl) flags.push("control_chars");
-  if (hasBidi) flags.push("bidi_control");
-  if (hasInvalidSurrogate) flags.push("invalid_surrogate");
-
-  let chars = out;
-  if (chars.length > maxChars) {
-    chars = chars.slice(0, maxChars);
-    flags.push("truncated");
-  }
-
-  return { display: chars.join(""), flags };
+  if (raw.normalize("NFC") !== raw) flags.add("non_nfc");
+  if (out.length > maxChars) flags.add("truncated");
+  return { display: out.slice(0, maxChars).join(""), flags: [...flags] };
 }
 
 function describeStringLeaf(value, type, path, limits) {

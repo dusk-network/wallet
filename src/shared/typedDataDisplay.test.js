@@ -2,11 +2,101 @@ import { createHash } from "node:crypto";
 import { hashTypedDataHex } from "@dusk/typed-data";
 import { checkPolicyLimits } from "@dusk/typed-data/policy";
 import { describe, expect, it } from "vitest";
+import * as display from "./typedDataDisplay.js";
 import {
   TYPED_DATA_DISPLAY_MAX_STRING_CHARS,
   flattenTypedMessage,
   sanitizeStringForDisplay,
 } from "./typedDataDisplay.js";
+
+function disclosureInput(message, fields) {
+  return {
+    domain: { name: "Disclosure", version: "1", chainId: "dusk:0" },
+    origin: "https://dapp.example",
+    types: {
+      DuskTypedDataDomain: [
+        { name: "name", type: "string" }, { name: "version", type: "string" },
+        { name: "chainId", type: "string" }, { name: "verifyingContract", type: "bytes32" },
+      ],
+      Message: fields, Empty: [],
+    },
+    primaryType: "Message", message,
+  };
+}
+
+describe("complete typed-data disclosure", () => {
+  it("exposes omitted array entries, long tails, empty structs and complete bytes without changing signed input", async () => {
+    const input = disclosureInput({
+      amounts: Array.from({ length: 210 }, (_, i) => i),
+      text: "A".repeat(2048) + " ORIGINAL TAIL", blob: "0X00AB", marker: {},
+    }, [
+      { name: "amounts", type: "uint64[210]" }, { name: "text", type: "string" },
+      { name: "blob", type: "bytes" }, { name: "marker", type: "Empty" },
+    ]);
+    const original = structuredClone(input);
+    checkPolicyLimits(input);
+    const digest = hashTypedDataHex(input);
+    expect((await flattenTypedMessage(input)).rows).toHaveLength(200);
+    const full = display.prepareTypedDataDisclosure(input, digest);
+    expect(JSON.parse(full.json)).toEqual(original);
+    expect(full.input).toEqual(original);
+    expect(full.json).toContain("ORIGINAL TAIL");
+    expect(full.input.message.amounts[209]).toBe(209);
+    expect(input).toEqual(original);
+    expect(hashTypedDataHex(full.input)).toBe(digest);
+  });
+
+  it("keeps Unicode, line breaks, formatting controls and literal escape spellings distinguishable", () => {
+    const values = ["é", "e\u0301", "\\u00e9", "Alice", "Ali\u200bce", "👩‍💻", "A\nB\rC\u2028D\u2029E", "x\u061c\u202ey\u202c", "<script>bad()</script>"];
+    const serialized = new Set();
+    for (const text of values) {
+      const input = disclosureInput({ text }, [{ name: "text", type: "string" }]);
+      checkPolicyLimits(input);
+      const digest = hashTypedDataHex(input);
+      const full = display.prepareTypedDataDisclosure(input, digest);
+      expect(full.json).not.toMatch(/[\u007f-\uffff]/);
+      expect(JSON.parse(full.json)).toEqual(input);
+      expect(hashTypedDataHex(full.input)).toBe(digest);
+      serialized.add(full.json);
+    }
+    expect(serialized.size).toBe(values.length);
+  });
+
+  it("rejects a digest mismatch or a serialization that changes the signing input", () => {
+    const input = disclosureInput({ text: "Alice" }, [{ name: "text", type: "string" }]);
+    const digest = hashTypedDataHex(input);
+    expect(() => display.prepareTypedDataDisclosure({ ...input, origin: "https://other.example" }, digest)).toThrow(/digest/i);
+    input.message = Object.assign(Object.create({ toJSON: () => ({ text: "Mallory" }) }), input.message);
+    expect(hashTypedDataHex(input)).toBe(digest);
+    expect(() => display.prepareTypedDataDisclosure(input, digest)).toThrow(/digest/i);
+    input.message = {};
+    Object.defineProperty(input.message, "text", { value: "Alice", enumerable: false });
+    expect(hashTypedDataHex(input)).toBe(digest);
+    expect(() => display.prepareTypedDataDisclosure(input, digest)).toThrow();
+  });
+
+  it("does not authorize malformed names through the full-view path", () => {
+    const input = disclosureInput({ "a.b": "value" }, [{ name: "a.b", type: "string" }]);
+    expect(() => display.prepareTypedDataDisclosure(input, `0x${"00".repeat(32)}`)).toThrow(/field definition/);
+  });
+
+  it("supports the string resource floor but refuses a full view exceeding its display budget", () => {
+    const input = disclosureInput({ text: "A".repeat(65_536) }, [{ name: "text", type: "string" }]);
+    checkPolicyLimits(input);
+    expect(display.prepareTypedDataDisclosure(input, hashTypedDataHex(input)).input).toEqual(input);
+    // Unused schema metadata is not hashed or depth-limited by protocol policy.
+    // Its compact transport fits policy, but pretty-printing it must stay bounded.
+    let unused = [];
+    for (let i = 0; i < 32; i++) unused = [unused];
+    for (const count of [1000, 2000]) {
+      input.types.Unused = Array(count).fill(unused);
+      checkPolicyLimits(input);
+      const digest = hashTypedDataHex(input);
+      // Exercise both final text size and the earlier construction budget.
+      expect(() => display.prepareTypedDataDisclosure(input, digest)).toThrow(/too large/i);
+    }
+  });
+});
 
 function rowsByPath(rows) {
   const out = {};
@@ -304,6 +394,32 @@ describe("flattenTypedMessage", () => {
     }
     const plain = "العربية 123 456 😀";
     expect(sanitizeStringForDisplay(plain)).toEqual({ display: plain, flags: [] });
+  });
+
+  it.each([0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xad])("visibly escapes invisible formatting U+%s without losing it", code => {
+    const raw = `A${String.fromCodePoint(code)}B`;
+    expect(sanitizeStringForDisplay(raw)).toEqual({
+      display: `A\\u${code.toString(16).padStart(4, "0")}B`, flags: ["invisible_format"],
+    });
+  });
+
+  it.each([0x0a, 0x0d, 0x2028, 0x2029])("visibly escapes a line separator U+%s instead of fabricating a line", code => {
+    expect(sanitizeStringForDisplay(`A${String.fromCodePoint(code)}B`)).toEqual({
+      display: `A\\u${code.toString(16).padStart(4, "0")}B`, flags: ["line_separator"],
+    });
+  });
+
+  it("flags non-NFC text without normalizing the original preview or emoji", () => {
+    expect(sanitizeStringForDisplay("e\u0301")).toEqual({ display: "e\u0301", flags: ["non_nfc"] });
+    expect(sanitizeStringForDisplay("é 😀")).toEqual({ display: "é 😀", flags: [] });
+    expect(sanitizeStringForDisplay("👩‍💻")).toEqual({ display: "👩\\u200d💻", flags: ["invisible_format"] });
+  });
+
+  it("preserves surrogate pairs at the preview cap and escapes supplementary format controls", () => {
+    expect(sanitizeStringForDisplay("😀X", 1)).toEqual({ display: "😀", flags: ["truncated"] });
+    expect(sanitizeStringForDisplay("\ud800X\udfff")).toEqual({ display: "�X�", flags: ["invalid_surrogate"] });
+    expect(sanitizeStringForDisplay("A\u{e0001}B")).toEqual({ display: "A\\udb40\\udc01B", flags: ["invisible_format"] });
+    expect(sanitizeStringForDisplay("A\tB")).toEqual({ display: "A�B", flags: ["control_chars"] });
   });
 
   it("neutralises and flags a control character", async () => {

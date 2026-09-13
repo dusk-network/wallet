@@ -458,13 +458,28 @@ The result:
 
 Field names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. String values must be
 well-formed Unicode: unpaired UTF-16 surrogates are rejected, not replaced with
-U+FFFD. Valid Unicode is hashed without normalization. Approval previews replace
-hidden control and Unicode `Bidi_Control` characters (including U+061C Arabic
-Letter Mark) in domain and message strings with visible placeholders and a warning.
-Clipping is disclosed; neither safeguard changes the original signed value.
+U+FFFD. Valid Unicode is hashed without normalization. The compact approval
+preview replaces control and Unicode `Bidi_Control` characters, visibly escapes
+Unicode formatting controls and line separators, and flags non-NFC sequences.
+These are review notices, not claims that legitimate shaping or emoji are malicious.
 Empty structs are shown as `{}` with their paths and declared types, including
-array elements; they count toward the same disclosed row limit. Byte previews
-describe the decoded hex bytes, including uppercase-prefixed and prefixless input.
+array elements. The preview remains bounded to 200 rows, depth 8 and 2048 source
+code points per string; clipping is disclosed. Byte previews summarize decoded
+hex bytes, including uppercase-prefixed and prefixless input.
+
+**Full signing request (escaped JSON)** expands a read-only, keyboard-scrollable
+view of the complete domain, schema, message and wallet-injected origin, including
+omitted preview values and original bytes. Non-ASCII characters use `\uXXXX`
+escapes (surrogate pairs for supplementary characters); parsing the JSON recovers
+the original strings without normalization. The implicit `verifyingContract`
+default is disclosed as 32 zero bytes. Unused types and extra metadata do not
+contribute to the digest.
+
+Both views use a snapshot whose digest is checked by the shared library against
+the pending signing digest. If serialization fails, that digest differs, or the
+full view exceeds the local 2 MiB text/construction budget, Sign is disabled with
+an explanation and Reject remains available. This is a signer display limit,
+not a new hash/verification validity rule. Neither view is fed back into signing.
 
 The wallet advertises supported versions as an array via `dusk_getCapabilities().features.signTypedDataVersions` (currently `[1]`), not a single scalar, so a caller can pick the highest version it understands and detect when a version it relies on is deprecated.
 

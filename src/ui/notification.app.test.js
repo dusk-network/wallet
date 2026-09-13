@@ -35,16 +35,16 @@ describe("notification approval UI", () => {
     expect(source).not.toContain("fnArgs: argsBytes");
   });
 
-  it("renders sign_typed_data via the shared flattener, not JSON.stringify of the message", async () => {
+  it("keeps the typed-data preview alongside a digest-checked full disclosure", async () => {
     const source = await readFile(path.resolve(process.cwd(), "src", "ui", "notification", "app.js"), "utf8");
     const block = source.match(/if \(kindNorm === "sign_typed_data"\) \{([\s\S]*?)\n  if \(kindNorm === "watch_asset"\)/);
 
     expect(block?.[1]).toBeTruthy();
     const body = block[1];
 
-    // Must flatten via the shared display module rather than dumping raw JSON.
-    expect(source).toContain('import { flattenTypedMessage, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js"');
-    expect(body).toContain("flattenTypedMessage(");
+    // The bounded preview remains separate from the full escaped request.
+    expect(body).toContain("prepareTypedDataDisclosure(");
+    expect(body).toContain("flattenTypedMessage(disclosure.input)");
     expect(body).not.toContain("JSON.stringify(params?.message");
     expect(body).not.toContain("JSON.stringify(message");
 
@@ -59,8 +59,8 @@ describe("notification approval UI", () => {
     expect(body).toContain("digestHex");
     expect(body).toContain('decisionButtons("Sign")');
 
-    // Verifying contract row is conditional on presence.
-    expect(body).toContain("verifyingContract\n");
+    // Even an implicit domain default is disclosed.
+    expect(body).toContain("32 zero bytes (default)");
 
     // A text-safety flag on any row must surface a warning to the user.
     expect(body).toContain("hasTextSafetyWarning");
