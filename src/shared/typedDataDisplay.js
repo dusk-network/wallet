@@ -27,11 +27,11 @@ const RESERVED_FIELD_NAMES = new Set(["__proto__", "constructor", "prototype"]);
 const REPLACEMENT_CHAR = "�";
 
 // U+202A-U+202E (LRE/RLE/PDF/LRO/RLO), U+2066-U+2069 (LRI/RLI/FSI/PDI),
-// U+200E/U+200F (LRM/RLM). A right-to-left override can make "send 1 DUSK"
-// paint as something else entirely on a signing screen, so these are always
-// neutralised, never passed through raw.
+// U+200E/U+200F (LRM/RLM), U+061C (ALM). A right-to-left override can make
+// "send 1 DUSK" paint as something else entirely on a signing screen, so
+// these are always neutralised, never passed through raw.
 const BIDI_CONTROL_CODEPOINTS = new Set([
-  0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x200e, 0x200f,
+  0x061c, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x200e, 0x200f,
 ]);
 
 function isC1ControlCodePoint(code) {
@@ -248,6 +248,15 @@ async function walk(typeStr, value, path, depth, types, state, limits) {
   }
 
   const obj = isPlainObject(value) ? value : null;
+  // Empty structs are leaves too: their named presence can carry meaning.
+  if (fields.length === 0) {
+    if (state.rows.length >= limits.maxRows) {
+      state.omitted += 1;
+    } else {
+      state.rows.push(makeRow(path || "(root)", type, obj ? "{}" : "(unexpected type)", []));
+    }
+    return;
+  }
   for (let idx = 0; idx < fields.length; idx++) {
     if (state.rows.length >= limits.maxRows) {
       state.omitted += fields.length - idx;

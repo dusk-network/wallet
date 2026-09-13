@@ -24,6 +24,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Displayed empty typed-data structs with their paths and types, including array elements and row-limit disclosure. ([#22])
+- Replaced Arabic Letter Mark in typed-data domain and message previews with a visible placeholder and warning. ([#22])
 - Counted completed typed-data signing requests as auto-lock activity. ([#22])
 - Matched typed-data byte previews to every accepted hex spelling. ([#22])
 - Applied message-preview safeguards to typed-data domain strings. ([#22])

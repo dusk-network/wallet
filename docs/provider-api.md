@@ -459,10 +459,12 @@ The result:
 Field names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. String values must be
 well-formed Unicode: unpaired UTF-16 surrogates are rejected, not replaced with
 U+FFFD. Valid Unicode is hashed without normalization. Approval previews replace
-hidden control and directional-override characters in domain and message strings
-with visible placeholders and a warning. Clipping is disclosed; neither safeguard
-changes the original signed value. Byte previews describe the decoded hex bytes,
-including uppercase-prefixed and prefixless input.
+hidden control and Unicode `Bidi_Control` characters (including U+061C Arabic
+Letter Mark) in domain and message strings with visible placeholders and a warning.
+Clipping is disclosed; neither safeguard changes the original signed value.
+Empty structs are shown as `{}` with their paths and declared types, including
+array elements; they count toward the same disclosed row limit. Byte previews
+describe the decoded hex bytes, including uppercase-prefixed and prefixless input.
 
 The wallet advertises supported versions as an array via `dusk_getCapabilities().features.signTypedDataVersions` (currently `[1]`), not a single scalar, so a caller can pick the highest version it understands and detect when a version it relies on is deprecated.
 

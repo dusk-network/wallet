@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { hashTypedDataHex } from "@dusk/typed-data";
+import { checkPolicyLimits } from "@dusk/typed-data/policy";
 import { describe, expect, it } from "vitest";
 import {
   TYPED_DATA_DISPLAY_MAX_STRING_CHARS,
   flattenTypedMessage,
+  sanitizeStringForDisplay,
 } from "./typedDataDisplay.js";
 
 function rowsByPath(rows) {
@@ -31,6 +33,60 @@ describe("flattenTypedMessage", () => {
       { path: "name", type: "string", display: "Bob", flags: [] },
       { path: "age", type: "uint8", display: "30", flags: [] },
     ]);
+  });
+
+  it.each([
+    ["Request", { note: "Sign in", approveAll: {} }, [
+      ["note", "string", "Sign in"], ["approveAll", "Empty", "{}"],
+    ]],
+    ["Permissions", { permissions: [{}, {}] }, [
+      ["permissions[0]", "Empty", "{}"], ["permissions[1]", "Empty", "{}"],
+    ]],
+    ["Empty", {}, [["(root)", "Empty", "{}"]]],
+  ])("renders accepted empty structs in %s without changing signed input", async (primaryType, message, expected) => {
+    const input = {
+      domain: { name: "Preview", version: "1", chainId: "dusk:0" },
+      origin: "https://dapp.example",
+      types: {
+        DuskTypedDataDomain: [
+          { name: "name", type: "string" }, { name: "version", type: "string" },
+          { name: "chainId", type: "string" }, { name: "verifyingContract", type: "bytes32" },
+        ],
+        Request: [{ name: "note", type: "string" }, { name: "approveAll", type: "Empty" }],
+        Permissions: [{ name: "permissions", type: "Empty[2]" }],
+        Empty: [],
+      },
+      primaryType, message,
+    };
+    const original = structuredClone(input);
+    checkPolicyLimits(input);
+    const digest = hashTypedDataHex(input);
+    expect(digest).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(await flattenTypedMessage(input)).toEqual({
+      rows: expected.map(([path, type, display]) => ({ path, type, display, flags: [] })),
+      truncated: null,
+    });
+    expect(input).toEqual(original);
+    expect(hashTypedDataHex(input)).toBe(digest);
+  });
+
+  it("counts empty structs against the row budget, including an empty root", async () => {
+    const input = {
+      types: { Permissions: [{ name: "permissions", type: "Empty[2]" }], Empty: [] },
+      primaryType: "Permissions", message: { permissions: [{}, {}] },
+    };
+    expect(await flattenTypedMessage(input, { maxRows: 1 })).toEqual({
+      rows: [{ path: "permissions[0]", type: "Empty", display: "{}", flags: [] }],
+      truncated: { omittedCount: 1, depthLimited: false },
+    });
+    expect(await flattenTypedMessage({ ...input, primaryType: "Empty", message: {} }, { maxRows: 0 })).toEqual({
+      rows: [], truncated: { omittedCount: 1, depthLimited: false },
+    });
+    for (const message of [null, [], 42]) {
+      expect((await flattenTypedMessage({ ...input, primaryType: "Empty", message })).rows).toEqual([
+        { path: "(root)", type: "Empty", display: "(unexpected type)", flags: [] },
+      ]);
+    }
   });
 
   it("flattens a nested struct using dotted paths", async () => {
@@ -232,6 +288,22 @@ describe("flattenTypedMessage", () => {
     expect(rows[0].flags).toContain("bidi_control");
     expect(rows[0].display).not.toContain("‮");
     expect(rows[0].display).toContain("�");
+  });
+
+  it("neutralises every Unicode Bidi_Control, but preserves ordinary Arabic and emoji", () => {
+    const controls = [];
+    for (let code = 0; code <= 0x10ffff; code++) {
+      const char = String.fromCodePoint(code);
+      if (/\p{Bidi_Control}/u.test(char)) controls.push(char);
+    }
+    expect(controls).toHaveLength(12);
+    for (const char of controls) {
+      expect(sanitizeStringForDisplay(`Amount: ${char}123 456`)).toEqual({
+        display: "Amount: �123 456", flags: ["bidi_control"],
+      });
+    }
+    const plain = "العربية 123 456 😀";
+    expect(sanitizeStringForDisplay(plain)).toEqual({ display: plain, flags: [] });
   });
 
   it("neutralises and flags a control character", async () => {
