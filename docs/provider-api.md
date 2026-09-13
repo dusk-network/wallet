@@ -476,10 +476,14 @@ default is disclosed as 32 zero bytes. Unused types and extra metadata do not
 contribute to the digest.
 
 Both views use a snapshot whose digest is checked by the shared library against
-the pending signing digest. If serialization fails, that digest differs, or the
-full view exceeds the local 2 MiB text/construction budget, Sign is disabled with
-an explanation and Reject remains available. This is a signer display limit,
-not a new hash/verification validity rule. Neither view is fed back into signing.
+the pending signing digest. If serialization fails, that digest differs, the
+approximate early construction-work budget is exceeded, or the final escaped
+text exceeds the strict 2 MiB limit (2,097,152 ASCII characters), Sign is disabled
+with an explanation and Reject remains available. The early counter is not exact
+output-size accounting: serialization and escaping can temporarily construct text
+larger than the final limit before it is rejected. Neither check is a peak-memory
+guarantee. These are local signer display limits, not new hash/verification
+validity rules. Neither view is fed back into signing.
 
 The wallet advertises supported versions as an array via `dusk_getCapabilities().features.signTypedDataVersions` (currently `[1]`), not a single scalar, so a caller can pick the highest version it understands and detect when a version it relies on is deprecated.
 

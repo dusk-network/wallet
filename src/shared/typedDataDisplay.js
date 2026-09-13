@@ -40,8 +40,9 @@ export function prepareTypedDataDisclosure(input, digestHex) {
   let budget = MAX_DISCLOSURE_CHARS;
   const parents = [];
   const json = JSON.stringify(input, function (key, value) {
-    // Bound construction work, including indentation of unused schema metadata
-    // (which protocol validation deliberately does not traverse).
+    // Approximate construction-work guard, including unused schema metadata.
+    // It undercounts JSON syntax, closing indentation, numbers and escaping.
+    // Not a strict size/memory bound: keep the final escaped-text length check.
     while (parents.length && parents.at(-1) !== this) parents.pop();
     budget -= key.length + (typeof value === "string" ? value.length : 1) + 2 * parents.length;
     if (budget < 0) throw new Error("Signing request is too large to disclose in full");
