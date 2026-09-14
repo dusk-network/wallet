@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { webcrypto } from "node:crypto";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 
@@ -47,7 +48,7 @@ async function runInpageScript() {
     Date,
     Math,
     Error,
-    crypto: { randomUUID: () => `req-${posted.length + 1}` },
+    crypto: { getRandomValues: bytes => webcrypto.getRandomValues(bytes), randomUUID: () => `req-${posted.length + 1}` },
   });
 
   vm.runInContext(source, context);
@@ -88,7 +89,7 @@ describe("integration: inpage provider discovery", () => {
     expect(announcements).toHaveLength(1);
     expect(announcements[0]).toMatchObject({
       info: {
-        uuid: "wallet.dusk.extension",
+        uuid: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
         name: "Dusk Wallet",
         rdns: "network.dusk.wallet",
       },
@@ -97,6 +98,22 @@ describe("integration: inpage provider discovery", () => {
     expect(typeof announcements[0].info.icon).toBe("string");
     expect(window.dusk).toBeUndefined();
     expect(window.duskWallet?.isDusk).toBe(true);
+  });
+
+  it("keeps discovery UUID stable within one page and changes it on a new page", async () => {
+    const first = await runInpageScript();
+    const announcements = [];
+    first.addEventListener("dusk:announceProvider", event => announcements.push(event.detail));
+    first.dispatchEvent(new Event("dusk:requestProvider"));
+    first.dispatchEvent(new Event("dusk:requestProvider"));
+    expect(announcements[0].info.uuid).toBe(announcements[1].info.uuid);
+    expect(announcements[0].provider).toBe(announcements[1].provider);
+    const next = await runInpageScript();
+    next.addEventListener("dusk:announceProvider", event => announcements.push(event.detail));
+    next.dispatchEvent(new Event("dusk:requestProvider"));
+    expect(announcements[2].info.uuid).not.toBe(announcements[0].info.uuid);
+    expect(announcements[2].info.rdns).toBe(announcements[0].info.rdns);
+    expect(announcements[0].info.uuid).not.toBe(DUSK_WALLET_ID);
   });
 
   it("deduplicates equivalent profilesChanged payloads", async () => {
@@ -235,7 +252,7 @@ describe("integration: inpage provider discovery", () => {
       Date,
       Math,
       Error,
-      crypto: { randomUUID: () => "req-1" },
+      crypto: { getRandomValues: bytes => webcrypto.getRandomValues(bytes), randomUUID: () => "req-1" },
     });
 
     vm.runInContext(source, context);

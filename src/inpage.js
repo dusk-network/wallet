@@ -38,8 +38,16 @@
     isAuthorized: false,
   };
 
+  // Discovery identity is per page/provider, not the stable bridge routing ID.
+  // getRandomValues also works on HTTP pages where randomUUID is unavailable.
+  const uuidBytes = crypto.getRandomValues(new Uint8Array(16));
+  uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40;
+  uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80;
+  const discoveryUuid = Array.from(uuidBytes, byte => byte.toString(16).padStart(2, "0"))
+    .join("").replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
+
   const walletInfo = Object.freeze({
-    uuid: DUSK_WALLET_ID,
+    uuid: discoveryUuid,
     name: "Dusk Wallet",
     icon:
       "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop stop-color='%237aa2ff'/%3E%3Cstop offset='1' stop-color='%2333d1ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='18' fill='%23070b14'/%3E%3Cpath d='M21 16h12.5c11.2 0 18.5 6.5 18.5 16s-7.3 16-18.5 16H21V16Zm11.4 24c6.5 0 10.6-3.1 10.6-8s-4.1-8-10.6-8h-2.7v16h2.7Z' fill='url(%23g)'/%3E%3C/svg%3E",
