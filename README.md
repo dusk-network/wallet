@@ -76,21 +76,25 @@ Then load `dist-firefox/` as a temporary add-on in `about:debugging`.
 
 The extension announces an EIP-1193-style provider through Dusk discovery events. Dusk isn't EVM, but the provider patterns are familiar.
 
+Use Connect's conflict-aware discovery support; metadata is self-attested, not
+wallet authentication. Run this as a JavaScript module:
+
 ```js
-const providers = [];
+import { createDuskWallet } from "@dusk/connect";
 
-window.addEventListener("dusk:announceProvider", (event) => {
-  providers.push(event.detail);
-});
+const wallet = createDuskWallet();
+await wallet.ready();
 
-window.dispatchEvent(new Event("dusk:requestProvider"));
-
-const dusk = providers[0]?.provider;
-const [profile] = await dusk.request({ method: "dusk_requestProfiles" });
+// When selection is required, show wallet.providers in a picker (or Connect UI).
+// Make conflicts visible and disable those entries; pass a chosen UUID to wallet.selectProvider().
+if (!wallet.provider) throw new Error("Select an unconflicted Dusk wallet before connecting");
+const [profile] = await wallet.connect(); // dusk_requestProfiles; prompts for a profile grant.
 console.log(profile.account);
 
-dusk.on("profilesChanged", console.log);
-dusk.on("chainChanged", console.log);
+// Keep requests/events on the wrapper so later selection changes are respected.
+wallet.on("profilesChanged", console.log);
+wallet.on("chainChanged", console.log);
+// Call wallet.destroy() when the integration is torn down.
 ```
 
 Canonical v0.1 docs:

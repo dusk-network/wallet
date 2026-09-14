@@ -2,7 +2,7 @@
 
 The Dusk Wallet extension announces a provider into web pages through **Dusk discovery events**. The provider itself is modeled after EIP-1193 (MetaMask's interface), but Dusk isn't EVM, so all methods use `dusk_*` prefixes.
 
-The canonical discovery protocol is documented in [`@dusk-network/connect`](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md).
+The canonical discovery protocol is documented in [`@dusk/connect`](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md).
 
 ## Quick Start
 
