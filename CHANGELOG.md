@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added a full escaped typed-data request view alongside the bounded approval preview. ([#113])
 - Displayed the installed extension version in Settings. ([#80])
 - Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and bounded, potentially truncated message previews with declared field types — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])
 
@@ -25,6 +26,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Disabled typed-data approval when complete disclosure cannot match the pending digest within display limits. ([#113])
+- Flagged typed-data formatting controls, line separators and non-NFC text without normalizing signed values. ([#113])
 - Displayed empty typed-data structs with their paths and types, including array elements and row-limit disclosure. ([#22])
 - Replaced Arabic Letter Mark in typed-data domain and message previews with a visible placeholder and warning. ([#22])
 - Counted completed typed-data signing requests as auto-lock activity. ([#22])
@@ -41,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Generated fresh discovery UUIDv4 values per page/provider, separate from the stable bridge routing identifier. ([dusk-network/connect#42](https://github.com/dusk-network/connect/issues/42))
 
 [#22]: https://github.com/dusk-network/wallet/issues/22
+[#113]: https://github.com/dusk-network/wallet/issues/113
 
 ## [0.3.0] - 2026-06-23
 

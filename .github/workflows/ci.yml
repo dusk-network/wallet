@@ -57,3 +57,31 @@ jobs:
 
       - name: Build Firefox extension
         run: npm run build:firefox
+
+  typed-data-renderer:
+    # The minimal core runner cannot install Chromium's system libraries.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository) }}
+    env:
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run typed-data approval renderer tests
+        run: |
+          npx --no-install playwright install --with-deps chromium
+          npm run e2e -- typed-data-preview.spec.js --workers=1
