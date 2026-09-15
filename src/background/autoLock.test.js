@@ -503,7 +503,9 @@ describe("background auto-lock activity", () => {
     expect(activityRecord()).toEqual({ lastActivityAt: 2_000_000 });
   });
 
-  it("successful unlocked dApp actions refresh persisted activity", async () => {
+  it.each([
+    "dusk_sendTransaction", "dusk_signMessage", "dusk_signAuth", "dusk_signTypedData",
+  ])("successful unlocked %s refreshes persisted activity", async (method) => {
     mocks.now = 3_000_000;
 
     await expect(
@@ -511,16 +513,36 @@ describe("background auto-lock activity", () => {
         {
           type: "DUSK_RPC_REQUEST",
           id: "rpc-1",
-          request: { method: "dusk_sendTransaction", params: { kind: "transfer" } },
+          request: { method, params: { kind: "transfer" } },
         },
         { url: "https://dapp.example/page", tab: { url: "https://dapp.example/page" } }
       )
     ).resolves.toEqual({
       id: "rpc-1",
-      result: { method: "dusk_sendTransaction" },
+      result: { method },
     });
 
     expect(activityRecord()).toEqual({ lastActivityAt: 3_000_000 });
+  });
+
+  it.each(["rejected", "locked"])("does not refresh activity for a %s typed-data request", async (state) => {
+    mocks.sessionStore.set(AUTO_LOCK_ACTIVITY_KEY, { lastActivityAt: 1_000_000 });
+    mocks.now = 3_000_000;
+    if (state === "rejected") {
+      mocks.handleRpc.mockRejectedValueOnce(Object.assign(new Error("Rejected"), { code: 4001 }));
+    } else {
+      mocks.handleRpc.mockImplementationOnce(async () => {
+        mocks.engineUnlocked = false;
+        return { method: "dusk_signTypedData" };
+      });
+    }
+    const response = await sendBackgroundMessage({
+      type: "DUSK_RPC_REQUEST", id: "typed",
+      request: { method: "dusk_signTypedData" },
+    }, { url: "https://dapp.example/page" });
+    if (state === "rejected") expect(response.error).toMatchObject({ code: 4001 });
+    else expect(response.result).toEqual({ method: "dusk_signTypedData" });
+    expect(activityRecord()).toEqual({ lastActivityAt: 1_000_000 });
   });
 
   it("real dApp network switches refresh persisted activity", async () => {

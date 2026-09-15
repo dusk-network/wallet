@@ -10,12 +10,37 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - Displayed the installed extension version in Settings. ([#80])
+- Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and bounded, potentially truncated message previews with declared field types — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])
+
+### Changed
+
+- Pinned the shared typed-data RC through JSR's npm compatibility registry for reproducible installs. ([#22])
+- Used `@dusk/typed-data` for typed-data validation, hashing and signed-message construction. ([#22])
+- Gated dApp RPC requests on the canonical method list before any permission lookup or approval prompt, so methods absent from the advertised surface are unreachable rather than merely undocumented. Deliberately refused methods still report why instead of "Unknown method".
+
+### Security
+
+- Pinned direct Noble dependencies to exact reviewed versions. ([#22])
+- Typed-data signatures cover a domain-separated message rather than the bare 32-byte digest, so they cannot be produced by, or replayed as, a signature over a caller-supplied digest.
 
 ### Fixed
 
+- Displayed empty typed-data structs with their paths and types, including array elements and row-limit disclosure. ([#22])
+- Replaced Arabic Letter Mark in typed-data domain and message previews with a visible placeholder and warning. ([#22])
+- Counted completed typed-data signing requests as auto-lock activity. ([#22])
+- Matched typed-data byte previews to every accepted hex spelling. ([#22])
+- Applied message-preview safeguards to typed-data domain strings. ([#22])
+- Required an exact typed-data chain match before approval. ([#22])
+- Rejected undeclared non-enumerable and symbol-keyed fields in typed-data structs. ([#22])
+- Returned `INVALID_PARAMS` with the typed-data error code for hash-time value validation failures. ([#22])
+- Visibly disclosed truncated strings in typed-data approval previews. ([#22])
+- Required identifier field names in typed-data schemas. ([#22])
+- Rejected unpaired UTF-16 surrogates in typed-data strings. ([#22])
 - Updated the dApp quick start to use conflict-aware provider selection. ([dusk-network/connect#42](https://github.com/dusk-network/connect/issues/42))
 - Serialized DRC20 and DRC721 encoded call arguments before browser extension messaging. ([#79])
 - Generated fresh discovery UUIDv4 values per page/provider, separate from the stable bridge routing identifier. ([dusk-network/connect#42](https://github.com/dusk-network/connect/issues/42))
+
+[#22]: https://github.com/dusk-network/wallet/issues/22
 
 ## [0.3.0] - 2026-06-23
 

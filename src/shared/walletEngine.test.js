@@ -574,6 +574,54 @@ describe("walletEngine", () => {
     })).rejects.toThrow("Wallet changed while awaiting approval");
   });
 
+  it("rejects typed-data signing when the approved engine context changed", async () => {
+    // The RPC layer checks its own snapshot, but engineCall is mocked in those
+    // tests, so this is the only place the engine-side guard actually runs.
+    // Without it a stale approval would still produce a signature.
+    engine.configure({
+      nodeUrl: NETWORK_KEY,
+      accountCount: 1,
+      selectedAccountIndex: 0,
+    });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    await expect(engine.signTypedData({
+      digestHex: `0x${"11".repeat(32)}`,
+      profileIndex: 0,
+      _approvalContext: {
+        walletId: WALLET_ID,
+        profileIndex: 0,
+        account: "acct0",
+        nodeUrl: "https://different.example",
+      },
+    })).rejects.toThrow("Wallet changed while awaiting approval");
+  });
+
+  it("signs typed data when the approved engine context still matches", async () => {
+    engine.configure({
+      nodeUrl: NETWORK_KEY,
+      accountCount: 1,
+      selectedAccountIndex: 0,
+    });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    const accounts = engine.getAccounts();
+    const res = await engine.signTypedData({
+      digestHex: `0x${"11".repeat(32)}`,
+      profileIndex: 0,
+      _approvalContext: {
+        walletId: WALLET_ID,
+        profileIndex: 0,
+        account: accounts[0],
+        nodeUrl: NETWORK_KEY,
+      },
+    });
+
+    expect(res.account).toBe(accounts[0]);
+    expect(res.signature).toMatch(/^0x[0-9a-f]{96}$/);
+    expect(res.publicKeyHex).toMatch(/^0x[0-9a-f]{192}$/);
+  });
+
   it("signAuth returns the signed canonical login envelope", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
