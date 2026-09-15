@@ -10,7 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - Displayed the installed extension version in Settings. ([#80])
-- Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and every message field with its declared type — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])
+- Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and bounded, potentially truncated message previews with declared field types — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])
 
 ### Changed
 
