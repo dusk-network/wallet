@@ -115,7 +115,7 @@ Goal: users should be able to manage common on-chain assets (tokens + NFTs) in-w
 
 ### 5.0 dApp Provider + Dusk Connect Parity
 
-Goal: make the injected provider (`window.dusk`) + the SDK (`@dusk-network/connect`, "Dusk Connect") feel as predictable for dApp developers as `window.ethereum` + common Ethereum SDKs.
+Goal: make the discovered provider + the SDK (`@dusk/connect`, "Dusk Connect") feel as predictable for dApp developers as `window.ethereum` + common Ethereum SDKs.
 
 #### 5.0.1 Decide Canonical dApp API Surface
 - [x] Decision: dApps use profiles as the provider identity model (`dusk_requestProfiles`/`dusk_profiles`), with explicit per-profile grants for public account and optional shielded receive address access.

@@ -2,31 +2,22 @@
 
 The Dusk Wallet extension announces a provider into web pages through **Dusk discovery events**. The provider itself is modeled after EIP-1193 (MetaMask's interface), but Dusk isn't EVM, so all methods use `dusk_*` prefixes.
 
-The canonical discovery protocol is documented in [`@dusk-network/connect`](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md).
+The canonical discovery protocol is documented in [`@dusk/connect`](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md).
 
 ## Quick Start
 
 Run this example in a JavaScript module or inside an async function; it uses
-top-level `await` while collecting announcements.
+top-level `await` while collecting announcements. The collector below requires
+Connect's conflict-aware discovery API; raw-provider users must also handle
+later announcements/selection changes (or use the `DuskWallet` wrapper).
 
 ```js
-const providers = new Map();
+import { requestDuskProviders } from "@dusk/connect";
 
-window.addEventListener("dusk:announceProvider", (event) => {
-  providers.set(event.detail.info.uuid, event.detail);
-});
-
-window.dispatchEvent(new Event("dusk:requestProvider"));
-await new Promise((resolve) => setTimeout(resolve, 100));
-
-const announced = [...providers.values()];
-const official = announced.find(
-  ({ info }) => info.rdns === "network.dusk.wallet",
-);
-if (!official && announced.length > 1) {
-  throw new Error("Ask the user to choose a Dusk wallet");
-}
-const dusk = (official ?? announced[0])?.provider;
+const announced = await requestDuskProviders({ timeoutMs: 100 });
+if (announced.some(({ info }) => info.conflicted)) throw new Error("Conflicting wallet identifiers");
+if (announced.length > 1) throw new Error("Ask the user to choose a Dusk wallet");
+const dusk = announced[0]?.provider;
 if (!dusk) throw new Error("Dusk wallet not installed");
 
 const { methods } = await dusk.request({ method: "dusk_getCapabilities" });
@@ -97,10 +88,18 @@ Announced provider metadata:
 
 Wallets may also expose a wallet-specific namespace for debugging or internal use, but dApps should treat the discovery events as the canonical integration surface.
 
-Do not bind to the first announcement. Collect announcements for a short window,
-deduplicate them by `info.uuid`, and let the user choose when multiple wallets
-remain. The official extension uses `info.rdns === "network.dusk.wallet"`.
-After selecting by identity or user choice, call the permissionless
+The extension generates one random UUIDv4 per page/provider instance, reusing it
+for all announcements. Its stable product hint is `network.dusk.wallet`; its
+internal bridge routing ID remains separate and unchanged. Neither a UUID nor
+an `rdns` match authenticates a wallet or proves that it is the official extension.
+
+Do not bind to the first announcement. Repeated announcements from the same
+object can update metadata; different objects claiming one UUID are a visible,
+unselectable conflict, not a first/last-wins choice. Let the user choose among
+unconflicted instances. Persist an `rdns` product hint only for unambiguous
+restoration, not a session UUID as product identity; follow the canonical
+[selection and migration rules](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md#selection-rules).
+After selection, call the permissionless
 `dusk_getCapabilities` method and confirm that `methods` contains every RPC the
 dApp needs before using the provider.
 
@@ -549,26 +548,16 @@ Errors are thrown as `Error` objects with `.code`, `.message`, and optional `.da
 
 ## Full Example
 
-Run this example in a JavaScript module or inside an async function.
+Run this example in a JavaScript module or inside an async function, with the
+same conflict-aware discovery and lifetime caveats as Quick Start.
 
 ```js
-const providers = new Map();
+import { requestDuskProviders } from "@dusk/connect";
 
-window.addEventListener("dusk:announceProvider", (event) => {
-  providers.set(event.detail.info.uuid, event.detail);
-});
-
-window.dispatchEvent(new Event("dusk:requestProvider"));
-await new Promise((resolve) => setTimeout(resolve, 100));
-
-const announced = [...providers.values()];
-const official = announced.find(
-  ({ info }) => info.rdns === "network.dusk.wallet",
-);
-if (!official && announced.length > 1) {
-  throw new Error("Ask the user to choose a Dusk wallet");
-}
-const dusk = (official ?? announced[0])?.provider;
+const announced = await requestDuskProviders({ timeoutMs: 100 });
+if (announced.some(({ info }) => info.conflicted)) throw new Error("Conflicting wallet identifiers");
+if (announced.length > 1) throw new Error("Ask the user to choose a Dusk wallet");
+const dusk = announced[0]?.provider;
 if (!dusk) throw new Error("Dusk wallet not installed");
 
 const { methods } = await dusk.request({ method: "dusk_getCapabilities" });

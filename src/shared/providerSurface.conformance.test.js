@@ -237,6 +237,8 @@ describe("Provider Surface Conformance", () => {
 
     expect(md).toContain("dusk_requestProfiles");
     expect(md).toContain("profilesChanged");
+    expect(md).toContain('import { createDuskWallet } from "@dusk/connect"');
+    expect(md).not.toContain("providers[0]");
     expect(md).not.toContain("dusk_requestAccounts");
     expect(md).not.toContain("accountsChanged");
   });
