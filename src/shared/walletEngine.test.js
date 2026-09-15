@@ -519,6 +519,61 @@ describe("walletEngine", () => {
     }
   );
 
+  it.each([
+    [false, "missing", 1n], [true, "missing", 1n],
+    [false, "zero cursor", 1n], [true, "zero cursor", 1n],
+    [false, "missing", 0n], [true, "missing", 0n],
+    [false, "zero cursor", 0n], [true, "zero cursor", 0n],
+  ])("clears spent-only legacy caches (force=%s, metadata=%s, tip=%s)", async (force, metadata, tip) => {
+    const store = await prepareReviewCache(tip);
+    await store.clearNotes(NETWORK_KEY, WALLET_ID, 0, { resetMeta: true });
+    if (metadata === "zero cursor") {
+      await store.putShieldedMeta(NETWORK_KEY, WALLET_ID, 0, { cursorBookmark: "0", cursorBlock: "0" });
+    }
+    const orphan = new Uint8Array([0xaa]), replacement = new Uint8Array([0xbb]);
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([[orphan, orphan]]));
+    await store.markNullifiersSpent(NETWORK_KEY, WALLET_ID, 0, [orphan]);
+    await store.putPendingNullifiers(NETWORK_KEY, WALLET_ID, 0, [new Uint8Array([0xcc])], "pending-tx");
+
+    const meta = await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0);
+    if (metadata === "missing") expect(meta).toBeNull();
+    else expect(meta).toMatchObject({ cursorBookmark: "0", cursorBlock: "0" });
+    expect(meta?.anchorHash).toBeUndefined();
+    expect(await store.countNotes(NETWORK_KEY, WALLET_ID, 0)).toBe(0);
+    expect((await store.getSpentNullifiers(NETWORK_KEY, WALLET_ID, 0)).map(bytesToHex)).toEqual(["aa"]);
+
+    const { AddressSyncer } = await import("@dusk/w3sper");
+    const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockResolvedValueOnce(new ReadableStream({
+      start(controller) {
+        if (tip > 0n) controller.enqueue([[new Map([[replacement, replacement]])], { bookmark: 0n, blockHeight: 100n }]);
+        controller.close();
+      },
+    }));
+    try {
+      const scans = force || tip > 0n;
+      expect((await engine.startShieldedSync({ force })).started).toBe(scans);
+      await vi.waitFor(() => expect(engine.getShieldedStatus().state).toBe("done"));
+      const expected = tip > 0n ? ["bb"] : [];
+      expect((await store.getUnspentNullifiers(NETWORK_KEY, WALLET_ID, 0)).map(bytesToHex)).toEqual(expected);
+      expect(Array.from((await store.getSpendableNotesMap(NETWORK_KEY, WALLET_ID, 0)).keys()).map(bytesToHex)).toEqual(expected);
+      expect(await store.getSpentNullifiers(NETWORK_KEY, WALLET_ID, 0)).toEqual([]);
+      expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "pending-tx")).toEqual(["cc"]);
+      const checkpoint = { cursorBookmark: tip.toString(), anchorBlock: "100", anchorHash: "block-100" };
+      // A forced empty scan has no chunk to commit; the caught-up path anchors it below.
+      expect(await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0)).toEqual(
+        force && tip === 0n ? null : expect.objectContaining(checkpoint)
+      );
+      if (scans) expect(notes.mock.calls[0][1].from.asUint()).toBe(0n);
+
+      // A subsequent reconciliation must not resurrect the discarded note.
+      expect((await engine.startShieldedSync()).started).toBe(false);
+      expect(engine.getShieldedStatus()).toMatchObject({ state: "done", notes: expected.length, lastError: "" });
+      expect((await store.getUnspentNullifiers(NETWORK_KEY, WALLET_ID, 0)).map(bytesToHex)).toEqual(expected);
+      expect(await store.getShieldedMeta(NETWORK_KEY, WALLET_ID, 0)).toMatchObject(checkpoint);
+      expect(notes).toHaveBeenCalledTimes(scans ? 1 : 0);
+    } finally { notes.mockRestore(); }
+  });
+
   it("does not publish caught-up status after cancellation during preflight", async () => {
     const store = await prepareReviewCache();
     const network = await engine.ensureNetwork();

@@ -26,6 +26,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Cleared unanchored spent-note caches before resync to prevent orphaned notes from reappearing. ([#106](https://github.com/dusk-network/wallet/issues/106))
 - Committed prefetched shielded chunks before stopping at the scan target, including under slow RPC responses.
 - Discarded abandoned unlock metadata errors and notifications after session or sync changes.
 - Kept concurrent metadata initialization from overwriting committed shielded cursors and anchors.

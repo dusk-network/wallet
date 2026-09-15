@@ -2196,8 +2196,8 @@ export async function startShieldedSync({ force = false } = {}) {
         await resetCache();
         cursor = { bookmark: 0n, block: 0n };
       }
-    } else if (cursor.bookmark > 0n || await countNotes(netKey, walletId, idx)) {
-      // Legacy caches have no verifiable chain anchor. Rebuild once.
+    } else {
+      // Without an anchor, neither unspent nor spent cache data is trustworthy.
       await resetCache();
       cursor = { bookmark: 0n, block: 0n };
     }
