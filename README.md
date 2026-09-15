@@ -55,7 +55,7 @@ A non-custodial wallet for [Dusk](https://dusk.network). Chrome and Firefox exte
 From a fresh checkout:
 
 ```bash
-npm install
+npm ci
 npm run build:chrome
 ```
 
@@ -66,7 +66,7 @@ Then load `dist/` as an unpacked extension in `chrome://extensions` (Developer m
 From a fresh checkout:
 
 ```bash
-npm install
+npm ci
 npm run build:firefox
 ```
 
@@ -101,28 +101,23 @@ wallet.on("chainChanged", console.log);
 
 `dusk_signTypedData` signs structured, wallet-rendered data rather than an opaque
 digest — the Dusk analogue of `eth_signTypedData_v4`, not of `eth_sign`. The approval
-screen shows the domain, the primary type, and every message field, so the user sees
-what they are authorizing.
+screen shows the domain, primary type, message previews and digest. Previews may be
+truncated; fully inspectable disclosure is tracked in [#113](https://github.com/dusk-network/wallet/issues/113).
 
 ```js
-const provider = wallet.provider;
-if (!provider) throw new Error("Select an unconflicted Dusk wallet before signing");
-const result = await provider.request({
-  method: "dusk_signTypedData",
-  params: {
-    domain: { name: "Example", version: "1", chainId: "dusk:1" },
-    types: {
-      DuskTypedDataDomain: [
-        { name: "name", type: "string" },
-        { name: "version", type: "string" },
-        { name: "chainId", type: "string" },
-        { name: "verifyingContract", type: "bytes32" },
-      ],
-      SignIn: [{ name: "address", type: "string" }],
-    },
-    primaryType: "SignIn",
-    message: { address: profile.account },
+const result = await wallet.request("dusk_signTypedData", {
+  domain: { name: "Example", version: "1", chainId: "dusk:1" },
+  types: {
+    DuskTypedDataDomain: [
+      { name: "name", type: "string" },
+      { name: "version", type: "string" },
+      { name: "chainId", type: "string" },
+      { name: "verifyingContract", type: "bytes32" },
+    ],
+    SignIn: [{ name: "address", type: "string" }],
   },
+  primaryType: "SignIn",
+  message: { address: profile.account },
 });
 // → { account, publicKeyHex, origin, chainId, primaryType, digestHex, signature }
 ```

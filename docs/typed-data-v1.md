@@ -10,7 +10,7 @@ Applications verify with `verifyTypedDataSignature` from `@dusk/typed-data/bls`,
 
 ## Status
 
-The protocol is **draft, not frozen**. This integration pins unpublished `0.1.0-next.0`; registry publication and regenerated lockfiles are required before merge/release. Local tests with a built tarball do not establish registry availability or independent encoding approval.
+The protocol is **draft, not frozen**. This integration pins published JSR `0.1.0-rc.0` through its npm compatibility registry, using the same `@jsr` registry configuration as w3sper. The npm alias keeps `@dusk/typed-data` imports unchanged and the committed lockfile supports `npm ci`; native npm publication is not required. Fixture tests read assets from the pinned installed package because the JSR bridge exports only the code entrypoints. Integration tests do not establish independent encoding approval.
 
 ## Provenance
 

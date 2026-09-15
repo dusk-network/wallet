@@ -1813,7 +1813,8 @@ describe("background rpc handler", () => {
     ["bool", "false", "E_VALUE_TYPE"],
     ["uint8[3]", [0, 1], "E_ARRAY_LENGTH"],
     ["bytes32", "0x11", "E_BYTES32_LENGTH"],
-  ])("dusk_signTypedData maps %s value errors before approval", async (type, value, code) => {
+    ["uint8[64][64][64]", Array(64).fill(Array(64).fill(Array(64).fill(0))), "E_COMPLEXITY"],
+  ])("dusk_signTypedData maps %s validation/resource errors before approval", async (type, value, code) => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
     connectDapp(0);
@@ -1843,7 +1844,7 @@ describe("background rpc handler", () => {
 
     await expect(
       handleRpc("https://dapp.example", { method: "dusk_signTypedData", params })
-    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+    ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS, data: { code: "E_POLICY_LIMIT" } });
     expect(requestUserApproval).not.toHaveBeenCalled();
   });
 

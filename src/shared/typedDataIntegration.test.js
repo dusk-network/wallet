@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { findPackageJSON } from "node:module";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mnemonicToSeedSync } from "bip39";
 import { bls12_381 } from "@noble/curves/bls12-381";
@@ -14,9 +15,10 @@ import {
 
 // Consumer checks use packaged frozen expectations, not a second encoder.
 // Core validation/policy tests and the full corpus live in @dusk/typed-data.
-const require = createRequire(import.meta.url);
+// ponytail: JSR does not export fixtures; use public subpaths if it adds them.
+const packageRoot = dirname(findPackageJSON("@dusk/typed-data", import.meta.url));
 function loadFixture(name) {
-  return JSON.parse(readFileSync(require.resolve(`@dusk/typed-data/vectors/${name}`), "utf8"));
+  return JSON.parse(readFileSync(join(packageRoot, "vectors/typed-data-v1", name), "utf8"));
 }
 
 const MNEMONIC =

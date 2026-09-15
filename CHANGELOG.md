@@ -14,6 +14,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Pinned the shared typed-data RC through JSR's npm compatibility registry for reproducible installs. ([#22])
 - Used `@dusk/typed-data` for typed-data validation, hashing and signed-message construction. ([#22])
 - Gated dApp RPC requests on the canonical method list before any permission lookup or approval prompt, so methods absent from the advertised surface are unreachable rather than merely undocumented. Deliberately refused methods still report why instead of "Unknown method".
 
