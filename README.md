@@ -55,7 +55,7 @@ A non-custodial wallet for [Dusk](https://dusk.network). Chrome and Firefox exte
 From a fresh checkout:
 
 ```bash
-npm install
+npm ci
 npm run build:chrome
 ```
 
@@ -66,7 +66,7 @@ Then load `dist/` as an unpacked extension in `chrome://extensions` (Developer m
 From a fresh checkout:
 
 ```bash
-npm install
+npm ci
 npm run build:firefox
 ```
 
@@ -76,47 +76,48 @@ Then load `dist-firefox/` as a temporary add-on in `about:debugging`.
 
 The extension announces an EIP-1193-style provider through Dusk discovery events. Dusk isn't EVM, but the provider patterns are familiar.
 
+Use Connect's conflict-aware discovery support; metadata is self-attested, not
+wallet authentication. Run this as a JavaScript module:
+
 ```js
-const providers = [];
+import { createDuskWallet } from "@dusk/connect";
 
-window.addEventListener("dusk:announceProvider", (event) => {
-  providers.push(event.detail);
-});
+const wallet = createDuskWallet();
+await wallet.ready();
 
-window.dispatchEvent(new Event("dusk:requestProvider"));
-
-const dusk = providers[0]?.provider;
-const [profile] = await dusk.request({ method: "dusk_requestProfiles" });
+// When selection is required, show wallet.providers in a picker (or Connect UI).
+// Make conflicts visible and disable those entries; pass a chosen UUID to wallet.selectProvider().
+if (!wallet.provider) throw new Error("Select an unconflicted Dusk wallet before connecting");
+const [profile] = await wallet.connect(); // dusk_requestProfiles; prompts for a profile grant.
 console.log(profile.account);
 
-dusk.on("profilesChanged", console.log);
-dusk.on("chainChanged", console.log);
+// Keep requests/events on the wrapper so later selection changes are respected.
+wallet.on("profilesChanged", console.log);
+wallet.on("chainChanged", console.log);
+// Call wallet.destroy() when the integration is torn down.
 ```
 
 ### Typed-data signing
 
 `dusk_signTypedData` signs structured, wallet-rendered data rather than an opaque
 digest — the Dusk analogue of `eth_signTypedData_v4`, not of `eth_sign`. The approval
-screen shows the domain, the primary type, and every message field, so the user sees
-what they are authorizing.
+screen shows the domain, primary type, message previews and digest. Previews may be
+truncated; fully inspectable disclosure is tracked in [#113](https://github.com/dusk-network/wallet/issues/113).
 
 ```js
-const result = await dusk.request({
-  method: "dusk_signTypedData",
-  params: {
-    domain: { name: "Example", version: "1", chainId: "dusk:1" },
-    types: {
-      DuskTypedDataDomain: [
-        { name: "name", type: "string" },
-        { name: "version", type: "string" },
-        { name: "chainId", type: "string" },
-        { name: "verifyingContract", type: "bytes32" },
-      ],
-      SignIn: [{ name: "address", type: "string" }],
-    },
-    primaryType: "SignIn",
-    message: { address: profile.account },
+const result = await wallet.request("dusk_signTypedData", {
+  domain: { name: "Example", version: "1", chainId: "dusk:1" },
+  types: {
+    DuskTypedDataDomain: [
+      { name: "name", type: "string" },
+      { name: "version", type: "string" },
+      { name: "chainId", type: "string" },
+      { name: "verifyingContract", type: "bytes32" },
+    ],
+    SignIn: [{ name: "address", type: "string" }],
   },
+  primaryType: "SignIn",
+  message: { address: profile.account },
 });
 // → { account, publicKeyHex, origin, chainId, primaryType, digestHex, signature }
 ```
