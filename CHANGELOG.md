@@ -26,6 +26,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Cleared unanchored spent-note caches before resync to prevent orphaned notes from reappearing. ([#106](https://github.com/dusk-network/wallet/issues/106))
+- Committed prefetched shielded chunks before stopping at the scan target, including under slow RPC responses.
+- Discarded abandoned unlock metadata errors and notifications after session or sync changes.
+- Kept concurrent metadata initialization from overwriting committed shielded cursors and anchors.
+- Backported the upstream W3sper stream reader so interrupted reads surface errors and can be retried; retained the published SDK pin without adding dependencies.
+- Validated shielded cache anchors and rebuilt invalidated notes/cursors together after a reorg, preserving pending reservations. Cursors now represent the next note position. ([#106](https://github.com/dusk-network/wallet/issues/106))
+- Surfaced failed spent-note reconciliation instead of reporting a healthy sync. ([#107](https://github.com/dusk-network/wallet/issues/107))
+- Cancelled stale shielded sync work after lock, profile or network changes, including preflight and cache writes. ([#108](https://github.com/dusk-network/wallet/issues/108))
 - Disabled typed-data approval when complete disclosure cannot match the pending digest within display limits. ([#113])
 - Flagged typed-data formatting controls, line separators and non-NFC text without normalizing signed values. ([#113])
 - Displayed empty typed-data structs with their paths and types, including array elements and row-limit disclosure. ([#22])

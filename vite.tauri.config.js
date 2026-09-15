@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import inject from "@rollup/plugin-inject";
-import { localW3sperAlias } from "./vite.local-w3sper.js";
+import { localW3sperAlias, w3sperStreamCompat } from "./vite.local-w3sper.js";
 
 // Frontend build for Tauri desktop/mobile.
 //
@@ -9,7 +9,7 @@ import { localW3sperAlias } from "./vite.local-w3sper.js";
 // - No background/contentScript/inpage/offscreen bundles
 
 export default defineConfig({
-  plugins: [],
+  plugins: [w3sperStreamCompat()],
   resolve: {
     alias: localW3sperAlias(),
   },
