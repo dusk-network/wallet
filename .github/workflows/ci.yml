@@ -54,7 +54,7 @@ jobs:
 
       - name: Run typed-data approval renderer tests
         run: |
-          npx --no-install playwright install chromium
+          npx --no-install playwright install --with-deps chromium
           npm run e2e -- typed-data-preview.spec.js --workers=1
 
       - name: Build Chrome extension
