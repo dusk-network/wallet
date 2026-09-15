@@ -52,6 +52,11 @@ jobs:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
 
+      - name: Run typed-data approval renderer tests
+        run: |
+          npx --no-install playwright install chromium
+          npm run e2e -- typed-data-preview.spec.js --workers=1
+
       - name: Build Chrome extension
         run: npm run build:chrome
 
