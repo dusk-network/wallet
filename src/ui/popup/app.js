@@ -175,6 +175,9 @@ function pulseViewAnimation() {
   }
 }
 
+// Retain the mounted unlock nodes, not a password copy in application state.
+let activeLockedView = null;
+
 function setApp(children) {
   if (!app) return;
 
@@ -196,12 +199,19 @@ function setApp(children) {
     // ignore
   }
 
-  app.innerHTML = "";
+  if (children !== activeLockedView) {
+    const password = app.querySelector("#unlock-password");
+    if (password) password.value = "";
+    activeLockedView = null;
+    app.innerHTML = "";
+    const siteBar = activeSiteBar(state.overview);
+    if (siteBar) app.appendChild(siteBar);
+    for (const child of children) app.appendChild(child);
+  }
+  // Refresh notices without detaching the live form (which would lose focus).
+  app.querySelector(":scope > .toast")?.remove();
   const toast = toastView(state.toast);
-  if (toast) app.appendChild(toast);
-  const siteBar = activeSiteBar(state.overview);
-  if (siteBar) app.appendChild(siteBar);
-  for (const child of children) app.appendChild(child);
+  if (toast) app.prepend(toast);
 }
 
 function showError(err) {
@@ -768,7 +778,9 @@ export async function render({ forceRefresh = false } = {}) {
   }
 
   if (!ov.isUnlocked) {
-    setApp(lockedView({ state, actions }));
+    const children = activeLockedView ?? lockedView({ state, actions });
+    setApp(children);
+    activeLockedView = children;
     return;
   }
 
