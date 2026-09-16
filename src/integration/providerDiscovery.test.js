@@ -226,6 +226,27 @@ describe("integration: inpage provider discovery", () => {
     expect(provider.profiles).toEqual([]);
   });
 
+  it.each(["genuine", "forged"].flatMap(first => ["result", "error"].map(kind => [first, kind])))(
+    "keeps the first %s bridge %s; routing IDs do not authenticate responses", async (first, kind) => {
+      const window = await runInpageScript();
+      const provider = window.duskWallet;
+      const firstChain = first === "genuine" ? "dusk:2" : "dusk:999";
+      const secondChain = first === "genuine" ? "dusk:999" : "dusk:2";
+      const outcome = provider.request({ method: "dusk_chainId" }).then(
+        result => ({ result }), error => ({ error: { code: error.code, message: error.message } })
+      );
+      const id = lastRpcRequest(window).id;
+      const response = kind === "error"
+        ? { error: { code: 4001, message: "First response refused" } }
+        : { result: firstChain };
+      // Both have the same page-visible routing identifiers; only the test labels their source.
+      dispatchWalletMessage(window, { type: "DUSK_RPC_RESPONSE", id, response });
+      dispatchWalletMessage(window, { type: "DUSK_RPC_RESPONSE", id, response: { result: secondChain } });
+      await expect(outcome).resolves.toEqual(response);
+      expect(provider.chainId).toBe(kind === "error" ? null : firstChain);
+    }
+  );
+
   it("scopes bridge messages to Dusk Wallet", async () => {
     const source = await readFile(inpageUrl, "utf8");
     const window = new EventTarget();

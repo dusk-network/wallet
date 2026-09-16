@@ -21,6 +21,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Security
 
+- Rejected non-integer and out-of-u8-range profile indices before BLS key derivation. ([#117])
 - Pinned direct Noble dependencies to exact reviewed versions. ([#22])
 - Typed-data signatures cover a domain-separated message rather than the bare 32-byte digest, so they cannot be produced by, or replayed as, a signature over a caller-supplied digest.
 
@@ -54,6 +55,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 [#22]: https://github.com/dusk-network/wallet/issues/22
 [#113]: https://github.com/dusk-network/wallet/issues/113
+[#117]: https://github.com/dusk-network/wallet/issues/117
 
 ## [0.3.0] - 2026-06-23
 

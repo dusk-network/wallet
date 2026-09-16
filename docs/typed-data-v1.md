@@ -6,6 +6,10 @@ Signer resource checks use `checkPolicyLimits` from `@dusk/typed-data/policy`, n
 
 Wallet owns keys and signing, trusted origin/chain checks, permissions and account selection, RPC error translation, approval display and lifecycle rechecks. Display clipping never changes the signed input. See [the provider API](provider-api.md#dusk_signtypeddata) for request/result fields.
 
+The BLS derivation helper requires a numeric integer in `[0, 255]`, matching
+wallet-core's `u8` index without coercion or wrapping. This does not increase the
+wallet's supported account count or change keys/signatures for valid indices.
+
 Applications verify with `verifyTypedDataSignature` from `@dusk/typed-data/bls`, using trusted chain/origin expectations and checking `result.ok`. Signer identity, authorization, nonce and expiry checks remain application responsibilities.
 
 ## Status

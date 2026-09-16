@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { findPackageJSON } from "node:module";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mnemonicToSeedSync } from "bip39";
 import { bls12_381 } from "@noble/curves/bls12-381";
@@ -106,6 +108,23 @@ describe("blsDigest module surface", () => {
 });
 
 describe("blsDigest", () => {
+  it.each([
+    -1, -256, 256, 1000, 2 ** 53, 2 ** 64, 0.5, NaN, Infinity, -Infinity,
+    "42", "", false, true, null, undefined, 42n, {}, new Number(42),
+  ])("rejects non-u8 profile indices without coercion: %s", (profileIndex) => {
+    expect(() => deriveBlsSecretKeyFromSeed(new Uint8Array(64), profileIndex))
+      .toThrow("profileIndex must be an integer in [0, 255]");
+  });
+
+  it.each([0, 255])("preserves the packaged BLS vector at u8 boundary %s", (index) => {
+    const packageRoot = dirname(findPackageJSON("@dusk/typed-data", import.meta.url));
+    const vector = JSON.parse(readFileSync(join(packageRoot, "vectors/bls-signing", `zero_seed_index_${index}.json`), "utf8"));
+    const key = deriveBlsSecretKeyFromSeed(hexToBytes(vector.input.seedHex), index);
+    expect(skScalarToBytes(key)).toEqual(hexToBytes(vector.expected.secretKeyLeHex));
+    expect(derivedFundsPkBytes(hexToBytes(vector.input.seedHex), index)).toEqual(hexToBytes(vector.expected.publicKeyG2Hex));
+    expect(signBlsMessageBytes(hexToBytes(vector.expected.signedMessageHex), key)).toEqual(hexToBytes(vector.expected.signatureG1Hex));
+  });
+
   it("serializes 32-byte little-endian scalars without truncation", () => {
     const expected = new Uint8Array(32);
     expected.set([4, 3, 2, 1]);
