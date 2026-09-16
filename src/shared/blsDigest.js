@@ -68,9 +68,12 @@ function fromBytesWide(bytes64) {
 
 /**
  * @param {Uint8Array} seed 64-byte BIP39 seed
- * @param {number} profileIndex
+ * @param {number} profileIndex Integer in [0, 255], matching wallet-core's u8 index.
  */
 export function deriveBlsSecretKeyFromSeed(seed, profileIndex) {
+  if (!Number.isInteger(profileIndex) || profileIndex < 0 || profileIndex > 255) {
+    throw new TypeError("profileIndex must be an integer in [0, 255]");
+  }
   const indexBytes = new Uint8Array(8);
   new DataView(indexBytes.buffer).setBigUint64(0, BigInt(profileIndex), true);
   const termination = new Uint8Array([0x53, 0x4b]);

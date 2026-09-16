@@ -174,6 +174,16 @@ The public repository does not currently include a native Tauri wrapper, so ther
 - Cannot access page JavaScript context
 - Provider injected via script tag with controlled interface
 
+#### Page Bridge
+
+The in-page `postMessage` transport is visible to other scripts in the same page.
+Its request IDs, wallet routing ID and `event.source` check do not authenticate a
+response against such scripts. The first matching response consumes a request;
+changing whether the pending entry is deleted before or after resolving/rejecting its Promise
+does not make a later genuine response win. Applications must independently verify
+returned signatures, signer identity and expected context; a resolved provider
+Promise is not proof of authenticity.
+
 #### Service Worker
 
 - No DOM access (by design)
