@@ -171,27 +171,73 @@ test("a rejected unlock transport recovers without an unhandled rejection", asyn
   await expect.poll(() => page.evaluate(() => window.unlockRequests.length)).toBe(2);
 });
 
-test("a late successful unlock invalidates the overview without disturbing Settings", async ({ page }) => {
-  await page.getByPlaceholder("Password", { exact: true }).fill(PASSWORD);
+test("success refreshes a replacement unlock form after returning before completion", async ({ page }) => {
+  const input = page.getByPlaceholder("Password", { exact: true });
+  await input.fill(PASSWORD);
   await page.getByRole("button", { name: "Unlock", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.unlockRequests.length)).toBe(1);
   await page.getByTitle("Options", { exact: true }).click();
   await expect(page.getByText("Settings", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "← Back", exact: true }).click();
+  await expect(input).toBeEnabled();
+  await input.fill(PASSWORD);
+  expect(await input.evaluate(el => el === window.originalPassword)).toBe(false);
+  expect(await page.evaluate(() => window.originalPassword.isConnected)).toBe(false);
+  expect(await page.evaluate(() => window.uiState.overview.isUnlocked)).toBe(false);
+  const reads = await page.evaluate(() => window.overviewReads);
+  await input.evaluate(el => { window.replacementPassword = el; });
+  // Resolve only the backend request: no lock-state push or manual rerender.
   await page.evaluate(() => {
-    window.settingsNode = document.querySelector("#app").lastElementChild;
     window.overview.isUnlocked = true;
     window.unlockReply.resolve({ ok: true });
   });
-  await expect.poll(() => page.evaluate(() => window.originalButton.textContent)).toBe("Unlock");
-  expect(await page.evaluate(() => ({
-    needsRefresh: window.uiState.needsRefresh,
-    settingsUnchanged: window.settingsNode === document.querySelector("#app").lastElementChild,
-    password: window.originalPassword.value,
-  }))).toEqual({ needsRefresh: true, settingsUnchanged: true, password: "" });
-  await page.getByRole("button", { name: "← Back", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.uiState.overview.isUnlocked)).toBe(true);
+  expect(await page.evaluate(() => window.overviewReads)).toBeGreaterThan(reads);
   await expect(page.locator("body")).toHaveAttribute("data-wallet-ready", "true");
-  await expect(page.getByPlaceholder("Password", { exact: true })).toHaveCount(0);
+  await expect(input).toHaveCount(0);
+  expect(await page.evaluate(() => [window.originalPassword.value, window.replacementPassword.value])).toEqual(["", ""]);
+  expect(await page.evaluate(() => window.unlockRequests.length)).toBe(1);
 });
+
+for (const [destination, placeholder, draft] of [
+  ["options", "https://provers.dusk.network", "https://unsaved.example"],
+  ["contacts", "Name (e.g. Alice)", "Unsaved contact"],
+]) {
+  test(`a late successful unlock preserves the active ${destination} draft`, async ({ page }) => {
+    await page.getByPlaceholder("Password", { exact: true }).fill(PASSWORD);
+    await page.getByRole("button", { name: "Unlock", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.unlockRequests.length)).toBe(1);
+    await page.getByTitle("Options", { exact: true }).click();
+    await expect(page.getByText("Settings", { exact: true })).toBeVisible();
+    if (destination === "contacts") {
+      await page.evaluate(async () => {
+        window.uiState.route = "contacts";
+        await window.renderPopup();
+      });
+      await page.getByRole("button", { name: "New contact", exact: true }).click();
+    }
+    const field = page.getByPlaceholder(placeholder, { exact: true });
+    await field.fill(draft);
+    await field.evaluate(el => { window.draftField = el; });
+    await page.evaluate(() => {
+      window.overview.isUnlocked = true;
+      window.unlockReply.resolve({ ok: true });
+    });
+    await expect.poll(() => page.evaluate(() => window.originalButton.textContent)).toBe("Unlock");
+    expect(await page.evaluate(() => ({
+      needsRefresh: window.uiState.needsRefresh,
+      password: window.originalPassword.value,
+    }))).toEqual({ needsRefresh: true, password: "" });
+    await expect(field).toHaveValue(draft);
+    await expect(field).toBeFocused();
+    expect(await field.evaluate(el => el === window.draftField)).toBe(true);
+    if (destination === "options") {
+      await page.getByRole("button", { name: "← Back", exact: true }).click();
+      await expect(page.locator("body")).toHaveAttribute("data-wallet-ready", "true");
+      await expect(page.getByPlaceholder("Password", { exact: true })).toHaveCount(0);
+    }
+  });
+}
 
 for (const destination of ["options", "contacts", "reset"]) {
   test(`leaving for ${destination} clears the old input and ignores a late unlock error`, async ({ page }) => {

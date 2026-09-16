@@ -32,8 +32,8 @@ export function lockedView({ state, actions } = {}) {
         const res = await actions?.send?.({ type: "DUSK_UI_UNLOCK", password: pwd.value });
         if (res?.error) throw new Error(res.error.message ?? "Unlock failed");
         state.needsRefresh = true;
-        // Navigation may have discarded this form while unlocking.
-        if (!pwd.isConnected) return;
+        // Refresh even a replacement unlock form, but leave other views alone.
+        if (!document.getElementById("unlock-password")) return;
         pwd.value = "";
         await actions?.render?.({ forceRefresh: true });
       } catch (err) {
