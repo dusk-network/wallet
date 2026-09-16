@@ -81,7 +81,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run typed-data approval renderer tests
+      - name: Run approval and unlock renderer tests
         run: |
           npx --no-install playwright install --with-deps chromium
-          npm run e2e -- typed-data-preview.spec.js --workers=1
+          npm run e2e -- typed-data-preview.spec.js unlock-form.spec.js --workers=1
