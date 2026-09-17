@@ -1,6 +1,7 @@
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
+import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { h } from "../lib/dom.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { truncateMiddle } from "../lib/strings.js";
@@ -561,6 +562,126 @@ export async function renderNotification() {
       }),
       decisionButtons("Sign in"),
     ]);
+    return;
+  }
+
+  if (kindNorm === "sign_typed_data") {
+    const digestHex = String(params?.digestHex ?? "");
+    let disclosure;
+    try {
+      disclosure = prepareTypedDataDisclosure({
+        domain: params?.domain, types: params?.types,
+        primaryType: params?.primaryType, message: params?.message, origin,
+      }, digestHex);
+    } catch {
+      setApp([
+        header,
+        h("div", { class: "err", role: "alert", text:
+          "Cannot safely disclose the full signing request. Signing is disabled. Reject this request and ask the site for a smaller or corrected payload." }),
+        decisionButtonsWithState({ approveText: "Sign", approveDisabled: true }).row,
+      ]);
+      return;
+    }
+    // Both views use the same digest-checked snapshot, not a second read of params.
+    const { domain, primaryType } = disclosure.input;
+    const originPreview = sanitizeStringForDisplay(disclosure.input.origin);
+    const domainName = sanitizeStringForDisplay(domain.name);
+    const domainVersion = sanitizeStringForDisplay(domain.version);
+    const domainChainId = sanitizeStringForDisplay(domain.chainId);
+    const verifyingContract = domain.verifyingContract;
+    const { rows, truncated } = await flattenTypedMessage(disclosure.input);
+    // Text shaping and normalization differences are not necessarily malicious;
+    // distinguish their review notice from ordinary preview-size limits.
+    const unsafeTextFlags = ["control_chars", "bidi_control", "invalid_surrogate", "invisible_format", "line_separator", "non_nfc"];
+    const hasTextSafetyWarning = [originPreview, domainName, domainVersion, domainChainId, ...rows].some((row) =>
+      (row.flags ?? []).some((flag) => unsafeTextFlags.includes(flag))
+    );
+
+    const displayRow = (label, row) =>
+      h("div", { class: "row" }, [
+        h("div", { class: "muted", text: label }),
+        h("div", { class: "box" }, [
+          h("code", { text: row.display, title: row.flags.length ? row.flags.join(", ") : "" }),
+        ]),
+        row.flags.includes("truncated")
+          ? h("div", { class: "muted", text: "Text truncated; the full value is signed." })
+          : null,
+      ]);
+
+    setApp(
+      [
+        displayRow("Request from", originPreview),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Approve typed data signature" }),
+        ]),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Account" }),
+          h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+        ]),
+        displayRow("Domain name", domainName),
+        displayRow("Domain version", domainVersion),
+        displayRow("Chain ID", domainChainId),
+        displayRow("Verifying contract", { display: verifyingContract || "32 zero bytes (default)", flags: [] }),
+        h("div", { class: "row" }, [
+          h("div", { class: "muted", text: "Primary type" }),
+          h("div", { class: "box" }, [h("code", { text: primaryType })]),
+        ]),
+        h("details", { class: "box" }, [
+          h("summary", { text: "Full signing request (escaped JSON)" }),
+          h("p", { class: "muted", text:
+            "Complete values and declared schema, including bytes and omitted preview content. Non-ASCII characters use JSON \\uXXXX escapes; originals are not normalized. Unused types and extra metadata do not contribute to the digest." }),
+          h("textarea", {
+            readonly: true, rows: 12, wrap: "off", spellcheck: false, dir: "ltr",
+            "aria-label": "Full signing request (escaped JSON)",
+            style: "width:100%;box-sizing:border-box;font-family:monospace;resize:vertical;unicode-bidi:isolate;",
+            text: disclosure.json,
+          }),
+        ]),
+        h("div", { class: "muted", text: "Message fields" }),
+        ...rows.map((row) => displayRow(`${row.path} · ${row.type}`, row)),
+        truncated
+          ? h("div", {
+              class: "muted",
+              text: [
+                truncated.omittedCount > 0
+                  ? `${truncated.omittedCount} more field(s) not shown.`
+                  : "",
+                truncated.depthLimited
+                  ? "Some fields are nested deeper than this screen displays."
+                  : "",
+                "Open Full signing request (escaped JSON) above to inspect every value.",
+                "The digest below covers the whole message.",
+              ]
+                .filter(Boolean)
+                .join(" "),
+            })
+          : null,
+        h("div", { class: "row" }, [
+          h("details", { class: "box" }, [
+            h("summary", { text: "Digest (verify against the dApp)" }),
+            h("div", { class: "muted", style: "margin-top:8px;" }, [
+              h("code", { text: digestHex || "—" }),
+            ]),
+          ]),
+        ]),
+        hasTextSafetyWarning
+          ? h("div", { class: "callout warn" }, [
+              h("div", { class: "callout-title", text: "Text needs review" }),
+              h("div", {
+                class: "muted",
+                text:
+                  "Some origin, domain or message text contains controls, formatting characters, line separators or non-NFC sequences. The preview may use placeholders or escapes. Inspect the originals in Full signing request before signing.",
+              }),
+            ])
+          : null,
+        h("div", {
+          class: "muted",
+          text:
+            "Signing authorizes this exact message for the site shown above. It does not submit a transaction. A malicious site can request a signature that references contracts or fields you don't intend to trust — verify every field before continuing.",
+        }),
+        decisionButtons("Sign"),
+      ].filter(Boolean)
+    );
     return;
   }
 

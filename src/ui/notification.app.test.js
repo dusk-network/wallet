@@ -34,4 +34,36 @@ describe("notification approval UI", () => {
     expect(source).toContain("fnArgs: argsHex");
     expect(source).not.toContain("fnArgs: argsBytes");
   });
+
+  it("keeps the typed-data preview alongside a digest-checked full disclosure", async () => {
+    const source = await readFile(path.resolve(process.cwd(), "src", "ui", "notification", "app.js"), "utf8");
+    const block = source.match(/if \(kindNorm === "sign_typed_data"\) \{([\s\S]*?)\n  if \(kindNorm === "watch_asset"\)/);
+
+    expect(block?.[1]).toBeTruthy();
+    const body = block[1];
+
+    // The bounded preview remains separate from the full escaped request.
+    expect(body).toContain("prepareTypedDataDisclosure(");
+    expect(body).toContain("flattenTypedMessage(disclosure.input)");
+    expect(body).not.toContain("JSON.stringify(params?.message");
+    expect(body).not.toContain("JSON.stringify(message");
+
+    // Required fields from the spec'd render order.
+    expect(body).toContain("Approve typed data signature");
+    expect(body).toContain("Domain name");
+    expect(body).toContain("Domain version");
+    expect(body).toContain("Chain ID");
+    expect(body).toContain("Verifying contract");
+    expect(body).toContain("Primary type");
+    expect(body).toContain("Message fields");
+    expect(body).toContain("digestHex");
+    expect(body).toContain('decisionButtons("Sign")');
+
+    // Even an implicit domain default is disclosed.
+    expect(body).toContain("32 zero bytes (default)");
+
+    // A text-safety flag on any row must surface a warning to the user.
+    expect(body).toContain("hasTextSafetyWarning");
+    expect(body).toContain("row.flags");
+  });
 });

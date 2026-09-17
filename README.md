@@ -55,7 +55,7 @@ A non-custodial wallet for [Dusk](https://dusk.network). Chrome and Firefox exte
 From a fresh checkout:
 
 ```bash
-npm install
+npm ci
 npm run build:chrome
 ```
 
@@ -66,7 +66,7 @@ Then load `dist/` as an unpacked extension in `chrome://extensions` (Developer m
 From a fresh checkout:
 
 ```bash
-npm install
+npm ci
 npm run build:firefox
 ```
 
@@ -76,26 +76,75 @@ Then load `dist-firefox/` as a temporary add-on in `about:debugging`.
 
 The extension announces an EIP-1193-style provider through Dusk discovery events. Dusk isn't EVM, but the provider patterns are familiar.
 
+Use Connect's conflict-aware discovery support; metadata is self-attested, not
+wallet authentication. Run this as a JavaScript module:
+
 ```js
-const providers = [];
+import { createDuskWallet } from "@dusk/connect";
 
-window.addEventListener("dusk:announceProvider", (event) => {
-  providers.push(event.detail);
-});
+const wallet = createDuskWallet();
+await wallet.ready();
 
-window.dispatchEvent(new Event("dusk:requestProvider"));
-
-const dusk = providers[0]?.provider;
-const [profile] = await dusk.request({ method: "dusk_requestProfiles" });
+// When selection is required, show wallet.providers in a picker (or Connect UI).
+// Make conflicts visible and disable those entries; pass a chosen UUID to wallet.selectProvider().
+if (!wallet.provider) throw new Error("Select an unconflicted Dusk wallet before connecting");
+const [profile] = await wallet.connect(); // dusk_requestProfiles; prompts for a profile grant.
 console.log(profile.account);
 
-dusk.on("profilesChanged", console.log);
-dusk.on("chainChanged", console.log);
+// Keep requests/events on the wrapper so later selection changes are respected.
+wallet.on("profilesChanged", console.log);
+wallet.on("chainChanged", console.log);
+// Call wallet.destroy() when the integration is torn down.
 ```
+
+### Typed-data signing
+
+`dusk_signTypedData` signs structured, wallet-rendered data rather than an opaque
+digest — the Dusk analogue of `eth_signTypedData_v4`, not of `eth_sign`. The approval
+screen shows the domain, primary type, message previews and digest. Previews may be
+truncated; **Full signing request (escaped JSON)** exposes the complete request
+without normalizing its values. Sign is disabled if the full disclosure cannot
+match the pending digest within display limits. See the [disclosure behavior and
+resource limits](docs/provider-api.md#dusk_signtypeddata) and
+[#113](https://github.com/dusk-network/wallet/issues/113).
+
+```js
+const result = await wallet.request("dusk_signTypedData", {
+  domain: { name: "Example", version: "1", chainId: "dusk:1" },
+  types: {
+    DuskTypedDataDomain: [
+      { name: "name", type: "string" },
+      { name: "version", type: "string" },
+      { name: "chainId", type: "string" },
+      { name: "verifyingContract", type: "bytes32" },
+    ],
+    SignIn: [{ name: "address", type: "string" }],
+  },
+  primaryType: "SignIn",
+  message: { address: profile.account },
+});
+// → { account, publicKeyHex, origin, chainId, primaryType, digestHex, signature }
+```
+
+Two things to know before integrating:
+
+- **Do not send `origin`.** The wallet injects its own view of the requesting origin
+  into the digest, and returns the exact string it used. A caller able to set it could
+  obtain a signature attributable to a site it does not control.
+- **`domain.chainId` must match the wallet's active chain**, or the request is rejected
+  before the user sees anything.
+
+Verify signatures with [`@dusk/typed-data/bls`](https://github.com/dusk-network/typed-data#usage),
+passing trusted chain/origin expectations and checking `result.ok`. Reconstruct the
+hash input with the wallet-returned `origin`. Also check the expected signer,
+authorization and replay protection.
+The signature covers a tagged wrapper around `digestHex`, not the bare digest — verifying
+the bare digest would accept signatures produced by any raw 32-byte signing path.
 
 Canonical v0.1 docs:
 
 - Provider API: [docs/provider-api.md](docs/provider-api.md)
+- Typed-data v1 specification and integration: [docs/typed-data-v1.md](docs/typed-data-v1.md)
 - Discovery protocol: [dusk-network/connect docs/wallet-discovery.md](https://github.com/dusk-network/connect/blob/main/docs/wallet-discovery.md)
 - Connect SDK usage: [dusk-network/connect README.md](https://github.com/dusk-network/connect/blob/main/README.md)
 - Wallet implementer guidance: [dusk-network/connect docs/wallet-implementer.md](https://github.com/dusk-network/connect/blob/main/docs/wallet-implementer.md)

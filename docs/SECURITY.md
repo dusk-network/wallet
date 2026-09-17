@@ -32,6 +32,14 @@ Dusk Wallet is a self-custody wallet — users control their own keys. This docu
 
 ## Security Measures
 
+### Cryptographic Dependencies
+
+`@noble/curves` and `@noble/hashes` execute in key derivation and signing paths,
+so their direct dependency versions are pinned exactly to make upgrades an
+explicit review decision. The lockfile already fixes versions for `npm ci`;
+exact manifest pins also constrain resolution when a lockfile is created or
+updated. Pins and integrity checks do not replace dependency review.
+
 ### 1. Mnemonic Protection
 
 #### Encryption at Rest
@@ -115,6 +123,7 @@ service worker does not immediately lock an otherwise active unlocked wallet.
 | `dusk_sendTransaction` | Yes | Yes |
 | `dusk_watchAsset` | Yes | Yes |
 | `dusk_signMessage` | Yes | Yes |
+| `dusk_signTypedData` | Yes | Yes |
 | `dusk_signAuth` | Yes | Yes |
 | `dusk_disconnect` | No | No |
 
@@ -164,6 +173,16 @@ The public repository does not currently include a native Tauri wrapper, so ther
 - Content scripts run in isolated world
 - Cannot access page JavaScript context
 - Provider injected via script tag with controlled interface
+
+#### Page Bridge
+
+The in-page `postMessage` transport is visible to other scripts in the same page.
+Its request IDs, wallet routing ID and `event.source` check do not authenticate a
+response against such scripts. The first matching response consumes a request;
+changing whether the pending entry is deleted before or after resolving/rejecting its Promise
+does not make a later genuine response win. Applications must independently verify
+returned signatures, signer identity and expected context; a resolved provider
+Promise is not proof of authenticity.
 
 #### Service Worker
 

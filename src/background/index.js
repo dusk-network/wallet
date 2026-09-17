@@ -76,6 +76,7 @@ const DAPP_ACTIVITY_METHODS = new Set([
   "dusk_watchAsset",
   "dusk_signMessage",
   "dusk_signAuth",
+  "dusk_signTypedData",
 ]);
 
 /** Last activity timestamp cache; persisted storage survives worker restarts. */
