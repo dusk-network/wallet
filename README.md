@@ -1,37 +1,34 @@
-# Dusk Wallet
+<div align="center">
 
-A non-custodial wallet for [Dusk](https://dusk.network). Chrome and Firefox extension builds from one codebase.
+# `Dusk Wallet`
+
+> A non-custodial wallet for [Dusk](https://dusk.network). Chrome and Firefox extension builds from one codebase.
+</div>
+
 
 **Your keys. Your DUSK. No middleman.**
 
 <p align="center">
   <a href="https://github.com/dusk-network/wallet/actions/workflows/ci.yml">
-    <img src="https://github.com/dusk-network/wallet/actions/workflows/ci.yml/badge.svg" alt="CI">
-  </a>
+    <img src="https://github.com/dusk-network/wallet/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   &nbsp;
   <a href="https://github.com/dusk-network/wallet/actions/workflows/release.yml">
-    <img src="https://github.com/dusk-network/wallet/actions/workflows/release.yml/badge.svg" alt="Release">
-  </a>
+    <img src="https://github.com/dusk-network/wallet/actions/workflows/release.yml/badge.svg" alt="Release"></a>
   &nbsp;
   <a href="https://codecov.io/gh/dusk-network/wallet">
-    <img src="https://codecov.io/gh/dusk-network/wallet/branch/main/graph/badge.svg" alt="Coverage">
-  </a>
+    <img src="https://codecov.io/gh/dusk-network/wallet/branch/main/graph/badge.svg" alt="Coverage"></a>
   &nbsp;
   <a href="https://github.com/dusk-network/wallet/stargazers">
-    <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/dusk-network/wallet?style=social">
-  </a>
+    <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/dusk-network/wallet?style=social"></a>
   &nbsp;
   <a href="https://discord.gg/dusk-official">
-    <img src="https://img.shields.io/discord/847466263064346624?label=discord&style=flat-square&color=5a66f6" alt="Join Discord">
-  </a>
+    <img src="https://img.shields.io/discord/847466263064346624?label=discord&style=flat-square&color=5a66f6" alt="Join Discord"></a>
   &nbsp;
   <a href="https://x.com/DuskFoundation/">
-    <img alt="X (formerly Twitter) Follow" src="https://img.shields.io/twitter/follow/DuskFoundation">
-  </a>
+    <img alt="X (formerly Twitter) Follow" src="https://img.shields.io/twitter/follow/DuskFoundation"></a>
   &nbsp;
   <a href="https://docs.dusk.network">
-    <img alt="Read the docs" src="https://img.shields.io/badge/read%20the%20docs-E2DFE9?style=flat-square">
-  </a>
+    <img alt="Read the docs" src="https://img.shields.io/badge/read%20the%20docs-E2DFE9?style=flat-square"></a>
 </p>
 
 ![Dusk Wallet extension design](./dusk-wallet-screenshots.png)
