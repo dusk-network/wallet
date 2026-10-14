@@ -27,6 +27,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Raised the shielded (Phoenix) transfer default gas limit to 50M and its minimum to 30M so shielded sends clear the node's spend-gas admission floor.
 - Preserved the active unlock form, including entered text and in-flight submission state, across passive rerenders. ([#110](https://github.com/dusk-network/wallet/issues/110))
 - Cleared unanchored spent-note caches before resync to prevent orphaned notes from reappearing. ([#106](https://github.com/dusk-network/wallet/issues/106))
 - Committed prefetched shielded chunks before stopping at the scan target, including under slow RPC responses.

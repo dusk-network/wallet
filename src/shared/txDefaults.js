@@ -12,21 +12,30 @@ import { TX_KIND } from "./constants.js";
  * Default gas settings by transaction kind.
  *
  * Rationale (current practical guidance):
- * - Public/Moonlight transfers: currently expected around 1-2M gas
- * - Shielded/Phoenix transfers: currently expected around 11-12M gas
+ * - Public/Moonlight transfers: ~1-2M gas used
+ * - Shielded/Phoenix transfers: ~23.7M gas used (10M for PLONK verification
+ *   plus ~13.7M for Merkle/Poseidon work and bookkeeping). Nodes also enforce
+ *   a Phoenix spend-gas admission floor of ~24M plus the transaction's data
+ *   charge (rusk-private #594), so an under-gassed shielded send is rejected
+ *   at submission (GasLimitTooLow) or runs out of gas mid-execution.
  * - Heavy operations (stake/unstake/withdraw): can reach ~27M
  * - Shielded staking operations pay from Phoenix notes and are deliberately
  *   kept at the same conservative envelope as shielded contract calls.
  *
  * So:
  * - transfer defaults are privacy-aware: public defaults to 2M, shielded
- *   defaults to 15M to leave headroom above observed Phoenix transfer cost.
+ *   defaults to 50M to clear the ~24M admission floor plus data charge
+ *   (~25.7M real total on data-charging networks) with margin. 50M matches
+ *   the shield/unshield defaults and the CLI wallet's transfer default.
  * - 500,000,000 for contract_call is a conservative default safety cap.
  *
  * Minimums are client-side safety floors. They are not a substitute for
  * node-side simulation/admission checks, but they prevent the wallet from
  * submitting obviously under-gassed transactions that can leave Phoenix
- * reservations stuck until mempool expiry/removal.
+ * reservations stuck until mempool expiry/removal. The shielded transfer
+ * floor is 30M: above the node's ~24M Phoenix admission floor plus data
+ * charge, yet below the 50M default so an advanced user can still dial a
+ * tighter manual limit.
  */
 export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
   public: Object.freeze({
@@ -34,7 +43,7 @@ export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
     price: "1",
   }),
   shielded: Object.freeze({
-    limit: "15000000",
+    limit: "50000000",
     price: "1",
   }),
 });
@@ -44,7 +53,7 @@ export const MIN_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
     limit: "2000000",
   }),
   shielded: Object.freeze({
-    limit: "15000000",
+    limit: "30000000",
   }),
 });
 
