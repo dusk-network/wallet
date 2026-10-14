@@ -731,7 +731,7 @@ describe("background rpc handler", () => {
         kind: "transfer",
         privacy: "shielded",
         to: SHIELDED_ADDRESS,
-        gas: { limit: "15000000", price: "1" },
+        gas: { limit: "50000000", price: "1" },
       })
     );
     expect(putTxMeta).toHaveBeenCalledWith(
@@ -765,7 +765,7 @@ describe("background rpc handler", () => {
       })
     ).rejects.toMatchObject({
       code: ERROR_CODES.INVALID_PARAMS,
-      message: expect.stringMatching(/at least 15000000/),
+      message: expect.stringMatching(/at least 30000000/),
     });
 
     expect(requestUserApproval).not.toHaveBeenCalledWith("send_tx", expect.anything(), expect.anything());
@@ -793,13 +793,13 @@ describe("background rpc handler", () => {
       })
     ).rejects.toMatchObject({
       code: ERROR_CODES.INVALID_PARAMS,
-      message: expect.stringMatching(/at least 15000000/),
+      message: expect.stringMatching(/at least 30000000/),
     });
 
     expect(requestUserApproval).toHaveBeenCalledWith(
       "send_tx",
       "https://dapp.example",
-      expect.objectContaining({ gas: { limit: "15000000", price: "1" } })
+      expect.objectContaining({ gas: { limit: "50000000", price: "1" } })
     );
     expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
   });

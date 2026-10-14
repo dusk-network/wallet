@@ -581,7 +581,7 @@ describe("background Phoenix tx lifecycle flow", () => {
     expect(response).toMatchObject({
       error: {
         code: ERROR_CODES.INVALID_PARAMS,
-        message: expect.stringContaining("at least 15000000"),
+        message: expect.stringContaining("at least 30000000"),
       },
     });
     expect(mocks.requestUserApproval).not.toHaveBeenCalled();
