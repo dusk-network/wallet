@@ -34,6 +34,24 @@ describe("send view", () => {
     expect(sendBlock?.[1]).toContain('"public"');
   });
 
+  it("sends to the account a .dusk name resolves to and shows both on review", async () => {
+    const source = await readFile(
+      path.resolve(process.cwd(), "src", "ui", "popup", "views", "send.js"),
+      "utf8"
+    );
+
+    const reviewBlock = source.match(/if \(isDuskName\(toVal\)\) \{([\s\S]*?)state\.route = "confirm"/);
+    expect(reviewBlock?.[1]).toContain("if (!applyNameResult(toVal, result)) return;");
+    expect(reviewBlock?.[1]).toContain("recipient = result.account;");
+    expect(reviewBlock?.[1]).toContain("to: recipient,");
+    expect(reviewBlock?.[1]).toContain("duskName,");
+
+    expect(source).toContain('nextBtn.disabled = t !== "account";');
+    expect(source).toContain('d.duskName ? h("div", { text: d.duskName.name }) : null');
+    expect(source).toContain('d.duskName.nodeUrl !== String(ov?.nodeUrl ?? "")');
+    expect(source).toMatch(/type: "DUSK_UI_SEND_TX"[\s\S]*?to: d\.to,/);
+  });
+
   it("uses shared recipient badges for send contact and privacy indicators", async () => {
     const sendView = await readFile(
       path.resolve(process.cwd(), "src", "ui", "popup", "views", "send.js"),
