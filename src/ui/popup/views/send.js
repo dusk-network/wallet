@@ -24,6 +24,7 @@ import {
 import { listAddressBook } from "../../../shared/addressBook.js";
 import {
   duskNameErrorText,
+  duskNameRecipient,
   duskNamesNetwork,
   isDuskName,
   lookupDuskName,
@@ -335,19 +336,51 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
   };
 
-  // A .dusk name resolves to a public account. Review stays off until it does.
+  // A .dusk name resolves to a public account, a shielded address or both. Review stays off until it does.
   const nameBox = h("div", { class: "row", style: "display:none" });
   const showNameBox = (children) => {
     setChildren(nameBox, children);
     nameBox.style.display = children.length ? "" : "none";
   };
 
+  // Whether a name with both is sent to its shielded address rather than its public account.
+  let nameShielded = draft.nameShielded === true;
+  const nameRecipient = (result) => duskNameRecipient(result, { shielded: nameShielded });
+
+  // For a name with both: its public account, or its shielded address instead.
+  const nameAddressToggle = (v, result) => {
+    const option = (text, shielded) =>
+      h("button", {
+        class: nameShielded === shielded ? "tab is-active" : "tab",
+        type: "button",
+        "aria-pressed": String(nameShielded === shielded),
+        text,
+        onclick: () => {
+          nameShielded = shielded;
+          syncDraft();
+          applyNameResult(v, result);
+          nameBox.querySelector('[aria-pressed="true"]')?.focus();
+        },
+      });
+    return h(
+      "div",
+      {
+        class: "tabs tabs--mini name-address-toggle",
+        style: `--seg-index:${nameShielded ? 1 : 0}; --seg-count:2;`,
+        title: `Send to ${result.name}'s public account or shielded address`,
+      },
+      [option("Public account", false), option("Shielded address", true)]
+    );
+  };
+
   // Shows a lookup result for `v` if the field still holds it; true when it can be sent to.
   const applyNameResult = (v, result) => {
     if (String(to.value || "").trim() !== v) return false;
-    // The transfer type follows from the resolved account, as for a pasted one.
-    const t = result.ok ? ProfileGenerator.typeOf(result.account) : null;
-    if (t === "account") {
+    // The transfer type follows from the address it sends to, as for a pasted one.
+    const recipient = result.ok ? nameRecipient(result) : "";
+    const t = recipient ? ProfileGenerator.typeOf(recipient) : null;
+    const usable = t === "account" || t === "address";
+    if (usable) {
       setRecipientBadge(toTypePill, {
         ...recipientTypeBadgeOptions(t),
         className: "recipient-type-badge",
@@ -355,7 +388,8 @@ export function sendFormView(ov, { state, actions } = {}) {
       showNameBox([
         h("div", { class: "box" }, [
           h("div", { text: result.name }),
-          h("code", { text: result.account }),
+          h("code", { text: recipient }),
+          result.account && result.address ? nameAddressToggle(v, result) : null,
         ]),
       ]);
     } else {
@@ -375,10 +409,10 @@ export function sendFormView(ov, { state, actions } = {}) {
           : null,
       ]);
     }
-    detectedRecipientType = t === "account" ? t : null;
-    nextBtn.disabled = t !== "account";
+    detectedRecipientType = usable ? t : null;
+    nextBtn.disabled = !usable;
     updateAmountHelpers();
-    return t === "account";
+    return usable;
   };
 
   const showDuskName = (v) => {
@@ -463,6 +497,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       to: String(to.value || ""),
       // The field is the recipient again; drop a name kept from review.
       duskName: undefined,
+      nameShielded,
       amountDusk: String(amount.value || ""),
       memo: String(memo.value || ""),
       // preserve any gas edits the user may have made on the confirm screen
@@ -471,6 +506,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   to.addEventListener("input", () => {
+    // A name typed anew sends to its public account until told otherwise.
+    nameShielded = false;
     updateToType();
     syncDraft();
   });
@@ -580,14 +617,14 @@ export function sendFormView(ov, { state, actions } = {}) {
         const toVal = to.value.trim();
         if (!toVal) throw new Error("Recipient is required");
 
-        // A .dusk name sends to the public account it resolves to.
+        // A .dusk name sends to the address it resolves to, as shown under the field.
         let recipient = toVal;
         let duskName;
         if (isDuskName(toVal)) {
           nextBtn.disabled = true;
           const result = await lookupDuskName(toVal, { nodeUrl: ov?.nodeUrl }).promise;
           if (!applyNameResult(toVal, result)) return;
-          recipient = result.account;
+          recipient = nameRecipient(result);
           duskName = { name: result.name, nodeUrl: String(ov?.nodeUrl ?? "") };
         }
 
@@ -606,6 +643,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         state.draft = {
           to: recipient,
           duskName,
+          nameShielded,
           privacy,
           amountLux: amtLux,
           amountDusk: amount.value.trim(),

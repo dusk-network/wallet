@@ -9,7 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- Added sending to `.dusk` names on Mainnet and Testnet.
+- Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address.
+- Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive.
 - Added a full escaped typed-data request view alongside the bounded approval preview. ([#113])
 - Displayed the installed extension version in Settings. ([#80])
 - Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and bounded, potentially truncated message previews with declared field types — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])

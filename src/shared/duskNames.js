@@ -1,17 +1,22 @@
-// Dusk Domains (.dusk names) for the send flow.
+// Dusk Domains (.dusk names) for the send flow and the wallet's own names.
 //
-// A name resolves to the public account in its `moonlight_address` record,
-// read through the SDK's lens reader and the wallet's own node. The SDK and the
-// pinned release descriptors are loaded on the first lookup only, so they stay
-// out of the popup bundle. The lens data driver ships with the extension in
-// public/drivers/dusk-domains, and the SDK checks it against the sha256 pinned
-// in dusk-domains-releases.json. Nothing else is fetched.
+// A name resolves to the public account in its `moonlight_address` record and
+// the shielded address in its `phoenix_payment_endpoint` record, and a public
+// account to its verified primary name, read through the SDK's lens reader and
+// the wallet's own node. The SDK and the pinned release descriptors are loaded
+// on the first lookup only, so they stay out of the popup bundle. The lens data
+// driver ships with the extension in public/drivers/dusk-domains, and the SDK
+// checks it against the sha256 pinned in dusk-domains-releases.json. Nothing
+// else is fetched.
 
 import { assetUrl } from "../platform/assets.js";
 import { classifyDuskIdentifier } from "./duskIdentifiers.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
 
 const LOOKUP_REUSE_MS = 60_000;
+
+// The records a name is sent to by: its public account, then its opt-in shielded address.
+const RECORD_KEYS = Object.freeze(["moonlight_address", "phoenix_payment_endpoint"]);
 
 /**
  * Whether recipient input is meant as a .dusk name. Base58 recipients never
@@ -68,6 +73,12 @@ function bundledFetch(release, nodeUrl) {
   };
 }
 
+// The SDK and the pinned release descriptors, loaded on the first lookup.
+const loadSdk = () => Promise.all([import("./duskNamesSdk.js"), import("./dusk-domains-releases.json")]);
+
+// The SDK's own spelling of the node URL, which its reads start with.
+const nodeHref = (nodeUrl) => new URL(String(nodeUrl)).href.replace(/\/$/, "");
+
 // One reader per network, bound to the node it reads from.
 const readers = new Map();
 
@@ -89,25 +100,40 @@ function readerFor(createLensReader, release, network, nodeUrl) {
   return promise;
 }
 
-function accountFrom({ status, account }, name) {
+// What an answer lets the wallet send to: the public account in the name's
+// `moonlight_address` record and the shielded address its
+// `phoenix_payment_endpoint` record holds as UTF-8 text. The wallet checks each
+// as it checks any address, and a record that fails counts as absent.
+function addressesFrom(sdk, { status, records }, name) {
   const fail = (reason) => ({ ok: false, name, reason });
   if (status === "Absent" || status === "Released") return fail("not_registered");
   if (status === "Grace" || status === "Expired") return fail("expired");
   if (status !== "Active") return fail("lookup_failed");
-  // The reader checks the record's shape only; the wallet checks the account as any address.
-  if (typeof account !== "string" || classifyDuskIdentifier(account) !== "account") return fail("no_account");
-  return { ok: true, name, account };
+  const [moonlight, phoenix] = records;
+  // The key check the reader's own resolveMoonlightAccount makes.
+  const account =
+    moonlight && sdk.hasClaimableReferrerShape({ kind: "Moonlight", bytes: moonlight.value })
+      ? sdk.encodeBase58(moonlight.value)
+      : "";
+  // A shielded address and nothing else, not even a byte order mark.
+  const text = phoenix ? new TextDecoder("utf-8", { ignoreBOM: true }).decode(Uint8Array.from(phoenix.value)) : "";
+  const result = { ok: true, name };
+  if (classifyDuskIdentifier(account) === "account") result.account = account;
+  if (text === text.trim() && classifyDuskIdentifier(text) === "address") result.address = text;
+  return result.account || result.address ? result : fail("no_account");
 }
 
 /**
- * Resolve a .dusk name to the public account in its `moonlight_address`
- * record. Only an active name with a valid 96-byte Moonlight account resolves;
- * everything else is a failure with a reason. Never throws.
+ * Resolve a .dusk name to what it can be sent to: the public account in its
+ * `moonlight_address` record and the shielded address in its
+ * `phoenix_payment_endpoint` record, read in one lens query. Only an active
+ * name with at least one valid address resolves; everything else is a failure
+ * with a reason. Never throws.
  *
  * @param {string} input - recipient field text
  * @param {{ nodeUrl?: string }} [opts] - the wallet's node for the active network
  * @returns {Promise<
- *   | { ok: true, name: string, account: string }
+ *   | { ok: true, name: string, account?: string, address?: string }
  *   | { ok: false, name: string, reason: "invalid_name"|"unsupported_network"|"not_registered"|"expired"|"no_account"|"lookup_failed" }
  * >}
  */
@@ -117,16 +143,12 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
 
   const network = duskNamesNetwork(nodeUrl);
   if (!network) return fail("unsupported_network");
-  // The SDK's own spelling of the node URL, which its reads start with.
-  const node = new URL(String(nodeUrl)).href.replace(/\/$/, "");
+  const node = nodeHref(nodeUrl);
 
   let sdk;
   let releases;
   try {
-    [sdk, { default: releases }] = await Promise.all([
-      import("./duskNamesSdk.js"),
-      import("./dusk-domains-releases.json"),
-    ]);
+    [sdk, { default: releases }] = await loadSdk();
   } catch {
     return fail("lookup_failed");
   }
@@ -138,10 +160,47 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
   // The reader bounds its own build and reads; any LensReaderError is a failed lookup.
   try {
     const reader = await readerFor(sdk.createLensReader, releases[network], network, node);
-    return accountFrom(await reader.resolveMoonlightAccount(name), name);
+    return addressesFrom(sdk, await reader.resolve(name, RECORD_KEYS), name);
   } catch {
     return fail("lookup_failed");
   }
+}
+
+/**
+ * The verified primary .dusk name of a public account, read with the lens
+ * reader's `verifyPrimary` through the wallet's node; `name` is null when the
+ * account has none. Never throws.
+ *
+ * @param {string} account - Base58 public account
+ * @param {{ nodeUrl?: string }} [opts] - the wallet's node for the active network
+ * @returns {Promise<{ ok: true, name: string|null } | { ok: false, reason: "unsupported_network"|"lookup_failed" }>}
+ */
+export async function resolvePrimaryName(account, { nodeUrl } = {}) {
+  const network = duskNamesNetwork(nodeUrl);
+  if (!network) return { ok: false, reason: "unsupported_network" };
+  // Only a public account, a Moonlight key, can have a primary name.
+  if (classifyDuskIdentifier(account) !== "account") return { ok: true, name: null };
+  try {
+    const [sdk, { default: releases }] = await loadSdk();
+    const reader = await readerFor(sdk.createLensReader, releases[network], network, nodeHref(nodeUrl));
+    // The reader takes the 96-byte key as plain numbers.
+    const verified = await reader.verifyPrimary(Array.from(sdk.decodeBase58(account)));
+    const name = verified === null ? null : verified.primary.spelling;
+    return name === null || typeof name === "string" ? { ok: true, name } : { ok: false, reason: "lookup_failed" };
+  } catch {
+    return { ok: false, reason: "lookup_failed" };
+  }
+}
+
+/**
+ * The address a resolved name is sent to: its public account, unless it has
+ * only a shielded address or `shielded` picks that one.
+ * @param {{ account?: string, address?: string }} result - a resolved name
+ * @param {{ shielded?: boolean }} [opts]
+ * @returns {string|undefined}
+ */
+export function duskNameRecipient({ account, address }, { shielded = false } = {}) {
+  return address && (shielded || !account) ? address : account;
 }
 
 let lastLookup = null;
@@ -175,8 +234,57 @@ export function lookupDuskName(input, { nodeUrl } = {}) {
   return entry;
 }
 
+// Primary names by node and account: the last answer, when it came, and the
+// lookup while one runs.
+const primaryNames = new Map();
+
 /**
- * Inline copy for a lookup that did not give a usable account.
+ * `resolvePrimaryName` for display, by node and account. A lookup starts after
+ * the render that asks for it and is shared while it runs; its answer is reused
+ * for a minute and stays on show while it is looked up again. A failed lookup
+ * changes nothing and is tried again on the next call.
+ *
+ * @param {string} account
+ * @param {{ nodeUrl?: string }} [opts]
+ * @returns {Promise<string|null>} the name, or null when there is none to show
+ */
+export function lookupPrimaryName(account, { nodeUrl } = {}) {
+  if (!duskNamesNetwork(nodeUrl) || classifyDuskIdentifier(account) !== "account") return Promise.resolve(null);
+  const key = `${nodeUrl}\n${account}`;
+  const entry = primaryNames.get(key) ?? { name: null, at: 0, running: null };
+  primaryNames.set(key, entry);
+  if (!entry.running && Date.now() - entry.at >= LOOKUP_REUSE_MS) {
+    entry.running = new Promise((start) => setTimeout(start)).then(async () => {
+      const result = await resolvePrimaryName(account, { nodeUrl });
+      entry.running = null;
+      if (result.ok) Object.assign(entry, { name: result.name, at: Date.now() });
+      return entry.at ? entry.name : null;
+    });
+  }
+  return entry.at ? Promise.resolve(entry.name) : entry.running;
+}
+
+/**
+ * The verified primary name of a public account, for display beside the same
+ * profile's shielded address: the name only when it pays there too, its
+ * `phoenix_payment_endpoint` record being exactly `address`, and null
+ * otherwise. Lookups are shared and reused as in `lookupPrimaryName` and
+ * `lookupDuskName`.
+ *
+ * @param {string} account - the public account
+ * @param {string} address - the profile's shielded address
+ * @param {{ nodeUrl?: string }} [opts]
+ * @returns {Promise<string|null>}
+ */
+export async function lookupShieldedName(account, address, { nodeUrl } = {}) {
+  const name = await lookupPrimaryName(account, { nodeUrl });
+  if (!name || !address) return null;
+  const result = await lookupDuskName(name, { nodeUrl }).promise;
+  return result.ok && result.address === address ? name : null;
+}
+
+/**
+ * Inline copy for a lookup that did not give a usable address.
  * @param {{ name?: string, reason?: string }} result
  * @returns {string}
  */
@@ -191,7 +299,7 @@ export function duskNameErrorText({ name, reason } = {}) {
     case "expired":
       return `${name} has expired.`;
     case "no_account":
-      return `${name} has no public account to send to.`;
+      return `${name} has no address to send to.`;
     default:
       return `Couldn't look up ${name}.`;
   }

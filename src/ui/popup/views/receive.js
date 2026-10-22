@@ -3,9 +3,11 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
 import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
 import { identiconEl } from "../../components/Identicon.js";
+import { duskNameEl } from "../../components/DuskName.js";
 import { decimalInput, textInput } from "../../components/FormControls.js";
 import { parseDuskToLux } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
+import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
 import {
   buildDuskUri,
 } from "../../../shared/duskUri.js";
@@ -123,7 +125,14 @@ export function receiveView(ov, { state, actions } = {}) {
   const chipIcon = h("div", { class: "receive-chip-icon" });
   const chipKind = h("div", { class: "receive-chip-kind" });
   const chipText = h("code", { class: "receive-chip-text" });
-  const chipMain = h("div", { class: "receive-chip-main" }, [chipKind, chipText]);
+  // The account's verified .dusk name; beside the shielded address only when the name pays there too.
+  const chipName = duskNameEl(
+    tab === "public"
+      ? lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl })
+      : lookupShieldedName(account, address, { nodeUrl: ov?.nodeUrl }),
+    { className: "receive-chip-name" }
+  );
+  const chipMain = h("div", { class: "receive-chip-main" }, [chipKind, chipName, chipText]);
   const chipCopy = h("div", { class: "receive-chip-copy", text: "⧉" });
   const addressChip = h(
     "button",

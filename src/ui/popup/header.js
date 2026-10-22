@@ -3,6 +3,7 @@ import { accountChipEl } from "../components/AccountChip.js";
 import { isFullView, isPopupView } from "./env.js";
 import { isExtensionRuntime } from "../../platform/runtime.js";
 import { platform } from "../../platform/index.js";
+import { lookupPrimaryName } from "../../shared/duskNames.js";
 
 /**
  * Get a CSS class for network status indicator.
@@ -141,7 +142,14 @@ export function createHeaderRenderer({
         }
       }
 
-      actions.push(accountChipEl(account, { onCopy: showToast, connected, host }));
+      actions.push(
+        accountChipEl(account, {
+          onCopy: showToast,
+          connected,
+          host,
+          name: lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl }),
+        })
+      );
 
       const canOpenProfiles = walletReady && acctMenu;
       if (canOpenProfiles) {

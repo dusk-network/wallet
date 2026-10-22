@@ -34,7 +34,7 @@ describe("send view", () => {
     expect(sendBlock?.[1]).toContain('"public"');
   });
 
-  it("sends to the account a .dusk name resolves to and shows both on review", async () => {
+  it("sends to the address a .dusk name resolves to and shows both on review", async () => {
     const source = await readFile(
       path.resolve(process.cwd(), "src", "ui", "popup", "views", "send.js"),
       "utf8"
@@ -42,14 +42,38 @@ describe("send view", () => {
 
     const reviewBlock = source.match(/if \(isDuskName\(toVal\)\) \{([\s\S]*?)state\.route = "confirm"/);
     expect(reviewBlock?.[1]).toContain("if (!applyNameResult(toVal, result)) return;");
-    expect(reviewBlock?.[1]).toContain("recipient = result.account;");
+    expect(reviewBlock?.[1]).toContain("recipient = nameRecipient(result);");
     expect(reviewBlock?.[1]).toContain("to: recipient,");
     expect(reviewBlock?.[1]).toContain("duskName,");
+    // A name's shielded address makes a shielded transfer, with its gas and balance.
+    expect(reviewBlock?.[1]).toContain('const privacy = recType === "address" ? "shielded" : "public";');
+    expect(source).toContain('privacy: d.privacy || (recType === "address" ? "shielded" : "public")');
 
-    expect(source).toContain('nextBtn.disabled = t !== "account";');
+    expect(source).toContain("nextBtn.disabled = !usable;");
+    expect(source).toContain("detectedRecipientType = usable ? t : null;");
     expect(source).toContain('d.duskName ? h("div", { text: d.duskName.name }) : null');
     expect(source).toContain('d.duskName.nodeUrl !== String(ov?.nodeUrl ?? "")');
     expect(source).toMatch(/type: "DUSK_UI_SEND_TX"[\s\S]*?to: d\.to,/);
+  });
+
+  it("lets a name with both addresses go to its shielded address instead", async () => {
+    const source = await readFile(
+      path.resolve(process.cwd(), "src", "ui", "popup", "views", "send.js"),
+      "utf8"
+    );
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+
+    expect(source).toContain("const nameRecipient = (result) => duskNameRecipient(result, { shielded: nameShielded });");
+    expect(source).toContain("result.account && result.address ? nameAddressToggle(v, result) : null");
+    expect(source).toContain('[option("Public account", false), option("Shielded address", true)]');
+    expect(source).toMatch(/onclick: \(\) => \{\s*nameShielded = shielded;\s*syncDraft\(\);\s*applyNameResult\(v, result\);/);
+    expect(css).toMatch(/\.tabs\.tabs--mini\.name-address-toggle\s*\{[^}]*margin-top/s);
+
+    // A name typed anew starts on its public account; re-renders and a return from review keep the pick.
+    expect(source).toMatch(/to\.addEventListener\("input", \(\) => \{\s*\/\/[^\n]*\n\s*nameShielded = false;/);
+    expect(source).toContain("let nameShielded = draft.nameShielded === true;");
+    expect(source.match(/^ {2}syncDraft = \(\) => \{([\s\S]*?)^ {2}\};/m)?.[1]).toContain("nameShielded,");
+    expect(source.match(/state\.draft = \{\s*to: recipient,([\s\S]*?)\};/)?.[1]).toContain("nameShielded,");
   });
 
   it("uses shared recipient badges for send contact and privacy indicators", async () => {

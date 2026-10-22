@@ -2,9 +2,12 @@ import { h } from "../lib/dom.js";
 import { copyToClipboard } from "../lib/clipboard.js";
 import { truncateMiddle } from "../lib/strings.js";
 import { identiconEl } from "./Identicon.js";
+import { duskNameEl } from "./DuskName.js";
 
-export function accountChipEl(account, { onCopy, connected, host } = {}) {
+// `name`, a lookup of the account's .dusk name, shows it above the short account once there is one.
+export function accountChipEl(account, { onCopy, connected, host, name } = {}) {
   const short = account ? truncateMiddle(account, 6, 4) : "—";
+  const text = h("div", { class: "chip-text", text: short });
 
   const icon = identiconEl(account || "dusk");
   if (host) {
@@ -34,6 +37,6 @@ export function accountChipEl(account, { onCopy, connected, host } = {}) {
         onCopy?.(ok ? "Copied account" : "Copy failed");
       },
     },
-    [icon, h("div", { class: "chip-text", text: short })]
+    [icon, name ? h("div", { class: "chip-lines" }, [duskNameEl(name), text]) : text]
   );
 }

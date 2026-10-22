@@ -1,5 +1,7 @@
 import { h } from "../lib/dom.js";
 import { truncateMiddle } from "../lib/strings.js";
+import { lookupPrimaryName } from "../../shared/duskNames.js";
+import { duskNameEl } from "./DuskName.js";
 
 /**
  * Small controller that renders the profile selection menu under an anchor.
@@ -45,6 +47,8 @@ export function createAccountMenuController({
 
       const left = h("div", { class: "net-menu-item-left" }, [
         h("div", { class: "net-menu-item-label", text: label }),
+        // Each profile's own .dusk name, looked up when the menu opens.
+        acct ? duskNameEl(lookupPrimaryName(String(acct), { nodeUrl: ov?.nodeUrl })) : null,
         hint
           ? h("div", { class: "net-menu-item-hint", text: hint })
           : h("div"),
