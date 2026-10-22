@@ -175,26 +175,37 @@ body[data-runtime="tauri"].page--full .panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 6px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
 
   background: #0C0C0E;
 }
 
-/* Header actions (account chip + refresh/options) */
+/* Header actions (account chip + expand/options). The brand and its network
+   pill keep their width; the account chip gives way and cuts its text. */
 .header-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.header-actions > * {
+  flex: 0 0 auto;
+}
+
+.header-actions > .account-chip {
+  flex: 0 1 auto;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .brand-mark {
@@ -216,6 +227,11 @@ body[data-runtime="tauri"].page--full .panel {
 }
 
 .brand-text { min-width: 0; }
+
+/* A narrow full view has room for the mark and the network pill only. */
+@media (max-width: 520px) {
+  body.page--full .brand-text { display: none; }
+}
 
 .panel-title {
   font-size: 14px;
@@ -520,6 +536,125 @@ input:focus, textarea:focus, select:focus {
   transform: translateY(-50%);
   max-width: 170px;
   pointer-events: none;
+}
+
+/* Send: where a .dusk name with both addresses is paid, as option cards */
+.name-choice-wrap,
+.name-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.name-points-to {
+  font-size: 13px;
+}
+
+.name-option {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--secondary);
+  transition: border-color 140ms ease;
+}
+
+.name-option:not(.is-checked):not(.is-disabled):hover {
+  border-color: rgba(242,240,235,0.16);
+}
+
+.name-option.is-checked {
+  border-color: var(--foreground);
+}
+
+.name-option__main {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 3px 10px;
+  padding: 10px 12px;
+  border-radius: inherit;
+  cursor: pointer;
+}
+
+.name-option__main:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 18%, transparent);
+}
+
+/* Dimmed, with the shortfall line right under it at full strength */
+.name-option.is-disabled .name-option__main {
+  padding-bottom: 3px;
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.name-option__dot {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--foreground);
+}
+
+.name-option.is-checked .name-option__dot {
+  background: radial-gradient(circle, var(--foreground) 0 3px, transparent 4px);
+}
+
+.name-option__title {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+}
+
+.name-option__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.name-option__addr {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  word-break: normal;
+}
+
+.name-option__line {
+  grid-column: 2;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted-foreground);
+}
+
+.name-option__line strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+/* "Not enough shielded DUSK. Shield DUSK first" */
+.name-shortfall {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted-foreground);
+}
+
+.name-option .name-shortfall {
+  padding: 0 12px 10px 40px;
+}
+
+button.name-shortfall__link {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--foreground);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.name-shortfall__link:hover {
+  background: none;
+  box-shadow: none;
 }
 
 .input-row > .icon-btn {
@@ -888,11 +1023,12 @@ button:disabled {
   gap: 8px;
 }
 
-/* Account chip (MetaMask-like) */
+/* Account chip (MetaMask-like): opens the profile switcher */
 .account-chip {
   height: 34px;
+  min-width: 0;
   max-width: 190px;
-  padding: 0 10px 0 8px;
+  padding: 0 8px 0 6px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--secondary);
@@ -900,7 +1036,7 @@ button:disabled {
 
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 
   box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
 }
@@ -915,13 +1051,12 @@ button:disabled {
 }
 
 .account-chip .chip-text {
+  display: flex;
   min-width: 0;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* A verified .dusk name, above the address it names */
@@ -934,23 +1069,23 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
-.account-chip .chip-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+/* The chip's name ends in "…" when it has to shrink; its short account loses
+   characters before the "…" and keeps its last four. */
+.account-chip .chip-text__head {
   min-width: 0;
-  line-height: 1.15;
-  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.account-chip .dusk-name {
+.account-chip .chip-text__tail {
+  flex: 0 0 auto;
+}
+
+.account-chip .chip-chev {
+  flex: 0 0 auto;
+  margin-left: auto;
   font-size: 12px;
-}
-
-.account-chip .dusk-name:not([hidden]) + .chip-text {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--muted-foreground);
+  opacity: 0.8;
 }
 
 .identicon {
@@ -1567,6 +1702,23 @@ body.page--popup .site-bar-action {
   margin-top: 0;
 }
 
+/* Refresh, next to the balance title */
+button.balance-refresh {
+  height: 20px;
+  min-width: 22px;
+  margin: 0 2px 0 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1;
+}
+
+button.balance-refresh:hover {
+  color: var(--foreground);
+}
+
 .balance-total-inline {
   margin-left: 6px;
   color: var(--muted-foreground);
@@ -1757,11 +1909,6 @@ body.page--popup .site-bar-action {
 .tabs.tabs--mini .tab {
   height: 30px;
   font-size: 11px;
-}
-
-/* Which of a .dusk name's addresses a transfer goes to */
-.tabs.tabs--mini.name-address-toggle {
-  margin-top: 10px;
 }
 
 /* Non-interactive segmented indicator (auto-detected) */
@@ -3110,6 +3257,34 @@ button.net-menu-item--active {
   flex: 0 0 auto;
 }
 
+.acct-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.acct-menu-row > .net-menu-item {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+button.acct-menu-copy {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+button.acct-menu-copy:hover {
+  color: var(--foreground);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
 /* -------------------------------------------------------
    Popup-only compact header (reduces crowding)
    ------------------------------------------------------- */
@@ -3228,23 +3403,19 @@ body.page--popup .action-btn-label {
 
 body.page--popup .panel-header {
   padding: 14px 14px;
-  gap: 12px;
 }
 
 body.page--popup .header-actions {
-  gap: 6px;
+  gap: 4px;
 }
 
-/* Make the account chip icon-only in popup */
+/* The account chip matches the popup's smaller buttons, and leaves its line
+   as much of the 380px as it can next to the expand and options buttons */
 body.page--popup .account-chip {
-  width: 36px;
-  max-width: 36px;
-  padding: 0;
-  justify-content: center;
-}
-
-body.page--popup .account-chip .chip-text {
-  display: none;
+  height: 32px;
+  padding: 0 6px 0 5px;
+  gap: 5px;
+  border-radius: 11px;
 }
 
 /* Slightly smaller icon buttons in popup */
@@ -3512,12 +3683,18 @@ body.page--popup .staking-shell .box {
   line-height: 1.35;
 }
 
-.stake-card__note--warn {
+.stake-card__note--warn,
+.send-self-note {
   padding: 10px 12px;
   border-radius: var(--radius);
   border: 1px solid color-mix(in oklab, var(--warn) 34%, var(--border));
   background: color-mix(in oklab, var(--warn) 9%, transparent);
   color: color-mix(in oklab, var(--dusk-snow-white) 88%, var(--warn));
+}
+
+.send-self-note {
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .stake-metrics {
@@ -3770,7 +3947,6 @@ body[data-runtime="tauri"] .panel-header {
 
 @media (max-width: 420px) {
   body[data-runtime="tauri"] .brand-text { display: none; }
-  body[data-runtime="tauri"] .header-actions .account-chip { display: none; }
   body[data-runtime="tauri"] .panel-header { padding-left: 12px; padding-right: 12px; gap: 10px; }
 }
 
@@ -3904,6 +4080,10 @@ body[data-runtime="tauri"].page--full .panel {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.receive-name-note {
+  text-align: center;
 }
 
 .receive-chip-copy {

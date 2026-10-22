@@ -14,6 +14,7 @@ import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
 import { submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
+import { nameAddressChoice, shieldedShortfallEl } from "../../components/NameAddressChoice.js";
 import {
   hideRecipientBadge,
   recipientBadge,
@@ -33,6 +34,25 @@ import {
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
+
+const duskAmount = (lux) => formatLuxShort(lux, UI_DISPLAY_DECIMALS);
+
+/**
+ * The line Review shows under the transfer's Public/Shielded pill: the balance
+ * that pays (for a shielded transfer, what can be spent now) and what the
+ * chain shows.
+ * @param {"public"|"shielded"} privacy
+ * @param {object} ov - the wallet overview
+ * @returns {string}
+ */
+export function transferLine(privacy, ov) {
+  if (privacy === "shielded") {
+    const spendable = safeBigInt(ov?.shieldedBalance?.spendable ?? ov?.shieldedBalance?.value, 0n);
+    return `Shielded transfer from your shielded balance (${duskAmount(spendable)} DUSK). Private.`;
+  }
+  const balance = safeBigInt(ov?.balance?.value, 0n);
+  return `Public transfer from your public balance (${duskAmount(balance)} DUSK). Visible on chain.`;
+}
 
 export function sendFormView(ov, { state, actions } = {}) {
   const draft = state.draft || {};
@@ -87,6 +107,16 @@ export function sendFormView(ov, { state, actions } = {}) {
     ov?.shieldedBalance?.spendable != null
       ? safeBigInt(ov.shieldedBalance.spendable, 0n)
       : null;
+
+  // Whether the spendable shielded balance covers the smallest transfer (1 Lux)
+  // plus the shielded fee cap; a .dusk name's shielded address needs it.
+  const shieldedCovers = shSpendLux != null && shSpendLux > feeLuxForRecipientType("address");
+
+  // The profile's own public account and shielded address, to flag sending to yourself.
+  const ownIdxRaw = Number(ov?.selectedAccountIndex ?? 0);
+  const ownIdx = Number.isFinite(ownIdxRaw) && ownIdxRaw >= 0 ? Math.floor(ownIdxRaw) : 0;
+  const ownAccount = String(ov?.accounts?.[ownIdx] ?? ov?.accounts?.[0] ?? "");
+  const ownAddress = String(ov?.addresses?.[ownIdx] ?? ov?.addresses?.[0] ?? "");
 
   let detectedRecipientType = null; // "account" | "address" | null
 
@@ -337,63 +367,70 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   // A .dusk name resolves to a public account, a shielded address or both. Review stays off until it does.
-  const nameBox = h("div", { class: "row", style: "display:none" });
+  const nameBox = h("div", { class: "row name-box", style: "display:none" });
   const showNameBox = (children) => {
-    setChildren(nameBox, children);
-    nameBox.style.display = children.length ? "" : "none";
+    const shown = children.filter(Boolean);
+    setChildren(nameBox, shown);
+    nameBox.style.display = shown.length ? "" : "none";
   };
 
-  // Whether a name with both is sent to its shielded address rather than its public account.
-  let nameShielded = draft.nameShielded === true;
-  const nameRecipient = (result) => duskNameRecipient(result, { shielded: nameShielded });
-
-  // For a name with both: its public account, or its shielded address instead.
-  const nameAddressToggle = (v, result) => {
-    const option = (text, shielded) =>
-      h("button", {
-        class: nameShielded === shielded ? "tab is-active" : "tab",
-        type: "button",
-        "aria-pressed": String(nameShielded === shielded),
-        text,
-        onclick: () => {
-          nameShielded = shielded;
-          syncDraft();
-          applyNameResult(v, result);
-          nameBox.querySelector('[aria-pressed="true"]')?.focus();
-        },
-      });
-    return h(
-      "div",
-      {
-        class: "tabs tabs--mini name-address-toggle",
-        style: `--seg-index:${nameShielded ? 1 : 0}; --seg-count:2;`,
-        title: `Send to ${result.name}'s public account or shielded address`,
-      },
-      [option("Public account", false), option("Shielded address", true)]
-    );
+  // Sending to your own account or address only costs a fee: say so, and let it go ahead.
+  const selfNote = h("div", { class: "send-self-note", hidden: true });
+  const showSelfNote = (recipient) => {
+    const own =
+      recipient && recipient === ownAccount
+        ? "account"
+        : recipient && recipient === ownAddress
+          ? "address"
+          : "";
+    selfNote.textContent = own ? `This is your own ${own}. Sending to yourself only costs a fee.` : "";
+    selfNote.hidden = !own;
   };
 
-  // Shows a lookup result for `v` if the field still holds it; true when it can be sent to.
+  // Opens Shield, for a shielded address the shielded balance can't pay.
+  const openShield = () => {
+    state.route = "convert";
+    state.draft = { kind: TX_KIND.SHIELD, amountDusk: "", amountLux: "" };
+    actions?.render?.().catch(() => {});
+  };
+
+  // Which address of a name with both the user picked, kept with that name:
+  // retyping the name, Back from Review and re-renders keep the pick, and any
+  // other name starts on its public account.
+  let nameChoice =
+    typeof draft.nameChoice?.name === "string"
+      ? { name: draft.nameChoice.name, shielded: draft.nameChoice.shielded === true }
+      : null;
+  const pickedShielded = (result) => nameChoice?.name === result.name && nameChoice.shielded;
+  const nameRecipient = (result) => duskNameRecipient(result, { shielded: pickedShielded(result) });
+
+  // Points the form at the address `result` sends to: the pill, the full
+  // address, the balance line and Review follow it. True when Review can go ahead.
+  const showNameAddress = (result, fullAddress) => {
+    const recipient = nameRecipient(result);
+    const t = ProfileGenerator.typeOf(recipient);
+    fullAddress.textContent = recipient;
+    setRecipientBadge(toTypePill, {
+      ...recipientTypeBadgeOptions(t),
+      className: "recipient-type-badge",
+    });
+    showSelfNote(recipient);
+    detectedRecipientType = t;
+    const sendable = t === "account" || shieldedCovers;
+    nextBtn.disabled = !sendable;
+    updateAmountHelpers();
+    return sendable;
+  };
+
+  // Shows a lookup result for `v` if the field still holds it; true when Review can go ahead.
   const applyNameResult = (v, result) => {
     if (String(to.value || "").trim() !== v) return false;
     // The transfer type follows from the address it sends to, as for a pasted one.
     const recipient = result.ok ? nameRecipient(result) : "";
     const t = recipient ? ProfileGenerator.typeOf(recipient) : null;
-    const usable = t === "account" || t === "address";
-    if (usable) {
-      setRecipientBadge(toTypePill, {
-        ...recipientTypeBadgeOptions(t),
-        className: "recipient-type-badge",
-      });
-      showNameBox([
-        h("div", { class: "box" }, [
-          h("div", { text: result.name }),
-          h("code", { text: recipient }),
-          result.account && result.address ? nameAddressToggle(v, result) : null,
-        ]),
-      ]);
-    } else {
+    if (t !== "account" && t !== "address") {
       hideRecipientBadge(toTypePill);
+      showSelfNote("");
       const failed = result.ok ? { name: result.name, reason: "no_account" } : result;
       showNameBox([
         h("div", { class: "err", text: duskNameErrorText(failed) }),
@@ -408,11 +445,43 @@ export function sendFormView(ov, { state, actions } = {}) {
             ])
           : null,
       ]);
+      detectedRecipientType = null;
+      nextBtn.disabled = true;
+      updateAmountHelpers();
+      return false;
     }
-    detectedRecipientType = usable ? t : null;
-    nextBtn.disabled = !usable;
-    updateAmountHelpers();
-    return usable;
+
+    const fullAddress = h("code");
+    if (result.account && result.address) {
+      const choice = nameAddressChoice({
+        name: result.name,
+        account: result.account,
+        address: result.address,
+        shielded: pickedShielded(result),
+        publicBalance: duskAmount(pubBalLux),
+        shieldedBalance: duskAmount(shSpendLux ?? shValueLux),
+        shieldedDisabled: !shieldedCovers,
+        onChoose: (shielded) => {
+          nameChoice = { name: result.name, shielded };
+          syncDraft();
+          choice.set(shielded);
+          showNameAddress(result, fullAddress);
+        },
+        onShield: openShield,
+      });
+      showNameBox([
+        choice.el,
+        h("div", { class: "muted name-full-label", text: "Full address" }),
+        h("div", { class: "box" }, [fullAddress]),
+      ]);
+    } else {
+      showNameBox([
+        h("div", { class: "box" }, [h("div", { text: result.name }), fullAddress]),
+        // A name with only a shielded address needs a shielded balance that pays.
+        result.account || shieldedCovers ? null : shieldedShortfallEl({ onShield: openShield }),
+      ]);
+    }
+    return showNameAddress(result, fullAddress);
   };
 
   const showDuskName = (v) => {
@@ -431,6 +500,7 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   const updateToType = () => {
     const v = String(to.value || "").trim();
+    showSelfNote("");
     if (!isDuskName(v)) {
       showNameBox([]);
       nextBtn.disabled = false;
@@ -473,6 +543,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       });
       detectedRecipientType = t;
       updateContactMatch(v, t);
+      showSelfNote(v);
       updateAmountHelpers();
       return;
     }
@@ -497,7 +568,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       to: String(to.value || ""),
       // The field is the recipient again; drop a name kept from review.
       duskName: undefined,
-      nameShielded,
+      nameChoice: nameChoice ?? undefined,
       amountDusk: String(amount.value || ""),
       memo: String(memo.value || ""),
       // preserve any gas edits the user may have made on the confirm screen
@@ -506,8 +577,6 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   to.addEventListener("input", () => {
-    // A name typed anew sends to its public account until told otherwise.
-    nameShielded = false;
     updateToType();
     syncDraft();
   });
@@ -643,7 +712,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         state.draft = {
           to: recipient,
           duskName,
-          nameShielded,
+          nameChoice: nameChoice ?? undefined,
           privacy,
           amountLux: amtLux,
           amountDusk: amount.value.trim(),
@@ -675,6 +744,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       toRow,
       toTypePill,
       nameBox,
+      selfNote,
       h("label", { text: "Amount" }),
       amountCard,
       h("label", { text: "Memo" }),
@@ -912,6 +982,11 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     }),
     h("div", { class: "row" }, [
       txTypeBadge,
+      // Which balance pays, and what the chain shows.
+      h("div", {
+        class: "muted transfer-line",
+        text: transferLine(d.privacy || (recType === "address" ? "shielded" : "public"), ov),
+      }),
       h("div", { class: "home-balance" }, [
         h("div", {
           class: "balance-amount",

@@ -1,4 +1,5 @@
 import { h } from "../lib/dom.js";
+import { copyToClipboard } from "../lib/clipboard.js";
 import { truncateMiddle } from "../lib/strings.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
 import { duskNameEl } from "./DuskName.js";
@@ -6,13 +7,16 @@ import { duskNameEl } from "./DuskName.js";
 /**
  * Small controller that renders the profile selection menu under an anchor.
  * Uses the same base classes as the network menu so ui.css styling applies.
+ * Each profile's row also copies its account, reporting through `onCopy`.
  */
 export function createAccountMenuController({
   onSelectAccountIndex,
   onOpenOptions,
+  onCopy,
 } = {}) {
   let menuEl = null;
   let cleanup = null;
+  let anchor = null;
 
   function close() {
     if (menuEl) {
@@ -23,6 +27,8 @@ export function createAccountMenuController({
       cleanup();
       cleanup = null;
     }
+    anchor?.setAttribute("aria-expanded", "false");
+    anchor = null;
   }
 
   function open(anchorEl, ov) {
@@ -58,7 +64,7 @@ export function createAccountMenuController({
         ? h("div", { class: "net-menu-check", text: "✓" })
         : h("div", { class: "net-menu-check", text: "" });
 
-      return h(
+      const select = h(
         "button",
         {
           class: `net-menu-item ${active ? "net-menu-item--active" : ""}`,
@@ -74,6 +80,24 @@ export function createAccountMenuController({
         },
         [left, check]
       );
+
+      // Beside the row rather than in it: a button can't hold another button.
+      const copy = acct
+        ? h("button", {
+            class: "acct-menu-copy",
+            type: "button",
+            text: "⧉",
+            title: "Copy account",
+            "aria-label": `Copy ${label} account`,
+            onclick: async () => {
+              const ok = await copyToClipboard(String(acct));
+              close();
+              onCopy?.(ok ? "Copied account" : "Copy failed");
+            },
+          })
+        : null;
+
+      return h("div", { class: "acct-menu-row" }, [select, copy]);
     });
 
     const manageAccountsBtn =
@@ -141,6 +165,9 @@ export function createAccountMenuController({
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", close);
     };
+
+    anchor = anchorEl;
+    anchor.setAttribute("aria-expanded", "true");
   }
 
   return { open, close, get isOpen() { return Boolean(menuEl); } };

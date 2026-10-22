@@ -126,13 +126,23 @@ export function receiveView(ov, { state, actions } = {}) {
   const chipKind = h("div", { class: "receive-chip-kind" });
   const chipText = h("code", { class: "receive-chip-text" });
   // The account's verified .dusk name; beside the shielded address only when the name pays there too.
-  const chipName = duskNameEl(
+  const nameLookup =
     tab === "public"
       ? lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl })
-      : lookupShieldedName(account, address, { nodeUrl: ov?.nodeUrl }),
-    { className: "receive-chip-name" }
-  );
+      : lookupShieldedName(account, address, { nodeUrl: ov?.nodeUrl });
+  const chipName = duskNameEl(nameLookup, { className: "receive-chip-name" });
   const chipMain = h("div", { class: "receive-chip-main" }, [chipKind, chipName, chipText]);
+
+  // Under the card, what people reach through that name.
+  const nameNote = h("div", { class: "muted receive-name-note", hidden: true });
+  nameLookup.then((name) => {
+    if (!name) return;
+    nameNote.textContent =
+      tab === "public"
+        ? `People who send to ${name} reach this public account.`
+        : `${name} also lists this address, so people can choose to pay you privately.`;
+    nameNote.hidden = false;
+  });
   const chipCopy = h("div", { class: "receive-chip-copy", text: "⧉" });
   const addressChip = h(
     "button",
@@ -428,6 +438,7 @@ export function receiveView(ov, { state, actions } = {}) {
       tabToggle,
       qrCard,
       addressChip,
+      nameNote,
       btnRow,
       requestDetails,
       note,

@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { installFakeDom } from "./testing/fakeDom.js";
+import { homeView } from "./popup/views/home.js";
+
+// The token and NFT cards load on their own; the balance card is what matters here.
+vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
 
 describe("home dashboard action icons", () => {
   it("uses crisp SVG glyphs for the primary wallet actions", async () => {
@@ -71,5 +77,49 @@ describe("home dashboard action icons", () => {
     expect(source).not.toContain('h("span", { text: "Activity" })');
     expect(source).not.toContain('class: "tabs"');
     expect(source).not.toContain("switchTab");
+  });
+});
+
+describe("home balance", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("puts Refresh next to the balance title, inside its brackets, and refreshes the wallet", async () => {
+    const { document } = installFakeDom();
+    const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const ov = {
+      isUnlocked: true,
+      nodeUrl: "https://testnet.nodes.dusk.network",
+      accounts: [],
+      balance: { value: "177986500000" },
+      shieldedBalance: { value: "0", spendable: "0" },
+    };
+    document.body.replaceChildren(...homeView(ov, { state, actions }));
+
+    const title = document.body.querySelector(".home-hero .balance-label");
+    expect(title.children.map((el) => el.className)).toEqual([
+      "bracket-title__bracket",
+      "bracket-title__text",
+      "balance-refresh",
+      "bracket-title__bracket",
+    ]);
+    expect(title.textContent).toBe("[Total balance⟳]");
+
+    const refresh = title.querySelector("button.balance-refresh");
+    expect(refresh.title).toBe("Refresh");
+    expect(refresh.getAttribute("aria-label")).toBe("Refresh");
+    refresh.click();
+    expect(actions.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes through the header's old Refresh action", async () => {
+    const app = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "app.js"), "utf8");
+    expect(app).toContain("const actions = { send, render, showToast, refresh: onRefresh };");
+    const onRefresh = app.match(/async function onRefresh\(\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+    expect(onRefresh).toContain("acctMenu.close();");
+    expect(onRefresh).toContain("state.needsRefresh = true;");
+    expect(onRefresh).toContain("await render({ forceRefresh: true });");
   });
 });

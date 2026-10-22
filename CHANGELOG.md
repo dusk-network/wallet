@@ -11,12 +11,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address.
 - Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive.
+- Added a warning when sending to your own account or address.
+- Showed on Review which balance pays and whether the transfer is visible on chain.
 - Added a full escaped typed-data request view alongside the bounded approval preview. ([#113])
 - Displayed the installed extension version in Settings. ([#80])
 - Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and bounded, potentially truncated message previews with declared field types — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])
 
 ### Changed
 
+- Opened the profile switcher from the header's account chip, with a copy button per account.
+- Moved Refresh from the header to the balance.
 - Pinned the shared typed-data RC through JSR's npm compatibility registry for reproducible installs. ([#22])
 - Used `@dusk/typed-data` for typed-data validation, hashing and signed-message construction. ([#22])
 - Gated dApp RPC requests on the canonical method list before any permission lookup or approval prompt, so methods absent from the advertised surface are unreachable rather than merely undocumented. Deliberately refused methods still report why instead of "Unknown method".

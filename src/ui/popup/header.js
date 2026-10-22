@@ -27,12 +27,17 @@ export function createHeaderRenderer({
   headerActionsHost,
   netMenu,
   acctMenu,
-  onRefresh,
   onOpenOptions,
   onExpand,
-  showToast,
 } = {}) {
+  // The account chip opens the profile switcher. Renders while the switcher
+  // is open keep the chip it hangs from, so a click on the chip still closes it.
+  let chip = null;
+  let chipFor = "";
+  let latest = null;
+
   return function renderHeader(ov) {
+    latest = ov;
     const hasVault = Boolean(ov?.hasVault);
     const isUnlocked = Boolean(ov?.isUnlocked);
     // Only show/enable wallet actions when we actually have a wallet loaded.
@@ -93,13 +98,6 @@ export function createHeaderRenderer({
         : null;
     }
 
-    const refreshBtn = h("button", {
-      class: "icon-btn icon-only",
-      text: "⟳",
-      title: "Refresh",
-      onclick: onRefresh,
-    });
-
     const optionsBtn = h("button", {
       class: "icon-btn icon-only",
       text: "⚙",
@@ -120,10 +118,6 @@ export function createHeaderRenderer({
     const actions = [];
 
     const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
-    const accountCountRaw = Number(ov?.accountCount ?? accounts.length ?? 1);
-    const accountCount = Number.isFinite(accountCountRaw) && accountCountRaw >= 1
-      ? Math.floor(accountCountRaw)
-      : 1;
     const idxRaw = Number(ov?.selectedAccountIndex ?? 0);
     const idx = Number.isFinite(idxRaw) && idxRaw >= 0 ? Math.floor(idxRaw) : 0;
     const account = accounts[idx] ?? accounts[0];
@@ -142,37 +136,33 @@ export function createHeaderRenderer({
         }
       }
 
-      actions.push(
-        accountChipEl(account, {
-          onCopy: showToast,
+      // The switcher's rows copy each account.
+      const canOpenProfiles = Boolean(walletReady && acctMenu);
+      const key = [account, host, connected, ov?.nodeUrl, canOpenProfiles].join("\n");
+      if (!chip || chipFor !== key || !acctMenu?.isOpen) {
+        chipFor = key;
+        chip = accountChipEl(account, {
           connected,
           host,
           name: lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl }),
-        })
-      );
-
-      const canOpenProfiles = walletReady && acctMenu;
-      if (canOpenProfiles) {
-        const btn = h("button", {
-          class: "icon-btn icon-only",
-          text: "▾",
-          title: accountCount > 1 ? "Switch profile" : "Profiles",
-          onclick: () => {
-            try {
-              if (acctMenu?.isOpen) acctMenu.close();
-              else acctMenu?.open(btn, ov);
-            } catch {
-              // ignore
-            }
-          },
+          expanded: canOpenProfiles && acctMenu.isOpen,
+          onClick: canOpenProfiles
+            ? (el) => {
+                try {
+                  if (acctMenu.isOpen) acctMenu.close();
+                  else acctMenu.open(el, latest);
+                } catch {
+                  // ignore
+                }
+              }
+            : undefined,
         });
-        actions.push(btn);
       }
+      actions.push(chip);
     }
 
     if (expandBtn) actions.push(expandBtn);
-    // Refresh is shown in full/app modes, but only when the wallet is unlocked.
-    if (isFullView && walletReady) actions.push(refreshBtn);
+    // Refresh sits next to the balance on the dashboard.
     actions.push(optionsBtn);
 
     setChildren(headerActionsHost, actions);
