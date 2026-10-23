@@ -54,6 +54,18 @@ export function transferLine(privacy, ov) {
   return `Public transfer from your public balance (${duskAmount(balance)} DUSK). Visible on chain.`;
 }
 
+/**
+ * The .dusk name the draft's recipient was resolved from, while the recipient
+ * is still the address it resolved to. Contacts can replace the recipient, and
+ * the name must not stay with an address it doesn't point to.
+ * @param {object} draft
+ * @returns {{ name: string, nodeUrl: string, to: string } | undefined}
+ */
+export function draftDuskName(draft) {
+  const name = draft?.duskName;
+  return name && typeof draft.to === "string" && name.to === draft.to ? name : undefined;
+}
+
 export function sendFormView(ov, { state, actions } = {}) {
   const draft = state.draft || {};
 
@@ -62,7 +74,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       ? "Account, shielded address or .dusk name"
       : "Recipient (account or shielded address)",
     // Back from review, show the .dusk name rather than the account it resolved to.
-    value: draft.duskName?.name || (typeof draft.to === "string" ? draft.to : ""),
+    value: draftDuskName(draft)?.name || (typeof draft.to === "string" ? draft.to : ""),
     onEnter: () => amount.focus(),
   });
 
@@ -692,9 +704,11 @@ export function sendFormView(ov, { state, actions } = {}) {
         if (isDuskName(toVal)) {
           nextBtn.disabled = true;
           const result = await lookupDuskName(toVal, { nodeUrl: ov?.nodeUrl }).promise;
+          // A lookup that ends after the user left Send, or after a redraw replaced this form, changes nothing.
+          if (!to.isConnected || state.route !== "send") return;
           if (!applyNameResult(toVal, result)) return;
           recipient = nameRecipient(result);
-          duskName = { name: result.name, nodeUrl: String(ov?.nodeUrl ?? "") };
+          duskName = { name: result.name, nodeUrl: String(ov?.nodeUrl ?? ""), to: recipient };
         }
 
         const recType = ProfileGenerator.typeOf(recipient);
@@ -757,8 +771,9 @@ export function sendFormView(ov, { state, actions } = {}) {
 
 export function sendConfirmView(ov, { state, actions } = {}) {
   const d = state.draft;
+  const duskName = draftDuskName(d);
   // A .dusk name resolved through another node is looked up again first.
-  if (!d || (d.duskName && d.duskName.nodeUrl !== String(ov?.nodeUrl ?? ""))) {
+  if (!d || (duskName && duskName.nodeUrl !== String(ov?.nodeUrl ?? ""))) {
     state.route = "send";
     return sendFormView(ov, { state, actions });
   }
@@ -996,7 +1011,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       ]),
       h("div", { class: "muted", text: "To" }),
       h("div", { class: "box" }, [
-        d.duskName ? h("div", { text: d.duskName.name }) : null,
+        duskName ? h("div", { text: duskName.name }) : null,
         h("code", { text: d.to }),
       ]),
       contactLine,

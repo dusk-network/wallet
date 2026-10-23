@@ -392,9 +392,79 @@ describe("review", () => {
 
     // The spendable shielded balance pays, not notes held for a pending transfer.
     view = review(
-      { to: ALICE.address, privacy: "shielded", duskName: { name: "alice.dusk", nodeUrl: overview().nodeUrl } },
+      {
+        to: ALICE.address,
+        privacy: "shielded",
+        duskName: { name: "alice.dusk", nodeUrl: overview().nodeUrl, to: ALICE.address },
+      },
       overview({ shieldedBalance: { value: "25000000000", spendable: "10000000000" } })
     );
     expect(view.transferLine()).toBe("Shielded transfer from your shielded balance (10 DUSK). Private.");
+  });
+});
+
+describe("a name and the recipient Contacts sets", () => {
+  // Contacts sets the recipient as addressbook.js does: the rest of the draft stays.
+  const setFromContacts = (state, address) => {
+    state.draft = { ...state.draft, to: address };
+    state.route = "confirm";
+  };
+  const toBox = (address) =>
+    dom.document.body.querySelectorAll(".box code").find((code) => code.textContent === address).parentNode;
+
+  it.each([
+    ["picking another contact", BOB.account],
+    ["saving an edited address", vary(ACCOUNT, 7)],
+  ])("drops the name after %s from Review", async (_label, address) => {
+    const state = newState();
+    let form = mount(state);
+    typeInto(form.to, "alice.dusk");
+    typeInto(form.amount, "1");
+    form.review.click();
+    await settle();
+    expect(state.draft.duskName).toEqual({ name: "alice.dusk", nodeUrl: overview().nodeUrl, to: ALICE.account });
+    mount(state);
+    expect(toBox(ALICE.account).textContent).toBe(`alice.dusk${ALICE.account}`);
+
+    setFromContacts(state, address);
+    mount(state);
+    expect(toBox(address).textContent).toBe(address);
+
+    // Back from Review shows the contact's address, not the name.
+    dom.document.body.querySelector(".subnav-back").click();
+    form = mount(state);
+    expect(form.to.value).toBe(address);
+    expect(dom.document.body.querySelector(".name-points-to")).toBeNull();
+  });
+});
+
+describe("a slow name lookup on Review", () => {
+  it.each([
+    [
+      "the user leaves Send",
+      (state) => {
+        state.route = "home";
+        state.draft = null;
+        dom.document.body.replaceChildren();
+      },
+      { route: "home", draft: null },
+    ],
+    ["a redraw replaces the form", (state) => mount(state), { route: "send" }],
+  ])("changes nothing when %s first", async (_label, leave, after) => {
+    const state = newState();
+    const form = mount(state);
+    typeInto(form.to, "alice.dusk");
+    typeInto(form.amount, "1");
+    let finish;
+    const pending = new Promise((resolve) => (finish = resolve));
+    lookupDuskName.mockImplementation(() => ({ result: undefined, promise: pending }));
+
+    form.review.click();
+    leave(state);
+    finish(NAMES["alice.dusk"]);
+    await settle();
+
+    expect(state).toMatchObject(after);
+    if (after.route === "send") expect(state.draft.duskName).toBeUndefined();
   });
 });
