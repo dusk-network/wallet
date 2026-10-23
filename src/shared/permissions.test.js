@@ -139,3 +139,49 @@ describe("permissions", () => {
     expect(res).toEqual({});
   });
 });
+
+describe("permissionProfileState", () => {
+  const perm = {
+    profileId: "account:1:acct1",
+    accountIndex: 1,
+    grants: { publicAccount: true, shieldedReceiveAddress: true },
+    updatedAt: 1,
+  };
+  const status = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"] };
+
+  it("gives the profile its verified .dusk name and no other profile's", async () => {
+    const { permissionsMod } = await loadPermissionsModule();
+    const state = (names, shielded = false) =>
+      permissionsMod.permissionProfileState(perm, status, shielded, names).profile;
+
+    expect(state(new Map([["acct0", "zero.dusk"], ["acct1", "one.dusk"]]))).toEqual({
+      profileId: "account:1:acct1",
+      account: "acct1",
+      name: "one.dusk",
+    });
+    expect(state(new Map([["acct1", "one.dusk"]]), true)).toEqual({
+      profileId: "account:1:acct1",
+      account: "acct1",
+      shieldedAddress: "addr1",
+      name: "one.dusk",
+    });
+    // Without a name for its account the profile has no name field at all.
+    expect(state(new Map([["acct0", "zero.dusk"]]))).toEqual({ profileId: "account:1:acct1", account: "acct1" });
+    expect(state()).toEqual({ profileId: "account:1:acct1", account: "acct1" });
+  });
+
+  it("gives no profile, so no name, while locked or through a stale permission", async () => {
+    const { permissionsMod } = await loadPermissionsModule();
+    const names = new Map([["acct0", "zero.dusk"], ["acct1", "one.dusk"]]);
+
+    expect(permissionsMod.permissionProfileState(perm, { ...status, isUnlocked: false }, true, names)).toEqual({
+      isValid: true,
+      profile: null,
+    });
+    const stale = { ...perm, profileId: "account:1:another-wallet" };
+    expect(permissionsMod.permissionProfileState(stale, status, true, names)).toEqual({
+      isValid: false,
+      profile: null,
+    });
+  });
+});

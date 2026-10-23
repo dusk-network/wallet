@@ -39,6 +39,7 @@ import {
 
 import { ERROR_CODES } from "../shared/errors.js";
 import { bytesToHex, bytesToTransportHex } from "../shared/bytes.js";
+import { lookupPrimaryName } from "../shared/duskNames.js";
 import {
   executionEventError,
   executionEventOk,
@@ -234,6 +235,20 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
         case "engine_selectAccount": {
           const res = await selectAccountIndex(params ?? {});
           sendResponse({ id, result: res });
+          return;
+        }
+
+        case "engine_checkNames": {
+          // Checks the .dusk names of the wallet's own accounts again for
+          // sites; each answer is kept in verifiedNames.js.
+          const own = isUnlocked() ? getAccounts() : [];
+          const accounts = Array.isArray(params?.accounts) ? params.accounts : [];
+          await Promise.all(
+            accounts
+              .filter((account) => own.includes(account))
+              .map((account) => lookupPrimaryName(account, { nodeUrl: params?.nodeUrl }))
+          );
+          sendResponse({ id, result: true });
           return;
         }
 

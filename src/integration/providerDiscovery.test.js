@@ -164,6 +164,29 @@ describe("integration: inpage provider discovery", () => {
     expect(events[1]).toEqual([{ profileId: "account:0:acct0", account: "acct0", shieldedAddress: "addr0" }]);
   });
 
+  it("passes on a profile's .dusk name when it is added, changed or removed, and only then", async () => {
+    const window = await runInpageScript();
+    const events = [];
+    window.duskWallet.on("profilesChanged", (profiles) => events.push(profiles));
+    const profile = { profileId: "account:0:acct0", account: "acct0" };
+    const send = (data) =>
+      dispatchWalletMessage(window, { type: "DUSK_PROVIDER_EVENT", name: "profilesChanged", data });
+
+    send([profile]);
+    send([{ ...profile, name: "alice.dusk" }]);
+    send([{ ...profile, name: "alice.dusk" }]);
+    send([{ ...profile, name: "carol.dusk" }]);
+    send([profile]);
+
+    expect(events).toEqual([
+      [profile],
+      [{ ...profile, name: "alice.dusk" }],
+      [{ ...profile, name: "carol.dusk" }],
+      [profile],
+    ]);
+    expect(window.duskWallet.profiles).toEqual([profile]);
+  });
+
   it("distinguishes disconnected, connected locked, and connected unlocked profile state", async () => {
     const window = await runInpageScript();
     const provider = window.duskWallet;

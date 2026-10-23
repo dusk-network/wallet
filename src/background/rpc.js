@@ -40,6 +40,7 @@ import {
 } from "./engineHost.js";
 import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
+import { siteNames } from "./siteNames.js";
 import { putTxMeta } from "../shared/txStore.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
 import {
@@ -304,8 +305,17 @@ export async function handleRpc(origin, request) {
     return profile;
   }
 
-  function profileFromPermission(status, perm, includeShielded = false) {
-    return permissionProfileState(perm, status, includeShielded).profile;
+  function profileFromPermission(status, perm, includeShielded = false, names = null) {
+    return permissionProfileState(perm, status, includeShielded, names).profile;
+  }
+
+  // The connected profile as its site sees it, with its verified .dusk name
+  // when that was checked lately. Reading the name never waits for a lookup.
+  async function siteProfile(status, perm) {
+    const account = profileFromPermission(status, perm)?.account;
+    if (!account) return null;
+    const names = await siteNames(String((await getSettings())?.nodeUrl ?? ""), [account]);
+    return profileFromPermission(status, perm, hasShieldedGrant(perm), names);
   }
 
   async function captureApprovalContext(perm) {
@@ -485,7 +495,7 @@ export async function handleRpc(origin, request) {
     case "dusk_requestProfiles": {
       const options = firstParamObject(params);
       const { perm, status } = await requestProfileConnection(options);
-      const profile = profileFromPermission(status, perm, hasShieldedGrant(perm));
+      const profile = await siteProfile(status, perm);
       return profile ? [profile] : [];
     }
 
@@ -494,7 +504,7 @@ export async function handleRpc(origin, request) {
       if (!perm) return [];
       const status = await getEngineStatus();
       if (!status?.isUnlocked) return [];
-      const profile = profileFromPermission(status, perm, hasShieldedGrant(perm));
+      const profile = await siteProfile(status, perm);
       return profile ? [profile] : [];
     }
 
