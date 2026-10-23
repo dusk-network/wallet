@@ -4,9 +4,25 @@
 // no layout. Selectors support tags, #ids, .classes and [attr] / [attr="v"],
 // combined, in comma lists and with the descendant and child (>) combinators.
 //
+// Importing it also defines `HTMLElement` and `customElements`, so a module
+// that defines a custom element can load when it is imported after this one:
+// createElement then builds the tag from its class, and connectedCallback runs
+// when the element joins the document.
+//
 // Test-only: nothing in the extension imports this.
 
 import { vi } from "vitest";
+
+// Custom elements defined through the fake `customElements`, by tag. As in a
+// page, a definition lasts as long as the module.
+const definedElements = new Map();
+
+// Runs connectedCallback on `node` and the elements in it once they are in the
+// document, as the browser does for custom elements.
+function connected(node) {
+  if (node.nodeType !== 1 || !node.isConnected) return;
+  for (const el of [node, ...node.querySelectorAll("*")]) el.connectedCallback?.();
+}
 
 const camel = (name) => name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
@@ -227,6 +243,7 @@ class FakeElement {
     child.parentNode?.removeChild(child);
     child.parentNode = this;
     this.childNodes.push(child);
+    connected(child);
     return child;
   }
 
@@ -235,6 +252,7 @@ class FakeElement {
     child.parentNode?.removeChild(child);
     child.parentNode = this;
     this.childNodes.splice(this.childNodes.indexOf(ref), 0, child);
+    connected(child);
     return child;
   }
 
@@ -442,6 +460,25 @@ for (const prop of ["hidden", "disabled", "checked", "open"]) {
   });
 }
 
+// The fake `HTMLElement`, for custom elements to extend: an instance is a fake
+// element of the tag its class was defined for, in the current document.
+class FakeHTMLElement extends FakeElement {
+  constructor() {
+    const tag = [...definedElements].find(([, cls]) => cls === new.target)?.[0];
+    super(tag ?? "div", globalThis.document);
+  }
+}
+
+globalThis.HTMLElement ??= FakeHTMLElement;
+globalThis.customElements ??= {
+  define(tag, cls) {
+    definedElements.set(String(tag).toLowerCase(), cls);
+  },
+  get(tag) {
+    return definedElements.get(String(tag).toLowerCase());
+  },
+};
+
 class FakeDocument {
   constructor({ elements = {} } = {}) {
     this._listeners = [];
@@ -454,9 +491,10 @@ class FakeDocument {
     this.activeElement = this.body;
   }
 
-  /** `elements` upgrades custom tags, as customElements.define would. */
+  /** A defined custom tag is built from its class; `elements` upgrades other custom tags. */
   createElement(tagName) {
-    const el = new FakeElement(tagName, this);
+    const Defined = definedElements.get(String(tagName).toLowerCase());
+    const el = Defined ? new Defined() : new FakeElement(tagName, this);
     this._elements[el.localName]?.(el);
     return el;
   }

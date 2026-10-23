@@ -31,7 +31,8 @@ export function shieldedShortfallEl({ onShield } = {}) {
  *
  * The two cards of a name with both addresses are a radio group; they only
  * report a pick through `onChoose`, and `set` shows one. A name with one
- * address has nothing to choose, so its card shows picked and is no radio.
+ * address has nothing to choose, so its card shows picked, is no radio and
+ * has no radio mark.
  *
  * @param {object} opts
  * @param {string} opts.name - the name, as resolved
@@ -71,7 +72,7 @@ export function nameAddressChoice({
         }),
       },
       [
-        h("span", { class: "name-option__dot", "aria-hidden": "true" }),
+        choosing ? h("span", { class: "name-option__dot", "aria-hidden": "true" }) : null,
         h("span", { class: "name-option__title" }, [
           h("span", { class: "name-option__label", text: title }),
           shortAddressEl(value, { className: "name-option__addr" }),
@@ -80,7 +81,8 @@ export function nameAddressChoice({
       ]
     );
     // The shortfall's link sits beside the radio rather than in it: a radio can't hold a button.
-    const card = h("div", { class: disabled ? "name-option is-disabled" : "name-option" }, [
+    const cardClass = ["name-option", choosing ? "" : "name-option--single", disabled ? "is-disabled" : ""];
+    const card = h("div", { class: cardClass.filter(Boolean).join(" ") }, [
       radio,
       disabled ? shieldedShortfallEl({ onShield }) : null,
     ]);

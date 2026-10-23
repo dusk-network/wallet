@@ -1,6 +1,7 @@
 import jsQR from "jsqr";
 import { h } from "../lib/dom.js";
 import { parseDuskUri } from "../../shared/duskUri.js";
+import { iconSvg } from "./ActionIcon.js";
 
 function clamp(n, a, b) {
   return Math.min(b, Math.max(a, n));
@@ -84,7 +85,8 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
       h("div", { class: "qrscan-title", text: title }),
       h("button", {
         class: "icon-btn icon-only",
-        text: "✕",
+        type: "button",
+        html: iconSvg("close"),
         onclick: () => finish(null),
         title: "Close",
         "aria-label": "Close",

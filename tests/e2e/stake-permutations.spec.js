@@ -255,7 +255,7 @@ test.describe("owner-aware staking position view", () => {
 
   test("supports choosing another local owner for new stake", async ({ page }) => {
     await installStakeHarness(page, ownerStatusFor("create-self"));
-    await expect(page.getByText("New stakes are self-owned by default. Choose another local owner only for separated-owner setups.")).toBeVisible();
+    await expect(page.getByText("Change the owner only for a separated-owner setup.")).toBeVisible();
     await page.locator("#stake-owner-profile").selectOption("1");
     await page.getByLabel("Stake amount").fill("1000");
     await page.getByRole("button", { name: /Review stake/i }).click();

@@ -4,6 +4,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
+import { iconSvg } from "../../components/ActionIcon.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
@@ -275,7 +276,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
         },
       },
       [
-        h("div", { class: "asset-ico", text: "⬢" }),
+        h("div", { class: "asset-ico", html: iconSvg("nft") }),
         h("div", { class: "asset-main" }, [
           h("div", { class: "asset-sym", text: `${sym} #${tokenId || "?"}` }),
           h("div", { class: "asset-name", text: name, title: cid }),
@@ -326,7 +327,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
   });
 
   const input = textInput({
-    placeholder: "Contract ID (0x…)",
+    placeholder: "0x…",
     value: String(st.contractId ?? ""),
     onEnter: () => lookupBtn.click(),
     oninput: (e) => {
@@ -360,7 +361,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
 
   const addBtn = h("button", {
     class: "btn-primary",
-    text: "Watch token",
+    text: "Add token",
     disabled: Boolean(st.loading) || !st.meta,
     onclick: async () => {
       try {
@@ -397,7 +398,6 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
   return [
     subnav({ title: "Add token", onBack }),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "Add a DRC20 token by contract ID for this profile." }),
       h("label", { text: "Contract ID" }),
       input,
       h("div", { class: "btnrow" }, [lookupBtn, addBtn]),
@@ -422,7 +422,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
   });
 
   const contractInput = textInput({
-    placeholder: "Contract ID (0x…)",
+    placeholder: "0x…",
     value: String(st.contractId ?? ""),
     onEnter: () => tokenIdInput.focus(),
     oninput: (e) => {
@@ -431,7 +431,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
   });
 
   const tokenIdInput = integerInput({
-    placeholder: "Token ID (u64)",
+    placeholder: "e.g. 1",
     value: String(st.tokenId ?? ""),
     onEnter: () => lookupBtn.click(),
     oninput: (e) => {
@@ -534,7 +534,6 @@ export function assetAddNftView(ov, { state, actions } = {}) {
   return [
     subnav({ title: "Import NFT", onBack }),
     h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "Add a DRC721 NFT by contract ID and token ID." }),
       h("label", { text: "Contract ID" }),
       contractInput,
       h("label", { text: "Token ID" }),
@@ -720,7 +719,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
   const transferToInput = textInput({
     id: "asset-token-to",
     name: "assetTokenRecipient",
-    placeholder: "Recipient (base58… or 0x…)",
+    placeholder: "Account or 0x… contract ID",
     value: String(form.to ?? ""),
     onEnter: () => transferAmountInput.focus(),
     oninput: (e) => {
@@ -730,7 +729,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
   const transferAmountInput = textInput({
     id: "asset-token-amount",
     name: "assetTokenAmount",
-    placeholder: `Amount (${sym})`,
+    placeholder: sym,
     value: String(form.amount ?? ""),
     numericMode: dec > 0 ? "decimal" : "integer",
     onEnter: () => reviewTransferBtn.click(),
@@ -744,7 +743,6 @@ export function assetTokenView(ov, { state, actions } = {}) {
   const sendSection = h("div", { class: "box asset-action-section" }, [
     h("div", { class: "asset-action-head" }, [
       h("div", { class: "asset-action-title", text: "Send" }),
-      h("div", { class: "asset-action-subtitle", text: `Transfer ${sym} to another account or contract.` }),
     ]),
     h("label", { for: "asset-token-to", text: "Recipient" }),
     transferToInput,
@@ -763,7 +761,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
   const approveSpenderInput = textInput({
     id: "asset-token-spender",
     name: "assetTokenSpender",
-    placeholder: "Spender (base58… or 0x…)",
+    placeholder: "Account or 0x… contract ID",
     value: String(form.spender ?? ""),
     onEnter: () => approveAmountInput.focus(),
     oninput: (e) => {
@@ -773,7 +771,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
   const approveAmountInput = textInput({
     id: "asset-token-approve-amount",
     name: "assetTokenApproveAmount",
-    placeholder: `Amount (${sym})`,
+    placeholder: sym,
     value: String(form.approveAmount ?? ""),
     numericMode: dec > 0 ? "decimal" : "integer",
     onEnter: () => reviewApproveBtn.click(),
@@ -847,10 +845,11 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
   gasEditor.amountLux = "0";
-  gasEditor.helpText = "Max fee shown is limit × price. Clear both to use wallet defaults.";
   gasEditor.setGas(d?.gas ?? null);
 
+  // The gas price suggestion opens with the fee's Edit.
   const gasHint = h("div", { class: "muted", text: "Loading gas price suggestion…" });
+  gasEditor.setEditContent([gasHint]);
 
   (async () => {
     try {
@@ -900,7 +899,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
         })
       : null;
 
-  const cancelBtn = h("button", { class: "btn-outline", text: "Cancel", onclick: onBack });
+  // Back returns to the token, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
   confirmBtn.addEventListener("click", async () => {
@@ -951,8 +950,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       warn,
       gasEditor,
-      gasHint,
-      h("div", { class: "btnrow" }, [cancelBtn, confirmBtn]),
+      h("div", { class: "btnrow" }, [confirmBtn]),
     ].filter(Boolean)),
   ];
 }
@@ -1015,7 +1013,7 @@ export function assetNftView(ov, { state, actions } = {}) {
       tokenUri
         ? h("div", {
             class: "muted",
-            text: "Media previews are disabled for now. The raw token URI is shown above.",
+            text: "Media previews are disabled for now.",
           })
         : null,
       h("button", { class: "btn-outline", text: "Remove NFT", onclick: doUnwatch }),

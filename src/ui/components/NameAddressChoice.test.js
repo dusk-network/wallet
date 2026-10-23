@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installFakeDom, press, screenReaderText, visibleText } from "../testing/fakeDom.js";
@@ -63,6 +65,9 @@ describe("name address choice", () => {
     expect(screenReaderText(publicRadio)).toBe(`Public account${ACCOUNT}Visible on chain`);
     expect(screenReaderText(shieldedRadio)).toBe(`Shielded address${ADDRESS}Private`);
     expect(el.querySelector(".name-shortfall")).toBeNull();
+    // Each radio shows its mark.
+    expect([publicRadio, shieldedRadio].map((radio) => radio.querySelectorAll(".name-option__dot").length)).toEqual([1, 1]);
+    expect(el.querySelector(".name-option--single")).toBeNull();
   });
 
   it("starts on the public account and reaches the group at the checked option", () => {
@@ -149,7 +154,7 @@ describe("name address choice", () => {
       "Shielded address4QpZhL…i743QENot enough shielded DUSK · Shield first",
       ADDRESS,
     ],
-  ])("shows a name with %s as that one card, picked, and as no radio", (_label, opts, text, full) => {
+  ])("shows a name with %s as that one card, picked, and as no radio", async (_label, opts, text, full) => {
     const { el, onChoose, onShield } = choice(opts);
     expect(el.querySelector(".name-points-to").textContent).toBe("alice.dusk points to");
     const cards = el.querySelectorAll(".name-option");
@@ -158,7 +163,15 @@ describe("name address choice", () => {
     expect(visibleText(cards[0])).toBe(text);
     expect(screenReaderText(cards[0])).toContain(full);
 
-    // Nothing to choose: no radio group, nothing to focus or pick.
+    // Nothing to choose: no radio mark, and the card's text takes the mark's column.
+    expect(cards[0].querySelector(".name-option__dot")).toBeNull();
+    expect(cards[0].classList.contains("name-option--single")).toBe(true);
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    expect(css).toMatch(/\.name-option--single \.name-option__main \{\s*grid-template-columns: minmax\(0, 1fr\);\s*\}/);
+    expect(css).toMatch(/\.name-option--single \.name-option__line \{\s*grid-column: 1;\s*\}/);
+    expect(css).toMatch(/\.name-option--single \.name-shortfall \{\s*padding-left: 12px;\s*\}/);
+
+    // Nor a radio group, or anything to focus or pick.
     expect(el.querySelector("[role]")).toBeNull();
     expect(el.querySelector("[aria-checked], [tabindex]")).toBeNull();
     cards[0].querySelector(".name-option__main").click();

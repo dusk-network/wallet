@@ -1,5 +1,11 @@
 import { h } from "../lib/dom.js";
 
+/**
+ * The gas price line and the Auto, Low, Recommended and High presets of a
+ * Review, in the panel the fee's Edit opens: Review shows the fee and the
+ * total until then. Low, Recommended and High set the default gas limit and
+ * the node's min, median or max gas price; Auto clears both.
+ */
 export function createGasQuickControls({
   actions,
   defaultLimit,
@@ -24,6 +30,7 @@ export function createGasQuickControls({
   });
   const btnHigh = h("button", { class: "btn-outline", type: "button", text: "High", disabled: true });
   const gasQuickRow = h("div", { class: "gas-quick-row" }, [btnAuto, btnLow, btnRecommended, btnHigh]);
+  gasEditor.setEditContent([gasHint, gasQuickRow]);
 
   (async () => {
     try {
@@ -44,11 +51,6 @@ export function createGasQuickControls({
       const max = String(stats?.max ?? median);
 
       gasHint.textContent = `Gas price (LUX): min ${min} · median ${median} · max ${max}`;
-      gasEditor.helpText =
-        (defaultLimit
-          ? `Suggested gas price comes from the node mempool. Default limit: ${defaultLimit}. `
-          : "Suggested gas price comes from the node mempool. ") +
-        "Max fee shown is limit × price. Clear both to use wallet defaults.";
 
       const apply = (price) => {
         if (!defaultLimit) return;

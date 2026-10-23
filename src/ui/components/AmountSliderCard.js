@@ -42,7 +42,8 @@ function maybeSnapRaw(raw) {
  */
 export function createAmountSliderCard({
   initialAmountDusk = "",
-  placeholder = "Amount (DUSK)",
+  // Under an "Amount" label: the unit and the format.
+  placeholder = "e.g. 1.25 DUSK",
   actions,
   // Called when user types in the amount input.
   onAmountInput,

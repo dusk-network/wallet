@@ -1,3 +1,4 @@
+// `hint` is a preset's second line, where its name doesn't say it all.
 export const NETWORK_PRESETS = [
   {
     id: "mainnet",
@@ -6,7 +7,6 @@ export const NETWORK_PRESETS = [
     proverUrl: "https://provers.dusk.network",
     archiverUrl: "https://nodes.dusk.network",
     explorerBase: "https://apps.dusk.network/explorer",
-    hint: "Public mainnet",
   },
   {
     id: "testnet",
@@ -15,7 +15,6 @@ export const NETWORK_PRESETS = [
     proverUrl: "https://testnet.provers.dusk.network",
     archiverUrl: "https://testnet.nodes.dusk.network",
     explorerBase: "https://apps.testnet.dusk.network/explorer",
-    hint: "Public testnet",
   },
   {
     id: "devnet",
@@ -24,7 +23,7 @@ export const NETWORK_PRESETS = [
     proverUrl: "https://devnet.provers.dusk.network",
     archiverUrl: "https://devnet.nodes.dusk.network",
     explorerBase: "https://apps.devnet.dusk.network/explorer",
-    hint: "Experimental network",
+    hint: "Experimental",
   },
   {
     id: "local",
@@ -33,7 +32,7 @@ export const NETWORK_PRESETS = [
     proverUrl: "http://127.0.0.1:8080",
     archiverUrl: "http://127.0.0.1:8080",
     explorerBase: null,
-    hint: "For a locally running node (Rusk HTTP/RUES on :8080)",
+    hint: "127.0.0.1:8080",
   },
   {
     id: "custom",
@@ -42,6 +41,6 @@ export const NETWORK_PRESETS = [
     proverUrl: "",
     archiverUrl: "",
     explorerBase: null,
-    hint: "Use any Rusk/RUES-enabled node URL",
+    hint: "Any node URL",
   },
 ];
