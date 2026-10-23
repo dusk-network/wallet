@@ -1,9 +1,10 @@
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
+import { iconSvg } from "../../components/ActionIcon.js";
 import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
-import { identiconEl } from "../../components/Identicon.js";
 import { duskNameEl } from "../../components/DuskName.js";
+import { shortAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, textInput } from "../../components/FormControls.js";
 import { parseDuskToLux } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
@@ -56,6 +57,8 @@ function qrFilename({ request, tab } = {}) {
   return request ? `dusk-${rail}-request-qr.png` : `dusk-${rail}-receive-qr.png`;
 }
 
+let nameNotes = 0;
+
 export function receiveView(ov, { state, actions } = {}) {
   const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
   const addresses = Array.isArray(ov?.addresses) ? ov.addresses : [];
@@ -71,6 +74,7 @@ export function receiveView(ov, { state, actions } = {}) {
   const r = (state.receive ??= {
     tab: "shielded",
     requestOpen: false,
+    infoOpen: false,
     amountDusk: "",
     memo: "",
   });
@@ -119,45 +123,80 @@ export function receiveView(ov, { state, actions } = {}) {
     [tabShielded, tabPublicBtn]
   );
 
-  // --- QR + chip -------------------------------------------------------
+  // --- QR, then the name and the address, each with a copy button -----
   const qrCard = h("div", { class: "box qr-box receive-qr-card" });
 
-  const chipIcon = h("div", { class: "receive-chip-icon" });
-  const chipKind = h("div", { class: "receive-chip-kind" });
-  const chipText = h("code", { class: "receive-chip-text" });
+  // An icon button that copies what `value` gives and says so in a toast.
+  const copyButton = (label, copied, value) =>
+    h("button", {
+      class: "receive-copy",
+      type: "button",
+      html: iconSvg("copy"),
+      title: label,
+      "aria-label": label,
+      onclick: async () => {
+        const text = value();
+        if (!text) return;
+        const ok = await copyToClipboard(text);
+        actions?.showToast?.(ok ? copied : "Copy failed");
+      },
+    });
+
   // The account's verified .dusk name; beside the shielded address only when the name pays there too.
   const nameLookup =
     tab === "public"
       ? lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl })
       : lookupShieldedName(account, address, { nodeUrl: ov?.nodeUrl });
-  const chipName = duskNameEl(nameLookup, { className: "receive-chip-name" });
-  const chipMain = h("div", { class: "receive-chip-main" }, [chipKind, chipName, chipText]);
+  let shownName = "";
 
-  // Under the card, what people reach through that name.
-  const nameNote = h("div", { class: "muted receive-name-note", hidden: true });
+  // What people reach through that name, behind the ⓘ beside it.
+  const nameNote = h("div", {
+    class: "muted receive-name-note",
+    id: `receive-name-note-${++nameNotes}`,
+    hidden: true,
+  });
+  const infoBtn = h("button", {
+    class: "receive-info",
+    type: "button",
+    html: iconSvg("info"),
+    "aria-controls": nameNote.id,
+    "aria-expanded": "false",
+    onclick: () => {
+      r.infoOpen = !r.infoOpen;
+      showNameNote();
+    },
+  });
+  const showNameNote = () => {
+    nameNote.hidden = !r.infoOpen;
+    infoBtn.setAttribute("aria-expanded", String(Boolean(r.infoOpen)));
+  };
+
+  const nameField = h("div", { class: "receive-field", hidden: true }, [
+    duskNameEl(nameLookup, { className: "receive-field__name" }),
+    infoBtn,
+    copyButton("Copy name", "Copied name", () => shownName),
+  ]);
   nameLookup.then((name) => {
     if (!name) return;
+    shownName = name;
+    infoBtn.title = `About ${name}`;
+    infoBtn.setAttribute("aria-label", `About ${name}`);
     nameNote.textContent =
       tab === "public"
         ? `People who send to ${name} reach this public account.`
-        : `${name} also lists this address, so people can choose to pay you privately.`;
-    nameNote.hidden = false;
+        : `People who pay ${name} choose public or shielded. Anyone can see this address belongs to ${name}.`;
+    nameField.hidden = false;
+    showNameNote();
   });
-  const chipCopy = h("div", { class: "receive-chip-copy", text: "⧉" });
-  const addressChip = h(
-    "button",
-    {
-      class: "receive-chip",
-      type: "button",
-      title: recipient ? `${recipient}` : "",
-      onclick: async () => {
-        if (!curRecipient) return;
-        const ok = await copyToClipboard(curRecipient);
-        actions?.showToast?.(ok ? `Copied ${recipientLabel}` : "Copy failed");
-      },
-    },
-    [chipIcon, chipMain, chipCopy]
-  );
+
+  const copyAddress = copyButton("Copy address", `Copied ${recipientLabel}`, () => recipient);
+  copyAddress.disabled = !recipient;
+  const addressField = h("div", { class: "receive-field" }, [
+    recipient
+      ? shortAddressEl(recipient, { className: "receive-field__address" })
+      : h("code", { class: "receive-field__address", text: "—" }),
+    copyAddress,
+  ]);
 
   // --- Request payment (progressive disclosure) -----------------------
   const amountInput = decimalInput({
@@ -168,9 +207,21 @@ export function receiveView(ov, { state, actions } = {}) {
   const memoInput = textInput({
     placeholder: "Memo (optional)",
     value: typeof r.memo === "string" ? r.memo : "",
-    onEnter: () => copyBtn.click(),
+    onEnter: () => copyRequestBtn.click(),
   });
   const amountErr = h("div", { class: "err", style: "display:none" });
+
+  // The request link's copy, which Enter in the memo presses; on once the QR holds a request.
+  const copyRequestBtn = h("button", {
+    class: "btn-outline",
+    type: "button",
+    text: "Copy request link",
+    onclick: async () => {
+      if (!wantRequest || !curUri) return;
+      const ok = await copyToClipboard(curUri);
+      actions?.showToast?.(ok ? "Copied request link" : "Copy failed");
+    },
+  });
 
   const summaryMeta = h("span", { class: "muted", text: "Optional" });
   const summaryChev = h("span", { class: "accordion-chev", text: "▾", "aria-hidden": "true" });
@@ -197,6 +248,7 @@ export function receiveView(ov, { state, actions } = {}) {
           class: "muted",
           text: "The QR updates to a dusk: request link.",
         }),
+        copyRequestBtn,
       ]),
     ]
   );
@@ -217,11 +269,9 @@ export function receiveView(ov, { state, actions } = {}) {
   };
 
   // --- Actions ---------------------------------------------------------
-  let curRecipient = recipient || "";
+  const curRecipient = recipient || "";
   let curUri = "";
   let curQrValue = recipient || "";
-  let curCopyValue = recipient || "";
-  let curCopyToast = tab === "public" ? "Copied account" : "Copied address";
   let wantRequest = false;
   let qrMenuOpen = false;
 
@@ -230,7 +280,7 @@ export function receiveView(ov, { state, actions } = {}) {
   const downloadCurrentQr = async () => {
     if (!curQrValue) return;
     try {
-      await downloadQrPng(curQrValue, qrFilename({ request: wantRequest, tab: r.tab }));
+      await downloadQrPng(curQrValue, qrFilename({ request: wantRequest, tab }));
       actions?.showToast?.("Downloaded QR PNG");
     } catch (e) {
       actions?.showToast?.(e?.message ?? "QR download failed", 2500);
@@ -282,16 +332,6 @@ export function receiveView(ov, { state, actions } = {}) {
     showQrMenu(e);
   });
 
-  const copyBtn = h("button", {
-    class: "btn-primary",
-    text: tab === "public" ? "Copy account" : "Copy address",
-    onclick: async () => {
-      if (!curCopyValue) return;
-      const ok = await copyToClipboard(curCopyValue);
-      actions?.showToast?.(ok ? curCopyToast : "Copy failed");
-    },
-  });
-
   const shareBtn = isTauriMobileLike()
     ? h("button", {
         class: "btn-outline",
@@ -329,7 +369,7 @@ export function receiveView(ov, { state, actions } = {}) {
   const btnRow = h(
     "div",
     { class: "btnrow btnrow--grid" },
-    shareBtn ? [copyBtn, shareBtn, downloadBtn] : [copyBtn, downloadBtn]
+    shareBtn ? [shareBtn, downloadBtn] : [downloadBtn]
   );
 
   // --- Live update -----------------------------------------------------
@@ -353,14 +393,7 @@ export function receiveView(ov, { state, actions } = {}) {
   });
 
   function update() {
-    curRecipient = (r.tab === "public" ? account : address) || "";
     wantRequest = false;
-
-    // Update chip
-    chipIcon.replaceChildren(identiconEl(curRecipient || "dusk"));
-    chipKind.textContent = r.tab === "public" ? "Public account" : "Shielded address";
-    chipText.textContent = curRecipient || "—";
-    addressChip.title = curRecipient || "";
 
     // Validate request fields
     const norm = normalizeRequestAmount(amountInput.value);
@@ -379,7 +412,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
     curUri = amountValid
       ? buildDuskUri({
-          kind: r.tab === "public" ? "public" : "shielded",
+          kind: tab,
           recipient: curRecipient,
           chainId,
           amountDusk: amountForUri || "",
@@ -394,27 +427,20 @@ export function receiveView(ov, { state, actions } = {}) {
     curQrValue = qrValue || "";
     qrCard.replaceChildren(qrCodeEl(qrValue || ""));
 
-    // Copy button is smart: address by default, request when configured.
+    // The fields copy the name and the address; the request link is copied here.
+    copyRequestBtn.disabled = !wantRequest;
     if (wantRequest) {
-      copyBtn.textContent = "Copy request link";
-      curCopyValue = curUri;
-      curCopyToast = "Copied request link";
       summaryMeta.textContent = amountForUri
         ? `${amountForUri} DUSK`
         : memoVal
           ? "With memo"
           : "Optional";
     } else {
-      copyBtn.textContent = r.tab === "public" ? "Copy account" : "Copy address";
-      curCopyValue = curRecipient;
-      curCopyToast = r.tab === "public" ? "Copied account" : "Copied address";
       summaryMeta.textContent = hasReq ? "Configured" : "Optional";
     }
 
-    copyBtn.disabled = !curCopyValue;
     downloadBtn.disabled = !curQrValue;
     if (!curQrValue) hideQrMenu();
-    addressChip.disabled = !curRecipient;
     if (shareBtn) shareBtn.disabled = !curRecipient;
   }
 
@@ -437,7 +463,7 @@ export function receiveView(ov, { state, actions } = {}) {
     h("div", { class: "row" }, [
       tabToggle,
       qrCard,
-      addressChip,
+      h("div", { class: "receive-fields" }, [nameField, addressField]),
       nameNote,
       btnRow,
       requestDetails,

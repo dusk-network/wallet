@@ -9,18 +9,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address.
-- Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive.
-- Added a warning when sending to your own account or address.
-- Showed on Review which balance pays and whether the transfer is visible on chain.
+- Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address. ([#125])
+- Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive. ([#125])
+- Added a warning when sending to your own account or address. ([#125])
+- Showed on Review whether the transfer is visible on chain. ([#125])
 - Added a full escaped typed-data request view alongside the bounded approval preview. ([#113])
 - Displayed the installed extension version in Settings. ([#80])
 - Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and bounded, potentially truncated message previews with declared field types — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])
 
 ### Changed
 
-- Opened the profile switcher from the header's account chip, with a copy button per account.
-- Moved Refresh from the header to the balance.
+- Opened the profile switcher from the header's account chip, with a copy button per account. ([#125])
+- Moved Refresh from the header to the balance. ([#125])
+- Showed Receive's name and short address in one-line fields with copy buttons. ([#125])
 - Pinned the shared typed-data RC through JSR's npm compatibility registry for reproducible installs. ([#22])
 - Used `@dusk/typed-data` for typed-data validation, hashing and signed-message construction. ([#22])
 - Gated dApp RPC requests on the canonical method list before any permission lookup or approval prompt, so methods absent from the advertised surface are unreachable rather than merely undocumented. Deliberately refused methods still report why instead of "Unknown method".
@@ -33,6 +34,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Fixed the popup moving Receive's QR and Review's recipient below the rest of the page. ([#125])
 - Preserved the active unlock form, including entered text and in-flight submission state, across passive rerenders. ([#110](https://github.com/dusk-network/wallet/issues/110))
 - Cleared unanchored spent-note caches before resync to prevent orphaned notes from reappearing. ([#106](https://github.com/dusk-network/wallet/issues/106))
 - Committed prefetched shielded chunks before stopping at the scan target, including under slow RPC responses.
@@ -62,6 +64,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 [#22]: https://github.com/dusk-network/wallet/issues/22
 [#113]: https://github.com/dusk-network/wallet/issues/113
 [#117]: https://github.com/dusk-network/wallet/issues/117
+[#125]: https://github.com/dusk-network/wallet/issues/125
 
 ## [0.3.0] - 2026-06-23
 

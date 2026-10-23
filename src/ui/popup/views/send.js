@@ -14,7 +14,7 @@ import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
 import { submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
-import { nameAddressChoice, shieldedShortfallEl } from "../../components/NameAddressChoice.js";
+import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import {
   hideRecipientBadge,
   recipientBadge,
@@ -35,23 +35,19 @@ import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModa
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
 
-const duskAmount = (lux) => formatLuxShort(lux, UI_DISPLAY_DECIMALS);
+// Review's .dusk name over the full address it resolved to: the name leads,
+// and the address follows smaller and muted.
+const namedAddressBox = (name, addressEl) =>
+  h("div", { class: "box named-address" }, [h("div", { class: "dusk-name", text: name, title: name }), addressEl]);
 
 /**
- * The line Review shows under the transfer's Public/Shielded pill: the balance
- * that pays (for a shielded transfer, what can be spent now) and what the
+ * The line Review shows under the transfer's Public/Shielded pill: what the
  * chain shows.
  * @param {"public"|"shielded"} privacy
- * @param {object} ov - the wallet overview
  * @returns {string}
  */
-export function transferLine(privacy, ov) {
-  if (privacy === "shielded") {
-    const spendable = safeBigInt(ov?.shieldedBalance?.spendable ?? ov?.shieldedBalance?.value, 0n);
-    return `Shielded transfer from your shielded balance (${duskAmount(spendable)} DUSK). Private.`;
-  }
-  const balance = safeBigInt(ov?.balance?.value, 0n);
-  return `Public transfer from your public balance (${duskAmount(balance)} DUSK). Visible on chain.`;
+export function transferLine(privacy) {
+  return privacy === "shielded" ? "Private" : "Visible on chain";
 }
 
 /**
@@ -416,16 +412,11 @@ export function sendFormView(ov, { state, actions } = {}) {
   const pickedShielded = (result) => nameChoice?.name === result.name && nameChoice.shielded;
   const nameRecipient = (result) => duskNameRecipient(result, { shielded: pickedShielded(result) });
 
-  // Points the form at the address `result` sends to: the pill, the full
-  // address, the balance line and Review follow it. True when Review can go ahead.
-  const showNameAddress = (result, fullAddress) => {
+  // Points the form at the address `result` sends to: the balance line and
+  // Review follow it. True when Review can go ahead.
+  const showNameAddress = (result) => {
     const recipient = nameRecipient(result);
     const t = ProfileGenerator.typeOf(recipient);
-    fullAddress.textContent = recipient;
-    setRecipientBadge(toTypePill, {
-      ...recipientTypeBadgeOptions(t),
-      className: "recipient-type-badge",
-    });
     showSelfNote(recipient);
     detectedRecipientType = t;
     const sendable = t === "account" || shieldedCovers;
@@ -463,37 +454,25 @@ export function sendFormView(ov, { state, actions } = {}) {
       return false;
     }
 
-    const fullAddress = h("code");
-    if (result.account && result.address) {
-      const choice = nameAddressChoice({
-        name: result.name,
-        account: result.account,
-        address: result.address,
-        shielded: pickedShielded(result),
-        publicBalance: duskAmount(pubBalLux),
-        shieldedBalance: duskAmount(shSpendLux ?? shValueLux),
-        shieldedDisabled: !shieldedCovers,
-        onChoose: (shielded) => {
-          nameChoice = { name: result.name, shielded };
-          syncDraft();
-          choice.set(shielded);
-          showNameAddress(result, fullAddress);
-        },
-        onShield: openShield,
-      });
-      showNameBox([
-        choice.el,
-        h("div", { class: "muted name-full-label", text: "Full address" }),
-        h("div", { class: "box" }, [fullAddress]),
-      ]);
-    } else {
-      showNameBox([
-        h("div", { class: "box" }, [h("div", { text: result.name }), fullAddress]),
-        // A name with only a shielded address needs a shielded balance that pays.
-        result.account || shieldedCovers ? null : shieldedShortfallEl({ onShield: openShield }),
-      ]);
-    }
-    return showNameAddress(result, fullAddress);
+    // The name's cards show the transfer type, and pick it when the name has
+    // both addresses, so the pill stays off.
+    hideRecipientBadge(toTypePill);
+    const choice = nameAddressChoice({
+      name: result.name,
+      account: result.account,
+      address: result.address,
+      shielded: pickedShielded(result),
+      shieldedDisabled: !shieldedCovers,
+      onChoose: (shielded) => {
+        nameChoice = { name: result.name, shielded };
+        syncDraft();
+        choice.set(shielded);
+        showNameAddress(result);
+      },
+      onShield: openShield,
+    });
+    showNameBox([choice.el]);
+    return showNameAddress(result);
   };
 
   const showDuskName = (v) => {
@@ -997,10 +976,10 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     }),
     h("div", { class: "row" }, [
       txTypeBadge,
-      // Which balance pays, and what the chain shows.
+      // What the chain shows.
       h("div", {
         class: "muted transfer-line",
-        text: transferLine(d.privacy || (recType === "address" ? "shielded" : "public"), ov),
+        text: transferLine(d.privacy || (recType === "address" ? "shielded" : "public")),
       }),
       h("div", { class: "home-balance" }, [
         h("div", {
@@ -1010,10 +989,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "balance-sub", text: "DUSK" }),
       ]),
       h("div", { class: "muted", text: "To" }),
-      h("div", { class: "box" }, [
-        duskName ? h("div", { text: duskName.name }) : null,
-        h("code", { text: d.to }),
-      ]),
+      duskName
+        ? namedAddressBox(duskName.name, h("code", { text: d.to }))
+        : h("div", { class: "box" }, [h("code", { text: d.to })]),
       contactLine,
       d.memo
         ? h("div", { class: "row" }, [

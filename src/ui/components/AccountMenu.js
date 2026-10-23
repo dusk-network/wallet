@@ -1,13 +1,14 @@
 import { h } from "../lib/dom.js";
 import { copyToClipboard } from "../lib/clipboard.js";
-import { truncateMiddle } from "../lib/strings.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
+import { iconSvg } from "./ActionIcon.js";
 import { duskNameEl } from "./DuskName.js";
+import { shortAddressEl } from "./ShortAddress.js";
 
 /**
  * Small controller that renders the profile selection menu under an anchor.
  * Uses the same base classes as the network menu so ui.css styling applies.
- * Each profile's row also copies its account, reporting through `onCopy`.
+ * Each profile's row also copies its public account, reporting through `onCopy`.
  */
 export function createAccountMenuController({
   onSelectAccountIndex,
@@ -49,15 +50,21 @@ export function createAccountMenuController({
       const active = i === selIdx;
       const name = String(nameMap?.[String(i)] ?? "").trim();
       const label = name || `Profile ${i + 1}`;
-      const hint = acct ? truncateMiddle(String(acct), 12, 10) : "";
+
+      // Two lines: the label, then the profile's verified .dusk name, looked
+      // up when the menu opens, or its short account until it has one.
+      const lookup = acct ? lookupPrimaryName(String(acct), { nodeUrl: ov?.nodeUrl }) : null;
+      const hint = acct
+        ? h("div", { class: "net-menu-item-hint" }, [shortAddressEl(String(acct), { tag: "span" })])
+        : h("div");
+      lookup?.then((verified) => {
+        if (verified) hint.hidden = true;
+      });
 
       const left = h("div", { class: "net-menu-item-left" }, [
         h("div", { class: "net-menu-item-label", text: label }),
-        // Each profile's own .dusk name, looked up when the menu opens.
-        acct ? duskNameEl(lookupPrimaryName(String(acct), { nodeUrl: ov?.nodeUrl })) : null,
-        hint
-          ? h("div", { class: "net-menu-item-hint", text: hint })
-          : h("div"),
+        lookup ? duskNameEl(lookup) : null,
+        hint,
       ]);
 
       const check = active
@@ -86,9 +93,9 @@ export function createAccountMenuController({
         ? h("button", {
             class: "acct-menu-copy",
             type: "button",
-            text: "⧉",
-            title: "Copy account",
-            "aria-label": `Copy ${label} account`,
+            html: iconSvg("copy"),
+            title: "Copy public account",
+            "aria-label": "Copy public account",
             onclick: async () => {
               const ok = await copyToClipboard(String(acct));
               close();

@@ -1,14 +1,17 @@
 import { h, setChildren } from "../lib/dom.js";
-import { truncateMiddle } from "../lib/strings.js";
+import { shortAddress } from "../lib/strings.js";
 import { identiconEl } from "./Identicon.js";
 
 // The chip's one line: the name, cut at its end when it has to shrink, or the
-// short account (6…4), which then gives up characters before the "…" and
-// keeps its last four.
-function chipLabel(text, tail = "") {
+// short account (6…6), which then gives up characters before the "…" and
+// keeps its last six. Screen readers get the full account in its place.
+function chipLabel(text, account = "") {
+  const cut = account ? text.indexOf("…") : -1;
+  if (cut < 0) return [h("span", { class: "chip-text__head", text })];
   return [
-    h("span", { class: "chip-text__head", text }),
-    tail ? h("span", { class: "chip-text__tail", text: tail }) : null,
+    h("span", { class: "chip-text__head", "aria-hidden": "true", text: text.slice(0, cut + 1) }),
+    h("span", { class: "chip-text__tail", "aria-hidden": "true", text: text.slice(cut + 1) }),
+    h("span", { class: "sr-only", text: account }),
   ];
 }
 
@@ -28,13 +31,8 @@ function chipLabel(text, tail = "") {
  * @returns {HTMLElement}
  */
 export function accountChipEl(account, { onClick, connected, host, name, expanded = false } = {}) {
-  const short = account ? truncateMiddle(account, 6, 4) : "—";
-  const cut = short === account ? -1 : short.indexOf("…");
-  const label = h(
-    "span",
-    { class: "chip-text" },
-    cut < 0 ? chipLabel(short) : chipLabel(short.slice(0, cut + 1), short.slice(cut + 1))
-  );
+  const short = account ? shortAddress(account) : "—";
+  const label = h("span", { class: "chip-text" }, chipLabel(short, short === account ? "" : account));
 
   const icon = identiconEl(account || "dusk");
   if (host) {

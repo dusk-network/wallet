@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { installFakeDom, press } from "../testing/fakeDom.js";
+import { installFakeDom, press, screenReaderText, visibleText } from "../testing/fakeDom.js";
 import { nameAddressChoice, shieldedShortfallEl } from "./NameAddressChoice.js";
 
 const ACCOUNT =
@@ -25,8 +25,6 @@ function choice(opts = {}) {
     name: "alice.dusk",
     account: ACCOUNT,
     address: ADDRESS,
-    publicBalance: "177.9865",
-    shieldedBalance: "25",
     onChoose,
     onShield,
     ...opts,
@@ -43,23 +41,27 @@ describe("name address choice", () => {
     const { el, publicRadio, shieldedRadio } = choice();
     const head = el.querySelector(".name-points-to");
     expect(head.textContent).toBe("alice.dusk points to");
+    // The name leads; the cards' addresses follow short and muted.
+    expect(head.querySelector(".name-points-to__name").textContent).toBe("alice.dusk");
     const group = el.querySelector("[role=radiogroup]");
     expect(group.getAttribute("aria-labelledby")).toBe(head.id);
     expect(head.id).not.toBe("");
 
     expect(publicRadio.querySelector(".name-option__label").textContent).toBe("Public account");
-    expect(publicRadio.querySelector(".name-option__addr").textContent).toBe("21n5nc…fMMLNz");
-    expect(publicRadio.querySelector(".name-option__addr").title).toBe(ACCOUNT);
-    expect(publicRadio.querySelector(".name-option__line").textContent).toBe(
-      "From your public balance (177.9865 DUSK). Amount and both accounts are visible on chain."
-    );
-    expect(publicRadio.querySelector(".name-option__line strong").textContent).toBe("public balance");
-
+    const addr = publicRadio.querySelector(".name-option__addr");
+    expect([visibleText(addr), addr.title, screenReaderText(addr)]).toEqual(["21n5nc…fMMLNz", ACCOUNT, ACCOUNT]);
+    expect(publicRadio.querySelector(".name-option__line").textContent).toBe("Visible on chain");
     expect(shieldedRadio.querySelector(".name-option__label").textContent).toBe("Shielded address");
-    expect(shieldedRadio.querySelector(".name-option__addr").textContent).toBe("4QpZhL…i743QE");
-    expect(shieldedRadio.querySelector(".name-option__line").textContent).toBe(
-      "From your shielded balance (25 DUSK). Amount and both parties stay private."
-    );
+    expect(shieldedRadio.querySelector(".name-option__line").textContent).toBe("Private");
+
+    // Each card shows its title, short address and one line, and no balance;
+    // screen readers get the full address in place of the short one.
+    expect([visibleText(publicRadio), visibleText(shieldedRadio)]).toEqual([
+      "Public account21n5nc…fMMLNzVisible on chain",
+      "Shielded address4QpZhL…i743QEPrivate",
+    ]);
+    expect(screenReaderText(publicRadio)).toBe(`Public account${ACCOUNT}Visible on chain`);
+    expect(screenReaderText(shieldedRadio)).toBe(`Shielded address${ADDRESS}Private`);
     expect(el.querySelector(".name-shortfall")).toBeNull();
   });
 
@@ -108,14 +110,15 @@ describe("name address choice", () => {
   });
 
   it("disables the shielded address when the shielded balance can't pay, and links to Shield", () => {
-    const { el, onChoose, onShield, publicRadio, shieldedRadio } = choice({
-      shieldedBalance: "0",
-      shieldedDisabled: true,
-    });
+    const { el, onChoose, onShield, publicRadio, shieldedRadio } = choice({ shieldedDisabled: true });
     expect(shieldedRadio.getAttribute("aria-disabled")).toBe("true");
     expect(publicRadio.hasAttribute("aria-disabled")).toBe(false);
     expect(shieldedRadio.parentNode.classList.contains("is-disabled")).toBe(true);
-    expect(shieldedRadio.querySelector(".name-option__line").textContent).toContain("(0 DUSK)");
+    // The shortfall takes the place of "Private".
+    expect(shieldedRadio.querySelector(".name-option__line")).toBeNull();
+    expect(visibleText(shieldedRadio.parentNode)).toBe(
+      "Shielded address4QpZhL…i743QENot enough shielded DUSK · Shield first"
+    );
 
     shieldedRadio.click();
     press(shieldedRadio, " ");
@@ -127,7 +130,7 @@ describe("name address choice", () => {
     // The hint sits in the shielded card, beside its radio rather than in it.
     const hint = el.querySelector(".name-shortfall");
     expect(hint.parentNode).toBe(shieldedRadio.parentNode);
-    expect(hint.textContent).toBe("Not enough shielded DUSK. Shield DUSK first");
+    expect(hint.textContent).toBe("Not enough shielded DUSK · Shield first");
     hint.querySelector("button").click();
     expect(onShield).toHaveBeenCalledTimes(1);
   });
@@ -136,13 +139,41 @@ describe("name address choice", () => {
     const { publicRadio, shieldedRadio } = choice({ shielded: true, shieldedDisabled: true });
     expect([checked(publicRadio), checked(shieldedRadio)]).toEqual(["false", "true"]);
   });
+
+  it.each([
+    ["only a public account", { address: undefined }, "Public account21n5nc…fMMLNzVisible on chain", ACCOUNT],
+    ["only a shielded address", { account: undefined }, "Shielded address4QpZhL…i743QEPrivate", ADDRESS],
+    [
+      "only a shielded address the balance can't pay",
+      { account: undefined, shieldedDisabled: true },
+      "Shielded address4QpZhL…i743QENot enough shielded DUSK · Shield first",
+      ADDRESS,
+    ],
+  ])("shows a name with %s as that one card, picked, and as no radio", (_label, opts, text, full) => {
+    const { el, onChoose, onShield } = choice(opts);
+    expect(el.querySelector(".name-points-to").textContent).toBe("alice.dusk points to");
+    const cards = el.querySelectorAll(".name-option");
+    expect(cards).toHaveLength(1);
+    expect(cards[0].classList.contains("is-checked")).toBe(true);
+    expect(visibleText(cards[0])).toBe(text);
+    expect(screenReaderText(cards[0])).toContain(full);
+
+    // Nothing to choose: no radio group, nothing to focus or pick.
+    expect(el.querySelector("[role]")).toBeNull();
+    expect(el.querySelector("[aria-checked], [tabindex]")).toBeNull();
+    cards[0].querySelector(".name-option__main").click();
+    expect(onChoose).not.toHaveBeenCalled();
+    el.querySelector(".name-shortfall button")?.click();
+    expect(onShield).toHaveBeenCalledTimes(opts.shieldedDisabled ? 1 : 0);
+  });
 });
 
 describe("shielded shortfall", () => {
   it("says the shielded balance is short and opens Shield", () => {
     const onShield = vi.fn();
     const el = shieldedShortfallEl({ onShield });
-    expect(el.textContent).toBe("Not enough shielded DUSK. Shield DUSK first");
+    expect(el.textContent).toBe("Not enough shielded DUSK · Shield first");
+    expect(el.querySelector("button").textContent).toBe("Shield first");
     el.querySelector("button").click();
     expect(onShield).toHaveBeenCalledTimes(1);
   });

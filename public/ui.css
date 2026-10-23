@@ -302,6 +302,21 @@ code {
   word-break: break-all;
 }
 
+/* For screen readers only, e.g. the full address behind a short one */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  user-select: none;
+}
+
 .divider {
   height: 1px;
   background: var(--border);
@@ -333,7 +348,8 @@ code {
   width: 100%;
 }
 
-.btnrow--grid > button:nth-child(3) {
+.btnrow--grid > button:nth-child(3),
+.btnrow--grid > button:only-child {
   grid-column: 1 / -1;
 }
 
@@ -538,7 +554,7 @@ input:focus, textarea:focus, select:focus {
   pointer-events: none;
 }
 
-/* Send: where a .dusk name with both addresses is paid, as option cards */
+/* Send: where a .dusk name is paid, as option cards */
 .name-choice-wrap,
 .name-choice {
   display: flex;
@@ -548,6 +564,28 @@ input:focus, textarea:focus, select:focus {
 
 .name-points-to {
   font-size: 13px;
+}
+
+.name-points-to__name {
+  color: var(--foreground);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Review: a .dusk name over the address it resolved to; the name leads, the
+   address follows smaller and muted */
+.named-address {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.named-address .dusk-name {
+  font-size: 14px;
+}
+
+.named-address code {
+  color: var(--muted-foreground);
 }
 
 .name-option {
@@ -571,6 +609,10 @@ input:focus, textarea:focus, select:focus {
   gap: 3px 10px;
   padding: 10px 12px;
   border-radius: inherit;
+}
+
+/* Only the cards of a choice are radios and take a click */
+.name-option__main[role="radio"] {
   cursor: pointer;
 }
 
@@ -624,12 +666,7 @@ input:focus, textarea:focus, select:focus {
   color: var(--muted-foreground);
 }
 
-.name-option__line strong {
-  color: var(--foreground);
-  font-weight: 600;
-}
-
-/* "Not enough shielded DUSK. Shield DUSK first" */
+/* "Not enough shielded DUSK · Shield first" */
 .name-shortfall {
   font-size: 12px;
   line-height: 1.35;
@@ -1070,7 +1107,7 @@ button:disabled {
 }
 
 /* The chip's name ends in "…" when it has to shrink; its short account loses
-   characters before the "…" and keeps its last four. */
+   characters before the "…" and keeps its last six. */
 .account-chip .chip-text__head {
   min-width: 0;
   overflow: hidden;
@@ -3268,7 +3305,8 @@ button.net-menu-item--active {
   min-width: 0;
 }
 
-button.acct-menu-copy {
+button.acct-menu-copy,
+button.receive-copy {
   flex: 0 0 auto;
   width: 28px;
   height: 28px;
@@ -3276,13 +3314,34 @@ button.acct-menu-copy {
   border-color: transparent;
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 12px;
 }
 
-button.acct-menu-copy:hover {
+button.acct-menu-copy:hover,
+button.receive-copy:hover,
+button.receive-info:hover {
   color: var(--foreground);
   border-color: var(--border);
   box-shadow: none;
+}
+
+/* The copy and ⓘ icons: inline SVG, centered in the button, in its colour */
+button.acct-menu-copy,
+button.receive-copy,
+button.receive-info {
+  display: inline-grid;
+  place-items: center;
+}
+
+button.acct-menu-copy svg,
+button.receive-copy svg,
+button.receive-info svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* -------------------------------------------------------
@@ -3319,6 +3378,12 @@ body.page--popup .dashboard-actions {
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+/* The popup dashboard's order. Scoped to its own sections: unscoped, it also
+   pushed the tabs and boxes of every other view (Receive's QR, Review's
+   recipient) to the end. */
+body.page--popup .wallet-dashboard > .dashboard-actions {
   order: 1;
 }
 
@@ -3327,16 +3392,19 @@ body.page--popup .dashboard-section-label {
 }
 
 body.page--popup .home-balance {
-  order: 0;
   padding: 14px;
 }
 
-body.page--popup .tabs {
+body.page--popup .wallet-dashboard > .home-balance {
+  order: 0;
+}
+
+body.page--popup .wallet-dashboard > .tabs {
   order: 2;
 }
 
-body.page--popup .activity-card,
-body.page--popup .box {
+body.page--popup .wallet-dashboard > .activity-card,
+body.page--popup .wallet-dashboard > .box {
   order: 3;
 }
 
@@ -4021,76 +4089,69 @@ body[data-runtime="tauri"].page--full .panel {
   padding: 12px;
 }
 
-.receive-chip {
-  width: 100%;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius);
+/* The name and the address under the QR, one line each with a copy button
+   at the right. The name leads; the address follows smaller and muted, in
+   full in its tooltip. */
+.receive-fields {
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--secondary);
-  box-shadow: 0 1px 0 rgba(242,240,235,0.04) inset;
 }
 
-.receive-chip:hover {
-  border-color: rgba(242,240,235,0.16);
-  box-shadow:
-    0 1px 0 rgba(242,240,235,0.06) inset,
-    var(--shadow-soft);
-}
-
-.receive-chip-icon .identicon {
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.10);
-}
-
-.receive-chip-main {
-  flex: 1;
-  min-width: 0;
+.receive-field {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 4px;
+  min-height: 40px;
+  padding: 4px 6px 4px 12px;
 }
 
-.receive-chip-kind {
+.receive-field[hidden] {
+  display: none;
+}
+
+.receive-field:not([hidden]) + .receive-field {
+  border-top: 1px solid var(--border);
+}
+
+.receive-field__name {
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.receive-field__address {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  word-break: normal;
+  font-size: 12px;
   color: var(--muted-foreground);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.1;
 }
 
-.receive-chip-name {
-  font-size: 13px;
-  line-height: 1.25;
+.receive-field .receive-copy {
+  margin-left: auto;
 }
 
-.receive-chip-name:not([hidden]) + .receive-chip-text {
+/* The ⓘ after the name: shows what people reach through it */
+button.receive-info {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 50%;
+  background: transparent;
   color: var(--muted-foreground);
 }
 
-.receive-chip-text {
-  display: block;
-  letter-spacing: 0;
-  line-height: 1.35;
+button.receive-info[aria-expanded="true"] {
   color: var(--foreground);
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
 .receive-name-note {
-  text-align: center;
-}
-
-.receive-chip-copy {
-  flex: 0 0 auto;
-  padding-top: 2px;
-  opacity: 0.75;
-  font-size: 12px;
+  padding: 0 12px;
 }
 
 .qr-context-menu {

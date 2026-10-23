@@ -4,6 +4,16 @@ export function truncateMiddle(str, head = 8, tail = 8) {
 }
 
 /**
+ * An account or address as the .dusk name views shorten it: its first and
+ * last six characters around "…". Short input comes back as it is.
+ * @param {string} address
+ * @returns {string}
+ */
+export function shortAddress(address) {
+  return truncateMiddle(String(address ?? ""), 6, 6);
+}
+
+/**
  * Convenience helper for displaying transaction hashes in compact form.
  * Returns first 10 chars + ellipsis + last 8 chars.
  * @param {string} hash

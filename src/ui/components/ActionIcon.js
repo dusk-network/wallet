@@ -30,11 +30,30 @@ const ICON_PATHS = {
     '<path d="m4 12 8 4.5 8-4.5"/>',
     '<path d="m4 16 8 4.5 8-4.5"/>',
   ],
+  info: [
+    '<circle cx="12" cy="12" r="9"/>',
+    '<path d="M12 12v4"/>',
+    '<path d="M12 8h.01"/>',
+  ],
+  copy: [
+    '<rect x="9" y="9" width="11" height="11" rx="2"/>',
+    '<path d="M9 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v3"/>',
+  ],
 };
+
+/**
+ * An icon as inline SVG markup, drawn in the current colour by the CSS where
+ * it shows, so it looks the same whatever fonts the system has.
+ * @param {string} name - one of ICON_PATHS
+ * @returns {string}
+ */
+export function iconSvg(name) {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name]?.join("") ?? ""}</svg>`;
+}
 
 export function actionIcon(name, { className = "action-btn-ico" } = {}) {
   return h("div", {
     class: className,
-    html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name]?.join("") ?? ""}</svg>`,
+    html: iconSvg(name),
   });
 }

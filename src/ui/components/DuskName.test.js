@@ -16,8 +16,8 @@ afterEach(() => {
 describe("duskNameEl", () => {
   it("stays hidden until the lookup gives a name, then shows it", async () => {
     let answer;
-    const el = duskNameEl(new Promise((resolve) => (answer = resolve)), { className: "receive-chip-name" });
-    expect(el.className).toBe("dusk-name receive-chip-name");
+    const el = duskNameEl(new Promise((resolve) => (answer = resolve)), { className: "receive-field__name" });
+    expect(el.className).toBe("dusk-name receive-field__name");
     expect(el.hidden).toBe(true);
     expect(el.textContent).toBe("");
 
@@ -47,22 +47,27 @@ describe("own .dusk names in the popup", () => {
   it("shows each profile's verified name where its account shows", async () => {
     const read = (...parts) => readFile(path.resolve(process.cwd(), ...parts), "utf8");
     const header = await read("src", "ui", "popup", "header.js");
-    const menu = await read("src", "ui", "components", "AccountMenu.js");
     const receive = await read("src", "ui", "popup", "views", "receive.js");
     const css = await read("public", "ui.css");
+    // The declarations of the top-level rule for exactly `selector`.
+    const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
 
     expect(header).toContain("name: lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl }),");
-    expect(menu).toContain("acct ? duskNameEl(lookupPrimaryName(String(acct), { nodeUrl: ov?.nodeUrl })) : null,");
     // The public account's name; beside the shielded address only when the name pays to it.
     expect(receive).toMatch(
       /tab === "public"\s*\? lookupPrimaryName\(account, \{ nodeUrl: ov\?\.nodeUrl \}\)\s*: lookupShieldedName\(account, address, \{ nodeUrl: ov\?\.nodeUrl \}\)/
     );
-    expect(receive).toContain("[chipKind, chipName, chipText]");
 
-    // Name first, the address after it muted; no colour of its own. The header
-    // chip has one line, the name or the short account.
-    expect(css).toMatch(/\.dusk-name\s*\{[^}]*color: var\(--foreground\)/s);
+    // The name leads at full contrast, with no colour of its own; the address
+    // after it is smaller and muted, on Receive one line ending in "…". The
+    // header chip has one line, the name or the short account.
+    expect(rule(".dusk-name")).toContain("color: var(--foreground);");
     expect(css).not.toContain(".chip-lines");
-    expect(css).toMatch(/\.receive-chip-name:not\(\[hidden\]\) \+ \.receive-chip-text\s*\{[^}]*var\(--muted-foreground\)/s);
+    expect(rule(".receive-field__name")).toContain("font-size: 14px;");
+    const oneMutedLine = ["font-size: 12px;", "color: var(--muted-foreground);", "white-space: nowrap;", "text-overflow: ellipsis;"];
+    for (const decl of oneMutedLine) expect(rule(".receive-field__address")).toContain(decl);
+    expect(rule(".receive-field[hidden]")).toContain("display: none;");
+    expect(rule(".named-address .dusk-name")).toContain("font-size: 14px;");
+    expect(rule(".named-address code")).toContain("color: var(--muted-foreground);");
   });
 });

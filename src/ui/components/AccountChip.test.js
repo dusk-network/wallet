@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { installFakeDom, settle } from "../testing/fakeDom.js";
+import { installFakeDom, screenReaderText, settle, visibleText } from "../testing/fakeDom.js";
 import { accountChipEl } from "./AccountChip.js";
 
 const ACCOUNT =
@@ -23,12 +23,15 @@ describe("account chip", () => {
   it("shows the short account on one line, then a ▾", () => {
     const chip = accountChipEl(ACCOUNT);
     expect(parts(chip)).toEqual(["identicon", "chip-text", "chip-chev"]);
-    expect(line(chip).textContent).toBe("26FCH7…k927");
-    // The account gives way before its "…" and keeps its last four characters.
+    expect(visibleText(line(chip))).toBe("26FCH7…Tck927");
+    // The account gives way before its "…" and keeps its last six characters;
+    // screen readers get all of it.
     expect(line(chip).children.map((part) => [part.className, part.textContent])).toEqual([
       ["chip-text__head", "26FCH7…"],
-      ["chip-text__tail", "k927"],
+      ["chip-text__tail", "Tck927"],
+      ["sr-only", ACCOUNT],
     ]);
+    expect(screenReaderText(line(chip))).toBe(ACCOUNT);
     expect(chip.querySelector(".chip-chev").textContent).toBe("▾");
     expect(chip.querySelector(".chip-chev").getAttribute("aria-hidden")).toBe("true");
     expect(chip.title).toBe(ACCOUNT);
@@ -47,7 +50,7 @@ describe("account chip", () => {
   it("keeps the short account when there is no name", async () => {
     const chip = accountChipEl(ACCOUNT, { name: Promise.resolve(null) });
     await settle();
-    expect(line(chip).textContent).toBe("26FCH7…k927");
+    expect(visibleText(line(chip))).toBe("26FCH7…Tck927");
     expect(chip.title).toBe(ACCOUNT);
   });
 

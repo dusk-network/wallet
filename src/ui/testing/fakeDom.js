@@ -527,6 +527,19 @@ export function isShown(el) {
   return true;
 }
 
+// The text under `node`, leaving out hidden elements and those `skip` picks.
+function textWithout(node, skip) {
+  if (node.nodeType === 3) return node.data;
+  if (node.hidden || node.style.display === "none" || skip(node)) return "";
+  return node.childNodes.map((child) => textWithout(child, skip)).join("");
+}
+
+/** The text `el` shows: without hidden parts and the screen-reader-only (.sr-only) ones. */
+export const visibleText = (el) => textWithout(el, (n) => n.classList.contains("sr-only"));
+
+/** The text screen readers get from `el`: without hidden and aria-hidden parts. */
+export const screenReaderText = (el) => textWithout(el, (n) => n.getAttribute("aria-hidden") === "true");
+
 /** Types `value` into an input the way the browser reports it: value, then an input event. */
 export function typeInto(input, value) {
   input.value = value;

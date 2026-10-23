@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fakeEvent, installFakeDom, settle } from "../testing/fakeDom.js";
+import { fakeEvent, installFakeDom, settle, visibleText } from "../testing/fakeDom.js";
 
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -86,8 +86,8 @@ describe("header", () => {
     const { names, renderHeader, chip } = await setup("popup");
     renderHeader(overview);
     await settle();
-    expect(chip().querySelector(".chip-text").textContent).toBe("26FCH7…k927");
-    expect(chip().textContent).toBe("26FCH7…k927▾");
+    expect(visibleText(chip().querySelector(".chip-text"))).toBe("26FCH7…Tck927");
+    expect(visibleText(chip())).toBe("26FCH7…Tck927▾");
     expect(names.lookupPrimaryName).toHaveBeenCalledWith(ACCOUNT, { nodeUrl: overview.nodeUrl });
 
     names.lookupPrimaryName.mockResolvedValue("alice.dusk");

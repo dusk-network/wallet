@@ -1,10 +1,10 @@
 import { h } from "../lib/dom.js";
-import { truncateMiddle } from "../lib/strings.js";
+import { shortAddressEl } from "./ShortAddress.js";
 
 let choices = 0;
 
 /**
- * "Not enough shielded DUSK. Shield DUSK first", where the link calls
+ * "Not enough shielded DUSK · Shield first", where "Shield first" calls
  * `onShield` (the send form opens Shield with it).
  *
  * @param {{ onShield?: () => void }} [opts]
@@ -12,32 +12,32 @@ let choices = 0;
  */
 export function shieldedShortfallEl({ onShield } = {}) {
   return h("div", { class: "name-shortfall" }, [
-    "Not enough shielded DUSK. ",
+    "Not enough shielded DUSK · ",
     h("button", {
       class: "name-shortfall__link",
       type: "button",
-      text: "Shield DUSK first",
+      text: "Shield first",
       onclick: () => onShield?.(),
     }),
   ]);
 }
 
 /**
- * Where a .dusk name with both addresses is paid: its public account or its
- * shielded address, as two option cards in a radio group under "<name> points
- * to". Each card says which balance pays and what the chain shows. The
- * shielded card can't be picked when `shieldedDisabled`, and then says how to
- * fix that.
+ * Where a .dusk name is paid, under "<name> points to": an option card for its
+ * public account and one for its shielded address, each with its title and
+ * short address, then what the chain shows. The shielded card can't be picked
+ * when `shieldedDisabled`, and then says how to fix that in place of what the
+ * chain shows.
  *
- * The cards only report a pick through `onChoose`; `set` shows one.
+ * The two cards of a name with both addresses are a radio group; they only
+ * report a pick through `onChoose`, and `set` shows one. A name with one
+ * address has nothing to choose, so its card shows picked and is no radio.
  *
  * @param {object} opts
  * @param {string} opts.name - the name, as resolved
- * @param {string} opts.account - its public account
- * @param {string} opts.address - its shielded address
+ * @param {string} [opts.account] - its public account
+ * @param {string} [opts.address] - its shielded address
  * @param {boolean} [opts.shielded] - whether the shielded address is picked
- * @param {string} opts.publicBalance - the public balance, in DUSK
- * @param {string} opts.shieldedBalance - the spendable shielded balance, in DUSK
  * @param {boolean} [opts.shieldedDisabled] - the shielded balance can't pay for a transfer
  * @param {(shielded: boolean) => void} [opts.onChoose]
  * @param {() => void} [opts.onShield]
@@ -48,38 +48,38 @@ export function nameAddressChoice({
   account,
   address,
   shielded = false,
-  publicBalance,
-  shieldedBalance,
   shieldedDisabled = false,
   onChoose,
   onShield,
 }) {
-  const option = ({ isShielded, title, value, balanceName, balance, shown, disabled }) => {
+  const headId = `name-choice-${++choices}`;
+  const choosing = Boolean(account && address);
+
+  const option = ({ isShielded, title, value, line, disabled }) => {
     const radio = h(
       "div",
       {
         class: "name-option__main",
-        role: "radio",
-        "aria-checked": "false",
-        "aria-disabled": disabled ? "true" : undefined,
-        tabindex: "-1",
-        onclick: () => {
-          if (!disabled) onChoose?.(isShielded);
-        },
+        ...(choosing && {
+          role: "radio",
+          "aria-checked": "false",
+          "aria-disabled": disabled ? "true" : undefined,
+          tabindex: "-1",
+          onclick: () => {
+            if (!disabled) onChoose?.(isShielded);
+          },
+        }),
       },
       [
         h("span", { class: "name-option__dot", "aria-hidden": "true" }),
         h("span", { class: "name-option__title" }, [
           h("span", { class: "name-option__label", text: title }),
-          h("code", { class: "name-option__addr", text: truncateMiddle(value, 6, 6), title: value }),
+          shortAddressEl(value, { className: "name-option__addr" }),
         ]),
-        h("span", { class: "name-option__line" }, [
-          "From your ",
-          h("strong", { text: balanceName }),
-          ` (${balance} DUSK). ${shown}`,
-        ]),
+        disabled ? null : h("span", { class: "name-option__line", text: line }),
       ]
     );
+    // The shortfall's link sits beside the radio rather than in it: a radio can't hold a button.
     const card = h("div", { class: disabled ? "name-option is-disabled" : "name-option" }, [
       radio,
       disabled ? shieldedShortfallEl({ onShield }) : null,
@@ -88,37 +88,22 @@ export function nameAddressChoice({
   };
 
   const options = [
-    option({
-      isShielded: false,
-      title: "Public account",
-      value: account,
-      balanceName: "public balance",
-      balance: publicBalance,
-      shown: "Amount and both accounts are visible on chain.",
-      disabled: false,
-    }),
-    option({
-      isShielded: true,
-      title: "Shielded address",
-      value: address,
-      balanceName: "shielded balance",
-      balance: shieldedBalance,
-      shown: "Amount and both parties stay private.",
-      disabled: shieldedDisabled,
-    }),
-  ];
+    account && option({ isShielded: false, title: "Public account", value: account, line: "Visible on chain" }),
+    address &&
+      option({ isShielded: true, title: "Shielded address", value: address, line: "Private", disabled: shieldedDisabled }),
+  ].filter(Boolean);
 
-  const headId = `name-choice-${++choices}`;
   const group = h(
     "div",
-    { class: "name-choice", role: "radiogroup", "aria-labelledby": headId },
+    { class: "name-choice", ...(choosing && { role: "radiogroup", "aria-labelledby": headId }) },
     options.map((o) => o.card)
   );
 
   const set = (next) => {
     for (const o of options) {
-      const on = o.shielded === (next === true);
+      const on = !choosing || o.shielded === (next === true);
       o.card.classList.toggle("is-checked", on);
+      if (!choosing) continue;
       o.radio.setAttribute("aria-checked", String(on));
       // Tab reaches the group at its checked option.
       o.radio.setAttribute("tabindex", on ? "0" : "-1");
@@ -152,7 +137,10 @@ export function nameAddressChoice({
 
   return {
     el: h("div", { class: "name-choice-wrap" }, [
-      h("div", { class: "muted name-points-to", id: headId, text: `${name} points to` }),
+      h("div", { class: "muted name-points-to", id: headId }, [
+        h("span", { class: "name-points-to__name", text: name }),
+        " points to",
+      ]),
       group,
     ]),
     set,
