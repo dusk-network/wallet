@@ -546,6 +546,36 @@ describe("background rpc handler", () => {
     });
   });
 
+  it("dusk_profiles reads the name again when the wallet moves network meanwhile", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    const { namesNetworkMoved } = await import("./siteNames.js");
+    const { readVerifiedNames } = await import("../shared/verifiedNames.js");
+
+    perms["https://dapp.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    const at = Date.now();
+    verifiedNames = { testnet: { acct1: { name: "one.dusk", at } }, mainnet: { acct1: { name: "main.dusk", at } } };
+
+    // The wallet moves to Mainnet while the Testnet names are read.
+    const held = {};
+    readVerifiedNames.mockImplementationOnce(
+      () => new Promise((resolve) => (held.release = () => resolve(verifiedNames)))
+    );
+    const profiles = handleRpc("https://dapp.example", { method: "dusk_profiles" });
+    await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+    settings = { ...settings, nodeUrl: "https://nodes.dusk.network" };
+    namesNetworkMoved();
+    held.release();
+
+    await expect(profiles).resolves.toEqual([{ profileId: "account:1:acct1", account: "acct1", name: "main.dusk" }]);
+  });
+
   it("dusk_requestProfiles gives the profile picked in the approval its name, dusk_requestShieldedAddress none", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

@@ -558,6 +558,63 @@ describe("dappEvents", () => {
       );
     });
 
+    // Holds the next permissions read until `release` is called.
+    async function holdPermissions() {
+      const { getPermissions } = await import("../shared/permissions.js");
+      const held = {};
+      getPermissions.mockImplementationOnce(
+        () => new Promise((resolve) => (held.release = () => resolve(permissions)))
+      );
+      return held;
+    }
+
+    const moveToMainnet = async (ev) => {
+      settings = { nodeUrl: "https://nodes.dusk.network" };
+      await ev.handleSettingsDiff({ nodeUrl: "https://testnet.nodes.dusk.network" }, settings);
+    };
+
+    it("drops a name update begun on the network the wallet moved away from", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk") }, mainnet: { acct0: check("main.dusk") } };
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+      port.messages = [];
+
+      // A Testnet check comes in, and the wallet moves to Mainnet while its
+      // update waits for the permissions.
+      const held = await holdPermissions();
+      const update = ev.handleVerifiedNamesDiff({}, { testnet: { acct0: check("carol.dusk") } });
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      await moveToMainnet(ev);
+      held.release();
+      await update;
+
+      expect(profileEvents(port).map((event) => event.data)).toEqual([
+        [{ profileId: "account:0:acct0", account: "acct0", name: "main.dusk" }],
+      ]);
+    });
+
+    it("builds a site's first state again when the wallet moves network meanwhile", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk") }, mainnet: { acct0: check("main.dusk") } };
+      const ev = await import("./dappEvents.js");
+
+      const held = await holdPermissions();
+      const port = new FakePort("https://dapp.example");
+      ev.registerDappPort(port);
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      await moveToMainnet(ev);
+      held.release();
+
+      await vi.waitFor(() => expect(port.messages.some((m) => m?.type === "DUSK_PROVIDER_STATE")).toBe(true));
+      const states = port.messages.filter((m) => m?.type === "DUSK_PROVIDER_STATE");
+      expect(states).toHaveLength(1);
+      expect(states[0].state).toMatchObject({
+        chainId: "dusk:1",
+        profiles: [{ profileId: "account:0:acct0", account: "acct0", name: "main.dusk" }],
+      });
+    });
+
     it("gives sites the new network's names when the wallet's node changes", async () => {
       permissions = { "https://dapp.example": connected(0) };
       verifiedNames = { testnet: { acct0: check("alice.dusk") }, mainnet: { acct0: check("main.dusk") } };

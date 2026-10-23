@@ -29,7 +29,7 @@ import {
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
 import { cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
-import { siteNames } from "./siteNames.js";
+import { keepEngineNameCheck, siteNames } from "./siteNames.js";
 import {
   broadcastChainChangedAll,
   broadcastProfilesChangedAll,
@@ -570,6 +570,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const result = await handleRpc(origin, message.request);
         await updateDappActivity(message.request, activityContext);
         sendResponse({ id, result });
+        return;
+      }
+
+      // The engine's .dusk name checks, kept here: Chrome's offscreen
+      // document has no storage.
+      if (message?.type === "DUSK_NAME_CHECKED") {
+        sendResponse({ ok: await keepEngineNameCheck(message, sender) });
         return;
       }
 
