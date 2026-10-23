@@ -412,6 +412,10 @@ export function sendFormView(ov, { state, actions } = {}) {
   const pickedShielded = (result) => nameChoice?.name === result.name && nameChoice.shielded;
   const nameRecipient = (result) => duskNameRecipient(result, { shielded: pickedShielded(result) });
 
+  // The resolved name the form shows while the field holds it. Contacts saves
+  // the address it sends to, never the name.
+  let shownName = null;
+
   // Points the form at the address `result` sends to: the balance line and
   // Review follow it. True when Review can go ahead.
   const showNameAddress = (result) => {
@@ -432,6 +436,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     const recipient = result.ok ? nameRecipient(result) : "";
     const t = recipient ? ProfileGenerator.typeOf(recipient) : null;
     if (t !== "account" && t !== "address") {
+      shownName = null;
       hideRecipientBadge(toTypePill);
       showSelfNote("");
       const failed = result.ok ? { name: result.name, reason: "no_account" } : result;
@@ -454,6 +459,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       return false;
     }
 
+    shownName = result;
     // The name's cards show the transfer type, and pick it when the name has
     // both addresses, so the pill stays off.
     hideRecipientBadge(toTypePill);
@@ -492,6 +498,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   const updateToType = () => {
     const v = String(to.value || "").trim();
     showSelfNote("");
+    shownName = null;
     if (!isDuskName(v)) {
       showNameBox([]);
       nextBtn.disabled = false;
@@ -629,7 +636,8 @@ export function sendFormView(ov, { state, actions } = {}) {
           mode: "pick",
           fromRoute: "send",
           pickReturnRoute: "send",
-          prefillAddress: String(to.value || "").trim(),
+          // A new contact gets the address a shown name sends to, in full in its form.
+          prefillAddress: shownName ? nameRecipient(shownName) : String(to.value || "").trim(),
           view: "list",
           query: "",
           loaded: false,

@@ -463,6 +463,31 @@ describe("a name and the recipient Contacts sets", () => {
   });
 });
 
+describe("a new contact from a name", () => {
+  it("gets the address the name sends to, not the name", () => {
+    const state = newState();
+    const form = mount(state);
+    const contacts = dom.document.body.querySelector('button[title="Contacts"]');
+
+    typeInto(form.to, "alice.dusk");
+    contacts.click();
+    expect(state.route).toBe("contacts");
+    expect(state.addressBook).toMatchObject({ mode: "pick", prefillAddress: ALICE.account });
+
+    // The picked card's address, which Send pays.
+    form.radios()[1].click();
+    contacts.click();
+    expect(state.addressBook.prefillAddress).toBe(ALICE.address);
+
+    // A pasted account, or a name that didn't resolve, goes as typed.
+    for (const value of [BOB.account, "nobody.dusk"]) {
+      typeInto(form.to, value);
+      contacts.click();
+      expect(state.addressBook.prefillAddress).toBe(value);
+    }
+  });
+});
+
 describe("a slow name lookup on Review", () => {
   it.each([
     [
