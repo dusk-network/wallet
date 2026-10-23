@@ -4,7 +4,7 @@ import { bytesToHex } from "../../../shared/bytes.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
-import { checkboxInput, passwordInput } from "../../components/FormControls.js";
+import { checkboxInput, fieldLabel, groupLabel, passwordInput } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 import { actionIcon } from "../../components/ActionIcon.js";
@@ -151,9 +151,9 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
         class: "muted",
         text: "Create a password to encrypt your wallet on this device.",
       }),
-      h("label", { text: "Password" }),
+      fieldLabel(pwd, "Password"),
       pwd,
-      h("label", { text: "Confirm password" }),
+      fieldLabel(pwd2, "Confirm password"),
       pwd2,
       h("label", { class: "checkline" }, [
         agree,
@@ -343,7 +343,7 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
         class: "muted",
         text: "Enter the words you wrote down.",
       }),
-      h("label", { text: "Recovery phrase" }),
+      groupLabel(confirmInput.el, "Recovery phrase"),
       confirmInput.el,
       busyCallout,
       err,
@@ -452,11 +452,11 @@ export function onboardingImportView({ state, actions } = {}) {
   return [
     nav,
     h("div", { class: "row" }, [
-      h("label", { text: "Recovery phrase" }),
+      groupLabel(mnemonicInput.el, "Recovery phrase"),
       mnemonicInput.el,
-      h("label", { text: "Password" }),
+      fieldLabel(pwd, "Password"),
       pwd,
-      h("label", { text: "Confirm password" }),
+      fieldLabel(pwd2, "Confirm password"),
       pwd2,
       busyCallout,
       err,

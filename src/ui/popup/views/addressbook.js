@@ -7,7 +7,7 @@ import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { identiconEl } from "../../components/Identicon.js";
 import { truncateMiddle } from "../../lib/strings.js";
-import { searchInput, textInput } from "../../components/FormControls.js";
+import { fieldLabel, searchInput, textInput } from "../../components/FormControls.js";
 import { TX_KIND } from "../../../shared/constants.js";
 
 import {
@@ -662,9 +662,9 @@ export function addressBookView(ov, { state, actions } = {}) {
         },
       }),
       h("div", { class: "row" }, [
-        h("label", { text: "Name" }),
+        fieldLabel(nameInput, "Name"),
         nameInput,
-        h("label", { text: "Address" }),
+        fieldLabel(addrInput, "Address"),
         addrInput,
         detectPill,
         errBox,

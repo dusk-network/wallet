@@ -578,6 +578,40 @@ export const visibleText = (el) => textWithout(el, (n) => n.classList.contains("
 /** The text screen readers get from `el`: without hidden and aria-hidden parts. */
 export const screenReaderText = (el) => textWithout(el, (n) => n.getAttribute("aria-hidden") === "true");
 
+/**
+ * The name screen readers give `el`, looked for in the order browsers look:
+ * the elements aria-labelledby names, aria-label, the <label>s tied to it (by
+ * `for`, or around it), its title, and last its placeholder.
+ * @param {object} el
+ * @returns {string}
+ */
+export function accessibleName(el) {
+  const doc = el.ownerDocument;
+  const clean = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+  const labelledBy = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean);
+  if (labelledBy.length) {
+    return clean(labelledBy.map((id) => doc.getElementById(id)?.textContent ?? "").join(" "));
+  }
+  const ariaLabel = clean(el.getAttribute("aria-label"));
+  if (ariaLabel) return ariaLabel;
+  const labels = doc
+    .querySelectorAll("label")
+    .filter((label) => (el.id && label.getAttribute("for") === el.id) || label.contains(el));
+  // A label around the field names it by its own text, not the field's.
+  const labelText = clean(
+    labels.map((label) => textWithout(label, (n) => n === el || ["select", "textarea"].includes(n.localName))).join(" ")
+  );
+  if (labelText) return labelText;
+  return clean(el.getAttribute("title")) || clean(el.getAttribute("placeholder"));
+}
+
+/** The accessible names of the form fields shown under `root`, in order. */
+export const fieldNames = (root) =>
+  root
+    .querySelectorAll("input, select, textarea")
+    .filter((field) => field.getAttribute("type") !== "file" && isShown(field))
+    .map(accessibleName);
+
 /** Types `value` into an input the way the browser reports it: value, then an input event. */
 export function typeInto(input, value) {
   input.value = value;

@@ -12,7 +12,7 @@ import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { sozuLiquidStakingView } from "./sozu.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
-import { decimalInput, submitOnGasEnter } from "../../components/FormControls.js";
+import { decimalInput, fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 
 const FUNDING_PUBLIC = "account";
@@ -560,7 +560,6 @@ function actionEditor(pos, st, { state, actions, minLux }) {
 
   const actionLabel = stakeKindLabel(kind, { hasStake: pos.hasStake });
   const input = decimalInput({
-    id: "stake-action-amount",
     name: "stakeActionAmount",
     placeholder: "DUSK",
     value: String(amountValue ?? ""),
@@ -624,6 +623,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     : h("select", {
         id: "stake-owner-profile",
         name: "stakeOwnerProfile",
+        "aria-label": "Stake owner",
         value: String(ownerProfileIndex),
         onchange: (e) => {
           st.ownerProfileIndex = Number(e?.target?.value ?? stakeProfileIndex) || 0;
@@ -656,7 +656,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
       h("code", { text: `${profileLabel(stakeProfileIndex)} public balance` }),
     ]),
     currentState.ok ? null : h("div", { class: "err", text: currentState.reason }),
-    usesAmountInput ? h("label", { for: "stake-action-amount", text: amountLabel }) : null,
+    usesAmountInput ? fieldLabel(input, amountLabel) : null,
     usesAmountInput ? input : null,
     !usesAmountInput
       ? h("div", { class: "hrow" }, [

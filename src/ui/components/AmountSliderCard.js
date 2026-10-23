@@ -85,6 +85,7 @@ export function createAmountSliderCard({
 
   const amountRow = h("div", { class: "input-row amount-input-row" }, [amount, maxBtn]);
 
+  // Named, and read out as the share it shows rather than its 0–1000 steps.
   const slider = h("input", {
     type: "range",
     class: "amount-range",
@@ -92,6 +93,8 @@ export function createAmountSliderCard({
     max: String(SLIDER_MAX),
     value: "0",
     disabled: true,
+    "aria-label": "Share of max",
+    "aria-valuetext": "0%",
   });
   slider.style.setProperty("--range-pct", "0%");
 
@@ -146,6 +149,7 @@ export function createAmountSliderCard({
     } else {
       sliderPct.textContent = `${pctInt}%`;
     }
+    slider.setAttribute("aria-valuetext", sliderPct.textContent);
   }
 
   function setAmountLux(lux, { syncSlider = true } = {}) {

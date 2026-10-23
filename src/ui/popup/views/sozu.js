@@ -18,7 +18,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
-import { decimalInput, submitOnGasEnter } from "../../components/FormControls.js";
+import { decimalInput, fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 
 function networkKey(ov) {
@@ -234,7 +234,6 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
   const amountInput = decimalInput({
-    id: "sozu-action-amount",
     name: "sozuActionAmount",
     placeholder: `${isWithdraw ? "Unstake" : "Stake"} amount (DUSK)`,
     value: isWithdraw ? st.withdrawAmountDusk : st.depositAmountDusk,
@@ -336,7 +335,7 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
       : null,
     h("div", { class: "sozu-action-card" }, [
       actionTabs,
-      h("label", { for: "sozu-action-amount", text: isWithdraw ? "Unstake amount" : "Stake amount" }),
+      fieldLabel(amountInput, isWithdraw ? "Unstake amount" : "Stake amount"),
       h("div", { class: "sozu-amount-row" }, [
         amountInput,
         h("button", {

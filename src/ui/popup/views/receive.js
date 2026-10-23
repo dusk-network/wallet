@@ -5,7 +5,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
 import { duskNameEl } from "../../components/DuskName.js";
 import { shortAddressEl } from "../../components/ShortAddress.js";
-import { decimalInput, textInput } from "../../components/FormControls.js";
+import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
 import { parseDuskToLux } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
@@ -239,10 +239,10 @@ export function receiveView(ov, { state, actions } = {}) {
         ]
       ),
       h("div", { class: "receive-accordion__body" }, [
-        h("label", { text: "Amount" }),
+        fieldLabel(amountInput, "Amount"),
         amountInput,
         amountErr,
-        h("label", { text: "Memo" }),
+        fieldLabel(memoInput, "Memo"),
         memoInput,
         h("div", {
           class: "muted",

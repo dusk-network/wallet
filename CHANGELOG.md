@@ -20,7 +20,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 
 - Moved Review's gas price line and presets behind the fee's Edit, and removed Review's Cancel. ([#126])
-- Cut repeated text across the popup and drew its icon buttons as SVG icons. ([#126])
+- Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])
 - Opened the profile switcher from the header's account chip, with a copy button per account. ([#125])
 - Moved Refresh from the header to the balance. ([#125])
 - Showed Receive's name and short address in one-line fields with copy buttons. ([#125])

@@ -11,7 +11,7 @@ import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
-import { submitOnGasEnter } from "../../components/FormControls.js";
+import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 import {
   privacyFlowBadgeOptions,
@@ -167,7 +167,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     h("div", { class: "row" }, [
       modeTabs,
       info,
-      h("label", { text: "Amount" }),
+      fieldLabel(amount, "Amount"),
       amountCard,
       errBox,
       h("div", { class: "btnrow" }, [nextBtn]),
