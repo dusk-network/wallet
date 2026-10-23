@@ -1,6 +1,6 @@
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
 import { h, setChildren } from "../lib/dom.js";
-import { integerInput } from "./FormControls.js";
+import { fieldLabel, integerInput } from "./FormControls.js";
 
 function maxFeeFromGasStrings(limitStr, priceStr) {
   const l = String(limitStr ?? "").trim();
@@ -144,9 +144,9 @@ export class DuskGasEditor extends HTMLElement {
     this.#detailsWrap = h("div", { class: "row", style: "display:none" }, [
       this.#editSlot,
       h("div", { class: "row" }, [
-        h("label", { text: "Gas limit" }),
+        fieldLabel(this.#limitInput, "Gas limit"),
         this.#limitInput,
-        h("label", { text: "Gas price" }),
+        fieldLabel(this.#priceInput, "Gas price"),
         this.#priceInput,
       ]),
       this.#helpNode,

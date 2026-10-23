@@ -9,7 +9,7 @@ import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
-import { textInput, urlInput } from "../../components/FormControls.js";
+import { fieldLabel, textInput, urlInput } from "../../components/FormControls.js";
 
 export function optionsView(ov, { state, actions } = {}) {
   const currentNodeUrl = String(ov?.nodeUrl ?? "").trim();
@@ -363,9 +363,11 @@ export function optionsView(ov, { state, actions } = {}) {
     },
   });
 
+  // Beside its "Contacts" label, and named with it.
   const addressBookBtn = h("button", {
     class: "btn-outline",
     text: "Manage",
+    "aria-label": "Manage contacts",
     onclick: async () => {
       state.addressBook = {
         ...(state.addressBook || {}),
@@ -406,13 +408,13 @@ export function optionsView(ov, { state, actions } = {}) {
     settingsSection("Profile", [
       ov?.isUnlocked
         ? h("div", { class: "row" }, [
-            h("label", { text: "Active profile" }),
+            fieldLabel(accountSelect, "Active profile"),
             h("div", { class: "select-wrap" }, [accountSelect]),
           ].filter(Boolean))
         : null,
       accountNamesEditor,
       h("div", { class: "row" }, [
-        h("label", { text: "Auto-lock" }),
+        fieldLabel(autoLockSelect, "Auto-lock"),
         h("div", { class: "select-wrap" }, [autoLockSelect]),
       ]),
     ]),
@@ -422,15 +424,15 @@ export function optionsView(ov, { state, actions } = {}) {
         networkHint,
       ]),
       h("div", { class: "row" }, [
-        h("label", { text: "Node URL" }),
+        fieldLabel(nodeUrlInput, "Node URL"),
         nodeUrlInput,
       ]),
       h("div", { class: "row" }, [
-        h("label", { text: "Prover URL" }),
+        fieldLabel(proverUrlInput, "Prover URL"),
         proverUrlInput,
       ]),
       h("div", { class: "row" }, [
-        h("label", { text: "Archiver URL" }),
+        fieldLabel(archiverUrlInput, "Archiver URL"),
         archiverUrlInput,
       ]),
       h("div", { class: "btnrow settings-actions" }, [saveBtn]),

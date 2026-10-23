@@ -13,7 +13,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
-import { submitOnGasEnter, textInput } from "../../components/FormControls.js";
+import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import {
@@ -756,14 +756,14 @@ export function sendFormView(ov, { state, actions } = {}) {
       },
     }),
     h("div", { class: "row" }, [
-      h("label", { text: "To" }),
+      fieldLabel(to, "To"),
       toRow,
       toTypePill,
       nameBox,
       selfNote,
-      h("label", { text: "Amount" }),
+      fieldLabel(amount, "Amount"),
       amountCard,
-      h("label", { text: "Memo" }),
+      fieldLabel(memo, "Memo"),
       memo,
       errBox,
       h("div", { class: "btnrow" }, [nextBtn]),

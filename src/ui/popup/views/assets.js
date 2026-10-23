@@ -6,7 +6,7 @@ import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
-import { integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
+import { fieldLabel, integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
 
 const MAX_U64 = 18446744073709551615n;
@@ -398,7 +398,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
   return [
     subnav({ title: "Add token", onBack }),
     h("div", { class: "row" }, [
-      h("label", { text: "Contract ID" }),
+      fieldLabel(input, "Contract ID"),
       input,
       h("div", { class: "btnrow" }, [lookupBtn, addBtn]),
       st.error ? h("div", { class: "err", text: String(st.error) }) : null,
@@ -534,9 +534,9 @@ export function assetAddNftView(ov, { state, actions } = {}) {
   return [
     subnav({ title: "Import NFT", onBack }),
     h("div", { class: "row" }, [
-      h("label", { text: "Contract ID" }),
+      fieldLabel(contractInput, "Contract ID"),
       contractInput,
-      h("label", { text: "Token ID" }),
+      fieldLabel(tokenIdInput, "Token ID"),
       tokenIdInput,
       h("div", { class: "btnrow" }, [lookupBtn, importBtn]),
       st.error ? h("div", { class: "err", text: String(st.error) }) : null,
@@ -717,7 +717,6 @@ export function assetTokenView(ov, { state, actions } = {}) {
   ]);
 
   const transferToInput = textInput({
-    id: "asset-token-to",
     name: "assetTokenRecipient",
     placeholder: "Account or 0x… contract ID",
     value: String(form.to ?? ""),
@@ -727,7 +726,6 @@ export function assetTokenView(ov, { state, actions } = {}) {
     },
   });
   const transferAmountInput = textInput({
-    id: "asset-token-amount",
     name: "assetTokenAmount",
     placeholder: sym,
     value: String(form.amount ?? ""),
@@ -744,9 +742,9 @@ export function assetTokenView(ov, { state, actions } = {}) {
     h("div", { class: "asset-action-head" }, [
       h("div", { class: "asset-action-title", text: "Send" }),
     ]),
-    h("label", { for: "asset-token-to", text: "Recipient" }),
+    fieldLabel(transferToInput, "Recipient"),
     transferToInput,
-    h("label", { for: "asset-token-amount", text: "Amount" }),
+    fieldLabel(transferAmountInput, "Amount"),
     transferAmountInput,
     reviewTransferBtn,
   ]);
@@ -759,7 +757,6 @@ export function assetTokenView(ov, { state, actions } = {}) {
   });
 
   const approveSpenderInput = textInput({
-    id: "asset-token-spender",
     name: "assetTokenSpender",
     placeholder: "Account or 0x… contract ID",
     value: String(form.spender ?? ""),
@@ -769,7 +766,6 @@ export function assetTokenView(ov, { state, actions } = {}) {
     },
   });
   const approveAmountInput = textInput({
-    id: "asset-token-approve-amount",
     name: "assetTokenApproveAmount",
     placeholder: sym,
     value: String(form.approveAmount ?? ""),
@@ -790,9 +786,9 @@ export function assetTokenView(ov, { state, actions } = {}) {
       h("div", { class: "asset-action-title", text: "Approve" }),
       h("div", { class: "asset-action-subtitle", text: `Let another account or contract spend ${sym}.` }),
     ]),
-    h("label", { for: "asset-token-spender", text: "Spender" }),
+    fieldLabel(approveSpenderInput, "Spender"),
     approveSpenderInput,
-    h("label", { for: "asset-token-approve-amount", text: "Allowance" }),
+    fieldLabel(approveAmountInput, "Allowance"),
     h("div", { class: "hrow" }, [
       approveAmountInput,
       approveMaxBtn,

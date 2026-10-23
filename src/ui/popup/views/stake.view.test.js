@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
-import { installFakeDom, isShown, settle } from "../../testing/fakeDom.js";
+import { accessibleName, installFakeDom, isShown, settle } from "../../testing/fakeDom.js";
 import { stakeConfirmView, stakeFormView } from "./stake.js";
 
 describe("stake view", () => {
@@ -110,7 +110,8 @@ describe("staking text", () => {
       "Max after the fee: 1482.8883 DUSK.",
     ]);
     expect(editor.querySelector(".err")).toBeNull();
-    expect(editor.querySelector("#stake-action-amount").getAttribute("placeholder")).toBe("DUSK");
+    const amount = editor.querySelectorAll("input").find((input) => accessibleName(input) === "Stake amount");
+    expect(amount.getAttribute("placeholder")).toBe("DUSK");
   });
 
   it("reviews an unstake of the whole position without repeating it under the amount", async () => {
