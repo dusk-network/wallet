@@ -210,4 +210,29 @@ describe("receive", () => {
     expect(link).toMatch(/^dusk:/);
     expect(link).toContain(ACCOUNT);
   });
+
+  it("says no more than the QR, the fields and Request payment show", async () => {
+    const state = { receive: { tab: "public", requestOpen: false, amountDusk: "", memo: "" } };
+    await receive("public", { state });
+    const body = dom.document.body;
+    const summary = () => visibleText(body.querySelector(".receive-accordion__summary"));
+
+    // No note that Send reads the QR, no "Optional" on Request payment or its fields.
+    expect(visibleText(body)).not.toMatch(/Send can read|Optional|optional/);
+    expect(summary()).toBe("Request payment▾");
+    expect(body.querySelectorAll(".receive-accordion__body label").map((l) => l.textContent)).toEqual(["Amount", "Memo"]);
+    expect(body.querySelectorAll(".receive-accordion__body input").map((i) => i.getAttribute("placeholder"))).toEqual([
+      "e.g. 1.25 DUSK",
+      "Optional",
+    ]);
+    expect(body.querySelector(".tabs").hasAttribute("title")).toBe(false);
+
+    // Once the QR holds a request, Request payment says what it asks for.
+    Object.assign(state.receive, { requestOpen: true, amountDusk: "1.5" });
+    await receive("public", { state });
+    expect(summary()).toBe("Request payment1.5 DUSK▾");
+    Object.assign(state.receive, { amountDusk: "", memo: "Lunch" });
+    await receive("public", { state });
+    expect(summary()).toBe("Request paymentWith memo▾");
+  });
 });

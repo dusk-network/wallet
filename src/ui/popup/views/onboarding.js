@@ -88,8 +88,7 @@ export function onboardingWelcomeView({ state, actions } = {}) {
       h("div", { class: "hero-title", text: "Set up your Dusk Wallet" }),
       h("div", {
         class: "muted",
-        text:
-          "Create a new wallet or import a recovery phrase. Keep it safe; it is the only way to restore your wallet.",
+        text: "Your recovery phrase is the only way to restore your wallet. Keep it safe.",
       }),
     ]),
     h("div", { class: "actions" }, [createBtn, importBtn]),
@@ -342,7 +341,7 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
     h("div", { class: "row" }, [
       h("div", {
         class: "muted",
-        text: "Confirm your recovery phrase to finish setting up your wallet.",
+        text: "Enter the words you wrote down.",
       }),
       h("label", { text: "Recovery phrase" }),
       confirmInput.el,
@@ -453,10 +452,6 @@ export function onboardingImportView({ state, actions } = {}) {
   return [
     nav,
     h("div", { class: "row" }, [
-      h("div", {
-        class: "muted",
-        text: "Import an existing recovery phrase to restore your wallet.",
-      }),
       h("label", { text: "Recovery phrase" }),
       mnemonicInput.el,
       h("label", { text: "Password" }),

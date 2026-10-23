@@ -30,7 +30,7 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await expect(page.getByText("Set up your Dusk Wallet")).toBeVisible();
   await page.getByRole("button", { name: "Import wallet" }).click();
 
-  await expect(page.getByText("Import an existing recovery phrase")).toBeVisible();
+  await expect(page.getByText("Recovery phrase", { exact: true })).toBeVisible();
 
   // Paste full phrase into first slot (MnemonicInput distributes it).
   await page.getByLabel("Word 1", { exact: true }).fill(MNEMONIC_12);
@@ -42,20 +42,20 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await expect(page.locator("#app").getByRole("button", { name: "Send" })).toBeVisible({ timeout: 120_000 });
 
   // Open settings; the wallet defaults to the same two profiles as the CLI.
-  await page.getByTitle("Options").click();
+  await page.getByTitle("Settings").click();
   await expect(page.getByText("Settings")).toBeVisible();
   await expect(page.locator("select#account option")).toHaveCount(2);
 
   // Set per-profile names (saved on change/blur).
-  const name1 = page.getByPlaceholder("Profile 1 name (optional)");
+  const name1 = page.getByLabel("Profile 1 name");
   await name1.fill("Main");
   await name1.press("Tab");
-  await expect(page.getByPlaceholder("Profile 1 name (optional)")).toHaveValue("Main");
+  await expect(page.getByLabel("Profile 1 name")).toHaveValue("Main");
 
-  const name2 = page.getByPlaceholder("Profile 2 name (optional)");
+  const name2 = page.getByLabel("Profile 2 name");
   await name2.fill("Spending");
   await name2.press("Tab");
-  await expect(page.getByPlaceholder("Profile 2 name (optional)")).toHaveValue("Spending");
+  await expect(page.getByLabel("Profile 2 name")).toHaveValue("Spending");
 
   // Back to home so the header switcher is visible
   await page.getByRole("button", { name: "← Back" }).click();
@@ -71,6 +71,6 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await page.getByRole("button", { name: /^Spending/ }).click();
 
   // Verify switch persisted (Settings selector now points to profile 2)
-  await page.getByTitle("Options").click();
+  await page.getByTitle("Settings").click();
   await expect(page.locator("select#account")).toHaveValue("1");
 });

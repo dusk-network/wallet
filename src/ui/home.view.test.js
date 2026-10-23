@@ -2,7 +2,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { TX_KIND } from "../shared/constants.js";
 import { installFakeDom } from "./testing/fakeDom.js";
+import { iconSvg } from "./components/ActionIcon.js";
 import { homeView } from "./popup/views/home.js";
 
 // The token and NFT cards load on their own; the balance card is what matters here.
@@ -20,7 +22,7 @@ describe("home dashboard action icons", () => {
       "utf8"
     );
 
-    expect(source).toContain('import { actionIcon } from "../../components/ActionIcon.js";');
+    expect(source).toContain('import { actionIcon, iconSvg } from "../../components/ActionIcon.js";');
     expect(iconSource).toContain('send: [');
     expect(iconSource).toContain('receive: [');
     expect(iconSource).toContain('shield: [');
@@ -105,13 +107,41 @@ describe("home balance", () => {
       "balance-refresh",
       "bracket-title__bracket",
     ]);
-    expect(title.textContent).toBe("[Total balance⟳]");
+    expect(title.textContent).toBe("[Total balance]");
 
+    // An SVG icon, not the ⟳ glyph, which many systems have no font for.
     const refresh = title.querySelector("button.balance-refresh");
+    expect([refresh.innerHTML, refresh.textContent]).toEqual([iconSvg("refresh"), ""]);
     expect(refresh.title).toBe("Refresh");
     expect(refresh.getAttribute("aria-label")).toBe("Refresh");
     refresh.click();
     expect(actions.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("names shield rows as the Shield view does, and offers View all only for more than the card shows", async () => {
+    const { document } = installFakeDom();
+    const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const tx = (n, kind) => ({ hash: `${n}`.padStart(64, "0"), kind, amount: "1000000000", status: "executed" });
+    const render = (txs) => {
+      const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs };
+      document.body.replaceChildren(...homeView(ov, { state, actions }));
+      return document.body.querySelectorAll(".activity-tx-item");
+    };
+
+    const rows = render([tx(1, TX_KIND.SHIELD), tx(2, TX_KIND.UNSHIELD)]);
+    expect(rows.map((row) => row.querySelector(".activity-title span").textContent)).toEqual(["Shield", "Unshield"]);
+    expect(rows.map((row) => row.querySelector(".activity-sub span").textContent)).toEqual([
+      "Public → Shielded",
+      "Shielded → Public",
+    ]);
+    expect(document.body.querySelector(".activity-view-all")).toBeNull();
+
+    // Five show on the dashboard; View all lists the rest too.
+    expect(render([1, 2, 3, 4, 5].map((n) => tx(n, TX_KIND.SHIELD)))).toHaveLength(5);
+    expect(document.body.querySelector(".activity-view-all")).toBeNull();
+    expect(render([1, 2, 3, 4, 5, 6].map((n) => tx(n, TX_KIND.SHIELD)))).toHaveLength(5);
+    expect(document.body.querySelector(".activity-view-all").textContent).toBe("View all");
   });
 
   it("refreshes through the header's old Refresh action", async () => {

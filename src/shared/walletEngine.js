@@ -1224,7 +1224,7 @@ function patchNetworkEndpoints(network) {
       }
     };
 
-    const hint = () => "Shielded transactions need a prover. Check Options → Prover URL.";
+    const hint = () => "Shielded transactions need a prover. Check Settings → Prover URL.";
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

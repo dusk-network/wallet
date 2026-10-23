@@ -127,7 +127,7 @@ test("rerendering an in-flight unlock keeps it busy, blocks duplicates and allow
   await expectOriginalInput(page);
   await expect(input).toBeDisabled();
   await expect(page.getByRole("button", { name: "Unlocking…", exact: true })).toBeDisabled();
-  await expect(page.getByText("Decrypting your vault.", { exact: false })).toBeVisible();
+  await expect(page.getByText("This can take a moment.", { exact: false })).toBeVisible();
   // Exercise the handler guard too, not only native disabled-button behavior.
   await page.evaluate(() => {
     window.originalButton.dispatchEvent(new MouseEvent("click"));
@@ -176,7 +176,7 @@ test("success refreshes a replacement unlock form after returning before complet
   await input.fill(PASSWORD);
   await page.getByRole("button", { name: "Unlock", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.unlockRequests.length)).toBe(1);
-  await page.getByTitle("Options", { exact: true }).click();
+  await page.getByTitle("Settings", { exact: true }).click();
   await expect(page.getByText("Settings", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "← Back", exact: true }).click();
   await expect(input).toBeEnabled();
@@ -201,13 +201,13 @@ test("success refreshes a replacement unlock form after returning before complet
 
 for (const [destination, placeholder, draft] of [
   ["options", "https://provers.dusk.network", "https://unsaved.example"],
-  ["contacts", "Name (e.g. Alice)", "Unsaved contact"],
+  ["contacts", "e.g. Alice", "Unsaved contact"],
 ]) {
   test(`a late successful unlock preserves the active ${destination} draft`, async ({ page }) => {
     await page.getByPlaceholder("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Unlock", exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.unlockRequests.length)).toBe(1);
-    await page.getByTitle("Options", { exact: true }).click();
+    await page.getByTitle("Settings", { exact: true }).click();
     await expect(page.getByText("Settings", { exact: true })).toBeVisible();
     if (destination === "contacts") {
       await page.evaluate(async () => {

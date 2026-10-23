@@ -9,12 +9,10 @@ export function lockedView({ state, actions } = {}) {
     onEnter: () => btn.click(),
   });
 
-  const busyTitle = h("div", { class: "callout-title", text: "Unlocking…" });
-  const busyBody = h("div", {
-    class: "muted",
-    text: "Decrypting your vault. This can take a moment on some devices.",
-  });
-  const busyCallout = h("div", { class: "callout", style: "display:none" }, [busyTitle, busyBody]);
+  // The button says "Unlocking…" meanwhile.
+  const busyCallout = h("div", { class: "callout", style: "display:none" }, [
+    h("div", { class: "muted", text: "This can take a moment." }),
+  ]);
 
   let busy = false;
   const btn = h("button", {

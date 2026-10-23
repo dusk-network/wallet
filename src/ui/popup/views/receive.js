@@ -118,7 +118,6 @@ export function receiveView(ov, { state, actions } = {}) {
     {
       class: "tabs tabs--mini",
       style: `--seg-index:${segIndex}; --seg-count:2;`,
-      title: "Choose the receiving address type",
     },
     [tabShielded, tabPublicBtn]
   );
@@ -200,12 +199,12 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // --- Request payment (progressive disclosure) -----------------------
   const amountInput = decimalInput({
-    placeholder: "Amount (optional, DUSK)",
+    placeholder: "e.g. 1.25 DUSK",
     value: typeof r.amountDusk === "string" ? r.amountDusk : "",
     onEnter: () => memoInput.focus(),
   });
   const memoInput = textInput({
-    placeholder: "Memo (optional)",
+    placeholder: "Optional",
     value: typeof r.memo === "string" ? r.memo : "",
     onEnter: () => copyRequestBtn.click(),
   });
@@ -223,7 +222,8 @@ export function receiveView(ov, { state, actions } = {}) {
     },
   });
 
-  const summaryMeta = h("span", { class: "muted", text: "Optional" });
+  // What the QR asks for, once it holds a request.
+  const summaryMeta = h("span", { class: "muted" });
   const summaryChev = h("span", { class: "accordion-chev", text: "▾", "aria-hidden": "true" });
 
   const requestDetails = h(
@@ -239,10 +239,10 @@ export function receiveView(ov, { state, actions } = {}) {
         ]
       ),
       h("div", { class: "receive-accordion__body" }, [
-        h("label", { text: "Amount (optional)" }),
+        h("label", { text: "Amount" }),
         amountInput,
         amountErr,
-        h("label", { text: "Memo (optional)" }),
+        h("label", { text: "Memo" }),
         memoInput,
         h("div", {
           class: "muted",
@@ -430,13 +430,9 @@ export function receiveView(ov, { state, actions } = {}) {
     // The fields copy the name and the address; the request link is copied here.
     copyRequestBtn.disabled = !wantRequest;
     if (wantRequest) {
-      summaryMeta.textContent = amountForUri
-        ? `${amountForUri} DUSK`
-        : memoVal
-          ? "With memo"
-          : "Optional";
+      summaryMeta.textContent = amountForUri ? `${amountForUri} DUSK` : "With memo";
     } else {
-      summaryMeta.textContent = hasReq ? "Configured" : "Optional";
+      summaryMeta.textContent = hasReq ? "Configured" : "";
     }
 
     downloadBtn.disabled = !curQrValue;
@@ -446,11 +442,6 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // Initial
   update();
-
-  const note = h("div", {
-    class: "muted",
-    text: "Send can read this QR directly.",
-  });
 
   return [
     subnav({
@@ -467,7 +458,6 @@ export function receiveView(ov, { state, actions } = {}) {
       nameNote,
       btnRow,
       requestDetails,
-      note,
       qrMenu,
     ]),
   ].filter(Boolean);

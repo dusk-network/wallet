@@ -41,7 +41,6 @@ export function convertFormView(ov, { state, actions } = {}) {
 
   const amountCtl = createAmountSliderCard({
     initialAmountDusk: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
-    placeholder: "Amount (DUSK, e.g. 1.25)",
     actions,
     onAmountInput: () => syncDraft(),
     onAmountChange: () => syncDraft(),
@@ -94,18 +93,17 @@ export function convertFormView(ov, { state, actions } = {}) {
   // Wire the shared MAX + slider component against the calculated maximum.
   amountCtl.setMaxLux(avail);
 
+  // Worded as Send words them, the fee cap on a line of its own.
+  const availLabel = kind === TX_KIND.SHIELD ? "Available (public)" : "Spendable (shielded)";
   const info = h("div", { class: "box" }, [
     recipientBadge({
       ...privacyFlowBadgeOptions({ from: fromLabel, to: toLabel }),
       className: "recipient-type-badge",
     }),
-    h("div", {
-      class: "muted",
-      style: "margin-top:6px",
-      text:
-        `Available (${fromLabel}): ${fmtAvail(avail)} DUSK` +
-        (feeLux > 0n ? ` · Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK` : ""),
-    }),
+    h("div", { class: "muted", style: "margin-top:6px", text: `${availLabel}: ${fmtAvail(avail)} DUSK` }),
+    feeLux > 0n
+      ? h("div", { class: "muted", text: `Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK` })
+      : null,
   ]);
 
   const nextBtn = h("button", {
@@ -188,15 +186,8 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   const fromLabel = kind === TX_KIND.SHIELD ? "Public" : "Shielded";
   const toLabel = kind === TX_KIND.SHIELD ? "Shielded" : "Public";
 
+  // Back returns to Shield with the draft, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
-  const cancelBtn = h("button", {
-    class: "btn-outline",
-    text: "Cancel",
-    onclick: () => {
-      state.route = "convert";
-      actions?.render?.().catch(() => {});
-    },
-  });
 
   const defaultGas = getDefaultGas(kind);
   const defaultLimit =
@@ -211,11 +202,10 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.amountLux = d.amountLux;
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-  gasEditor.helpText =
-    "Max fee shown is limit × price. Clear both to use wallet defaults.";
   gasEditor.setGas(d?.gas ?? null);
 
-  const { gasHint, gasQuickRow } = createGasQuickControls({
+  // The gas price line and the presets open with the fee's Edit.
+  createGasQuickControls({
     actions,
     defaultLimit,
     fallbackPrice,
@@ -289,9 +279,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "balance-sub", text: "DUSK" }),
       ]),
       gasEditor,
-      gasHint,
-      gasQuickRow,
-      h("div", { class: "btnrow" }, [cancelBtn, confirmBtn]),
+      h("div", { class: "btnrow" }, [confirmBtn]),
     ]),
   ].filter(Boolean);
 }

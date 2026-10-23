@@ -86,8 +86,10 @@ export function optionsView(ov, { state, actions } = {}) {
     ? h("div", { class: "row" }, [
         h("label", { text: "Profile names" }),
         ...displayAccounts.map((acct, i) => {
+          // The line above names the profile.
           const input = textInput({
-            placeholder: `Profile ${i + 1} name (optional)`,
+            placeholder: "Name (optional)",
+            "aria-label": `Profile ${i + 1} name`,
             value: String(nameMap?.[String(i)] ?? ""),
           });
 
@@ -164,19 +166,22 @@ export function optionsView(ov, { state, actions } = {}) {
     onEnter: () => saveBtn.click(),
   });
 
+  // The section's title names the select.
   const networkSelect = h(
     "select",
-    { id: "network" },
+    { id: "network", "aria-label": "Network" },
     NETWORK_PRESETS.map((p) => h("option", { value: p.id, text: p.label }))
   );
 
   networkSelect.value = detectPresetIdFromNodeUrl(currentNodeUrl);
 
-  const networkHint = h("div", {
-    class: "muted",
-    text:
-      NETWORK_PRESETS.find((p) => p.id === networkSelect.value)?.hint ?? "",
-  });
+  // A preset's hint, for the presets that have one.
+  const networkHint = h("div", { class: "muted" });
+  const showNetworkHint = (preset) => {
+    networkHint.textContent = preset?.hint ?? "";
+    networkHint.hidden = !preset?.hint;
+  };
+  showNetworkHint(NETWORK_PRESETS.find((p) => p.id === networkSelect.value));
 
   function syncFromSelect() {
     const preset = NETWORK_PRESETS.find((p) => p.id === networkSelect.value);
@@ -187,14 +192,14 @@ export function optionsView(ov, { state, actions } = {}) {
       if (preset.proverUrl) proverUrlInput.value = preset.proverUrl;
       if (preset.archiverUrl) archiverUrlInput.value = preset.archiverUrl;
     }
-    networkHint.textContent = preset.hint ?? "";
+    showNetworkHint(preset);
   }
 
   function syncFromNodeUrl() {
     const presetId = detectPresetIdFromNodeUrl(nodeUrlInput.value);
     networkSelect.value = presetId;
     const preset = NETWORK_PRESETS.find((p) => p.id === presetId);
-    networkHint.textContent = preset?.hint ?? "";
+    showNetworkHint(preset);
 
     // If the node URL matches a known preset, keep prover/archiver aligned.
     if (preset && preset.id !== "custom") {
@@ -280,60 +285,59 @@ export function optionsView(ov, { state, actions } = {}) {
     },
   });
 
+  // The sites, then Clear connected sites below them when there are any.
   const connectedSites = Array.isArray(ov?.permissions) ? ov.permissions : [];
+  const siteRows = connectedSites.flatMap((p, siteIndex) => {
+    const origin = String(p?.origin ?? "");
+    const idx = Number(p?.accountIndex ?? 0) || 0;
+
+    const sel = h(
+      "select",
+      { "aria-label": `Profile for ${origin}` },
+      displayAccounts.map((acct, i) =>
+        h("option", {
+          value: String(i),
+          text: (() => {
+            const name = String(nameMap?.[String(i)] ?? "").trim();
+            const acctText = String(acct) ? truncateMiddle(String(acct), 6, 4) : "";
+            if (name && acctText) return `${name} · ${acctText}`;
+            if (name) return name;
+            if (acctText) return `Profile ${i + 1} · ${acctText}`;
+            return `Profile ${i + 1}`;
+          })(),
+        })
+      )
+    );
+    sel.value = String(
+      Math.max(0, Math.min(idx, Math.max(0, displayAccounts.length - 1)))
+    );
+
+    sel.addEventListener("change", async () => {
+      try {
+        await actions?.send?.({
+          type: "DUSK_UI_SET_ORIGIN_ACCOUNT",
+          origin,
+          accountIndex: Number(sel.value),
+        });
+        actions?.showToast?.("Updated site profile.");
+        state.needsRefresh = true;
+        await actions?.render?.({ forceRefresh: true });
+      } catch (e) {
+        actions?.showToast?.(e?.message ?? String(e), 2500);
+      }
+    });
+
+    return [
+      siteIndex ? h("div", { class: "divider" }) : null,
+      h("div", { class: "muted", text: origin }),
+      h("div", { class: "select-wrap" }, [sel]),
+    ];
+  });
   const connectedSitesEl = platform.capabilities.dapp
-    ? connectedSites.length
-      ? h(
-          "div",
-          { class: "row" },
-          connectedSites.flatMap((p) => {
-            const origin = String(p?.origin ?? "");
-            const idx = Number(p?.accountIndex ?? 0) || 0;
-
-            const sel = h(
-              "select",
-              {},
-              displayAccounts.map((acct, i) =>
-                h("option", {
-                  value: String(i),
-                  text: (() => {
-                    const name = String(nameMap?.[String(i)] ?? "").trim();
-                    const acctText = String(acct) ? truncateMiddle(String(acct), 6, 4) : "";
-                    if (name && acctText) return `${name} · ${acctText}`;
-                    if (name) return name;
-                    if (acctText) return `Profile ${i + 1} · ${acctText}`;
-                    return `Profile ${i + 1}`;
-                  })(),
-                })
-              )
-            );
-            sel.value = String(
-              Math.max(0, Math.min(idx, Math.max(0, displayAccounts.length - 1)))
-            );
-
-            sel.addEventListener("change", async () => {
-              try {
-                await actions?.send?.({
-                  type: "DUSK_UI_SET_ORIGIN_ACCOUNT",
-                  origin,
-                  accountIndex: Number(sel.value),
-                });
-                actions?.showToast?.("Updated site profile.");
-                state.needsRefresh = true;
-                await actions?.render?.({ forceRefresh: true });
-              } catch (e) {
-                actions?.showToast?.(e?.message ?? String(e), 2500);
-              }
-            });
-
-            return [
-              h("div", { class: "divider" }),
-              h("div", { class: "muted", text: origin }),
-              h("div", { class: "select-wrap" }, [sel]),
-            ];
-          })
-        )
-      : h("div", { class: "row" }, [h("div", { class: "muted", text: "No connected sites." })])
+    ? h("div", { class: "row" }, [
+        h("label", { text: "Connected sites" }),
+        ...(siteRows.length ? siteRows : [h("div", { class: "muted", text: "None" })]),
+      ])
     : null;
 
   const clearVaultBtn = h("button", {
@@ -361,7 +365,7 @@ export function optionsView(ov, { state, actions } = {}) {
 
   const addressBookBtn = h("button", {
     class: "btn-outline",
-    text: "Contacts",
+    text: "Manage",
     onclick: async () => {
       state.addressBook = {
         ...(state.addressBook || {}),
@@ -414,7 +418,6 @@ export function optionsView(ov, { state, actions } = {}) {
     ]),
     settingsSection("Network", [
       h("div", { class: "row" }, [
-        h("label", { text: "Network" }),
         h("div", { class: "select-wrap" }, [networkSelect]),
         networkHint,
       ]),
@@ -438,17 +441,15 @@ export function optionsView(ov, { state, actions } = {}) {
         h("div", { class: "muted", text: "Remote media is disabled." }),
       ]),
       h("div", { class: "settings-inline-action" }, [
-        h("label", { text: "Saved recipients" }),
+        h("label", { text: "Contacts" }),
         h("div", { class: "btnrow" }, [addressBookBtn]),
       ]),
+      connectedSitesEl,
       h(
         "div",
         { class: "btnrow settings-actions settings-actions--danger" },
-        platform.capabilities.dapp
-          ? [clearPermBtn, clearVaultBtn]
-          : [clearVaultBtn]
+        [connectedSitesEl && siteRows.length ? clearPermBtn : null, clearVaultBtn].filter(Boolean)
       ),
-      connectedSitesEl,
     ]),
     installedVersion
       ? settingsSection("About", [
