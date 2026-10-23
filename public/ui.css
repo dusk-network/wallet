@@ -707,6 +707,34 @@ button.name-shortfall__link:hover {
   box-shadow: none;
 }
 
+/* Connect approval: each profile as an option card, around a native radio
+   when there is a choice. Its label, its .dusk name and its short account sit
+   one under the other beside the dot. The other approvals show the profile's
+   name over its account as Review does (.named-address). */
+.profile-option {
+  position: relative;
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--foreground);
+}
+
+label.profile-option {
+  cursor: pointer;
+}
+
+.profile-option .name-option__main > :not(.name-option__dot) {
+  grid-column: 2;
+}
+
+.profile-option .dusk-name {
+  font-size: 12px;
+}
+
+.profile-option input:focus-visible + .name-option__main {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 18%, transparent);
+}
+
 .input-row > .icon-btn {
   width: 44px;
   min-width: 44px;

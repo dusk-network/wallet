@@ -29,6 +29,7 @@ import {
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
 import { cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
+import { siteNames } from "./siteNames.js";
 import {
   broadcastChainChangedAll,
   broadcastProfilesChangedAll,
@@ -702,6 +703,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           accountNames = {};
         }
 
+        // The profiles' .dusk names checked lately, so the approval shows
+        // them from its first paint. It never waits for a lookup.
+        const accounts = status?.isUnlocked && Array.isArray(status.accounts) ? status.accounts : [];
+        const names = await siteNames(String(settings?.nodeUrl ?? ""), accounts);
+
         sendResponse({
           rid: message.rid,
           kind: entry.kind,
@@ -713,6 +719,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           accountCount: settings?.accountCount ?? 1,
           selectedAccountIndex: status.selectedAccountIndex ?? settings?.selectedAccountIndex ?? 0,
           accountNames,
+          duskNames: Object.fromEntries(accounts.filter((a) => names.has(a)).map((a) => [a, names.get(a)])),
           permissionAccountIndex:
             perm && perm.accountIndex !== undefined && perm.accountIndex !== null
               ? Number(perm.accountIndex) || 0

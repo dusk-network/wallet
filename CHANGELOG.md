@@ -11,6 +11,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
+- Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
 - Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address. ([#125])
 - Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive. ([#125])
 - Added a warning when sending to your own account or address. ([#125])
@@ -24,6 +25,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Moved Review's gas price line and presets behind the fee's Edit, and removed Review's Cancel. ([#126])
 - Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])
 - Opened Receive on the public account, as the web wallet does. ([web-wallet#970])
+- Picked the profile to connect from option cards instead of a dropdown. ([#127])
 - Opened the profile switcher from the header's account chip, with a copy button per account. ([#125])
 - Moved Refresh from the header to the balance. ([#125])
 - Showed Receive's name and short address in one-line fields with copy buttons. ([#125])

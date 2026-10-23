@@ -4,7 +4,7 @@ import { TX_KIND } from "../../shared/constants.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { h } from "../lib/dom.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
-import { truncateMiddle } from "../lib/strings.js";
+import { shortAddressEl } from "../components/ShortAddress.js";
 import "../components/GasEditor.js";
 import {
   runtimeGetURL,
@@ -33,6 +33,17 @@ const rid = getRid();
 
 function renderError(text) {
   setApp([h("div", { class: "err", text })]);
+}
+
+// The profile that signs or pays: its verified .dusk name, which the wallet
+// checked lately, over its account, which then shows short and muted; the
+// account alone, in full, without one.
+function profileBox(account, name) {
+  if (!account || !name) return h("div", { class: "box" }, [h("code", { text: account || "(none)" })]);
+  return h("div", { class: "box named-address" }, [
+    h("div", { class: "dusk-name", text: name, title: name }),
+    shortAddressEl(account),
+  ]);
 }
 
 function prettyAmount(v) {
@@ -157,6 +168,7 @@ export async function renderNotification() {
     accountCount,
     selectedAccountIndex,
     accountNames,
+    duskNames,
     permissionAccountIndex,
   } = pending;
   // Normalize request kind defensively. In some environments the value might
@@ -176,6 +188,12 @@ export async function renderNotification() {
   const selIdx = Number.isFinite(selIdxRaw) && selIdxRaw >= 0 ? Math.floor(selIdxRaw) : 0;
   const idxForOrigin = permIdx ?? selIdx;
   const activeAccount = accountsArr[idxForOrigin] ?? accountsArr[0] ?? "";
+  // Names of the wallet's own profiles only, never of a recipient or contract.
+  const nameOf = (account) => {
+    const name = duskNames && typeof duskNames === "object" ? duskNames[account] : "";
+    return typeof name === "string" ? name : "";
+  };
+  const activeProfileBox = () => profileBox(activeAccount, nameOf(activeAccount));
 
   const header = h("div", { class: "row" }, [
     h("div", { class: "muted", text: "Request from" }),
@@ -347,45 +365,54 @@ export async function renderNotification() {
 
     const nameMap = accountNames && typeof accountNames === "object" ? accountNames : {};
 
-    const accountSelect = h(
-      "select",
-      {},
-      displayAccounts.map((acct, i) =>
-        h("option", {
-          value: String(i),
-          text: (() => {
-            const name = String(nameMap?.[String(i)] ?? "").trim();
-            const acctText = String(acct)
-              ? truncateMiddle(String(acct), 10, 8)
-              : "";
-            if (name && acctText) return `${name} · ${acctText}`;
-            if (name) return `${name}`;
-            if (acctText) return `Profile ${i + 1} · ${acctText}`;
-            return `Profile ${i + 1}`;
-          })(),
-        })
-      )
-    );
-    accountSelect.value = String(
-      Math.max(0, Math.min(idxForOrigin, Math.max(0, displayAccounts.length - 1)))
-    );
+    // A card per profile: its label, its .dusk name when the wallet checked it
+    // lately, and its short account, muted. With more than one profile the
+    // cards are native radios, so arrow keys pick one and screen readers read
+    // each card, the full account included.
+    const choosing = displayAccounts.length > 1;
+    let selected = Math.max(0, Math.min(idxForOrigin, displayAccounts.length - 1));
+    const options = displayAccounts.map((acct, i) => {
+      const account = String(acct ?? "");
+      const name = nameOf(account);
+      const radio = choosing
+        ? h("input", { class: "sr-only", type: "radio", name: "connect-profile", value: String(i) })
+        : null;
+      radio?.addEventListener("change", () => {
+        if (radio.checked) pick(i);
+      });
+      const card = h(choosing ? "label" : "div", { class: "name-option profile-option" }, [
+        radio,
+        h("span", { class: "name-option__main" }, [
+          h("span", { class: "name-option__dot", "aria-hidden": "true" }),
+          h("span", {
+            class: "name-option__label",
+            text: String(nameMap?.[String(i)] ?? "").trim() || `Profile ${i + 1}`,
+          }),
+          name ? h("span", { class: "dusk-name", text: name, title: name }) : null,
+          account ? shortAddressEl(account, { className: "name-option__addr" }) : null,
+        ]),
+      ]);
+      return { card, radio };
+    });
 
-    const effectiveShieldedGrantForSelection = () => {
-      const selectedIndex = Number(accountSelect.value);
-      const sameProfile =
-        currentAccountIndex !== null &&
-        Number.isFinite(selectedIndex) &&
-        Math.floor(selectedIndex) === currentAccountIndex;
-      return requestedShielded || (sameProfile && currentShieldedGrant);
-    };
+    const effectiveShieldedGrantForSelection = () =>
+      requestedShielded ||
+      (currentAccountIndex !== null && selected === currentAccountIndex && currentShieldedGrant);
     const disclosureText = h("div", { class: "muted" });
     const updateDisclosureText = () => {
       disclosureText.textContent = effectiveShieldedGrantForSelection()
         ? "The site will be able to use the selected profile's public account and shareable shielded receive address."
         : "The site will only be able to use the selected profile's public account.";
     };
-    accountSelect.onchange = updateDisclosureText;
-    updateDisclosureText();
+    const pick = (index) => {
+      selected = index;
+      options.forEach(({ card, radio }, i) => {
+        card.classList.toggle("is-checked", i === index);
+        if (radio) radio.checked = i === index;
+      });
+      updateDisclosureText();
+    };
+    pick(selected);
 
     setApp([
       header,
@@ -393,12 +420,19 @@ export async function renderNotification() {
         h("div", { class: "muted", text: "Connect this site to a Dusk profile?" }),
       ]),
       h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Profile" }),
-        h("div", { class: "select-wrap" }, [accountSelect]),
+        h("div", { class: "muted", id: "connect-profile-label", text: "Profile" }),
+        h(
+          "div",
+          {
+            class: "name-choice",
+            ...(choosing && { role: "radiogroup", "aria-labelledby": "connect-profile-label" }),
+          },
+          options.map((o) => o.card)
+        ),
         disclosureText,
       ]),
       decisionButtons("Connect", () => ({
-        accountIndex: Number(accountSelect.value),
+        accountIndex: selected,
         shieldedReceiveAddress: effectiveShieldedGrantForSelection(),
       })),
     ]);
@@ -499,7 +533,7 @@ export async function renderNotification() {
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Account" }),
-        h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+        activeProfileBox(),
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Chain ID" }),
@@ -534,7 +568,7 @@ export async function renderNotification() {
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Account" }),
-        h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+        activeProfileBox(),
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Chain ID" }),
@@ -616,7 +650,7 @@ export async function renderNotification() {
         ]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "Account" }),
-          h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+          activeProfileBox(),
         ]),
         displayRow("Domain name", domainName),
         displayRow("Domain version", domainVersion),
@@ -741,7 +775,7 @@ export async function renderNotification() {
       h("div", { class: "row" }, [h("div", { class: "muted", text: "Add asset" })]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Account" }),
-        h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+        activeProfileBox(),
       ]),
       h("div", { class: "row" }, [
         h("div", { class: "muted", text: "Type" }),
@@ -812,7 +846,10 @@ export async function renderNotification() {
       const gas = params?.gas ?? null;
       const privacy = String(params?.privacy ?? "").trim().toLowerCase();
       const isShieldedTransfer = privacy === "shielded";
-      const fromLabel = isShieldedTransfer ? "Phoenix shielded balance" : activeAccount || "(none)";
+      // A shielded transfer is paid from the shielded balance: no account, so no name.
+      const fromBox = isShieldedTransfer
+        ? h("div", { class: "box" }, [h("code", { text: "Phoenix shielded balance" })])
+        : activeProfileBox();
       const railLabel = isShieldedTransfer ? "Shielded (Phoenix)" : "Public (Moonlight)";
 
       const amountLuxStr = prettyAmount(amount);
@@ -833,7 +870,7 @@ export async function renderNotification() {
         h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve transfer" })]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "From" }),
-          h("div", { class: "box" }, [h("code", { text: fromLabel })]),
+          fromBox,
         ]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "Privacy" }),
@@ -1026,7 +1063,7 @@ export async function renderNotification() {
           ]),
           h("div", { class: "row" }, [
             h("div", { class: "muted", text: "From" }),
-            h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+            activeProfileBox(),
           ]),
           h("div", { class: "row" }, [
             h("div", { class: "muted", text: "Token" }),
@@ -1149,7 +1186,7 @@ export async function renderNotification() {
           ]),
           h("div", { class: "row" }, [
             h("div", { class: "muted", text: "From" }),
-            h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+            activeProfileBox(),
           ]),
           h("div", { class: "row" }, [
             h("div", { class: "muted", text: "Contract" }),
@@ -1254,7 +1291,7 @@ export async function renderNotification() {
         h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve contract call" })]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "From" }),
-          h("div", { class: "box" }, [h("code", { text: activeAccount || "(none)" })]),
+          activeProfileBox(),
         ]),
         h("div", { class: "row" }, [
           h("div", { class: "muted", text: "Contract" }),
