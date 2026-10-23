@@ -402,14 +402,11 @@ export function sendFormView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  // Which address of a name with both the user picked, kept with that name:
-  // retyping the name, Back from Review and re-renders keep the pick, and any
-  // other name starts on its public account.
-  let nameChoice =
-    typeof draft.nameChoice?.name === "string"
-      ? { name: draft.nameChoice.name, shielded: draft.nameChoice.shielded === true }
-      : null;
-  const pickedShielded = (result) => nameChoice?.name === result.name && nameChoice.shielded;
+  // Which address of each name with both the user picked, by the name as
+  // resolved: retyping a name, Back from Review and re-renders keep its pick,
+  // and a name without one starts on its public account.
+  const nameChoices = { ...draft.nameChoices };
+  const pickedShielded = (result) => nameChoices[result.name] === true;
   const nameRecipient = (result) => duskNameRecipient(result, { shielded: pickedShielded(result) });
 
   // The resolved name the form shows while the field holds it. Contacts saves
@@ -470,7 +467,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       shielded: pickedShielded(result),
       shieldedDisabled: !shieldedCovers,
       onChoose: (shielded) => {
-        nameChoice = { name: result.name, shielded };
+        nameChoices[result.name] = shielded;
         syncDraft();
         choice.set(shielded);
         showNameAddress(result);
@@ -566,7 +563,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       to: String(to.value || ""),
       // The field is the recipient again; drop a name kept from review.
       duskName: undefined,
-      nameChoice: nameChoice ?? undefined,
+      nameChoices: { ...nameChoices },
       amountDusk: String(amount.value || ""),
       memo: String(memo.value || ""),
       // preserve any gas edits the user may have made on the confirm screen
@@ -713,7 +710,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         state.draft = {
           to: recipient,
           duskName,
-          nameChoice: nameChoice ?? undefined,
+          nameChoices: { ...nameChoices },
           privacy,
           amountLux: amtLux,
           amountDusk: amount.value.trim(),
@@ -766,6 +763,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   }
 
   const recType = ProfileGenerator.typeOf(String(d.to || "").trim());
+  // Public or shielded follows the recipient, as the pill does: Contacts can
+  // replace it after the draft's privacy was set.
+  const privacy = recType === "address" ? "shielded" : "public";
   const txTypeLabel = recType === "address" ? "Shielded transfer" : "Public transfer";
   const txTypeBadge = recipientBadge({
     ...(recipientTypeBadgeOptions(recType) || {
@@ -896,9 +896,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   });
 
   // Gas editor (collapsed by default)
-  const defaultGas = getDefaultGas(TX_KIND.TRANSFER, {
-    privacy: d.privacy || (recType === "address" ? "shielded" : "public"),
-  });
+  const defaultGas = getDefaultGas(TX_KIND.TRANSFER, { privacy });
   const defaultLimit =
     defaultGas?.limit !== undefined && defaultGas?.limit !== null
       ? String(defaultGas.limit)
@@ -940,7 +938,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         type: "DUSK_UI_SEND_TX",
         params: {
           kind: TX_KIND.TRANSFER,
-          privacy: d.privacy || (recType === "address" ? "shielded" : "public"),
+          privacy,
           to: d.to,
           amount: d.amountLux,
           memo: d.memo || undefined,
@@ -987,7 +985,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       // What the chain shows.
       h("div", {
         class: "muted transfer-line",
-        text: transferLine(d.privacy || (recType === "address" ? "shielded" : "public")),
+        text: transferLine(privacy),
       }),
       h("div", { class: "home-balance" }, [
         h("div", {

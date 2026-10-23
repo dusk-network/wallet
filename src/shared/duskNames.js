@@ -240,28 +240,34 @@ const primaryNames = new Map();
 
 /**
  * `resolvePrimaryName` for display, by node and account. A lookup starts after
- * the render that asks for it and is shared while it runs; its answer is reused
- * for a minute and stays on show while it is looked up again. A failed lookup
- * changes nothing and is tried again on the next call.
+ * the render that asks for it and is shared while it runs. Its answer is reused
+ * for a minute; after that a call gets the answer of a new lookup, so a name
+ * that changed or went away doesn't stay on show. A failed lookup gives no name
+ * and is tried again on the next call.
+ *
+ * With `stale`, a call gets the last answer at once while a new lookup runs,
+ * for display that copies and sends nothing, as the header's account chip.
  *
  * @param {string} account
- * @param {{ nodeUrl?: string }} [opts]
+ * @param {{ nodeUrl?: string, stale?: boolean }} [opts]
  * @returns {Promise<string|null>} the name, or null when there is none to show
  */
-export function lookupPrimaryName(account, { nodeUrl } = {}) {
+export function lookupPrimaryName(account, { nodeUrl, stale = false } = {}) {
   if (!duskNamesNetwork(nodeUrl) || classifyDuskIdentifier(account) !== "account") return Promise.resolve(null);
   const key = `${nodeUrl}\n${account}`;
   const entry = primaryNames.get(key) ?? { name: null, at: 0, running: null };
   primaryNames.set(key, entry);
-  if (!entry.running && Date.now() - entry.at >= LOOKUP_REUSE_MS) {
+  const fresh = Date.now() - entry.at < LOOKUP_REUSE_MS;
+  if (!fresh && !entry.running) {
     entry.running = new Promise((start) => setTimeout(start)).then(async () => {
       const result = await resolvePrimaryName(account, { nodeUrl });
       entry.running = null;
-      if (result.ok) Object.assign(entry, { name: result.name, at: Date.now() });
-      return entry.at ? entry.name : null;
+      if (!result.ok) return null;
+      Object.assign(entry, { name: result.name, at: Date.now() });
+      return result.name;
     });
   }
-  return entry.at ? Promise.resolve(entry.name) : entry.running;
+  return fresh || (stale && entry.at) ? Promise.resolve(entry.name) : entry.running;
 }
 
 /**

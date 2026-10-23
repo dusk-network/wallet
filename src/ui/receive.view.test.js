@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createLensReader } from "@duskdomains/sdk/lens-reader";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { lookupPrimaryName, lookupShieldedName } from "../shared/duskNames.js";
@@ -11,6 +12,10 @@ vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupPrimaryName: vi.fn(),
   lookupShieldedName: vi.fn(),
+}));
+vi.mock("@duskdomains/sdk/lens-reader", async (importOriginal) => ({
+  ...(await importOriginal()),
+  createLensReader: vi.fn(),
 }));
 
 const ACCOUNT =
@@ -40,6 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -153,6 +159,27 @@ describe("receive", () => {
     view.info.click();
     expect(view.shownNote()).toBe(SHIELDED_NOTE);
     expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied address"]);
+  });
+
+  it("shows and copies no name once a lookup a minute on finds it cleared", async () => {
+    // The real lookups, with the lens reader standing in for the node.
+    const real = await vi.importActual("../shared/duskNames.js");
+    lookupPrimaryName.mockImplementation(real.lookupPrimaryName);
+    const verifyPrimary = vi.fn(async () => ({ primary: { spelling: "alice.dusk" } }));
+    createLensReader.mockResolvedValue({ verifyPrimary });
+    vi.useFakeTimers({ toFake: ["Date"] });
+
+    let view = await receive("public");
+    await vi.waitFor(() => expect(view.name()).toBe("alice.dusk"));
+
+    // A minute on, the account has no primary name any more.
+    vi.advanceTimersByTime(61_000);
+    verifyPrimary.mockResolvedValue(null);
+    view = await receive("public");
+    await vi.waitFor(() => expect(verifyPrimary).toHaveBeenCalledTimes(2));
+    await settle();
+    expect([view.name(), isShown(view.info)]).toEqual(["", false]);
+    expect(await view.copy("Copy name")).toEqual([undefined, undefined]);
   });
 
   it("shows the address alone without a name, and says when a copy fails", async () => {

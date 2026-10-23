@@ -438,7 +438,7 @@ describe("lookupPrimaryName", () => {
     await expect(pending).resolves.toBe("domains.dusk");
   });
 
-  it("shares a lookup, reuses its answer for a minute and shows it while it is looked up again", async () => {
+  it("shares a lookup, reuses its answer for a minute, and then gives the answer of a new one", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const reader = useReader({ verifyPrimary: async () => primary("domains.dusk") });
 
@@ -450,12 +450,33 @@ describe("lookupPrimaryName", () => {
     await expect(lookup()).resolves.toBe("domains.dusk");
     expect(reader.verifyPrimary).toHaveBeenCalledTimes(1);
 
-    // A minute on, the name was cleared: the old answer shows until the new one is in.
+    // A minute on, the name was cleared: callers get that, not the old answer.
     vi.advanceTimersByTime(2_000);
     reader.verifyPrimary.mockResolvedValue(null);
-    await expect(lookup()).resolves.toBe("domains.dusk");
-    await vi.waitFor(async () => expect(await lookup()).toBeNull());
+    const again = lookup();
+    expect(lookup()).toBe(again);
+    await expect(again).resolves.toBeNull();
     expect(reader.verifyPrimary).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives no name when the lookup a minute on fails, while the account chip keeps the last one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const reader = useReader({ verifyPrimary: async () => primary("domains.dusk") });
+    const chip = () => names.lookupPrimaryName(ACCOUNT, { nodeUrl: TESTNET, stale: true });
+    await expect(lookup()).resolves.toBe("domains.dusk");
+
+    vi.advanceTimersByTime(61_000);
+    reader.verifyPrimary.mockRejectedValue(new lens.LensReaderError("read", "offline"));
+    // The chip gets the last answer at once, and the same new lookup runs for both.
+    await expect(chip()).resolves.toBe("domains.dusk");
+    await expect(lookup()).resolves.toBeNull();
+    expect(reader.verifyPrimary).toHaveBeenCalledTimes(2);
+
+    // The next answer replaces it for everyone.
+    reader.verifyPrimary.mockResolvedValue(primary("other.dusk"));
+    await expect(lookup()).resolves.toBe("other.dusk");
+    await expect(chip()).resolves.toBe("other.dusk");
+    expect(reader.verifyPrimary).toHaveBeenCalledTimes(3);
   });
 
   it("keeps lookups apart by node and account, so a switch looks the new one up", async () => {

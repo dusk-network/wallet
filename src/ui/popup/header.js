@@ -144,7 +144,8 @@ export function createHeaderRenderer({
         chip = accountChipEl(account, {
           connected,
           host,
-          name: lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl }),
+          // The chip only shows the name, so it keeps the last one while it is looked up again.
+          name: lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true }),
           expanded: canOpenProfiles && acctMenu.isOpen,
           onClick: canOpenProfiles
             ? (el) => {

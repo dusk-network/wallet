@@ -88,7 +88,7 @@ describe("header", () => {
     await settle();
     expect(visibleText(chip().querySelector(".chip-text"))).toBe("26FCH7…Tck927");
     expect(visibleText(chip())).toBe("26FCH7…Tck927▾");
-    expect(names.lookupPrimaryName).toHaveBeenCalledWith(ACCOUNT, { nodeUrl: overview.nodeUrl });
+    expect(names.lookupPrimaryName).toHaveBeenCalledWith(ACCOUNT, { nodeUrl: overview.nodeUrl, stale: true });
 
     names.lookupPrimaryName.mockResolvedValue("alice.dusk");
     renderHeader(overview);

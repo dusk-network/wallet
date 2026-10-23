@@ -46,10 +46,11 @@ describe("send view", () => {
     const draftBlock = source.match(/state\.draft = \{([\s\S]*?)state\.route = "confirm"/);
     expect(draftBlock?.[1]).toContain("privacy,");
 
-    const sendBlock = source.match(/type: "DUSK_UI_SEND_TX"([\s\S]*?)memo: d\.memo/);
-    expect(sendBlock?.[1]).toContain("privacy:");
-    expect(sendBlock?.[1]).toContain('"shielded"');
-    expect(sendBlock?.[1]).toContain('"public"');
+    // Review sends one of the two, the one its recipient has.
+    const review = source.slice(source.indexOf("export function sendConfirmView"));
+    expect(review).toContain('const privacy = recType === "address" ? "shielded" : "public";');
+    const sendBlock = review.match(/type: "DUSK_UI_SEND_TX"([\s\S]*?)memo: d\.memo/);
+    expect(sendBlock?.[1]).toContain("privacy,");
   });
 
   it("uses shared recipient badges for send contact and privacy indicators", async () => {
@@ -210,7 +211,7 @@ describe("send to a .dusk name with both addresses", () => {
     expect(form.picked()).toEqual(["false", "true"]);
     expect(form.pill()).toBe("");
     expect(form.balanceLine()).toBe("Spendable (shielded): 24.985 DUSK");
-    expect(state.draft.nameChoice).toEqual({ name: "alice.dusk", shielded: true });
+    expect(state.draft.nameChoices).toEqual({ "alice.dusk": true });
 
     form.radios()[0].click();
     expect(form.picked()).toEqual(["true", "false"]);
@@ -227,8 +228,9 @@ describe("send to a .dusk name with both addresses", () => {
     expect(form.pill()).toBe("Shielded");
   });
 
-  it("keeps the pick while the same name is typed again, and starts any other name on public", () => {
-    const form = mount(newState());
+  it("keeps each name's pick while it is typed again, and starts a name without one on public", () => {
+    const state = newState();
+    let form = mount(state);
     typeInto(form.to, "alice.dusk");
     form.radios()[1].click();
 
@@ -245,7 +247,19 @@ describe("send to a .dusk name with both addresses", () => {
     expect(form.picked()).toEqual(["true", "false"]);
     expect(form.balanceLine()).toBe("Available (public): 177.9845 DUSK");
 
-    // The pick stays with alice.dusk.
+    // A pick for bob.dusk doesn't take alice.dusk's place.
+    form.radios()[1].click();
+    form.radios()[0].click();
+    typeInto(form.to, "alice.dusk");
+    expect(form.picked()).toEqual(["false", "true"]);
+    typeInto(form.to, "bob.dusk");
+    expect(form.picked()).toEqual(["true", "false"]);
+    form.radios()[1].click();
+
+    // Both stay through a redraw from the draft.
+    form = mount(state);
+    expect(state.draft.nameChoices).toEqual({ "alice.dusk": true, "bob.dusk": true });
+    expect(form.picked()).toEqual(["false", "true"]);
     typeInto(form.to, "alice.dusk");
     expect(form.picked()).toEqual(["false", "true"]);
   });
@@ -269,7 +283,7 @@ describe("send to a .dusk name with both addresses", () => {
       to: ALICE.address,
       privacy: "shielded",
       duskName: { name: "alice.dusk" },
-      nameChoice: { name: "alice.dusk", shielded: true },
+      nameChoices: { "alice.dusk": true },
     });
 
     const review = mount(state);
@@ -460,6 +474,29 @@ describe("a name and the recipient Contacts sets", () => {
     form = mount(state);
     expect(form.to.value).toBe(address);
     expect(dom.document.body.querySelector(".name-points-to")).toBeNull();
+  });
+
+  it("makes Review public when Contacts saves a shielded name's address as a public account", async () => {
+    const state = newState();
+    const form = mount(state);
+    typeInto(form.to, "alice.dusk");
+    form.radios()[1].click();
+    typeInto(form.amount, "1");
+    form.review.click();
+    await settle();
+    expect(state.draft).toMatchObject({ to: ALICE.address, privacy: "shielded" });
+
+    // Save to Contacts, with the address edited to a public account.
+    setFromContacts(state, BOB.account);
+    const review = mount(state);
+    expect([review.pill(), review.transferLine()]).toEqual(["Public", "Visible on chain"]);
+
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await settle();
+    expect(review.actions.send).toHaveBeenCalledWith({
+      type: "DUSK_UI_SEND_TX",
+      params: expect.objectContaining({ privacy: "public", to: BOB.account }),
+    });
   });
 });
 

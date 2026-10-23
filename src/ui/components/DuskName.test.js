@@ -52,7 +52,7 @@ describe("own .dusk names in the popup", () => {
     // The declarations of the top-level rule for exactly `selector`.
     const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
 
-    expect(header).toContain("name: lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl }),");
+    expect(header).toContain("name: lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true }),");
     // The public account's name; beside the shielded address only when the name pays to it.
     expect(receive).toMatch(
       /tab === "public"\s*\? lookupPrimaryName\(account, \{ nodeUrl: ov\?\.nodeUrl \}\)\s*: lookupShieldedName\(account, address, \{ nodeUrl: ov\?\.nodeUrl \}\)/
