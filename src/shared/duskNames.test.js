@@ -656,6 +656,6 @@ describe("bundle boundary", () => {
     }
     expect('import { x } from "../shared/duskNames.js";').toMatch(importsNames);
     // The engine checks the names sites get.
-    expect(await read("engine", "runtime.js")).toContain('import { lookupPrimaryName } from "../shared/duskNames.js";');
+    expect(await read("engine", "runtime.js")).toMatch(/import \{[^}]*\blookupPrimaryName\b[^}]*\} from "\.\.\/shared\/duskNames\.js";/);
   });
 });

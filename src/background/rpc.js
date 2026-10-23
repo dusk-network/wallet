@@ -40,7 +40,7 @@ import {
 } from "./engineHost.js";
 import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
-import { siteNames } from "./siteNames.js";
+import { namesGeneration, siteNames } from "./siteNames.js";
 import { putTxMeta } from "../shared/txStore.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
 import {
@@ -314,7 +314,10 @@ export async function handleRpc(origin, request) {
   async function siteProfile(status, perm) {
     const account = profileFromPermission(status, perm)?.account;
     if (!account) return null;
+    const generation = namesGeneration();
     const names = await siteNames(String((await getSettings())?.nodeUrl ?? ""), [account]);
+    // Read for a network the wallet has left since: read it again.
+    if (generation !== namesGeneration()) return siteProfile(status, perm);
     return profileFromPermission(status, perm, hasShieldedGrant(perm), names);
   }
 

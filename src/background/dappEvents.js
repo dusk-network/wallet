@@ -11,7 +11,7 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { duskNamesNetwork, verifiedNamesFor } from "../shared/verifiedNames.js";
 import { getEngineStatus } from "./engineHost.js";
-import { siteNames } from "./siteNames.js";
+import { namesGeneration, namesNetworkMoved, siteNames } from "./siteNames.js";
 import { getExtensionApi } from "../platform/extensionApi.js";
 
 /**
@@ -91,7 +91,10 @@ function isWebOrigin(origin) {
  * @param {string} origin
  */
 async function initPortForOrigin(port, origin) {
+  const generation = namesGeneration();
   const state = await buildProviderState(origin);
+  // Built for a network the wallet has left since: build it again.
+  if (generation !== namesGeneration()) return initPortForOrigin(port, origin);
   safePost(port, { type: "DUSK_PROVIDER_STATE", state });
 
   // If the site is already connected, emit connect.
@@ -309,9 +312,12 @@ export function broadcastToAll(name, data) {
  * This should be called when wallet locks/unlocks or permissions change.
  */
 export async function broadcastProfilesChangedAll() {
+  const generation = namesGeneration();
   const perms = await getPermissions();
   const status = await getEngineStatus();
   const names = await namesForOrigins([...portsByOrigin.keys()], perms, status);
+  // The wallet moved to another network meanwhile, which sends these again.
+  if (generation !== namesGeneration()) return;
 
   for (const [origin, set] of portsByOrigin.entries()) {
     const perm = perms?.[origin];
@@ -334,6 +340,7 @@ export async function broadcastProfilesChangedAll() {
  * @param {string} origin
  */
 export async function broadcastProfilesChangedForOrigin(origin) {
+  const generation = namesGeneration();
   const perms = await getPermissions();
   const status = await getEngineStatus();
   const perm = perms?.[origin];
@@ -343,6 +350,7 @@ export async function broadcastProfilesChangedForOrigin(origin) {
     Boolean(perm?.grants?.shieldedReceiveAddress),
     await namesForOrigins([origin], perms, status)
   );
+  if (generation !== namesGeneration()) return;
   broadcastToOrigin(origin, "profilesChanged", permission.profile ? [permission.profile] : []);
 }
 
@@ -357,6 +365,7 @@ export async function broadcastProfilesChangedForOrigin(origin) {
  */
 export async function handleVerifiedNamesDiff(oldNames, newNames) {
   if (!portsByOrigin.size) return;
+  const generation = namesGeneration();
   const nodeUrl = String((await getSettings())?.nodeUrl ?? "");
   const network = duskNamesNetwork(nodeUrl);
   if (!network) return;
@@ -364,6 +373,8 @@ export async function handleVerifiedNamesDiff(oldNames, newNames) {
 
   const perms = await getPermissions();
   const status = await getEngineStatus();
+  // Names of a network the wallet has left since.
+  if (generation !== namesGeneration()) return;
   const names = verifiedNamesFor(newNames, nodeUrl);
   for (const [origin, set] of portsByOrigin.entries()) {
     const perm = perms?.[origin];
@@ -496,9 +507,12 @@ export async function handleSettingsDiff(oldSettings, newSettings) {
   const oldUrl = String(oldSettings?.nodeUrl ?? "");
   const newUrl = String(newSettings?.nodeUrl ?? "");
   if (oldUrl !== newUrl) {
+    // A profile's .dusk name is the one checked on its network: profile
+    // updates begun before the move are dropped, and sites get them again.
+    const moved = duskNamesNetwork(oldUrl) !== duskNamesNetwork(newUrl);
+    if (moved) namesNetworkMoved();
     await broadcastChainChangedAll();
-    // A profile's .dusk name is the one checked on its network.
-    if (duskNamesNetwork(oldUrl) !== duskNamesNetwork(newUrl)) await broadcastProfilesChangedAll();
+    if (moved) await broadcastProfilesChangedAll();
   }
 }
 
