@@ -22,6 +22,8 @@ let settings = {
   archiverUrl: "https://testnet.nodes.dusk.network",
 };
 let engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+// The .dusk name checks kept in verifiedNames.js.
+let verifiedNames = {};
 
 const loadVault = vi.fn(async () => vaultValue);
 
@@ -81,6 +83,9 @@ const engineCall = vi.fn(async (method, params) => {
   }
   if (method === "dusk_signAuth") {
     return { ok: true, __params: params };
+  }
+  if (method === "engine_checkNames") {
+    return true;
   }
   if (method === "dusk_signTypedData") {
     return {
@@ -145,6 +150,10 @@ vi.mock("../shared/assetsStore.js", () => ({
   watchNft,
 }));
 vi.mock("./dappEvents.js", () => ({ broadcastChainChangedAll }));
+vi.mock("../shared/verifiedNames.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  readVerifiedNames: vi.fn(async () => verifiedNames),
+}));
 vi.mock("../platform/extensionApi.js", () => ({
   getExtensionApi,
   runtimeGetURL,
@@ -161,6 +170,7 @@ describe("background rpc handler", () => {
       archiverUrl: "https://testnet.nodes.dusk.network",
     };
     engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+    verifiedNames = {};
 
     vi.clearAllMocks();
   });
@@ -470,6 +480,91 @@ describe("background rpc handler", () => {
     expect(await handleRpc("https://dapp.example", { method: "dusk_profiles" })).toEqual([
       { profileId: "account:1:acct1", account: "acct1", shieldedAddress: "addr1" },
     ]);
+  });
+
+  it("dusk_profiles gives the profile its .dusk name checked lately on the wallet's network", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    const at = Date.now();
+    verifiedNames = {
+      testnet: { acct0: { name: "zero.dusk", at }, acct1: { name: "one.dusk", at } },
+      mainnet: { acct1: { name: "main.dusk", at } },
+    };
+    const profiles = () => handleRpc("https://dapp.example", { method: "dusk_profiles" });
+
+    expect(await profiles()).toEqual([{ profileId: "account:1:acct1", account: "acct1", name: "one.dusk" }]);
+    settings = { ...settings, nodeUrl: "https://nodes.dusk.network" };
+    expect(await profiles()).toEqual([{ profileId: "account:1:acct1", account: "acct1", name: "main.dusk" }]);
+    settings = { ...settings, nodeUrl: "https://devnet.nodes.dusk.network" };
+    expect(await profiles()).toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
+    // Names checked under a minute ago aren't checked again.
+    expect(engineCall).not.toHaveBeenCalledWith("engine_checkNames", expect.anything());
+
+    // An unconnected site gets no profile and starts no check.
+    verifiedNames = {};
+    settings = { ...settings, nodeUrl: "https://testnet.nodes.dusk.network" };
+    expect(await handleRpc("https://other.example", { method: "dusk_profiles" })).toEqual([]);
+    expect(engineCall).not.toHaveBeenCalledWith("engine_checkNames", expect.anything());
+  });
+
+  it("dusk_profiles leaves out a name checked ten minutes ago and has it checked again without waiting", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = {
+      profileId: "account:1:acct1",
+      accountIndex: 1,
+      grants: { publicAccount: true, shieldedReceiveAddress: true },
+      connectedAt: 1,
+      updatedAt: 1,
+    };
+    verifiedNames = { testnet: { acct1: { name: "one.dusk", at: Date.now() - 10 * 60_000 } } };
+    // The check never answers; the site's request doesn't wait for it.
+    const answer = engineCall.getMockImplementation();
+    engineCall.mockImplementation((method, p) =>
+      method === "engine_checkNames" ? new Promise(() => {}) : answer(method, p)
+    );
+    try {
+      await expect(handleRpc("https://dapp.example", { method: "dusk_profiles" })).resolves.toEqual([
+        { profileId: "account:1:acct1", account: "acct1", shieldedAddress: "addr1" },
+      ]);
+    } finally {
+      engineCall.mockImplementation(answer);
+    }
+    // Only the connected profile's name is checked.
+    expect(engineCall).toHaveBeenCalledWith("engine_checkNames", {
+      nodeUrl: "https://testnet.nodes.dusk.network",
+      accounts: ["acct1"],
+    });
+  });
+
+  it("dusk_requestProfiles gives the profile picked in the approval its name, dusk_requestShieldedAddress none", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    const at = Date.now();
+    verifiedNames = { testnet: { acct0: { name: "zero.dusk", at }, acct1: { name: "one.dusk", at } } };
+    // The user picks profile 2 in both approvals.
+    requestUserApproval.mockResolvedValueOnce({ accountIndex: 1 }).mockResolvedValueOnce({ accountIndex: 1 });
+    const profiles = await handleRpc("https://dapp.example", { method: "dusk_requestProfiles" });
+    const shielded = await handleRpc("https://dapp.example", { method: "dusk_requestShieldedAddress" });
+
+    expect(profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1", name: "one.dusk" }]);
+    expect(shielded).toEqual({
+      address: "addr1",
+      account: "acct1",
+      profileId: "account:1:acct1",
+      chainId: "dusk:2",
+    });
   });
 
   it("keeps permissions and disconnect scoped to the requesting origin", async () => {

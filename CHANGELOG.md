@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address. ([#125])
 - Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive. ([#125])
 - Added a warning when sending to your own account or address. ([#125])
@@ -65,6 +66,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 [#113]: https://github.com/dusk-network/wallet/issues/113
 [#117]: https://github.com/dusk-network/wallet/issues/117
 [#125]: https://github.com/dusk-network/wallet/issues/125
+[#127]: https://github.com/dusk-network/wallet/issues/127
 
 ## [0.3.0] - 2026-06-23
 

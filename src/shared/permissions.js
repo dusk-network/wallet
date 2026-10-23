@@ -17,7 +17,18 @@ export async function getPermissionForOrigin(origin) {
   return permissions[origin] ?? null;
 }
 
-export function permissionProfileState(perm, status, includeShielded = false) {
+/**
+ * Whether `perm` is still a valid grant, and the profile its site sees: its
+ * public account, its shielded receive address with `includeShielded`, and its
+ * verified .dusk name when `names` has one for that account.
+ *
+ * @param {object} perm
+ * @param {object} status - engine status
+ * @param {boolean} [includeShielded]
+ * @param {Map<string, string>} [names] - verified names by account (verifiedNames.js)
+ * @returns {{ isValid: boolean, profile: { profileId: string, account: string, shieldedAddress?: string, name?: string } | null }}
+ */
+export function permissionProfileState(perm, status, includeShielded = false, names = null) {
   const accountIndex = perm?.accountIndex;
   const profileId = String(perm?.profileId ?? "");
   const prefix = `account:${accountIndex}:`;
@@ -39,6 +50,7 @@ export function permissionProfileState(perm, status, includeShielded = false) {
     return { isValid: false, profile: null };
   }
 
+  const name = names?.get(account);
   return {
     isValid: true,
     profile: {
@@ -47,6 +59,7 @@ export function permissionProfileState(perm, status, includeShielded = false) {
       ...(includeShielded && addresses[accountIndex]
         ? { shieldedAddress: addresses[accountIndex] }
         : {}),
+      ...(name ? { name } : {}),
     },
   };
 }

@@ -196,6 +196,8 @@ when a contract ABI or cryptographic library needs the raw public-key bytes; no
 additional wallet RPC or approval is required. The account remains unavailable
 while the connected profile is locked.
 
+`name` is the profile's `.dusk` name, on Mainnet and Testnet, sent only when the wallet checked in the last ten minutes that the name's `moonlight_address` record is `account`, and left out otherwise. It is for display.
+
 ---
 
 ### `dusk_profiles`
@@ -543,7 +545,7 @@ dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 |-------|---------|------|
 | `connect` | `{ chainId }` | Permission granted |
 | `disconnect` | `{ code: 4900, message }` | Permission revoked |
-| `profilesChanged` | `DuskProfile[]` | Lock/unlock, connect/disconnect, selected profile changes, or profile grant changes |
+| `profilesChanged` | `DuskProfile[]` | Lock/unlock, connect/disconnect, selected profile changes, profile grant changes, or the profile's `.dusk` name changes |
 | `chainChanged` | `ChainId` | Network changed (different chain ID) |
 | `duskNodeChanged` | `{ chainId, nodeUrl, networkName }` | Node URL changed (even same chain) |
 

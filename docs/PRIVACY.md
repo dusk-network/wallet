@@ -6,7 +6,7 @@ Dusk Wallet is a non-custodial browser extension for the Dusk network.
 
 Recovery phrases and private keys are encrypted locally on your device. Dusk Network does not collect, store, or custody your recovery phrase or private keys.
 
-The extension stores local wallet data needed to operate the wallet, including encrypted vault data, wallet settings, approved dApp origins, watched assets, address book entries, and local transaction metadata.
+The extension stores local wallet data needed to operate the wallet, including encrypted vault data, wallet settings, approved dApp origins, watched assets, address book entries, local transaction metadata, and the latest checks of your profiles' .dusk names.
 
 ## Network data
 
@@ -19,6 +19,8 @@ Looking up a .dusk name sends the name to your configured node. Showing your pro
 ## dApp connections
 
 Dusk Wallet only shares wallet profile information with a dApp after you approve a connection request.
+
+A connected dApp also gets the profile's .dusk name, once the wallet has checked that the name points to the profile's public account.
 
 Shielded addresses require separate explicit approval before they are shared with a dApp.
 
