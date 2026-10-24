@@ -175,15 +175,16 @@ function mount(state, ov = overview(), send = async () => ({})) {
 }
 
 describe("send form", () => {
-  it("labels its scan and contacts icons, and its placeholders don't repeat the labels", () => {
+  it("labels its scan and contacts icons and its Max, and its placeholders don't repeat the labels", () => {
     const form = mount(newState());
     const body = dom.document.body;
     expect(
       body.querySelectorAll(".input-row .icon-only").map((b) => [b.getAttribute("aria-label"), b.innerHTML, b.textContent])
     ).toEqual([
       ["Scan QR", iconSvg("qr"), ""],
-      ["Contacts", iconSvg("star"), ""],
+      ["Contacts", iconSvg("contacts"), ""],
     ]);
+    expect(body.querySelector(".amount-input-row button").textContent).toBe("Max");
     expect(body.querySelectorAll("label").map((l) => l.textContent)).toEqual(["To", "Amount", "Memo"]);
     expect([form.to, form.amount, body.querySelector(".row > input")].map((i) => i.getAttribute("placeholder"))).toEqual([
       "Account, shielded address or .dusk name",

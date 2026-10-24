@@ -399,14 +399,6 @@ export function stakeFormView(ov, { state, actions } = {}) {
         ? h("div", { class: pos.manageable === false ? "stake-card__note stake-card__note--warn" : "stake-card__note", text: ownerCopy(pos) })
         : null,
       emptyCompact ? null : h("div", { class: "stake-metrics" }, selected ? rows : summaryRows),
-      selected
-        ? h("div", { class: "stake-gas-line" }, [
-            h("span", { text: "Gas" }),
-            h("code", {
-              text: `${profileLabel(stakeProfile)} public · ${fmtLux(fundingOptionsForPosition(pos).publicLux)} DUSK`,
-            }),
-          ])
-        : null,
       !selected && !emptyCompact && (!topupState.ok || !manageState.ok || !claimState.ok)
         ? h("div", {
             class: "stake-card__note stake-card__note--warn",
@@ -653,7 +645,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     // The amount, if any, and the gas.
     h("div", { class: "stake-gas-line" }, [
       h("span", { text: "Paid from" }),
-      h("code", { text: `${profileLabel(stakeProfileIndex)} public balance` }),
+      h("code", { text: `${profileLabel(stakeProfileIndex)} public · ${fmtLux(publicLux)} DUSK` }),
     ]),
     currentState.ok ? null : h("div", { class: "err", text: currentState.reason }),
     usesAmountInput ? fieldLabel(input, amountLabel) : null,

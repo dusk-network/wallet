@@ -68,7 +68,7 @@ export function createAmountSliderCard({
   const maxBtn = h("button", {
     class: "icon-btn max-btn",
     type: "button",
-    text: "MAX",
+    text: "Max",
     title: "Use maximum amount",
     disabled: true,
     onclick: () => {

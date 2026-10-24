@@ -634,7 +634,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   const bookBtn = h("button", {
     class: "icon-btn icon-only",
     type: "button",
-    html: iconSvg("star"),
+    html: iconSvg("contacts"),
     title: "Contacts",
     "aria-label": "Contacts",
     onclick: async () => {

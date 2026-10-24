@@ -34,7 +34,7 @@ describe("popup icons", () => {
       for (const glyph of GLYPHS) expect(code, `${file} draws ${glyph}`).not.toContain(glyph);
     }
 
-    for (const name of ["refresh", "expand", "settings", "qr", "star", "close", "plus", "nft", "copy", "info"]) {
+    for (const name of ["refresh", "expand", "settings", "qr", "contacts", "close", "plus", "nft", "copy", "info"]) {
       expect(iconSvg(name)).toMatch(/^<svg viewBox="0 0 24 24" aria-hidden="true"><(path|rect|circle) [^>]+\/>/);
     }
 

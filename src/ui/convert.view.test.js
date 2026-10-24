@@ -53,6 +53,15 @@ describe("shield and unshield", () => {
     expect(dom.document.body.querySelector("input.amount-input").getAttribute("placeholder")).toBe("e.g. 1.25 DUSK");
   });
 
+  it("names the whole-balance button Max, in the type other buttons use, as Stake and Sozu do", async () => {
+    for (const kind of [TX_KIND.SHIELD, TX_KIND.UNSHIELD]) {
+      dom.document.body.replaceChildren(...convertFormView(ov, { state: { route: "convert", draft: { kind } }, actions: actions() }));
+      expect(dom.document.body.querySelector(".amount-input-row button").textContent).toBe("Max");
+    }
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    expect(css).not.toContain(".max-btn");
+  });
+
   it("reviews with Back and Confirm, the gas presets behind the fee's Edit", async () => {
     const state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountLux: "1000000000", amountDusk: "1" } };
     dom.document.body.replaceChildren(...convertConfirmView(ov, { state, actions: actions() }));

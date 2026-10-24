@@ -104,7 +104,10 @@ describe("staking text", () => {
 
     // The position card above names the account; the editor doesn't again.
     expect(editor.querySelector(".stake-editor__head > div").textContent).toBe("Manage position");
-    expect(editor.querySelector(".stake-gas-line").textContent).toBe("Paid fromProfile 1 public balance");
+    // One line, the editor's, says which balance pays and what it holds; the card has no Gas line.
+    const paidFrom = document.body.querySelectorAll(".stake-gas-line");
+    expect(paidFrom.map((line) => line.textContent)).toEqual(["Paid fromProfile 1 public · 1482.9383 DUSK"]);
+    expect(editor.contains(paidFrom[0])).toBe(true);
     expect(editor.querySelectorAll(".stake-editor > .muted").map((line) => line.textContent)).toEqual([
       "Most people leave this as it is.",
       "Max after the fee: 1482.8883 DUSK.",
@@ -112,6 +115,56 @@ describe("staking text", () => {
     expect(editor.querySelector(".err")).toBeNull();
     const amount = editor.querySelectorAll("input").find((input) => accessibleName(input) === "Stake amount");
     expect(amount.getAttribute("placeholder")).toBe("DUSK");
+  });
+
+  it("says an unstake or a claim is paid from the stake profile's public balance, which pays the gas", () => {
+    const { document } = installFakeDom();
+    const dusk = (n) => (BigInt(n) * 1_000_000_000n).toString();
+    // Profile 1 (selected, 5000 DUSK) owns Profile 2's stake; Profile 2 has 500 DUSK.
+    const staking = (actionKind) => ({
+      loaded: true,
+      loading: false,
+      profileIndex: 0,
+      minimumStakeLux: dusk(1000),
+      actionKind,
+      ownerStatus: {
+        profileIndex: 0,
+        account: ACCOUNT,
+        publicBalance: { value: dusk(5000) },
+        hasStake: false,
+        info: { amount: null, reward: "0", faults: 0, hardFaults: 0 },
+        ownerKind: "none",
+        ownerProfileIndex: 0,
+        manageable: true,
+        profiles: [{ profileIndex: 0 }, { profileIndex: 1 }],
+        relatedStakes: [
+          {
+            profileIndex: 1,
+            account: ACCOUNT.replace("26", "27"),
+            publicBalance: { value: dusk(500) },
+            hasStake: true,
+            info: {
+              amount: { value: dusk(2000), locked: "0", eligibility: "0", total: dusk(2000) },
+              reward: dusk(42),
+              faults: 0,
+              hardFaults: 0,
+            },
+            ownerKind: "local",
+            ownerProfileIndex: 0,
+            manageable: true,
+          },
+        ],
+      },
+    });
+
+    for (const actionKind of ["unstake", "claim"]) {
+      const state = { route: "stake", staking: staking(actionKind) };
+      document.body.replaceChildren(...stakeFormView({ selectedAccountIndex: 0 }, { state, actions: actions() }));
+      expect(document.body.querySelectorAll(".stake-gas-line").map((line) => line.textContent)).toEqual([
+        "Paid fromProfile 2 public · 500 DUSK",
+      ]);
+      expect(document.body.querySelector(".stake-editor .err")).toBeNull();
+    }
   });
 
   it("reviews an unstake of the whole position without repeating it under the amount", async () => {
