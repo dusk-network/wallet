@@ -40,7 +40,7 @@ import {
 } from "./engineHost.js";
 import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
-import { namesGeneration, siteNames } from "./siteNames.js";
+import { profileVisibilityGeneration, siteNames } from "./siteNames.js";
 import { putTxMeta } from "../shared/txStore.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
 import {
@@ -309,16 +309,20 @@ export async function handleRpc(origin, request) {
     return permissionProfileState(perm, status, includeShielded, names).profile;
   }
 
-  // The connected profile as its site sees it, with its verified .dusk name
-  // when that was checked lately. Reading the name never waits for a lookup.
-  async function siteProfile(status, perm) {
+  // The site's profiles as they are now: its connected profile, with its
+  // verified .dusk name when that was checked lately. Reading the name never
+  // waits for a lookup.
+  async function siteProfiles() {
+    const generation = profileVisibilityGeneration();
+    const perm = await getPermissionForOrigin(origin);
+    const status = perm ? await getEngineStatus() : null;
     const account = profileFromPermission(status, perm)?.account;
-    if (!account) return null;
-    const generation = namesGeneration();
-    const names = await siteNames(String((await getSettings())?.nodeUrl ?? ""), [account]);
-    // Read for a network the wallet has left since: read it again.
-    if (generation !== namesGeneration()) return siteProfile(status, perm);
-    return profileFromPermission(status, perm, hasShieldedGrant(perm), names);
+    const names = account ? await siteNames(String((await getSettings())?.nodeUrl ?? ""), [account]) : null;
+    // Read before a lock, unlock, permission change or network move: read it
+    // again.
+    if (generation !== profileVisibilityGeneration()) return siteProfiles();
+    const profile = profileFromPermission(status, perm, hasShieldedGrant(perm), names);
+    return profile ? [profile] : [];
   }
 
   async function captureApprovalContext(perm) {
@@ -497,19 +501,12 @@ export async function handleRpc(origin, request) {
 
     case "dusk_requestProfiles": {
       const options = firstParamObject(params);
-      const { perm, status } = await requestProfileConnection(options);
-      const profile = await siteProfile(status, perm);
-      return profile ? [profile] : [];
+      await requestProfileConnection(options);
+      return siteProfiles();
     }
 
-    case "dusk_profiles": {
-      const perm = await getPermissionForOrigin(origin);
-      if (!perm) return [];
-      const status = await getEngineStatus();
-      if (!status?.isUnlocked) return [];
-      const profile = await siteProfile(status, perm);
-      return profile ? [profile] : [];
-    }
+    case "dusk_profiles":
+      return siteProfiles();
 
     case "dusk_requestShieldedAddress": {
       const options = firstParamObject(params);

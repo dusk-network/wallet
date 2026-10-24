@@ -11,7 +11,7 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { duskNamesNetwork, verifiedNamesFor } from "../shared/verifiedNames.js";
 import { getEngineStatus } from "./engineHost.js";
-import { namesGeneration, namesNetworkMoved, siteNames } from "./siteNames.js";
+import { profileVisibilityChanged, profileVisibilityGeneration, siteNames } from "./siteNames.js";
 import { getExtensionApi } from "../platform/extensionApi.js";
 
 /**
@@ -91,10 +91,11 @@ function isWebOrigin(origin) {
  * @param {string} origin
  */
 async function initPortForOrigin(port, origin) {
-  const generation = namesGeneration();
+  const generation = profileVisibilityGeneration();
   const state = await buildProviderState(origin);
-  // Built for a network the wallet has left since: build it again.
-  if (generation !== namesGeneration()) return initPortForOrigin(port, origin);
+  // Built before a lock, unlock, permission change or network move: build it
+  // again.
+  if (generation !== profileVisibilityGeneration()) return initPortForOrigin(port, origin);
   safePost(port, { type: "DUSK_PROVIDER_STATE", state });
 
   // If the site is already connected, emit connect.
@@ -312,12 +313,15 @@ export function broadcastToAll(name, data) {
  * This should be called when wallet locks/unlocks or permissions change.
  */
 export async function broadcastProfilesChangedAll() {
-  const generation = namesGeneration();
+  // Every site gets its profile as it is from now on, so the profile updates
+  // begun before this one are dropped.
+  profileVisibilityChanged();
+  const generation = profileVisibilityGeneration();
   const perms = await getPermissions();
   const status = await getEngineStatus();
   const names = await namesForOrigins([...portsByOrigin.keys()], perms, status);
-  // The wallet moved to another network meanwhile, which sends these again.
-  if (generation !== namesGeneration()) return;
+  // A newer change meanwhile sends these again.
+  if (generation !== profileVisibilityGeneration()) return;
 
   for (const [origin, set] of portsByOrigin.entries()) {
     const perm = perms?.[origin];
@@ -340,7 +344,7 @@ export async function broadcastProfilesChangedAll() {
  * @param {string} origin
  */
 export async function broadcastProfilesChangedForOrigin(origin) {
-  const generation = namesGeneration();
+  const generation = profileVisibilityGeneration();
   const perms = await getPermissions();
   const status = await getEngineStatus();
   const perm = perms?.[origin];
@@ -350,7 +354,7 @@ export async function broadcastProfilesChangedForOrigin(origin) {
     Boolean(perm?.grants?.shieldedReceiveAddress),
     await namesForOrigins([origin], perms, status)
   );
-  if (generation !== namesGeneration()) return;
+  if (generation !== profileVisibilityGeneration()) return;
   broadcastToOrigin(origin, "profilesChanged", permission.profile ? [permission.profile] : []);
 }
 
@@ -365,7 +369,7 @@ export async function broadcastProfilesChangedForOrigin(origin) {
  */
 export async function handleVerifiedNamesDiff(oldNames, newNames) {
   if (!portsByOrigin.size) return;
-  const generation = namesGeneration();
+  const generation = profileVisibilityGeneration();
   const nodeUrl = String((await getSettings())?.nodeUrl ?? "");
   const network = duskNamesNetwork(nodeUrl);
   if (!network) return;
@@ -373,8 +377,9 @@ export async function handleVerifiedNamesDiff(oldNames, newNames) {
 
   const perms = await getPermissions();
   const status = await getEngineStatus();
-  // Names of a network the wallet has left since.
-  if (generation !== namesGeneration()) return;
+  // Read before a lock, unlock, permission change or network move, which
+  // sends sites their profiles again.
+  if (generation !== profileVisibilityGeneration()) return;
   const names = verifiedNamesFor(newNames, nodeUrl);
   for (const [origin, set] of portsByOrigin.entries()) {
     const perm = perms?.[origin];
@@ -475,14 +480,10 @@ export async function handlePermissionsDiff(oldPerms, newPerms) {
   }
 
   // Always refresh profiles for any origin diff, so sites see [] when revoked
-  // and profile fields when granted.
-  if (added.length || removed.length) {
+  // and profile fields when granted, or when their profile or grants change.
+  // Every site gets it, as it drops the profile updates begun before it.
+  if (added.length || removed.length || changed.length) {
     await broadcastProfilesChangedAll();
-  }
-
-  // Profile selection or grant changes should emit profilesChanged.
-  for (const origin of changed) {
-    await broadcastProfilesChangedForOrigin(origin);
   }
 }
 
@@ -510,7 +511,7 @@ export async function handleSettingsDiff(oldSettings, newSettings) {
     // A profile's .dusk name is the one checked on its network: profile
     // updates begun before the move are dropped, and sites get them again.
     const moved = duskNamesNetwork(oldUrl) !== duskNamesNetwork(newUrl);
-    if (moved) namesNetworkMoved();
+    if (moved) profileVisibilityChanged();
     await broadcastChainChangedAll();
     if (moved) await broadcastProfilesChangedAll();
   }

@@ -21,17 +21,19 @@ import { engineCall, getEngineStatus } from "./engineHost.js";
 // engine page.
 const ENGINE_PAGES = ["offscreen.html", "engine.html"];
 
-// Moves between networks with different .dusk names. A profile update begun
-// before a move is stale: the move sends sites their profiles again.
+// Changes to what sites see of the profiles: a lock or unlock, a permission
+// change, or a move to a network with other .dusk names. A profile update
+// begun before one is stale: the change sends sites their profiles again
+// (dappEvents.js).
 let generation = 0;
 
-/** Note a move to a network with other .dusk names. */
-export function namesNetworkMoved() {
+/** Note a change to what sites see of the profiles. */
+export function profileVisibilityChanged() {
   generation += 1;
 }
 
-/** The moves so far: an update begun at another count is stale. */
-export function namesGeneration() {
+/** The changes so far: an update begun at another count is stale. */
+export function profileVisibilityGeneration() {
   return generation;
 }
 

@@ -568,9 +568,28 @@ describe("dappEvents", () => {
       return held;
     }
 
+    // Holds the next call of the mocked `read` until `release` is called,
+    // which answers `value`: what it read before the wallet changed.
+    function holdNext(read, value) {
+      const held = {};
+      read.mockImplementationOnce(() => new Promise((resolve) => (held.release = () => resolve(value))));
+      return held;
+    }
+
     const moveToMainnet = async (ev) => {
       settings = { nodeUrl: "https://nodes.dusk.network" };
       await ev.handleSettingsDiff({ nodeUrl: "https://testnet.nodes.dusk.network" }, settings);
+    };
+    // As index.js locks: the engine, then sites hear of it.
+    const lock = async (ev) => {
+      engineStatus = { ...engineStatus, isUnlocked: false };
+      await ev.broadcastProfilesChangedAll();
+    };
+    // The site's permission becomes `next`, as storage reports it.
+    const regrant = (next) => async (ev) => {
+      const before = permissions;
+      permissions = next;
+      await ev.handlePermissionsDiff(before, next);
     };
 
     it("drops a name update begun on the network the wallet moved away from", async () => {
@@ -613,6 +632,44 @@ describe("dappEvents", () => {
         chainId: "dusk:1",
         profiles: [{ profileId: "account:0:acct0", account: "acct0", name: "main.dusk" }],
       });
+    });
+
+    it.each([
+      ["locks", lock, []],
+      ["revokes the site's grant", regrant({}), []],
+      [
+        "switches the site's profile",
+        regrant({ "https://dapp.example": connected(1) }),
+        [{ profileId: "account:1:acct1", account: "acct1" }],
+      ],
+    ])("sends sites only profiles read after the wallet %s", async (_, change, profiles) => {
+      permissions = { "https://dapp.example": connected(0) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk") } };
+      const ev = await import("./dappEvents.js");
+      const { getEngineStatus } = await import("./engineHost.js");
+      const port = await openPort(ev);
+      port.messages = [];
+
+      // A profile update, a name check's update and a new page's first state
+      // have read the wallet before the change, and go on after it.
+      const held = [0, 1, 2].map(() => holdNext(getEngineStatus, engineStatus));
+      const updates = [
+        ev.broadcastProfilesChangedAll(),
+        ev.handleVerifiedNamesDiff({}, { testnet: { acct0: check("carol.dusk") } }),
+      ];
+      const late = new FakePort("https://dapp.example", 2);
+      ev.registerDappPort(late);
+      await vi.waitFor(() => expect(held.every((h) => h.release)).toBe(true));
+      await change(ev);
+      held.forEach((h) => h.release());
+      await Promise.all(updates);
+
+      // The updates are dropped and the first state is built again, so each
+      // page keeps the profiles the change sent it.
+      expect(profileEvents(port).map((event) => event.data)).toEqual([profiles]);
+      const states = () =>
+        late.messages.filter((m) => m?.type === "DUSK_PROVIDER_STATE").map((m) => m.state.profiles);
+      await vi.waitFor(() => expect(states()).toEqual([profiles]));
     });
 
     it("gives sites the new network's names when the wallet's node changes", async () => {
