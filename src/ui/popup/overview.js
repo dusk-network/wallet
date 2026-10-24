@@ -23,6 +23,9 @@ export async function refreshOverview(send, { force = false } = {}) {
   }
 
   state.overview = await send({ type: "DUSK_UI_OVERVIEW", origin, route: state.route });
+  if (typeof state.hideBalances === "boolean" && state.overview) {
+    state.overview.hideBalances = state.hideBalances;
+  }
   state.lastOrigin = origin;
   state.needsRefresh = false;
   return true;

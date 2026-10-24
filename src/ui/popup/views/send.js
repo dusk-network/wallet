@@ -10,6 +10,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
 import { iconSvg } from "../../components/ActionIcon.js";
+import { balance, balancesHidden } from "../../components/Balance.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
@@ -110,6 +111,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   }
 
   // Balances from overview.
+  const hidden = balancesHidden(ov);
   const pubBalLux = safeBigInt(ov?.balance?.value, 0n);
   const shValueLux = safeBigInt(ov?.shieldedBalance?.value, 0n);
   const shSpendLux =
@@ -145,6 +147,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     onEnter: () => nextBtn.click(),
     children: [amountMeta],
     maxUnavailableToast: "Enter a valid recipient to calculate max",
+    hidden,
   });
 
   const amount = amountCtl.amountInput;
@@ -180,19 +183,27 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     if (detectedRecipientType === "address") {
       const feeLux = feeLuxForRecipientType("address");
-      amountMetaMain.textContent = `Spendable (shielded): ${formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)} DUSK`;
+      amountMetaMain.replaceChildren(
+        "Spendable (shielded): ",
+        balance(hidden, formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)),
+        " DUSK"
+      );
 
       const parts = [];
       if (shSpendLux != null && shValueLux > shSpendLux) {
-        parts.push(`Total shielded: ${formatLuxShort(shValueLux, UI_DISPLAY_DECIMALS)} DUSK`);
+        parts.push(["Total shielded: ", balance(hidden, formatLuxShort(shValueLux, UI_DISPLAY_DECIMALS)), " DUSK"]);
       }
       if (feeLux > 0n) {
-        parts.push(`Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK`);
+        parts.push([`Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK`]);
       }
-      amountMetaSub.textContent = parts.join(" · ");
+      amountMetaSub.replaceChildren(...parts.flatMap((part, i) => (i ? [" · ", ...part] : part)));
     } else {
       const feeLux = feeLuxForRecipientType("account");
-      amountMetaMain.textContent = `Available (public): ${formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)} DUSK`;
+      amountMetaMain.replaceChildren(
+        "Available (public): ",
+        balance(hidden, formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)),
+        " DUSK"
+      );
       amountMetaSub.textContent = feeLux > 0n ? `Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK` : "";
     }
 

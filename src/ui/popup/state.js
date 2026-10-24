@@ -60,6 +60,9 @@ export const state = {
   })(),
   txDetailFrom: null,
   overview: null,
+  // Hide balances as chosen in this popup, once chosen: an overview read
+  // before the choice was saved doesn't undo it.
+  hideBalances: null,
   draft: null,
   // Watched assets cache (tokens + NFTs)
   assets: null,

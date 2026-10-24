@@ -11,6 +11,7 @@ import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
+import { balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 import {
@@ -29,6 +30,7 @@ function fmtAvail(lux) {
 export function convertFormView(ov, { state, actions } = {}) {
   const draft = state.draft || {};
   const kind = draft.kind === TX_KIND.UNSHIELD ? TX_KIND.UNSHIELD : TX_KIND.SHIELD;
+  const hidden = balancesHidden(ov);
 
   const defaultGas = getDefaultGas(kind);
   const feeLux =
@@ -45,6 +47,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     onAmountInput: () => syncDraft(),
     onAmountChange: () => syncDraft(),
     onEnter: () => nextBtn.click(),
+    hidden,
   });
 
   const amount = amountCtl.amountInput;
@@ -100,7 +103,11 @@ export function convertFormView(ov, { state, actions } = {}) {
       ...privacyFlowBadgeOptions({ from: fromLabel, to: toLabel }),
       className: "recipient-type-badge",
     }),
-    h("div", { class: "muted", style: "margin-top:6px", text: `${availLabel}: ${fmtAvail(avail)} DUSK` }),
+    h("div", { class: "muted", style: "margin-top:6px" }, [
+      `${availLabel}: `,
+      balance(hidden, fmtAvail(avail)),
+      " DUSK",
+    ]),
     feeLux > 0n
       ? h("div", { class: "muted", text: `Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK` })
       : null,

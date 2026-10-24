@@ -1757,7 +1757,8 @@ body.page--popup .site-bar-action {
   margin-top: 0;
 }
 
-/* Refresh, next to the balance title */
+/* Hide balances and Refresh, next to the balance title */
+button.balance-eye,
 button.balance-refresh {
   height: 20px;
   min-width: 22px;
@@ -1770,8 +1771,13 @@ button.balance-refresh {
   line-height: 1;
 }
 
+button.balance-eye:hover,
 button.balance-refresh:hover {
   color: var(--foreground);
+}
+
+button.balance-eye + button.balance-refresh {
+  margin-left: 0;
 }
 
 .balance-total-inline {
@@ -3345,6 +3351,7 @@ button.receive-info:hover {
 /* Icons are inline SVG (iconSvg), centered in their button (.icon-btn already
    centers), in its colour, so they look the same whatever fonts the system has */
 button.balance-refresh,
+button.balance-eye,
 button.acct-menu-copy,
 button.receive-copy,
 button.receive-info {
@@ -3355,6 +3362,7 @@ button.receive-info {
 .icon-btn.icon-only svg,
 .asset-ico svg,
 button.balance-refresh svg,
+button.balance-eye svg,
 button.acct-menu-copy svg,
 button.receive-copy svg,
 button.receive-info svg {
@@ -3367,7 +3375,8 @@ button.receive-info svg {
   stroke-linejoin: round;
 }
 
-button.balance-refresh svg {
+button.balance-refresh svg,
+button.balance-eye svg {
   width: 13px;
   height: 13px;
 }

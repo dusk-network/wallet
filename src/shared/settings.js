@@ -38,6 +38,8 @@ export const DEFAULT_SETTINGS = {
   nftMetadataEnabled: false,
   /** IPFS gateway base used to resolve ipfs:// token URIs. */
   ipfsGateway: "https://ipfs.io/ipfs/",
+  /** Show balances as •••• until the dashboard's eye button is pressed again. */
+  hideBalances: false,
 };
 
 function normalizeBaseUrl(v) {
@@ -126,6 +128,7 @@ export async function getSettings() {
     // `true` in storage from before the security hardening pass.
     nftMetadataEnabled: false,
     ipfsGateway: normalizeIpfsGateway(merged.ipfsGateway),
+    hideBalances: merged.hideBalances === true,
   };
 }
 

@@ -43,6 +43,16 @@ const ICON_PATHS = {
     '<path d="M20 12a8 8 0 1 1-2.34-5.66"/>',
     '<path d="M17.66 2.34v4h-4"/>',
   ],
+  // Balances shown, and hidden. The hidden eye has no pupil under its slash,
+  // so it stays clear at the balance title's 13px.
+  eye: [
+    '<path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5-9.5-6.5-9.5-6.5Z"/>',
+    '<circle cx="12" cy="12" r="3"/>',
+  ],
+  "eye-off": [
+    '<path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5-9.5-6.5-9.5-6.5Z"/>',
+    '<path d="M4.5 4.5l15 15"/>',
+  ],
   expand: [
     '<path d="M14 4h6v6"/>',
     '<path d="M20 4l-6 6"/>',

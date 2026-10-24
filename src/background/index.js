@@ -1158,6 +1158,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           autoLockTimeoutMinutes: settings.autoLockTimeoutMinutes ?? 5,
           nftMetadataEnabled: settings.nftMetadataEnabled !== false,
           ipfsGateway: settings.ipfsGateway ?? "",
+          hideBalances: settings.hideBalances === true,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           networkStatus,
           activeOrigin,

@@ -12,6 +12,7 @@ import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { sozuLiquidStakingView } from "./sozu.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
+import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { decimalInput, fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 
@@ -77,7 +78,7 @@ function defaultFeeLux(kind, payment = FUNDING_PUBLIC) {
   return safeBigInt(gas?.limit, 0n) * safeBigInt(gas?.price, 1n);
 }
 
-function stakeMetricRows(info, { emptyStake = "—" } = {}) {
+function stakeMetricRows(info, { emptyStake = "—", hidden = false } = {}) {
   const hasStake = Boolean(info?.amount);
   const stakeTotalLux = safeBigInt(info?.amount?.total ?? 0, 0n);
   const stakeLockedLux = safeBigInt(info?.amount?.locked ?? 0, 0n);
@@ -87,18 +88,19 @@ function stakeMetricRows(info, { emptyStake = "—" } = {}) {
   return [
     h("div", { class: "hrow" }, [
       h("div", { class: "muted", text: "Staked" }),
-      h("code", {
-        text: hasStake ? `${fmtLux(stakeTotalLux)} DUSK` : emptyStake,
-        title: hasStake ? `Lux: ${stakeTotalLux.toString()}` : "",
-      }),
+      h(
+        "code",
+        { title: hasStake && !hidden ? `Lux: ${stakeTotalLux.toString()}` : "" },
+        hasStake ? [balance(hidden, fmtLux(stakeTotalLux)), " DUSK"] : [emptyStake]
+      ),
     ]),
     hasStake
       ? h("div", { class: "hrow" }, [
           h("div", { class: "muted", text: "Locked" }),
-          h("code", {
-            text: `${fmtLux(stakeLockedLux)} DUSK`,
-            title: `Lux: ${stakeLockedLux.toString()}`,
-          }),
+          h("code", { title: hidden ? undefined : `Lux: ${stakeLockedLux.toString()}` }, [
+            balance(hidden, fmtLux(stakeLockedLux)),
+            " DUSK",
+          ]),
         ])
       : null,
     hasStake
@@ -112,10 +114,10 @@ function stakeMetricRows(info, { emptyStake = "—" } = {}) {
       : null,
     h("div", { class: "hrow" }, [
       h("div", { class: "muted", text: "Rewards" }),
-      h("code", {
-        text: `${fmtLux(rewardLux)} DUSK`,
-        title: `Lux: ${rewardLux.toString()}`,
-      }),
+      h("code", { title: hidden ? undefined : `Lux: ${rewardLux.toString()}` }, [
+        balance(hidden, fmtLux(rewardLux)),
+        " DUSK",
+      ]),
     ]),
     hasStake
       ? h("div", { class: "hrow" }, [
@@ -268,7 +270,7 @@ function fundingOptionsForPosition(pos) {
   };
 }
 
-function actionState(pos, actionKind, amountLux, minLux) {
+function actionState(pos, actionKind, amountLux, minLux, { hidden = false } = {}) {
   const kind = actionToKind(actionKind);
   const { publicLux } = fundingOptionsForPosition(pos);
   const feeLux = defaultFeeLux(kind, FUNDING_PUBLIC);
@@ -320,7 +322,9 @@ function actionState(pos, actionKind, amountLux, minLux) {
     if (publicLux < requiredLux) {
       return {
         ok: false,
-        reason: `${profileLabel(pos.stakeProfileIndex)} public balance is short by ${fmtLux(requiredLux - publicLux)} DUSK including the estimated fee.`,
+        reason: `${profileLabel(pos.stakeProfileIndex)} public balance is short by ${
+          hidden ? HIDDEN_BALANCE : fmtLux(requiredLux - publicLux)
+        } DUSK including the estimated fee.`,
       };
     }
   }
@@ -333,6 +337,7 @@ export function stakeFormView(ov, { state, actions } = {}) {
   const ownerStatus = st?.ownerStatus ?? null;
   const minLux = st?.minimumStakeLux != null ? safeBigInt(st.minimumStakeLux, 0n) : 0n;
   const positions = buildPositions(ownerStatus, selectedIndex);
+  const hidden = balancesHidden(ov);
 
   if (!st.activePositionKey || !positions.some((pos) => positionKey(pos) === st.activePositionKey)) {
     st.activePositionKey = positionKey(positions.find((pos) => pos.hasStake) ?? positions[0] ?? {
@@ -361,7 +366,7 @@ export function stakeFormView(ov, { state, actions } = {}) {
         : pos.ownerKind === "contract"
         ? "Contract"
         : "Unavailable";
-    const rows = stakeMetricRows(pos.info);
+    const rows = stakeMetricRows(pos.info, { hidden });
     const summaryRows = rows.filter((row) => {
       const label = row?.querySelector?.(".muted")?.textContent ?? "";
       return label === "Staked" || label === "Rewards";
@@ -409,7 +414,7 @@ export function stakeFormView(ov, { state, actions } = {}) {
   };
 
   const actionPanel = activePosition
-    ? actionEditor(activePosition, st, { state, actions, minLux })
+    ? actionEditor(activePosition, st, { state, actions, minLux, hidden })
     : null;
 
   const statusLine = st?.loading
@@ -461,7 +466,7 @@ export function stakeFormView(ov, { state, actions } = {}) {
   ];
 }
 
-function actionEditor(pos, st, { state, actions, minLux }) {
+function actionEditor(pos, st, { state, actions, minLux, hidden = false }) {
   const actionKind = st.actionKind || ACTION_TOPUP;
   const kind = actionToKind(actionKind);
   const stakeProfileIndex = Number(pos.stakeProfileIndex) || 0;
@@ -532,7 +537,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     try {
       const lux = parseAmount();
       if (lux <= 0n) throw new Error("Amount must be > 0");
-      const check = actionState(pos, actionKind, lux, minLux);
+      const check = actionState(pos, actionKind, lux, minLux, { hidden });
       if (!check.ok) throw new Error(check.reason);
       makeDraft(lux.toString(), st.amountMode === "max" ? "max" : "custom");
       st.amountMode = "custom";
@@ -645,7 +650,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     // The amount, if any, and the gas.
     h("div", { class: "stake-gas-line" }, [
       h("span", { text: "Paid from" }),
-      h("code", { text: `${profileLabel(stakeProfileIndex)} public · ${fmtLux(publicLux)} DUSK` }),
+      h("code", {}, [`${profileLabel(stakeProfileIndex)} public · `, balance(hidden, fmtLux(publicLux)), " DUSK"]),
     ]),
     currentState.ok ? null : h("div", { class: "err", text: currentState.reason }),
     usesAmountInput ? fieldLabel(input, amountLabel) : null,
@@ -653,20 +658,16 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     !usesAmountInput
       ? h("div", { class: "hrow" }, [
           h("div", { class: "muted", text: "Amount" }),
-          h("code", {
-            text:
-              actionKind === ACTION_UNSTAKE
-                ? `Full stake · ${fmtLux(stakeTotalLux)} DUSK`
-                : `All rewards · ${fmtLux(rewardLux)} DUSK`,
-          }),
+          h("code", {}, [
+            actionKind === ACTION_UNSTAKE ? "Full stake · " : "All rewards · ",
+            balance(hidden, fmtLux(actionKind === ACTION_UNSTAKE ? stakeTotalLux : rewardLux)),
+            " DUSK",
+          ]),
         ])
       : null,
     h("div", { class: "btnrow stake-review-row" }, [maxButton, reviewButton].filter(Boolean)),
     actionKind === ACTION_TOPUP && maxTopupLux > 0n
-      ? h("div", {
-          class: "muted",
-          text: `Max after the fee: ${fmtLux(maxTopupLux)} DUSK.`,
-        })
+      ? h("div", { class: "muted" }, ["Max after the fee: ", balance(hidden, fmtLux(maxTopupLux)), " DUSK."])
       : null,
   ].filter(Boolean));
 }
