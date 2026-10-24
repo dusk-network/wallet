@@ -217,12 +217,13 @@ describe("receive", () => {
     const body = dom.document.body;
     const summary = () => visibleText(body.querySelector(".receive-accordion__summary"));
 
-    // No note that Send reads the QR, no "Optional" on Request payment or its fields.
+    // No note that Send reads the QR, no "Optional" beside Request payment or its labels:
+    // the placeholders say both fields are optional.
     expect(visibleText(body)).not.toMatch(/Send can read|Optional|optional/);
     expect(summary()).toBe("Request payment▾");
     expect(body.querySelectorAll(".receive-accordion__body label").map((l) => l.textContent)).toEqual(["Amount", "Memo"]);
     expect(body.querySelectorAll(".receive-accordion__body input").map((i) => i.getAttribute("placeholder"))).toEqual([
-      "e.g. 1.25 DUSK",
+      "Optional, e.g. 1.25 DUSK",
       "Optional",
     ]);
     expect(body.querySelector(".tabs").hasAttribute("title")).toBe(false);

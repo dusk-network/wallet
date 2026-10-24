@@ -199,7 +199,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // --- Request payment (progressive disclosure) -----------------------
   const amountInput = decimalInput({
-    placeholder: "e.g. 1.25 DUSK",
+    placeholder: "Optional, e.g. 1.25 DUSK",
     value: typeof r.amountDusk === "string" ? r.amountDusk : "",
     onEnter: () => memoInput.focus(),
   });

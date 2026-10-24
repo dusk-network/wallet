@@ -646,7 +646,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     !pos.hasStake
       ? h("div", {
           class: "muted",
-          text: "Change the owner only for a separated-owner setup.",
+          text: "Most people leave this as it is.",
         })
       : null,
     actionTabs,

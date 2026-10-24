@@ -31,6 +31,7 @@ export function createGasQuickControls({
   const btnHigh = h("button", { class: "btn-outline", type: "button", text: "High", disabled: true });
   const gasQuickRow = h("div", { class: "gas-quick-row" }, [btnAuto, btnLow, btnRecommended, btnHigh]);
   gasEditor.setEditContent([gasHint, gasQuickRow]);
+  gasEditor.helpText = "Max fee = gas limit × gas price. Auto uses the wallet's defaults.";
 
   (async () => {
     try {

@@ -64,8 +64,8 @@ describe("settings", () => {
     const view = await settings();
     const inputs = view.section("Profile").querySelectorAll("input");
     expect(inputs.map((i) => [i.getAttribute("aria-label"), i.getAttribute("placeholder")])).toEqual([
-      ["Profile 1 name", "Name (optional)"],
-      ["Profile 2 name", "Name (optional)"],
+      ["Profile 1 name", "Label, only on this device"],
+      ["Profile 2 name", "Label, only on this device"],
     ]);
   });
 

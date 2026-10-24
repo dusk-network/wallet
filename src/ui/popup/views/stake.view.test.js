@@ -106,7 +106,7 @@ describe("staking text", () => {
     expect(editor.querySelector(".stake-editor__head > div").textContent).toBe("Manage position");
     expect(editor.querySelector(".stake-gas-line").textContent).toBe("Paid fromProfile 1 public balance");
     expect(editor.querySelectorAll(".stake-editor > .muted").map((line) => line.textContent)).toEqual([
-      "Change the owner only for a separated-owner setup.",
+      "Most people leave this as it is.",
       "Max after the fee: 1482.8883 DUSK.",
     ]);
     expect(editor.querySelector(".err")).toBeNull();

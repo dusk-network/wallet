@@ -20,7 +20,7 @@ export class DuskGasEditor extends HTMLElement {
   #amountLux = 0n;
   #extraLux = [];
   #maxDecimals = UI_DISPLAY_DECIMALS;
-  #helpText = "Max fee = gas limit × gas price.";
+  #helpText = "Max fee = gas limit × gas price. Clear both to use the wallet's defaults.";
 
   // Allows setGas() before the element is connected/rendered.
   #pendingGas = null;

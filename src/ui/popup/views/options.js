@@ -88,7 +88,7 @@ export function optionsView(ov, { state, actions } = {}) {
         ...displayAccounts.map((acct, i) => {
           // The line above names the profile.
           const input = textInput({
-            placeholder: "Name (optional)",
+            placeholder: "Label, only on this device",
             "aria-label": `Profile ${i + 1} name`,
             value: String(nameMap?.[String(i)] ?? ""),
           });

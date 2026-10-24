@@ -49,7 +49,8 @@ describe("fee editor", () => {
     expect(edit.getAttribute("aria-expanded")).toBe("true");
     expect(shownButtons()).toEqual(["Hide", "Auto", "Low", "Recommended", "High"]);
     expect(visibleText(panel)).toBe(
-      "Gas price (LUX): min 1 · median 2 · max 5AutoLowRecommendedHighGas limitGas priceMax fee = gas limit × gas price."
+      "Gas price (LUX): min 1 · median 2 · max 5AutoLowRecommendedHighGas limitGas price" +
+        "Max fee = gas limit × gas price. Auto uses the wallet's defaults."
     );
 
     edit.click();
@@ -80,6 +81,20 @@ describe("fee editor", () => {
     expect(editor.readFinalGas()).toEqual({ limit: "2000000", price: "1" });
     editor.querySelector(".link-btn").click();
     expect(visibleText(panel)).toContain("Gas price unavailable (using defaults).");
+  });
+
+  it("says that clearing both uses the wallet's defaults where there is no Auto, as on the token Review", () => {
+    const editor = dom.document.createElement("dusk-gas-editor");
+    editor.setGas({ limit: "500000000", price: "1" });
+    dom.document.body.appendChild(editor);
+    editor.querySelector(".link-btn").click();
+    expect(visibleText(editor.querySelector(".row"))).toBe(
+      "Gas limitGas priceMax fee = gas limit × gas price. Clear both to use the wallet's defaults."
+    );
+
+    // Cleared, the editor sends no gas of its own.
+    editor.setGas(null);
+    expect(editor.readFinalGas()).toBeUndefined();
   });
 
   it("adds nothing to the panel when nothing is put there, as the approval page uses it", async () => {
