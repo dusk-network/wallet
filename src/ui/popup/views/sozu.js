@@ -18,7 +18,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
-import { decimalInput, submitOnGasEnter } from "../../components/FormControls.js";
+import { decimalInput, fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 
 function networkKey(ov) {
@@ -234,7 +234,6 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
   const amountInput = decimalInput({
-    id: "sozu-action-amount",
     name: "sozuActionAmount",
     placeholder: `${isWithdraw ? "Unstake" : "Stake"} amount (DUSK)`,
     value: isWithdraw ? st.withdrawAmountDusk : st.depositAmountDusk,
@@ -336,7 +335,7 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
       : null,
     h("div", { class: "sozu-action-card" }, [
       actionTabs,
-      h("label", { for: "sozu-action-amount", text: isWithdraw ? "Unstake amount" : "Stake amount" }),
+      fieldLabel(amountInput, isWithdraw ? "Unstake amount" : "Stake amount"),
       h("div", { class: "sozu-amount-row" }, [
         amountInput,
         h("button", {
@@ -379,11 +378,11 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     ? "Stake amount exceeds public balance after gas."
     : "";
 
+  // Back returns to Staking, so Review has no Cancel.
   const goBack = () => {
     state.route = "stake";
     actions?.render?.().catch(() => {});
   };
-  const cancelBtn = h("button", { class: "btn-outline", text: "Cancel", onclick: goBack });
   const confirmBtn = h("button", {
     class: "btn-primary",
     text: st.submitting ? "Sending…" : "Confirm",
@@ -399,9 +398,9 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
   gasEditor.amountLux = "0";
   gasEditor.extraLux = [String(draft.deposit ?? "0")];
-  gasEditor.helpText = "Max fee shown is limit × price. Clear both to use wallet defaults.";
   gasEditor.setGas(draft?.gas ?? null);
-  const { gasHint, gasQuickRow } = createGasQuickControls({
+  // The gas price line and the presets open with the fee's Edit.
+  createGasQuickControls({
     actions,
     gas: draft?.gas,
     defaultLimit,
@@ -454,9 +453,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       submitDisabledReason ? h("div", { class: "err", text: submitDisabledReason }) : null,
       gasEditor,
-      gasHint,
-      gasQuickRow,
-      h("div", { class: "btnrow" }, [cancelBtn, confirmBtn]),
+      h("div", { class: "btnrow" }, [confirmBtn]),
     ]),
   ];
 }

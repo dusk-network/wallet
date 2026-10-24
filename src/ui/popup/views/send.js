@@ -9,10 +9,11 @@ import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
+import { iconSvg } from "../../components/ActionIcon.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
-import { submitOnGasEnter, textInput } from "../../components/FormControls.js";
+import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import {
@@ -68,7 +69,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   const to = textInput({
     placeholder: duskNamesNetwork(ov?.nodeUrl)
       ? "Account, shielded address or .dusk name"
-      : "Recipient (account or shielded address)",
+      : "Account or shielded address",
     // Back from review, show the .dusk name rather than the account it resolved to.
     value: draftDuskName(draft)?.name || (typeof draft.to === "string" ? draft.to : ""),
     onEnter: () => amount.focus(),
@@ -82,7 +83,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
   const toWrap = h("div", { class: "to-input-wrap" }, [toChip, to]);
   const memo = textInput({
-    placeholder: "Memo (optional)",
+    placeholder: "Optional",
     value: typeof draft.memo === "string" ? draft.memo : "",
     onEnter: () => nextBtn.click(),
   });
@@ -138,7 +139,6 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   const amountCtl = createAmountSliderCard({
     initialAmountDusk: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
-    placeholder: "Amount (DUSK, e.g. 1.25)",
     actions,
     onAmountInput: () => syncDraft(),
     onAmountChange: () => syncDraft(),
@@ -601,8 +601,9 @@ export function sendFormView(ov, { state, actions } = {}) {
   const scanBtn = h("button", {
     class: "icon-btn icon-only",
     type: "button",
-    text: "▦",
+    html: iconSvg("qr"),
     title: "Scan QR",
+    "aria-label": "Scan QR",
     onclick: async () => {
       try {
         const payload = await openQrScanModal({
@@ -621,8 +622,9 @@ export function sendFormView(ov, { state, actions } = {}) {
   const bookBtn = h("button", {
     class: "icon-btn icon-only",
     type: "button",
-    text: "★",
+    html: iconSvg("star"),
     title: "Contacts",
+    "aria-label": "Contacts",
     onclick: async () => {
       try {
         // Ensure the current form state is preserved before navigating.
@@ -740,14 +742,14 @@ export function sendFormView(ov, { state, actions } = {}) {
       },
     }),
     h("div", { class: "row" }, [
-      h("label", { text: "To" }),
+      fieldLabel(to, "To"),
       toRow,
       toTypePill,
       nameBox,
       selfNote,
-      h("label", { text: "Amount" }),
+      fieldLabel(amount, "Amount"),
       amountCard,
-      h("label", { text: "Memo" }),
+      fieldLabel(memo, "Memo"),
       memo,
       errBox,
       h("div", { class: "btnrow" }, [nextBtn]),
@@ -887,15 +889,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     // ignore
   }
 
+  // Back returns to Send with the draft, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
-  const cancelBtn = h("button", {
-    class: "btn-outline",
-    text: "Cancel",
-    onclick: () => {
-      state.route = "send";
-      actions?.render?.().catch(() => {});
-    },
-  });
 
   // Gas editor (collapsed by default)
   const defaultGas = getDefaultGas(TX_KIND.TRANSFER, { privacy });
@@ -911,14 +906,13 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.amountLux = d.amountLux;
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-  gasEditor.helpText =
-    "Max fee shown is limit × price. Clear both to use wallet defaults.";
 
   // Prefer persisted draft gas. Otherwise we'll fetch the node's current gas
   // price stats and set a recommended default (median).
   gasEditor.setGas(d?.gas ?? null);
 
-  const { gasHint, gasQuickRow } = createGasQuickControls({
+  // The gas price line and the presets open with the fee's Edit.
+  createGasQuickControls({
     actions,
     defaultLimit,
     fallbackPrice,
@@ -1008,9 +1002,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           ])
         : h("div"),
       gasEditor,
-      gasHint,
-      gasQuickRow,
-      h("div", { class: "btnrow" }, [cancelBtn, confirmBtn]),
+      h("div", { class: "btnrow" }, [confirmBtn]),
     ]),
   ].filter(Boolean);
 }

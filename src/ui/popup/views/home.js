@@ -16,7 +16,7 @@ import { txActivityStatusLabel, txKindRailLabel, txStatusTone } from "./txDispla
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { recipientBadge } from "../../components/RecipientBadge.js";
 import { subnav } from "../../components/Subnav.js";
-import { actionIcon } from "../../components/ActionIcon.js";
+import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -132,7 +132,7 @@ export function homeView(ov, { state, actions } = {}) {
   const refreshBtn = h("button", {
     class: "balance-refresh",
     type: "button",
-    text: "⟳",
+    html: iconSvg("refresh"),
     title: "Refresh",
     "aria-label": "Refresh",
     onclick: () => actions?.refresh?.()?.catch?.(() => {}),
@@ -294,11 +294,12 @@ export function homeView(ov, { state, actions } = {}) {
         icon: "↑",
       };
     }
+    // Named as the Shield view and the transaction details name them.
     if (kind === TX_KIND.SHIELD) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: "Shielded transfer",
-        sub: "Phoenix · PLONK proof verified",
+        title: "Shield",
+        sub: "Public → Shielded",
         amount: amt ? `${amt} DUSK` : "—",
         tone: "shield",
         icon: "✦",
@@ -307,8 +308,8 @@ export function homeView(ov, { state, actions } = {}) {
     if (kind === TX_KIND.UNSHIELD) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
       return {
-        title: "Unshielded transfer",
-        sub: "Phoenix → Moonlight",
+        title: "Unshield",
+        sub: "Shielded → Public",
         amount: amt ? `${amt} DUSK` : "—",
         tone: "shield",
         icon: "✦",
@@ -611,8 +612,9 @@ export function homeView(ov, { state, actions } = {}) {
       actions: publicHistoryActions,
     }),
     activityList(recentTxs, "No local wallet activity yet."),
-    h("div", { class: "activity-card-footer" }, [viewAllButton]),
-  ]);
+    // View all only when it shows more than the card does.
+    txs.length > recentTxs.length ? h("div", { class: "activity-card-footer" }, [viewAllButton]) : null,
+  ].filter(Boolean));
 
   // Full mode should feel like an app dashboard, while popup remains a compact
   // single-column wallet. CSS handles the responsive collapse.

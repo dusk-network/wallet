@@ -1,4 +1,5 @@
 import { h, setChildren } from "../lib/dom.js";
+import { iconSvg } from "../components/ActionIcon.js";
 import { accountChipEl } from "../components/AccountChip.js";
 import { isFullView, isPopupView } from "./env.js";
 import { isExtensionRuntime } from "../../platform/runtime.js";
@@ -98,10 +99,13 @@ export function createHeaderRenderer({
         : null;
     }
 
+    // Named as the page it opens.
     const optionsBtn = h("button", {
       class: "icon-btn icon-only",
-      text: "⚙",
-      title: "Options",
+      type: "button",
+      html: iconSvg("settings"),
+      title: "Settings",
+      "aria-label": "Settings",
       onclick: onOpenOptions,
     });
 
@@ -110,8 +114,10 @@ export function createHeaderRenderer({
       ? null
       : h("button", {
           class: "icon-btn icon-only",
-          text: "⤢",
+          type: "button",
+          html: iconSvg("expand"),
           title: "Expand view",
+          "aria-label": "Expand view",
           onclick: onExpand,
         });
 

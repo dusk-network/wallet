@@ -12,7 +12,7 @@ import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { sozuLiquidStakingView } from "./sozu.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
-import { decimalInput, submitOnGasEnter } from "../../components/FormControls.js";
+import { decimalInput, fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 
 const FUNDING_PUBLIC = "account";
@@ -481,7 +481,6 @@ function actionEditor(pos, st, { state, actions, minLux }) {
   const publicLux = fundingOptionsForPosition(pos).publicLux;
   const rewardLux = safeBigInt(pos?.info?.reward ?? 0, 0n);
   const stakeTotalLux = safeBigInt(pos?.info?.amount?.total ?? 0, 0n);
-  const canUseShielded = false;
   const usesAmountInput = actionKind === ACTION_TOPUP;
 
   const amountValue = usesAmountInput ? st.stakeAmountDusk : "";
@@ -561,9 +560,8 @@ function actionEditor(pos, st, { state, actions, minLux }) {
 
   const actionLabel = stakeKindLabel(kind, { hasStake: pos.hasStake });
   const input = decimalInput({
-    id: "stake-action-amount",
     name: "stakeActionAmount",
-    placeholder: `${amountLabel} (DUSK)`,
+    placeholder: "DUSK",
     value: String(amountValue ?? ""),
     onEnter: () => reviewButton.click(),
     oninput: (e) => {
@@ -625,6 +623,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     : h("select", {
         id: "stake-owner-profile",
         name: "stakeOwnerProfile",
+        "aria-label": "Stake owner",
         value: String(ownerProfileIndex),
         onchange: (e) => {
           st.ownerProfileIndex = Number(e?.target?.value ?? stakeProfileIndex) || 0;
@@ -638,37 +637,26 @@ function actionEditor(pos, st, { state, actions, minLux }) {
         });
       }));
 
+  // The selected position card above names the stake account.
   return h("div", { class: "box stake-editor" }, [
     h("div", { class: "stake-editor__head" }, [
-      h("div", {}, [
-        h("div", { class: "muted", text: "Manage position" }),
-        h("code", { text: `${profileLabel(stakeProfileIndex)} · ${shortAccount(pos.stakeAccount)}` }),
-      ]),
+      h("div", {}, [h("div", { class: "muted", text: "Manage position" })]),
       h("div", { class: "stake-badge" }, [ownerControl]),
     ]),
     !pos.hasStake
       ? h("div", {
           class: "muted",
-          text: "New stakes are self-owned by default. Choose another local owner only for separated-owner setups.",
+          text: "Change the owner only for a separated-owner setup.",
         })
       : null,
     actionTabs,
+    // The amount, if any, and the gas.
     h("div", { class: "stake-gas-line" }, [
-      h("span", { text: "Funding" }),
+      h("span", { text: "Paid from" }),
       h("code", { text: `${profileLabel(stakeProfileIndex)} public balance` }),
     ]),
-    h("div", {
-      class: "muted",
-      text: canUseShielded
-        ? "Shielded funding is available."
-        : "Funding uses the stake profile's public balance.",
-    }),
-    h("div", {
-      class: currentState.ok ? "muted" : "err",
-      text: currentState.reason ||
-        `Gas comes from ${profileLabel(stakeProfileIndex)} public balance.`,
-    }),
-    usesAmountInput ? h("label", { for: "stake-action-amount", text: amountLabel }) : null,
+    currentState.ok ? null : h("div", { class: "err", text: currentState.reason }),
+    usesAmountInput ? fieldLabel(input, amountLabel) : null,
     usesAmountInput ? input : null,
     !usesAmountInput
       ? h("div", { class: "hrow" }, [
@@ -685,7 +673,7 @@ function actionEditor(pos, st, { state, actions, minLux }) {
     actionKind === ACTION_TOPUP && maxTopupLux > 0n
       ? h("div", {
           class: "muted",
-          text: `Max leaves room for the estimated fee: ${fmtLux(maxTopupLux)} DUSK.`,
+          text: `Max after the fee: ${fmtLux(maxTopupLux)} DUSK.`,
         })
       : null,
   ].filter(Boolean));
@@ -700,16 +688,12 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
 
   const kind = String(d.kind ?? "").toLowerCase();
   const kindLabel = stakeKindLabel(kind);
+  // Back returns to Staking, so Review has no Cancel.
   const goBack = () => {
     state.route = "stake";
     actions?.render?.().catch(() => {});
   };
 
-  const cancelBtn = h("button", {
-    class: "btn-outline",
-    text: "Cancel",
-    onclick: goBack,
-  });
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
   const defaultGas = getDefaultGas(kind, {
@@ -722,11 +706,11 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
 
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-  gasEditor.helpText = "Max fee shown is limit × price. Clear both to use wallet defaults.";
   gasEditor.amountLux = kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0";
   gasEditor.setGas(d?.gas ?? null);
 
-  const { gasHint, gasQuickRow } = createGasQuickControls({
+  // The gas price line and the presets open with the fee's Edit.
+  createGasQuickControls({
     actions,
     defaultLimit,
     fallbackPrice,
@@ -798,18 +782,9 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "muted", text: `Stake account: ${d.stakeProfileLabel ?? profileLabel(d.stakeProfileIndex ?? d.profileIndex)}` }),
         h("div", { class: "muted", text: `Owner: ${d.ownerProfileLabel ?? profileLabel(d.ownerProfileIndex)}` }),
         h("div", { class: "muted", text: `Gas: ${d.fundingLabel ?? fundingLabel(d.payment)}` }),
-        d.amountMode === "max" ? h("div", { class: "muted", text: "Max includes the estimated fee." }) : null,
-        d.amountMode === "all" && kind === TX_KIND.UNSTAKE
-          ? h("div", { class: "muted", text: "Unstake the full position." })
-          : null,
-        d.amountMode === "all" && kind === TX_KIND.WITHDRAW_REWARD
-          ? h("div", { class: "muted", text: "Claim all rewards." })
-          : null,
-      ].filter(Boolean)),
+      ]),
       gasEditor,
-      gasHint,
-      gasQuickRow,
-      h("div", { class: "btnrow" }, [cancelBtn, confirmBtn]),
+      h("div", { class: "btnrow" }, [confirmBtn]),
     ]),
   ];
 }

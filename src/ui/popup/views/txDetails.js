@@ -24,16 +24,12 @@ function statusLabel(status) {
   return txStatusLabel(status);
 }
 
+// What the status pill doesn't say: whether to wait, and what may still hold.
 function statusHelp(tx) {
   const s = String(tx?.status ?? "").toLowerCase();
-  if (s === "submitted") return "Submitted. Waiting for network execution.";
-  if (s === "mempool") return "This transaction is still waiting in the mempool. Do not retry yet.";
-  if (s === "unknown") {
-    return "The wallet did not receive an execution event before timeout. This does not mean the transaction failed.";
-  }
-  if (s === "removed") {
-    return "This transaction is no longer in this node's mempool. Shielded funds may still be reserved locally.";
-  }
+  if (s === "mempool") return "Still waiting to go through. Don't retry yet.";
+  if (s === "unknown") return "The wallet stopped waiting for a result. That doesn't mean it failed.";
+  if (s === "removed") return "Shielded funds may still be reserved locally.";
   return "";
 }
 
@@ -207,9 +203,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
     ]);
   };
 
+  // The summary below names the type.
   const chips = h("div", { class: "tx-chips" }, [
     h("div", { class: statusPillClass, text: `Status: ${status}` }),
-    h("div", { class: "meta-pill", text: `Type: ${kindLabel}` }),
     h("div", { class: "meta-pill", text: `Network: ${netName}` }),
   ]);
 
@@ -274,11 +270,10 @@ export function txDetailsView(ov, { state, actions } = {}) {
     kindNorm === TX_KIND.CONTRACT_CALL && contractId
       ? h("div", { class: "box" }, [
           h("div", { class: "muted", text: "Assets" }),
-          h("div", { class: "muted", text: "Add this contract to your watched assets list." }),
           h("div", { class: "btnrow" }, [
             h("button", {
               class: "btn-outline",
-              text: "Watch token",
+              text: "Add token",
               onclick: async () => {
                 try {
                   state.assetAddToken = {

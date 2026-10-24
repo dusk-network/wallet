@@ -4,9 +4,10 @@ import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
+import { iconSvg } from "../../components/ActionIcon.js";
 import { identiconEl } from "../../components/Identicon.js";
 import { truncateMiddle } from "../../lib/strings.js";
-import { searchInput, textInput } from "../../components/FormControls.js";
+import { fieldLabel, searchInput, textInput } from "../../components/FormControls.js";
 import { TX_KIND } from "../../../shared/constants.js";
 
 import {
@@ -197,8 +198,10 @@ export function addressBookView(ov, { state, actions } = {}) {
 
     const title = ab.mode === "pick" ? "Select contact" : "Contacts";
 
+    // The title names the list, so the search has no label of its own.
     const search = searchInput({
       placeholder: "Search name or address…",
+      "aria-label": "Search contacts",
       value: String(ab.query ?? ""),
       oninput: (e) => {
         ab.query = String(e?.target?.value ?? "");
@@ -212,19 +215,20 @@ export function addressBookView(ov, { state, actions } = {}) {
       onclick: () => startEdit(null),
     });
 
-    const clearBtn = ab.mode === "manage"
+    // Deletes every contact, so it says so and only shows when there are some.
+    const clearBtn = ab.mode === "manage" && items.length
       ? h("button", {
           class: "btn-outline",
-          text: "Clear",
+          text: "Delete all",
           onclick: async () => {
-            const ok = confirm("Clear all saved contacts?");
+            const ok = confirm("Delete all contacts?");
             if (!ok) return;
             try {
               await clearAddressBook();
               ab.loaded = false;
               ab.items = null;
               ab.query = "";
-              actions?.showToast?.("Cleared contacts");
+              actions?.showToast?.("Deleted all contacts");
               actions?.render?.().catch(() => {});
             } catch (e) {
               actions?.showToast?.(e?.message ?? String(e), 2500);
@@ -234,7 +238,6 @@ export function addressBookView(ov, { state, actions } = {}) {
       : null;
 
     const topRow = h("div", { class: "row" }, [
-      h("label", { text: "Contacts" }),
       search,
       h("div", { class: "btnrow" }, [clearBtn, addBtn].filter(Boolean)),
     ]);
@@ -271,8 +274,9 @@ export function addressBookView(ov, { state, actions } = {}) {
             const saveBtn = h("button", {
               class: "icon-btn icon-only",
               type: "button",
-              text: "＋",
+              html: iconSvg("plus"),
               title: "Save to Contacts",
+              "aria-label": "Save to Contacts",
               onclick: (e) => {
                 try {
                   e?.stopPropagation?.();
@@ -311,7 +315,6 @@ export function addressBookView(ov, { state, actions } = {}) {
                   h("div", { class: "activity-title" }, [
                     h("span", { text: truncateMiddle(r.addr, 10, 8) }),
                   ]),
-                  h("div", { class: "activity-sub", text: "Recent recipient" }),
                 ]),
                 h("div", { class: "activity-right" }, [pill, saveBtn]),
               ]
@@ -515,7 +518,7 @@ export function addressBookView(ov, { state, actions } = {}) {
     const isNew = !ab.editId;
 
     const nameInput = textInput({
-      placeholder: "Name (e.g. Alice)",
+      placeholder: "e.g. Alice",
       value: String(ab.editName ?? ""),
       onEnter: () => addrInput.focus(),
       oninput: (e) => {
@@ -524,7 +527,7 @@ export function addressBookView(ov, { state, actions } = {}) {
     });
 
     const addrInput = textInput({
-      placeholder: "Address (public account or shielded)",
+      placeholder: "Public account or shielded address",
       value: String(ab.editAddress ?? ""),
       onEnter: () => saveBtn.click(),
       oninput: (e) => {
@@ -621,15 +624,7 @@ export function addressBookView(ov, { state, actions } = {}) {
       },
     });
 
-    const cancelBtn = h("button", {
-      class: "btn-outline",
-      text: "Cancel",
-      onclick: () => {
-        ab.view = ab.editReturnView === "detail" ? "detail" : "list";
-        actions?.render?.().catch(() => {});
-      },
-    });
-
+    // Back leaves without saving, so the form has no Cancel.
     const deleteBtn = !isNew
       ? h("button", {
           class: "btn-destructive",
@@ -667,13 +662,13 @@ export function addressBookView(ov, { state, actions } = {}) {
         },
       }),
       h("div", { class: "row" }, [
-        h("label", { text: "Name" }),
+        fieldLabel(nameInput, "Name"),
         nameInput,
-        h("label", { text: "Address" }),
+        fieldLabel(addrInput, "Address"),
         addrInput,
         detectPill,
         errBox,
-        h("div", { class: "btnrow" }, [cancelBtn, deleteBtn, saveBtn].filter(Boolean)),
+        h("div", { class: "btnrow" }, [deleteBtn, saveBtn].filter(Boolean)),
       ]),
     ];
   };
