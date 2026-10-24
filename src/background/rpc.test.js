@@ -546,10 +546,18 @@ describe("background rpc handler", () => {
     });
   });
 
-  it("dusk_profiles reads the name again when the wallet moves network meanwhile", async () => {
+  it.each([
+    [
+      "the wallet moves network",
+      () => (settings = { ...settings, nodeUrl: "https://nodes.dusk.network" }),
+      [{ profileId: "account:1:acct1", account: "acct1", name: "main.dusk" }],
+    ],
+    ["the wallet locks", () => (engineStatus = { ...engineStatus, isUnlocked: false }), []],
+    ["the site's grant is revoked", () => delete perms["https://dapp.example"], []],
+  ])("dusk_profiles reads the profile again when %s meanwhile", async (_, change, expected) => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
-    const { namesNetworkMoved } = await import("./siteNames.js");
+    const { profileVisibilityChanged } = await import("./siteNames.js");
     const { readVerifiedNames } = await import("../shared/verifiedNames.js");
 
     perms["https://dapp.example"] = {
@@ -562,18 +570,42 @@ describe("background rpc handler", () => {
     const at = Date.now();
     verifiedNames = { testnet: { acct1: { name: "one.dusk", at } }, mainnet: { acct1: { name: "main.dusk", at } } };
 
-    // The wallet moves to Mainnet while the Testnet names are read.
+    // The wallet changes while the Testnet names are read, and sites hear of
+    // it (dappEvents.js).
     const held = {};
     readVerifiedNames.mockImplementationOnce(
       () => new Promise((resolve) => (held.release = () => resolve(verifiedNames)))
     );
     const profiles = handleRpc("https://dapp.example", { method: "dusk_profiles" });
     await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
-    settings = { ...settings, nodeUrl: "https://nodes.dusk.network" };
-    namesNetworkMoved();
+    change();
+    profileVisibilityChanged();
     held.release();
 
-    await expect(profiles).resolves.toEqual([{ profileId: "account:1:acct1", account: "acct1", name: "main.dusk" }]);
+    await expect(profiles).resolves.toEqual(expected);
+  });
+
+  it("dusk_requestProfiles answers with no profile when the wallet locks after the approval", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    const { profileVisibilityChanged } = await import("./siteNames.js");
+    const { readVerifiedNames } = await import("../shared/verifiedNames.js");
+
+    vaultValue = { v: 1 };
+    verifiedNames = { testnet: { acct1: { name: "one.dusk", at: Date.now() } } };
+    requestUserApproval.mockResolvedValueOnce({ accountIndex: 1 });
+    const held = {};
+    readVerifiedNames.mockImplementationOnce(
+      () => new Promise((resolve) => (held.release = () => resolve(verifiedNames)))
+    );
+    const profiles = handleRpc("https://dapp.example", { method: "dusk_requestProfiles" });
+    await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+    engineStatus = { ...engineStatus, isUnlocked: false };
+    profileVisibilityChanged();
+    held.release();
+
+    await expect(profiles).resolves.toEqual([]);
+    expect(perms["https://dapp.example"]).toMatchObject({ profileId: "account:1:acct1" });
   });
 
   it("dusk_requestProfiles gives the profile picked in the approval its name, dusk_requestShieldedAddress none", async () => {
