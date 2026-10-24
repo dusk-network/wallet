@@ -39,6 +39,7 @@ import {
 
 import { ERROR_CODES } from "../shared/errors.js";
 import { bytesToHex, bytesToTransportHex } from "../shared/bytes.js";
+import { keepPrimaryNamesWith, lookupPrimaryName } from "../shared/duskNames.js";
 import {
   executionEventError,
   executionEventOk,
@@ -175,6 +176,12 @@ async function watchTxExecuted(hash) {
   }
 }
 
+// Chrome's offscreen document has no storage, so the background keeps the
+// engine's .dusk name checks, from Firefox's engine page too.
+keepPrimaryNamesWith((nodeUrl, account, name) =>
+  runtimeSendMessage({ type: "DUSK_NAME_CHECKED", nodeUrl, account, name }).catch(() => {})
+);
+
 ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
   if (!message) return;
 
@@ -234,6 +241,20 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
         case "engine_selectAccount": {
           const res = await selectAccountIndex(params ?? {});
           sendResponse({ id, result: res });
+          return;
+        }
+
+        case "engine_checkNames": {
+          // Checks the .dusk names of the wallet's own accounts again for
+          // sites; each answer goes to the background (DUSK_NAME_CHECKED).
+          const own = isUnlocked() ? getAccounts() : [];
+          const accounts = Array.isArray(params?.accounts) ? params.accounts : [];
+          await Promise.all(
+            accounts
+              .filter((account) => own.includes(account))
+              .map((account) => lookupPrimaryName(account, { nodeUrl: params?.nodeUrl }))
+          );
+          sendResponse({ id, result: true });
           return;
         }
 

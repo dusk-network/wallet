@@ -11,7 +11,9 @@
 
 import { assetUrl } from "../platform/assets.js";
 import { classifyDuskIdentifier } from "./duskIdentifiers.js";
-import { detectPresetIdFromNodeUrl } from "./network.js";
+import { duskNamesNetwork, rememberVerifiedName } from "./verifiedNames.js";
+
+export { duskNamesNetwork };
 
 const LOOKUP_REUSE_MS = 60_000;
 
@@ -28,16 +30,6 @@ const RECORD_KEYS = Object.freeze(["moonlight_address", "phoenix_payment_endpoin
 export function isDuskName(value) {
   const text = String(value ?? "").trim();
   return /\.dusk$/i.test(text) && !/^dusk:/i.test(text);
-}
-
-/**
- * The Dusk Domains network for a node URL, or null where names are off.
- * @param {string} nodeUrl
- * @returns {"mainnet"|"testnet"|null}
- */
-export function duskNamesNetwork(nodeUrl) {
-  const preset = detectPresetIdFromNodeUrl(String(nodeUrl ?? ""));
-  return preset === "mainnet" || preset === "testnet" ? preset : null;
 }
 
 // Release roles whose data drivers ship with the extension, in
@@ -238,6 +230,21 @@ export function lookupDuskName(input, { nodeUrl } = {}) {
 // lookup while one runs.
 const primaryNames = new Map();
 
+// Where each answer is kept for sites and approvals: in storage, or, from
+// the engine, by the background (keepPrimaryNamesWith).
+let keepPrimaryName = rememberVerifiedName;
+
+/**
+ * Keep each primary-name answer with `keep` from now on rather than in this
+ * context's storage. The engine sends its answers to the background: Chrome's
+ * offscreen document has no storage.
+ *
+ * @param {(nodeUrl: string, account: string, name: string|null) => unknown} keep - never throws
+ */
+export function keepPrimaryNamesWith(keep) {
+  keepPrimaryName = keep;
+}
+
 /**
  * `resolvePrimaryName` for display, by node and account. A lookup starts after
  * the render that asks for it and is shared while it runs. Its answer is reused
@@ -247,6 +254,9 @@ const primaryNames = new Map();
  *
  * With `stale`, a call gets the last answer at once while a new lookup runs,
  * for display that copies and sends nothing, as the header's account chip.
+ *
+ * Each answer is also kept for sites and approvals (verifiedNames.js,
+ * keepPrimaryNamesWith).
  *
  * @param {string} account
  * @param {{ nodeUrl?: string, stale?: boolean }} [opts]
@@ -264,6 +274,7 @@ export function lookupPrimaryName(account, { nodeUrl, stale = false } = {}) {
       entry.running = null;
       if (!result.ok) return null;
       Object.assign(entry, { name: result.name, at: Date.now() });
+      keepPrimaryName(nodeUrl, account, result.name);
       return result.name;
     });
   }

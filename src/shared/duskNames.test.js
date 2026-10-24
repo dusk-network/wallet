@@ -11,6 +11,10 @@ vi.mock("@duskdomains/sdk/lens-reader", async (importOriginal) => ({
   ...(await importOriginal()),
   createLensReader: vi.fn(),
 }));
+vi.mock("./verifiedNames.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  rememberVerifiedName: vi.fn(async () => {}),
+}));
 
 const nodeUrl = (id) => NETWORK_PRESETS.find((preset) => preset.id === id).nodeUrl;
 const MAINNET = nodeUrl("mainnet");
@@ -28,6 +32,7 @@ const RECORD_KEYS = ["moonlight_address", "phoenix_payment_endpoint"];
 
 let lens;
 let names;
+let kept;
 
 beforeEach(async () => {
   // An extension runtime, so bundled assets resolve to extension URLs.
@@ -39,6 +44,8 @@ beforeEach(async () => {
   lens = await import("@duskdomains/sdk/lens-reader");
   lens.createLensReader.mockReset();
   names = await import("./duskNames.js");
+  kept = await import("./verifiedNames.js");
+  kept.rememberVerifiedName.mockClear();
 });
 
 afterEach(() => {
@@ -479,6 +486,27 @@ describe("lookupPrimaryName", () => {
     expect(reader.verifyPrimary).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps each answer for sites and approvals, and nothing for a failed lookup", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const reader = useReader({ verifyPrimary: async () => primary("domains.dusk") });
+    await expect(lookup()).resolves.toBe("domains.dusk");
+    expect(kept.rememberVerifiedName).toHaveBeenCalledWith(TESTNET, ACCOUNT, "domains.dusk");
+
+    // A reused answer is kept once.
+    await expect(lookup()).resolves.toBe("domains.dusk");
+    expect(kept.rememberVerifiedName).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(61_000);
+    reader.verifyPrimary.mockResolvedValue(null);
+    await expect(lookup()).resolves.toBeNull();
+    expect(kept.rememberVerifiedName).toHaveBeenLastCalledWith(TESTNET, ACCOUNT, null);
+
+    vi.advanceTimersByTime(61_000);
+    reader.verifyPrimary.mockRejectedValue(new lens.LensReaderError("read", "offline"));
+    await expect(lookup()).resolves.toBeNull();
+    expect(kept.rememberVerifiedName).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps lookups apart by node and account, so a switch looks the new one up", async () => {
     const key = Array.from(decodeBase58(ACCOUNT)).join();
     const reader = useReader({
@@ -609,5 +637,25 @@ describe("bundle boundary", () => {
     for (const parts of users) {
       expect(await read(...parts), parts.join("/")).not.toMatch(/@duskdomains\/sdk|duskNamesSdk/);
     }
+  });
+
+  it("keeps the names code out of the service worker and the approval window", async () => {
+    const read = (...parts) => readFile(path.resolve(process.cwd(), "src", ...parts), "utf8");
+    const readers = [
+      ["shared", "verifiedNames.js"],
+      ["shared", "permissions.js"],
+      ["background", "siteNames.js"],
+      ["background", "rpc.js"],
+      ["background", "dappEvents.js"],
+      ["background", "index.js"],
+      ["ui", "notification", "app.js"],
+    ];
+    const importsNames = /(?:from\s*|import\(\s*)["'][^"']*(?:@duskdomains\/sdk|duskNamesSdk|\/duskNames\.js)["']/;
+    for (const parts of readers) {
+      expect(await read(...parts), parts.join("/")).not.toMatch(importsNames);
+    }
+    expect('import { x } from "../shared/duskNames.js";').toMatch(importsNames);
+    // The engine checks the names sites get.
+    expect(await read("engine", "runtime.js")).toMatch(/import \{[^}]*\blookupPrimaryName\b[^}]*\} from "\.\.\/shared\/duskNames\.js";/);
   });
 });
