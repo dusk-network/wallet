@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { truncateMiddle, shortHash, normalizeMnemonic } from "./strings.js";
+import { truncateMiddle, shortAddress, shortHash, normalizeMnemonic } from "./strings.js";
 
 describe("truncateMiddle", () => {
   it("returns short strings unchanged", () => {
@@ -23,6 +23,16 @@ describe("truncateMiddle", () => {
     expect(truncateMiddle(null)).toBe(null);
     expect(truncateMiddle(undefined)).toBe(undefined);
     expect(truncateMiddle("")).toBe("");
+  });
+});
+
+describe("shortAddress", () => {
+  it("keeps the first and last six characters, and short input as it is", () => {
+    expect(shortAddress("0123456789abcdefghijklmnopqrstuvwxyz")).toBe("012345…uvwxyz");
+    expect(shortAddress("0123456789abcdef")).toBe("012345…abcdef");
+    // Six, six and the "…" would make these no shorter.
+    for (const input of ["0123456789abcde", "acct0", ""]) expect(shortAddress(input)).toBe(input);
+    expect([shortAddress(null), shortAddress(undefined)]).toEqual(["", ""]);
   });
 });
 

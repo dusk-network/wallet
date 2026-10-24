@@ -638,6 +638,7 @@ const acctMenu = createAccountMenuController({
     state.route = "options";
     await render();
   },
+  onCopy: showToast,
 });
 
 // --- Header actions -------------------------------------------------------
@@ -695,10 +696,8 @@ const renderHeader = createHeaderRenderer({
   headerActionsHost,
   netMenu,
   acctMenu,
-  onRefresh,
   onOpenOptions,
   onExpand,
-  showToast,
 });
 
 // --- Main render ----------------------------------------------------------
@@ -730,7 +729,8 @@ export async function render({ forceRefresh = false } = {}) {
   scheduleShieldedPoll(ov);
   schedulePendingTxPoll(ov);
 
-  const actions = { send, render, showToast };
+  // `refresh` is the dashboard's Refresh, next to the balance.
+  const actions = { send, render, showToast, refresh: onRefresh };
 
   // Settings should be accessible even when the wallet is locked or not yet imported.
   // TODO: Reconsider?
