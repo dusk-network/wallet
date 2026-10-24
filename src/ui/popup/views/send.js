@@ -627,6 +627,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       try {
         // Ensure the current form state is preserved before navigating.
         syncDraft();
+        const toVal = String(to.value || "").trim();
 
         state.addressBook = {
           ...(state.addressBook || {}),
@@ -634,7 +635,8 @@ export function sendFormView(ov, { state, actions } = {}) {
           fromRoute: "send",
           pickReturnRoute: "send",
           // A new contact gets the address a shown name sends to, in full in its form.
-          prefillAddress: shownName ? nameRecipient(shownName) : String(to.value || "").trim(),
+          // A name still being looked up, or one that didn't resolve, gives no address.
+          prefillAddress: shownName ? nameRecipient(shownName) : isDuskName(toVal) ? "" : toVal,
           view: "list",
           query: "",
           loaded: false,

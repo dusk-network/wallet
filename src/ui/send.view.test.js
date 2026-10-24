@@ -516,12 +516,30 @@ describe("a new contact from a name", () => {
     contacts.click();
     expect(state.addressBook.prefillAddress).toBe(ALICE.address);
 
-    // A pasted account, or a name that didn't resolve, goes as typed.
-    for (const value of [BOB.account, "nobody.dusk"]) {
+    // A pasted account goes as typed, and a name that didn't resolve gives no address.
+    for (const [value, prefill] of [[BOB.account, BOB.account], ["nobody.dusk", ""]]) {
       typeInto(form.to, value);
       contacts.click();
-      expect(state.addressBook.prefillAddress).toBe(value);
+      expect(state.addressBook.prefillAddress).toBe(prefill);
     }
+  });
+
+  it("gets no address while the name is still being looked up, and its address once it resolves", async () => {
+    const state = newState();
+    const form = mount(state);
+    const contacts = dom.document.body.querySelector('button[title="Contacts"]');
+    let finish;
+    const pending = new Promise((resolve) => (finish = resolve));
+    lookupDuskName.mockImplementation(() => ({ result: undefined, promise: pending }));
+
+    typeInto(form.to, "alice.dusk");
+    contacts.click();
+    expect(state.addressBook.prefillAddress).toBe("");
+
+    finish(NAMES["alice.dusk"]);
+    await settle();
+    contacts.click();
+    expect(state.addressBook.prefillAddress).toBe(ALICE.account);
   });
 });
 
