@@ -20,7 +20,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
-- Paused shielded transactions on networks that have them turned off.
+- Paused shielded transactions on networks that have them turned off. ([#134])
 - Moved Review's gas price line and presets behind the fee's Edit, and removed Review's Cancel. ([#126])
 - Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])
 - Opened Receive on the public account, as the web wallet does. ([web-wallet#970])
@@ -72,6 +72,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 [#125]: https://github.com/dusk-network/wallet/issues/125
 [#126]: https://github.com/dusk-network/wallet/issues/126
 [#130]: https://github.com/dusk-network/wallet/issues/130
+[#134]: https://github.com/dusk-network/wallet/pull/134
 [web-wallet#970]: https://github.com/dusk-network/web-wallet/issues/970
 
 ## [0.3.0] - 2026-06-23

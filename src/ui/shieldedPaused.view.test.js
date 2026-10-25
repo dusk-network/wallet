@@ -122,6 +122,16 @@ describe("home while shielded transactions are paused", () => {
     }
   });
 
+  it("leaves out the balance line while balances are hidden, so it doesn't give one away", () => {
+    show(homeView(overview({ hideBalances: true }), { state, actions }));
+    expect(visibleText($(".shielded-paused"))).toBe(PAUSED);
+    expect(dom.document.body.textContent).not.toContain(STAYS);
+
+    state.receive.tab = "shielded";
+    show(receiveView(overview({ hideBalances: true }), { state, actions }));
+    expect(notices().map(visibleText)).toEqual([PAUSED]);
+  });
+
   it("is unchanged while shielded transactions run", () => {
     show(homeView(overview({ phoenixPaused: false }), { state, actions }));
 
