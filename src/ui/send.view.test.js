@@ -543,6 +543,36 @@ describe("a new contact from a name", () => {
   });
 });
 
+describe("going back to a name while it is looked up", () => {
+  it("keeps the newer lookup's answer when the older one fails after it", async () => {
+    const form = mount(newState());
+    // Each lookup answers when the test says, in any order.
+    const answers = [];
+    lookupDuskName.mockImplementation(() => {
+      let answer;
+      const promise = new Promise((resolve) => (answer = resolve));
+      answers.push(answer);
+      return { result: null, promise };
+    });
+
+    // Back to alice.dusk after bob.dusk starts a second lookup of it.
+    for (const name of ["alice.dusk", "bob.dusk", "alice.dusk"]) typeInto(form.to, name);
+    expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["alice.dusk", "bob.dusk", "alice.dusk"]);
+    answers[2](NAMES["alice.dusk"]);
+    await settle();
+    expect(form.picked()).toEqual(["true", "false"]);
+    expect(form.review.disabled).toBe(false);
+
+    // The first lookup fails after that, and bob.dusk's lookup answers last.
+    answers[0]({ ok: false, name: "alice.dusk", reason: "lookup_failed" });
+    answers[1](NAMES["bob.dusk"]);
+    await settle();
+    expect(visibleText(form.nameBox())).toMatch(/^alice\.dusk points to/);
+    expect(form.picked()).toEqual(["true", "false"]);
+    expect(form.review.disabled).toBe(false);
+  });
+});
+
 describe("a slow name lookup on Review", () => {
   it.each([
     [
@@ -555,6 +585,11 @@ describe("a slow name lookup on Review", () => {
       { route: "home", draft: null },
     ],
     ["a redraw replaces the form", (state) => mount(state), { route: "send" }],
+    [
+      "the user goes to another name and back",
+      (_state, form) => ["bob.dusk", "alice.dusk"].forEach((name) => typeInto(form.to, name)),
+      { route: "send" },
+    ],
   ])("changes nothing when %s first", async (_label, leave, after) => {
     const state = newState();
     const form = mount(state);
@@ -565,7 +600,7 @@ describe("a slow name lookup on Review", () => {
     lookupDuskName.mockImplementation(() => ({ result: undefined, promise: pending }));
 
     form.review.click();
-    leave(state);
+    leave(state, form);
     finish(NAMES["alice.dusk"]);
     await settle();
 

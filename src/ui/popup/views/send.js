@@ -478,8 +478,18 @@ export function sendFormView(ov, { state, actions } = {}) {
     return showNameAddress(result);
   };
 
+  // The name lookups the field starts, as the user types and on Review, are
+  // numbered, and only the latest one's answer counts: going back to a name
+  // while it is looked up starts a second lookup of it, and the first can
+  // still answer last.
+  let lookupCount = 0;
+  const startLookup = (v) => {
+    const n = ++lookupCount;
+    return { lookup: lookupDuskName(v, { nodeUrl: ov?.nodeUrl }), latest: () => n === lookupCount };
+  };
+
   const showDuskName = (v) => {
-    const lookup = lookupDuskName(v, { nodeUrl: ov?.nodeUrl });
+    const { lookup, latest } = startLookup(v);
     if (lookup.result) {
       applyNameResult(v, lookup.result);
       return;
@@ -489,7 +499,9 @@ export function sendFormView(ov, { state, actions } = {}) {
     nextBtn.disabled = true;
     updateAmountHelpers();
     showNameBox([h("div", { class: "muted", text: `Looking up ${v}…` })]);
-    lookup.promise.then((result) => applyNameResult(v, result));
+    lookup.promise.then((result) => {
+      if (latest()) applyNameResult(v, result);
+    });
   };
 
   const updateToType = () => {
@@ -689,9 +701,11 @@ export function sendFormView(ov, { state, actions } = {}) {
         let duskName;
         if (isDuskName(toVal)) {
           nextBtn.disabled = true;
-          const result = await lookupDuskName(toVal, { nodeUrl: ov?.nodeUrl }).promise;
-          // A lookup that ends after the user left Send, or after a redraw replaced this form, changes nothing.
-          if (!to.isConnected || state.route !== "send") return;
+          const { lookup, latest } = startLookup(toVal);
+          const result = await lookup.promise;
+          // A lookup that ends after the user left Send, after a redraw replaced this form, or after the
+          // field started a newer one, changes nothing.
+          if (!to.isConnected || state.route !== "send" || !latest()) return;
           if (!applyNameResult(toVal, result)) return;
           recipient = nameRecipient(result);
           duskName = { name: result.name, nodeUrl: String(ov?.nodeUrl ?? ""), to: recipient };
