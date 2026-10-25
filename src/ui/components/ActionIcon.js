@@ -63,14 +63,15 @@ const ICON_PATHS = {
     '<path d="M14 14h2v2h-2z"/>',
     '<path d="M20 14h.01M14 20h.01M20 20h.01"/>',
   ],
-  // An address book: a cover with its spine, and a person on it. The book's
-  // edges and spine sit on whole pixels at 16px, and the parts keep apart, so
-  // it stays clear at that size.
+  // An address book: a cover with binder rings along its left edge, and a
+  // person on it. The rings keep it from reading as a profile picture.
   contacts: [
-    '<rect x="3.5" y="2.5" width="17" height="19" rx="2"/>',
-    '<path d="M7 2.5v19"/>',
-    '<circle cx="13.75" cy="8.5" r="2.25"/>',
-    '<path d="M10.25 18a3.5 3.5 0 0 1 7 0"/>',
+    '<rect x="5" y="2.5" width="15.5" height="19" rx="2"/>',
+    '<path d="M3 7h4"/>',
+    '<path d="M3 12h4"/>',
+    '<path d="M3 17h4"/>',
+    '<circle cx="13" cy="8.75" r="2.25"/>',
+    '<path d="M9.5 17.5a3.5 3.5 0 0 1 7 0"/>',
   ],
   close: [
     '<path d="M6 6l12 12"/>',
