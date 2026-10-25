@@ -7,9 +7,9 @@ import { TX_KIND } from "../shared/constants.js";
 import { lookupDuskName } from "../shared/duskNames.js";
 import { shortAddress } from "./lib/strings.js";
 import { installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { iconSvg } from "./components/ActionIcon.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
 
-vi.mock("./components/GasEditor.js", () => ({}));
 vi.mock("./components/QrScanModal.js", () => ({
   openQrScanModal: vi.fn(),
   parseDuskQrPayload: vi.fn(() => null),
@@ -123,11 +123,7 @@ const overview = (over = {}) => ({
 let dom;
 
 beforeEach(() => {
-  dom = installFakeDom({
-    elements: {
-      "dusk-gas-editor": (el) => Object.assign(el, { setGas: vi.fn(), readFinalGas: () => null }),
-    },
-  });
+  dom = installFakeDom();
   lookupDuskName.mockReset();
   lookupDuskName.mockImplementation((input) => {
     const key = String(input).trim().toLowerCase();
@@ -146,9 +142,9 @@ function newState() {
 }
 
 // Renders the current route as the popup does, and finds the parts the tests read.
-function mount(state, ov = overview()) {
+function mount(state, ov = overview(), send = async () => ({})) {
   const actions = {
-    send: vi.fn(async () => ({})),
+    send: vi.fn(send),
     render: vi.fn(async () => {}),
     showToast: vi.fn(),
   };
@@ -177,6 +173,30 @@ function mount(state, ov = overview()) {
     transferLine: () => $(".transfer-line")?.textContent,
   };
 }
+
+describe("send form", () => {
+  it("labels its scan and contacts icons and its Max, and its placeholders don't repeat the labels", () => {
+    const form = mount(newState());
+    const body = dom.document.body;
+    expect(
+      body.querySelectorAll(".input-row .icon-only").map((b) => [b.getAttribute("aria-label"), b.innerHTML, b.textContent])
+    ).toEqual([
+      ["Scan QR", iconSvg("qr"), ""],
+      ["Contacts", iconSvg("contacts"), ""],
+    ]);
+    expect(body.querySelector(".amount-input-row button").textContent).toBe("Max");
+    expect(body.querySelectorAll("label").map((l) => l.textContent)).toEqual(["To", "Amount", "Memo"]);
+    expect([form.to, form.amount, body.querySelector(".row > input")].map((i) => i.getAttribute("placeholder"))).toEqual([
+      "Account, shielded address or .dusk name",
+      "e.g. 1.25 DUSK",
+      "Optional",
+    ]);
+
+    // Without .dusk names on the network, the field takes an account or an address.
+    mount(newState(), overview({ nodeUrl: "http://127.0.0.1:8080" }));
+    expect(body.querySelector(".to-input-wrap input").getAttribute("placeholder")).toBe("Account or shielded address");
+  });
+});
 
 describe("send to a .dusk name with both addresses", () => {
   it("shows option cards under the name, on the public account by default", () => {
@@ -411,15 +431,49 @@ describe("sending to yourself", () => {
 });
 
 describe("review", () => {
-  const review = (draft, ov) =>
+  const review = (draft, ov, send) =>
     mount(
       {
         route: "confirm",
         addressBook: { loaded: true, items: [] },
         draft: { amountDusk: "1", amountLux: "1000000000", memo: "", ...draft },
       },
-      ov
+      ov,
+      send
     );
+
+  it("shows the fee and the total with Back and Confirm, and puts the gas price line and presets behind Edit", async () => {
+    // The node's gas prices are 1, 2 and 5 LUX; a transfer returns its hash.
+    const send = async (message) =>
+      message.type === "DUSK_UI_GET_CACHED_GAS_PRICE"
+        ? { min: "1", median: "2", max: "5" }
+        : { ok: true, result: { hash: "ab".repeat(32) } };
+    const view = review({ to: ALICE.account, privacy: "public" }, overview(), send);
+    await settle();
+    const body = dom.document.body;
+    const shownButtons = () => body.querySelectorAll("button").filter(isShown).map((b) => b.textContent);
+
+    // Back is the way back to Send, so there is no Cancel.
+    expect(shownButtons()).toEqual(["← Back", "Save to Contacts", "Edit", "Confirm"]);
+    expect(visibleText(body.querySelector("dusk-gas-editor"))).toBe(
+      "Network fee (max)0.004 DUSKEditTotal (max)1.004 DUSK"
+    );
+    expect(visibleText(body)).not.toContain("Gas price");
+
+    const button = (text) => body.querySelectorAll("button").find((b) => b.textContent === text);
+    button("Edit").click();
+    expect(shownButtons()).toEqual(["← Back", "Save to Contacts", "Hide", "Auto", "Low", "Recommended", "High", "Confirm"]);
+    expect(visibleText(body)).toContain("Gas price (LUX): min 1 · median 2 · max 5");
+
+    // A preset picked under Edit is what Confirm sends.
+    button("Low").click();
+    button("Confirm").click();
+    await settle();
+    expect(view.actions.send).toHaveBeenLastCalledWith({
+      type: "DUSK_UI_SEND_TX",
+      params: expect.objectContaining({ to: ALICE.account, privacy: "public", gas: { limit: "2000000", price: "1" } }),
+    });
+  });
 
   it("says under the pill whether the transfer is visible on chain", () => {
     let view = review({ to: ALICE.account, privacy: "public" });

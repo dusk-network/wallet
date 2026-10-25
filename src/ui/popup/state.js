@@ -80,7 +80,7 @@ export const state = {
   },
   receive: {
     // Receive screen state
-    tab: "shielded", // "shielded" | "public"
+    tab: "public", // "public" | "shielded"
     amountDusk: "", // Optional amount encoded into receive QR / request link
     memo: "", // Optional memo/message included in request link
   },

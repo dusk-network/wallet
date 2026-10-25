@@ -240,6 +240,9 @@ test.describe("Sozu liquid staking panel", () => {
     await expect(page.getByText("Stake with Sozu")).toBeVisible();
     await expect(page.getByText("Gas: Profile 1 public balance")).toBeVisible();
     await expect(page.getByText("Total (max)")).toBeVisible();
+    // The gas presets open with the fee's Edit.
+    await expect(page.getByRole("button", { name: "Recommended" })).toBeHidden();
+    await page.getByRole("button", { name: "Edit" }).click();
     await expect(page.getByRole("button", { name: "Recommended" })).toBeVisible();
 
     await page.getByRole("button", { name: "Confirm" }).click();

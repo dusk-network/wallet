@@ -1,6 +1,6 @@
 import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
-import { h } from "../lib/dom.js";
-import { integerInput } from "./FormControls.js";
+import { h, setChildren } from "../lib/dom.js";
+import { fieldLabel, integerInput } from "./FormControls.js";
 
 function maxFeeFromGasStrings(limitStr, priceStr) {
   const l = String(limitStr ?? "").trim();
@@ -20,7 +20,7 @@ export class DuskGasEditor extends HTMLElement {
   #amountLux = 0n;
   #extraLux = [];
   #maxDecimals = UI_DISPLAY_DECIMALS;
-  #helpText = "";
+  #helpText = "Max fee = gas limit × gas price. Clear both to use the wallet's defaults.";
 
   // Allows setGas() before the element is connected/rendered.
   #pendingGas = null;
@@ -32,6 +32,8 @@ export class DuskGasEditor extends HTMLElement {
   #detailsWrap = null;
   #editBtn = null;
   #helpNode = null;
+  #editContent = [];
+  #editSlot = null;
 
   connectedCallback() {
     if (this.#initialized) return;
@@ -82,6 +84,17 @@ export class DuskGasEditor extends HTMLElement {
   }
 
   /**
+   * Shows `nodes` in the panel Edit opens, above the gas limit and price, so
+   * the fee and the total show alone until Edit is pressed. The presets put
+   * their gas price line and buttons here.
+   * @param {Node|Node[]} nodes
+   */
+  setEditContent(nodes) {
+    this.#editContent = [nodes].flat().filter(Boolean);
+    if (this.#editSlot) setChildren(this.#editSlot, this.#editContent);
+  }
+
+  /**
    * Programmatically set the input values.
    * @param {{limit?:string|null, price?:string|null}|null|undefined} gas
    */
@@ -126,12 +139,14 @@ export class DuskGasEditor extends HTMLElement {
     this.#totalCode = h("code", { text: "—" });
 
     this.#helpNode = h("div", { class: "muted", text: this.#helpText || "" });
+    this.#editSlot = h("div", { class: "gas-edit-extra" }, this.#editContent);
 
     this.#detailsWrap = h("div", { class: "row", style: "display:none" }, [
+      this.#editSlot,
       h("div", { class: "row" }, [
-        h("label", { text: "Gas limit" }),
+        fieldLabel(this.#limitInput, "Gas limit"),
         this.#limitInput,
-        h("label", { text: "Gas price" }),
+        fieldLabel(this.#priceInput, "Gas price"),
         this.#priceInput,
       ]),
       this.#helpNode,
@@ -139,11 +154,14 @@ export class DuskGasEditor extends HTMLElement {
 
     this.#editBtn = h("button", {
       class: "link-btn",
+      type: "button",
       text: "Edit",
+      "aria-expanded": "false",
       onclick: () => {
         const open = this.#detailsWrap.style.display !== "none";
         this.#detailsWrap.style.display = open ? "none" : "block";
         this.#editBtn.textContent = open ? "Edit" : "Hide";
+        this.#editBtn.setAttribute("aria-expanded", String(!open));
       },
     });
 

@@ -677,6 +677,19 @@ input:focus, textarea:focus, select:focus {
   padding: 0 12px 10px 40px;
 }
 
+/* A name with one address has nothing to choose: its card has no radio mark */
+.name-option--single .name-option__main {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.name-option--single .name-option__line {
+  grid-column: 1;
+}
+
+.name-option--single .name-shortfall {
+  padding-left: 12px;
+}
+
 button.name-shortfall__link {
   padding: 0;
   border: 0;
@@ -708,12 +721,6 @@ body.page--popup .input-row > .icon-btn {
 }
 
 /* ---- Amount helpers (Send / Shield) ---- */
-.max-btn {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-}
-
 /* Amount module: a normal input with a separate balance slider helper. */
 .amount-card {
   display: flex;
@@ -1372,11 +1379,22 @@ body.page--popup .site-bar-action {
   margin-top: 4px;
 }
 
+/* The gas price line and the presets, in the panel the fee's Edit opens */
+.gas-edit-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.gas-edit-extra:empty {
+  display: none;
+}
+
 .gas-quick-row {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 /* Tx details key/value block (avoid input-like boxes) */
@@ -3324,7 +3342,9 @@ button.receive-info:hover {
   box-shadow: none;
 }
 
-/* The copy and ⓘ icons: inline SVG, centered in the button, in its colour */
+/* Icons are inline SVG (iconSvg), centered in their button (.icon-btn already
+   centers), in its colour, so they look the same whatever fonts the system has */
+button.balance-refresh,
 button.acct-menu-copy,
 button.receive-copy,
 button.receive-info {
@@ -3332,6 +3352,9 @@ button.receive-info {
   place-items: center;
 }
 
+.icon-btn.icon-only svg,
+.asset-ico svg,
+button.balance-refresh svg,
 button.acct-menu-copy svg,
 button.receive-copy svg,
 button.receive-info svg {
@@ -3342,6 +3365,11 @@ button.receive-info svg {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+button.balance-refresh svg {
+  width: 13px;
+  height: 13px;
 }
 
 /* -------------------------------------------------------

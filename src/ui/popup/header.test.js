@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fakeEvent, installFakeDom, settle, visibleText } from "../testing/fakeDom.js";
+import { iconSvg } from "../components/ActionIcon.js";
 
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -71,15 +72,28 @@ afterEach(() => {
 });
 
 describe("header", () => {
-  it.each(Object.keys(VIEWS))("holds the account chip and Options, no ▾ button or Refresh (%s)", async (view) => {
+  it.each(Object.keys(VIEWS))("holds the account chip and Settings, no ▾ button or Refresh (%s)", async (view) => {
     const { host, renderHeader } = await setup(view);
     renderHeader(overview);
     expect(host.children.map((el) => el.className)).toEqual(["account-chip", "icon-btn icon-only"]);
-    expect(host.children[1].title).toBe("Options");
+    expect(host.children[1].title).toBe("Settings");
     for (const title of ["Switch profile", "Profiles", "Refresh"]) {
       expect(host.querySelector(`[title="${title}"]`)).toBeNull();
     }
     expect(host.textContent).not.toContain("⟳");
+  });
+
+  it("draws Expand view and Settings as labelled SVG icons, not glyphs", async () => {
+    const { host, renderHeader } = await setup("popup");
+    // The extension's popup can expand into a tab.
+    vi.stubGlobal("browser", { runtime: { id: "dusk-wallet", sendMessage: () => {} } });
+    renderHeader(overview);
+    expect(
+      host.querySelectorAll(".icon-btn").map((b) => [b.title, b.getAttribute("aria-label"), b.innerHTML, b.textContent])
+    ).toEqual([
+      ["Expand view", "Expand view", iconSvg("expand"), ""],
+      ["Settings", "Settings", iconSvg("settings"), ""],
+    ]);
   });
 
   it("shows the short account without a name and the verified name once there is one", async () => {
@@ -138,7 +152,7 @@ describe("header", () => {
     const { host, renderHeader, chip } = await setup("popup");
     renderHeader({ ...overview, isUnlocked: false });
     expect(chip()).toBeNull();
-    expect(host.children.map((el) => el.title)).toEqual(["Options"]);
+    expect(host.children.map((el) => el.title)).toEqual(["Settings"]);
   });
 
   it("keeps the brand and network pill at full width and lets the chip give way", async () => {

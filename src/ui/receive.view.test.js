@@ -80,6 +80,20 @@ async function receive(tab, { state = { receive: { tab } }, ov = overview } = {}
 }
 
 describe("receive", () => {
+  it("opens on the public account, first of the two tabs, as the web wallet does", async () => {
+    const view = await receive(undefined, { state: {} });
+    const tabs = dom.document.body.querySelector(".tabs").children;
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Public", "Shielded"]);
+    expect(tabs.map((tab) => tab.classList.contains("is-active"))).toEqual([true, false]);
+    expect(view.state.receive.tab).toBe("public");
+    expect(view.address.title).toBe(ACCOUNT);
+
+    tabs[1].click();
+    expect(view.state.receive.tab).toBe("shielded");
+    const shielded = await receive(undefined, { state: view.state });
+    expect(shielded.address.title).toBe(ADDRESS);
+  });
+
   it("shows the name and the short account under the QR, each copying its own", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const view = await receive("public");
@@ -209,5 +223,31 @@ describe("receive", () => {
     const [link] = dom.clipboard.writeText.mock.calls.at(-1);
     expect(link).toMatch(/^dusk:/);
     expect(link).toContain(ACCOUNT);
+  });
+
+  it("says no more than the QR, the fields and Request payment show", async () => {
+    const state = { receive: { tab: "public", requestOpen: false, amountDusk: "", memo: "" } };
+    await receive("public", { state });
+    const body = dom.document.body;
+    const summary = () => visibleText(body.querySelector(".receive-accordion__summary"));
+
+    // No note that Send reads the QR, no "Optional" beside Request payment or its labels:
+    // the placeholders say both fields are optional.
+    expect(visibleText(body)).not.toMatch(/Send can read|Optional|optional/);
+    expect(summary()).toBe("Request payment▾");
+    expect(body.querySelectorAll(".receive-accordion__body label").map((l) => l.textContent)).toEqual(["Amount", "Memo"]);
+    expect(body.querySelectorAll(".receive-accordion__body input").map((i) => i.getAttribute("placeholder"))).toEqual([
+      "Optional, e.g. 1.25 DUSK",
+      "Optional",
+    ]);
+    expect(body.querySelector(".tabs").hasAttribute("title")).toBe(false);
+
+    // Once the QR holds a request, Request payment says what it asks for.
+    Object.assign(state.receive, { requestOpen: true, amountDusk: "1.5" });
+    await receive("public", { state });
+    expect(summary()).toBe("Request payment1.5 DUSK▾");
+    Object.assign(state.receive, { amountDusk: "", memo: "Lunch" });
+    await receive("public", { state });
+    expect(summary()).toBe("Request paymentWith memo▾");
   });
 });
