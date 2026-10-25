@@ -613,6 +613,51 @@ describe("dappEvents", () => {
       ]);
     });
 
+    it("sends name checks to sites in the order they came", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+      port.messages = [];
+
+      // A check adds the name, and its update waits for the permissions while
+      // a later check removes the name.
+      const held = await holdPermissions();
+      const updates = [
+        ev.handleVerifiedNamesDiff({}, { testnet: { acct0: check("alice.dusk") } }),
+        ev.handleVerifiedNamesDiff({ testnet: { acct0: check("alice.dusk") } }, { testnet: { acct0: check(null) } }),
+      ];
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      held.release();
+      await Promise.all(updates);
+
+      // The removal goes out last, so the site ends with no name.
+      expect(profileEvents(port).map((event) => event.data)).toEqual([
+        [{ profileId: "account:0:acct0", account: "acct0", name: "alice.dusk" }],
+        [{ profileId: "account:0:acct0", account: "acct0" }],
+      ]);
+    });
+
+    it("keeps name checks in order when one comes while the site's page reloads", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+
+      // A check adds the name and waits for the permissions, and the check
+      // that removes it comes while the site's page reloads.
+      const held = await holdPermissions();
+      const added = ev.handleVerifiedNamesDiff({}, { testnet: { acct0: check("alice.dusk") } });
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      port.onDisconnect.emit();
+      verifiedNames = { testnet: { acct0: check(null) } };
+      const removed = ev.handleVerifiedNamesDiff({ testnet: { acct0: check("alice.dusk") } }, verifiedNames);
+      const reloaded = await openPort(ev);
+      held.release();
+      await Promise.all([added, removed]);
+
+      // The reloaded page ends with no name.
+      expect(profileEvents(reloaded).at(-1)?.data).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
+    });
+
     it("builds a site's first state again when the wallet moves network meanwhile", async () => {
       permissions = { "https://dapp.example": connected(0) };
       verifiedNames = { testnet: { acct0: check("alice.dusk") }, mainnet: { acct0: check("main.dusk") } };

@@ -358,6 +358,12 @@ export async function broadcastProfilesChangedForOrigin(origin) {
   broadcastToOrigin(origin, "profilesChanged", permission.profile ? [permission.profile] : []);
 }
 
+// Name checks go to sites one at a time, in the order they came: a check
+// whose update waits on the wallet would otherwise go out after a later one,
+// and give a site back a name the later check removed.
+/** @type {Promise<void>} */
+let _nameCheckQueue = Promise.resolve();
+
 /**
  * Handle new .dusk name checks (verifiedNames.js) by sending profilesChanged
  * to each site whose profile's name was checked, so a name that was added,
@@ -368,8 +374,22 @@ export async function broadcastProfilesChangedForOrigin(origin) {
  * @param {Record<string, any>} newNames
  */
 export async function handleVerifiedNamesDiff(oldNames, newNames) {
-  if (!portsByOrigin.size) return;
   const generation = profileVisibilityGeneration();
+  _nameCheckQueue = _nameCheckQueue
+    .then(() => sendNameCheck(oldNames, newNames, generation))
+    .catch(() => {});
+  await _nameCheckQueue;
+}
+
+/**
+ * Send one name check on to the sites whose profile's name it checked.
+ *
+ * @param {Record<string, any>} oldNames
+ * @param {Record<string, any>} newNames
+ * @param {number} generation - profileVisibilityGeneration() when the check came
+ */
+async function sendNameCheck(oldNames, newNames, generation) {
+  if (!portsByOrigin.size) return;
   const nodeUrl = String((await getSettings())?.nodeUrl ?? "");
   const network = duskNamesNetwork(nodeUrl);
   if (!network) return;
@@ -377,7 +397,7 @@ export async function handleVerifiedNamesDiff(oldNames, newNames) {
 
   const perms = await getPermissions();
   const status = await getEngineStatus();
-  // Read before a lock, unlock, permission change or network move, which
+  // A lock, unlock, permission change or network move since the check came
   // sends sites their profiles again.
   if (generation !== profileVisibilityGeneration()) return;
   const names = verifiedNamesFor(newNames, nodeUrl);
