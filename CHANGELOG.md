@@ -33,6 +33,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Pinned the shared typed-data RC through JSR's npm compatibility registry for reproducible installs. ([#22])
 - Used `@dusk/typed-data` for typed-data validation, hashing and signed-message construction. ([#22])
 - Gated dApp RPC requests on the canonical method list before any permission lookup or approval prompt, so methods absent from the advertised surface are unreachable rather than merely undocumented. Deliberately refused methods still report why instead of "Unknown method".
+- Defaulted public transfers to 2.5M gas, set gas minimums for shield (30M) and public staking (35M), and lowered the unshield minimum to 30M, matching the web wallet. ([web-wallet#969](https://github.com/dusk-network/web-wallet/issues/969))
 
 ### Security
 
@@ -43,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Fixed
 
 - Fixed the popup moving Receive's QR and Review's recipient below the rest of the page. ([#125])
+- Raised the shielded (Phoenix) transfer default gas limit to 50M and its minimum to 30M so shielded sends clear the node's spend-gas admission floor.
 - Preserved the active unlock form, including entered text and in-flight submission state, across passive rerenders. ([#110](https://github.com/dusk-network/wallet/issues/110))
 - Cleared unanchored spent-note caches before resync to prevent orphaned notes from reappearing. ([#106](https://github.com/dusk-network/wallet/issues/106))
 - Committed prefetched shielded chunks before stopping at the scan target, including under slow RPC responses.

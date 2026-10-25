@@ -111,7 +111,7 @@ No offscreen document needed — engine runs in the same process.
 ```js
 // 1. Static defaults per transaction kind
 const DEFAULT_GAS_BY_KIND = {
-  transfer: { limit: "2000000", price: "1" }, // public; shielded transfer uses 15000000
+  transfer: { limit: "2500000", price: "1" }, // public; shielded transfer uses 50000000
   shield: { limit: "50000000", price: "1" },
   // ...
 };

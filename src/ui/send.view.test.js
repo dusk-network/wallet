@@ -107,7 +107,7 @@ const NAMES = {
   "me.dusk": { ok: true, name: "me.dusk", ...OWN },
 };
 
-// 177.9865 DUSK public, 25 DUSK shielded; the fee caps are 0.002 and 0.015 DUSK.
+// 177.9865 DUSK public, 25 DUSK shielded; the fee caps are 0.0025 and 0.05 DUSK.
 const overview = (over = {}) => ({
   hasVault: true,
   isUnlocked: true,
@@ -216,7 +216,7 @@ describe("send to a .dusk name with both addresses", () => {
       `alice.dusk points toPublic account${shortAddress(ALICE.account)}Visible on chain` +
         `Shielded address${shortAddress(ALICE.address)}Private`
     );
-    expect(form.balanceLine()).toBe("Available (public): 177.9845 DUSK");
+    expect(form.balanceLine()).toBe("Available (public): 177.984 DUSK");
     expect(form.review.disabled).toBe(false);
     // The old Public account | Shielded address switch is gone.
     expect(dom.document.body.querySelector(".name-address-toggle")).toBeNull();
@@ -230,12 +230,12 @@ describe("send to a .dusk name with both addresses", () => {
 
     expect(form.picked()).toEqual(["false", "true"]);
     expect(form.pill()).toBe("");
-    expect(form.balanceLine()).toBe("Spendable (shielded): 24.985 DUSK");
+    expect(form.balanceLine()).toBe("Spendable (shielded): 24.95 DUSK");
     expect(state.draft.nameChoices).toEqual({ "alice.dusk": true });
 
     form.radios()[0].click();
     expect(form.picked()).toEqual(["true", "false"]);
-    expect(form.balanceLine()).toBe("Available (public): 177.9845 DUSK");
+    expect(form.balanceLine()).toBe("Available (public): 177.984 DUSK");
   });
 
   it("shows the pill for a pasted account or address, where it is the only sign of the transfer type", () => {
@@ -261,11 +261,11 @@ describe("send to a .dusk name with both addresses", () => {
     // The same name, as resolved.
     typeInto(form.to, " Alice.DUSK");
     expect(form.picked()).toEqual(["false", "true"]);
-    expect(form.balanceLine()).toBe("Spendable (shielded): 24.985 DUSK");
+    expect(form.balanceLine()).toBe("Spendable (shielded): 24.95 DUSK");
 
     typeInto(form.to, "bob.dusk");
     expect(form.picked()).toEqual(["true", "false"]);
-    expect(form.balanceLine()).toBe("Available (public): 177.9845 DUSK");
+    expect(form.balanceLine()).toBe("Available (public): 177.984 DUSK");
 
     // A pick for bob.dusk doesn't take alice.dusk's place.
     form.radios()[1].click();
@@ -314,11 +314,11 @@ describe("send to a .dusk name with both addresses", () => {
     form = mount(state);
     expect(form.to.value).toBe("alice.dusk");
     expect(form.picked()).toEqual(["false", "true"]);
-    expect(form.balanceLine()).toBe("Spendable (shielded): 24.985 DUSK");
+    expect(form.balanceLine()).toBe("Spendable (shielded): 24.95 DUSK");
   });
 
   it.each([
-    ["covers only the fee cap", { value: "15000000", spendable: "15000000" }],
+    ["covers only the fee cap", { value: "50000000", spendable: "50000000" }],
     ["is empty", { value: "0", spendable: "0" }],
     ["can't be read", null],
   ])("disables the shielded card when the shielded balance %s, and links to Shield", (_label, shieldedBalance) => {
@@ -340,7 +340,7 @@ describe("send to a .dusk name with both addresses", () => {
   });
 
   it("enables the shielded card once the balance covers a transfer and its fee", () => {
-    const form = mount(newState(), overview({ shieldedBalance: { value: "15000001", spendable: "15000001" } }));
+    const form = mount(newState(), overview({ shieldedBalance: { value: "50000001", spendable: "50000001" } }));
     typeInto(form.to, "alice.dusk");
     expect(form.radios()[1].hasAttribute("aria-disabled")).toBe(false);
     expect(form.shortfall()).toBeNull();
@@ -369,7 +369,7 @@ describe("send to a .dusk name with one address", () => {
     const funded = mount(newState());
     typeInto(funded.to, "carol.dusk");
     expect(visibleText(funded.nameBox())).toBe(`carol.dusk points toShielded address${shortAddress(carol)}Private`);
-    expect(funded.balanceLine()).toBe("Spendable (shielded): 24.985 DUSK");
+    expect(funded.balanceLine()).toBe("Spendable (shielded): 24.95 DUSK");
     expect(funded.review.disabled).toBe(false);
   });
 
@@ -456,7 +456,7 @@ describe("review", () => {
     // Back is the way back to Send, so there is no Cancel.
     expect(shownButtons()).toEqual(["← Back", "Save to Contacts", "Edit", "Confirm"]);
     expect(visibleText(body.querySelector("dusk-gas-editor"))).toBe(
-      "Network fee (max)0.004 DUSKEditTotal (max)1.004 DUSK"
+      "Network fee (max)0.005 DUSKEditTotal (max)1.005 DUSK"
     );
     expect(visibleText(body)).not.toContain("Gas price");
 
@@ -471,7 +471,7 @@ describe("review", () => {
     await settle();
     expect(view.actions.send).toHaveBeenLastCalledWith({
       type: "DUSK_UI_SEND_TX",
-      params: expect.objectContaining({ to: ALICE.account, privacy: "public", gas: { limit: "2000000", price: "1" } }),
+      params: expect.objectContaining({ to: ALICE.account, privacy: "public", gas: { limit: "2500000", price: "1" } }),
     });
   });
 

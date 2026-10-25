@@ -186,20 +186,20 @@ describe("hidden balances", () => {
       "Available (public): hidden DUSK",
     ]);
     // The fee cap isn't a balance.
-    expect(body.querySelector(".amount-meta__sub").textContent).toBe("Fee cap: 0.002 DUSK");
+    expect(body.querySelector(".amount-meta__sub").textContent).toBe("Fee cap: 0.0025 DUSK");
     body.querySelector(".amount-input-row button").click();
-    expect(amount.value).toBe("1482.9363");
+    expect(amount.value).toBe("1482.9358");
     expect(share()).toEqual(["••%", "hidden", "hidden"]);
 
     typeInto(to, ADDRESS);
     await settle();
     expect(visibleText(body.querySelector(".amount-meta__main"))).toBe("Spendable (shielded): •••• DUSK");
     expect(seen(body.querySelector(".amount-meta__sub"))).toEqual([
-      "Total shielded: •••• DUSK · Fee cap: 0.015 DUSK",
-      "Total shielded: hidden DUSK · Fee cap: 0.015 DUSK",
+      "Total shielded: •••• DUSK · Fee cap: 0.05 DUSK",
+      "Total shielded: hidden DUSK · Fee cap: 0.05 DUSK",
     ]);
     body.querySelector(".amount-input-row button").click();
-    expect(amount.value).toBe("19.985");
+    expect(amount.value).toBe("19.95");
 
     // What the user types shows as typed.
     typeInto(amount, "12.5");
@@ -370,7 +370,7 @@ describe("still shown with balances hidden", () => {
 
     let state = { route: "confirm", draft: { to: OTHER_ACCOUNT, privacy: "public", amountDusk: "1.5", amountLux: "1500000000", memo: "" } };
     await show(sendConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect([amountOf(), ...fee()]).toEqual(["1.5", "0.002 DUSK", "1.502 DUSK"]);
+    expect([amountOf(), ...fee()]).toEqual(["1.5", "0.0025 DUSK", "1.5025 DUSK"]);
 
     state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountLux: dusk(2), amountDusk: "2" } };
     await show(convertConfirmView(overview(HIDDEN), { state, actions: actions() }));
