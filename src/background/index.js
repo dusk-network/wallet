@@ -1189,6 +1189,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI initiated transaction (from the wallet popup)
       if (message?.type === "DUSK_UI_SEND_TX") {
+        // Held until it is sent, as for sites: a network switch can't come in
+        // between the checks, the engine's configuration and the submission.
+        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         const status = await getEngineStatus();
         if (!status.isUnlocked) {
           throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
@@ -1279,6 +1282,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           publicResult.nonce = result.nonce?.toString?.() ?? String(result.nonce);
         }
         sendResponse({ ok: true, result: publicResult });
+        });
         return;
       }
 

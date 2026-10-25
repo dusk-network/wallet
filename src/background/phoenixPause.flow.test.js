@@ -25,6 +25,8 @@ const engineCall = vi.hoisted(() =>
   })
 );
 const getPhoenixPause = vi.hoisted(() => vi.fn(async () => ({ paused: mocks.paused, checkedAt: 1 })));
+// A network switch reconfigures the engine through this.
+const invalidateEngineConfig = vi.hoisted(() => vi.fn(() => {}));
 
 function makeLocalStorage() {
   const store = new Map();
@@ -56,7 +58,7 @@ vi.mock("../background/engineHost.js", () => {
     ensureEngineConfigured: vi.fn(async () => true),
     getEngineStatus: vi.fn(status),
     getEngineStatusStrict: vi.fn(status),
-    invalidateEngineConfig: vi.fn(() => {}),
+    invalidateEngineConfig,
     handleEngineReady: vi.fn(() => {}),
   };
 });
@@ -219,5 +221,25 @@ describe("background while shielded transactions are paused", () => {
     const res = await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", params: { kind: "shield", amount: "1" } });
     expect(res).toMatchObject({ ok: true, result: { hash: "0xhash" } });
     expect(sentTransactions()).toHaveLength(1);
+  });
+
+  it("keeps a network switch from coming in between the pause check and the send", async () => {
+    // The current network answers "not paused" only once a switch to a paused one was asked for.
+    let answerPause;
+    getPhoenixPause.mockImplementationOnce(
+      () => new Promise((resolve) => (answerPause = () => resolve({ paused: false, checkedAt: 1 })))
+    );
+    const sending = sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", params: { kind: "shield", amount: "1" } });
+    await vi.waitFor(() => expect(answerPause).toBeTypeOf("function"));
+    const switching = sendBackgroundMessage({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: "https://nodes.dusk.network" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    answerPause();
+
+    await expect(sending).resolves.toMatchObject({ ok: true, result: { hash: "0xhash" } });
+    await expect(switching).resolves.toMatchObject({ ok: true, networkName: "Mainnet" });
+    // The shield went out on the network it was checked on, before the switch reconfigured the engine.
+    const sent = engineCall.mock.invocationCallOrder[engineCall.mock.calls.findIndex(([m]) => m === "dusk_sendTransaction")];
+    expect(invalidateEngineConfig).toHaveBeenCalledTimes(1);
+    expect(sent).toBeLessThan(invalidateEngineConfig.mock.invocationCallOrder[0]);
   });
 });
