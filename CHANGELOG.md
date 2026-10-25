@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address. ([#125])
 - Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive. ([#125])
 - Added a warning when sending to your own account or address. ([#125])
@@ -69,6 +70,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 [#117]: https://github.com/dusk-network/wallet/issues/117
 [#125]: https://github.com/dusk-network/wallet/issues/125
 [#126]: https://github.com/dusk-network/wallet/issues/126
+[#130]: https://github.com/dusk-network/wallet/issues/130
 [web-wallet#970]: https://github.com/dusk-network/web-wallet/issues/970
 
 ## [0.3.0] - 2026-06-23

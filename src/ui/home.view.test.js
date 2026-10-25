@@ -87,7 +87,7 @@ describe("home balance", () => {
     vi.unstubAllGlobals();
   });
 
-  it("puts Refresh next to the balance title, inside its brackets, and refreshes the wallet", async () => {
+  it("puts Hide balances and Refresh next to the balance title, inside its brackets, and refreshes the wallet", async () => {
     const { document } = installFakeDom();
     const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
     const state = { route: "home", addressBook: { loaded: true, items: [] } };
@@ -104,6 +104,7 @@ describe("home balance", () => {
     expect(title.children.map((el) => el.className)).toEqual([
       "bracket-title__bracket",
       "bracket-title__text",
+      "balance-eye",
       "balance-refresh",
       "bracket-title__bracket",
     ]);

@@ -17,6 +17,7 @@ import { bracketTitle } from "../../components/BracketTitle.js";
 import { recipientBadge } from "../../components/RecipientBadge.js";
 import { subnav } from "../../components/Subnav.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
+import { balance, balancesHidden } from "../../components/Balance.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -56,6 +57,7 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
 }
 
 export function homeView(ov, { state, actions } = {}) {
+  const hidden = balancesHidden(ov);
   const hasBalance = Boolean(ov?.balance?.value);
   const pubLux = safeBigInt(ov?.balance?.value, 0n);
   const balFull = hasBalance ? formatLuxToDusk(pubLux) : "—";
@@ -120,7 +122,7 @@ export function homeView(ov, { state, actions } = {}) {
   // show a small hint.
   if (!shieldStatus && reservedLux > 0n) {
     shieldStatus = "Pending";
-    shieldStatusTitle = `Reserved ${formatLuxShort(reservedLux, UI_DISPLAY_DECIMALS)} DUSK`;
+    shieldStatusTitle = hidden ? undefined : `Reserved ${formatLuxShort(reservedLux, UI_DISPLAY_DECIMALS)} DUSK`;
   }
 
   // Home hero shows the total once shielded is available.
@@ -137,17 +139,43 @@ export function homeView(ov, { state, actions } = {}) {
     "aria-label": "Refresh",
     onclick: () => actions?.refresh?.()?.catch?.(() => {}),
   });
+  // Hide balances: every balance shows as •••• until it's pressed again. Its
+  // name stays; aria-pressed says whether they're hidden.
+  const eyeBtn = h("button", {
+    class: "balance-eye",
+    type: "button",
+    html: iconSvg(hidden ? "eye-off" : "eye"),
+    title: "Hide balances",
+    "aria-label": "Hide balances",
+    "aria-pressed": hidden,
+    onclick: async () => {
+      // At once and for the rest of this popup, then saved for the next one.
+      state.hideBalances = !hidden;
+      if (state.overview) state.overview.hideBalances = !hidden;
+      // The page redraws, the eye with it: the focus stays on the eye.
+      actions
+        ?.render?.()
+        ?.then?.(() => document.querySelector("button.balance-eye")?.focus?.())
+        ?.catch?.(() => {});
+      try {
+        const res = await actions?.send?.({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: !hidden });
+        if (res?.error) throw new Error(res.error.message);
+      } catch (e) {
+        actions?.showToast?.(e?.message || "Couldn't save Hide balances.", 2500);
+      }
+    },
+  });
   const balanceLabel = bracketTitle({
     class: "balance-sub balance-label",
     text: heroLabel,
-    action: refreshBtn,
+    action: [eyeBtn, refreshBtn],
   });
 
   const balanceSubRow = h("div", { class: "balance-subrow" }, [balanceLabel]);
   const balanceSplit = h("div", { class: "balance-split" }, [
     h("div", { class: "balance-split-item" }, [
       h("span", { class: "balance-split-label", text: "Public" }),
-      h("span", { class: "balance-split-value", text: balDusk, title: balFull }),
+      h("span", { class: "balance-split-value", title: hidden ? undefined : balFull }, [balance(hidden, balDusk)]),
     ]),
     showShielded
       ? h("div", { class: "balance-split-item" }, [
@@ -156,7 +184,9 @@ export function homeView(ov, { state, actions } = {}) {
             text: shieldStatus ? `Shielded · ${shieldStatus}` : "Shielded",
             title: shieldStatusTitle,
           }),
-          h("span", { class: "balance-split-value", text: shieldDusk, title: shieldFull }),
+          h("span", { class: "balance-split-value", title: hidden ? undefined : shieldFull }, [
+            balance(hidden, shieldDusk),
+          ]),
         ])
       : null,
   ].filter(Boolean));
@@ -222,7 +252,7 @@ export function homeView(ov, { state, actions } = {}) {
   // rendered *outside* this container (more MetaMask-like, less "card-in-card").
   const hero = h("div", { class: "home-balance home-hero" }, [
     balanceSubRow,
-    h("div", { class: "balance-amount", text: heroAmt, title: heroAmtTitle }),
+    h("div", { class: "balance-amount", title: hidden ? undefined : heroAmtTitle }, [balance(hidden, heroAmt)]),
     balanceSplit,
     ov?.balanceError
       ? h("div", { class: "muted", text: `Balance error: ${ov.balanceError}` })

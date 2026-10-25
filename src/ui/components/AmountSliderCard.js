@@ -1,5 +1,6 @@
 import { UI_DISPLAY_DECIMALS, formatLuxShort, parseDuskToLux } from "../../shared/amount.js";
 import { h } from "../lib/dom.js";
+import { balance } from "./Balance.js";
 import { decimalInput } from "./FormControls.js";
 
 // Slider resolution (0–100% in 0.1% steps).
@@ -55,6 +56,9 @@ export function createAmountSliderCard({
   children = [],
   // Message shown when user taps MAX while max isn't available.
   maxUnavailableToast = "Enter a valid recipient to calculate max",
+  // Balances are hidden: the slider's share of max, which with the amount
+  // gives the balance away, shows as ••%.
+  hidden = false,
 } = {}) {
   let maxLux = null;
 
@@ -142,14 +146,9 @@ export function createAmountSliderCard({
     slider.style.setProperty("--range-pct", `${pctExact}%`);
 
     const pctInt = Math.round(pctExact);
-    if (n > 0 && pctInt === 0) {
-      sliderPct.textContent = "<1%";
-    } else if (pctInt >= 100) {
-      sliderPct.textContent = "100%";
-    } else {
-      sliderPct.textContent = `${pctInt}%`;
-    }
-    slider.setAttribute("aria-valuetext", sliderPct.textContent);
+    const pct = n > 0 && pctInt === 0 ? "<1%" : pctInt >= 100 ? "100%" : `${pctInt}%`;
+    sliderPct.replaceChildren(balance(hidden, pct, "••%"));
+    slider.setAttribute("aria-valuetext", hidden ? "hidden" : pct);
   }
 
   function setAmountLux(lux, { syncSlider = true } = {}) {

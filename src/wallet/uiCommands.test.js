@@ -133,6 +133,23 @@ describe("shared UI command dispatcher", () => {
     });
   });
 
+  it("saves Hide balances, with the wallet locked or not", async () => {
+    const adapters = createAdapters();
+
+    await expect(handleUiCommand({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: true }, adapters)).resolves.toEqual({
+      ok: true,
+      hideBalances: true,
+    });
+    expect(mocks.setSettings).toHaveBeenCalledWith({ hideBalances: true });
+    expect(adapters.getEngineStatus).not.toHaveBeenCalled();
+
+    // Only true hides them.
+    await expect(handleUiCommand({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: "true" }, adapters)).resolves.toEqual({
+      ok: true,
+      hideBalances: false,
+    });
+  });
+
   it("clamps and applies the selected account index", async () => {
     const adapters = createAdapters(true);
 

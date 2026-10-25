@@ -5,6 +5,7 @@ import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
+import { balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { fieldLabel, integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
@@ -210,6 +211,7 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
 
 export function assetsSectionsView(ov, { state, actions } = {}) {
   const st = ensureTokenBalancesLoaded(ov, { state, actions });
+  const hidden = balancesHidden(ov);
 
   const openAddToken = () => {
     state.route = "asset_add_token";
@@ -250,7 +252,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
         ]),
         h("div", { class: "asset-row-tail" }, [
           h("div", { class: "asset-bal" }, [
-            h("div", { class: "asset-amt", text: bal }),
+            h("div", { class: "asset-amt" }, [balance(hidden, bal)]),
             h("div", { class: "asset-sub", text: "Balance" }),
           ]),
           h("div", { class: "activity-chevron", text: "›" }),
@@ -586,6 +588,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
 
   const balUnits = st?.balances?.[cid];
   const balHuman = balUnits != null ? formatTokenUnits(balUnits, dec, { maxFrac: UI_DISPLAY_DECIMALS }) : "—";
+  const hidden = balancesHidden(ov);
 
   const form = (state.assetTokenForm ??= { to: "", amount: "", spender: "", approveAmount: "" });
 
@@ -700,7 +703,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     ]),
     h("div", { class: "asset-token-balance" }, [
       h("div", { class: "asset-token-balance-label", text: "Balance" }),
-      h("div", { class: "asset-token-balance-value", text: balHuman }),
+      h("div", { class: "asset-token-balance-value" }, [balance(hidden, balHuman)]),
     ]),
     h("div", { class: "asset-token-meta" }, [
       h("div", { class: "asset-token-meta-row" }, [
@@ -710,7 +713,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
       balUnits != null
         ? h("div", { class: "asset-token-meta-row" }, [
             h("span", { text: "Atomic units" }),
-            h("code", { text: String(balUnits), title: String(balUnits) }),
+            h("code", { title: hidden ? undefined : String(balUnits) }, [balance(hidden, String(balUnits))]),
           ])
         : null,
     ].filter(Boolean)),

@@ -18,6 +18,7 @@ import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
+import { balance, balancesHidden } from "../../components/Balance.js";
 import { decimalInput, fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
 
@@ -141,6 +142,7 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
     : staticCfg;
   const pool = st.pool ? parseSozuPoolState(st.pool) : null;
   const position = st.position ? parseSozuPosition(st.position) : null;
+  const hidden = balancesHidden(ov);
   const publicBalanceLux = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const poolBalanceLux = safeBigInt(position?.poolBalanceLux ?? 0, 0n);
   const publicFeeLux = defaultContractCallFeeLux();
@@ -294,13 +296,13 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
       position
         ? h("div", { class: "hrow" }, [
             h("div", { class: "muted", text: "Pool balance" }),
-            h("code", { text: `${fmtLux(position.poolBalanceLux)} DUSK` }),
+            h("code", {}, [balance(hidden, fmtLux(position.poolBalanceLux)), " DUSK"]),
           ])
         : h("div", { class: "muted", text: "No Sozu pool balance loaded." }),
       liveStatus?.publicBalance
         ? h("div", { class: "hrow" }, [
             h("div", { class: "muted", text: "Available" }),
-            h("code", { text: `${fmtLux(liveStatus.publicBalance.value)} DUSK` }),
+            h("code", {}, [balance(hidden, fmtLux(liveStatus.publicBalance.value)), " DUSK"]),
           ])
         : null,
       position
@@ -312,7 +314,7 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
             onclick: stDuskAutoAdded ? openStDuskAsset : undefined,
           }, [
             h("div", { class: "muted", text: "stDUSK" }),
-            h("code", { text: `${fmtLux(position.stDuskBalanceLux)} stDUSK` }),
+            h("code", {}, [balance(hidden, fmtLux(position.stDuskBalanceLux)), " stDUSK"]),
           ])
         : null,
       pool

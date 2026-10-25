@@ -82,6 +82,12 @@ export async function handleUiCommand(
     return { ok: true, nftMetadataEnabled: false, ipfsGateway: next.ipfsGateway ?? "" };
   }
 
+  // A display choice, so it needs no unlocked wallet.
+  if (type === "DUSK_UI_SET_HIDE_BALANCES") {
+    const next = await setSettings({ hideBalances: message.hideBalances === true });
+    return { ok: true, hideBalances: next.hideBalances === true };
+  }
+
   if (type === "DUSK_UI_GET_CACHED_GAS_PRICE") {
     await ensureEngineConfigured();
     return { ok: true, result: await engineCall("dusk_getCachedGasPrice") };

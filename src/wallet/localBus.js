@@ -342,6 +342,7 @@ export async function localSend(message) {
         archiverUrl: settings.archiverUrl,
         nftMetadataEnabled: settings.nftMetadataEnabled !== false,
         ipfsGateway: settings.ipfsGateway ?? "",
+        hideBalances: settings.hideBalances === true,
         networkName: networkNameFromNodeUrl(settings.nodeUrl),
         activeOrigin,
         activeConnected,
