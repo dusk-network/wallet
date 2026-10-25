@@ -60,6 +60,7 @@
       String(profile.profileId ?? ""),
       String(profile.account ?? ""),
       String(profile.shieldedAddress ?? ""),
+      String(profile.name ?? ""),
     ].join("\u0000");
   }
 

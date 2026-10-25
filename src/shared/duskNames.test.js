@@ -11,6 +11,10 @@ vi.mock("@duskdomains/sdk/lens-reader", async (importOriginal) => ({
   ...(await importOriginal()),
   createLensReader: vi.fn(),
 }));
+vi.mock("./verifiedNames.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  rememberVerifiedName: vi.fn(async () => {}),
+}));
 
 const nodeUrl = (id) => NETWORK_PRESETS.find((preset) => preset.id === id).nodeUrl;
 const MAINNET = nodeUrl("mainnet");
@@ -28,6 +32,7 @@ const RECORD_KEYS = ["moonlight_address", "phoenix_payment_endpoint"];
 
 let lens;
 let names;
+let kept;
 
 beforeEach(async () => {
   // An extension runtime, so bundled assets resolve to extension URLs.
@@ -39,6 +44,8 @@ beforeEach(async () => {
   lens = await import("@duskdomains/sdk/lens-reader");
   lens.createLensReader.mockReset();
   names = await import("./duskNames.js");
+  kept = await import("./verifiedNames.js");
+  kept.rememberVerifiedName.mockClear();
 });
 
 afterEach(() => {
@@ -479,6 +486,27 @@ describe("lookupPrimaryName", () => {
     expect(reader.verifyPrimary).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps each answer for sites and approvals, and nothing for a failed lookup", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const reader = useReader({ verifyPrimary: async () => primary("domains.dusk") });
+    await expect(lookup()).resolves.toBe("domains.dusk");
+    expect(kept.rememberVerifiedName).toHaveBeenCalledWith(TESTNET, ACCOUNT, "domains.dusk");
+
+    // A reused answer is kept once.
+    await expect(lookup()).resolves.toBe("domains.dusk");
+    expect(kept.rememberVerifiedName).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(61_000);
+    reader.verifyPrimary.mockResolvedValue(null);
+    await expect(lookup()).resolves.toBeNull();
+    expect(kept.rememberVerifiedName).toHaveBeenLastCalledWith(TESTNET, ACCOUNT, null);
+
+    vi.advanceTimersByTime(61_000);
+    reader.verifyPrimary.mockRejectedValue(new lens.LensReaderError("read", "offline"));
+    await expect(lookup()).resolves.toBeNull();
+    expect(kept.rememberVerifiedName).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps lookups apart by node and account, so a switch looks the new one up", async () => {
     const key = Array.from(decodeBase58(ACCOUNT)).join();
     const reader = useReader({
@@ -552,6 +580,51 @@ describe("lookupShieldedName", () => {
   });
 });
 
+describe("lookupRecipientName", () => {
+  const lookup = (recipient = ACCOUNT, url = TESTNET) => names.lookupRecipientName(recipient, { nodeUrl: url });
+
+  it("gives the recipient's verified primary name, read as a profile's is, and keeps nothing", async () => {
+    const reader = useReader({ verifyPrimary: async () => primary("carol.dusk") });
+    await expect(lookup(` ${ACCOUNT} `)).resolves.toBe("carol.dusk");
+    expect(reader.verifyPrimary).toHaveBeenCalledWith(Array.from(decodeBase58(ACCOUNT)));
+    expect(kept.rememberVerifiedName).not.toHaveBeenCalled();
+  });
+
+  it("gives no name without a verified primary, when the lookup fails, or for what can't have one", async () => {
+    const reader = useReader({ verifyPrimary: async () => null });
+    await expect(lookup()).resolves.toBeNull();
+    // A primary whose record doesn't point back to the account fails the reader's check.
+    reader.verifyPrimary.mockRejectedValue(new lens.LensReaderError("evidence", "Lens primary does not match its endpoint"));
+    await expect(lookup()).resolves.toBeNull();
+
+    lens.createLensReader.mockClear();
+    for (const recipient of [ADDRESS, `0x${"11".repeat(32)}`, "carol.dusk", ""]) {
+      await expect(lookup(recipient)).resolves.toBeNull();
+    }
+    await expect(lookup(ACCOUNT, nodeUrl("devnet"))).resolves.toBeNull();
+    expect(lens.createLensReader).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["isn't canonical", "Carol.dusk"],
+    ["is longer than 24 characters", "abcdefghijklmnopqrst.dusk"],
+    ["has a label like a contract ID", "0xdeadbeef.dusk"],
+    ["has a subname label like one", "0x11.carol.dusk"],
+    ["has a label like the start of an account or address", "26fch745yg5etfl1.dusk"],
+  ])("gives no name that %s", async (_label, spelling) => {
+    useReader({ verifyPrimary: async () => primary(spelling) });
+    await expect(lookup()).resolves.toBeNull();
+  });
+
+  it.each(["abcdefghijklmnopqrs.dusk", "pay.carol.dusk", "carol-2024-payroll.dusk", "web3wallet2024.dusk", "0xford.dusk"])(
+    "gives %s, which keeps to those rules",
+    async (spelling) => {
+      useReader({ verifyPrimary: async () => primary(spelling) });
+      await expect(lookup()).resolves.toBe(spelling);
+    }
+  );
+});
+
 describe("duskNameErrorText", () => {
   it("explains each failure", () => {
     const text = (reason) => names.duskNameErrorText({ name: "alice.dusk", reason });
@@ -609,5 +682,25 @@ describe("bundle boundary", () => {
     for (const parts of users) {
       expect(await read(...parts), parts.join("/")).not.toMatch(/@duskdomains\/sdk|duskNamesSdk/);
     }
+  });
+
+  it("keeps the names code out of the service worker and the approval window", async () => {
+    const read = (...parts) => readFile(path.resolve(process.cwd(), "src", ...parts), "utf8");
+    const readers = [
+      ["shared", "verifiedNames.js"],
+      ["shared", "permissions.js"],
+      ["background", "siteNames.js"],
+      ["background", "rpc.js"],
+      ["background", "dappEvents.js"],
+      ["background", "index.js"],
+      ["ui", "notification", "app.js"],
+    ];
+    const importsNames = /(?:from\s*|import\(\s*)["'][^"']*(?:@duskdomains\/sdk|duskNamesSdk|\/duskNames\.js)["']/;
+    for (const parts of readers) {
+      expect(await read(...parts), parts.join("/")).not.toMatch(importsNames);
+    }
+    expect('import { x } from "../shared/duskNames.js";').toMatch(importsNames);
+    // The engine checks the names sites get.
+    expect(await read("engine", "runtime.js")).toMatch(/import \{[^}]*\blookupPrimaryName\b[^}]*\} from "\.\.\/shared\/duskNames\.js";/);
   });
 });

@@ -3,6 +3,9 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 let permissions = {};
 let settings = { nodeUrl: "https://testnet.nodes.dusk.network" };
 let engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"] };
+// The .dusk name checks kept in verifiedNames.js.
+let verifiedNames = {};
+let storageListener = null;
 
 vi.mock("../shared/settings.js", () => ({
   getSettings: vi.fn(async () => settings),
@@ -14,12 +17,24 @@ vi.mock("../shared/permissions.js", async (importOriginal) => ({
 }));
 
 vi.mock("./engineHost.js", () => ({
+  engineCall: vi.fn(async () => true),
   getEngineStatus: vi.fn(async () => engineStatus),
+}));
+
+vi.mock("../shared/verifiedNames.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  readVerifiedNames: vi.fn(async () => verifiedNames),
 }));
 
 vi.mock("../platform/extensionApi.js", () => ({
   getExtensionApi: () => ({
-    storage: { onChanged: { addListener: () => {} } },
+    storage: {
+      onChanged: {
+        addListener: (fn) => {
+          storageListener = fn;
+        },
+      },
+    },
   }),
 }));
 
@@ -64,6 +79,7 @@ describe("dappEvents", () => {
     permissions = {};
     settings = { nodeUrl: "https://testnet.nodes.dusk.network" };
     engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"] };
+    verifiedNames = {};
     vi.resetModules();
   });
 
@@ -427,5 +443,343 @@ describe("dappEvents", () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(port.messages).toEqual([]);
+  });
+
+  describe("profile names", () => {
+    const connected = (accountIndex = 0) => ({
+      profileId: `account:${accountIndex}:acct${accountIndex}`,
+      accountIndex,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1,
+      updatedAt: 1,
+    });
+    const check = (name, at = Date.now()) => ({ name, at });
+    const profileEvents = (port) =>
+      port.messages.filter((m) => m?.type === "DUSK_PROVIDER_EVENT" && m?.name === "profilesChanged");
+    // The profiles a page got, in order: in its first state and in profilesChanged.
+    const given = (port) =>
+      port.messages.flatMap((m) =>
+        m?.type === "DUSK_PROVIDER_STATE" ? [m.state.profiles] : m?.name === "profilesChanged" ? [m.data] : []
+      );
+    // Whether a page got a profile's name after it got the profile without one.
+    const nameCameBack = (port) =>
+      given(port).some((profiles, i, all) => profiles[0]?.name && all.slice(0, i).some((p) => !p[0]?.name));
+    const plain = { profileId: "account:0:acct0", account: "acct0" };
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+
+    async function openPort(ev, origin = "https://dapp.example", tabId = 1) {
+      const port = new FakePort(origin, tabId);
+      ev.registerDappPort(port);
+      await new Promise((r) => setTimeout(r, 0));
+      return port;
+    }
+
+    it("gives a connected site's profile its .dusk name in its state and in profilesChanged", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk"), acct1: check("bob.dusk") } };
+
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+      expect(port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE")?.state.profiles).toEqual([
+        { profileId: "account:0:acct0", account: "acct0", name: "alice.dusk" },
+      ]);
+
+      await ev.broadcastProfilesChangedAll();
+      expect(profileEvents(port).at(-1)?.data).toEqual([
+        { profileId: "account:0:acct0", account: "acct0", name: "alice.dusk" },
+      ]);
+
+      // A name checked over ten minutes ago, or on another network, isn't sent.
+      verifiedNames = {
+        testnet: { acct0: check("alice.dusk", Date.now() - 10 * 60_000) },
+        mainnet: { acct0: check("main.dusk") },
+      };
+      await ev.broadcastProfilesChangedForOrigin("https://dapp.example");
+      expect(profileEvents(port).at(-1)?.data).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
+    });
+
+    it("has a connected profile's name checked again, without waiting, when it is over a minute old", async () => {
+      permissions = { "https://dapp.example": connected(1) };
+      verifiedNames = { testnet: { acct0: check(null, Date.now() - 2 * 60_000) } };
+      const { engineCall } = await import("./engineHost.js");
+      engineCall.mockClear();
+      // The check never answers; the state doesn't wait for it.
+      engineCall.mockImplementation(() => new Promise(() => {}));
+
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+      engineCall.mockImplementation(async () => true);
+      expect(port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE")?.state.profiles).toEqual([
+        { profileId: "account:1:acct1", account: "acct1" },
+      ]);
+      expect(engineCall).toHaveBeenCalledWith("engine_checkNames", {
+        nodeUrl: "https://testnet.nodes.dusk.network",
+        accounts: ["acct1"],
+      });
+    });
+
+    it("sends profilesChanged when a later check adds, changes or removes a connected profile's name", async () => {
+      permissions = { "https://dapp.example": connected(0), "https://other.example": connected(1) };
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+      const other = await openPort(ev, "https://other.example", 2);
+      const stranger = await openPort(ev, "https://stranger.example", 3);
+      for (const p of [port, other, stranger]) p.messages = [];
+
+      const steps = [
+        [{}, { testnet: { acct0: check("alice.dusk") } }, "alice.dusk"],
+        [{ testnet: { acct0: check("alice.dusk") } }, { testnet: { acct0: check("carol.dusk") } }, "carol.dusk"],
+        [{ testnet: { acct0: check("carol.dusk") } }, { testnet: { acct0: check(null) } }, undefined],
+      ];
+      for (const [before, after, name] of steps) {
+        verifiedNames = after;
+        await ev.handleVerifiedNamesDiff(before, after);
+        expect(profileEvents(port).at(-1)?.data).toEqual([
+          { profileId: "account:0:acct0", account: "acct0", ...(name ? { name } : {}) },
+        ]);
+      }
+      expect(profileEvents(port)).toHaveLength(3);
+      // Only the site whose profile was checked hears of it, and an
+      // unconnected site hears nothing.
+      expect(profileEvents(other)).toEqual([]);
+      expect(stranger.messages).toEqual([]);
+
+      // A check on another network, or while locked, sends nothing.
+      await ev.handleVerifiedNamesDiff({}, { mainnet: { acct0: check("main.dusk") } });
+      engineStatus = { ...engineStatus, isUnlocked: false };
+      await ev.handleVerifiedNamesDiff({}, { testnet: { acct0: check("alice.dusk") } });
+      expect(profileEvents(port)).toHaveLength(3);
+    });
+
+    it("passes a name check kept in storage on to the site", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      const ev = await import("./dappEvents.js");
+      ev.registerStorageChangeForwarder();
+      const port = await openPort(ev);
+      port.messages = [];
+
+      verifiedNames = { testnet: { acct0: check("alice.dusk") } };
+      storageListener({ dusk_verified_names_v1: { oldValue: undefined, newValue: verifiedNames } }, "local");
+      await vi.waitFor(() =>
+        expect(profileEvents(port).at(-1)?.data).toEqual([
+          { profileId: "account:0:acct0", account: "acct0", name: "alice.dusk" },
+        ])
+      );
+    });
+
+    // Holds the next permissions read until `release` is called.
+    async function holdPermissions() {
+      const { getPermissions } = await import("../shared/permissions.js");
+      const held = {};
+      getPermissions.mockImplementationOnce(
+        () => new Promise((resolve) => (held.release = () => resolve(permissions)))
+      );
+      return held;
+    }
+
+    // Holds the next call of the mocked `read` until `release` is called,
+    // which answers `value`: what it read before the wallet changed.
+    function holdNext(read, value) {
+      const held = {};
+      read.mockImplementationOnce(() => new Promise((resolve) => (held.release = () => resolve(value))));
+      return held;
+    }
+
+    const moveToMainnet = async (ev) => {
+      settings = { nodeUrl: "https://nodes.dusk.network" };
+      await ev.handleSettingsDiff({ nodeUrl: "https://testnet.nodes.dusk.network" }, settings);
+    };
+    // As index.js locks: the engine, then sites hear of it.
+    const lock = async (ev) => {
+      engineStatus = { ...engineStatus, isUnlocked: false };
+      await ev.broadcastProfilesChangedAll();
+    };
+    // The site's permission becomes `next`, as storage reports it.
+    const regrant = (next) => async (ev) => {
+      const before = permissions;
+      permissions = next;
+      await ev.handlePermissionsDiff(before, next);
+    };
+
+    it("drops a name update begun on the network the wallet moved away from", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk") }, mainnet: { acct0: check("main.dusk") } };
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+      port.messages = [];
+
+      // A Testnet check comes in, and the wallet moves to Mainnet while its
+      // update waits for the permissions.
+      const held = await holdPermissions();
+      const update = ev.handleVerifiedNamesDiff({}, { testnet: { acct0: check("carol.dusk") } });
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      await moveToMainnet(ev);
+      held.release();
+      await update;
+
+      expect(profileEvents(port).map((event) => event.data)).toEqual([
+        [{ profileId: "account:0:acct0", account: "acct0", name: "main.dusk" }],
+      ]);
+    });
+
+    it("never gives a site back a name that a later check removed", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+      port.messages = [];
+
+      // A check adds the name, and its update waits for the permissions while
+      // a later check removes the name.
+      const held = await holdPermissions();
+      verifiedNames = { testnet: { acct0: check("alice.dusk") } };
+      const added = ev.handleVerifiedNamesDiff({}, verifiedNames);
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      const before = verifiedNames;
+      verifiedNames = { testnet: { acct0: check(null) } };
+      const removed = ev.handleVerifiedNamesDiff(before, verifiedNames);
+      held.release();
+      await Promise.all([added, removed]);
+
+      // The site ends with no name.
+      expect(nameCameBack(port)).toBe(false);
+      expect(given(port).at(-1)).toEqual([plain]);
+    });
+
+    it("keeps name checks in order when one comes while the site's page reloads", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+
+      // A check adds the name and waits for the permissions, and the check
+      // that removes it comes while the site's page reloads.
+      const held = await holdPermissions();
+      const added = ev.handleVerifiedNamesDiff({}, { testnet: { acct0: check("alice.dusk") } });
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      port.onDisconnect.emit();
+      verifiedNames = { testnet: { acct0: check(null) } };
+      const removed = ev.handleVerifiedNamesDiff({ testnet: { acct0: check("alice.dusk") } }, verifiedNames);
+      const reloaded = await openPort(ev);
+      held.release();
+      await Promise.all([added, removed]);
+
+      // The reloaded page ends with no name, and the first check doesn't give
+      // it back: it reads the names again.
+      expect(nameCameBack(reloaded)).toBe(false);
+      expect(given(reloaded).at(-1)).toEqual([plain]);
+    });
+
+    const bob = { profileId: "account:1:acct1", account: "acct1", name: "bob.dusk" };
+    it.each([
+      ["a new page's first state", (ev, page) => ev.registerDappPort(page), []],
+      ["an update to every site", (ev) => ev.broadcastProfilesChangedAll(), [[bob]]],
+      ["an update to the site", (ev) => ev.broadcastProfilesChangedForOrigin("https://dapp.example"), []],
+    ])("never sends %s with a name removed while it read the names", async (_, read, otherGets) => {
+      permissions = { "https://dapp.example": connected(0), "https://other.example": connected(1) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk"), acct1: check("bob.dusk") } };
+      const ev = await import("./dappEvents.js");
+      const { readVerifiedNames } = await import("../shared/verifiedNames.js");
+      const open = await openPort(ev);
+      const other = await openPort(ev, "https://other.example", 3);
+      const page = new FakePort("https://dapp.example", 2);
+      for (const p of [open, other]) p.messages = [];
+
+      // The read has the names when a check removes the site's name.
+      const held = holdNext(readVerifiedNames, verifiedNames);
+      read(ev, page);
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      const before = verifiedNames;
+      verifiedNames = { testnet: { ...before.testnet, acct0: check(null) } };
+      await ev.handleVerifiedNamesDiff(before, verifiedNames);
+      held.release();
+      await settle();
+
+      // It is read again: the site's pages end without the name and never get
+      // it back, and an update to every site still reaches the other site.
+      for (const p of [open, page].filter((p) => p.messages.length)) {
+        expect(nameCameBack(p)).toBe(false);
+        expect(given(p).at(-1)).toEqual([plain]);
+      }
+      expect(given(other)).toEqual(otherGets);
+    });
+
+    it("builds a site's first state again when the wallet moves network meanwhile", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk") }, mainnet: { acct0: check("main.dusk") } };
+      const ev = await import("./dappEvents.js");
+
+      const held = await holdPermissions();
+      const port = new FakePort("https://dapp.example");
+      ev.registerDappPort(port);
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      await moveToMainnet(ev);
+      held.release();
+
+      await vi.waitFor(() => expect(port.messages.some((m) => m?.type === "DUSK_PROVIDER_STATE")).toBe(true));
+      const states = port.messages.filter((m) => m?.type === "DUSK_PROVIDER_STATE");
+      expect(states).toHaveLength(1);
+      expect(states[0].state).toMatchObject({
+        chainId: "dusk:1",
+        profiles: [{ profileId: "account:0:acct0", account: "acct0", name: "main.dusk" }],
+      });
+    });
+
+    it.each([
+      ["locks", lock, []],
+      ["revokes the site's grant", regrant({}), []],
+      [
+        "switches the site's profile",
+        regrant({ "https://dapp.example": connected(1) }),
+        [{ profileId: "account:1:acct1", account: "acct1" }],
+      ],
+    ])("sends sites only profiles read after the wallet %s", async (_, change, profiles) => {
+      permissions = { "https://dapp.example": connected(0) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk") } };
+      const ev = await import("./dappEvents.js");
+      const { getEngineStatus } = await import("./engineHost.js");
+      const port = await openPort(ev);
+      port.messages = [];
+
+      // A profile update, a name check's update and a new page's first state
+      // have read the wallet before the change, and go on after it.
+      const held = [0, 1, 2].map(() => holdNext(getEngineStatus, engineStatus));
+      const updates = [
+        ev.broadcastProfilesChangedAll(),
+        ev.handleVerifiedNamesDiff({}, { testnet: { acct0: check("carol.dusk") } }),
+      ];
+      const late = new FakePort("https://dapp.example", 2);
+      ev.registerDappPort(late);
+      await vi.waitFor(() => expect(held.every((h) => h.release)).toBe(true));
+      await change(ev);
+      held.forEach((h) => h.release());
+      await Promise.all(updates);
+
+      // The update to every site and the first state are read again, so each
+      // page only gets the profiles the change left it: from the change, and
+      // from the update read again.
+      expect(profileEvents(port).map((event) => event.data)).toEqual([profiles, profiles]);
+      const states = () =>
+        late.messages.filter((m) => m?.type === "DUSK_PROVIDER_STATE").map((m) => m.state.profiles);
+      await vi.waitFor(() => expect(states()).toEqual([profiles]));
+    });
+
+    it("gives sites the new network's names when the wallet's node changes", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk") }, mainnet: { acct0: check("main.dusk") } };
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+      port.messages = [];
+
+      settings = { nodeUrl: "https://nodes.dusk.network" };
+      await ev.handleSettingsDiff({ nodeUrl: "https://testnet.nodes.dusk.network" }, settings);
+      expect(profileEvents(port).at(-1)?.data).toEqual([
+        { profileId: "account:0:acct0", account: "acct0", name: "main.dusk" },
+      ]);
+
+      // Between networks without names, profiles stay as they are.
+      port.messages = [];
+      settings = { nodeUrl: "http://127.0.0.1:8080" };
+      await ev.handleSettingsDiff({ nodeUrl: "https://devnet.nodes.dusk.network" }, settings);
+      expect(profileEvents(port)).toEqual([]);
+    });
   });
 });

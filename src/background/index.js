@@ -29,6 +29,7 @@ import {
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
 import { cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
+import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNames.js";
 import {
   broadcastChainChangedAll,
   broadcastProfilesChangedAll,
@@ -43,6 +44,7 @@ import {
   registerTxNotificationHandlers,
 } from "./txNotify.js";
 import { getAccountNames } from "../shared/accountNames.js";
+import { listAddressBook } from "../shared/addressBook.js";
 import { getTxMeta, patchTxMeta, putTxMeta, listTxs } from "../shared/txStore.js";
 import { handleUiCommand } from "../wallet/uiCommands.js";
 import {
@@ -572,6 +574,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // The engine's .dusk name checks, kept here: Chrome's offscreen
+      // document has no storage.
+      if (message?.type === "DUSK_NAME_CHECKED") {
+        sendResponse({ ok: await keepEngineNameCheck(message, sender) });
+        return;
+      }
+
       // Offscreen notifies us when a tx lifecycle event is observed (best-effort).
       if (message?.type === "DUSK_TX_EXECUTED") {
         const hash = String(message.hash ?? "");
@@ -702,6 +711,22 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           accountNames = {};
         }
 
+        // The profiles' .dusk names checked lately, so the approval shows
+        // them from its first paint. It never waits for a lookup.
+        const accounts = status?.isUnlocked && Array.isArray(status.accounts) ? status.accounts : [];
+        const names = await siteNames(String(settings?.nodeUrl ?? ""), accounts);
+
+        // The saved contacts, so a request to send names a recipient the
+        // user saved from its first paint, as it names the profiles.
+        let contacts = [];
+        if (entry.kind === "send_tx") {
+          try {
+            contacts = (await listAddressBook()).map(({ name, address }) => ({ name, address }));
+          } catch {
+            contacts = [];
+          }
+        }
+
         sendResponse({
           rid: message.rid,
           kind: entry.kind,
@@ -710,14 +735,24 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
           accounts: status.accounts,
+          addresses: status.addresses,
           accountCount: settings?.accountCount ?? 1,
           selectedAccountIndex: status.selectedAccountIndex ?? settings?.selectedAccountIndex ?? 0,
           accountNames,
+          duskNames: Object.fromEntries(accounts.filter((a) => names.has(a)).map((a) => [a, names.get(a)])),
+          contacts,
           permissionAccountIndex:
             perm && perm.accountIndex !== undefined && perm.accountIndex !== null
               ? Number(perm.accountIndex) || 0
               : null,
         });
+        return;
+      }
+
+      // The .dusk name of the recipient of a site's request to send, which
+      // its approval asks for once it shows.
+      if (message?.type === "DUSK_UI_RECIPIENT_NAME") {
+        sendResponse({ ok: true, result: await approvalRecipientName(getPending(message.rid), message.recipient) });
         return;
       }
 

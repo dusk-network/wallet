@@ -40,6 +40,7 @@ import {
 } from "./engineHost.js";
 import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
+import { readCurrent, siteNames } from "./siteNames.js";
 import { putTxMeta } from "../shared/txStore.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
 import {
@@ -304,8 +305,22 @@ export async function handleRpc(origin, request) {
     return profile;
   }
 
-  function profileFromPermission(status, perm, includeShielded = false) {
-    return permissionProfileState(perm, status, includeShielded).profile;
+  function profileFromPermission(status, perm, includeShielded = false, names = null) {
+    return permissionProfileState(perm, status, includeShielded, names).profile;
+  }
+
+  // The site's profiles as they are now: its connected profile, with its
+  // verified .dusk name when that was checked lately. Reading the name never
+  // waits for a lookup.
+  function siteProfiles() {
+    return readCurrent(async () => {
+      const perm = await getPermissionForOrigin(origin);
+      const status = perm ? await getEngineStatus() : null;
+      const account = profileFromPermission(status, perm)?.account;
+      const names = account ? await siteNames(String((await getSettings())?.nodeUrl ?? ""), [account]) : null;
+      const profile = profileFromPermission(status, perm, hasShieldedGrant(perm), names);
+      return profile ? [profile] : [];
+    });
   }
 
   async function captureApprovalContext(perm) {
@@ -484,19 +499,12 @@ export async function handleRpc(origin, request) {
 
     case "dusk_requestProfiles": {
       const options = firstParamObject(params);
-      const { perm, status } = await requestProfileConnection(options);
-      const profile = profileFromPermission(status, perm, hasShieldedGrant(perm));
-      return profile ? [profile] : [];
+      await requestProfileConnection(options);
+      return siteProfiles();
     }
 
-    case "dusk_profiles": {
-      const perm = await getPermissionForOrigin(origin);
-      if (!perm) return [];
-      const status = await getEngineStatus();
-      if (!status?.isUnlocked) return [];
-      const profile = profileFromPermission(status, perm, hasShieldedGrant(perm));
-      return profile ? [profile] : [];
-    }
+    case "dusk_profiles":
+      return siteProfiles();
 
     case "dusk_requestShieldedAddress": {
       const options = firstParamObject(params);
