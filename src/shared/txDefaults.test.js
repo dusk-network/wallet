@@ -16,18 +16,18 @@ import { TX_KIND } from "./constants.js";
 describe("DEFAULT_GAS_BY_KIND", () => {
   it("has a public fallback default for transfer", () => {
     expect(DEFAULT_GAS_BY_KIND[TX_KIND.TRANSFER]).toEqual({
-      limit: "2000000",
+      limit: "2500000",
       price: "1",
     });
   });
 
   it("has privacy-aware defaults for transfer", () => {
     expect(DEFAULT_TRANSFER_GAS_BY_PRIVACY.public).toEqual({
-      limit: "2000000",
+      limit: "2500000",
       price: "1",
     });
     expect(DEFAULT_TRANSFER_GAS_BY_PRIVACY.shielded).toEqual({
-      limit: "15000000",
+      limit: "50000000",
       price: "1",
     });
   });
@@ -65,17 +65,17 @@ describe("DEFAULT_GAS_BY_KIND", () => {
 
 describe("getDefaultGas", () => {
   it("returns defaults for known kinds", () => {
-    expect(getDefaultGas("transfer")).toEqual({ limit: "2000000", price: "1" });
+    expect(getDefaultGas("transfer")).toEqual({ limit: "2500000", price: "1" });
     expect(getDefaultGas("shield")).toEqual({ limit: "50000000", price: "1" });
   });
 
   it("returns privacy-aware transfer defaults", () => {
     expect(getDefaultGas("transfer", { privacy: "public" })).toEqual({
-      limit: "2000000",
+      limit: "2500000",
       price: "1",
     });
     expect(getDefaultGas("transfer", { privacy: "shielded" })).toEqual({
-      limit: "15000000",
+      limit: "50000000",
       price: "1",
     });
   });
@@ -96,8 +96,8 @@ describe("getDefaultGas", () => {
   });
 
   it("handles case insensitivity", () => {
-    expect(getDefaultGas("TRANSFER")).toEqual({ limit: "2000000", price: "1" });
-    expect(getDefaultGas("TRANSFER", { privacy: "Shielded" })).toEqual({ limit: "15000000", price: "1" });
+    expect(getDefaultGas("TRANSFER")).toEqual({ limit: "2500000", price: "1" });
+    expect(getDefaultGas("TRANSFER", { privacy: "Shielded" })).toEqual({ limit: "50000000", price: "1" });
     expect(getDefaultGas("Shield")).toEqual({ limit: "50000000", price: "1" });
   });
 
@@ -111,7 +111,7 @@ describe("getDefaultGas", () => {
 describe("getMinimumGas", () => {
   it("returns privacy-aware transfer floors", () => {
     expect(getMinimumGas("transfer", { privacy: "public" })).toEqual({ limit: "2000000" });
-    expect(getMinimumGas("transfer", { privacy: "shielded" })).toEqual({ limit: "15000000" });
+    expect(getMinimumGas("transfer", { privacy: "shielded" })).toEqual({ limit: "30000000" });
   });
 
   it("returns a shielded contract-call floor", () => {
@@ -124,22 +124,45 @@ describe("getMinimumGas", () => {
     expect(getMinimumGas("unstake", { privacy: "shielded" })).toEqual({ limit: "100000000" });
     expect(getMinimumGas("withdraw_reward", { privacy: "shielded" })).toEqual({ limit: "100000000" });
   });
+
+  it("returns public staking floors", () => {
+    expect(getMinimumGas("stake")).toEqual({ limit: "35000000" });
+    expect(getMinimumGas("unstake", { privacy: "public" })).toEqual({ limit: "35000000" });
+    expect(getMinimumGas("withdraw_reward")).toEqual({ limit: "35000000" });
+  });
+
+  it("returns shield and unshield floors", () => {
+    expect(getMinimumGas("shield")).toEqual({ limit: "30000000" });
+    expect(getMinimumGas("unshield")).toEqual({ limit: "30000000" });
+  });
+
+  it("keeps every default at or above its floor", () => {
+    for (const kind of Object.values(TX_KIND)) {
+      for (const privacy of ["public", "shielded"]) {
+        const min = getMinimumGas(kind, { privacy });
+        if (!min) continue;
+        expect(BigInt(getDefaultGas(kind, { privacy }).limit)).toBeGreaterThanOrEqual(
+          BigInt(min.limit)
+        );
+      }
+    }
+  });
 });
 
 describe("applyGasDefaults", () => {
   it("fills missing limit and price", () => {
     const result = applyGasDefaults("transfer", {});
-    expect(result).toEqual({ limit: "2000000", price: "1" });
+    expect(result).toEqual({ limit: "2500000", price: "1" });
   });
 
   it("fills privacy-aware transfer gas", () => {
     const result = applyGasDefaults("transfer", {}, { privacy: "shielded" });
-    expect(result).toEqual({ limit: "15000000", price: "1" });
+    expect(result).toEqual({ limit: "50000000", price: "1" });
   });
 
   it("fills missing limit only", () => {
     const result = applyGasDefaults("transfer", { price: "2" });
-    expect(result).toEqual({ limit: "2000000", price: "2" });
+    expect(result).toEqual({ limit: "2500000", price: "2" });
   });
 
   it("fills missing price only", () => {
@@ -153,7 +176,7 @@ describe("applyGasDefaults", () => {
   });
 
   it("fills defaults for explicit null (auto sentinel)", () => {
-    expect(applyGasDefaults("transfer", null)).toEqual({ limit: "2000000", price: "1" });
+    expect(applyGasDefaults("transfer", null)).toEqual({ limit: "2500000", price: "1" });
   });
 
   it("returns undefined when no defaults exist and gas undefined", () => {
@@ -167,13 +190,13 @@ describe("applyGasDefaults", () => {
 
   it("handles empty string values", () => {
     const result = applyGasDefaults("transfer", { limit: "", price: "" });
-    expect(result).toEqual({ limit: "2000000", price: "1" });
+    expect(result).toEqual({ limit: "2500000", price: "1" });
   });
 
   it("rejects under-floor shielded transfer gas", () => {
     expect(() =>
       applyGasDefaults("transfer", { limit: "10000000", price: "1" }, { privacy: "shielded" })
-    ).toThrow(/at least 15000000/);
+    ).toThrow(/at least 30000000/);
   });
 
   it("rejects under-floor shielded contract-call gas", () => {
@@ -191,6 +214,18 @@ describe("applyGasDefaults", () => {
       applyGasDefaults("stake", { limit: "99999999", price: "1" }, { privacy: "shielded" })
     ).toThrow(/at least 100000000/);
   });
+
+  it("rejects under-floor public staking gas", () => {
+    expect(() => applyGasDefaults("unstake", { limit: "34999999", price: "1" })).toThrow(
+      /at least 35000000/
+    );
+  });
+
+  it("rejects under-floor shield gas", () => {
+    expect(() => applyGasDefaults("shield", { limit: "29999999", price: "1" })).toThrow(
+      /at least 30000000/
+    );
+  });
 });
 
 describe("applyTxDefaults", () => {
@@ -201,7 +236,7 @@ describe("applyTxDefaults", () => {
       kind: "transfer",
       privacy: "public",
       to: "abc123",
-      gas: { limit: "2000000", price: "1" },
+      gas: { limit: "2500000", price: "1" },
     });
   });
 
@@ -212,7 +247,7 @@ describe("applyTxDefaults", () => {
       kind: "transfer",
       privacy: "shielded",
       to: "abc123",
-      gas: { limit: "15000000", price: "1" },
+      gas: { limit: "50000000", price: "1" },
     });
   });
 
@@ -235,7 +270,7 @@ describe("applyTxDefaults", () => {
   it("handles case insensitive kind", () => {
     const params = { kind: "TRANSFER", to: "abc" };
     const result = applyTxDefaults(params);
-    expect(result.gas).toEqual({ limit: "2000000", price: "1" });
+    expect(result.gas).toEqual({ limit: "2500000", price: "1" });
   });
 
   it("rejects under-floor shielded transfer params", () => {
@@ -245,7 +280,7 @@ describe("applyTxDefaults", () => {
         privacy: "shielded",
         gas: { limit: "10000000", price: "1" },
       })
-    ).toThrow(/at least 15000000/);
+    ).toThrow(/at least 30000000/);
   });
 
   it("rejects under-floor shielded contract-call params", () => {
@@ -280,10 +315,10 @@ describe("assertMinimumGas", () => {
     expect(
       assertMinimumGas(
         "transfer",
-        { limit: "15000000", price: "1" },
+        { limit: "30000000", price: "1" },
         { privacy: "shielded" }
       )
-    ).toEqual({ limit: "15000000", price: "1" });
+    ).toEqual({ limit: "30000000", price: "1" });
   });
 });
 

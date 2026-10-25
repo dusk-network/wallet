@@ -11,30 +11,53 @@ import { TX_KIND } from "./constants.js";
 /**
  * Default gas settings by transaction kind.
  *
- * Rationale (current practical guidance):
- * - Public/Moonlight transfers: currently expected around 1-2M gas
- * - Shielded/Phoenix transfers: currently expected around 11-12M gas
- * - Heavy operations (stake/unstake/withdraw): can reach ~27M
+ * Rationale (a failed transaction, out of gas included, is charged its whole
+ * limit, so defaults need clear headroom; the public, shield and staking
+ * figures are gas spent on mainnet and testnet under Rusk 1.7.1, October
+ * 2026):
+ * - Public/Moonlight transfers: 1.81-1.87M gas used, memos included
+ * - Shielded/Phoenix transfers: 10.7-11.7M gas used on testnet under 1.7.1,
+ *   and ~23.7M on Rusk master (10M for PLONK verification plus ~13.7M for
+ *   Merkle/Poseidon work and bookkeeping). Rusk's unreleased
+ *   admission rules (rusk-private #594, not in 1.7.1) also enforce a Phoenix
+ *   spend-gas admission floor of ~24M plus the transaction's data charge, so
+ *   an under-gassed shielded send is rejected at submission (GasLimitTooLow)
+ *   or runs out of gas mid-execution.
+ * - Shield: 28.5M gas used. Unshield is a Phoenix spend, as above.
+ * - Public stake: 31.2-31.3M gas used; unstake and reward withdrawal:
+ *   33.0-33.2M.
  * - Shielded staking operations pay from Phoenix notes and are deliberately
  *   kept at the same conservative envelope as shielded contract calls.
  *
  * So:
- * - transfer defaults are privacy-aware: public defaults to 2M, shielded
- *   defaults to 15M to leave headroom above observed Phoenix transfer cost.
+ * - transfer defaults are privacy-aware: public defaults to 2.5M (1.3x the
+ *   highest public transfer), shielded defaults to 50M to clear the ~24M
+ *   admission floor plus data charge (~25.7M real total on data-charging
+ *   networks) with margin. 50M matches the shield/unshield defaults and the
+ *   CLI wallet's transfer default.
+ * - shield and public staking default to 50M (1.5x to 1.8x what they
+ *   spend), and unshield to the shielded transfer default.
  * - 500,000,000 for contract_call is a conservative default safety cap.
  *
  * Minimums are client-side safety floors. They are not a substitute for
  * node-side simulation/admission checks, but they prevent the wallet from
  * submitting obviously under-gassed transactions that can leave Phoenix
- * reservations stuck until mempool expiry/removal.
+ * reservations stuck until mempool expiry/removal. The shielded transfer
+ * floor is 30M: above that ~24M Phoenix admission floor plus data charge,
+ * yet below the 50M default so an advanced user can still dial a tighter
+ * manual limit. Unshield shares it. The public transfer (2M), shield
+ * (30M) and public staking (35M) floors sit 5% to 12% above the highest
+ * spend measured.
+ *
+ * The web wallet uses the same numbers.
  */
 export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
   public: Object.freeze({
-    limit: "2000000",
+    limit: "2500000",
     price: "1",
   }),
   shielded: Object.freeze({
-    limit: "15000000",
+    limit: "50000000",
     price: "1",
   }),
 });
@@ -44,7 +67,7 @@ export const MIN_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
     limit: "2000000",
   }),
   shielded: Object.freeze({
-    limit: "15000000",
+    limit: "30000000",
   }),
 });
 
@@ -87,8 +110,20 @@ export const MIN_GAS_BY_KIND = Object.freeze({
   [TX_KIND.TRANSFER]: Object.freeze({
     ...MIN_TRANSFER_GAS_BY_PRIVACY.public,
   }),
+  [TX_KIND.SHIELD]: Object.freeze({
+    limit: "30000000",
+  }),
   [TX_KIND.UNSHIELD]: Object.freeze({
-    limit: "50000000",
+    limit: "30000000",
+  }),
+  [TX_KIND.STAKE]: Object.freeze({
+    limit: "35000000",
+  }),
+  [TX_KIND.UNSTAKE]: Object.freeze({
+    limit: "35000000",
+  }),
+  [TX_KIND.WITHDRAW_REWARD]: Object.freeze({
+    limit: "35000000",
   }),
 });
 
