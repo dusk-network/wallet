@@ -80,6 +80,20 @@ async function receive(tab, { state = { receive: { tab } }, ov = overview } = {}
 }
 
 describe("receive", () => {
+  it("opens on the public account, first of the two tabs, as the web wallet does", async () => {
+    const view = await receive(undefined, { state: {} });
+    const tabs = dom.document.body.querySelector(".tabs").children;
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Public", "Shielded"]);
+    expect(tabs.map((tab) => tab.classList.contains("is-active"))).toEqual([true, false]);
+    expect(view.state.receive.tab).toBe("public");
+    expect(view.address.title).toBe(ACCOUNT);
+
+    tabs[1].click();
+    expect(view.state.receive.tab).toBe("shielded");
+    const shielded = await receive(undefined, { state: view.state });
+    expect(shielded.address.title).toBe(ADDRESS);
+  });
+
   it("shows the name and the short account under the QR, each copying its own", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const view = await receive("public");

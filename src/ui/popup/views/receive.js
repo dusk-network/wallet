@@ -53,7 +53,7 @@ function isTauriMobileLike() {
 }
 
 function qrFilename({ request, tab } = {}) {
-  const rail = tab === "public" ? "public" : "shielded";
+  const rail = tab === "shielded" ? "shielded" : "public";
   return request ? `dusk-${rail}-request-qr.png` : `dusk-${rail}-receive-qr.png`;
 }
 
@@ -72,13 +72,13 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // Persist request fields while the user navigates around.
   const r = (state.receive ??= {
-    tab: "shielded",
+    tab: "public",
     requestOpen: false,
     infoOpen: false,
     amountDusk: "",
     memo: "",
   });
-  const tab = r.tab === "public" ? "public" : "shielded";
+  const tab = r.tab === "shielded" ? "shielded" : "public";
 
   // Current recipient string
   const recipient = tab === "public" ? account : address;
@@ -109,9 +109,9 @@ export function receiveView(ov, { state, actions } = {}) {
     },
   });
 
-  const segIndex = tab === "public" ? 1 : 0;
-  tabShielded.classList.toggle("is-active", segIndex === 0);
-  tabPublicBtn.classList.toggle("is-active", segIndex === 1);
+  const segIndex = tab === "public" ? 0 : 1;
+  tabPublicBtn.classList.toggle("is-active", segIndex === 0);
+  tabShielded.classList.toggle("is-active", segIndex === 1);
 
   const tabToggle = h(
     "div",
@@ -119,7 +119,7 @@ export function receiveView(ov, { state, actions } = {}) {
       class: "tabs tabs--mini",
       style: `--seg-index:${segIndex}; --seg-count:2;`,
     },
-    [tabShielded, tabPublicBtn]
+    [tabPublicBtn, tabShielded]
   );
 
   // --- QR, then the name and the address, each with a copy button -----
