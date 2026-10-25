@@ -26,9 +26,9 @@ import { engineCall, getEngineStatus } from "./engineHost.js";
 const ENGINE_PAGES = ["offscreen.html", "engine.html"];
 
 // Changes to what sites see of the profiles: a lock or unlock, a permission
-// change, or a move to a network with other .dusk names. A profile update
-// begun before one is stale: the change sends sites their profiles again
-// (dappEvents.js).
+// change, a move to a network with other .dusk names, or a new name check.
+// Everything that gives a site a profile reads it with readCurrent and sends
+// it right away, so a profile read before a change never goes out after it.
 let generation = 0;
 
 /** Note a change to what sites see of the profiles. */
@@ -36,9 +36,20 @@ export function profileVisibilityChanged() {
   generation += 1;
 }
 
-/** The changes so far: an update begun at another count is stale. */
-export function profileVisibilityGeneration() {
-  return generation;
+/**
+ * What `read` gives, read again until no change to what sites see came in
+ * while it read.
+ *
+ * @template T
+ * @param {() => Promise<T>} read
+ * @returns {Promise<T>}
+ */
+export async function readCurrent(read) {
+  for (;;) {
+    const at = generation;
+    const value = await read();
+    if (at === generation) return value;
+  }
 }
 
 /**

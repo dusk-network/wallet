@@ -456,6 +456,16 @@ describe("dappEvents", () => {
     const check = (name, at = Date.now()) => ({ name, at });
     const profileEvents = (port) =>
       port.messages.filter((m) => m?.type === "DUSK_PROVIDER_EVENT" && m?.name === "profilesChanged");
+    // The profiles a page got, in order: in its first state and in profilesChanged.
+    const given = (port) =>
+      port.messages.flatMap((m) =>
+        m?.type === "DUSK_PROVIDER_STATE" ? [m.state.profiles] : m?.name === "profilesChanged" ? [m.data] : []
+      );
+    // Whether a page got a profile's name after it got the profile without one.
+    const nameCameBack = (port) =>
+      given(port).some((profiles, i, all) => profiles[0]?.name && all.slice(0, i).some((p) => !p[0]?.name));
+    const plain = { profileId: "account:0:acct0", account: "acct0" };
+    const settle = () => new Promise((r) => setTimeout(r, 0));
 
     async function openPort(ev, origin = "https://dapp.example", tabId = 1) {
       const port = new FakePort(origin, tabId);
@@ -522,6 +532,7 @@ describe("dappEvents", () => {
         [{ testnet: { acct0: check("carol.dusk") } }, { testnet: { acct0: check(null) } }, undefined],
       ];
       for (const [before, after, name] of steps) {
+        verifiedNames = after;
         await ev.handleVerifiedNamesDiff(before, after);
         expect(profileEvents(port).at(-1)?.data).toEqual([
           { profileId: "account:0:acct0", account: "acct0", ...(name ? { name } : {}) },
@@ -547,10 +558,8 @@ describe("dappEvents", () => {
       const port = await openPort(ev);
       port.messages = [];
 
-      storageListener(
-        { dusk_verified_names_v1: { oldValue: undefined, newValue: { testnet: { acct0: check("alice.dusk") } } } },
-        "local"
-      );
+      verifiedNames = { testnet: { acct0: check("alice.dusk") } };
+      storageListener({ dusk_verified_names_v1: { oldValue: undefined, newValue: verifiedNames } }, "local");
       await vi.waitFor(() =>
         expect(profileEvents(port).at(-1)?.data).toEqual([
           { profileId: "account:0:acct0", account: "acct0", name: "alice.dusk" },
@@ -613,7 +622,7 @@ describe("dappEvents", () => {
       ]);
     });
 
-    it("sends name checks to sites in the order they came", async () => {
+    it("never gives a site back a name that a later check removed", async () => {
       permissions = { "https://dapp.example": connected(0) };
       const ev = await import("./dappEvents.js");
       const port = await openPort(ev);
@@ -622,19 +631,18 @@ describe("dappEvents", () => {
       // A check adds the name, and its update waits for the permissions while
       // a later check removes the name.
       const held = await holdPermissions();
-      const updates = [
-        ev.handleVerifiedNamesDiff({}, { testnet: { acct0: check("alice.dusk") } }),
-        ev.handleVerifiedNamesDiff({ testnet: { acct0: check("alice.dusk") } }, { testnet: { acct0: check(null) } }),
-      ];
+      verifiedNames = { testnet: { acct0: check("alice.dusk") } };
+      const added = ev.handleVerifiedNamesDiff({}, verifiedNames);
       await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      const before = verifiedNames;
+      verifiedNames = { testnet: { acct0: check(null) } };
+      const removed = ev.handleVerifiedNamesDiff(before, verifiedNames);
       held.release();
-      await Promise.all(updates);
+      await Promise.all([added, removed]);
 
-      // The removal goes out last, so the site ends with no name.
-      expect(profileEvents(port).map((event) => event.data)).toEqual([
-        [{ profileId: "account:0:acct0", account: "acct0", name: "alice.dusk" }],
-        [{ profileId: "account:0:acct0", account: "acct0" }],
-      ]);
+      // The site ends with no name.
+      expect(nameCameBack(port)).toBe(false);
+      expect(given(port).at(-1)).toEqual([plain]);
     });
 
     it("keeps name checks in order when one comes while the site's page reloads", async () => {
@@ -654,8 +662,44 @@ describe("dappEvents", () => {
       held.release();
       await Promise.all([added, removed]);
 
-      // The reloaded page ends with no name.
-      expect(profileEvents(reloaded).at(-1)?.data).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
+      // The reloaded page ends with no name, and the first check doesn't give
+      // it back: it reads the names again.
+      expect(nameCameBack(reloaded)).toBe(false);
+      expect(given(reloaded).at(-1)).toEqual([plain]);
+    });
+
+    const bob = { profileId: "account:1:acct1", account: "acct1", name: "bob.dusk" };
+    it.each([
+      ["a new page's first state", (ev, page) => ev.registerDappPort(page), []],
+      ["an update to every site", (ev) => ev.broadcastProfilesChangedAll(), [[bob]]],
+      ["an update to the site", (ev) => ev.broadcastProfilesChangedForOrigin("https://dapp.example"), []],
+    ])("never sends %s with a name removed while it read the names", async (_, read, otherGets) => {
+      permissions = { "https://dapp.example": connected(0), "https://other.example": connected(1) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk"), acct1: check("bob.dusk") } };
+      const ev = await import("./dappEvents.js");
+      const { readVerifiedNames } = await import("../shared/verifiedNames.js");
+      const open = await openPort(ev);
+      const other = await openPort(ev, "https://other.example", 3);
+      const page = new FakePort("https://dapp.example", 2);
+      for (const p of [open, other]) p.messages = [];
+
+      // The read has the names when a check removes the site's name.
+      const held = holdNext(readVerifiedNames, verifiedNames);
+      read(ev, page);
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      const before = verifiedNames;
+      verifiedNames = { testnet: { ...before.testnet, acct0: check(null) } };
+      await ev.handleVerifiedNamesDiff(before, verifiedNames);
+      held.release();
+      await settle();
+
+      // It is read again: the site's pages end without the name and never get
+      // it back, and an update to every site still reaches the other site.
+      for (const p of [open, page].filter((p) => p.messages.length)) {
+        expect(nameCameBack(p)).toBe(false);
+        expect(given(p).at(-1)).toEqual([plain]);
+      }
+      expect(given(other)).toEqual(otherGets);
     });
 
     it("builds a site's first state again when the wallet moves network meanwhile", async () => {
@@ -709,9 +753,10 @@ describe("dappEvents", () => {
       held.forEach((h) => h.release());
       await Promise.all(updates);
 
-      // The updates are dropped and the first state is built again, so each
-      // page keeps the profiles the change sent it.
-      expect(profileEvents(port).map((event) => event.data)).toEqual([profiles]);
+      // The update to every site and the first state are read again, so each
+      // page only gets the profiles the change left it: from the change, and
+      // from the update read again.
+      expect(profileEvents(port).map((event) => event.data)).toEqual([profiles, profiles]);
       const states = () =>
         late.messages.filter((m) => m?.type === "DUSK_PROVIDER_STATE").map((m) => m.state.profiles);
       await vi.waitFor(() => expect(states()).toEqual([profiles]));

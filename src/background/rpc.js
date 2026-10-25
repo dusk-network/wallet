@@ -40,7 +40,7 @@ import {
 } from "./engineHost.js";
 import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
-import { profileVisibilityGeneration, siteNames } from "./siteNames.js";
+import { readCurrent, siteNames } from "./siteNames.js";
 import { putTxMeta } from "../shared/txStore.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
 import {
@@ -312,17 +312,15 @@ export async function handleRpc(origin, request) {
   // The site's profiles as they are now: its connected profile, with its
   // verified .dusk name when that was checked lately. Reading the name never
   // waits for a lookup.
-  async function siteProfiles() {
-    const generation = profileVisibilityGeneration();
-    const perm = await getPermissionForOrigin(origin);
-    const status = perm ? await getEngineStatus() : null;
-    const account = profileFromPermission(status, perm)?.account;
-    const names = account ? await siteNames(String((await getSettings())?.nodeUrl ?? ""), [account]) : null;
-    // Read before a lock, unlock, permission change or network move: read it
-    // again.
-    if (generation !== profileVisibilityGeneration()) return siteProfiles();
-    const profile = profileFromPermission(status, perm, hasShieldedGrant(perm), names);
-    return profile ? [profile] : [];
+  function siteProfiles() {
+    return readCurrent(async () => {
+      const perm = await getPermissionForOrigin(origin);
+      const status = perm ? await getEngineStatus() : null;
+      const account = profileFromPermission(status, perm)?.account;
+      const names = account ? await siteNames(String((await getSettings())?.nodeUrl ?? ""), [account]) : null;
+      const profile = profileFromPermission(status, perm, hasShieldedGrant(perm), names);
+      return profile ? [profile] : [];
+    });
   }
 
   async function captureApprovalContext(perm) {

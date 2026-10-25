@@ -608,6 +608,42 @@ describe("background rpc handler", () => {
     expect(perms["https://dapp.example"]).toMatchObject({ profileId: "account:1:acct1" });
   });
 
+  it.each(["dusk_profiles", "dusk_requestProfiles"])(
+    "%s answers without a name removed while it read the names",
+    async (method) => {
+      vi.resetModules();
+      const { handleRpc } = await import("./rpc.js");
+      const { readVerifiedNames } = await import("../shared/verifiedNames.js");
+      // The background, which hears of each name check (dappEvents.js).
+      const { handleVerifiedNamesDiff } = await vi.importActual("./dappEvents.js");
+
+      vaultValue = { v: 1 };
+      if (method === "dusk_requestProfiles") requestUserApproval.mockResolvedValueOnce({ accountIndex: 1 });
+      perms["https://dapp.example"] = {
+        profileId: "account:1:acct1",
+        accountIndex: 1,
+        grants: { publicAccount: true, shieldedReceiveAddress: false },
+        connectedAt: 1,
+        updatedAt: 1,
+      };
+      const named = { testnet: { acct1: { name: "one.dusk", at: Date.now() } } };
+      verifiedNames = named;
+
+      // The answer has read the name when a check removes it.
+      const held = {};
+      readVerifiedNames.mockImplementationOnce(
+        () => new Promise((resolve) => (held.release = () => resolve(named)))
+      );
+      const profiles = handleRpc("https://dapp.example", { method });
+      await vi.waitFor(() => expect(held.release).toBeTypeOf("function"));
+      verifiedNames = { testnet: { acct1: { name: null, at: Date.now() } } };
+      await handleVerifiedNamesDiff(named, verifiedNames);
+      held.release();
+
+      await expect(profiles).resolves.toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
+    }
+  );
+
   it("dusk_requestProfiles gives the profile picked in the approval its name, dusk_requestShieldedAddress none", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

@@ -9,9 +9,9 @@ import { STORAGE_KEYS } from "../shared/storage.js";
 import { chainIdFromNodeUrl } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
-import { duskNamesNetwork, verifiedNamesFor } from "../shared/verifiedNames.js";
+import { duskNamesNetwork } from "../shared/verifiedNames.js";
 import { getEngineStatus } from "./engineHost.js";
-import { profileVisibilityChanged, profileVisibilityGeneration, siteNames } from "./siteNames.js";
+import { profileVisibilityChanged, readCurrent, siteNames } from "./siteNames.js";
 import { getExtensionApi } from "../platform/extensionApi.js";
 
 /**
@@ -91,11 +91,7 @@ function isWebOrigin(origin) {
  * @param {string} origin
  */
 async function initPortForOrigin(port, origin) {
-  const generation = profileVisibilityGeneration();
-  const state = await buildProviderState(origin);
-  // Built before a lock, unlock, permission change or network move: build it
-  // again.
-  if (generation !== profileVisibilityGeneration()) return initPortForOrigin(port, origin);
+  const state = await readCurrent(() => buildProviderState(origin));
   safePost(port, { type: "DUSK_PROVIDER_STATE", state });
 
   // If the site is already connected, emit connect.
@@ -313,15 +309,15 @@ export function broadcastToAll(name, data) {
  * This should be called when wallet locks/unlocks or permissions change.
  */
 export async function broadcastProfilesChangedAll() {
-  // Every site gets its profile as it is from now on, so the profile updates
-  // begun before this one are dropped.
+  // Every site gets its profile as it is from now on, so the profiles read
+  // before this one are read again.
   profileVisibilityChanged();
-  const generation = profileVisibilityGeneration();
-  const perms = await getPermissions();
-  const status = await getEngineStatus();
-  const names = await namesForOrigins([...portsByOrigin.keys()], perms, status);
-  // A newer change meanwhile sends these again.
-  if (generation !== profileVisibilityGeneration()) return;
+  const { perms, status, names } = await readCurrent(async () => {
+    const perms = await getPermissions();
+    const status = await getEngineStatus();
+    const names = await namesForOrigins([...portsByOrigin.keys()], perms, status);
+    return { perms, status, names };
+  });
 
   for (const [origin, set] of portsByOrigin.entries()) {
     const perm = perms?.[origin];
@@ -344,25 +340,19 @@ export async function broadcastProfilesChangedAll() {
  * @param {string} origin
  */
 export async function broadcastProfilesChangedForOrigin(origin) {
-  const generation = profileVisibilityGeneration();
-  const perms = await getPermissions();
-  const status = await getEngineStatus();
-  const perm = perms?.[origin];
-  const permission = permissionProfileState(
-    perm,
-    status,
-    Boolean(perm?.grants?.shieldedReceiveAddress),
-    await namesForOrigins([origin], perms, status)
-  );
-  if (generation !== profileVisibilityGeneration()) return;
+  const permission = await readCurrent(async () => {
+    const perms = await getPermissions();
+    const status = await getEngineStatus();
+    const perm = perms?.[origin];
+    return permissionProfileState(
+      perm,
+      status,
+      Boolean(perm?.grants?.shieldedReceiveAddress),
+      await namesForOrigins([origin], perms, status)
+    );
+  });
   broadcastToOrigin(origin, "profilesChanged", permission.profile ? [permission.profile] : []);
 }
-
-// Name checks go to sites one at a time, in the order they came: a check
-// whose update waits on the wallet would otherwise go out after a later one,
-// and give a site back a name the later check removed.
-/** @type {Promise<void>} */
-let _nameCheckQueue = Promise.resolve();
 
 /**
  * Handle new .dusk name checks (verifiedNames.js) by sending profilesChanged
@@ -374,33 +364,21 @@ let _nameCheckQueue = Promise.resolve();
  * @param {Record<string, any>} newNames
  */
 export async function handleVerifiedNamesDiff(oldNames, newNames) {
-  const generation = profileVisibilityGeneration();
-  _nameCheckQueue = _nameCheckQueue
-    .then(() => sendNameCheck(oldNames, newNames, generation))
-    .catch(() => {});
-  await _nameCheckQueue;
-}
-
-/**
- * Send one name check on to the sites whose profile's name it checked.
- *
- * @param {Record<string, any>} oldNames
- * @param {Record<string, any>} newNames
- * @param {number} generation - profileVisibilityGeneration() when the check came
- */
-async function sendNameCheck(oldNames, newNames, generation) {
+  // A check changes what sites see: the profiles read before it are read
+  // again, as is this one when a later change comes in while it reads.
+  profileVisibilityChanged();
   if (!portsByOrigin.size) return;
-  const nodeUrl = String((await getSettings())?.nodeUrl ?? "");
+  const { nodeUrl, perms, status, names } = await readCurrent(async () => {
+    const nodeUrl = String((await getSettings())?.nodeUrl ?? "");
+    const perms = await getPermissions();
+    const status = await getEngineStatus();
+    const names = await siteNames(nodeUrl);
+    return { nodeUrl, perms, status, names };
+  });
   const network = duskNamesNetwork(nodeUrl);
   if (!network) return;
-  const check = (names, account) => JSON.stringify(names?.[network]?.[account] ?? null);
+  const check = (all, account) => JSON.stringify(all?.[network]?.[account] ?? null);
 
-  const perms = await getPermissions();
-  const status = await getEngineStatus();
-  // A lock, unlock, permission change or network move since the check came
-  // sends sites their profiles again.
-  if (generation !== profileVisibilityGeneration()) return;
-  const names = verifiedNamesFor(newNames, nodeUrl);
   for (const [origin, set] of portsByOrigin.entries()) {
     const perm = perms?.[origin];
     const { profile } = permissionProfileState(
