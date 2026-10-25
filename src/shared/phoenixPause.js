@@ -12,6 +12,7 @@ import { ERROR_CODES, rpcError } from "./errors.js";
 import { fetchWithTimeout } from "./networkStatus.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
+import { postGraphql } from "./txLifecycle.js";
 
 export const PHOENIX_FEATURE = "DISABLE_PHOENIX";
 export const U64_MAX = 18446744073709551615n;
@@ -103,8 +104,11 @@ function canEverActivate(activation) {
   return activation.ranges.length > 0;
 }
 
+// Resolved against the node URL as the transaction lookups do (txLifecycle.js).
 function nodeEndpoint(nodeUrl, pathname) {
-  return new URL(pathname, new URL(nodeUrl).origin).toString();
+  const base = String(nodeUrl || "").trim();
+  if (!base) throw new Error("nodeUrl is required");
+  return new URL(pathname, base).toString();
 }
 
 async function fetchNodeInfo(nodeUrl, timeoutMs) {
@@ -121,19 +125,10 @@ async function fetchNodeInfo(nodeUrl, timeoutMs) {
   return await resp.json();
 }
 
-async function fetchTipHeight(nodeUrl, timeoutMs) {
-  const resp = await fetchWithTimeout(
-    nodeEndpoint(nodeUrl, "/graphql"),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ query: "query { block(height: -1) { header { height } } }" }),
-    },
-    timeoutMs
-  );
-  if (!resp.ok) throw new Error(`Block height request failed (HTTP ${resp.status})`);
-  const body = await resp.json();
-  const height = toHeight(body?.data?.block?.header?.height);
+// The node's own GraphQL protocol, as the transaction lookups use it.
+async function fetchTipHeight(nodeUrl) {
+  const body = await postGraphql(nodeUrl, "query { block(height: -1) { header { height } } }");
+  const height = toHeight(body?.block?.header?.height);
   if (height === null) throw new Error("Block height missing from node response");
   return height;
 }
@@ -142,11 +137,11 @@ async function fetchTipHeight(nodeUrl, timeoutMs) {
  * Ask a node whether Phoenix is paused for the next block. Throws when the
  * node can't answer.
  * @param {string} nodeUrl
- * @param {{ timeoutMs?: number }} [opts]
+ * @param {{ timeoutMs?: number }} [opts] - for the node info request
  * @returns {Promise<boolean>}
  */
 export async function fetchPhoenixPaused(nodeUrl, { timeoutMs = FETCH_TIMEOUT_MS } = {}) {
-  const tip = fetchTipHeight(nodeUrl, timeoutMs);
+  const tip = fetchTipHeight(nodeUrl);
   // The info alone settles a missing feature, so the height may go unused.
   tip.catch(() => {});
   const info = await fetchNodeInfo(nodeUrl, timeoutMs);

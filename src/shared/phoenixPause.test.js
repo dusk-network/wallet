@@ -156,16 +156,18 @@ function makeLocalStorage() {
   };
 }
 
-// A node per origin: { info, tip } answers, or `down: true` to fail requests.
+// A bare node per origin, answering { info, tip }: /on/node/info, and the tip on its own GraphQL
+// protocol (a raw query to /on/graphql/query, the answer unwrapped); nothing at /graphql.
+// `down: true` fails every request, `tipDown: true` the tip.
 function stubNodes(nodes) {
-  const fetchMock = vi.fn(async (url) => {
+  const fetchMock = vi.fn(async (url, init) => {
     const { origin, pathname } = new URL(url);
     const node = nodes[origin];
     if (!node || node.down) throw new TypeError("Failed to fetch");
     if (pathname === "/on/node/info") return new Response(JSON.stringify(node.info));
-    if (pathname === "/graphql") {
+    if (pathname === "/on/graphql/query" && String(init?.body).startsWith("query { block(height: -1)")) {
       if (node.tipDown) return new Response("", { status: 502 });
-      return new Response(JSON.stringify({ data: { block: { header: { height: node.tip } } } }));
+      return new Response(JSON.stringify({ block: { header: { height: node.tip } } }));
     }
     return new Response("", { status: 404 });
   });
@@ -192,18 +194,19 @@ describe("getPhoenixPause", () => {
     else delete globalThis.localStorage;
   });
 
-  it("asks the node for its info and the tip height", async () => {
+  it("asks the node for its info, and for the tip on its own GraphQL protocol", async () => {
     const fetchMock = stubNodes({ [TESTNET]: { info: TESTNET_INFO, tip: 4_684_309 } });
 
     await expect(fetchPhoenixPaused(`${TESTNET}/some/path`)).resolves.toBe(true);
 
     const calls = fetchMock.mock.calls.map(([url, init]) => [String(url), init?.method]).sort();
     expect(calls).toEqual([
-      [`${TESTNET}/graphql`, "POST"],
+      [`${TESTNET}/on/graphql/query`, "POST"],
       [`${TESTNET}/on/node/info`, "POST"],
     ]);
-    const query = JSON.parse(fetchMock.mock.calls.find(([url]) => String(url).endsWith("/graphql"))[1].body);
-    expect(query.query).toContain("block(height: -1)");
+    const [, tip] = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/on/graphql/query"));
+    expect(tip.headers).toEqual({ "Content-Type": "text/plain" });
+    expect(tip.body).toBe("query { block(height: -1) { header { height } } }");
   });
 
   it("caches the answer per network", async () => {

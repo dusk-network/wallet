@@ -800,6 +800,32 @@ describe("background rpc handler", () => {
     expect(getPhoenixPause).toHaveBeenCalledWith("https://nodes.dusk.network");
   });
 
+  it("dusk_sendTransaction refuses a shielded transfer when the pause starts while the prompt is open", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+    requestUserApproval.mockImplementationOnce(async () => {
+      phoenixPaused = true;
+      return null;
+    });
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: { kind: "transfer", privacy: "shielded", to: SHIELDED_ADDRESS, amount: "1" },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNSUPPORTED, message: "Shielded transactions are paused on Testnet." });
+
+    expect(requestUserApproval).toHaveBeenCalledWith("send_tx", "https://dapp.example", expect.anything());
+    expect(getPhoenixPause).toHaveBeenCalledTimes(2);
+    expect(getPhoenixPause).toHaveBeenLastCalledWith("https://testnet.nodes.dusk.network");
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+    expect(putTxMeta).not.toHaveBeenCalled();
+  });
+
   it("dusk_sendTransaction keeps public transfers and calls working while shielded transactions are paused", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

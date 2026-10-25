@@ -165,12 +165,33 @@ describe("send while shielded transactions are paused", () => {
     typeInto(form.to, PAYEE.address);
     typeInto(form.amount, "1");
     expect(notices().map(visibleText)).toEqual([PAUSED]);
+    expect(form.review.disabled).toBe(true);
 
+    // Even if Review were pressed, the form keeps it from going on.
+    form.review.disabled = false;
     form.review.click();
     await settle();
     expect(state.route).toBe("send");
     expect(actions.render).not.toHaveBeenCalled();
     expect(notices()).toHaveLength(1);
+  });
+
+  it("turns Review off with the notice, and back on for a public account", async () => {
+    const form = sendForm();
+    expect(form.review.disabled).toBe(false);
+
+    typeInto(form.to, PAYEE.address);
+    expect(notices()).toHaveLength(1);
+    expect(form.review.disabled).toBe(true);
+
+    typeInto(form.to, PAYEE.account);
+    expect(notices()).toEqual([]);
+    expect(form.review.disabled).toBe(false);
+
+    typeInto(form.amount, "1");
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
   });
 
   it("keeps sends to a public account going to Review", async () => {

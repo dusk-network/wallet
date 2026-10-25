@@ -22,7 +22,13 @@ function losslessJson(text) {
   )).join(""));
 }
 
-async function postGraphql(nodeUrl, query) {
+/**
+ * A raw GraphQL query to the node's /on/graphql/query; the response comes back
+ * unwrapped (no `data`), with large integers as strings.
+ * @param {string} nodeUrl
+ * @param {string} query
+ */
+export async function postGraphql(nodeUrl, query) {
   const res = await fetchWithTimeout(graphqlUrl(nodeUrl), {
     method: "POST",
     headers: { "Content-Type": "text/plain" },

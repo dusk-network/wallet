@@ -577,7 +577,10 @@ export function sendFormView(ov, { state, actions } = {}) {
       detectedRecipientType = t;
       updateContactMatch(v, t);
       showSelfNote(v);
-      pausedNote.hidden = !(shieldedPaused && t === "address");
+      // While paused, a shielded address gets the notice and Review stays off.
+      const paused = shieldedPaused && t === "address";
+      pausedNote.hidden = !paused;
+      nextBtn.disabled = paused;
       updateAmountHelpers();
       return;
     }

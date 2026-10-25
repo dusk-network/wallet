@@ -744,6 +744,11 @@ export async function handleRpc(origin, request) {
       const finalParams = applyTxDefaultsForRpc(mergeTxParams(baseParams, overrides), { dynamicPrice });
       finalParams.gas = validateGasShape(finalParams.gas);
 
+      // Checked again: a pause can start while the prompt is open.
+      if (txNeedsPhoenix(finalParams) && (await getPhoenixPause(executionContext.nodeUrl)).paused) {
+        throw phoenixPausedError(networkNameFromNodeUrl(executionContext.nodeUrl));
+      }
+
       const idx = executionContext.profileIndex;
       const engineParams = {
         ...finalParams,
