@@ -175,26 +175,37 @@ body[data-runtime="tauri"].page--full .panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 6px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
 
   background: #0C0C0E;
 }
 
-/* Header actions (account chip + refresh/options) */
+/* Header actions (account chip + expand/options). The brand and its network
+   pill keep their width; the account chip gives way and cuts its text. */
 .header-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.header-actions > * {
+  flex: 0 0 auto;
+}
+
+.header-actions > .account-chip {
+  flex: 0 1 auto;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .brand-mark {
@@ -216,6 +227,11 @@ body[data-runtime="tauri"].page--full .panel {
 }
 
 .brand-text { min-width: 0; }
+
+/* A narrow full view has room for the mark and the network pill only. */
+@media (max-width: 520px) {
+  body.page--full .brand-text { display: none; }
+}
 
 .panel-title {
   font-size: 14px;
@@ -286,6 +302,21 @@ code {
   word-break: break-all;
 }
 
+/* For screen readers only, e.g. the full address behind a short one */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  user-select: none;
+}
+
 .divider {
   height: 1px;
   background: var(--border);
@@ -317,7 +348,8 @@ code {
   width: 100%;
 }
 
-.btnrow--grid > button:nth-child(3) {
+.btnrow--grid > button:nth-child(3),
+.btnrow--grid > button:only-child {
   grid-column: 1 / -1;
 }
 
@@ -520,6 +552,146 @@ input:focus, textarea:focus, select:focus {
   transform: translateY(-50%);
   max-width: 170px;
   pointer-events: none;
+}
+
+/* Send: where a .dusk name is paid, as option cards */
+.name-choice-wrap,
+.name-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.name-points-to {
+  font-size: 13px;
+}
+
+.name-points-to__name {
+  color: var(--foreground);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Review: a .dusk name over the address it resolved to; the name leads, the
+   address follows smaller and muted */
+.named-address {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.named-address .dusk-name {
+  font-size: 14px;
+}
+
+.named-address code {
+  color: var(--muted-foreground);
+}
+
+.name-option {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--secondary);
+  transition: border-color 140ms ease;
+}
+
+.name-option:not(.is-checked):not(.is-disabled):hover {
+  border-color: rgba(242,240,235,0.16);
+}
+
+.name-option.is-checked {
+  border-color: var(--foreground);
+}
+
+.name-option__main {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 3px 10px;
+  padding: 10px 12px;
+  border-radius: inherit;
+}
+
+/* Only the cards of a choice are radios and take a click */
+.name-option__main[role="radio"] {
+  cursor: pointer;
+}
+
+.name-option__main:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 18%, transparent);
+}
+
+/* Dimmed, with the shortfall line right under it at full strength */
+.name-option.is-disabled .name-option__main {
+  padding-bottom: 3px;
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.name-option__dot {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--foreground);
+}
+
+.name-option.is-checked .name-option__dot {
+  background: radial-gradient(circle, var(--foreground) 0 3px, transparent 4px);
+}
+
+.name-option__title {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+}
+
+.name-option__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.name-option__addr {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  word-break: normal;
+}
+
+.name-option__line {
+  grid-column: 2;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted-foreground);
+}
+
+/* "Not enough shielded DUSK · Shield first" */
+.name-shortfall {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted-foreground);
+}
+
+.name-option .name-shortfall {
+  padding: 0 12px 10px 40px;
+}
+
+button.name-shortfall__link {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--foreground);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.name-shortfall__link:hover {
+  background: none;
+  box-shadow: none;
 }
 
 .input-row > .icon-btn {
@@ -888,11 +1060,12 @@ button:disabled {
   gap: 8px;
 }
 
-/* Account chip (MetaMask-like) */
+/* Account chip (MetaMask-like): opens the profile switcher */
 .account-chip {
   height: 34px;
+  min-width: 0;
   max-width: 190px;
-  padding: 0 10px 0 8px;
+  padding: 0 8px 0 6px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--secondary);
@@ -900,7 +1073,7 @@ button:disabled {
 
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 
   box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 10%, transparent) inset;
 }
@@ -915,13 +1088,41 @@ button:disabled {
 }
 
 .account-chip .chip-text {
+  display: flex;
   min-width: 0;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0;
   white-space: nowrap;
+}
+
+/* A verified .dusk name, above the address it names */
+.dusk-name {
+  min-width: 0;
+  color: var(--foreground);
+  font-weight: 600;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The chip's name ends in "…" when it has to shrink; its short account loses
+   characters before the "…" and keeps its last six. */
+.account-chip .chip-text__head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-chip .chip-text__tail {
+  flex: 0 0 auto;
+}
+
+.account-chip .chip-chev {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.8;
 }
 
 .identicon {
@@ -1536,6 +1737,23 @@ body.page--popup .site-bar-action {
 
 .balance-subrow .balance-sub {
   margin-top: 0;
+}
+
+/* Refresh, next to the balance title */
+button.balance-refresh {
+  height: 20px;
+  min-width: 22px;
+  margin: 0 2px 0 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1;
+}
+
+button.balance-refresh:hover {
+  color: var(--foreground);
 }
 
 .balance-total-inline {
@@ -3067,9 +3285,63 @@ button.net-menu-item--active {
   text-overflow: ellipsis;
 }
 
+.net-menu-item-left .dusk-name {
+  font-size: 11px;
+}
+
 .net-menu-check {
   opacity: 0.95;
   flex: 0 0 auto;
+}
+
+.acct-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.acct-menu-row > .net-menu-item {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+button.acct-menu-copy,
+button.receive-copy {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+button.acct-menu-copy:hover,
+button.receive-copy:hover,
+button.receive-info:hover {
+  color: var(--foreground);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+/* The copy and ⓘ icons: inline SVG, centered in the button, in its colour */
+button.acct-menu-copy,
+button.receive-copy,
+button.receive-info {
+  display: inline-grid;
+  place-items: center;
+}
+
+button.acct-menu-copy svg,
+button.receive-copy svg,
+button.receive-info svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* -------------------------------------------------------
@@ -3106,6 +3378,12 @@ body.page--popup .dashboard-actions {
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+/* The popup dashboard's order. Scoped to its own sections: unscoped, it also
+   pushed the tabs and boxes of every other view (Receive's QR, Review's
+   recipient) to the end. */
+body.page--popup .wallet-dashboard > .dashboard-actions {
   order: 1;
 }
 
@@ -3114,16 +3392,19 @@ body.page--popup .dashboard-section-label {
 }
 
 body.page--popup .home-balance {
-  order: 0;
   padding: 14px;
 }
 
-body.page--popup .tabs {
+body.page--popup .wallet-dashboard > .home-balance {
+  order: 0;
+}
+
+body.page--popup .wallet-dashboard > .tabs {
   order: 2;
 }
 
-body.page--popup .activity-card,
-body.page--popup .box {
+body.page--popup .wallet-dashboard > .activity-card,
+body.page--popup .wallet-dashboard > .box {
   order: 3;
 }
 
@@ -3190,23 +3471,19 @@ body.page--popup .action-btn-label {
 
 body.page--popup .panel-header {
   padding: 14px 14px;
-  gap: 12px;
 }
 
 body.page--popup .header-actions {
-  gap: 6px;
+  gap: 4px;
 }
 
-/* Make the account chip icon-only in popup */
+/* The account chip matches the popup's smaller buttons, and leaves its line
+   as much of the 380px as it can next to the expand and options buttons */
 body.page--popup .account-chip {
-  width: 36px;
-  max-width: 36px;
-  padding: 0;
-  justify-content: center;
-}
-
-body.page--popup .account-chip .chip-text {
-  display: none;
+  height: 32px;
+  padding: 0 6px 0 5px;
+  gap: 5px;
+  border-radius: 11px;
 }
 
 /* Slightly smaller icon buttons in popup */
@@ -3474,12 +3751,18 @@ body.page--popup .staking-shell .box {
   line-height: 1.35;
 }
 
-.stake-card__note--warn {
+.stake-card__note--warn,
+.send-self-note {
   padding: 10px 12px;
   border-radius: var(--radius);
   border: 1px solid color-mix(in oklab, var(--warn) 34%, var(--border));
   background: color-mix(in oklab, var(--warn) 9%, transparent);
   color: color-mix(in oklab, var(--dusk-snow-white) 88%, var(--warn));
+}
+
+.send-self-note {
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .stake-metrics {
@@ -3732,7 +4015,6 @@ body[data-runtime="tauri"] .panel-header {
 
 @media (max-width: 420px) {
   body[data-runtime="tauri"] .brand-text { display: none; }
-  body[data-runtime="tauri"] .header-actions .account-chip { display: none; }
   body[data-runtime="tauri"] .panel-header { padding-left: 12px; padding-right: 12px; gap: 10px; }
 }
 
@@ -3807,63 +4089,69 @@ body[data-runtime="tauri"].page--full .panel {
   padding: 12px;
 }
 
-.receive-chip {
-  width: 100%;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius);
+/* The name and the address under the QR, one line each with a copy button
+   at the right. The name leads; the address follows smaller and muted, in
+   full in its tooltip. */
+.receive-fields {
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--secondary);
-  box-shadow: 0 1px 0 rgba(242,240,235,0.04) inset;
 }
 
-.receive-chip:hover {
-  border-color: rgba(242,240,235,0.16);
-  box-shadow:
-    0 1px 0 rgba(242,240,235,0.06) inset,
-    var(--shadow-soft);
-}
-
-.receive-chip-icon .identicon {
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.10);
-}
-
-.receive-chip-main {
-  flex: 1;
-  min-width: 0;
+.receive-field {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 4px;
+  min-height: 40px;
+  padding: 4px 6px 4px 12px;
 }
 
-.receive-chip-kind {
-  color: var(--muted-foreground);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.1;
+.receive-field[hidden] {
+  display: none;
 }
 
-.receive-chip-text {
-  display: block;
-  letter-spacing: 0;
-  line-height: 1.35;
-  color: var(--foreground);
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+.receive-field:not([hidden]) + .receive-field {
+  border-top: 1px solid var(--border);
 }
 
-.receive-chip-copy {
-  flex: 0 0 auto;
-  padding-top: 2px;
-  opacity: 0.75;
+.receive-field__name {
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.receive-field__address {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  word-break: normal;
   font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.receive-field .receive-copy {
+  margin-left: auto;
+}
+
+/* The ⓘ after the name: shows what people reach through it */
+button.receive-info {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+button.receive-info[aria-expanded="true"] {
+  color: var(--foreground);
+}
+
+.receive-name-note {
+  padding: 0 12px;
 }
 
 .qr-context-menu {

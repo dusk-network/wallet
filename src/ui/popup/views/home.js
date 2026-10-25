@@ -128,7 +128,20 @@ export function homeView(ov, { state, actions } = {}) {
   const heroAmtTitle = hasTotal ? totalFull : balFull;
   const heroLabel = hasTotal ? "Total balance" : "Public balance";
 
-  const balanceLabel = bracketTitle({ class: "balance-sub balance-label", text: heroLabel });
+  // Refresh, moved here from the header, sits with the balance it reloads.
+  const refreshBtn = h("button", {
+    class: "balance-refresh",
+    type: "button",
+    text: "⟳",
+    title: "Refresh",
+    "aria-label": "Refresh",
+    onclick: () => actions?.refresh?.()?.catch?.(() => {}),
+  });
+  const balanceLabel = bracketTitle({
+    class: "balance-sub balance-label",
+    text: heroLabel,
+    action: refreshBtn,
+  });
 
   const balanceSubRow = h("div", { class: "balance-subrow" }, [balanceLabel]);
   const balanceSplit = h("div", { class: "balance-split" }, [

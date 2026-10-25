@@ -6,15 +6,14 @@ export default {
 
 export const Disconnected = () =>
   accountChipEl("acct0", {
-    onCopy: (msg) => console.log(msg),
+    onClick: () => console.log("open profiles"),
     connected: false,
     host: "dapp.example",
   });
 
 export const Connected = () =>
   accountChipEl("acct0", {
-    onCopy: (msg) => console.log(msg),
+    onClick: () => console.log("open profiles"),
     connected: true,
     host: "dapp.example",
   });
-

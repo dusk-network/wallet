@@ -61,13 +61,14 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await page.getByRole("button", { name: "← Back" }).click();
   await expect(page.locator("#app").getByRole("button", { name: "Send" })).toBeVisible();
 
-  // Open profile menu and switch
-  await page.getByTitle("Switch profile").click();
+  // Open the profile switcher from the account chip and switch
+  await page.locator("#header-actions .account-chip").click();
   await expect(page.getByText("Select profile")).toBeVisible();
   await expect(page.getByText("Main")).toBeVisible();
   await expect(page.getByText("Spending")).toBeVisible();
 
-  await page.getByRole("button", { name: /Spending/ }).click();
+  // The row, not its copy button ("Copy public account").
+  await page.getByRole("button", { name: /^Spending/ }).click();
 
   // Verify switch persisted (Settings selector now points to profile 2)
   await page.getByTitle("Options").click();

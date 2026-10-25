@@ -1,10 +1,38 @@
-import { h } from "../lib/dom.js";
-import { copyToClipboard } from "../lib/clipboard.js";
-import { truncateMiddle } from "../lib/strings.js";
+import { h, setChildren } from "../lib/dom.js";
+import { shortAddress } from "../lib/strings.js";
 import { identiconEl } from "./Identicon.js";
 
-export function accountChipEl(account, { onCopy, connected, host } = {}) {
-  const short = account ? truncateMiddle(account, 6, 4) : "—";
+// The chip's one line: the name, cut at its end when it has to shrink, or the
+// short account (6…6), which then gives up characters before the "…" and
+// keeps its last six. Screen readers get the full account in its place.
+function chipLabel(text, account = "") {
+  const cut = account ? text.indexOf("…") : -1;
+  if (cut < 0) return [h("span", { class: "chip-text__head", text })];
+  return [
+    h("span", { class: "chip-text__head", "aria-hidden": "true", text: text.slice(0, cut + 1) }),
+    h("span", { class: "chip-text__tail", "aria-hidden": "true", text: text.slice(cut + 1) }),
+    h("span", { class: "sr-only", text: account }),
+  ];
+}
+
+/**
+ * The header's account chip: one line with the profile's verified .dusk name
+ * once `name` gives one, else its short account, and a ▾. A click calls
+ * `onClick` with the chip, which the header uses to open the profile switcher.
+ * The tooltip has the full name and account.
+ *
+ * @param {string} account
+ * @param {object} [opts]
+ * @param {(chip: HTMLElement) => void} [opts.onClick]
+ * @param {boolean} [opts.connected] - whether the active site is connected
+ * @param {string|null} [opts.host] - the active site, marked on the identicon
+ * @param {Promise<string|null>} [opts.name] - a lookup of the account's .dusk name
+ * @param {boolean} [opts.expanded] - whether the profile switcher is open
+ * @returns {HTMLElement}
+ */
+export function accountChipEl(account, { onClick, connected, host, name, expanded = false } = {}) {
+  const short = account ? shortAddress(account) : "—";
+  const label = h("span", { class: "chip-text" }, chipLabel(short, short === account ? "" : account));
 
   const icon = identiconEl(account || "dusk");
   if (host) {
@@ -19,21 +47,27 @@ export function accountChipEl(account, { onCopy, connected, host } = {}) {
     );
   }
 
-  const title = host
-    ? `${account || ""}\n${connected ? "Connected" : "Site"}: ${host}`
-    : account || "";
+  const site = host ? `${connected ? "Connected" : "Site"}: ${host}` : "";
+  const tooltip = (verified) => [verified, account, site].filter(Boolean).join("\n");
 
-  return h(
+  const chip = h(
     "button",
     {
       class: "account-chip",
-      title,
-      onclick: async () => {
-        if (!account) return;
-        const ok = await copyToClipboard(account);
-        onCopy?.(ok ? "Copied account" : "Copy failed");
-      },
+      type: "button",
+      title: tooltip(""),
+      "aria-haspopup": "menu",
+      "aria-expanded": String(Boolean(expanded)),
+      onclick: () => onClick?.(chip),
     },
-    [icon, h("div", { class: "chip-text", text: short })]
+    [icon, label, h("span", { class: "chip-chev", "aria-hidden": "true", text: "▾" })]
   );
+
+  name?.then((verified) => {
+    if (!verified) return;
+    setChildren(label, chipLabel(verified));
+    chip.title = tooltip(verified);
+  });
+
+  return chip;
 }
