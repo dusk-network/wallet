@@ -134,4 +134,39 @@ describe("integration: .dusk name checks from the engine", () => {
     const source = await readFile(path.resolve(process.cwd(), "src", "background", "index.js"), "utf8");
     expect(source).toMatch(/message\?\.type === "DUSK_NAME_CHECKED"[\s\S]*?keepEngineNameCheck\(message, sender\)/);
   });
+
+  it("give the approval of a site's request to send its recipient's name, which nothing keeps", async () => {
+    const engine = await loadEngine();
+    await expect(engine.call("engine_recipientName", { nodeUrl: TESTNET, recipient: OTHER })).resolves.toEqual({
+      id: "engine_recipientName",
+      result: "alice.dusk",
+    });
+    expect(engine.sent.filter((message) => message.type === "DUSK_NAME_CHECKED")).toEqual([]);
+
+    const background = await loadBackground({});
+    const { engineCall } = await import("../background/engineHost.js");
+    engineCall.mockImplementation(async (method) => (method === "engine_recipientName" ? "alice.dusk" : true));
+    const approval = { kind: "send_tx", params: { nodeUrl: TESTNET } };
+    await expect(background.approvalRecipientName(approval, OTHER)).resolves.toBe("alice.dusk");
+    expect(engineCall).toHaveBeenCalledWith("engine_recipientName", { nodeUrl: TESTNET, recipient: OTHER });
+
+    // Only a pending request to send, on a network with names, asks; a failed lookup is no name.
+    engineCall.mockClear();
+    for (const other of [
+      null,
+      { kind: "sign_message", params: { nodeUrl: TESTNET } },
+      { kind: "send_tx", params: { nodeUrl: "http://127.0.0.1:8080" } },
+    ]) {
+      await expect(background.approvalRecipientName(other, OTHER)).resolves.toBeNull();
+    }
+    expect(engineCall).not.toHaveBeenCalled();
+    engineCall.mockRejectedValueOnce(new Error("Engine call timed out"));
+    await expect(background.approvalRecipientName(approval, OTHER)).resolves.toBeNull();
+
+    // The approval asks the background for it with its request id.
+    const source = await readFile(path.resolve(process.cwd(), "src", "background", "index.js"), "utf8");
+    expect(source).toMatch(
+      /message\?\.type === "DUSK_UI_RECIPIENT_NAME"[\s\S]*?approvalRecipientName\(getPending\(message\.rid\), message\.recipient\)/
+    );
+  });
 });

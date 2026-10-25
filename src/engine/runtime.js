@@ -39,7 +39,7 @@ import {
 
 import { ERROR_CODES } from "../shared/errors.js";
 import { bytesToHex, bytesToTransportHex } from "../shared/bytes.js";
-import { keepPrimaryNamesWith, lookupPrimaryName } from "../shared/duskNames.js";
+import { keepPrimaryNamesWith, lookupPrimaryName, lookupRecipientName } from "../shared/duskNames.js";
 import {
   executionEventError,
   executionEventOk,
@@ -255,6 +255,14 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
               .map((account) => lookupPrimaryName(account, { nodeUrl: params?.nodeUrl }))
           );
           sendResponse({ id, result: true });
+          return;
+        }
+
+        case "engine_recipientName": {
+          // The .dusk name of the recipient of a site's request to send, for
+          // its approval. It isn't kept: the names kept are the wallet's own.
+          const name = await lookupRecipientName(params?.recipient, { nodeUrl: params?.nodeUrl });
+          sendResponse({ id, result: name });
           return;
         }
 

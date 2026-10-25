@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   addListener: vi.fn(),
   runtimeSendMessage: vi.fn(async () => undefined),
   lookupPrimaryName: vi.fn(async () => "alice.dusk"),
+  lookupRecipientName: vi.fn(async () => "carol.dusk"),
   unlocked: true,
 }));
 
@@ -26,6 +27,7 @@ vi.mock("../shared/walletEngine.js", async (importOriginal) => ({
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupPrimaryName: mocks.lookupPrimaryName,
+  lookupRecipientName: mocks.lookupRecipientName,
 }));
 
 await import("./runtime.js");
@@ -75,5 +77,14 @@ describe("engine name checks", () => {
     } finally {
       mocks.unlocked = true;
     }
+  });
+
+  it("looks up the name of a site request's recipient through the approval's node", async () => {
+    await expect(engineCall("engine_recipientName", { nodeUrl, recipient: "someone" })).resolves.toEqual({
+      id: "engine_recipientName",
+      result: "carol.dusk",
+    });
+    expect(mocks.lookupRecipientName).toHaveBeenCalledWith("someone", { nodeUrl });
+    expect(mocks.lookupPrimaryName).not.toHaveBeenCalledWith("someone", expect.anything());
   });
 });

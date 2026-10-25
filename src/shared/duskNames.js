@@ -1,4 +1,5 @@
-// Dusk Domains (.dusk names) for the send flow and the wallet's own names.
+// Dusk Domains (.dusk names) for the send flow, the wallet's own names and the
+// recipients of sites' requests to send.
 //
 // A name resolves to the public account in its `moonlight_address` record and
 // the shielded address in its `phoenix_payment_endpoint` record, and a public
@@ -298,6 +299,44 @@ export async function lookupShieldedName(account, address, { nodeUrl } = {}) {
   if (!name || !address) return null;
   const result = await lookupDuskName(name, { nodeUrl }).promise;
   return result.ok && result.address === address ? name : null;
+}
+
+// The longest name an approval shows for a recipient, ".dusk" included, so it
+// fits on its line beside "name set by the recipient". A longer name is left
+// out rather than cut short: the part cut off could be what gives it away.
+export const RECIPIENT_NAME_MAX = 24;
+
+// A label that reads as key material rather than a name: a contract ID's 0x
+// and hex digits, or 16 or more letters and digits with both among them, as
+// the start of an account or a shielded address reads.
+const keyLike = (label) =>
+  /^0x[0-9a-f]*$/.test(label) ||
+  (label.length >= 16 && /^[a-z0-9]+$/.test(label) && /[0-9]/.test(label) && /[a-z]/.test(label));
+
+/**
+ * The primary .dusk name of the recipient of a site's request to send, for
+ * its approval: that of a public account, once the lens reader's
+ * `verifyPrimary` checked that the name's `moonlight_address` record is that
+ * account. It is given only as a canonical name of at most RECIPIENT_NAME_MAX
+ * characters, none of whose labels reads like an account, an address or a
+ * contract ID; null otherwise. Unlike a profile's name it isn't kept: the
+ * names kept are the wallet's own. Never throws.
+ *
+ * @param {string} recipient
+ * @param {{ nodeUrl?: string }} [opts] - the approval's node
+ * @returns {Promise<string|null>}
+ */
+export async function lookupRecipientName(recipient, { nodeUrl } = {}) {
+  const result = await resolvePrimaryName(String(recipient ?? "").trim(), { nodeUrl });
+  const name = result.ok ? result.name : null;
+  if (typeof name !== "string" || name.length > RECIPIENT_NAME_MAX) return null;
+  try {
+    const [sdk] = await loadSdk();
+    const checked = sdk.validateName(name);
+    return checked.ok && checked.name.canonical === name && !checked.name.labels.some(keyLike) ? name : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -580,6 +580,51 @@ describe("lookupShieldedName", () => {
   });
 });
 
+describe("lookupRecipientName", () => {
+  const lookup = (recipient = ACCOUNT, url = TESTNET) => names.lookupRecipientName(recipient, { nodeUrl: url });
+
+  it("gives the recipient's verified primary name, read as a profile's is, and keeps nothing", async () => {
+    const reader = useReader({ verifyPrimary: async () => primary("carol.dusk") });
+    await expect(lookup(` ${ACCOUNT} `)).resolves.toBe("carol.dusk");
+    expect(reader.verifyPrimary).toHaveBeenCalledWith(Array.from(decodeBase58(ACCOUNT)));
+    expect(kept.rememberVerifiedName).not.toHaveBeenCalled();
+  });
+
+  it("gives no name without a verified primary, when the lookup fails, or for what can't have one", async () => {
+    const reader = useReader({ verifyPrimary: async () => null });
+    await expect(lookup()).resolves.toBeNull();
+    // A primary whose record doesn't point back to the account fails the reader's check.
+    reader.verifyPrimary.mockRejectedValue(new lens.LensReaderError("evidence", "Lens primary does not match its endpoint"));
+    await expect(lookup()).resolves.toBeNull();
+
+    lens.createLensReader.mockClear();
+    for (const recipient of [ADDRESS, `0x${"11".repeat(32)}`, "carol.dusk", ""]) {
+      await expect(lookup(recipient)).resolves.toBeNull();
+    }
+    await expect(lookup(ACCOUNT, nodeUrl("devnet"))).resolves.toBeNull();
+    expect(lens.createLensReader).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["isn't canonical", "Carol.dusk"],
+    ["is longer than 24 characters", "abcdefghijklmnopqrst.dusk"],
+    ["has a label like a contract ID", "0xdeadbeef.dusk"],
+    ["has a subname label like one", "0x11.carol.dusk"],
+    ["has a label like the start of an account or address", "26fch745yg5etfl1.dusk"],
+  ])("gives no name that %s", async (_label, spelling) => {
+    useReader({ verifyPrimary: async () => primary(spelling) });
+    await expect(lookup()).resolves.toBeNull();
+  });
+
+  it.each(["abcdefghijklmnopqrs.dusk", "pay.carol.dusk", "carol-2024-payroll.dusk", "web3wallet2024.dusk", "0xford.dusk"])(
+    "gives %s, which keeps to those rules",
+    async (spelling) => {
+      useReader({ verifyPrimary: async () => primary(spelling) });
+      await expect(lookup()).resolves.toBe(spelling);
+    }
+  );
+});
+
 describe("duskNameErrorText", () => {
   it("explains each failure", () => {
     const text = (reason) => names.duskNameErrorText({ name: "alice.dusk", reason });

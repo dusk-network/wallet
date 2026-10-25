@@ -735,6 +735,33 @@ label.profile-option {
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 18%, transparent);
 }
 
+/* Approvals: under a recipient's full address, one muted line for who the
+   wallet knows it as, or the .dusk name the recipient set. The line is there
+   while the name is looked up, so nothing below moves when it comes, and it
+   never wraps: a label too wide ends in "…", never what follows it. */
+.recipient-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recipient-line {
+  display: flex;
+  min-height: 1.4em;
+  white-space: nowrap;
+}
+
+.recipient-line__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recipient-line__source {
+  flex: none;
+  white-space: pre;
+}
+
 .input-row > .icon-btn {
   width: 44px;
   min-width: 44px;

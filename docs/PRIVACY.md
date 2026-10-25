@@ -14,7 +14,7 @@ To provide wallet functionality, Dusk Wallet communicates with configured Dusk n
 
 Users may configure their own endpoints. Network operators may be able to observe requests sent to their endpoints.
 
-Looking up a .dusk name sends the name to your configured node. Showing your profiles' .dusk names sends their public accounts to it.
+Looking up a .dusk name sends the name to your configured node. Showing your profiles' .dusk names sends their public accounts to it, as does showing the name of a public account a site asks you to send to.
 
 ## dApp connections
 

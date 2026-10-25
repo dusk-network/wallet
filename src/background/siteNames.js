@@ -7,8 +7,12 @@
 // document has no storage: it sends each one here (DUSK_NAME_CHECKED), and an
 // answer that changes a connected site's profile reaches it as profilesChanged
 // (dappEvents.js).
+//
+// The approval of a site's request to send also shows its recipient's name,
+// which the engine looks up once the approval shows and nothing keeps.
 
 import {
+  duskNamesNetwork,
   namesToRecheck,
   readVerifiedNames,
   rememberVerifiedName,
@@ -72,4 +76,26 @@ export async function keepEngineNameCheck(message, sender) {
   if (!status?.isUnlocked || !status.accounts?.includes(account)) return false;
   await rememberVerifiedName(String(nodeUrl ?? ""), account, name);
   return true;
+}
+
+/**
+ * The .dusk name of the recipient of a site's request to send, for its
+ * approval: the engine looks the account's primary name up on the approval's
+ * network and checks that the name points back to it (lookupRecipientName).
+ * Null for any other request, off Mainnet and Testnet, and when the lookup
+ * fails.
+ *
+ * @param {{ kind?: string, params?: { nodeUrl?: string } } | null} approval - the pending request
+ * @param {string} recipient - its recipient, as the approval shows it
+ * @returns {Promise<string|null>}
+ */
+export async function approvalRecipientName(approval, recipient) {
+  const nodeUrl = String(approval?.params?.nodeUrl ?? "");
+  if (approval?.kind !== "send_tx" || !duskNamesNetwork(nodeUrl)) return null;
+  try {
+    const name = await engineCall("engine_recipientName", { nodeUrl, recipient: String(recipient ?? "") });
+    return typeof name === "string" ? name : null;
+  } catch {
+    return null;
+  }
 }

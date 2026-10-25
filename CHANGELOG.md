@@ -12,6 +12,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
+- Named the recipient of a site's transfer under its address: your profile, a saved contact, or its verified `.dusk` name. ([#127])
 - Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address. ([#125])
 - Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive. ([#125])
 - Added a warning when sending to your own account or address. ([#125])
