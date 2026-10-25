@@ -18,6 +18,7 @@ import {
   privacyFlowBadgeOptions,
   recipientBadge,
 } from "../../components/RecipientBadge.js";
+import { isShieldedPaused, shieldedPausedNotice } from "../../components/ShieldedPausedNotice.js";
 
 function fmtAvail(lux) {
   try {
@@ -28,6 +29,22 @@ function fmtAvail(lux) {
 }
 
 export function convertFormView(ov, { state, actions } = {}) {
+  // Shield and Unshield are shielded transactions: while those are paused,
+  // only the notice shows.
+  if (isShieldedPaused(ov)) {
+    return [
+      subnav({
+        title: "Shield",
+        onBack: () => {
+          state.route = "home";
+          state.draft = null;
+          actions?.render?.().catch(() => {});
+        },
+      }),
+      h("div", { class: "row" }, [shieldedPausedNotice(ov)]),
+    ];
+  }
+
   const draft = state.draft || {};
   const kind = draft.kind === TX_KIND.UNSHIELD ? TX_KIND.UNSHIELD : TX_KIND.SHIELD;
   const hidden = balancesHidden(ov);
@@ -184,7 +201,7 @@ export function convertFormView(ov, { state, actions } = {}) {
 
 export function convertConfirmView(ov, { state, actions } = {}) {
   const d = state.draft;
-  if (!d) {
+  if (!d || isShieldedPaused(ov)) {
     state.route = "convert";
     return convertFormView(ov, { state, actions });
   }

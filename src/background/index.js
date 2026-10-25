@@ -51,6 +51,7 @@ import {
   resetNetworkStatus,
   isStatusStale,
 } from "../shared/networkStatus.js";
+import { getPhoenixPause, phoenixPausedError, txNeedsPhoenix } from "../shared/phoenixPause.js";
 import {
   alarmsClear,
   getExtensionApi,
@@ -1013,6 +1014,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const vault = await loadVault();
         const settings = await getSettings();
         const status = await getEngineStatus();
+        // Asked alongside the balance calls below; only unlocked views use it.
+        const phoenixPause = status.isUnlocked ? getPhoenixPause(settings.nodeUrl) : null;
 
         const activeOrigin =
           typeof message.origin === "string" && message.origin.length
@@ -1139,6 +1142,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
+        const phoenixPaused = Boolean((await phoenixPause)?.paused);
+
         sendResponse({
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
@@ -1161,6 +1166,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           hideBalances: settings.hideBalances === true,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           networkStatus,
+          phoenixPaused,
           activeOrigin,
           activeConnected,
           txs,
@@ -1186,6 +1192,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const status = await getEngineStatus();
         if (!status.isUnlocked) {
           throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+        // The popup already blocks these; this also covers a view that is out of date.
+        if (txNeedsPhoenix(message.params)) {
+          const { nodeUrl } = await getSettings();
+          if ((await getPhoenixPause(nodeUrl)).paused) {
+            throw phoenixPausedError(networkNameFromNodeUrl(nodeUrl));
+          }
         }
         await ensureEngineConfigured();
         // Fetch live gas price from node (cached for 30s) to use as default.

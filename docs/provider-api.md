@@ -341,6 +341,13 @@ field schema. A short `{ label: "Human-readable action" }` is the recommended
 minimum for custom calls with opaque arguments. Users must still verify the
 contract ID, function, amounts, and deposit shown separately by the wallet.
 
+#### Shielded transactions paused
+
+While the network has shielded transactions paused, requests that need them
+(shielded transfers and contract calls, or a call to the transfer contract's
+`convert`) fail with `4200` before any prompt, with a message such as
+`Shielded transactions are paused on Mainnet.`
+
 ---
 
 ### `dusk_watchAsset`

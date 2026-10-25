@@ -18,6 +18,11 @@ import { recipientBadge } from "../../components/RecipientBadge.js";
 import { subnav } from "../../components/Subnav.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
+import {
+  isShieldedPaused,
+  shieldedPausedNotice,
+  shieldedPausedText,
+} from "../../components/ShieldedPausedNotice.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -191,12 +196,13 @@ export function homeView(ov, { state, actions } = {}) {
       : null,
   ].filter(Boolean));
 
-  const actionBtn = (label, icon, onClick) =>
+  const actionBtn = (label, icon, onClick, attrs = {}) =>
     h(
       "button",
       {
         class: "action-btn",
         onclick: onClick,
+        ...attrs,
       },
       [
         actionIcon(icon),
@@ -218,7 +224,7 @@ export function homeView(ov, { state, actions } = {}) {
       state.route = "convert";
       state.draft = { kind: TX_KIND.SHIELD, amountDusk: "", amountLux: "" };
       actions?.render?.().catch(() => {});
-    }),
+    }, isShieldedPaused(ov) ? { disabled: true, title: shieldedPausedText(ov) } : {}),
     actionBtn("Stake", "stake", () => {
       state.route = "stake";
       actions?.render?.().catch(() => {});
@@ -254,6 +260,7 @@ export function homeView(ov, { state, actions } = {}) {
     balanceSubRow,
     h("div", { class: "balance-amount", title: hidden ? undefined : heroAmtTitle }, [balance(hidden, heroAmt)]),
     balanceSplit,
+    isShieldedPaused(ov) ? shieldedPausedNotice(ov) : null,
     ov?.balanceError
       ? h("div", { class: "muted", text: `Balance error: ${ov.balanceError}` })
       : null,

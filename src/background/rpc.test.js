@@ -110,6 +110,9 @@ const normalizeContractId = vi.fn((value) => {
   return s.toLowerCase();
 });
 
+let phoenixPaused = false;
+const getPhoenixPause = vi.fn(async () => ({ paused: phoenixPaused, checkedAt: 1 }));
+
 const tabsCreate = vi.fn(async () => ({ id: 1 }));
 const runtimeGetURL = vi.fn((path) => `chrome-extension://test/${String(path ?? "")}`);
 const getExtensionApi = vi.fn(() => ({
@@ -145,6 +148,10 @@ vi.mock("../shared/assetsStore.js", () => ({
   watchNft,
 }));
 vi.mock("./dappEvents.js", () => ({ broadcastChainChangedAll }));
+vi.mock("../shared/phoenixPause.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getPhoenixPause,
+}));
 vi.mock("../platform/extensionApi.js", () => ({
   getExtensionApi,
   runtimeGetURL,
@@ -161,6 +168,7 @@ describe("background rpc handler", () => {
       archiverUrl: "https://testnet.nodes.dusk.network",
     };
     engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+    phoenixPaused = false;
 
     vi.clearAllMocks();
   });
@@ -742,6 +750,80 @@ describe("background rpc handler", () => {
         reservationStatus: "pending",
       })
     );
+  });
+
+  it.each([
+    ["a shielded transfer", { kind: "transfer", privacy: "shielded", to: SHIELDED_ADDRESS, amount: "1" }],
+    [
+      "a shielded contract call",
+      { kind: "contract_call", privacy: "shielded", contractId: `0x${"ab".repeat(32)}`, fnName: "transfer", fnArgs: "0x12" },
+    ],
+    [
+      "a call to the transfer contract's convert",
+      { kind: "contract_call", privacy: "public", contractId: `0x01${"00".repeat(31)}`, fnName: "convert", fnArgs: "0x12" },
+    ],
+  ])("dusk_sendTransaction refuses %s while shielded transactions are paused, before any prompt", async (_label, params) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+    phoenixPaused = true;
+
+    await expect(handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params })).rejects.toMatchObject({
+      code: ERROR_CODES.UNSUPPORTED,
+      message: "Shielded transactions are paused on Testnet.",
+    });
+
+    expect(getPhoenixPause).toHaveBeenCalledWith("https://testnet.nodes.dusk.network");
+    expect(requestUserApproval).not.toHaveBeenCalled();
+    expect(engineCall).not.toHaveBeenCalled();
+    expect(putTxMeta).not.toHaveBeenCalled();
+  });
+
+  it("dusk_sendTransaction names the network it refuses shielded transactions on", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    settings = { ...settings, nodeUrl: "https://nodes.dusk.network" };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+    phoenixPaused = true;
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: { kind: "transfer", privacy: "shielded", to: SHIELDED_ADDRESS, amount: "1" },
+      })
+    ).rejects.toMatchObject({ code: ERROR_CODES.UNSUPPORTED, message: "Shielded transactions are paused on Mainnet." });
+    expect(getPhoenixPause).toHaveBeenCalledWith("https://nodes.dusk.network");
+  });
+
+  it("dusk_sendTransaction keeps public transfers and calls working while shielded transactions are paused", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+    phoenixPaused = true;
+
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1" },
+      })
+    ).resolves.toEqual({ hash: "0xhash", nonce: "5" });
+    await expect(
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: { kind: "contract_call", contractId: `0x${"ab".repeat(32)}`, fnName: "transfer", fnArgs: "0x12" },
+      })
+    ).resolves.toEqual({ hash: "0xhash", nonce: "5" });
+
+    expect(getPhoenixPause).not.toHaveBeenCalled();
+    expect(requestUserApproval).toHaveBeenCalledTimes(2);
   });
 
   it("dusk_sendTransaction rejects under-floor Phoenix transfer gas before approval", async () => {

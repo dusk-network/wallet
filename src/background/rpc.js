@@ -13,6 +13,7 @@ import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
+import { getPhoenixPause, phoenixPausedError, txNeedsPhoenix } from "../shared/phoenixPause.js";
 import {
   isAllowedDappEndpoint,
   isAllowedDappOrigin,
@@ -697,6 +698,15 @@ export async function handleRpc(origin, request) {
           deposit: validateU64(normalizedParams.deposit, "deposit"),
           gas: validateGasShape(normalizedParams.gas),
         };
+      }
+
+      // Refuse requests that need Phoenix while this network has it paused,
+      // before any prompt.
+      if (txNeedsPhoenix(normalizedParams)) {
+        const nodeUrl = String((await getSettings())?.nodeUrl ?? "");
+        if ((await getPhoenixPause(nodeUrl)).paused) {
+          throw phoenixPausedError(networkNameFromNodeUrl(nodeUrl));
+        }
       }
 
       // Fill wallet defaults (standard gas settings) so the user always sees a fee.

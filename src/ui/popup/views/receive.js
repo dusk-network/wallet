@@ -6,6 +6,7 @@ import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
 import { duskNameEl } from "../../components/DuskName.js";
 import { shortAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
+import { isShieldedPaused, shieldedPausedNotice } from "../../components/ShieldedPausedNotice.js";
 import { parseDuskToLux } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
@@ -451,14 +452,22 @@ export function receiveView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    h("div", { class: "row" }, [
-      tabToggle,
-      qrCard,
-      h("div", { class: "receive-fields" }, [nameField, addressField]),
-      nameNote,
-      btnRow,
-      requestDetails,
-      qrMenu,
-    ]),
+    h(
+      "div",
+      { class: "row" },
+      // While shielded transactions are paused, a payer couldn't send to the
+      // shielded address, so its tab shows the notice instead.
+      tab === "shielded" && isShieldedPaused(ov)
+        ? [tabToggle, shieldedPausedNotice(ov)]
+        : [
+            tabToggle,
+            qrCard,
+            h("div", { class: "receive-fields" }, [nameField, addressField]),
+            nameNote,
+            btnRow,
+            requestDetails,
+            qrMenu,
+          ]
+    ),
   ].filter(Boolean);
 }

@@ -18,5 +18,6 @@ export const STORAGE_KEYS = {
   ADDRESS_BOOK: "dusk_addressbook_v1", // { [id]: { id, name, address, type, createdAt, updatedAt } }
   ASSETS: "dusk_assets_v1", // { [walletId]: { [networkKey]: { [profileIndex]: { tokens: [], nfts: [] } } } }
   NETWORK_STATUS: "dusk_network_status_v1", // { nodeStatus, proverStatus, archiverStatus, lastChecked, errors }
+  PHOENIX_PAUSE: "dusk_phoenix_pause_v1", // { [nodeOrigin]: { paused, checkedAt, attemptedAt? } }
   AUTO_LOCK_ACTIVITY: "dusk_auto_lock_activity_v1", // { lastActivityAt }
 };

@@ -20,6 +20,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Paused shielded transactions on networks that have them turned off.
 - Moved Review's gas price line and presets behind the fee's Edit, and removed Review's Cancel. ([#126])
 - Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])
 - Opened Receive on the public account, as the web wallet does. ([web-wallet#970])

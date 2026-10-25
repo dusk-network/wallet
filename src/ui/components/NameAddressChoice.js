@@ -27,7 +27,7 @@ export function shieldedShortfallEl({ onShield } = {}) {
  * public account and one for its shielded address, each with its title and
  * short address, then what the chain shows. The shielded card can't be picked
  * when `shieldedDisabled`, and then says how to fix that in place of what the
- * chain shows.
+ * chain shows, or `shieldedNote` when there is nothing to fix.
  *
  * The two cards of a name with both addresses are a radio group; they only
  * report a pick through `onChoose`, and `set` shows one. A name with one
@@ -40,6 +40,7 @@ export function shieldedShortfallEl({ onShield } = {}) {
  * @param {string} [opts.address] - its shielded address
  * @param {boolean} [opts.shielded] - whether the shielded address is picked
  * @param {boolean} [opts.shieldedDisabled] - the shielded balance can't pay for a transfer
+ * @param {string} [opts.shieldedNote] - said under the disabled shielded card instead
  * @param {(shielded: boolean) => void} [opts.onChoose]
  * @param {() => void} [opts.onShield]
  * @returns {{ el: HTMLElement, set: (shielded: boolean) => void }}
@@ -50,6 +51,7 @@ export function nameAddressChoice({
   address,
   shielded = false,
   shieldedDisabled = false,
+  shieldedNote,
   onChoose,
   onShield,
 }) {
@@ -82,10 +84,12 @@ export function nameAddressChoice({
     );
     // The shortfall's link sits beside the radio rather than in it: a radio can't hold a button.
     const cardClass = ["name-option", choosing ? "" : "name-option--single", disabled ? "is-disabled" : ""];
-    const card = h("div", { class: cardClass.filter(Boolean).join(" ") }, [
-      radio,
-      disabled ? shieldedShortfallEl({ onShield }) : null,
-    ]);
+    const disabledNote = !disabled
+      ? null
+      : shieldedNote
+        ? h("div", { class: "name-shortfall", text: shieldedNote })
+        : shieldedShortfallEl({ onShield });
+    const card = h("div", { class: cardClass.filter(Boolean).join(" ") }, [radio, disabledNote]);
     return { shielded: isShielded, disabled, radio, card };
   };
 

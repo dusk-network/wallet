@@ -7,6 +7,7 @@ import { toastView } from "../components/Toast.js";
 import { createNetworkMenuController } from "../components/NetworkMenu.js";
 import { createAccountMenuController } from "../components/AccountMenu.js";
 import { createHeaderRenderer } from "./header.js";
+import { syncShieldNavItem } from "../components/ShieldedPausedNotice.js";
 import { send as rawSend } from "../../wallet/bus.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
@@ -234,6 +235,7 @@ function updateFullNav() {
       item.classList.toggle("is-active", active);
       if (active) item.setAttribute("aria-current", "page");
       else item.removeAttribute("aria-current");
+      if (itemRoute === "convert") syncShieldNavItem(item, state.overview);
     }
   } catch {
     // ignore

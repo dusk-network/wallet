@@ -32,6 +32,11 @@ import {
   isDuskName,
   lookupDuskName,
 } from "../../../shared/duskNames.js";
+import {
+  isShieldedPaused,
+  shieldedPausedNotice,
+  shieldedPausedText,
+} from "../../components/ShieldedPausedNotice.js";
 
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
@@ -130,6 +135,13 @@ export function sendFormView(ov, { state, actions } = {}) {
   const ownAddress = String(ov?.addresses?.[ownIdx] ?? ov?.addresses?.[0] ?? "");
 
   let detectedRecipientType = null; // "account" | "address" | null
+
+  // While shielded transactions are paused, a shielded address gets this
+  // message and the form stops before Review. A .dusk name's shielded card
+  // says it itself.
+  const shieldedPaused = isShieldedPaused(ov);
+  const pausedNote = shieldedPausedNotice(ov, { balanceLine: false });
+  pausedNote.hidden = true;
 
   const amountMetaMain = h("div", { class: "amount-meta__main", text: "" });
   const amountMetaSub = h("div", { class: "amount-meta__sub", text: "" });
@@ -431,7 +443,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     const t = ProfileGenerator.typeOf(recipient);
     showSelfNote(recipient);
     detectedRecipientType = t;
-    const sendable = t === "account" || shieldedCovers;
+    const sendable = t === "account" || (shieldedCovers && !shieldedPaused);
     nextBtn.disabled = !sendable;
     updateAmountHelpers();
     return sendable;
@@ -476,7 +488,9 @@ export function sendFormView(ov, { state, actions } = {}) {
       account: result.account,
       address: result.address,
       shielded: pickedShielded(result),
-      shieldedDisabled: !shieldedCovers,
+      shieldedDisabled: !shieldedCovers || shieldedPaused,
+      // While paused, the card says so in place of the offer to shield.
+      shieldedNote: shieldedPaused ? shieldedPausedText(ov) : undefined,
       onChoose: (shielded) => {
         nameChoices[result.name] = shielded;
         syncDraft();
@@ -518,6 +532,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   const updateToType = () => {
     const v = String(to.value || "").trim();
     showSelfNote("");
+    pausedNote.hidden = true;
     shownName = null;
     if (!isDuskName(v)) {
       showNameBox([]);
@@ -562,6 +577,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       detectedRecipientType = t;
       updateContactMatch(v, t);
       showSelfNote(v);
+      pausedNote.hidden = !(shieldedPaused && t === "address");
       updateAmountHelpers();
       return;
     }
@@ -729,6 +745,10 @@ export function sendFormView(ov, { state, actions } = {}) {
           throw new Error("Invalid recipient: expected a Dusk account or shielded address");
         }
         const privacy = recType === "address" ? "shielded" : "public";
+        if (privacy === "shielded" && shieldedPaused) {
+          pausedNote.hidden = false;
+          return;
+        }
 
         const amtLux = parseDuskToLux(amount.value);
         const memoVal = memo.value.trim();
@@ -770,6 +790,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       fieldLabel(to, "To"),
       toRow,
       toTypePill,
+      pausedNote,
       nameBox,
       selfNote,
       fieldLabel(amount, "Amount"),
@@ -795,6 +816,11 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // Public or shielded follows the recipient, as the pill does: Contacts can
   // replace it after the draft's privacy was set.
   const privacy = recType === "address" ? "shielded" : "public";
+  // A shielded draft goes back to the form, which says why it can't be sent.
+  if (privacy === "shielded" && isShieldedPaused(ov)) {
+    state.route = "send";
+    return sendFormView(ov, { state, actions });
+  }
   const txTypeLabel = recType === "address" ? "Shielded transfer" : "Public transfer";
   const txTypeBadge = recipientBadge({
     ...(recipientTypeBadgeOptions(recType) || {
