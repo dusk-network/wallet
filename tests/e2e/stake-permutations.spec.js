@@ -169,7 +169,7 @@ test.describe("owner-aware staking", () => {
 
     // The overview shows Profile 2's stake; Unstake and Claim say why they can't go ahead.
     await expect(page.locator(".stake-account")).toContainText("Profile 2");
-    await expect(page.getByText(/Add gas funds to Profile 2/)).toHaveCount(1);
+    await expect(page.getByText(/You need some public DUSK in Profile 2 to pay the network fee/)).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Unstake", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Claim rewards", exact: true })).toBeDisabled();
     await page.locator("details.advanced > summary").click();

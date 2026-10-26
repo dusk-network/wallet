@@ -146,6 +146,20 @@ export function formatFee(luxStr, { max = false } = {}) {
 }
 
 /**
+ * The most a Max puts in an amount field: `availableLux` less what it keeps
+ * back, cut down to the 4 decimals amounts show with, so it never reads more
+ * than there is.
+ * @param {bigint} availableLux
+ * @param {bigint} keepLux
+ * @returns {bigint}
+ */
+export function maxAmountLux(availableLux, keepLux = 0n) {
+  const step = 10n ** BigInt(LUX_DECIMALS - UI_DISPLAY_DECIMALS);
+  const rest = availableLux - keepLux;
+  return rest > 0n ? (rest / step) * step : 0n;
+}
+
+/**
  * Parse a user-entered DUSK decimal string into Lux (atomic units) string.
  * @param {string} duskStr
  */

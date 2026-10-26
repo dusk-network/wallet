@@ -11,6 +11,7 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
+  maxAmountLux,
 } from "./amount.js";
 
 describe("amount constants", () => {
@@ -206,5 +207,16 @@ describe("display formatting", () => {
     // Too small to show at that precision: in full, never as zero.
     expect(formatFee("40000")).toBe("0.00004");
     expect(formatFee("0")).toBe("0");
+  });
+});
+
+describe("maxAmountLux", () => {
+  it("keeps back what it's asked to, cut down to the 4 decimals amounts show with", () => {
+    expect(maxAmountLux(1_480_550_766_286n, 100_000_000n)).toBe(1_480_450_700_000n);
+    expect(formatLuxToDusk(maxAmountLux(1_480_550_766_286n, 100_000_000n))).toBe("1480.4507");
+    expect(maxAmountLux(5_000_000_000n)).toBe(5_000_000_000n);
+    // Never below zero.
+    expect(maxAmountLux(50_000_000n, 100_000_000n)).toBe(0n);
+    expect(maxAmountLux(100_000_000n, 100_000_000n)).toBe(0n);
   });
 });

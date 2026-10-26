@@ -4,6 +4,7 @@ import {
   formatFee,
   formatLuxToDusk,
   groupThousands,
+  maxAmountLux,
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
@@ -20,7 +21,8 @@ import { bracketTitle } from "../../components/BracketTitle.js";
 import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
-import { sozuLiquidStakingView } from "./sozu.js";
+import { profileNameEl } from "../../components/ProfileName.js";
+import { publicStakeLine, sozuLiquidStakingView } from "./sozu.js";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -52,12 +54,6 @@ function actionToKind(action) {
   return TX_KIND.STAKE;
 }
 
-function fundingLabel(payment) {
-  return String(payment ?? FUNDING_PUBLIC) === FUNDING_SHIELDED
-    ? "Shielded balance"
-    : "Public balance";
-}
-
 function fmtLux(luxStr) {
   return formatDusk(luxStr, UI_DISPLAY_DECIMALS);
 }
@@ -65,6 +61,13 @@ function fmtLux(luxStr) {
 function profileLabel(index) {
   return `Profile ${Number(index ?? 0) + 1}`;
 }
+
+// A profile by its name as the header shows it: its .dusk name once looked
+// up, else its label.
+function profileName(ov, index) {
+  return profileNameEl(ov, { index: Number(index ?? 0) || 0 });
+}
+
 
 function positionKey(pos) {
   return `stake:${Number(pos?.stakeProfileIndex ?? pos?.profileIndex ?? 0)}`;
@@ -268,14 +271,14 @@ function actionState(pos, actionKind, amountLux, minLux, { hidden = false, feeGa
     return { ok: false, reason: "No rewards to claim yet." };
   }
   if (!hasGas) {
-    const ownerText =
-      pos?.ownerProfileIndex !== undefined &&
-      Number(pos.ownerProfileIndex) !== Number(pos.stakeProfileIndex)
-        ? ` ${profileLabel(pos.ownerProfileIndex)} owns this stake. Gas still comes from ${profileLabel(pos.stakeProfileIndex)}.`
-        : "";
+    // The fee comes from the stake's profile, also when another one owns it.
+    const elsewhere =
+      pos?.ownerProfileIndex !== undefined && Number(pos.ownerProfileIndex) !== Number(pos.stakeProfileIndex);
     return {
       ok: false,
-      reason: `Add gas funds to ${profileLabel(pos.stakeProfileIndex)} before managing this stake.${ownerText}`,
+      reason: elsewhere
+        ? `You need some public DUSK in ${profileLabel(pos.stakeProfileIndex)} to pay the network fee.`
+        : "You need some public DUSK to pay the network fee.",
     };
   }
   if (actionKind === ACTION_TOPUP && amountLux !== null && amountLux !== undefined) {
@@ -440,7 +443,8 @@ function stakingOverview(ov, ctx, { state, actions }) {
   const summary = h("div", { class: "group stake-sum" }, [
     several
       ? h("div", { class: "stake-account" }, [
-          `${profileLabel(pos.stakeProfileIndex)} · `,
+          profileName(ov, pos.stakeProfileIndex),
+          " · ",
           h("span", { class: "mono", title: pos.stakeAccount, text: shortAddress(pos.stakeAccount) }),
         ])
       : null,
@@ -532,9 +536,10 @@ function stakingOverview(ov, ctx, { state, actions }) {
           ])
         : null,
       h("div", { class: "group group--inset" }, [
-        kvRow("Owner", ownerLabel(pos)),
+        kvRow("Owner", ["self", "local", "none"].includes(pos?.ownerKind) ? profileName(ov, pos.ownerProfileIndex) : ownerLabel(pos)),
         kvRow("Stake account", [
-          `${profileLabel(pos.stakeProfileIndex)} · `,
+          profileName(ov, pos.stakeProfileIndex),
+          " · ",
           h("span", { class: "mono", title: pos.stakeAccount, text: shortAddress(pos.stakeAccount) }),
         ]),
         pos.hasStake
@@ -566,8 +571,10 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   const back = () => setScreen(st, SCREEN_OVERVIEW, actions);
   const kind = TX_KIND.STAKE;
   const feeLux = reviewFeeLux(kind, FUNDING_PUBLIC, feeGas);
+  // Max keeps the fee to unstake later too, at the gas Settings may set.
+  const unstakeFeeLux = reviewFeeLux(TX_KIND.UNSTAKE, FUNDING_PUBLIC, { customGas: feeGas?.customGas ?? null });
   const { publicLux } = fundingOptionsForPosition(pos);
-  const maxTopupLux = publicLux > feeLux ? publicLux - feeLux : 0n;
+  const maxTopupLux = maxAmountLux(publicLux, feeLux + unstakeFeeLux);
   const isNew = !pos.hasStake;
   const stakeProfileIndex = Number(pos.stakeProfileIndex) || 0;
   const ownerProfileIndex = pos.hasStake
@@ -595,14 +602,27 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     disabled: true,
     onclick: () => review(),
   });
+  // What isn't an error: why nothing can be staked yet, or what Max kept.
+  const note = h("p", { class: "amount-note", hidden: true });
+  const showNote = (text) => {
+    note.textContent = text || "";
+    note.hidden = !text;
+  };
 
   // The amount as typed, checked as it is typed: the minimum and the balance
   // say so under the field, and Review can't be pressed until it is right.
+  // A stake nothing can be done with says why, as a note: nothing was tried.
   function check() {
     const raw = String(field.input.value ?? "").trim();
     st.stakeAmountDusk = raw;
+    showNote(
+      st.amountMode === "max" && blocked.ok
+        ? `Max keeps ${formatFee(unstakeFeeLux, { max: true })} DUSK for the fee to unstake later.`
+        : ""
+    );
     if (!blocked.ok) {
-      field.setError(blocked.reason);
+      field.setError("");
+      showNote(blocked.reason);
       reviewBtn.disabled = true;
       return null;
     }
@@ -661,7 +681,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     class: "mini-btn",
     type: "button",
     text: "Max",
-    title: "All of it, less the network fee",
+    title: "All of it, less the network fee and the fee to unstake later",
     disabled: !blocked.ok || maxTopupLux <= 0n,
     onclick: () => fill(maxTopupLux, "max"),
   });
@@ -686,7 +706,9 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   const facts = h("div", { class: "group info" }, [
     // The stake is the stake account's: the node signs with its consensus key.
     infoRow("server", "Needs your own Dusk node", [
-      `A computer that runs Dusk's node software and stays online, with ${profileLabel(stakeProfileIndex)}'s consensus key from this recovery phrase. `,
+      "An always-on computer running Dusk's node with ",
+      profileName(ov, stakeProfileIndex),
+      "'s consensus key. ",
       nodeLink,
     ]),
     infoRow("clock", "Rewards start in about 6 to 12 hours", "Unstake any time, with no waiting period."),
@@ -736,10 +758,13 @@ function nativeStakeView(ov, ctx, { state, actions }) {
             h("div", { class: "select-wrap" }, [ownerSelect]),
             h("div", { class: "stake-cap", text: "The owner can unstake and claim the rewards. Most people keep this profile." }),
           ])
-        : h("div", { class: "group group--inset" }, [kvRow("Owner", ownerLabel(pos, ownerProfileIndex))]),
+        : h("div", { class: "group group--inset" }, [
+            kvRow("Owner", ["self", "local", "none"].includes(pos?.ownerKind) ? profileName(ov, ownerProfileIndex) : ownerLabel(pos, ownerProfileIndex)),
+          ]),
       h("div", { class: "group group--inset" }, [
         kvRow("Stake account", [
-          `${profileLabel(stakeProfileIndex)} · `,
+          profileName(ov, stakeProfileIndex),
+          " · ",
           h("span", { class: "mono", title: pos.stakeAccount, text: shortAddress(pos.stakeAccount) }),
         ]),
       ]),
@@ -761,7 +786,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   return [
     subnav({ title: isNew ? "Native staking" : "Stake more", onBack: back }),
     statusLine(st),
-    h("div", { class: "amount-entry" }, [field.el, field.error, available]),
+    h("div", { class: "amount-entry" }, [field.el, field.error, note, available]),
     facts,
     advanced,
     h("div", { class: "stake-bottom" }, [reviewBtn, liquidLink].filter(Boolean)),
@@ -874,7 +899,21 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   });
   submitOnGasEnter(gasEditor, confirmBtn);
 
-  const severalProfiles = Number(d.ownerProfileIndex) !== Number(d.stakeProfileIndex ?? d.profileIndex);
+  const stakeIndex = d.stakeProfileIndex ?? d.profileIndex;
+  const severalProfiles = Number(d.ownerProfileIndex) !== Number(stakeIndex);
+
+  // A stake is public: the explorer shows it, and its rewards, under the
+  // profile's name.
+  const publicWhat =
+    kind === TX_KIND.STAKE ? "the amount staked, your rewards" : kind === TX_KIND.UNSTAKE ? "the amount unstaked" : "the rewards claimed";
+  const visibleLine = h("div", { class: "review-line review-visible", text: publicStakeLine(publicWhat) });
+  const showName = (name) => {
+    visibleLine.textContent = publicStakeLine(publicWhat, name);
+  };
+  // The profile the stake is for, by its name as the header shows it: the
+  // stake comes from its public balance, and an unstake or a claim goes back to it.
+  const stakeName = profileNameEl(ov, { index: Number(stakeIndex) || 0, onName: showName });
+  const nodeName = profileName(ov, stakeIndex);
 
   return [
     subnav({ title: "Review", onBack: goBack }),
@@ -883,16 +922,27 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "review-kind", text: kindLabel }),
         h("div", { class: "balance-amount" }, amountLine()),
         h("div", { class: "review-line", text: line }),
-      ]),
+        d.payment === FUNDING_SHIELDED ? null : visibleLine,
+      ].filter(Boolean)),
       h("div", { class: "group" }, [
-        kvRow("Stake account", d.stakeProfileLabel ?? profileLabel(d.stakeProfileIndex ?? d.profileIndex)),
-        kvRow("Owner", d.ownerProfileLabel ?? profileLabel(d.ownerProfileIndex)),
-        kvRow("Fee paid from", d.fundingLabel ?? fundingLabel(d.payment)),
+        // One line, "alice.dusk · Public", as on Send's Review.
+        kvRow(kind === TX_KIND.STAKE ? "From" : "To", [
+          h("span", {}, [stakeName, h("span", { class: "kv-muted", text: d.payment === FUNDING_SHIELDED ? " · Shielded" : " · Public" })]),
+        ]),
+        severalProfiles ? kvRow("Owner", profileName(ov, d.ownerProfileIndex)) : null,
         kind === TX_KIND.STAKE && !severalProfiles && !d.hasStake ? kvRow("Rewards start", "In about 6 to 12 hours") : null,
       ].filter(Boolean)),
+      // The node warning from the amount screen, once more before Confirm.
+      kind === TX_KIND.STAKE
+        ? h("div", { class: "group info" }, [
+            infoRow("alert", ["Your node must run with ", nodeName, "'s consensus key"], [
+              "If it misses its turn, part of the stake gets locked. It's still yours, and unstaking returns it. If it breaks the rules, part of the stake can be burned (lost).",
+            ]),
+          ])
+        : null,
       gasEditor,
       confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
-    ]),
+    ].filter(Boolean)),
   ];
 }

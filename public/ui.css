@@ -2854,6 +2854,15 @@ input.amount-field__input:focus {
   color: var(--text);
 }
 
+/* Why nothing can be staked yet, or what Max kept back: a note, not an error */
+.amount-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 /* Facts as rows: a small icon, a line, a muted line under it */
 .group.info .list-row {
   grid-template-columns: 30px minmax(0, 1fr) auto;

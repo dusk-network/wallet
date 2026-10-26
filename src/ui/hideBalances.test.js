@@ -272,7 +272,7 @@ describe("hidden balances", () => {
       "Available hidden DUSK from your public balance",
     ]);
     button("Max").click();
-    expect(state.staking.stakeAmountDusk).toBe("1482.8883");
+    expect(state.staking.stakeAmountDusk).toBe("1482.8383");
 
     // Too much: the check holds, under the field, and doesn't give the balance away.
     typeInto(body.querySelector("input.amount-field__input"), "5000");
@@ -334,10 +334,10 @@ describe("hidden balances", () => {
       "stDUSK•••• stDUSKAdd to Assets",
     ]);
     button("Max").click();
-    expect(st.depositAmountDusk).toBe("1482.4383");
+    expect(st.depositAmountDusk).toBe("1481.9383");
     // What the typed amount gets isn't a balance: it shows.
     expect(visibleText(body.querySelector(".stake-estimate .stake-estimate__main"))).toBe(
-      "You get about 1,411.84 stDUSK, worth 1,482.4383 DUSK now."
+      "You get about 1,411.36 stDUSK, worth 1,481.9383 DUSK now."
     );
   });
 });

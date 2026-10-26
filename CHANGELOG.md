@@ -41,6 +41,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said plainly that staking needs some public DUSK for the network fee, without an error before anything is typed.
+- Kept Max on Staking to 4 decimals, and left the fee to unstake later.
+- Said on both staking Reviews that a stake is public, named the profile by its `.dusk` name, and repeated the node warning before Confirm.
+- Showed on Sozu's Review what the stDUSK is worth now and who holds the DUSK, and said why a contract call's fee cap is higher.
 - Led Activity and a transaction's details with a saved contact's own name, its `.dusk` name beside it.
 - Named Dusk Domains calls in Activity by what they did, such as "Registered a .dusk name", and Sozu's as "Staked with Sozu".
 - Kept a deposit to DuskEVM's recipient with the transaction and showed it in its details.
