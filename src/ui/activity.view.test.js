@@ -402,6 +402,24 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     return entry;
   };
 
+  it("says Syncing… where its time goes, or its block's time once another row of that block has it", () => {
+    const view = setup();
+    const entry = unfetched(view);
+    const line = () =>
+      visibleText(body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Call register")).querySelector(".tx-sub"));
+    view.draw();
+    expect(line()).toBe("Contract · Syncing…");
+    view.state.route = "activity";
+    view.draw();
+    expect(line()).toBe("Contract · Syncing…");
+
+    // Another entry of the same block has come with its time.
+    const other = view.state.activity.entries.find((e) => e !== entry && e.timestamp);
+    entry.blockHeight = other.blockHeight;
+    view.draw();
+    expect(line()).toBe(`Contract · ${new Date(other.timestamp).toISOString().slice(11, 16)}`);
+  });
+
   it("says Unknown, muted, not Completed or Pending", () => {
     const view = setup();
     unfetched(view);

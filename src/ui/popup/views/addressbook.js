@@ -19,7 +19,7 @@ import { fieldLabel, searchInput, textInput } from "../../components/FormControl
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
-import { contactNames, describeTx, recentText, txRowEl, txTime } from "./txRow.js";
+import { blockTimes, contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
 
 import {
   clearAddressBook,
@@ -385,7 +385,9 @@ export function addressBookView(ov, { state, actions } = {}) {
     const hidden = balancesHidden(ov);
     const names = contactNames(state, actions);
     const now = Date.now();
-    const rows = activityRows(ov, state).filter((tx) =>
+    const all = activityRows(ov, state);
+    const times = blockTimes(all);
+    const rows = all.filter((tx) =>
       [tx?.to, tx?.from, tx?.counterparty, tx?.asset?.to].some((a) => a && lower(a) === lower(addr))
     );
     const activity = h("section", { class: "contacts-section" }, [
@@ -401,7 +403,7 @@ export function addressBookView(ov, { state, actions } = {}) {
                 hidden,
                 nodeUrl,
                 contactName: names,
-                when: (t) => (txTime(t) ? recentText(txTime(t), now) : ""),
+                when: (t) => whenText(t, { times, format: (ms) => recentText(ms, now) }),
               })
             )
           )

@@ -55,6 +55,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Offered auto-lock after 5 or 15 minutes, 15 by default, or Off; an open popup nobody uses locks too.
 - Asked before disconnecting all sites, and moved Reset wallet to the end of Settings.
 - Showed Activity's rows with a direction icon and the other side's name first; a failed one says nothing was sent and the fee paid.
+- Showed a synced transaction's time from its block, or Syncing… until its outcome comes.
 - Reworked a transaction's details into a summary of who, how much and its status, then its date, memo, fee, profile and ID, with block and gas under Technical details.
 - Hid Activity's amounts and a transaction's amount while balances are hidden; fees stay visible.
 - Said known chain errors in plain words, with the chain's own under Technical details.
