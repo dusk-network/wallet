@@ -108,6 +108,12 @@ button, input, select, textarea {
   font-family: inherit;
 }
 
+/* An element with the hidden attribute stays hidden, whatever display its
+   class gives it. */
+[hidden] {
+  display: none !important;
+}
+
 /* Popup sizing, Chrome reads width from body */
 body.page--popup {
   width: var(--panel-width);
@@ -2054,10 +2060,6 @@ button.toast__action:focus-visible {
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5'/%3E%3Cpath d='M12 16.2h.01'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-.field-error[hidden] {
-  display: none;
-}
-
 /* Options layout */
 .options-wrap {
   max-width: 820px;
@@ -3162,10 +3164,6 @@ body[data-runtime="tauri"].page--full .panel {
   gap: 4px;
   min-height: 40px;
   padding: 4px 6px 4px 12px;
-}
-
-.receive-field[hidden] {
-  display: none;
 }
 
 .receive-field:not([hidden]) + .receive-field {

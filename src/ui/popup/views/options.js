@@ -92,29 +92,55 @@ export function optionsView(ov, { state, actions } = {}) {
     }
   });
 
-  // Labels only this device knows, one per profile.
+  // Labels only this device knows, one per profile. A label being typed
+  // survives a redraw (a sync's status, another label saved): its field
+  // starts from what was typed, and saves when it's left. A saved label
+  // shows at once in the header's pill; Settings doesn't redraw for it.
   const walletId = ov?.isUnlocked && accounts.length ? String(accounts[0] ?? "").trim() : "";
   const nameMap = ov?.accountNames && typeof ov.accountNames === "object" ? ov.accountNames : {};
+  const drafts = (state.labelDrafts ??= {});
+  const labelOf = (s) => String(s ?? "").trim().replace(/\s+/g, " ").slice(0, 32);
   const labelsEditor =
     ov?.isUnlocked && walletId
       ? h("div", { class: "settings-labels" }, [
           h("h3", { class: "settings-subtitle", text: "Labels on this device" }),
           ...displayAccounts.map((acct, i) => {
+            let saved = labelOf(nameMap?.[String(i)]);
             const input = textInput({
               placeholder: "Label, only on this device",
               "aria-label": `Profile ${i + 1} label`,
-              value: String(nameMap?.[String(i)] ?? ""),
+              value: drafts[i] ?? saved,
             });
-            input.addEventListener("change", async () => {
+            input.addEventListener("input", () => {
+              drafts[i] = input.value;
+            });
+            const save = async () => {
+              const value = input.value;
+              const label = labelOf(value);
+              if (label === saved) {
+                if (drafts[i] === value) delete drafts[i];
+                return;
+              }
+              const before = saved;
+              saved = label;
               try {
-                await setAccountName(walletId, i, input.value);
+                const map = await setAccountName(walletId, i, value);
+                if (drafts[i] === value) delete drafts[i];
+                const names =
+                  map && typeof map === "object" ? { ...map } : { ...(state.overview?.accountNames ?? {}), [String(i)]: label };
+                if (!label && !(map && typeof map === "object")) delete names[String(i)];
+                if (state.overview) state.overview.accountNames = names;
+                if (ov && ov !== state.overview) ov.accountNames = names;
                 actions?.showToast?.("Label saved.");
-                state.needsRefresh = true;
-                await actions?.render?.({ forceRefresh: true });
+                actions?.renderHeader?.();
               } catch (e) {
+                saved = before;
                 actions?.showToast?.(e?.message ?? String(e), 2500);
               }
-            });
+            };
+            // Left with Tab or a click, or Enter: whichever comes first saves.
+            input.addEventListener("change", save);
+            input.addEventListener("blur", save);
             const line = named(i, h("span", { class: "settings-profile-line" }), () =>
               [verified.get(i) || `Profile ${i + 1}`, acct ? shortAddress(String(acct)) : ""].filter(Boolean).join(" · ")
             );

@@ -66,7 +66,8 @@ describe("own .dusk names in the popup", () => {
     expect(rule(".receive-field__name")).toContain("font-size: 14px;");
     const oneMutedLine = ["font-size: 12px;", "color: var(--muted-foreground);", "white-space: nowrap;", "text-overflow: ellipsis;"];
     for (const decl of oneMutedLine) expect(rule(".receive-field__address")).toContain(decl);
-    expect(rule(".receive-field[hidden]")).toContain("display: none;");
+    // A hidden field is hidden, as every hidden element is.
+    expect(rule("[hidden]")).toContain("display: none !important;");
     expect(rule(".named-address .dusk-name")).toContain("font-size: 14px;");
     expect(rule(".named-address code")).toContain("color: var(--muted-foreground);");
   });

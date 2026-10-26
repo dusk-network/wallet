@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { accessibleName, installFakeDom, isShown, settle, visibleText } from "./testing/fakeDom.js";
+import { setAccountName } from "../shared/accountNames.js";
+import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 vi.mock("../shared/accountNames.js", () => ({ setAccountName: vi.fn(async () => {}) }));
 // The first profile has a verified .dusk name, as the header shows it.
@@ -41,7 +42,7 @@ async function settings(over = {}) {
     ...over,
   };
   const state = { route: "options", overview: ov };
-  const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn() };
+  const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn(), renderHeader: vi.fn() };
   const draw = () => dom.document.body.replaceChildren(...optionsView(ov, { state, actions }));
   draw();
   await settle();
@@ -52,6 +53,47 @@ async function settings(over = {}) {
   const shownButtons = (el) => el.querySelectorAll("button").filter(isShown).map((b) => b.textContent);
   return { ov, state, actions, draw, section, shownButtons };
 }
+
+describe("profile labels", () => {
+  const label = (n) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === `Profile ${n} label`);
+
+  it("keep a label being typed through a redraw, and save it when the field is left", async () => {
+    setAccountName.mockClear();
+    const view = await settings();
+    typeInto(label(2), "Spending");
+    // A redraw meanwhile, as a sync's status or another label's save brings.
+    view.draw();
+    expect(label(2).value).toBe("Spending");
+
+    label(2).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(setAccountName).toHaveBeenCalledTimes(1);
+    expect(setAccountName).toHaveBeenCalledWith(ACCOUNTS[0], 1, "Spending");
+    // Saved, it shows in the header's pill at once; Settings doesn't redraw for it.
+    expect(view.ov.accountNames).toEqual({ 1: "Spending" });
+    expect(view.actions.renderHeader).toHaveBeenCalledTimes(1);
+    expect(view.actions.render).not.toHaveBeenCalled();
+    expect(view.actions.showToast).toHaveBeenCalledWith("Label saved.");
+    view.draw();
+    expect(label(2).value).toBe("Spending");
+  });
+
+  it("save once when the field is left with both a change and a blur, and not when nothing changed", async () => {
+    setAccountName.mockClear();
+    await settings({ accountNames: { 0: "Main" } });
+    typeInto(label(1), "Main ");
+    label(1).dispatchEvent(fakeEvent("change"));
+    label(1).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(setAccountName).not.toHaveBeenCalled();
+
+    typeInto(label(1), "Savings");
+    label(1).dispatchEvent(fakeEvent("change"));
+    label(1).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(setAccountName.mock.calls).toEqual([[ACCOUNTS[0], 0, "Savings"]]);
+  });
+});
 
 describe("settings", () => {
   it("lets the section title name the network, with its node addresses behind a disclosure", async () => {

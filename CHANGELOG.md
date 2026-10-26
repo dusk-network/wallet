@@ -81,6 +81,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Hid controls that showed while hidden: Review's Use the network's price, Max on an empty Send, and Settings' custom gas fields when off.
+- Kept a profile label being typed when Settings redraws, and saved it when the field is left.
 - Made the profile and network menus work from the keyboard.
 - Gave every popup screen a heading for screen readers.
 - Fixed the popup moving Receive's QR and Review's recipient below the rest of the page. ([#125])

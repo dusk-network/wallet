@@ -579,6 +579,25 @@ describe("review", () => {
     });
   });
 
+  it("hides Use the network's price while the fee is the network's, custom gas from Settings that equals it too", async () => {
+    // The node asks 2 LUX.
+    const send = async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {});
+    const reset = () => dom.document.body.querySelector("button.gas-reset");
+    review({ to: ALICE.account, privacy: "public" }, overview({ customGas: { limit: "2500000", price: "2" } }), send);
+    await settle();
+    expect([reset().textContent, reset().hidden]).toEqual(["Use the network's price", true]);
+    // Hidden is hidden in the popup: no class's display shows it anyway.
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    expect(css).toMatch(/\n\[hidden\] \{\s*display: none !important;\s*\}/);
+
+    // Gas of your own shows it, and the network's price typed back hides it again.
+    review({ to: ALICE.account, privacy: "public" }, overview({ customGas: { limit: "2500000", price: "3" } }), send);
+    await settle();
+    expect(reset().hidden).toBe(false);
+    typeInto(dom.document.body.querySelectorAll("dusk-gas-editor input")[1], "2");
+    expect(reset().hidden).toBe(true);
+  });
+
   it("says what a public send shows everyone, with only the parts that apply, and nothing for a shielded one", async () => {
     let view = review({ to: ALICE.account, privacy: "public" });
     expect([view.kind(), view.visibleLine()]).toEqual(["Public transfer", "Visible to everyone: amount and your account."]);

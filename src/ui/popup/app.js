@@ -225,8 +225,8 @@ function setApp(children) {
 
   if (children !== activeLockedView) {
     // Redrawn in place (a watcher event, a refresh), the screen keeps the
-    // focus on the same button.
-    const focused = sameScreen ? focusedButton() : null;
+    // focus on the same button or field, and a field its caret.
+    const focused = sameScreen ? focusedControl() : null;
     const password = app.querySelector("#unlock-password");
     if (password) password.value = "";
     activeLockedView = null;
@@ -234,30 +234,39 @@ function setApp(children) {
     const siteBar = activeSiteBar(state.overview);
     if (siteBar) app.appendChild(siteBar);
     for (const child of children) app.appendChild(child);
-    if (focused) refocusButton(focused);
+    if (focused) refocusControl(focused);
   }
 }
 
-// The focused button (or disclosure) in #app, by its words and its place
-// among those with the same words.
-const FOCUS_KEPT = "button, summary";
+// The focused control in #app (a button, a disclosure or a field), by its
+// words and its place among those with the same words; a field also by its
+// name and placeholder, and with its caret, so typing goes on where it was.
+const FOCUS_KEPT = "button, summary, input, select, textarea";
 
-function focusedButton() {
+function focusedControl() {
   try {
     const el = document.activeElement;
-    if (!el || !["BUTTON", "SUMMARY"].includes(el.tagName) || !app.contains(el)) return null;
-    const key = (b) => `${b.tagName}\n${b.textContent}\n${b.getAttribute("aria-label") ?? ""}`;
+    if (!el || !el.matches?.(FOCUS_KEPT) || !app.contains(el)) return null;
+    const key = (b) =>
+      [b.tagName, b.textContent, ...["aria-label", "name", "placeholder", "type"].map((a) => b.getAttribute(a) ?? "")].join("\n");
     const same = [...app.querySelectorAll(FOCUS_KEPT)].filter((b) => key(b) === key(el));
-    return { key: key(el), index: same.indexOf(el), keyOf: key };
+    let caret = null;
+    try {
+      if (typeof el.selectionStart === "number") caret = [el.selectionStart, el.selectionEnd, el.selectionDirection ?? "none"];
+    } catch {
+      // A field without a caret, such as a checkbox.
+    }
+    return { key: key(el), index: same.indexOf(el), keyOf: key, caret };
   } catch {
     return null;
   }
 }
 
-function refocusButton({ key, index, keyOf }) {
+function refocusControl({ key, index, keyOf, caret }) {
   try {
     const match = [...app.querySelectorAll(FOCUS_KEPT)].filter((b) => keyOf(b) === key)[index];
     match?.focus?.();
+    if (caret && typeof match?.setSelectionRange === "function") match.setSelectionRange(...caret);
   } catch {
     // ignore
   }
@@ -776,7 +785,15 @@ export async function render({ forceRefresh = false } = {}) {
   ensureActivity(ov, { state, render, send });
 
   // `refresh` is the dashboard's Refresh, next to the balance.
-  const actions = { send, render, showToast, refresh: onRefresh, announce: (text) => toaster.announce(text) };
+  const actions = {
+    send,
+    render,
+    showToast,
+    refresh: onRefresh,
+    announce: (text) => toaster.announce(text),
+    // The header alone, for a change only it shows, such as a profile's label.
+    renderHeader: () => renderHeader(state.overview),
+  };
 
   // Settings should be accessible even when the wallet is locked or not yet imported.
   // TODO: Reconsider?
