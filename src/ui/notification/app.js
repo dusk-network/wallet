@@ -939,8 +939,10 @@ export async function renderNotification() {
     const shielded = privacy === "shielded";
     const rail = shielded ? "Shielded" : "Public";
     const gas = params?.gas ?? null;
+    // Who a public transaction shows as: the profile's verified .dusk name,
+    // or its account when it has none.
     const myName = nameOf(activeAccount);
-    const me = myName ? `your name ${myName}` : "your public address";
+    const me = myName ? `your name ${myName}` : "your account";
 
     // The network's lines, which most people skip.
     const networkRows = () => [
@@ -966,8 +968,8 @@ export async function renderNotification() {
       const gasEditor = gasEditorFor(amountLux);
       const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
       submitOnGasEnter(gasEditor, bar.approveBtn);
-      // A public transfer shows on chain for good: say what, and under
-      // which name.
+      // A public transfer shows on chain for good: say what, only what
+      // applies, and under which name. A shielded one gets no line.
       const visible = memo
         ? `Visible to everyone: amount, memo, and ${me}.`
         : `Visible to everyone: amount and ${me}.`;

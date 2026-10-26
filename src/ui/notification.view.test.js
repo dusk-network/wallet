@@ -297,16 +297,17 @@ describe("a site's request to pay", () => {
     expect(visibleText(head().querySelector(".ap-amount"))).toBe("1.000090001 DUSK");
   });
 
-  it("says what a public transfer makes visible to everyone, under which name", async () => {
-    const visible = () => app.querySelector(".ap-visible")?.textContent ?? null;
-    await render("send_tx", transfer(BOB, { memo: "Order 1042" }));
-    expect(visible()).toBe("Visible to everyone: amount, memo, and your name alice.dusk.");
-    await render("send_tx", transfer(BOB));
-    expect(visible()).toBe("Visible to everyone: amount and your name alice.dusk.");
-    await render("send_tx", transfer(BOB, { memo: "x" }), { duskNames: {} });
-    expect(visible()).toBe("Visible to everyone: amount, memo, and your public address.");
-    await render("send_tx", transfer(ADDRESS, { privacy: "shielded" }));
-    expect(visible()).toBeNull();
+  // What a public transfer makes visible to everyone: only what applies, under
+  // the profile's verified name or else its account. A shielded one: nothing.
+  it.each([
+    ["with a memo, under its verified name", transfer(BOB, { memo: "Order 1042" }), {}, "Visible to everyone: amount, memo, and your name alice.dusk."],
+    ["without a memo, under its verified name", transfer(BOB), {}, "Visible to everyone: amount and your name alice.dusk."],
+    ["with a memo, for a profile without a name", transfer(BOB, { memo: "Order 1042" }), { duskNames: {} }, "Visible to everyone: amount, memo, and your account."],
+    ["without a memo, for a profile without a name", transfer(BOB), { duskNames: {} }, "Visible to everyone: amount and your account."],
+    ["for a shielded transfer", transfer(ADDRESS, { privacy: "shielded", memo: "Order 1042" }), {}, null],
+  ])("says what becomes visible to everyone %s", async (_label, params, over, line) => {
+    await render("send_tx", params, over);
+    expect(app.querySelector(".ap-visible")?.textContent ?? null).toBe(line);
   });
 
   it("names the paying profile and the rail in plain words", async () => {
