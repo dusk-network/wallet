@@ -350,9 +350,11 @@ Testnet, through the Testnet node: `depositETHToWithValue` on the
 L1StandardBridge (the DuskEVM recipient and amount, checked against the
 `deposit`), and `proveWithdrawalTransaction` and
 `finalizeWithdrawalTransaction` on the OptimismPortal (the withdrawal's amount
-and the Dusk account it pays). It marks them "Known DuskEVM bridge call".
-Arguments that don't decode exactly as the bridge encodes them, and every
-call on Mainnet until the bridge is configured there, stay opaque.
+and the Dusk account it pays, on the bridge's own route: from DuskEVM's
+messenger to Dusk's, relaying DuskEVM's bridge to Dusk's). It marks them
+"Known DuskEVM bridge call". Arguments that don't decode exactly as the bridge
+encodes them stay opaque, with a warning on a call to the bridge's contracts,
+and so does every call on Mainnet until the bridge is configured there.
 
 ---
 

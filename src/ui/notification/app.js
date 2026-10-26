@@ -4,6 +4,7 @@
 // Details. A locked wallet shows what is asked, with Unlock and Reject.
 
 import { UI_DISPLAY_DECIMALS, formatDuskExact, groupThousands, safeBigInt } from "../../shared/amount.js";
+import { callsBridge } from "../../shared/bridgeCalls.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { getMinimumGas } from "../../shared/txDefaults.js";
@@ -1309,10 +1310,20 @@ export async function renderNotification() {
       return;
     }
 
-    // Any other call: the wallet can't read its arguments, so it says so.
+    // Any other call: the wallet can't read its arguments, so it says so. One
+    // to the bridge's contracts that isn't a transfer it knows, such as a
+    // withdrawal off the bridge's route, gets a warning.
     const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
     submitOnGasEnter(gasEditor, bar.approveBtn);
     const summary = requestSummary("send_tx", params);
+    const unchecked = callsBridge({ nodeUrl: params?.nodeUrl, contractId: contractIdHex })
+      ? warning(
+          "The wallet can't check this bridge call",
+          "It goes to the DuskEVM bridge, but it isn't a transfer the wallet knows for this network. Reject it unless you know why the site sent it."
+        )
+      : note("The wallet can't read this call's arguments. Check them on the site before you approve.", "alert", {
+          className: "ap-opaque",
+        });
     show(
       [
         site,
@@ -1322,9 +1333,7 @@ export async function renderNotification() {
           sub: fnNameTrim ? h("span", {}, ["Calls ", mono(fnNameTrim)]) : null,
         }),
         callRows({ from: true }),
-        note("The wallet can't read this call's arguments. Check them on the site before you approve.", "alert", {
-          className: "ap-opaque",
-        }),
+        unchecked,
         gasEditor,
         visible("this call, the DUSK it sends"),
         rawData(),

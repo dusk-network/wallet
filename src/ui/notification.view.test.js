@@ -579,6 +579,20 @@ describe("contract calls", () => {
     expect(head().querySelector(".ap-tag").textContent).toBe("Known DuskEVM bridge call");
   });
 
+  it("shows a withdrawal off the bridge's route as the call it is, with a warning, never as known", async () => {
+    // Its target is another contract than Dusk's messenger.
+    const fnArgs = fixture("prove-account").args.replace(fixtures.route.l1Messenger.slice(2).toLowerCase(), "11".repeat(20));
+    expect(fnArgs).not.toBe(fixture("prove-account").args);
+    await render("send_tx", contractCall(portal, "prove-account", { fnArgs }));
+    expect(head().querySelector("h1").textContent).toBe("Contract call");
+    expect(head().querySelector(".ap-tag")).toBeNull();
+    expect(app.textContent).not.toContain("Known DuskEVM bridge call");
+    expect(app.querySelector(".callout.warn").textContent).toBe(
+      "The wallet can't check this bridge callIt goes to the DuskEVM bridge, but it isn't a transfer the wallet knows for this network. Reject it unless you know why the site sent it."
+    );
+    expect(app.querySelector(".ap-opaque")).toBeNull();
+  });
+
   it("names a withdrawal that pays a contract", async () => {
     await render("send_tx", contractCall(portal, "claim-contract"));
     expect(row("Pays to contract").textContent).toBe(fixture("claim-contract").expected.recipient);

@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { BRIDGE_CONTRACTS } from "./bridge.js";
-import { BRIDGE_FUNCTIONS, checksumAddress, decodeBridgeCall, weiToDusk } from "./bridgeCalls.js";
+import { BRIDGE_FUNCTIONS, callsBridge, checksumAddress, decodeBridgeCall, evmAddressOf, weiToDusk } from "./bridgeCalls.js";
 import { hexToBytes } from "./bytes.js";
 import fixtures from "./fixtures/duskevm-bridge-calls.json";
 
 // Calls made with the bridge's own deposit encoder and its pinned
 // OptimismPortal data driver; `expected` is what the bridge's decoders read
 // from them. "deposit-shoot" is byte for byte what the bridge sent the wallet
-// on testnet (40 bytes · sha256=2f64b19f5ac0…731c7c2a).
+// on testnet (40 bytes · sha256=2f64b19f5ac0…731c7c2a). The withdrawals take
+// DuskEVM testnet's route (`fixtures.route`), as its MessagePassed logs name it.
 const TESTNET = "https://testnet.nodes.dusk.network";
 const { bridge, portal } = BRIDGE_CONTRACTS.testnet;
 const call = (name) => fixtures.calls.find((c) => c.name === name);
@@ -100,6 +101,33 @@ describe("DuskEVM bridge calls", () => {
     // Untouched, they decode.
     expect(tamper("claim-contract", () => {})).not.toBeNull();
     expect(tamper("prove-account", () => {})).not.toBeNull();
+  });
+
+  it("decodes a withdrawal only on the bridge's route: messenger to messenger, relaying bridge to bridge", () => {
+    const { route } = fixtures;
+    // Dusk's bridge as DuskEVM names it: its contract ID's EVM address.
+    expect(`0x${evmAddressOf(bridge)}`).toBe(route.l1Bridge.toLowerCase());
+    const find = (bytes, seq) => bytes.findIndex((_, i) => seq.every((b, j) => bytes[i + j] === b));
+    for (const name of ["claim-account", "prove-account", "claim-external-contract"]) {
+      const c = call(name);
+      expect(decode(name), name).not.toBeNull();
+      // The withdrawal's sender and target, and the relayed call's sender and target.
+      for (const [part, address] of Object.entries(route)) {
+        const args = hexToBytes(c.args);
+        const at = find(args, Array.from(hexToBytes(address.slice(2).toLowerCase())));
+        expect(at, `${name}: ${part}`).toBeGreaterThan(-1);
+        args[at + 19] ^= 1;
+        expect(decode(name, { args }), `${name} with another ${part}`).toBeNull();
+      }
+    }
+  });
+
+  it("tells a call to the bridge's contracts on its network, read or not", () => {
+    expect(callsBridge({ nodeUrl: TESTNET, contractId: portal })).toBe(true);
+    expect(callsBridge({ nodeUrl: TESTNET, contractId: `0x${bridge.toUpperCase()}` })).toBe(true);
+    expect(callsBridge({ nodeUrl: TESTNET, contractId: "ab".repeat(32) })).toBe(false);
+    expect(callsBridge({ nodeUrl: "https://nodes.dusk.network", contractId: portal })).toBe(false);
+    expect(callsBridge({ nodeUrl: TESTNET })).toBe(false);
   });
 
   it("writes EVM addresses with their EIP-55 checksum", () => {

@@ -8,8 +8,9 @@
 // custom node, whose contract at the same ID could be anything. The
 // arguments are rkyv, as
 // the bridge's encoder and the portal's data driver write them, and must
-// decode exactly: every pointer in bounds, and a withdrawal's amount the same
-// in each place it's written. Anything else stays undecoded.
+// decode exactly: every pointer in bounds, a withdrawal's amount the same in
+// each place it's written, and its route the bridge's own. Anything else
+// stays undecoded.
 
 import { keccak_256 } from "@noble/hashes/sha3";
 
@@ -34,6 +35,18 @@ const CLAIM_WITH_PROOF_OF_ROOT = WITHDRAWAL + 20;
 // L1StandardBridge.finalizeBridgeETH as its message.
 const RELAY_MESSAGE = "d764ad0b";
 const FINALIZE_BRIDGE_ETH = "1635f5fd";
+
+// The route a DUSK withdrawal takes: DuskEVM's messenger sends it to Dusk's,
+// relaying DuskEVM's bridge to Dusk's. The DuskEVM side are OP-stack
+// predeploys; the Dusk side are the EVM addresses DuskEVM gives Dusk's
+// contracts (L2CrossDomainMessenger.otherMessenger, L2StandardBridge.
+// otherBridge), the bridge's being its contract ID's (evmAddressOf). A
+// withdrawal on any other route is some other message through the portal.
+const L2_MESSENGER = "4200000000000000000000000000000000000007";
+const L2_BRIDGE = "4200000000000000000000000000000000000010";
+const L1_MESSENGERS = Object.freeze({
+  testnet: "8b6aa15321d9656c91ad2d5fbc2ae8b750ad6f9a",
+});
 
 const WEI_PER_LUX = 1_000_000_000n;
 
@@ -73,6 +86,13 @@ function vecAt(bytes, at, end, itemSize = 1) {
 function bytesAt(bytes, at, end) {
   const { start, length } = vecAt(bytes, at, end);
   return bytes.subarray(start, start + length);
+}
+
+/** The EVM address DuskEVM gives a Dusk contract: its ID's keccak-256, last 20 bytes. */
+export function evmAddressOf(contractId) {
+  const id = norm(contractId);
+  if (!/^[0-9a-f]{64}$/.test(id)) return "";
+  return hex(keccak_256(Uint8Array.from(id.match(/../g), (b) => parseInt(b, 16)))).slice(-40);
 }
 
 /** An EVM address with its EIP-55 checksum, as EVM wallets and the bridge write it. */
@@ -187,7 +207,8 @@ function abiCall(data, selector, types) {
 
 // ---- Calls ----------------------------------------------------------------
 
-// The bridge's contracts when `nodeUrl` is its network's own node.
+// The bridge's contracts when `nodeUrl` is its network's own node, with the
+// route its withdrawals take there (null without one: none decode).
 function bridgeContracts(nodeUrl) {
   const origin = (url) => {
     try {
@@ -198,7 +219,13 @@ function bridgeContracts(nodeUrl) {
   };
   const at = origin(nodeUrl);
   const preset = at ? NETWORK_PRESETS.find((p) => p.nodeUrl && origin(p.nodeUrl) === at) : null;
-  return (preset && BRIDGE_CONTRACTS[preset.id]) || null;
+  const contracts = (preset && BRIDGE_CONTRACTS[preset.id]) || null;
+  if (!contracts) return null;
+  const l1Messenger = L1_MESSENGERS[preset.id];
+  const route = l1Messenger
+    ? { l2Messenger: L2_MESSENGER, l1Messenger, l2Bridge: L2_BRIDGE, l1Bridge: evmAddressOf(contracts.bridge) }
+    : null;
+  return { ...contracts, route };
 }
 
 function decodeDeposit(args) {
@@ -214,12 +241,18 @@ function decodeDeposit(args) {
 }
 
 // A withdrawal, as DuskEVM recorded it: what it pays, to whom on Dusk, and
-// who sent it on DuskEVM. The amount is the same in the withdrawal, the relay
-// and the bridge's message, or it isn't one the bridge sent.
-function decodeWithdrawal(args, at, end) {
+// who sent it on DuskEVM. It takes the bridge's route, from messenger to
+// messenger relaying bridge to bridge, and its amount is the same in the
+// withdrawal, the relay and the bridge's message, or the bridge didn't send it.
+function decodeWithdrawal(args, at, end, route) {
+  if (!route) fail();
   const value = uintBe(args, at + 32, 32);
   const data = bytesAt(args, at + 96, end);
-  const [, , , relayValue, , message] = abiCall(data, RELAY_MESSAGE, ["uint", "address", "address", "uint", "uint", "bytes"]);
+  const sender = hex(args.subarray(at + 104, at + 124));
+  const target = hex(args.subarray(at + 124, at + 144));
+  if (sender !== route.l2Messenger || target !== route.l1Messenger) fail();
+  const [, relaySender, relayTarget, relayValue, , message] = abiCall(data, RELAY_MESSAGE, ["uint", "address", "address", "uint", "uint", "bytes"]);
+  if (hex(relaySender) !== route.l2Bridge || hex(relayTarget) !== route.l1Bridge) fail();
   const [from, , amountWei, extraData] = abiCall(message, FINALIZE_BRIDGE_ETH, ["address", "address", "uint", "bytes"]);
   if (value !== relayValue || relayValue !== amountWei) fail();
   return {
@@ -230,23 +263,23 @@ function decodeWithdrawal(args, at, end) {
   };
 }
 
-function decodeProve(args) {
+function decodeProve(args, route) {
   const root = args.length - PROVE_ROOT;
   if (root < 0 || root % 4 !== 0) fail();
   // The proof's nodes: each a Vec<u8> before the root.
   const proof = vecAt(args, root + 304, root, 8);
   for (let i = 0; i < proof.length; i++) vecAt(args, proof.start + 8 * i, root);
   return {
-    ...decodeWithdrawal(args, root + 160, root),
+    ...decodeWithdrawal(args, root + 160, root, route),
     disputeGameIndex: uintBe(args, root + 128, 32),
     proofNodes: proof.length,
   };
 }
 
-function decodeClaim(args, rootSize) {
+function decodeClaim(args, rootSize, route) {
   const root = args.length - rootSize;
   if (root < 0 || root % 4 !== 0) fail();
-  const out = decodeWithdrawal(args, root, root);
+  const out = decodeWithdrawal(args, root, root, route);
   if (rootSize === CLAIM_WITH_PROOF_OF_ROOT) out.proofSubmitter = checksumAddress(args.subarray(root + WITHDRAWAL, root + WITHDRAWAL + 20));
   return out;
 }
@@ -262,7 +295,7 @@ function decodeClaim(args, rootSize) {
  * - prove and claim: `{ kind: "prove" | "claim", amountWei, recipient,
  *   sender, gasLimit, ... }`, recipient being `{ kind: "account", account }`
  *   or `{ kind: "contract", contractId }` on Dusk, sender the DuskEVM address
- *   that withdrew
+ *   that withdrew; only a withdrawal on the bridge's route
  *
  * @param {{ nodeUrl?: string, contractId?: string, fnName?: string, args?: Uint8Array, deposit?: string|bigint }} call
  * @returns {object|null}
@@ -283,14 +316,28 @@ export function decodeBridgeCall({ nodeUrl, contractId, fnName, args, deposit } 
       return { kind: "deposit", ...decodeDeposit(args), sentLux };
     }
     if (id === contracts.portal) {
-      if (fn === BRIDGE_FUNCTIONS.prove) return { kind: "prove", ...decodeProve(args) };
-      if (fn === BRIDGE_FUNCTIONS.claim) return { kind: "claim", ...decodeClaim(args, CLAIM_ROOT) };
-      if (fn === BRIDGE_FUNCTIONS.claimWithProofOf) return { kind: "claim", ...decodeClaim(args, CLAIM_WITH_PROOF_OF_ROOT) };
+      const { route } = contracts;
+      if (fn === BRIDGE_FUNCTIONS.prove) return { kind: "prove", ...decodeProve(args, route) };
+      if (fn === BRIDGE_FUNCTIONS.claim) return { kind: "claim", ...decodeClaim(args, CLAIM_ROOT, route) };
+      if (fn === BRIDGE_FUNCTIONS.claimWithProofOf) return { kind: "claim", ...decodeClaim(args, CLAIM_WITH_PROOF_OF_ROOT, route) };
     }
   } catch {
     return null;
   }
   return null;
+}
+
+/**
+ * Whether a call goes to the DuskEVM bridge's contracts on this network,
+ * decoded or not. One that decodeBridgeCall doesn't read is the bridge's
+ * contract doing something the wallet can't vouch for.
+ * @param {{ nodeUrl?: string, contractId?: string }} call
+ * @returns {boolean}
+ */
+export function callsBridge({ nodeUrl, contractId } = {}) {
+  const contracts = bridgeContracts(nodeUrl);
+  const id = norm(contractId);
+  return Boolean(contracts && id && (id === contracts.bridge || id === contracts.portal));
 }
 
 /**
