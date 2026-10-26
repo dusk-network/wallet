@@ -3,9 +3,10 @@
 // at the bottom where they always show. Chain, node and raw bytes sit under
 // Details. A locked wallet shows what is asked, with Unlock and Reject.
 
-import { UI_DISPLAY_DECIMALS, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, formatDuskExact, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
+import { getMinimumGas } from "../../shared/txDefaults.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
@@ -17,7 +18,6 @@ import { shortAddressEl } from "../components/ShortAddress.js";
 import "../components/GasEditor.js";
 import {
   details,
-  exactDusk,
   facts,
   group,
   headTag,
@@ -951,13 +951,29 @@ export async function renderNotification() {
       nodeUrl ? kv("Node", mono(nodeUrl), { stack: true }) : null,
     ];
 
+    // The one fee editor, as on every Review: the fee and the total, then
+    // Custom fee. A limit under the transaction's minimum says so while it's
+    // typed, and "Use the network's price" puts back the request's limit at
+    // the price the node asks now.
+    const minimum = getMinimumGas(txKind, { privacy })?.limit ?? null;
     const gasEditorFor = (amountLux, extraLux = []) => {
       const gasEditor = document.createElement("dusk-gas-editor");
       gasEditor.amountLux = amountLux;
       gasEditor.extraLux = extraLux;
       gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-      gasEditor.helpText = "Max fee = gas limit × gas price. Only the gas used is charged. Clear both to use the defaults.";
+      gasEditor.helpText = "The fee is at most the gas limit times the gas price.";
+      gasEditor.minLimit = minimum;
+      gasEditor.networkGas = gas;
       gasEditor.setGas(gas);
+      if (gas?.limit != null) {
+        send({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" })
+          .then((res) => {
+            const stats = res?.result ?? res;
+            const price = String(stats?.median ?? stats?.average ?? "").trim();
+            if (/^\d+$/.test(price) && price !== "0") gasEditor.networkGas = { limit: String(gas.limit), price };
+          })
+          .catch(() => {});
+      }
       return gasEditor;
     };
 
@@ -977,7 +993,7 @@ export async function renderNotification() {
       show(
         [
           site,
-          requestHead({ title: "Pay", amount: { value: exactDusk(amountLux), unit: "DUSK" }, to: toLine(to) }),
+          requestHead({ title: "Pay", amount: { value: formatDuskExact(amountLux), unit: "DUSK" }, to: toLine(to) }),
           gasEditor,
           shielded ? null : note(visible, "eye", { className: "ap-visible" }),
           group([
@@ -1038,8 +1054,8 @@ export async function renderNotification() {
         kv("Contract", shortMono(contractIdHex)),
         kv("Function", mono(fnName || "(none)")),
         kv("Call data", mono(callData), { stack: true }),
-        safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${exactDusk(amountLux)} DUSK`) : null,
-        safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${exactDusk(depositLux)} DUSK`) : null,
+        safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${formatDuskExact(amountLux)} DUSK`) : null,
+        safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${formatDuskExact(depositLux)} DUSK`) : null,
       ]);
     const rawData = () =>
       details("Raw call data", [h("code", { class: "ap-raw", text: argsHex || String(params?.fnArgs ?? "") })]);
@@ -1069,14 +1085,14 @@ export async function renderNotification() {
         });
         decoded = group([
           kv("DuskEVM recipient", h("code", { class: "ap-address", text: bridge.recipient }), { stack: true }),
-          kv("Amount", `${exactDusk(bridge.amountLux)} DUSK`),
+          kv("Amount", `${formatDuskExact(bridge.amountLux)} DUSK`),
           kv("From", payerLine(rail)),
           bridge.extraDataBytes ? kv("Extra data", `${bridge.extraDataBytes} bytes`) : null,
         ]);
         if (!matches) {
           extra = warning(
             "The amounts don't match",
-            `This call sends ${exactDusk(depositLux)} DUSK but bridges ${exactDusk(bridge.amountLux)} DUSK. Reject it unless the site told you why.`
+            `This call sends ${formatDuskExact(depositLux)} DUSK but bridges ${formatDuskExact(bridge.amountLux)} DUSK. Reject it unless the site told you why.`
           );
         }
       } else {
@@ -1182,7 +1198,8 @@ export async function renderNotification() {
       const spenderStr = accountEnumToString(decoded?.spender);
       const ownerStr = accountEnumToString(decoded?.owner);
       const valueUnitsStr = decoded?.value != null ? String(decoded.value) : "";
-      const valueHuman = valueUnitsStr ? formatTokenUnits(valueUnitsStr, dec, { maxFrac: UI_DISPLAY_DECIMALS }) : "—";
+      // Exact, as an approval shows DUSK: every decimal the token has.
+      const valueHuman = valueUnitsStr ? groupThousands(formatTokenUnits(valueUnitsStr, dec, { maxFrac: dec })) : "—";
 
       const isApprove = fnNameLower === "approve";
       const isTransfer = fnNameLower === "transfer";
@@ -1301,7 +1318,7 @@ export async function renderNotification() {
         site,
         requestHead({
           title: summary.title,
-          amount: sendsLux > 0n ? { value: exactDusk(sendsLux), unit: "DUSK" } : null,
+          amount: sendsLux > 0n ? { value: formatDuskExact(sendsLux), unit: "DUSK" } : null,
           sub: fnNameTrim ? h("span", {}, ["Calls ", mono(fnNameTrim)]) : null,
         }),
         callRows({ from: true }),

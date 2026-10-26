@@ -3,7 +3,6 @@
 // Details disclosure for the technical lines. Styles: public/notification.css
 // on top of the component layer in ui.css.
 
-import { formatLuxToDusk, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { h } from "../lib/dom.js";
 import { truncateMiddle } from "../lib/strings.js";
 import { iconSvg } from "../components/ActionIcon.js";
@@ -16,11 +15,6 @@ const GLOBE =
 /** Icon markup: the shared set (ActionIcon.js), and a globe for sites. */
 export function icon(name) {
   return name === "globe" ? GLOBE : iconSvg(name);
-}
-
-/** An exact amount of Lux in DUSK, every decimal kept: what is approved is what shows. */
-export function exactDusk(lux) {
-  return groupThousands(formatLuxToDusk(safeBigInt(lux, 0n).toString()));
 }
 
 /**

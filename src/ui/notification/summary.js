@@ -6,8 +6,7 @@
 import { decodeBridgeCall, weiToDusk } from "../../shared/bridgeCalls.js";
 import { toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
-import { safeBigInt } from "../../shared/amount.js";
-import { exactDusk } from "./parts.js";
+import { formatDuskExact, safeBigInt } from "../../shared/amount.js";
 
 /** A contract call's arguments as bytes, or null when they aren't any. */
 export function callArgs(params) {
@@ -30,7 +29,7 @@ export function bridgeCallOf(params) {
 /** A withdrawal's amount as `{ value, unit }`. */
 export function withdrawalAmount(wei) {
   const { lux, text } = weiToDusk(wei);
-  return { value: lux === null ? text : exactDusk(lux), unit: "DUSK" };
+  return { value: lux === null ? text : formatDuskExact(lux), unit: "DUSK" };
 }
 
 /**
@@ -85,7 +84,7 @@ function txSummary(p) {
   if (kind === TX_KIND.TRANSFER) {
     return {
       title: "Pay",
-      amount: { value: exactDusk(p.amount), unit: "DUSK" },
+      amount: { value: formatDuskExact(p.amount), unit: "DUSK" },
       to: { address: String(p.to ?? "").trim(), network: "dusk" },
     };
   }
@@ -94,7 +93,7 @@ function txSummary(p) {
     if (bridge?.kind === "deposit") {
       return {
         title: "Bridge to DuskEVM",
-        amount: { value: exactDusk(bridge.amountLux), unit: "DUSK" },
+        amount: { value: formatDuskExact(bridge.amountLux), unit: "DUSK" },
         to: { address: bridge.recipient, network: "duskevm" },
       };
     }
@@ -109,7 +108,7 @@ function txSummary(p) {
     const fn = String(p.fnName ?? "").trim();
     return {
       title: "Contract call",
-      amount: sends > 0n ? { value: exactDusk(sends), unit: "DUSK" } : undefined,
+      amount: sends > 0n ? { value: formatDuskExact(sends), unit: "DUSK" } : undefined,
       sub: fn ? `Calls ${fn}` : undefined,
     };
   }

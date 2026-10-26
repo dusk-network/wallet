@@ -70,7 +70,7 @@ test("a payment shows its amount, recipient, fee and both buttons without scroll
   for (const locator of [
     page.locator(".ap-amount"),
     page.locator(".ap-recipient__lead"),
-    page.getByText("Network fee (max)"),
+    page.getByText("Network fee", { exact: true }),
     page.getByRole("button", { name: "Reject", exact: true }),
     page.getByRole("button", { name: "Approve", exact: true }),
   ]) {

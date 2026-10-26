@@ -318,6 +318,22 @@ describe("a site's request to pay", () => {
     expect(app.textContent).not.toMatch(/Moonlight|Phoenix/);
   });
 
+  it("gives the fee editor the transaction's minimum and, once the node answers, the network's price", async () => {
+    mocks.answers.DUSK_UI_GET_CACHED_GAS_PRICE = async () => ({ ok: true, result: { average: "2", max: "5", median: "1", min: "1" } });
+    // The site set its own price; the network's is 1 LUX.
+    await render("send_tx", transfer(BOB, { gas: { limit: "2600000", price: "3" } }));
+    const editor = app.querySelector("dusk-gas-editor");
+    expect(editor.setGas).toHaveBeenCalledWith({ limit: "2600000", price: "3" });
+    expect(editor.minLimit).toBe("2000000");
+    await vi.waitFor(() => expect(editor.networkGas).toEqual({ limit: "2600000", price: "1" }));
+
+    // A shielded contract call has its own minimum; a public one has none.
+    await render("send_tx", { kind: "contract_call", privacy: "shielded", contractId: `0x${"11".repeat(32)}`, fnName: "x", fnArgs: "0x00", gas: { limit: "100000000", price: "1" }, nodeUrl: TESTNET });
+    expect(app.querySelector("dusk-gas-editor").minLimit).toBe("100000000");
+    await render("send_tx", { kind: "contract_call", privacy: "public", contractId: `0x${"11".repeat(32)}`, fnName: "x", fnArgs: "0x00", gas: { limit: "5000000", price: "1" }, nodeUrl: TESTNET });
+    expect(app.querySelector("dusk-gas-editor").minLimit).toBeNull();
+  });
+
   it("refuses a gas edit that won't do under the buttons, and sends nothing", async () => {
     await render("send_tx", transfer(BOB));
     const editorError = new Error("Provide both gas limit and gas price (or clear both to use wallet defaults).");
@@ -453,6 +469,15 @@ describe("the recipient of a site's request to send", () => {
     await render("send_tx", params);
     await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: null }));
     expect(row("To").textContent).toBe(CAROL);
+  });
+
+  it("shows a token amount exactly, every decimal the token has", async () => {
+    Object.assign(mocks.answers, {
+      DUSK_UI_DRC20_DECODE_INPUT: async () => ({ ok: true, result: { to: { External: CAROL }, value: "1234567891234" } }),
+      DUSK_UI_DRC20_GET_METADATA: async () => ({ ok: true, result: { name: "Token", symbol: "TKN", decimals: 9 } }),
+    });
+    await render("send_tx", { kind: "contract_call", contractId: `0x${"11".repeat(32)}`, fnName: "transfer", fnArgs: "0x00", chainId: "dusk:2", nodeUrl: TESTNET });
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("1,234.567891234 TKN");
   });
 
   it("asks for no name for a token spender, which receives nothing", async () => {
