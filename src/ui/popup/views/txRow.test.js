@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { TX_KIND } from "../../../shared/constants.js";
+import releases from "../../../shared/dusk-domains-releases.json";
 import { amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
 
 process.env.TZ = "UTC";
+const TESTNET = "https://testnet.nodes.dusk.network";
 const NOW = Date.parse("2026-10-26T15:00:00Z");
 const at = (iso) => Date.parse(iso);
 
@@ -75,12 +77,44 @@ describe("what a row says", () => {
     // Liquid staking's unstake: the DUSK comes back once the chain says so.
     expect(read({ kind: TX_KIND.CONTRACT_CALL, fnName: "sozu_unstake", deposit: "0", amount: "0", status: "submitted" })).toEqual([
       "stake",
-      "Unstake from Sozu",
+      "Unstaked from Sozu",
       "Staking · 14:32",
       "",
       "Pending",
     ]);
     expect(read({ kind: TX_KIND.UNSTAKE, status: "unknown" })).toEqual(["stake", "Unstake", "Staking · 14:32", "", "Not confirmed"]);
+  });
+
+  it("leads with a saved contact's own name, then its .dusk name, else the .dusk name", () => {
+    const to = "b".repeat(40);
+    const contactName = (address) => (address === to ? "Jan (flour)" : "");
+    const send = { kind: TX_KIND.TRANSFER, direction: "out", to, toName: "wallet-both.dusk", amount: "500000000", status: "executed" };
+    const d = describeTx(send, { contactName });
+    expect([d.name, d.alias, d.address, d.isAddress]).toEqual(["Jan (flour)", "wallet-both.dusk", to, false]);
+    // A verified name does the same; a contact named as its name shows it once.
+    expect(describeTx({ ...send, toName: undefined, counterpartyName: "wallet-both.dusk" }, { contactName }).alias).toBe("wallet-both.dusk");
+    expect(describeTx(send, { contactName: () => "Wallet-Both.dusk" }).alias).toBe("");
+    // Without a contact, the .dusk name leads alone.
+    expect([describeTx(send).name, describeTx(send).alias]).toEqual(["wallet-both.dusk", ""]);
+  });
+
+  it("says what Dusk Domains and Sozu calls did", () => {
+    const store = releases.testnet.contracts.find((c) => c.role === "store").contractId;
+    const call = (fnName, over = {}) =>
+      describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: store, fnName, status: "executed", ...over }, { nodeUrl: TESTNET });
+    const register = call("register", { deposit: "10000000000" });
+    expect([register.lead, register.name, subText(register, "14:32"), amountText(register.amount, false), register.category]).toEqual([
+      "Dusk Domains",
+      "Registered a .dusk name",
+      "Dusk Domains · 14:32",
+      "−10 DUSK",
+      "sent",
+    ]);
+    expect(call("commit").name).toBe("Reserved a .dusk name");
+    // On another network's node, or a custom one, it's any contract.
+    expect(call("register", { nodeUrl: "https://nodes.dusk.network" }).name).toBe("Call register");
+    expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: store, fnName: "register" }, { nodeUrl: "https://node.example" }).name).toBe("Call register");
+    expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, fnName: "sozu_stake", deposit: "1000000000" }).name).toBe("Staked with Sozu");
   });
 
   it("puts each under one filter, and bridge transfers under All alone", () => {

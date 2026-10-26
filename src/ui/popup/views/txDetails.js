@@ -1,4 +1,3 @@
-import { STAKE_CONTRACT, TRANSFER_CONTRACT } from "../../../shared/activityHistory.js";
 import { formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
@@ -158,16 +157,21 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const kind = String(tx?.kind ?? "").toLowerCase();
   const showToast = actions?.showToast;
 
-  // Who: the other side's name with its short address and Copy; an address
-  // without a name shows in full mono, Copy beside it; a contract call shows
-  // the contract.
+  // Who: the other side's name with its short address and Copy, a saved
+  // contact's .dusk name before it; an address without a name shows in full
+  // mono, Copy beside it; a deposit to DuskEVM shows the DuskEVM address it
+  // pays; another contract call shows the contract.
   const other =
     desc.address && !desc.isAddress
       ? desc.address
       : kind === TX_KIND.CONTRACT_CALL && !desc.address && tx?.contractId
       ? String(tx.contractId)
       : "";
-  const otherLabel = kind === TX_KIND.CONTRACT_CALL && other === String(tx?.contractId ?? "") ? "Copy contract ID" : "Copy address";
+  const otherLabel = desc.evm
+    ? "Copy DuskEVM address"
+    : kind === TX_KIND.CONTRACT_CALL && other === String(tx?.contractId ?? "")
+    ? "Copy contract ID"
+    : "Copy address";
   const hero = h("div", { class: "tx-hero" }, [
     h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true", html: txIconSvg(desc.icon) }),
     desc.lead ? h("div", { class: "tx-hero-lead", text: desc.lead }) : null,
@@ -176,7 +180,11 @@ export function txDetailsView(ov, { state, actions } = {}) {
       desc.isAddress ? copyButton(desc.address, { showToast }) : null,
     ].filter(Boolean)),
     other
-      ? h("div", { class: "tx-hero-addr" }, [mono(other, shortAddress(other)), copyButton(other, { label: otherLabel, showToast })])
+      ? h("div", { class: "tx-hero-addr" }, [
+          desc.alias ? h("span", { class: "tx-hero-alias", text: `${desc.alias} · ` }) : null,
+          mono(other, shortAddress(other)),
+          copyButton(other, { label: otherLabel, showToast }),
+        ].filter(Boolean))
       : null,
     amountEl(desc.amount, hidden, "tx-hero-amount"),
     h("div", { class: `tx-hero-status is-${desc.tone}` }, [
@@ -238,6 +246,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   const rows = h("div", { class: "group" }, [
     when ? kv("Date", dateText(when)) : null,
+    // Where a deposit to DuskEVM went, in full.
+    desc.evm ? kv("DuskEVM recipient", h("span", { class: "mono", text: desc.address }), { className: "kv--wrap" }) : null,
     tx?.memo ? kv("Memo", String(tx.memo), { className: "kv--wrap" }) : null,
     feeRow(tx, desc),
     ...ownRows,
@@ -254,35 +264,6 @@ export function txDetailsView(ov, { state, actions } = {}) {
     if (state) state.txTechOpen = tech.open;
   });
 
-  // A contract's token or NFT, to follow in Assets: not the network's own
-  // transfer and stake contracts.
-  const contractId = tx?.contractId ? String(tx.contractId) : "";
-  const network = [TRANSFER_CONTRACT, STAKE_CONTRACT].includes(contractId.toLowerCase().replace(/^0x/, ""));
-  const assets =
-    kind === TX_KIND.CONTRACT_CALL && contractId && !network && !["staking", "bridge"].includes(desc.category)
-      ? h("div", { class: "tx-assets" }, [
-          h("button", {
-            class: "btn-outline",
-            type: "button",
-            text: "Add token",
-            onclick: () => {
-              state.assetAddToken = { contractId, loading: false, error: null, meta: null };
-              state.route = "asset_add_token";
-              actions?.render?.()?.catch?.(() => {});
-            },
-          }),
-          h("button", {
-            class: "btn-outline",
-            type: "button",
-            text: "Import NFT",
-            onclick: () => {
-              state.assetAddNft = { contractId, tokenId: "", loading: false, error: null, info: null };
-              state.route = "asset_add_nft";
-              actions?.render?.()?.catch?.(() => {});
-            },
-          }),
-        ])
-      : null;
-
-  return [nav, h("div", { class: "tx-detail" }, [hero, rows, tech, assets, explorerButton(explorerUrl, actions)].filter(Boolean))];
+  // A call's details offer no Add token or Import NFT: Assets has both.
+  return [nav, h("div", { class: "tx-detail" }, [hero, rows, tech, explorerButton(explorerUrl, actions)].filter(Boolean))];
 }

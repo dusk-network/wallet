@@ -40,6 +40,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Led Activity and a transaction's details with a saved contact's own name, its `.dusk` name beside it.
+- Named Dusk Domains calls in Activity by what they did, such as "Registered a .dusk name", and Sozu's as "Staked with Sozu".
+- Kept a deposit to DuskEVM's recipient with the transaction and showed it in its details.
+- Stopped offering Add token and Import NFT on a contract call's details.
 - Gave the site approval windows the calm look, with Reject and the approve button always in view, and the chain, node, function, call data and the site's own details under Details.
 - Led a site's payment approval with the amount, the recipient's name and the fee.
 - Said in the connect approval what a site sees and that it can't move funds without your approval, with its own wording for a request for the shielded address.

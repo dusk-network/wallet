@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
+import releases from "../shared/dusk-domains-releases.json";
 import { TX_KIND } from "../shared/constants.js";
 import { installFakeDom, visibleText } from "./testing/fakeDom.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
@@ -18,8 +20,8 @@ afterEach(() => {
 });
 
 // Renders a transaction's details as the popup does.
-function details(tx) {
-  const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home" };
+function details(tx, { contacts = [] } = {}) {
+  const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home", addressBook: { loaded: true, items: contacts } };
   const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
   const ov = { nodeUrl: NODE, txs: [{ hash: HASH, nodeUrl: NODE, ...tx }] };
   dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
@@ -61,7 +63,7 @@ describe("transaction details", () => {
     expect([view.status, view.note]).toEqual(["Completed", ""]);
   });
 
-  it("offers a contract's token or NFT with the buttons alone, and names the contract", () => {
+  it("names the contract a call went to, and offers no Add token or Import NFT", () => {
     const contractId = "cd".repeat(32);
     const view = details({
       kind: TX_KIND.CONTRACT_CALL,
@@ -72,10 +74,54 @@ describe("transaction details", () => {
     expect(view.name).toBe("Call transfer");
     expect(visibleText(view.body.querySelector(".tx-hero-addr"))).toBe("0xcdcd…cdcdcd");
     expect(view.body.querySelector(".tx-hero-addr button").getAttribute("aria-label")).toBe("Copy contract ID");
-    expect(visibleText(view.body.querySelector(".tx-assets"))).toBe("Add tokenImport NFT");
-    // Not for the network's own transfer contract.
-    const convert = details({ kind: TX_KIND.CONTRACT_CALL, contractId: `01${"00".repeat(31)}`, fnName: "convert", status: "failed" });
-    expect(convert.body.querySelector(".tx-assets")).toBeNull();
+    expect(view.body.querySelector(".tx-assets")).toBeNull();
+    expect(view.body.querySelectorAll("button").map((b) => b.textContent)).not.toEqual(expect.arrayContaining(["Add token"]));
+    expect(view.body.querySelectorAll("button").map((b) => b.textContent)).not.toEqual(expect.arrayContaining(["Import NFT"]));
+  });
+
+  it("says what a Dusk Domains call did, on its own network", () => {
+    // The testnet release's store contract, where names are registered.
+    const STORE = releases.testnet.contracts.find((c) => c.role === "store").contractId;
+    const register = details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "register", deposit: "10000000000", status: "executed" });
+    expect([visibleText(register.lead), register.name]).toEqual(["Dusk Domains", "Registered a .dusk name"]);
+    expect(visibleText(register.body.querySelector(".tx-hero-amount"))).toBe("−10 DUSK");
+    const commit = details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "commit", status: "executed" });
+    expect(commit.name).toBe("Reserved a .dusk name");
+    // The same contract ID through a custom node is any contract.
+    const ov = { nodeUrl: "https://node.example", txs: [{ hash: HASH, nodeUrl: "https://node.example", kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "register", status: "executed" }] };
+    dom.document.body.replaceChildren(...txDetailsView(ov, { state: { route: "tx", txDetailHash: HASH, addressBook: { loaded: true, items: [] } }, actions: {} }));
+    expect(visibleText(dom.document.body.querySelector(".tx-hero-name"))).toBe("Call register");
+  });
+
+  it("says where a deposit to DuskEVM went, read from the call the wallet approved", () => {
+    const evm = "0x5A3d8e1B7c2f4A6b9e0D1C3f5A7b9C2D4e6F8a01";
+    const deposit = {
+      kind: TX_KIND.CONTRACT_CALL,
+      contractId: BRIDGE_CONTRACTS.testnet.bridge,
+      fnName: "depositETHToWithValue",
+      amount: "0",
+      deposit: "500000000",
+      status: "executed",
+    };
+    const view = details({ ...deposit, bridgeTo: evm });
+    expect([visibleText(view.lead), view.name]).toEqual(["Bridge", "To DuskEVM"]);
+    expect(visibleText(view.body.querySelector(".tx-hero-addr"))).toBe("0x5A3d…6F8a01");
+    expect(view.body.querySelector(".tx-hero-addr button").getAttribute("aria-label")).toBe("Copy DuskEVM address");
+    expect(view.rows).toContain(`DuskEVM recipient${evm}`);
+    // Without it, the bridge's contract, and no recipient row.
+    const old = details(deposit);
+    expect(visibleText(old.body.querySelector(".tx-hero-addr"))).toBe("2257e5…a1b31d");
+    expect(old.rows.filter((r) => r.startsWith("DuskEVM recipient"))).toEqual([]);
+  });
+
+  it("leads with a saved contact's own name, its .dusk name beside the address", () => {
+    const to = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+    const send = { kind: TX_KIND.TRANSFER, direction: "out", to, toName: "wallet-both.dusk", amount: "500000000", status: "executed" };
+    const view = details(send, { contacts: [{ name: "Jan (flour)", address: to }] });
+    expect(view.name).toBe("Jan (flour)");
+    expect(visibleText(view.body.querySelector(".tx-hero-addr"))).toBe(`wallet-both.dusk · ${to.slice(0, 6)}…${to.slice(-6)}`);
+    // Without the contact, the .dusk name leads.
+    expect(details(send).name).toBe("wallet-both.dusk");
   });
 
   it("names the site a transaction came from, and none for the wallet's own", () => {

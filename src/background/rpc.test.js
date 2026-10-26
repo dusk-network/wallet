@@ -1579,6 +1579,34 @@ describe("background rpc handler", () => {
     );
   });
 
+  it("dusk_sendTransaction keeps where a deposit to DuskEVM pays on its record, read from its call", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    const { BRIDGE_CONTRACTS } = await import("../shared/bridge.js");
+    const { default: fixtures } = await import("../shared/fixtures/duskevm-bridge-calls.json");
+    const deposit = fixtures.calls.find((c) => c.name === "deposit-shoot");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+
+    const call = {
+      kind: "contract_call",
+      privacy: "public",
+      contractId: `0x${BRIDGE_CONTRACTS.testnet.bridge}`,
+      fnName: deposit.fnName,
+      fnArgs: deposit.args,
+      amount: "0",
+      deposit: deposit.expected.amountLux,
+    };
+    await handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params: call });
+    expect(putTxMeta).toHaveBeenLastCalledWith("0xhash", expect.objectContaining({ bridgeTo: deposit.expected.to }), { epoch: 7 });
+
+    // One that sends other DUSK than it bridges keeps none.
+    await handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params: { ...call, deposit: "1" } });
+    expect(putTxMeta.mock.lastCall[1].bridgeTo).toBeUndefined();
+  });
+
   it.each([
     ["non-object params", null],
     ["unsupported type", { type: "ERC20", options: { contractId: `0x${"02".repeat(32)}` } }],

@@ -15,6 +15,7 @@
 import { keccak_256 } from "@noble/hashes/sha3";
 
 import { BRIDGE_CONTRACTS } from "./bridge.js";
+import { toBytes } from "./bytes.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
 
 export const BRIDGE_FUNCTIONS = Object.freeze({
@@ -352,6 +353,24 @@ export function bridgeEnvelopeOk(call, { amount, deposit, to, own = [] } = {}) {
   if (call.kind === "deposit" ? sent !== call.amountLux : sent !== 0n) return false;
   const recipient = String(to ?? "").trim();
   return !recipient || own.includes(recipient);
+}
+
+/**
+ * The DuskEVM address a deposit to DuskEVM pays, for the wallet's record of
+ * it: only for a deposit decodeBridgeCall reads, sent as the bridge's route
+ * expects (bridgeEnvelopeOk), else undefined.
+ * @param {{ nodeUrl?: string, contractId?: string, fnName?: string, fnArgs?: unknown, amount?: string|bigint, deposit?: string|bigint }} tx
+ * @returns {string|undefined} the address with its checksum
+ */
+export function bridgeDepositRecipient({ nodeUrl, contractId, fnName, fnArgs, amount, deposit } = {}) {
+  let args;
+  try {
+    args = toBytes(fnArgs);
+  } catch {
+    return undefined;
+  }
+  const call = decodeBridgeCall({ nodeUrl, contractId, fnName, args, deposit });
+  return call?.kind === "deposit" && bridgeEnvelopeOk(call, { amount, deposit }) ? call.recipient : undefined;
 }
 
 /**

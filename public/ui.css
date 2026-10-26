@@ -3903,6 +3903,13 @@ button.tx-open:focus-visible::after {
   font-weight: 400;
 }
 
+/* A saved contact's .dusk name, after its own name */
+.tx-name .tx-alias,
+.tx-hero-alias {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
 .tx-sub {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4201,12 +4208,6 @@ button.text-btn.tx-id {
 
 details.tx-tech > .group {
   margin: 0 8px 8px;
-}
-
-.tx-assets {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
 }
 
 button.tx-explorer-btn {
