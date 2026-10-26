@@ -17,6 +17,24 @@ export function txStatusWord(status, { final = false } = {}) {
   return "Pending";
 }
 
+// Chain errors with a plain meaning, in the words Activity uses. The raw
+// error stays under a transaction's Technical details.
+const KNOWN_ERRORS = [
+  [/phoenix is not enabled/i, "Shielded transactions are paused on the network."],
+  [/\bout\s*of\s*gas\b|\bOutOfGas\b/i, "It ran out of gas. A higher gas limit lets it finish."],
+  [/contract does not exist|\bDoesNotExist\b/i, "The contract it called isn't on this network."],
+];
+
+/**
+ * A known chain error in plain words, or "" for one without them.
+ * @param {string} error - as the chain or the watcher gave it
+ * @returns {string}
+ */
+export function txErrorText(error) {
+  const raw = String(error ?? "");
+  return KNOWN_ERRORS.find(([re]) => re.test(raw))?.[1] ?? "";
+}
+
 /** @returns {"ok"|"bad"|"pending"|"neutral"} */
 export function txStatusTone(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();

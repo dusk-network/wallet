@@ -5,6 +5,7 @@ import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
+import { txErrorText } from "./txDisplay.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 
@@ -123,7 +124,11 @@ export function sentSteps(sent, ov) {
     return [
       sending,
       { label: "Sent to the network", state: "done", sub: "" },
-      { label: "Failed", state: "failed", sub: [reasonText(error) || "It didn't go through.", charged].filter(Boolean).join(" ") },
+      {
+        label: "Failed",
+        state: "failed",
+        sub: [txErrorText(error) || reasonText(error) || "It didn't go through.", charged].filter(Boolean).join(" "),
+      },
     ];
   }
   if (status === "removed") {

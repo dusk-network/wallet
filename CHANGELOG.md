@@ -40,6 +40,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed Activity's rows with a direction icon and the other side's name first; a failed one says nothing was sent and the fee paid.
 - Reworked a transaction's details into a summary of who, how much and its status, then its date, memo, fee, profile and ID, with block and gas under Technical details.
 - Hid Activity's amounts and a transaction's amount while balances are hidden; fees stay visible.
+- Said known chain errors in plain words, with the chain's own under Technical details.
 - Moved the account's explorer link from Home's History ↗ to the end of Activity, on the Dusk explorer instead of DuskScan.
 - Cleared the wallet's transactions, shielded notes and history on reset.
 - Moved Review's gas price line and presets behind the fee's Edit, and removed Review's Cancel. ([#126])

@@ -333,11 +333,15 @@ describe("a transaction's details", () => {
     expect(text.some((t) => t.startsWith("Network fee"))).toBe(false);
   });
 
-  it("says why one didn't go through, and what it cost", () => {
-    const failed = { ...sent, status: "failed", error: "Panic: out of gas" };
+  it("says why one didn't go through in plain words, and what it cost", () => {
+    const failed = { ...sent, status: "failed", error: "Panic: phoenix is not enabled in the VM" };
     open({ local: [failed] }, failed.hash);
     expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Failed");
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("Panic: out of gas. The 25 DUSK stayed in your wallet.");
+    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe(
+      "Shielded transactions are paused on the network. The 25 DUSK stayed in your wallet."
+    );
+    // The chain's own words wait under Technical details.
+    expect(body().querySelectorAll("details.tx-tech .kv").map(visibleText)).toContain("ErrorPanic: phoenix is not enabled in the VM");
     // Nothing left: the amount shows muted, without a sign.
     expect([visibleText(body().querySelector(".tx-hero-amount")), body().querySelector(".tx-hero-amount").className]).toEqual([
       "25 DUSK",
@@ -345,7 +349,12 @@ describe("a transaction's details", () => {
     ]);
     expect(visibleText(body())).toContain("Fee charged0.0037 DUSK");
     open({ local: [failed], hidden: true }, failed.hash);
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("Panic: out of gas. The amount stayed in your wallet.");
+    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe(
+      "Shielded transactions are paused on the network. The amount stayed in your wallet."
+    );
+    // An error without plain words keeps its own, shortened.
+    open({ local: [{ ...failed, error: "Panic: DRC20Phoenix: paused" }] }, failed.hash);
+    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("Panic: DRC20Phoenix: paused. The 25 DUSK stayed in your wallet.");
 
     const pending = { ...sent, status: "mempool", feePaid: undefined, gasSpent: undefined };
     open({ local: [pending] }, pending.hash);

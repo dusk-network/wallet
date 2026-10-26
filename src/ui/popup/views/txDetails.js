@@ -11,7 +11,7 @@ import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
-import { txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
+import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
 import { amountEl, contactNames, copyButton, dateText, describeTx, txIconSvg, txTime } from "./txRow.js";
 import { reasonText } from "./sent.js";
 import { activityRows, loadActivityDetail } from "../activity.js";
@@ -43,7 +43,7 @@ function statusNote(tx, desc, hidden) {
     case "removed":
       return `The network dropped it before it ran, so no fee was charged.${stayed}${shielded ? " Shielded funds may still be reserved locally." : ""}`;
     case "failed":
-      return `${reasonText(tx?.error) || "It ran but didn't go through."}${stayed}`;
+      return `${txErrorText(tx?.error) || reasonText(tx?.error) || "It ran but didn't go through."}${stayed}`;
     default:
       return "";
   }
@@ -108,6 +108,8 @@ function technicalRows(tx, ov, nodeUrl) {
     at("Dropped", tx?.removedAt),
     tx?.reservationStatus ? kv("Shielded reservation", String(tx.reservationStatus)) : null,
     tx?.recoveryReason ? kv("Why", txRecoveryReasonLabel(tx.recoveryReason), { className: "kv--wrap" }) : null,
+    // The chain's own words for a failure; the summary says it plainly.
+    String(tx?.status ?? "") === "failed" && tx?.error ? kv("Error", String(tx.error), { className: "kv--wrap" }) : null,
   ].filter(Boolean);
 }
 
