@@ -625,6 +625,83 @@ describe("lookupRecipientName", () => {
   );
 });
 
+describe("lookupRecipientNames", () => {
+  const lookup = (accounts, url = TESTNET) => names.lookupRecipientNames(accounts, { nodeUrl: url });
+  const LENS = releases.testnet.lens.contractId;
+
+  it("looks up many accounts at once, each as lookupRecipientName gives one, and keeps nothing", async () => {
+    const reader = useReader({ verifyPrimary: async (key) => (key[95] === decodeBase58(ACCOUNT)[95] ? primary("carol.dusk") : null) });
+    const result = await lookup([ACCOUNT, OTHER_ACCOUNT, ` ${ACCOUNT} `, ADDRESS, "carol.dusk"]);
+    expect(result).toEqual(new Map([[ACCOUNT, "carol.dusk"], [OTHER_ACCOUNT, null]]));
+    // Once per account, and only for public accounts.
+    expect(reader.verifyPrimary).toHaveBeenCalledTimes(2);
+    expect(kept.rememberVerifiedName).not.toHaveBeenCalled();
+  });
+
+  it("reads through Multicall for Dusk: the lookups of one task go out as one query", async () => {
+    useReader();
+    await lookup([ACCOUNT]);
+    const { fetch, nodeUrl: node } = lens.createLensReader.mock.calls[0][1];
+    const sent = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init) => {
+        sent.push([String(url), new Uint8Array(init.body)]);
+        // Two results of one byte each, as the multicall archives them: the
+        // bytes, a 16-byte slot each from 4, and the root at 40.
+        const reply = new Uint8Array(56);
+        const view = new DataView(reply.buffer);
+        reply.set([7, 8], 0);
+        view.setInt32(4 + 4, 0 - (4 + 4), true);
+        view.setUint32(4 + 8, 1, true);
+        view.setInt32(20 + 4, 1 - (20 + 4), true);
+        view.setUint32(20 + 8, 1, true);
+        view.setBigUint64(40, 5n, true);
+        view.setInt32(48, 4 - 48, true);
+        view.setUint32(52, 2, true);
+        return new Response(reply);
+      })
+    );
+    const read = (body) => fetch(`${node}/on/contracts:${LENS}/reverse`, { method: "POST", body: new Uint8Array(body) });
+    const answers = await Promise.all([read([1]), read([2])]);
+    expect(sent.map(([url]) => url)).toEqual([`${node}/on/contracts:93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4/aggregate`]);
+    // Each reverse read capped at the SDK client's 842M gas: 203 reads at 4M, and 30M.
+    const envelope = sent[0][1];
+    const gas = new DataView(envelope.buffer).getBigUint64(envelope.length - 8 - 56 * 2 + 48, true);
+    expect(gas).toBe(842_000_000n);
+    expect(answers.map((r) => r.status)).toEqual([200, 200]);
+    expect(await Promise.all(answers.map(async (r) => Array.from(new Uint8Array(await r.arrayBuffer()))))).toEqual([[7], [8]]);
+  });
+
+  it("reads a lookup the lens refused for want of gas again on its own", async () => {
+    const refused = new lens.LensReaderError("refused", "Lens reverse refused: GasBudget", {
+      refusal: { code: "GasBudget", contract: null, cause: null, height: 1n },
+    });
+    const batched = { resolve: vi.fn(), verifyPrimary: vi.fn(async () => Promise.reject(refused)) };
+    const direct = { resolve: vi.fn(), verifyPrimary: vi.fn(async () => primary("carol.dusk")) };
+    lens.createLensReader.mockResolvedValueOnce(batched).mockResolvedValueOnce(direct);
+    await expect(lookup([ACCOUNT])).resolves.toEqual(new Map([[ACCOUNT, "carol.dusk"]]));
+    expect(direct.verifyPrimary).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves out an account whose lookup failed, and names the reader's checks refused", async () => {
+    useReader({
+      verifyPrimary: async (key) => {
+        if (key[95] === decodeBase58(ACCOUNT)[95]) throw new lens.LensReaderError("evidence", "Lens primary does not match its endpoint");
+        return primary("Carol.dusk");
+      },
+    });
+    await expect(lookup([ACCOUNT, OTHER_ACCOUNT])).resolves.toEqual(new Map([[OTHER_ACCOUNT, null]]));
+  });
+
+  it("looks up nothing off Mainnet and Testnet, or without accounts", async () => {
+    useReader();
+    await expect(lookup([ACCOUNT], nodeUrl("devnet"))).resolves.toEqual(new Map());
+    await expect(lookup([ADDRESS, ""])).resolves.toEqual(new Map());
+    expect(lens.createLensReader).not.toHaveBeenCalled();
+  });
+});
+
 describe("duskNameErrorText", () => {
   it("explains each failure", () => {
     const text = (reason) => names.duskNameErrorText({ name: "alice.dusk", reason });

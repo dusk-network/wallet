@@ -12,6 +12,7 @@
 
 import { assetUrl } from "../platform/assets.js";
 import { classifyDuskIdentifier } from "./duskIdentifiers.js";
+import { createMulticallFetch } from "./multicallFetch.js";
 import { duskNamesNetwork, rememberVerifiedName } from "./verifiedNames.js";
 
 export { duskNamesNetwork };
@@ -72,23 +73,36 @@ const loadSdk = () => Promise.all([import("./duskNamesSdk.js"), import("./dusk-d
 // The SDK's own spelling of the node URL, which its reads start with.
 const nodeHref = (nodeUrl) => new URL(String(nodeUrl)).href.replace(/\/$/, "");
 
-// One reader per network, bound to the node it reads from.
+// One reader per network, bound to the node it reads from, and one whose
+// reads go through Multicall for Dusk (lookupRecipientNames).
 const readers = new Map();
+const batchedReaders = new Map();
 
-function readerFor(createLensReader, release, network, nodeUrl) {
-  const cached = readers.get(network);
+// The gas a lens read takes inside a multicall, as the SDK's client gives it
+// (client.ts, LENS_READS and lensGas): the lens shares its gas among every
+// read it may make and refuses (GasBudget) when a share is short.
+const LENS_READS = { resolve: 90, reverse: 203 };
+const lensGas = (release) => (contractId, fnName) =>
+  contractId === release.lens.contractId && LENS_READS[fnName]
+    ? BigInt(LENS_READS[fnName]) * 4_000_000n + 30_000_000n
+    : 0n;
+
+function readerFor(createLensReader, release, network, nodeUrl, { batched = false } = {}) {
+  const cache = batched ? batchedReaders : readers;
+  const cached = cache.get(network);
   if (cached?.nodeUrl === nodeUrl) return cached.promise;
 
+  const direct = bundledFetch(release, nodeUrl);
   const promise = createLensReader(release, {
     nodeUrl,
     artifactBaseUrl: release.artifactBaseUrl,
-    fetch: bundledFetch(release, nodeUrl),
+    fetch: batched ? createMulticallFetch({ nodeUrl, fetch: direct, gasFor: lensGas(release) }) : direct,
   });
   const entry = { nodeUrl, promise };
-  readers.set(network, entry);
+  cache.set(network, entry);
   // A reader that failed to build is built again by the next lookup.
   promise.catch(() => {
-    if (readers.get(network) === entry) readers.delete(network);
+    if (cache.get(network) === entry) cache.delete(network);
   });
   return promise;
 }
@@ -329,14 +343,78 @@ const keyLike = (label) =>
 export async function lookupRecipientName(recipient, { nodeUrl } = {}) {
   const result = await resolvePrimaryName(String(recipient ?? "").trim(), { nodeUrl });
   const name = result.ok ? result.name : null;
-  if (typeof name !== "string" || name.length > RECIPIENT_NAME_MAX) return null;
   try {
-    const [sdk] = await loadSdk();
-    const checked = sdk.validateName(name);
-    return checked.ok && checked.name.canonical === name && !checked.name.labels.some(keyLike) ? name : null;
+    return shownRecipientName((await loadSdk())[0], name);
   } catch {
     return null;
   }
+}
+
+// A verified primary name as lookupRecipientName gives it: canonical, at most
+// RECIPIENT_NAME_MAX characters and no label like key material; else null.
+function shownRecipientName(sdk, name) {
+  if (typeof name !== "string" || name.length > RECIPIENT_NAME_MAX) return null;
+  const checked = sdk.validateName(name);
+  return checked.ok && checked.name.canonical === name && !checked.name.labels.some(keyLike) ? name : null;
+}
+
+// A lens refusal for want of gas, which a multicall's share of gas can cause
+// and a query of its own does not (the SDK's client reads those again alone).
+const shortOfGas = (error) =>
+  error?.reason === "refused" &&
+  (error.refusal?.code === "GasBudget" || error.refusal?.code === "ReadFailed" || error.refusal?.cause === "GasBudget");
+
+/**
+ * `lookupRecipientName` for many accounts at once, as Activity names its
+ * counterparties: the lookups go out together, so Multicall for Dusk carries
+ * up to 32 of them in one query (multicallFetch.js), and the lens reader
+ * checks each answer as it checks one read alone. A lookup the lens refused
+ * for want of gas in the batch is made again on its own. Accounts whose
+ * lookup failed are left out. Never throws.
+ *
+ * @param {string[]} accounts
+ * @param {{ nodeUrl?: string }} [opts]
+ * @returns {Promise<Map<string, string|null>>} the name of each account looked up, null for none
+ */
+export async function lookupRecipientNames(accounts, { nodeUrl } = {}) {
+  const out = new Map();
+  const network = duskNamesNetwork(nodeUrl);
+  const list = [...new Set((accounts ?? []).map((a) => String(a ?? "").trim()))].filter(
+    (a) => classifyDuskIdentifier(a) === "account"
+  );
+  if (!network || !list.length) return out;
+  let sdk;
+  let reader;
+  try {
+    let releases;
+    [sdk, { default: releases }] = await loadSdk();
+    reader = await readerFor(sdk.createLensReader, releases[network], network, nodeHref(nodeUrl), { batched: true });
+  } catch {
+    return out;
+  }
+  // Started in one task, so one aggregate takes them.
+  const results = await Promise.allSettled(list.map((a) => reader.verifyPrimary(Array.from(sdk.decodeBase58(a)))));
+  const again = [];
+  results.forEach((result, i) => {
+    if (result.status === "fulfilled") {
+      const name = result.value === null ? null : result.value?.primary?.spelling;
+      if (name === null || typeof name === "string") out.set(list[i], name);
+    } else if (shortOfGas(result.reason)) {
+      again.push(list[i]);
+    }
+  });
+  for (const account of again) {
+    const result = await resolvePrimaryName(account, { nodeUrl });
+    if (result.ok) out.set(account, result.name);
+  }
+  for (const [account, name] of out) {
+    try {
+      out.set(account, name === null ? null : shownRecipientName(sdk, name));
+    } catch {
+      out.delete(account);
+    }
+  }
+  return out;
 }
 
 /**
