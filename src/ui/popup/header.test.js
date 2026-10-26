@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fakeEvent, installFakeDom, settle, visibleText } from "../testing/fakeDom.js";
+import { fakeEvent, installFakeDom, screenReaderText, settle, visibleText } from "../testing/fakeDom.js";
 import { iconSvg } from "../components/ActionIcon.js";
 
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
@@ -96,13 +96,22 @@ describe("header", () => {
     ]);
   });
 
-  it("shows the short account without a name and the verified name once there is one", async () => {
+  it("shows the profile's label without a name, the account only in the tooltip, and the verified name once there is one", async () => {
     const { names, renderHeader, chip } = await setup("popup");
     renderHeader(overview);
     await settle();
-    expect(visibleText(chip().querySelector(".chip-text"))).toBe("26FCH7…Tck927");
-    expect(visibleText(chip())).toBe("26FCH7…Tck927▾");
+    expect(visibleText(chip())).toBe("Profile 1▾");
+    expect(chip().title).toBe(`Profile 1\n${ACCOUNT}`);
+    expect(screenReaderText(chip())).not.toContain(ACCOUNT.slice(0, 6));
     expect(names.lookupPrimaryName).toHaveBeenCalledWith(ACCOUNT, { nodeUrl: overview.nodeUrl, stale: true });
+
+    // A label set on this device takes its place; another profile shows its own.
+    renderHeader({ ...overview, accountNames: { 0: "Savings" } });
+    await settle();
+    expect(visibleText(chip())).toBe("Savings▾");
+    renderHeader({ ...overview, selectedAccountIndex: 1 });
+    await settle();
+    expect([visibleText(chip()), chip().title]).toEqual(["Profile 2▾", `Profile 2\n${SECOND}`]);
 
     names.lookupPrimaryName.mockResolvedValue("alice.dusk");
     renderHeader(overview);
@@ -199,9 +208,11 @@ describe("header", () => {
     expect(rule(".header-actions > *")).toContain("flex: 0 0 auto;");
     expect(rule(".header-actions > .account-chip")).toContain("flex: 0 1 auto;");
     expect(rule(".account-chip")).toContain("min-width: 0;");
-    expect(rule(".account-chip .chip-text")).toContain("min-width: 0;");
-    expect(rule(".account-chip .chip-text__head")).toContain("text-overflow: ellipsis;");
-    expect(rule(".account-chip .chip-text__tail")).toContain("flex: 0 0 auto;");
+    // One line that ends in one "…" when it has to shrink, whatever it holds.
+    for (const declaration of ["min-width: 0;", "overflow: hidden;", "text-overflow: ellipsis;", "white-space: nowrap;"]) {
+      expect(rule(".account-chip .chip-text")).toContain(declaration);
+    }
+    expect(css).not.toContain("chip-text__");
     expect(rule(".account-chip .chip-chev")).toContain("flex: 0 0 auto;");
     // The chip shows its line in the popup too, and stays on narrow screens.
     expect(css).not.toMatch(/body\.page--popup \.account-chip \.chip-text\s*\{[^}]*display: none/);

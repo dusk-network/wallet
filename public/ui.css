@@ -1020,9 +1020,13 @@ button:disabled {
   transform: translateY(1px);
 }
 
+/* The chip's one line, a name or a label, ends in one "…" when it has to
+   shrink */
 .account-chip .chip-text {
-  display: flex;
+  display: block;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0;
@@ -1037,18 +1041,6 @@ button:disabled {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* The chip's name ends in "…" when it has to shrink; its short account loses
-   characters before the "…" and keeps its last six. */
-.account-chip .chip-text__head {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.account-chip .chip-text__tail {
-  flex: 0 0 auto;
 }
 
 .account-chip .chip-chev {

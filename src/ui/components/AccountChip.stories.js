@@ -9,6 +9,7 @@ export const Disconnected = () =>
     onClick: () => console.log("open profiles"),
     connected: false,
     host: "dapp.example",
+    label: "Profile 1",
   });
 
 export const Connected = () =>
@@ -16,4 +17,5 @@ export const Connected = () =>
     onClick: () => console.log("open profiles"),
     connected: true,
     host: "dapp.example",
+    label: "Profile 1",
   });

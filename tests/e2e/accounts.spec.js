@@ -61,11 +61,15 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await page.getByRole("button", { name: "← Back" }).click();
   await expect(page.locator("#app").getByRole("button", { name: "Send" })).toBeVisible();
 
+  // Without a .dusk name, the chip shows the profile's label, not its account.
+  await expect(page.locator("#header-actions .account-chip .chip-text")).toHaveText("Main");
+
   // Open the profile switcher from the account chip and switch
   await page.locator("#header-actions .account-chip").click();
   await expect(page.getByText("Select profile")).toBeVisible();
-  await expect(page.getByText("Main")).toBeVisible();
-  await expect(page.getByText("Spending")).toBeVisible();
+  const menu = page.locator(".acct-menu");
+  await expect(menu.getByText("Main")).toBeVisible();
+  await expect(menu.getByText("Spending")).toBeVisible();
 
   // The row, not its copy button ("Copy Spending's public account").
   await page.getByRole("menuitemradio", { name: /^Spending/ }).click();

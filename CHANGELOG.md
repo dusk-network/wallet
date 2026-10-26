@@ -50,6 +50,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Restyled Receive, Contacts and Settings, and showed what a `.dusk` name reaches under it on Receive.
 - Restyled the token and NFT screens, onboarding and Unlock, and kept the full view's pages to one readable column.
 - Shortened every address, contract ID and transaction ID the same way, to its first and last six characters.
+- Named a profile without a `.dusk` name by its label in the header, with its account in the tooltip and the profile switcher.
 - Named profiles by their verified `.dusk` names in Settings and its profile pickers.
 - Offered auto-lock after 5 or 15 minutes, 15 by default, or Off; an open popup nobody uses locks too.
 - Asked before disconnecting all sites, and moved Reset wallet to the end of Settings.
