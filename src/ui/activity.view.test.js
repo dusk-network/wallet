@@ -112,7 +112,7 @@ describe("Recent activity with the account's history", () => {
 });
 
 describe("the details of a send the archive has without its outcome", () => {
-  it("looks its outcome up, keeping the wallet's pending status meanwhile", () => {
+  it("looks its outcome up, as final with its outcome unknown meanwhile", () => {
     const { ov, state, actions } = setup();
     const register = state.activity.entries.find((e) => e.fnName === "register");
     Object.assign(register, { success: null, detailsAt: undefined });
@@ -121,7 +121,9 @@ describe("the details of a send the archive has without its outcome", () => {
     detail.load.mockClear();
     dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
     expect(detail.load).toHaveBeenCalledWith(expect.objectContaining({ state }), register.hash);
-    expect(visibleText(dom.document.body)).toContain("Status: Pending");
+    // In a finalized block: not pending, whatever the wallet's watcher last saw.
+    expect(visibleText(dom.document.body)).toContain("Status: Unknown");
+    expect(visibleText(dom.document.body)).toContain("It is final on chain. Its outcome is still being looked up.");
   });
 });
 

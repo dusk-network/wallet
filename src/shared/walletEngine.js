@@ -48,6 +48,7 @@ import {
 import { activityNetworkKey, assertArchive, historyArchiverUrl } from "./activityHistory.js";
 import {
   StaleActivityError,
+  clearShieldedActivity,
   getActivityEpoch,
   getNoteHeightPool,
   getShieldedHistoryRecord,
@@ -2207,6 +2208,7 @@ export async function startShieldedSync({ force = false } = {}) {
       signal.throwIfAborted();
       if (hash !== anchor.anchorHash) {
         await resetCache();
+        await forgetShieldedActivity(engineConfig.nodeUrl);
         throw new Error("Chain changed during synchronization; retry to rebuild shielded notes");
       }
     };
@@ -2221,6 +2223,7 @@ export async function startShieldedSync({ force = false } = {}) {
         // ponytail: rare reorgs rebuild from genesis; per-note rollback metadata
         // is only needed if a full rescan becomes too expensive.
         await resetCache();
+        await forgetShieldedActivity(engineConfig.nodeUrl);
         cursor = { bookmark: 0n, block: 0n };
       }
     } else {
@@ -2508,6 +2511,15 @@ async function noteValue(profile, nullifier, leaf) {
 
 let shieldedHistoryRun = null;
 
+// Bumped when the shielded sync finds its anchored chain replaced (a dev or
+// local chain rebuilt at the same URL): the note tree's heights and the
+// shielded histories kept for the network are the old chain's.
+let shieldedChainGeneration = 0;
+async function forgetShieldedActivity(nodeUrl) {
+  shieldedChainGeneration += 1;
+  await clearShieldedActivity(activityNetworkKey(nodeUrl)).catch(() => {});
+}
+
 /**
  * The selected profile's shielded history (phoenixHistory.js), worked out
  * once its shielded notes are synced and kept from then on. A profile
@@ -2522,16 +2534,18 @@ export async function getShieldedHistory() {
   const walletId = getWalletId();
   const profileIndex = getSelectedProfileIndex();
   const generation = unlockGeneration;
+  const chain = shieldedChainGeneration;
   // The keys the notes' values are read with: this profile's, whatever is selected later.
   const profile = getCurrentProfile();
   const key = `${activityNetworkKey(nodeUrl)}::${walletId}::${profileIndex}`;
   if (shieldedHistoryRun?.key === key && shieldedHistoryRun.generation === generation) return shieldedHistoryRun.promise;
-  // A lock, a reset, another profile or another node since the build began:
-  // it stops, and keeps nothing.
+  // A lock, a reset, another profile, another node or a replaced chain since
+  // the build began: it stops, and keeps nothing.
   const assertCurrent = () => {
     if (
       !state.unlocked ||
       unlockGeneration !== generation ||
+      shieldedChainGeneration !== chain ||
       getWalletId() !== walletId ||
       getSelectedProfileIndex() !== profileIndex ||
       engineConfig.nodeUrl !== nodeUrl
@@ -2547,7 +2561,11 @@ export async function getShieldedHistory() {
       getSpentNotesMap(netKey, walletId, profileIndex),
     ]);
     assertCurrent();
-    if (!unspent.size && !spent.size) return { profileIndex, entries: [] };
+    // Notes still being discovered aren't the history yet: what is known
+    // shows, marked pending, and is asked for again once they are.
+    const syncing = state.shielded.status.state !== "done";
+    const snapshot = (entries) => (syncing ? { profileIndex, entries, pending: true } : { profileIndex, entries });
+    if (!unspent.size && !spent.size) return snapshot([]);
     const rows = [
       ...[...unspent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: false })),
       ...[...spent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: true })),
@@ -2559,9 +2577,8 @@ export async function getShieldedHistory() {
       .join(",");
     const kept = await getShieldedHistoryRecord(key).catch(() => null);
     assertCurrent();
-    if (kept?.fingerprint === fingerprint) return { profileIndex, entries: kept.entries };
-    // Notes still being discovered aren't the history yet.
-    if (state.shielded.status.state !== "done") return { profileIndex, entries: kept?.entries ?? [], pending: true };
+    if (kept?.fingerprint === fingerprint) return snapshot(kept.entries);
+    if (syncing) return snapshot(kept?.entries ?? []);
 
     // A node without the archive reads no note tree either.
     const url = historyArchiverUrl({ nodeUrl, archiverUrl: engineConfig.archiverUrl });
@@ -2580,6 +2597,8 @@ export async function getShieldedHistory() {
     const inTree = new Set(pool ?? []);
     if (!pool || real.some((h) => !inTree.has(h))) return { profileIndex, entries: kept?.entries ?? [], pending: true };
     const { heights, decoys } = pickHeights(pool, real, { keep: kept?.decoys ?? [] });
+    // Not one other height to ask among: asking would name the profile's own.
+    if (!decoys.length) return { profileIndex, entries: kept?.entries ?? [], pending: true };
     const blocks = await fetchBlocks(url, heights);
     assertCurrent();
     const entries = buildShieldedHistory({ notes, blocks });

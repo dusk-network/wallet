@@ -190,6 +190,53 @@ describe("shielded history", () => {
     await until(() => send.mock.calls.length === 2);
     await until(() => state.activity.shieldedAsked === false);
   });
+
+  it("asks again in a view that stays open, once the notes are synced", async () => {
+    fakeArchive();
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, result: { profileIndex: 0, entries: [], pending: true } })
+      .mockResolvedValue({ ok: true, result: { profileIndex: 0, entries: [shieldedRow] } });
+    const state = { route: "home" };
+    const render = vi.fn(async () => {});
+    const syncing = overview(A, { shieldedSync: { state: "syncing" } });
+    activity.ensureActivity(syncing, { state, render, send });
+    await until(() => send.mock.calls.length === 1 && state.activity.shieldedAsked === false);
+    // The view's next renders, while the notes still sync: nothing more.
+    activity.ensureActivity(syncing, { state, render, send });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(send).toHaveBeenCalledTimes(1);
+    // Synced: asked again, and shown.
+    activity.ensureActivity(overview(A, { shieldedSync: { state: "done" } }), { state, render, send });
+    await until(() => state.activity.shielded.length > 0);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("loadActivityDetail", () => {
+  it("asks again a while after a lookup that brought nothing, not before", async () => {
+    const node = fakeArchive();
+    const { state, render } = await popup();
+    // An entry shown before any lookup found its details.
+    const entry = { ...state.activity.entries[0], detailsAt: undefined };
+    state.activity.entries = [entry, ...state.activity.entries.slice(1)];
+    const lookups = () => node.detailQueries().length;
+
+    node.down = true;
+    const before = lookups();
+    activity.loadActivityDetail({ state, render }, entry.hash);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    node.down = false;
+    // Right after: not asked again.
+    activity.loadActivityDetail({ state, render }, entry.hash);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(lookups()).toBe(before);
+    // A minute later: asked, and found.
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + activity.DETAIL_RETRY_MS + 1);
+    activity.loadActivityDetail({ state, render }, entry.hash);
+    await until(() => lookups() > before);
+  });
 });
 
 describe("refreshActivitySoon", () => {

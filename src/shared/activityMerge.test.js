@@ -96,12 +96,19 @@ describe("mergeActivity", () => {
     });
   });
 
-  it("keeps the wallet's own status while the archive's outcome is unknown", () => {
+  it("takes a row the archive has as final: the outcome the wallet saw, else unknown until its details come", () => {
     const unknown = { ...registered(), success: null, detailsAt: undefined };
-    for (const status of ["submitted", "unknown", "failed"]) {
+    for (const [status, shown] of [
+      ["submitted", "unknown"],
+      ["mempool", "unknown"],
+      ["unknown", "unknown"],
+      ["removed", "unknown"],
+      ["failed", "failed"],
+      ["executed", "executed"],
+    ]) {
       const local = { hash: unknown.hash, kind: "contract_call", status, error: status === "failed" ? "OutOfGas" : undefined, profileIndex: 0 };
       const [row] = mergeActivity({ local: [local], history: [unknown], profileIndex: 0 });
-      expect(row).toMatchObject({ source: "both", status, error: local.error, detailsAt: undefined });
+      expect(row).toMatchObject({ source: "both", status: shown, error: shown === "failed" ? "OutOfGas" : undefined, detailsAt: undefined });
     }
   });
 

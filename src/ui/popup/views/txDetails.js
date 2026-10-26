@@ -29,7 +29,7 @@ function statusLabel(status) {
 function statusHelp(tx) {
   const s = String(tx?.status ?? "").toLowerCase();
   if (s === "mempool") return "Still waiting to go through. Don't retry yet.";
-  if (s === "unknown" && tx?.source === "archive") return "It is final on chain. Its outcome is still being looked up.";
+  if (s === "unknown" && (tx?.source === "archive" || tx?.source === "both")) return "It is final on chain. Its outcome is still being looked up.";
   if (s === "unknown") return "The wallet stopped waiting for a result. That doesn't mean it failed.";
   if (s === "removed") return "Shielded funds may still be reserved locally.";
   return "";

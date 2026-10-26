@@ -304,6 +304,19 @@ export async function putNoteHeightPool(network, heights, notes, epoch) {
   });
 }
 
+/**
+ * Forget a network's note-tree heights and every shielded history kept on it,
+ * for a chain the shielded sync found replaced.
+ * @param {string} network
+ */
+export async function clearShieldedActivity(network) {
+  const db = await openDb();
+  const tx = db.transaction([STORE_POOLS, STORE_SHIELDED], "readwrite");
+  tx.objectStore(STORE_POOLS).delete(network);
+  tx.objectStore(STORE_SHIELDED).delete(IDBKeyRange.bound(`${network}::`, `${network}::\uffff`));
+  await done(tx);
+}
+
 /** A profile's kept shielded history: `{ ownerKey, fingerprint, entries, decoys }`, or null. */
 export async function getShieldedHistoryRecord(ownerKey) {
   const db = await openDb();

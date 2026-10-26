@@ -106,22 +106,40 @@ async function checkNames(a) {
   return names.size > 0;
 }
 
+/** How long a view waits to ask again for a shielded history the wallet couldn't give yet. */
+export const SHIELDED_RETRY_MS = 60_000;
+
 // The profile's shielded history, from the engine, once Moonlight's is shown:
-// worked out once from the notes the shielded sync keeps, then kept.
+// worked out once from the notes the shielded sync keeps, then kept. One the
+// wallet couldn't give yet is asked for again: by the next popup, or by a
+// long-lived view once its notes are synced, or a minute later.
 async function loadShielded(a, state, render) {
   if (a.shieldedAsked || !a.send) return;
   a.shieldedAsked = true;
+  const again = () => {
+    a.shieldedAsked = false;
+    a.shieldedRetryAt = Date.now() + SHIELDED_RETRY_MS;
+  };
   try {
     const res = await a.send({ type: "DUSK_UI_GET_SHIELDED_HISTORY" });
     const result = res?.result;
     if (state.activity !== a || !Array.isArray(result?.entries) || result.profileIndex !== a.profileIndex) return;
     a.shielded = result.entries;
-    // Notes still syncing: asked again by the next popup.
-    if (result.pending) a.shieldedAsked = false;
+    if (result.pending) again();
     if (result.entries.length) redraw(state, render);
   } catch {
-    a.shieldedAsked = false;
+    again();
   }
+}
+
+// A render of the same account: its shielded history asked for again once
+// the notes finished syncing, or a minute after the wallet couldn't give it.
+function retryShielded(a, ov, state, render) {
+  const synced = ov?.shieldedSync?.state === "done";
+  const justSynced = synced && a.shieldedSync !== "done";
+  a.shieldedSync = ov?.shieldedSync?.state;
+  if (a.shieldedAsked || !a.loaded || a.syncing || !synced) return;
+  if (justSynced || Date.now() >= (a.shieldedRetryAt ?? 0)) loadShielded(a, state, render).catch(() => {});
 }
 
 async function run(a, state, render) {
@@ -183,7 +201,10 @@ export function ensureActivity(ov, { state, render, send }) {
   // Locked: what the last account's work brings back is dropped.
   if (ov?.isUnlocked === false) state.activity = null;
   if (!key) return;
-  if (state.activity?.key === key) return;
+  if (state.activity?.key === key) {
+    retryShielded(state.activity, ov, state, render);
+    return;
+  }
   const { account, profileIndex } = selected(ov);
   const a = {
     key,
@@ -199,6 +220,7 @@ export function ensureActivity(ov, { state, render, send }) {
     names: new Map(),
     checked: new Set(),
     shielded: [],
+    shieldedSync: ov?.shieldedSync?.state,
     send,
     syncing: false,
     error: null,
@@ -257,19 +279,26 @@ export async function showMoreActivity({ state, render }) {
   if (!a.complete && a.entries.length < a.limit) await run(a, state, render);
 }
 
-const detailLoads = new Set();
+/** How long a detail lookup that brought nothing waits before it is asked again. */
+export const DETAIL_RETRY_MS = 60_000;
+// By activity and hash: "loading", or when a lookup that brought nothing
+// ended (the archive's index can lag the block, or the request fail).
+const detailLoads = new Map();
 
 /**
  * The time, outcome and fee of one synced entry, for its details view, when
- * no sync looked them up yet: one request, once.
+ * no sync looked them up yet: one request at a time, again a minute after
+ * one that brought nothing.
  * @param {{ state: object, render: () => Promise<void> }} ctx
  * @param {string} hash
  */
 export function loadActivityDetail({ state, render }, hash) {
   const a = state?.activity;
   const entry = a?.entries.find((e) => e.hash === hash);
-  if (!entry || detailLoads.has(`${a.key}\n${hash}`)) return;
-  detailLoads.add(`${a.key}\n${hash}`);
+  const key = `${a?.key}\n${hash}`;
+  const last = detailLoads.get(key);
+  if (!entry || last === "loading" || (typeof last === "number" && Date.now() - last < DETAIL_RETRY_MS)) return;
+  detailLoads.set(key, "loading");
   a.epoch
     .then((epoch) => {
       if (epoch === undefined) throw new Error("The activity store is out of reach");
@@ -277,7 +306,11 @@ export function loadActivityDetail({ state, render }, hash) {
     })
     .then(() => reload(a))
     .then(() => redraw(state, render))
-    .catch(() => {});
+    .catch(() => {})
+    .finally(() => {
+      if (a.entries.find((e) => e.hash === hash)?.detailsAt) detailLoads.delete(key);
+      else detailLoads.set(key, Date.now());
+    });
 }
 
 /** Whether Show more has more to show: kept rows beyond the page, or older history to sync. */

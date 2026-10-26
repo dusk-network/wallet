@@ -2,12 +2,14 @@
 // selected account's history from the archive (activityHistory.js) and its
 // shielded history, one row per transaction, newest first.
 //
-// A transaction both know is the chain's once it is final: its outcome,
-// amount, time and fee come from the archive. The wallet's own record adds
-// what the chain doesn't say, such as the .dusk name typed for the recipient,
-// the site that asked or the token sent, and the amount it meant to send
-// when it didn't go through. Until the archive has it, the wallet's record
-// shows it, pending or not.
+// A transaction both know is the chain's: the archive has it, so it is in a
+// finalized block, and its outcome, amount, time and fee come from the
+// archive. Until its details come, its outcome is unknown, unless the wallet
+// saw it go through or fail. The wallet's own record adds what the chain
+// doesn't say, such as the .dusk name typed for the recipient, the site that
+// asked or the token sent, and the amount it meant to send when it didn't go
+// through. Until the archive has it, the wallet's record shows it, pending
+// or not.
 
 import { TX_KIND } from "./constants.js";
 
@@ -100,10 +102,16 @@ export function mergeActivity({ local = [], history = [], shielded = [], profile
       continue;
     }
     const extra = Object.fromEntries(LOCAL_ONLY.filter((k) => tx[k] !== undefined).map((k) => [k, tx[k]]));
-    // Until the chain's outcome is known, the wallet's own status stands; a
-    // shielded history row's outcome is the chain's.
+    // The chain's outcome when it is known (a shielded history row's is);
+    // else the one the wallet saw, if it saw one; else unknown: final, its
+    // outcome still to be looked up.
     const final = typeof known.success === "boolean" || (known.source === "shielded" && ["executed", "failed"].includes(known.status));
-    const outcome = final ? { status: known.status, error: known.error } : { status: tx.status ?? known.status, error: tx.error };
+    const seen = tx.status === "executed" || tx.status === "failed";
+    const outcome = final
+      ? { status: known.status, error: known.error }
+      : seen
+      ? { status: tx.status, error: tx.error }
+      : { status: "unknown", error: undefined };
     // Unless it went through, its value didn't move on chain: the amount it
     // was sent with shows what stayed in the wallet.
     const intent =
