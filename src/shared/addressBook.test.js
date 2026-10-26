@@ -260,6 +260,37 @@ describe("addressBook", () => {
     });
   });
 
+  describe("concurrent changes", () => {
+    // A name check whose read of the book waits, holding the book as it was.
+    function holdNextRead() {
+      const read = Promise.withResolvers();
+      const held = Promise.withResolvers();
+      const get = storage.get.getMockImplementation();
+      storage.get.mockImplementationOnce(async (key) => {
+        const before = structuredClone(await get(key));
+        read.resolve();
+        await held.promise;
+        return before;
+      });
+      return { read: read.promise, release: held.resolve };
+    }
+
+    it.each([
+      ["deleted", (entry) => removeAddressBookEntry(entry.id), () => []],
+      ["edited", (entry) => upsertAddressBookEntry({ ...entry, name: "Corner shop" }), () => [expect.objectContaining({ name: "Corner shop" })]],
+    ])("leave a contact %s while its name was checked as the change left it", async (_change, change, expected) => {
+      const checked = await upsertAddressBookEntry({ name: "Shop", address: "addr", duskName: "shop.dusk", checkedAt: 1 });
+      const { read, release } = holdNextRead();
+      const mark = markAddressBookNameChecked(checked, 5000);
+      await read;
+      const changed = change(checked);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      release();
+      await Promise.all([mark, changed]);
+      expect(await listAddressBook()).toEqual(expected());
+    });
+  });
+
   describe("removeAddressBookEntry", () => {
     it("removes entry by id", async () => {
       const created = await upsertAddressBookEntry({

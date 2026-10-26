@@ -1,4 +1,10 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
+import { withStorageLock } from "./storageLock.js";
+
+// Every change reads the whole book and writes it back: one at a time, in
+// every window and the background alike, so none writes back a copy that
+// another change made old.
+const mutate = (fn) => withStorageLock(STORAGE_KEYS.ADDRESS_BOOK, fn);
 
 /**
  * A contact, in the shape the web wallet's contacts share: a name, the
@@ -99,26 +105,27 @@ export async function getAddressBookEntry(id) {
  */
 export async function upsertAddressBookEntry(entry) {
   const id = entry?.id || createId();
-  const now = Date.now();
+  return mutate(async () => {
+    const now = Date.now();
+    const all = await getAll();
+    const prev = all[id];
 
-  const all = await getAll();
-  const prev = all[id];
+    const duskName = String(entry?.duskName ?? "").trim().toLowerCase();
+    const checkedAt = Number(entry?.checkedAt);
+    const next = {
+      id,
+      name: String(entry?.name ?? "").trim(),
+      address: String(entry?.address ?? "").trim(),
+      type: entry?.type ?? prev?.type ?? "unknown",
+      ...(duskName ? { duskName, checkedAt: Number.isFinite(checkedAt) && checkedAt > 0 ? checkedAt : now } : {}),
+      createdAt: prev?.createdAt ?? now,
+      updatedAt: now,
+    };
 
-  const duskName = String(entry?.duskName ?? "").trim().toLowerCase();
-  const checkedAt = Number(entry?.checkedAt);
-  const next = {
-    id,
-    name: String(entry?.name ?? "").trim(),
-    address: String(entry?.address ?? "").trim(),
-    type: entry?.type ?? prev?.type ?? "unknown",
-    ...(duskName ? { duskName, checkedAt: Number.isFinite(checkedAt) && checkedAt > 0 ? checkedAt : now } : {}),
-    createdAt: prev?.createdAt ?? now,
-    updatedAt: now,
-  };
-
-  all[id] = next;
-  await setAll(prune(all));
-  return next;
+    all[id] = next;
+    await setAll(prune(all));
+    return next;
+  });
 }
 
 /**
@@ -133,14 +140,16 @@ export async function upsertAddressBookEntry(entry) {
 export async function markAddressBookNameChecked(checked, checkedAt = Date.now()) {
   const id = checked?.id;
   if (!id || !checked?.duskName) return null;
-  const all = await getAll();
-  const prev = all[id];
-  if (!prev || prev.name !== checked.name || prev.address !== checked.address || prev.duskName !== checked.duskName) {
-    return null;
-  }
-  all[id] = { ...prev, checkedAt };
-  await setAll(all);
-  return all[id];
+  return mutate(async () => {
+    const all = await getAll();
+    const prev = all[id];
+    if (!prev || prev.name !== checked.name || prev.address !== checked.address || prev.duskName !== checked.duskName) {
+      return null;
+    }
+    all[id] = { ...prev, checkedAt };
+    await setAll(all);
+    return all[id];
+  });
 }
 
 /**
@@ -149,12 +158,14 @@ export async function markAddressBookNameChecked(checked, checkedAt = Date.now()
  */
 export async function removeAddressBookEntry(id) {
   if (!id) return;
-  const all = await getAll();
-  if (!all[id]) return;
-  delete all[id];
-  await setAll(all);
+  await mutate(async () => {
+    const all = await getAll();
+    if (!all[id]) return;
+    delete all[id];
+    await setAll(all);
+  });
 }
 
 export async function clearAddressBook() {
-  await setAll({});
+  await mutate(() => setAll({}));
 }
