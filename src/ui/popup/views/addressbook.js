@@ -1,14 +1,25 @@
 import { ProfileGenerator } from "@dusk/w3sper";
-import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../../shared/amount.js";
 import { explorerAccountUrl } from "../../../shared/explorer.js";
+import {
+  duskNameErrorText,
+  duskNameRecipient,
+  duskNamesNetwork,
+  isDuskName,
+  lookupDuskName,
+} from "../../../shared/duskNames.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { copyToClipboard } from "../../lib/clipboard.js";
+import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { identiconEl } from "../../components/Identicon.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, searchInput, textInput } from "../../components/FormControls.js";
-import { TX_KIND } from "../../../shared/constants.js";
+import { nameAddressChoice } from "../../components/NameAddressChoice.js";
+import { parseDuskQrPayload } from "../../components/QrScanModal.js";
+import { activityRows } from "../activity.js";
+import { contactNames, describeTx, recentText, txRowEl, txTime } from "./txRow.js";
 
 import {
   clearAddressBook,
@@ -16,7 +27,14 @@ import {
   removeAddressBookEntry,
   upsertAddressBookEntry,
 } from "../../../shared/addressBook.js";
-import { parseDuskQrPayload } from "../../components/QrScanModal.js";
+
+// Contacts: a list of names with the address each sends to, a contact's
+// page with its activity, and a form that takes an address or a .dusk name.
+// A contact saved from a .dusk name keeps the name, and its page checks the
+// name again once it's an hour old: a name that points elsewhere now says so.
+
+/** How long a contact's .dusk name stays checked before its page looks it up again. */
+export const NAME_RECHECK_MS = 60 * 60_000;
 
 function typeLabel(t) {
   if (t === "address") return "Shielded";
@@ -33,97 +51,38 @@ function normalizeRecipient(raw) {
   return s;
 }
 
-function sameAddress(a, b) {
-  const aa = String(a ?? "").trim().toLowerCase();
-  const bb = String(b ?? "").trim().toLowerCase();
-  return !!aa && !!bb && aa === bb;
-}
+const lower = (v) => String(v ?? "").trim().toLowerCase();
 
-function txAddresses(tx) {
-  const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
-  return [
-    tx?.to,
-    tx?.from,
-    asset?.to,
-    asset?.from,
-    asset?.spender,
-  ].filter((v) => typeof v === "string" && v.trim());
-}
-
-function contactTxs(txs, address) {
-  const addr = String(address ?? "").trim();
-  if (!addr) return [];
-  return (Array.isArray(txs) ? txs : []).filter((tx) =>
-    txAddresses(tx).some((candidate) => sameAddress(candidate, addr))
-  );
-}
-
-function timeAgo(ts) {
-  const t = Number(ts || 0);
-  if (!t) return "";
-  const ms = Date.now() - t;
-  if (ms < 0) return "";
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${Math.max(1, s)}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const hhr = Math.floor(m / 60);
-  if (hhr < 24) return `${hhr}h`;
-  return `${Math.floor(hhr / 24)}d`;
-}
-
-function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
-  const u = safeBigInt(units, 0n);
-  let d = Number(decimals ?? 0);
-  if (!Number.isFinite(d) || d < 0) d = 0;
-  d = Math.min(64, Math.floor(d));
-
-  const s = u.toString();
-  if (d === 0) return s;
-
-  const pad = s.length <= d ? "0".repeat(d - s.length + 1) + s : s;
-  const intPart = pad.slice(0, -d) || "0";
-  let frac = pad.slice(-d).replace(/0+$/, "");
-  if (typeof maxFrac === "number" && maxFrac >= 0 && frac.length > maxFrac) {
-    frac = frac.slice(0, maxFrac).replace(/0+$/, "");
-  }
-  return frac ? `${intPart}.${frac}` : intPart;
-}
-
-function describeContactTx(tx, address) {
-  const kind = String(tx?.kind ?? "").toLowerCase();
-  const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
-  const symbol = String(asset?.symbol ?? "").trim();
-  const assetOp = String(asset?.op ?? "").toLowerCase();
-
-  if (asset && String(asset?.type ?? "") === "DRC20" && assetOp === "transfer") {
-    const amt = formatTokenUnits(asset?.valueUnits ?? asset?.value ?? "0", asset?.decimals ?? 0);
-    return {
-      title: sameAddress(asset?.to, address) ? `Sent ${symbol || "token"}` : `${symbol || "Token"} transfer`,
-      sub: "Token transfer",
-      amount: amt ? `-${amt} ${symbol || "units"}` : "—",
-    };
-  }
-
-  if (kind === TX_KIND.TRANSFER) {
-    const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
-    const outgoing = sameAddress(tx?.to, address);
-    const incoming = sameAddress(tx?.from, address);
-    return {
-      title: outgoing ? "Sent DUSK" : incoming ? "Received DUSK" : "Transfer",
-      sub: String(tx?.privacy ?? "").toLowerCase() === "shielded" ? "Shielded" : "Public",
-      amount: amt ? `${outgoing ? "-" : incoming ? "+" : ""}${amt} DUSK` : "—",
-    };
-  }
-
-  const deposit = safeBigInt(tx?.deposit, 0n);
-  const dep = deposit > 0n ? formatLuxShort(deposit, UI_DISPLAY_DECIMALS) : "";
+function ownAddresses(ov) {
+  const idx = Math.max(0, Math.floor(Number(ov?.selectedAccountIndex) || 0));
   return {
-    title: tx?.fnName ? `Call ${String(tx.fnName)}` : "Transaction",
-    sub: String(tx?.kind ?? ""),
-    amount: dep ? `-${dep} DUSK` : "—",
+    account: String(ov?.accounts?.[idx] ?? ""),
+    address: String(ov?.addresses?.[idx] ?? ""),
   };
 }
+
+// "That's this wallet's own account." for this profile's account or address.
+function ownText(ov, recipient) {
+  const own = ownAddresses(ov);
+  if (recipient && recipient === own.account) return "That's this profile's own account.";
+  if (recipient && recipient === own.address) return "That's this profile's own shielded address.";
+  return "";
+}
+
+const fieldError = (id) => h("div", { class: "field-error", id, role: "alert", hidden: true });
+const setFieldError = (input, error, text) => {
+  error.textContent = text || "";
+  error.hidden = !text;
+  if (text) {
+    input.setAttribute("aria-invalid", "true");
+    input.setAttribute("aria-describedby", error.id);
+  } else {
+    input.removeAttribute("aria-invalid");
+    input.removeAttribute("aria-describedby");
+  }
+};
+
+let formSeq = 0;
 
 export function addressBookView(ov, { state, actions } = {}) {
   const ab = (state.addressBook ??= {
@@ -145,12 +104,13 @@ export function addressBookView(ov, { state, actions } = {}) {
   });
 
   const backRoute = ab.fromRoute || (ab.mode === "pick" ? ab.pickReturnRoute : null) || "home";
+  const rerender = () => actions?.render?.()?.catch?.(() => {});
 
   const goBack = () => {
     ab.view = "list";
     ab.error = null;
     state.route = backRoute;
-    actions?.render?.().catch(() => {});
+    rerender();
   };
 
   const ensureLoaded = () => {
@@ -162,41 +122,61 @@ export function addressBookView(ov, { state, actions } = {}) {
         ab.loaded = true;
         ab.loading = false;
         ab.error = null;
-        actions?.render?.().catch(() => {});
+        rerender();
       })
       .catch((e) => {
         ab.loading = false;
         ab.error = e?.message ?? String(e);
-        actions?.render?.().catch(() => {});
+        rerender();
       });
   };
 
   ensureLoaded();
 
-  const startEdit = async (entry = null, returnView = "list") => {
+  const refreshItems = async () => {
+    try {
+      ab.items = await listAddressBook();
+      ab.loaded = true;
+      ab.loading = false;
+      ab.error = null;
+    } catch {
+      ab.loaded = false;
+      ab.items = null;
+    }
+  };
+
+  const startEdit = (entry = null, returnView = "list") => {
     ab.view = "edit";
     ab.error = null;
     ab.editId = entry?.id ?? null;
     ab.editReturnView = returnView;
-    ab.editName = entry?.name ?? "";
-    ab.editAddress = entry?.address ?? normalizeRecipient(ab.prefillAddress ?? "");
-    actions?.render?.().catch(() => {});
+    ab.editName = entry?.name ?? String(ab.prefillName ?? "");
+    // A contact saved from a .dusk name is edited by its name.
+    ab.editAddress = entry ? entry.duskName || entry.address || "" : normalizeRecipient(ab.prefillAddress ?? "");
+    ab.editShielded = entry?.duskName ? entry.type === "address" : false;
+    rerender();
+  };
+
+  // Picks a recipient for the screen Contacts was opened from, and goes back.
+  const pick = (address) => {
+    state.draft = { ...(state.draft || {}), to: address };
+    state.route = ab.pickReturnRoute || backRoute || "send";
+    ab.view = "list";
+    rerender();
+  };
+
+  const rowLine = (entry) => {
+    const addr = String(entry?.address ?? "");
+    const t = entry?.type || ProfileGenerator.typeOf(addr) || "unknown";
+    return [entry?.duskName || shortAddress(addr), typeLabel(t)].filter(Boolean).join(" · ");
   };
 
   const renderList = () => {
-    const q = String(ab.query ?? "").trim();
-    const ql = q.toLowerCase();
-
+    const q = lower(ab.query);
     const items = Array.isArray(ab.items) ? ab.items : [];
     const filtered = q
-      ? items.filter((e) => {
-          const name = String(e?.name ?? "").toLowerCase();
-          const addr = String(e?.address ?? "").toLowerCase();
-          return name.includes(ql) || addr.includes(ql);
-        })
+      ? items.filter((e) => [e?.name, e?.address, e?.duskName].some((v) => lower(v).includes(q)))
       : items;
-
-    const title = ab.mode === "pick" ? "Select contact" : "Contacts";
 
     // The title names the list, so the search has no label of its own.
     const search = searchInput({
@@ -205,317 +185,254 @@ export function addressBookView(ov, { state, actions } = {}) {
       value: String(ab.query ?? ""),
       oninput: (e) => {
         ab.query = String(e?.target?.value ?? "");
-        actions?.render?.().catch(() => {});
+        rerender();
       },
     });
 
     const addBtn = h("button", {
       class: "btn-primary",
+      type: "button",
       text: "New contact",
       onclick: () => startEdit(null),
     });
 
-    // Deletes every contact, so it says so and only shows when there are some.
-    const clearBtn = ab.mode === "manage" && items.length
-      ? h("button", {
-          class: "btn-outline",
-          text: "Delete all",
-          onclick: async () => {
-            const ok = confirm("Delete all contacts?");
-            if (!ok) return;
-            try {
-              await clearAddressBook();
-              ab.loaded = false;
-              ab.items = null;
-              ab.query = "";
-              actions?.showToast?.("Deleted all contacts");
-              actions?.render?.().catch(() => {});
-            } catch (e) {
-              actions?.showToast?.(e?.message ?? String(e), 2500);
-            }
-          },
-        })
-      : null;
-
-    const topRow = h("div", { class: "row" }, [
-      search,
-      h("div", { class: "btnrow" }, [clearBtn, addBtn].filter(Boolean)),
-    ]);
-
-    const list = h("div", { class: "activity-list" });
-
-    // In pick mode, show recent recipients (from Activity) with a quick Save action.
-    try {
-      if (ab.mode === "pick") {
-        const saved = new Set();
-        for (const e of items) {
-          const addr = String(e?.address ?? "").trim();
-          if (addr) saved.add(addr.toLowerCase());
-        }
-
-        const recent = [];
-        const txs = Array.isArray(ov?.txs) ? ov.txs : [];
-        for (const t of txs) {
-          if (recent.length >= 6) break;
-          if (String(t?.kind ?? "") !== TX_KIND.TRANSFER) continue;
-          const addr = String(t?.to ?? "").trim();
-          if (!addr) continue;
-          const key = addr.toLowerCase();
-          if (saved.has(key)) continue;
-          if (recent.some((r) => r.key === key)) continue;
-          const typ = ProfileGenerator.typeOf(addr) || "unknown";
-          recent.push({ key, addr, typ });
-        }
-
-        if (recent.length) {
-          list.appendChild(h("div", { class: "muted", text: "Recent" }));
-          for (const r of recent) {
-            const pill = h("span", { class: "meta-pill", text: typeLabel(r.typ) });
-            const saveBtn = h("button", {
-              class: "icon-btn icon-only",
-              type: "button",
-              html: iconSvg("plus"),
-              title: "Save to Contacts",
-              "aria-label": "Save to Contacts",
-              onclick: (e) => {
-                try {
-                  e?.stopPropagation?.();
-                  ab.prefillAddress = r.addr;
-                  ab.view = "edit";
-                  ab.error = null;
-                  ab.editId = null;
-                  ab.editName = "";
-                  ab.editAddress = r.addr;
-                  actions?.render?.().catch(() => {});
-                } catch {
-                  // ignore
-                }
-              },
-            });
-
-            const row = h(
-              "div",
-              {
-                class: "activity-item",
-                role: "button",
-                tabindex: "0",
-                onclick: () => {
-                  // Pick and return.
-                  state.draft = {
-                    ...(state.draft || {}),
-                    to: r.addr,
-                  };
-                  state.route = ab.pickReturnRoute || backRoute || "send";
-                  actions?.render?.().catch(() => {});
-                },
-              },
-              [
-                h("div", { class: "activity-ico" }, [identiconEl(r.addr || "dusk")]),
-                h("div", { class: "activity-main" }, [
-                  h("div", { class: "activity-title" }, [
-                    h("span", { text: truncateMiddle(r.addr, 10, 8) }),
-                  ]),
-                ]),
-                h("div", { class: "activity-right" }, [pill, saveBtn]),
-              ]
-            );
-            list.appendChild(row);
-          }
-          list.appendChild(h("div", { class: "divider" }));
-        }
+    // In pick mode, the recent recipients of this profile's sends, with Save.
+    const recentGroup = (() => {
+      if (ab.mode !== "pick") return null;
+      const saved = new Set(items.map((e) => lower(e?.address)));
+      const own = ownAddresses(ov);
+      const names = contactNames(state, actions);
+      const recent = [];
+      for (const tx of activityRows(ov, state)) {
+        if (recent.length >= 5) break;
+        const d = describeTx(tx, { contactName: names, nodeUrl: ov?.nodeUrl });
+        if (d.category !== "sent" || !d.address) continue;
+        const key = lower(d.address);
+        if (saved.has(key) || d.address === own.account || d.address === own.address) continue;
+        if (recent.some((r) => lower(r.address) === key)) continue;
+        recent.push(d);
       }
-    } catch {
-      // ignore
-    }
-
-    if (ab.loading && !ab.loaded) {
-      list.appendChild(h("div", { class: "muted", text: "Loading…" }));
-    } else if (ab.error) {
-      list.appendChild(h("div", { class: "err", text: ab.error }));
-    } else if (!filtered.length) {
-      list.appendChild(
-        h("div", { class: "muted", text: q ? "No matches" : "No contacts yet" })
-      );
-    } else {
-      for (const entry of filtered) {
-        const addr = String(entry?.address ?? "");
-        const t = entry?.type || ProfileGenerator.typeOf(addr) || "unknown";
-
-        const pill = h("span", { class: "meta-pill", text: typeLabel(t) });
-        const chevron = h("span", { class: "activity-chevron", text: "›" });
-
-        const btn = h(
-          "button",
-          {
-            class: "activity-item",
-            type: "button",
-            onclick: async () => {
-              if (ab.mode === "pick") {
-                // Fill recipient and go back.
-                state.draft = {
-                  ...(state.draft || {}),
-                  to: addr,
-                };
-                state.route = ab.pickReturnRoute || backRoute || "send";
-                actions?.render?.().catch(() => {});
-                return;
-              }
-              ab.detailId = entry?.id ?? null;
-              ab.view = "detail";
-              actions?.render?.().catch(() => {});
-            },
-          },
-          [
-            h("div", { class: "activity-ico" }, [identiconEl(addr || "dusk")]),
-            h("div", { class: "activity-main" }, [
-              h("div", { class: "activity-title" }, [
-                h("span", { text: String(entry?.name ?? "") || "(Unnamed)" }),
+      if (!recent.length) return null;
+      return h("section", { class: "contacts-section" }, [
+        h("h2", { class: "contacts-section-title", text: "Recent" }),
+        h(
+          "div",
+          { class: "group" },
+          recent.map((d) =>
+            h("div", { class: "list-row contact-row" }, [
+              h("span", { class: "row-icon", "aria-hidden": "true" }, [identiconEl(d.address)]),
+              h("button", { class: "contact-row__main", type: "button", onclick: () => pick(d.address) }, [
+                h("span", { class: d.isAddress ? "row-title mono" : "row-title", text: d.name }),
+                h("span", { class: "row-sub", text: typeLabel(ProfileGenerator.typeOf(d.address)) }),
               ]),
-              h("div", {
-                class: "activity-sub contact-address-line",
-                text: addr || "—",
-                title: addr || "",
+              h("button", {
+                class: "mini-btn",
+                type: "button",
+                text: "Save",
+                "aria-label": `Save ${d.name} to Contacts`,
+                onclick: () => {
+                  ab.prefillAddress = d.address;
+                  ab.prefillName = d.isAddress ? "" : d.name;
+                  startEdit(null);
+                },
               }),
-            ]),
-            h("div", { class: "activity-right" }, [pill, chevron]),
-          ]
-        );
+            ])
+          )
+        ),
+      ]);
+    })();
 
-        list.appendChild(btn);
-      }
+    let listBody;
+    if (ab.loading && !ab.loaded) listBody = h("p", { class: "contacts-empty", text: "Loading…" });
+    else if (ab.error) listBody = h("div", { class: "err", text: ab.error });
+    else if (!filtered.length) listBody = h("p", { class: "contacts-empty", text: q ? "No matches." : "No contacts yet." });
+    else {
+      listBody = h(
+        "div",
+        { class: "group" },
+        filtered.map((entry) => {
+          const addr = String(entry?.address ?? "");
+          return h(
+            "button",
+            {
+              class: "list-row contact-row",
+              type: "button",
+              onclick: () => {
+                if (ab.mode === "pick") return pick(addr);
+                ab.detailId = entry?.id ?? null;
+                ab.view = "detail";
+                rerender();
+              },
+            },
+            [
+              h("span", { class: "row-icon", "aria-hidden": "true" }, [identiconEl(addr || "dusk")]),
+              h("span", { class: "row-main" }, [
+                h("span", { class: "row-title", text: String(entry?.name ?? "") || "(No name)" }),
+                h("span", { class: entry?.duskName ? "row-sub" : "row-sub mono", text: rowLine(entry) }),
+              ]),
+              h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
+            ]
+          );
+        })
+      );
     }
+
+    // Deletes every contact, so it asks first, sits apart, and only shows when there are some.
+    const clearBtn =
+      ab.mode === "manage" && items.length
+        ? h("button", {
+            class: "text-btn contacts-delete-all",
+            type: "button",
+            text: "Delete all contacts",
+            onclick: async () => {
+              if (!confirm("Delete all contacts?")) return;
+              try {
+                await clearAddressBook();
+                ab.loaded = false;
+                ab.items = null;
+                ab.query = "";
+                actions?.showToast?.("Deleted all contacts");
+                rerender();
+              } catch (e) {
+                actions?.showToast?.(e?.message ?? String(e), 2500);
+              }
+            },
+          })
+        : null;
 
     return [
-      subnav({
-        title,
-        onBack: goBack,
-      }),
-      topRow,
-      h("div", { class: "row" }, [list]),
+      subnav({ title: ab.mode === "pick" ? "Select contact" : "Contacts", onBack: goBack }),
+      h("div", { class: "row contacts" }, [
+        h("div", { class: "contacts-top" }, [search, addBtn]),
+        recentGroup,
+        recentGroup ? h("h2", { class: "contacts-section-title", text: "Contacts" }) : null,
+        listBody,
+        clearBtn,
+      ].filter(Boolean)),
     ];
   };
 
   const renderDetail = () => {
     const items = Array.isArray(ab.items) ? ab.items : [];
     const entry = items.find((e) => String(e?.id ?? "") === String(ab.detailId ?? "")) || null;
+    const back = () => {
+      ab.view = "list";
+      rerender();
+    };
 
     if (!entry) {
-      return [
-        subnav({
-          title: "Contact",
-          onBack: () => {
-            ab.view = "list";
-            actions?.render?.().catch(() => {});
-          },
-        }),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Contact not found." }),
-        ]),
-      ];
+      return [subnav({ title: "Contact", onBack: back }), h("p", { class: "contacts-empty", text: "This contact isn't saved any more." })];
     }
 
     const addr = String(entry?.address ?? "").trim();
     const typ = entry?.type || ProfileGenerator.typeOf(addr) || "unknown";
-    const txs = contactTxs(ov?.txs, addr);
     const nodeUrl = String(ov?.nodeUrl ?? "");
 
-    const editBtn = h("button", {
-      class: "btn-outline",
-      text: "Edit",
-      onclick: () => startEdit(entry, "detail"),
-    });
+    // A name an hour old is looked up again: one that points elsewhere now says so.
+    const nameCheck = h("p", { class: "field-error contact-name-check", role: "alert", hidden: true });
+    if (entry.duskName && duskNamesNetwork(nodeUrl) && Date.now() - Number(entry.checkedAt || 0) > NAME_RECHECK_MS) {
+      const { result, promise } = lookupDuskName(entry.duskName, { nodeUrl });
+      Promise.resolve(result ?? promise)
+        .then(async (res) => {
+          if (!res?.ok) return;
+          const now = duskNameRecipient(res, { shielded: typ === "address" });
+          if (now === addr) {
+            await upsertAddressBookEntry({ ...entry, checkedAt: Date.now() });
+            await refreshItems();
+          } else {
+            nameCheck.textContent = `${entry.duskName} now points to another address. Edit the contact before you send to it.`;
+            nameCheck.hidden = false;
+          }
+        })
+        .catch(() => {});
+    }
 
-    const sendBtn = h("button", {
-      class: "btn-primary",
-      text: "Send",
-      onclick: () => {
-        state.draft = {
-          ...(state.draft || {}),
-          to: addr,
-        };
-        state.route = "send";
-        actions?.render?.().catch(() => {});
+    const copyBtn = h("button", {
+      class: "copy-ico",
+      type: "button",
+      title: "Copy address",
+      "aria-label": "Copy address",
+      html: iconSvg("copy"),
+      onclick: async () => {
+        const ok = await copyToClipboard(addr);
+        actions?.showToast?.(ok ? "Address copied" : "Couldn't copy the address");
       },
     });
 
-    const historyUrl = typ === "account" ? explorerAccountUrl(nodeUrl, addr) : null;
-    const historyBtn = historyUrl
-      ? h("button", {
-          class: "btn-outline",
-          text: "History ↗",
-          onclick: async () => {
-            const ok = await openUrl(historyUrl);
-            if (!ok) actions?.showToast?.("Explorer unavailable");
-          },
-        })
-      : null;
+    const hero = h("div", { class: "tx-hero contact-hero" }, [
+      h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true" }, [identiconEl(addr || "dusk")]),
+      h("h2", { class: "tx-hero-name", text: String(entry?.name ?? "") || "(No name)" }),
+      entry.duskName ? h("div", { class: "tx-hero-lead", text: entry.duskName }) : null,
+      h("div", { class: "tx-hero-addr" }, [h("span", { class: "mono", title: addr, text: shortAddress(addr) }), copyBtn]),
+      h("span", { class: "tag", text: typeLabel(typ) }),
+    ].filter(Boolean));
 
-    const txRow = (tx) => {
-      const { title, sub, amount } = describeContactTx(tx, addr);
-      const hash = String(tx?.hash ?? "");
-      const openDetails = () => {
-        if (!hash) return;
-        state.txDetailHash = hash;
-        state.txDetailFrom = "contacts";
-        state.route = "tx";
-        actions?.render?.().catch(() => {});
-      };
-
-      return h(
-        "button",
-        {
-          class: "activity-item contact-activity-item",
-          type: "button",
-          disabled: !hash,
-          onclick: openDetails,
-        },
-        [
-          h("div", { class: "activity-main" }, [
-            h("div", { class: "activity-title" }, [h("span", { text: title })]),
-            h("div", { class: "activity-sub", text: sub || (hash ? truncateMiddle(hash, 10, 8) : "") }),
-          ]),
-          h("div", { class: "activity-right" }, [
-            h("div", { class: "contact-activity-tail" }, [
-              h("div", { class: "activity-amount", text: amount }),
-              h("div", { class: "activity-time", text: tx?.submittedAt ? timeAgo(tx.submittedAt) : "" }),
-            ]),
-            hash ? h("span", { class: "activity-chevron", text: "›" }) : null,
-          ].filter(Boolean)),
-        ]
-      );
-    };
-
-    return [
-      subnav({
-        title: "Contact",
-        onBack: () => {
-          ab.view = "list";
-          actions?.render?.().catch(() => {});
+    const actionsRow = h("div", { class: "contact-actions" }, [
+      h("button", {
+        class: "btn-primary",
+        type: "button",
+        text: "Send",
+        onclick: () => {
+          state.draft = { ...(state.draft || {}), to: addr };
+          state.route = "send";
+          rerender();
         },
       }),
-      h("div", { class: "row contact-detail" }, [
-        h("div", { class: "contact-detail-head" }, [
-          h("div", { class: "activity-ico contact-detail-icon" }, [identiconEl(addr || "dusk")]),
-          h("div", { class: "contact-detail-main" }, [
-            h("div", { class: "contact-detail-name", text: String(entry?.name ?? "") || "(Unnamed)" }),
-            h("span", { class: "meta-pill", text: typeLabel(typ) }),
-          ]),
-        ]),
-        h("label", { text: "Address" }),
-        h("div", { class: "box contact-detail-address" }, [h("code", { text: addr || "—" })]),
-        h("div", { class: "btnrow" }, [editBtn, historyBtn, sendBtn].filter(Boolean)),
-      ]),
-      h("div", { class: "row contact-activity" }, [
-        h("label", { text: "Activity" }),
-        txs.length
-          ? h("div", { class: "activity-list" }, txs.map((tx) => txRow(tx)))
-          : h("div", { class: "muted", text: "No local wallet activity for this contact." }),
-      ]),
+      h("button", { class: "btn-outline", type: "button", text: "Edit", onclick: () => startEdit(entry, "detail") }),
+    ]);
+
+    // This contact's transactions, as Activity shows them.
+    const hidden = balancesHidden(ov);
+    const names = contactNames(state, actions);
+    const now = Date.now();
+    const rows = activityRows(ov, state).filter((tx) =>
+      [tx?.to, tx?.from, tx?.counterparty, tx?.asset?.to].some((a) => a && lower(a) === lower(addr))
+    );
+    const activity = h("section", { class: "contacts-section" }, [
+      h("h2", { class: "contacts-section-title", text: "Activity" }),
+      rows.length
+        ? h(
+            "ul",
+            { class: "group tx-list" },
+            rows.slice(0, 20).map((tx) =>
+              txRowEl(tx, {
+                state,
+                actions,
+                hidden,
+                nodeUrl,
+                contactName: names,
+                when: (t) => (txTime(t) ? recentText(txTime(t), now) : ""),
+              })
+            )
+          )
+        : h("p", { class: "contacts-empty", text: "No activity with this contact yet." }),
+    ]);
+
+    const explorerUrl = typ === "account" ? explorerAccountUrl(nodeUrl, addr) : null;
+    const explorer = explorerUrl
+      ? h(
+          "button",
+          {
+            class: "text-btn tx-explorer",
+            type: "button",
+            onclick: async () => {
+              const ok = await openUrl(explorerUrl);
+              if (!ok) actions?.showToast?.("Couldn't open the explorer");
+            },
+          },
+          [h("span", { text: "View in Dusk explorer" }), h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("ext") })]
+        )
+      : null;
+
+    return [
+      subnav({ title: "Contact", onBack: back }),
+      h("div", { class: "row contact-detail" }, [hero, nameCheck, actionsRow, activity, explorer].filter(Boolean)),
     ];
   };
 
   const renderEdit = () => {
     const isNew = !ab.editId;
+    const n = ++formSeq;
 
     const nameInput = textInput({
       placeholder: "e.g. Alice",
@@ -523,92 +440,140 @@ export function addressBookView(ov, { state, actions } = {}) {
       onEnter: () => addrInput.focus(),
       oninput: (e) => {
         ab.editName = String(e?.target?.value ?? "");
+        setFieldError(nameInput, nameError, "");
       },
     });
+    const nameError = fieldError(`contact-name-error-${n}`);
 
     const addrInput = textInput({
-      placeholder: "Public account or shielded address",
+      placeholder: duskNamesNetwork(ov?.nodeUrl) ? "Account, shielded address or .dusk name" : "Account or shielded address",
       value: String(ab.editAddress ?? ""),
       onEnter: () => saveBtn.click(),
       oninput: (e) => {
         ab.editAddress = String(e?.target?.value ?? "");
-        // Re-render to update detection pill.
-        actions?.render?.().catch(() => {});
+        setFieldError(addrInput, addrError, "");
+        updateAddress();
       },
     });
+    const addrError = fieldError(`contact-address-error-${n}`);
+    // What the field holds: the kind of address, or the addresses a .dusk name points to.
+    const addrBox = h("div", { class: "contact-address-box" });
 
-    const addrRaw = normalizeRecipient(ab.editAddress);
-    const t = addrRaw ? ProfileGenerator.typeOf(addrRaw) : null;
+    // The latest name lookup's answer, for the text the field holds.
+    let lookupFor = "";
+    let resolved = null;
+    let lookups = 0;
 
-    const detectPill = addrRaw
-      ? h("span", {
-          class: "meta-pill contact-detect-pill",
-          text: t === "address" ? "Shielded address" : t === "account" ? "Public account" : "Unknown format",
-        })
-      : null;
-
-    const errBox = h("div", { class: "err", style: "display:none" });
-    const setErr = (msg) => {
-      if (!msg) {
-        errBox.style.display = "none";
-        errBox.textContent = "";
+    const showResolved = (text, result) => {
+      if (String(addrInput.value ?? "").trim() !== text) return;
+      resolved = result;
+      if (!result?.ok || (!result.account && !result.address)) {
+        addrBox.replaceChildren();
+        const failed = result?.ok ? { name: result.name, reason: "no_account" } : result;
+        setFieldError(addrInput, addrError, duskNameErrorText(failed ?? { name: text }));
         return;
       }
-      errBox.style.display = "block";
-      errBox.textContent = String(msg);
+      const choice = nameAddressChoice({
+        name: result.name,
+        account: result.account,
+        address: result.address,
+        shielded: Boolean(ab.editShielded) && Boolean(result.address),
+        onChoose: (shielded) => {
+          ab.editShielded = shielded;
+          choice.set(shielded);
+        },
+      });
+      addrBox.replaceChildren(choice.el);
+    };
+
+    const updateAddress = () => {
+      const text = normalizeRecipient(addrInput.value);
+      resolved = null;
+      lookupFor = "";
+      if (!text) {
+        addrBox.replaceChildren();
+        return;
+      }
+      if (isDuskName(text)) {
+        const k = ++lookups;
+        lookupFor = text;
+        const { result, promise } = lookupDuskName(text, { nodeUrl: ov?.nodeUrl });
+        if (result) return showResolved(text, result);
+        addrBox.replaceChildren(h("p", { class: "contacts-empty", text: `Looking up ${text}…` }));
+        promise.then((res) => {
+          if (k === lookups) showResolved(text, res);
+        });
+        return;
+      }
+      const t = ProfileGenerator.typeOf(text);
+      addrBox.replaceChildren(
+        t === "account" || t === "address" ? h("span", { class: "tag", text: t === "address" ? "Shielded address" : "Public account" }) : ""
+      );
+    };
+
+    // What gets saved: the address, with the .dusk name it came from.
+    const target = async () => {
+      const text = normalizeRecipient(addrInput.value);
+      if (!text) return { error: "Enter an account, a shielded address or a .dusk name." };
+      if (isDuskName(text)) {
+        let result = lookupFor === text ? resolved : null;
+        if (!result) {
+          const { result: now, promise } = lookupDuskName(text, { nodeUrl: ov?.nodeUrl });
+          result = now ?? (await promise);
+        }
+        if (!result?.ok || (!result.account && !result.address)) {
+          const failed = result?.ok ? { name: result.name, reason: "no_account" } : result;
+          return { error: duskNameErrorText(failed ?? { name: text }) };
+        }
+        const address = duskNameRecipient(result, { shielded: Boolean(ab.editShielded) && Boolean(result.address) });
+        return { address, duskName: result.name, checkedAt: Date.now() };
+      }
+      const t = ProfileGenerator.typeOf(text);
+      if (t !== "account" && t !== "address") return { error: "That isn't an account, a shielded address or a .dusk name." };
+      return { address: text };
     };
 
     const saveBtn = h("button", {
       class: "btn-primary",
+      type: "button",
       text: "Save",
       onclick: async () => {
+        const name = String(nameInput.value ?? "").trim();
+        if (!name) {
+          setFieldError(nameInput, nameError, "Enter a name.");
+          nameInput.focus();
+          return;
+        }
+        saveBtn.disabled = true;
         try {
-          setErr("");
-          const name = String(nameInput.value ?? "").trim();
-          const addr0 = normalizeRecipient(addrInput.value);
-          const addr = String(addr0 ?? "").trim();
-
-          if (!name) throw new Error("Name is required");
-          if (!addr) throw new Error("Address is required");
-
-          // If the user pasted a dusk: request, store only the recipient.
-          if (/^dusk:/i.test(String(addrInput.value || "").trim()) && addr !== String(addrInput.value || "").trim()) {
-            actions?.showToast?.("Stored recipient from request link", 1800);
+          const t = await target();
+          if (t.error) {
+            setFieldError(addrInput, addrError, t.error);
+            addrInput.focus();
+            return;
           }
-
-          const typ = ProfileGenerator.typeOf(addr);
-          if (typ !== "account" && typ !== "address") {
-            throw new Error("Address must be a valid public account or shielded address");
+          const own = ownText(ov, t.address);
+          if (own) {
+            setFieldError(addrInput, addrError, own);
+            addrInput.focus();
+            return;
           }
-
+          if (/^dusk:/i.test(String(addrInput.value || "").trim())) {
+            actions?.showToast?.("Saved the recipient from the request link", 1800);
+          }
           const saved = await upsertAddressBookEntry({
             id: ab.editId || undefined,
             name,
-            address: addr,
-            type: typ,
+            address: t.address,
+            type: ProfileGenerator.typeOf(t.address),
+            duskName: t.duskName ?? null,
+            checkedAt: t.checkedAt ?? null,
           });
+          await refreshItems();
+          ab.prefillName = "";
 
-          // Refresh cache.
-          try {
-            ab.items = await listAddressBook();
-            ab.loaded = true;
-            ab.loading = false;
-            ab.error = null;
-          } catch {
-            // If refresh fails, leave the cache as-is.
-          }
-
-          // In pick mode: after creating/editing, immediately select and return.
-          if (ab.mode === "pick") {
-            state.draft = {
-              ...(state.draft || {}),
-              to: saved.address,
-            };
-            state.route = ab.pickReturnRoute || backRoute || "send";
-            ab.view = "list";
-            actions?.render?.().catch(() => {});
-            return;
-          }
+          // In pick mode: after creating or editing, select it and go back.
+          if (ab.mode === "pick") return pick(saved.address);
 
           actions?.showToast?.("Saved contact", 1600);
           if (!isNew && ab.editReturnView === "detail") {
@@ -617,9 +582,11 @@ export function addressBookView(ov, { state, actions } = {}) {
           } else {
             ab.view = "list";
           }
-          actions?.render?.().catch(() => {});
+          rerender();
         } catch (e) {
-          setErr(e?.message ?? String(e));
+          setFieldError(addrInput, addrError, e?.message ?? String(e));
+        } finally {
+          saveBtn.disabled = false;
         }
       },
     });
@@ -627,49 +594,45 @@ export function addressBookView(ov, { state, actions } = {}) {
     // Back leaves without saving, so the form has no Cancel.
     const deleteBtn = !isNew
       ? h("button", {
-          class: "btn-destructive",
-          text: "Delete",
+          class: "text-btn contacts-delete",
+          type: "button",
+          text: "Delete contact",
           onclick: async () => {
-            const ok = confirm("Delete this contact?");
-            if (!ok) return;
+            if (!confirm("Delete this contact?")) return;
             try {
               await removeAddressBookEntry(ab.editId);
-              try {
-                ab.items = await listAddressBook();
-                ab.loaded = true;
-                ab.loading = false;
-                ab.error = null;
-              } catch {
-                ab.loaded = false;
-                ab.items = null;
-              }
+              await refreshItems();
               actions?.showToast?.("Deleted contact", 1600);
               ab.view = "list";
-              actions?.render?.().catch(() => {});
+              rerender();
             } catch (e) {
-              setErr(e?.message ?? String(e));
+              actions?.showToast?.(e?.message ?? String(e), 2500);
             }
           },
         })
       : null;
+
+    updateAddress();
 
     return [
       subnav({
         title: isNew ? "New contact" : "Edit contact",
         onBack: () => {
           ab.view = ab.editReturnView === "detail" ? "detail" : "list";
-          actions?.render?.().catch(() => {});
+          rerender();
         },
       }),
-      h("div", { class: "row" }, [
+      h("div", { class: "row contact-form" }, [
         fieldLabel(nameInput, "Name"),
         nameInput,
+        nameError,
         fieldLabel(addrInput, "Address"),
         addrInput,
-        detectPill,
-        errBox,
-        h("div", { class: "btnrow" }, [deleteBtn, saveBtn].filter(Boolean)),
-      ]),
+        addrError,
+        addrBox,
+        h("div", { class: "btnrow" }, [saveBtn]),
+        deleteBtn,
+      ].filter(Boolean)),
     ];
   };
 

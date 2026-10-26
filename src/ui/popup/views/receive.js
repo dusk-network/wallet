@@ -6,6 +6,7 @@ import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
 import { duskNameEl } from "../../components/DuskName.js";
 import { shortAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
+import { segmented } from "../../components/Segmented.js";
 import { parseDuskToLux } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
@@ -74,7 +75,6 @@ export function receiveView(ov, { state, actions } = {}) {
   const r = (state.receive ??= {
     tab: "public",
     requestOpen: false,
-    infoOpen: false,
     amountDusk: "",
     memo: "",
   });
@@ -84,43 +84,23 @@ export function receiveView(ov, { state, actions } = {}) {
   const recipient = tab === "public" ? account : address;
   const recipientLabel = tab === "public" ? "account" : "address";
 
-  // --- Public/Shielded toggle (segmented) -----------------------------
-  const tabShielded = h("button", {
-    class: "tab",
-    type: "button",
-    text: "Shielded",
-    onclick: () => {
+  // --- Public or shielded: a tab list that says which is picked -------
+  const tabToggle = segmented({
+    label: "Receive to",
+    className: "tabs--mini",
+    items: [
+      { id: "public", text: "Public" },
+      { id: "shielded", text: "Shielded" },
+    ],
+    selected: tab,
+    onSelect: (next) => {
       // Persist any in-progress edits before switching.
       r.amountDusk = amountInput.value;
       r.memo = memoInput.value;
-      r.tab = "shielded";
+      r.tab = next;
       actions?.render?.().catch(() => {});
     },
   });
-  const tabPublicBtn = h("button", {
-    class: "tab",
-    type: "button",
-    text: "Public",
-    onclick: () => {
-      r.amountDusk = amountInput.value;
-      r.memo = memoInput.value;
-      r.tab = "public";
-      actions?.render?.().catch(() => {});
-    },
-  });
-
-  const segIndex = tab === "public" ? 0 : 1;
-  tabPublicBtn.classList.toggle("is-active", segIndex === 0);
-  tabShielded.classList.toggle("is-active", segIndex === 1);
-
-  const tabToggle = h(
-    "div",
-    {
-      class: "tabs tabs--mini",
-      style: `--seg-index:${segIndex}; --seg-count:2;`,
-    },
-    [tabPublicBtn, tabShielded]
-  );
 
   // --- QR, then the name and the address, each with a copy button -----
   const qrCard = h("div", { class: "box qr-box receive-qr-card" });
@@ -148,44 +128,26 @@ export function receiveView(ov, { state, actions } = {}) {
       : lookupShieldedName(account, address, { nodeUrl: ov?.nodeUrl });
   let shownName = "";
 
-  // What people reach through that name, behind the ⓘ beside it.
-  const nameNote = h("div", {
-    class: "muted receive-name-note",
+  // What people reach through that name, said under it.
+  const nameNote = h("p", {
+    class: "receive-name-note",
     id: `receive-name-note-${++nameNotes}`,
     hidden: true,
   });
-  const infoBtn = h("button", {
-    class: "receive-info",
-    type: "button",
-    html: iconSvg("info"),
-    "aria-controls": nameNote.id,
-    "aria-expanded": "false",
-    onclick: () => {
-      r.infoOpen = !r.infoOpen;
-      showNameNote();
-    },
-  });
-  const showNameNote = () => {
-    nameNote.hidden = !r.infoOpen;
-    infoBtn.setAttribute("aria-expanded", String(Boolean(r.infoOpen)));
-  };
 
   const nameField = h("div", { class: "receive-field", hidden: true }, [
     duskNameEl(nameLookup, { className: "receive-field__name" }),
-    infoBtn,
     copyButton("Copy name", "Copied name", () => shownName),
   ]);
   nameLookup.then((name) => {
     if (!name) return;
     shownName = name;
-    infoBtn.title = `About ${name}`;
-    infoBtn.setAttribute("aria-label", `About ${name}`);
     nameNote.textContent =
       tab === "public"
         ? `People who send to ${name} reach this public account.`
         : `People who pay ${name} choose public or shielded. Anyone can see this address belongs to ${name}.`;
     nameField.hidden = false;
-    showNameNote();
+    nameNote.hidden = false;
   });
 
   const copyAddress = copyButton("Copy address", `Copied ${recipientLabel}`, () => recipient);
@@ -223,22 +185,14 @@ export function receiveView(ov, { state, actions } = {}) {
   });
 
   // What the QR asks for, once it holds a request.
-  const summaryMeta = h("span", { class: "muted" });
-  const summaryChev = h("span", { class: "accordion-chev", text: "▾", "aria-hidden": "true" });
+  const summaryMeta = h("span", { class: "receive-request__meta" });
 
   const requestDetails = h(
     "details",
-    { class: "receive-accordion", open: !!r.requestOpen },
+    { class: "advanced receive-request", open: !!r.requestOpen },
     [
-      h(
-        "summary",
-        { class: "receive-accordion__summary" },
-        [
-          h("span", { class: "receive-accordion__title", text: "Request payment" }),
-          h("span", { class: "receive-accordion__meta" }, [summaryMeta, summaryChev]),
-        ]
-      ),
-      h("div", { class: "receive-accordion__body" }, [
+      h("summary", {}, [h("span", { text: "Request payment" }), summaryMeta]),
+      h("div", { class: "advanced-body" }, [
         fieldLabel(amountInput, "Amount"),
         amountInput,
         amountErr,

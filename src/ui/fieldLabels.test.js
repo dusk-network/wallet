@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
-import { accessibleName, fieldNames, installFakeDom, settle, typeInto } from "./testing/fakeDom.js";
+import { accessibleName, fieldNames, installFakeDom, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { addressBookView } from "./popup/views/addressbook.js";
 import { assetAddNftView, assetAddTokenView, assetTokenView } from "./popup/views/assets.js";
 import { convertFormView } from "./popup/views/convert.js";
@@ -137,18 +137,17 @@ describe("field labels", () => {
     const body = await show(optionsView(ov, { state: { route: "options" }, actions: actions() }));
     expect(fieldNames(body)).toEqual([
       "Active profile",
-      "Profile 1 name",
-      "Profile 2 name",
+      "Profile 1 label",
+      "Profile 2 label",
       "Auto-lock",
       "Network",
       "Node URL",
       "Prover URL",
       "Archiver URL",
+      "Custom gas",
     ]);
-    // The Contacts row's button, beside its label.
-    expect(accessibleName(body.querySelectorAll("button").find((b) => b.textContent === "Manage"))).toBe(
-      "Manage contacts"
-    );
+    // Contacts is a row of its own.
+    expect(visibleText(body.querySelector(".settings-row"))).toBe("Contacts");
   });
 
   it("name the setup fields, and the recovery phrase's words as one group", async () => {

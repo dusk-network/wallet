@@ -5,17 +5,45 @@ import { detectPresetIdFromNodeUrl } from "./network.js";
 import { MAX_ACCOUNT_COUNT } from "./constants.js";
 
 /**
- * Auto-lock timeout options in minutes.
- * 0 = disabled.
+ * Auto-lock timeout options in minutes, 0 for off. One minute is too short
+ * to finish a send, and more than 15 leaves the wallet open too long.
  */
 export const AUTO_LOCK_OPTIONS = [
-  { value: 0, label: "Off" },
-  { value: 1, label: "1 minute" },
   { value: 5, label: "5 minutes" },
   { value: 15, label: "15 minutes" },
-  { value: 30, label: "30 minutes" },
-  { value: 60, label: "1 hour" },
+  { value: 0, label: "Off" },
 ];
+
+/** Auto-lock's default: 15 minutes. */
+export const DEFAULT_AUTO_LOCK_MINUTES = 15;
+
+/**
+ * A stored auto-lock timeout as the wallet uses it: off, at most 15 minutes,
+ * and 5 for the 1 minute that was an option once. A shorter time a test
+ * stores directly stays as it is; Settings can't choose one.
+ * @param {unknown} value
+ * @returns {number}
+ */
+export function normalizeAutoLock(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_AUTO_LOCK_MINUTES;
+  if (n <= 0) return 0;
+  if (n === 1) return 5;
+  return Math.min(n, 15);
+}
+
+/**
+ * Custom gas from Settings, a gas limit and price used on every Review, or
+ * null for the network's gas price and each transaction's own limit.
+ * @param {unknown} value
+ * @returns {{ limit: string, price: string } | null}
+ */
+export function normalizeCustomGas(value) {
+  const limit = String(value?.limit ?? "").trim();
+  const price = String(value?.price ?? "").trim();
+  if (!/^\d+$/.test(limit) || !/^\d+$/.test(price) || BigInt(limit) <= 0n || BigInt(price) <= 0n) return null;
+  return { limit, price };
+}
 
 export const DEFAULT_SETTINGS = {
   // Default to Mainnet.
@@ -23,7 +51,9 @@ export const DEFAULT_SETTINGS = {
   proverUrl: "https://provers.dusk.network",
   archiverUrl: "https://nodes.dusk.network",
   /** Auto-lock timeout in minutes (0 = disabled) */
-  autoLockTimeoutMinutes: 5,
+  autoLockTimeoutMinutes: DEFAULT_AUTO_LOCK_MINUTES,
+  /** A gas limit and price for every Review, or null for the network's price */
+  customGas: null,
   /** Number of derived accounts (public + shielded keypairs) */
   accountCount: 2,
   /** Selected account index for the wallet UI */
@@ -129,6 +159,8 @@ export async function getSettings() {
     nftMetadataEnabled: false,
     ipfsGateway: normalizeIpfsGateway(merged.ipfsGateway),
     hideBalances: merged.hideBalances === true,
+    autoLockTimeoutMinutes: normalizeAutoLock(merged.autoLockTimeoutMinutes),
+    customGas: normalizeCustomGas(merged.customGas),
   };
 }
 

@@ -1,11 +1,17 @@
 import { storage, STORAGE_KEYS } from "./storage.js";
 
 /**
+ * A contact, in the shape the web wallet's contacts share: a name, the
+ * address it sends to, and the .dusk name it was saved from with when that
+ * name last pointed to the address.
+ *
  * @typedef {Object} AddressBookEntry
  * @property {string} id
- * @property {string} name
- * @property {string} address
+ * @property {string} name - the contact's name, as the user wrote it
+ * @property {string} address - the public account or shielded address it sends to
  * @property {"account"|"address"|"unknown"=} type
+ * @property {string=} duskName - the .dusk name it was saved from
+ * @property {number=} checkedAt - when `duskName` last resolved to `address` (ms)
  * @property {number} createdAt
  * @property {number} updatedAt
  */
@@ -55,7 +61,8 @@ export async function listAddressBook(opts = {}) {
     out = out.filter((e) => {
       const name = String(e?.name ?? "").toLowerCase();
       const addr = String(e?.address ?? "").toLowerCase();
-      return name.includes(q) || addr.includes(q);
+      const duskName = String(e?.duskName ?? "").toLowerCase();
+      return name.includes(q) || addr.includes(q) || duskName.includes(q);
     });
   }
 
@@ -82,8 +89,12 @@ export async function getAddressBookEntry(id) {
 }
 
 /**
- * Upsert an entry.
- * @param {{ id?: string, name: string, address: string, type?: "account"|"address"|"unknown" }} entry
+ * Upsert an entry. A contact saved from a .dusk name keeps the name and when
+ * it was checked; one saved from an address alone has neither.
+ * @param {{
+ *   id?: string, name: string, address: string, type?: "account"|"address"|"unknown",
+ *   duskName?: string|null, checkedAt?: number|null,
+ * }} entry
  * @returns {Promise<AddressBookEntry>}
  */
 export async function upsertAddressBookEntry(entry) {
@@ -93,11 +104,14 @@ export async function upsertAddressBookEntry(entry) {
   const all = await getAll();
   const prev = all[id];
 
+  const duskName = String(entry?.duskName ?? "").trim().toLowerCase();
+  const checkedAt = Number(entry?.checkedAt);
   const next = {
     id,
     name: String(entry?.name ?? "").trim(),
     address: String(entry?.address ?? "").trim(),
     type: entry?.type ?? prev?.type ?? "unknown",
+    ...(duskName ? { duskName, checkedAt: Number.isFinite(checkedAt) && checkedAt > 0 ? checkedAt : now } : {}),
     createdAt: prev?.createdAt ?? now,
     updatedAt: now,
   };

@@ -584,8 +584,7 @@ textarea[aria-invalid="true"] {
   color: var(--pending);
 }
 
-.recipient-type-badge,
-.confirm-contact-badge {
+.recipient-type-badge {
   align-self: flex-start;
 }
 
@@ -1241,27 +1240,6 @@ body.page--popup .site-bar-action {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.meta-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: color-mix(in oklab, var(--card) 35%, transparent);
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 600;
-
-  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
-}
-
-.meta-pill:hover {
-  border-color: color-mix(in oklab, var(--primary) 18%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 10%, transparent);
-  background: color-mix(in oklab, var(--card) 52%, transparent);
-}
-
 /* The summary on a token transfer's Review */
 .tx-summary {
   padding: 14px 12px;
@@ -2297,78 +2275,10 @@ button.balance-refresh:hover {
   gap: 10px;
   transition: background 120ms ease, transform 120ms ease;
 }
-
-.contact-address-line {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
 .contact-detail {
   gap: 12px;
 }
 
-.contact-detail-head {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-}
-
-.contact-detail-icon {
-  width: 44px;
-  height: 44px;
-}
-
-.contact-detail-icon .identicon {
-  width: 44px;
-  height: 44px;
-}
-
-.contact-detail-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.contact-detail-name {
-  min-width: 0;
-  color: var(--foreground);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.2;
-  overflow-wrap: anywhere;
-}
-
-.contact-detail-address {
-  padding: 10px 12px;
-}
-
-.contact-detail-address code {
-  display: block;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  line-height: 1.45;
-}
-
-.contact-detail .btn-primary {
-  width: auto;
-}
-
-.contact-detect-pill {
-  align-self: flex-start;
-}
-.contact-activity-item {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.contact-activity-tail {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
 /* Pending shimmer */
 .activity-item.is-pending {
   position: relative;
@@ -2463,81 +2373,6 @@ button.balance-refresh:hover {
 @keyframes pendingDotPulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.18); }
-}
-.activity-ico {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border-radius: 6px;
-  border: 0;
-  background: rgba(242,240,235,0.08);
-  color: var(--dusk-snow-white);
-  font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 13px;
-
-  transition: transform 180ms ease, background 180ms ease, color 180ms ease;
-}
-
-.activity-item:hover .activity-ico {
-  transform: translateY(-1px);
-}
-.activity-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.activity-title {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.15;
-  min-width: 0;
-}
-
-.activity-title span {
-  min-width: 0;
-}
-
-.activity-title > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.activity-time {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--dusk-granite);
-  text-align: right;
-  white-space: nowrap;
-}
-
-.activity-sub {
-  font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  color: var(--dusk-granite);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.activity-right {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-}
-.activity-amount {
-  font-family: "Sohne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 14px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  text-align: right;
-  white-space: nowrap;
 }
 .activity-chevron {
   pointer-events: none;
@@ -3021,8 +2856,7 @@ button.receive-copy {
 }
 
 button.acct-menu-copy:hover,
-button.receive-copy:hover,
-button.receive-info:hover {
+button.receive-copy:hover {
   color: var(--foreground);
   border-color: var(--border);
   box-shadow: none;
@@ -3033,8 +2867,7 @@ button.receive-info:hover {
 button.balance-refresh,
 button.balance-eye,
 button.acct-menu-copy,
-button.receive-copy,
-button.receive-info {
+button.receive-copy {
   display: inline-grid;
   place-items: center;
 }
@@ -3044,8 +2877,7 @@ button.receive-info {
 button.balance-refresh svg,
 button.balance-eye svg,
 button.acct-menu-copy svg,
-button.receive-copy svg,
-button.receive-info svg {
+button.receive-copy svg {
   width: 16px;
   height: 16px;
   fill: none;
@@ -3139,24 +2971,6 @@ body.page--popup .wallet-dashboard > .tabs {
 body.page--popup .wallet-dashboard > .box {
   order: 3;
 }
-body.page--popup .activity-ico {
-  width: 32px;
-  height: 32px;
-}
-
-body.page--popup .activity-title {
-  font-size: 13px;
-  gap: 8px;
-}
-
-body.page--popup .activity-sub {
-  font-size: 10.5px;
-}
-
-body.page--popup .activity-amount {
-  font-size: 12px;
-}
-
 body.page--popup .action-bar {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -3863,24 +3677,13 @@ body[data-runtime="tauri"].page--full .panel {
   margin-left: auto;
 }
 
-/* The ⓘ after the name: shows what people reach through it */
-button.receive-info {
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border-color: transparent;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted-foreground);
-}
-
-button.receive-info[aria-expanded="true"] {
-  color: var(--foreground);
-}
-
-.receive-name-note {
-  padding: 0 12px;
+/* What people reach through the name, said under it */
+p.receive-name-note {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .qr-context-menu {
@@ -3908,62 +3711,6 @@ button.receive-info[aria-expanded="true"] {
   background: var(--secondary);
   border-color: var(--border);
 }
-
-.receive-accordion {
-  border-radius: var(--radius-lg);
-  border: 0;
-  background: var(--surface-1);
-  overflow: hidden;
-}
-
-.receive-accordion > summary {
-  list-style: none;
-}
-
-.receive-accordion > summary::-webkit-details-marker {
-  display: none;
-}
-
-.receive-accordion__summary {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 12px;
-}
-
-.receive-accordion__title {
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-.receive-accordion__meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.accordion-chev {
-  opacity: 0.7;
-  transition: transform 200ms cubic-bezier(.2,.8,.2,1);
-}
-
-.receive-accordion[open] .accordion-chev {
-  transform: rotate(180deg);
-}
-
-.receive-accordion[open] .receive-accordion__summary {
-  border-bottom: 1px solid var(--line);
-}
-
-.receive-accordion__body {
-  padding: 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  animation: viewIn 180ms ease both;
-}
-
 @media (max-width: 420px) {
   .qr-inner .qr-svg {
     width: 200px;
@@ -5054,4 +4801,233 @@ p.convert-flow {
   color: var(--text-muted);
   font-size: 13px;
   text-align: center;
+}
+
+/* Receive's Request payment: a disclosure like Advanced, what it asks for on the right */
+details.receive-request > summary {
+  gap: 8px;
+}
+
+.receive-request__meta {
+  margin-left: auto;
+  color: var(--text-subtle);
+  font-size: 12.5px;
+}
+
+/* -------------------------------------------------------
+   Contacts: the list, a contact's page, and the form
+   ------------------------------------------------------- */
+.contacts {
+  gap: 12px;
+}
+
+.contacts-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.contacts-top .btn-primary {
+  width: auto;
+  min-height: 42px;
+  padding: 10px 16px;
+  font-size: 13.5px;
+}
+
+h2.contacts-section-title {
+  margin: 6px 0 -4px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.contacts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.contact-row .row-icon {
+  overflow: hidden;
+}
+
+.contact-row .row-icon svg,
+.contact-hero .row-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.contact-row .row-sub.mono {
+  font-size: 12px;
+}
+
+/* A recent recipient: picking it is the row, Save sits on its right */
+button.contact-row__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+}
+
+button.contact-row__main:hover,
+button.contact-row__main:active {
+  background: transparent;
+  transform: none;
+}
+
+p.contacts-empty {
+  margin: 0;
+  padding: 11px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+button.text-btn.contacts-delete-all,
+button.text-btn.contacts-delete {
+  align-self: center;
+  margin-top: 6px;
+  color: var(--danger);
+  text-decoration-color: color-mix(in oklab, var(--danger) 45%, transparent);
+}
+
+.contact-hero .tag {
+  margin: 8px 0 0;
+}
+
+.contact-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.contact-actions > button {
+  width: 100%;
+  min-height: 42px;
+}
+
+p.contact-name-check {
+  margin: 0;
+}
+
+.contact-address-box:empty {
+  display: none;
+}
+
+/* -------------------------------------------------------
+   Settings: sections of grouped rows, Reset on its own at the end
+   ------------------------------------------------------- */
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+h3.settings-subtitle {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-labels,
+.settings-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-profile-line {
+  font-size: 13px;
+  color: var(--text);
+}
+
+p.settings-note,
+p.settings-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.group.settings-sites {
+  padding: 0;
+}
+
+.settings-site {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.settings-site + .settings-site::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 0;
+  border-top: 1px solid var(--line);
+}
+
+.settings-site__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-site__host {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.settings-site select {
+  background: var(--surface-2);
+}
+
+button.text-btn.settings-disconnect-all {
+  align-self: flex-start;
+}
+
+.settings-row .row-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+label.settings-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+label.settings-switch input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--pill);
+}
+
+.settings-gas-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-section--danger .btn-destructive {
+  align-self: flex-start;
 }

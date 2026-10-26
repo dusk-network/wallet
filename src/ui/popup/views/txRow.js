@@ -369,7 +369,8 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
   const open = () => {
     if (!state || !hash) return;
     state.txDetailHash = hash;
-    state.txDetailFrom = state.route === "activity" ? "activity" : "home";
+    // Back from the details returns here: Activity, a contact's page, or Home.
+    state.txDetailFrom = ["activity", "contacts"].includes(state.route) ? state.route : "home";
     state.route = "tx";
     actions?.render?.()?.catch?.(() => {});
   };

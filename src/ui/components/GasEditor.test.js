@@ -78,6 +78,22 @@ describe("fee editor", () => {
     expect(offline.editor.readFinalGas()).toEqual({ limit: "2500000", price: "1" });
   });
 
+  it("starts at custom gas from Settings, with the transaction's own limit where the custom one is under its minimum", async () => {
+    const shield = async (customGas) => {
+      const editor = dom.document.createElement("dusk-gas-editor");
+      const send = vi.fn(async () => ({ median: "2" }));
+      useNetworkGas({ actions: { send }, defaultLimit: "50000000", fallbackPrice: "1", gas: null, gasEditor: editor, minLimit: "30000000", customGas });
+      dom.document.body.appendChild(editor);
+      await settle();
+      return [editor.readFinalGas(), visibleText(editor.querySelector(".gas-note"))];
+    };
+    expect(await shield({ limit: "40000000", price: "3" })).toEqual([
+      { limit: "40000000", price: "3" },
+      "The wallet uses your custom gas from Settings.",
+    ]);
+    expect((await shield({ limit: "2500000", price: "3" }))[0]).toEqual({ limit: "50000000", price: "3" });
+  });
+
   it("leaves blank gas to the network where a site's request has none, as the approval page uses it", async () => {
     const editor = dom.document.createElement("dusk-gas-editor");
     editor.helpText = "Approval help.";

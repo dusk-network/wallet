@@ -19,6 +19,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed a pasted public account's verified `.dusk` name on Send.
 - Named the profile that pays on Send's Review, and a contact by both its label and its verified name.
 - Said on a public send's Review what everyone can see: the amount, the memo and your name.
+- Saved contacts from `.dusk` names, keeping the name and checking it again before it's an hour old.
+- Added a Disconnect for each connected site, and custom gas under Settings' Advanced.
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
@@ -43,6 +45,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Set fees at the network's gas price, with one Custom fee for your own limit and price, and a warning under the minimum gas limit as you type.
 - Restyled Send, Shield and Unshield: one large amount field, what's available after fees with Max, and errors under the field.
 - Stopped offering Save to Contacts for your own account or address.
+- Restyled Receive, Contacts and Settings, and showed what a `.dusk` name reaches under it on Receive.
+- Named profiles by their verified `.dusk` names in Settings and its profile pickers.
+- Offered auto-lock after 5 or 15 minutes, 15 by default, or Off; an open popup nobody uses locks too.
+- Asked before disconnecting all sites, and moved Reset wallet to the end of Settings.
 - Showed Activity's rows with a direction icon and the other side's name first; a failed one says nothing was sent and the fee paid.
 - Reworked a transaction's details into a summary of who, how much and its status, then its date, memo, fee, profile and ID, with block and gas under Technical details.
 - Hid Activity's amounts and a transaction's amount while balances are hidden; fees stay visible.

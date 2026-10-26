@@ -497,6 +497,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   gasEditor.setGas(draft?.gas ?? null);
   // The network's gas price by default; Custom fee for gas of your own.
   useNetworkGas({
+    customGas: ov?.customGas,
     actions,
     gas: draft?.gas,
     defaultLimit,

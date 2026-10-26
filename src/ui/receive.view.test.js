@@ -71,7 +71,6 @@ async function receive(tab, { state = { receive: { tab } }, ov = overview } = {}
     addressField,
     name: () => (isShown(nameField) ? visibleText(nameField.querySelector(".receive-field__name")) : ""),
     address: addressField.querySelector(".receive-field__address"),
-    info: $(".receive-info"),
     note,
     shownNote: () => (isShown(note) ? note.textContent : ""),
     button,
@@ -85,6 +84,12 @@ describe("receive", () => {
     const tabs = dom.document.body.querySelector(".tabs").children;
     expect(tabs.map((tab) => tab.textContent)).toEqual(["Public", "Shielded"]);
     expect(tabs.map((tab) => tab.classList.contains("is-active"))).toEqual([true, false]);
+    // Screen readers hear which is picked.
+    expect(dom.document.body.querySelector(".tabs").getAttribute("role")).toBe("tablist");
+    expect(tabs.map((tab) => [tab.getAttribute("role"), tab.getAttribute("aria-selected")])).toEqual([
+      ["tab", "true"],
+      ["tab", "false"],
+    ]);
     expect(view.state.receive.tab).toBe("public");
     expect(view.address.title).toBe(ACCOUNT);
 
@@ -115,62 +120,46 @@ describe("receive", () => {
     expect(dom.document.body.querySelector(".btnrow").children.map((b) => b.textContent)).toEqual(["Download QR PNG"]);
   });
 
-  it("draws the ⓘ and the copy buttons as SVG icons, centered in their buttons", async () => {
+  it("draws the copy buttons as SVG icons, centered in their buttons", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     await receive("public");
-    const icons = ["About alice.dusk", "Copy name", "Copy address"].map((label) => {
+    const icons = ["Copy name", "Copy address"].map((label) => {
       const button = dom.document.body.querySelector(`button[aria-label="${label}"]`);
       return [button.innerHTML, button.textContent];
     });
     // No glyph text, which shows as an empty box without a font that has it.
     expect(icons).toEqual([
-      [iconSvg("info"), ""],
       [iconSvg("copy"), ""],
       [iconSvg("copy"), ""],
     ]);
-    expect(iconSvg("info")).toMatch(/^<svg viewBox="0 0 24 24" aria-hidden="true"><circle /);
 
-    // The button centers the icon and gives it its colour, the switcher's copy buttons too.
+    // The button centers the icon, the switcher's copy buttons too.
     const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-    const buttons = String.raw`button\.acct-menu-copy,\s*button\.receive-copy,\s*button\.receive-info`;
-    expect(css).toMatch(new RegExp(`${buttons} \\{\\s*display: inline-grid;\\s*place-items: center;\\s*\\}`));
-    expect(css).toMatch(/button\.receive-info svg \{\s*width: 16px;\s*height: 16px;\s*fill: none;\s*stroke: currentColor;/);
+    expect(css).toMatch(/button\.acct-menu-copy,\s*button\.receive-copy \{\s*display: inline-grid;\s*place-items: center;\s*\}/);
   });
 
-  it("keeps what the name reaches behind the ⓘ, open across redraws", async () => {
+  it("says what the name reaches right under it, with no ⓘ to press", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const view = await receive("public");
-    expect(view.shownNote()).toBe("");
-    expect(view.info.getAttribute("type")).toBe("button");
-    expect(view.info.getAttribute("aria-label")).toBe("About alice.dusk");
-    expect(view.info.getAttribute("aria-expanded")).toBe("false");
-    expect(dom.document.getElementById(view.info.getAttribute("aria-controls"))).toBe(view.note);
-
-    view.info.click();
     expect(view.shownNote()).toBe(PUBLIC_NOTE);
-    expect(view.info.getAttribute("aria-expanded")).toBe("true");
-
-    // A redraw, such as the copy toast's, keeps it open; a second press closes it.
-    const again = await receive("public", { state: view.state });
-    expect(again.shownNote()).toBe(PUBLIC_NOTE);
-    again.info.click();
-    expect(again.shownNote()).toBe("");
-    expect(again.info.getAttribute("aria-expanded")).toBe("false");
+    expect(dom.document.body.querySelector(".receive-info")).toBeNull();
+    // It follows the fields it speaks of.
+    const row = dom.document.body.querySelector(".row").children;
+    expect(row.indexOf(view.note)).toBe(row.indexOf(view.addressField.parentNode) + 1);
   });
 
   it("names the shielded address only when the name's record is that address", async () => {
     // The account has a name, but its phoenix_payment_endpoint is not this address.
     lookupPrimaryName.mockResolvedValue("alice.dusk");
-    let view = await receive("shielded", { state: { receive: { tab: "shielded", infoOpen: true } } });
+    let view = await receive("shielded", { state: { receive: { tab: "shielded" } } });
     expect(lookupShieldedName).toHaveBeenCalledWith(ACCOUNT, ADDRESS, { nodeUrl: overview.nodeUrl });
-    expect([view.name(), isShown(view.info), view.shownNote()]).toEqual(["", false, ""]);
+    expect([view.name(), view.shownNote()]).toEqual(["", ""]);
     expect(visibleText(view.address)).toBe("2Ana1p…RbFj4T");
     expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied address"]);
 
     lookupShieldedName.mockResolvedValue("alice.dusk");
     view = await receive("shielded");
     expect(view.name()).toBe("alice.dusk");
-    view.info.click();
     expect(view.shownNote()).toBe(SHIELDED_NOTE);
     expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied address"]);
   });
@@ -192,13 +181,13 @@ describe("receive", () => {
     view = await receive("public");
     await vi.waitFor(() => expect(verifyPrimary).toHaveBeenCalledTimes(2));
     await settle();
-    expect([view.name(), isShown(view.info)]).toEqual(["", false]);
+    expect([view.name(), view.shownNote()]).toEqual(["", ""]);
     expect(await view.copy("Copy name")).toEqual([undefined, undefined]);
   });
 
   it("shows the address alone without a name, and says when a copy fails", async () => {
-    const view = await receive("public", { state: { receive: { tab: "public", infoOpen: true } } });
-    expect([view.name(), isShown(view.info), view.shownNote()]).toEqual(["", false, ""]);
+    const view = await receive("public", { state: { receive: { tab: "public" } } });
+    expect([view.name(), view.shownNote()]).toEqual(["", ""]);
     expect(isShown(view.addressField)).toBe(true);
 
     dom.clipboard.writeText.mockRejectedValueOnce(new Error("denied"));
@@ -229,14 +218,14 @@ describe("receive", () => {
     const state = { receive: { tab: "public", requestOpen: false, amountDusk: "", memo: "" } };
     await receive("public", { state });
     const body = dom.document.body;
-    const summary = () => visibleText(body.querySelector(".receive-accordion__summary"));
+    const summary = () => visibleText(body.querySelector("details.receive-request > summary"));
 
     // No note that Send reads the QR, no "Optional" beside Request payment or its labels:
     // the placeholders say both fields are optional.
     expect(visibleText(body)).not.toMatch(/Send can read|Optional|optional/);
-    expect(summary()).toBe("Request payment▾");
-    expect(body.querySelectorAll(".receive-accordion__body label").map((l) => l.textContent)).toEqual(["Amount", "Memo"]);
-    expect(body.querySelectorAll(".receive-accordion__body input").map((i) => i.getAttribute("placeholder"))).toEqual([
+    expect(summary()).toBe("Request payment");
+    expect(body.querySelectorAll(".receive-request .advanced-body label").map((l) => l.textContent)).toEqual(["Amount", "Memo"]);
+    expect(body.querySelectorAll(".receive-request .advanced-body input").map((i) => i.getAttribute("placeholder"))).toEqual([
       "Optional, e.g. 1.25 DUSK",
       "Optional",
     ]);
@@ -245,9 +234,9 @@ describe("receive", () => {
     // Once the QR holds a request, Request payment says what it asks for.
     Object.assign(state.receive, { requestOpen: true, amountDusk: "1.5" });
     await receive("public", { state });
-    expect(summary()).toBe("Request payment1.5 DUSK▾");
+    expect(summary()).toBe("Request payment1.5 DUSK");
     Object.assign(state.receive, { amountDusk: "", memo: "Lunch" });
     await receive("public", { state });
-    expect(summary()).toBe("Request paymentWith memo▾");
+    expect(summary()).toBe("Request paymentWith memo");
   });
 });

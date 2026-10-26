@@ -600,44 +600,24 @@ function installTxStatusListener() {
 
 installTxStatusListener();
 
-// --- Auto-lock activity heartbeat ------------------------------------------
-// Send activity pings to background while the popup is visible/focused.
-// This prevents auto-lock from triggering while the user is actively using
-// the wallet UI.
-let activityHeartbeatTimer = null;
+// --- Auto-lock activity ------------------------------------------------------
+// The wallet is in use while someone uses it: the popup opening, then a
+// press or a key in it, at most one ping every 30 seconds. An open popup
+// nobody touches locks after the timeout, as a closed one does.
+const ACTIVITY_PING_MS = 30_000;
+let lastActivityPing = 0;
 
-function startActivityHeartbeat() {
-  if (activityHeartbeatTimer) return;
-  // Immediately ping once, then every 30s.
+function pingActivity() {
+  const now = Date.now();
+  if (now - lastActivityPing < ACTIVITY_PING_MS) return;
+  lastActivityPing = now;
   send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
-  activityHeartbeatTimer = setInterval(() => {
-    send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
-  }, 30_000);
 }
 
-function stopActivityHeartbeat() {
-  if (activityHeartbeatTimer) {
-    clearInterval(activityHeartbeatTimer);
-    activityHeartbeatTimer = null;
-  }
+pingActivity();
+for (const type of ["pointerdown", "keydown"]) {
+  document.addEventListener(type, pingActivity, { passive: true, capture: true });
 }
-
-// Start heartbeat immediately when popup opens.
-startActivityHeartbeat();
-
-// Pause when tab/window is hidden, resume when visible.
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
-    stopActivityHeartbeat();
-  } else {
-    startActivityHeartbeat();
-  }
-});
-
-// Also ping on any user interaction to be extra safe.
-document.addEventListener("click", () => {
-  send({ type: "DUSK_UI_ACTIVITY" }).catch(() => {});
-}, { passive: true });
 
 // --- Network menu --------------------------------------------------------
 const netMenu = createNetworkMenuController({

@@ -8,7 +8,7 @@ import {
   getPermissions,
   revokeOrigin,
 } from "../shared/permissions.js";
-import { getSettings, setSettings } from "../shared/settings.js";
+import { getSettings, normalizeAutoLock, setSettings } from "../shared/settings.js";
 import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
@@ -1062,7 +1062,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI sets auto-lock timeout
       if (message?.type === "DUSK_UI_SET_AUTO_LOCK") {
-        const timeout = Number(message.autoLockTimeoutMinutes ?? 0);
+        const timeout = normalizeAutoLock(message.autoLockTimeoutMinutes ?? 0);
         await setSettings({ autoLockTimeoutMinutes: timeout });
         if (timeout > 0) {
           await ensureActivityTimestampIfUnlocked();
@@ -1228,7 +1228,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           nodeUrl: settings.nodeUrl,
           proverUrl: settings.proverUrl,
           archiverUrl: settings.archiverUrl,
-          autoLockTimeoutMinutes: settings.autoLockTimeoutMinutes ?? 5,
+          autoLockTimeoutMinutes: settings.autoLockTimeoutMinutes ?? 15,
+          customGas: settings.customGas ?? null,
           nftMetadataEnabled: settings.nftMetadataEnabled !== false,
           ipfsGateway: settings.ipfsGateway ?? "",
           hideBalances: settings.hideBalances === true,
