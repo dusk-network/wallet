@@ -41,6 +41,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Named the eye button Show balances while balances are hidden.
+- Moved what a site's request makes visible to everyone up, under the amount, in every approval window.
+- Set every extension page's language to English.
+- Showed the time zone with full dates and times in a transaction's details, the Sent screen and approvals.
+- Moved Delete all contacts to Settings' Advanced, asking first, and showed each contact by its first letter.
 - Kept Confirm and Approve off while a custom gas limit is under the minimum or the gas price is 0, with the reason under the field.
 - Showed under Custom fee what the gas limit and price come to in DUSK.
 - Showed a transaction's exact fee under Technical details.

@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAccountName } from "../shared/accountNames.js";
+import { clearAddressBook } from "../shared/addressBook.js";
 import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 vi.mock("../shared/accountNames.js", () => ({ setAccountName: vi.fn(async () => {}) }));
+vi.mock("../shared/addressBook.js", () => ({ clearAddressBook: vi.fn(async () => {}) }));
 // The first profile has a verified .dusk name, as the header shows it.
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -191,5 +193,29 @@ describe("settings", () => {
     expect(visibleText(advanced.querySelector(".settings-note"))).toBe(
       "Each transaction costs at most 0.0025 DUSK. One that needs more gas than this limit keeps its own."
     );
+  });
+
+  it("keeps Delete all contacts under Advanced, asking first", async () => {
+    const view = await settings();
+    view.state.addressBook = { loaded: true, items: [{ id: "1", name: "Jan (flour)" }] };
+    const advanced = dom.document.body.querySelector("details.settings-advanced");
+    const remove = advanced.querySelectorAll("button").find((b) => b.textContent === "Delete all contacts");
+    expect(remove).toBeTruthy();
+    // Not near the Contacts row.
+    const contacts = view.section("Contacts");
+    expect(contacts.querySelectorAll("button").map(visibleText)).toEqual(["Contacts"]);
+
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    remove.click();
+    await settle();
+    expect(clearAddressBook).not.toHaveBeenCalled();
+
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    remove.click();
+    await settle();
+    expect(confirm).toHaveBeenCalledWith("Delete all saved contacts from this wallet? This can't be undone.");
+    expect(clearAddressBook).toHaveBeenCalledTimes(1);
+    expect(view.state.addressBook).toMatchObject({ loaded: false, items: null });
+    expect(view.actions.showToast).toHaveBeenCalledWith("Deleted all contacts");
   });
 });

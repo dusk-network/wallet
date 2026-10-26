@@ -61,4 +61,17 @@ describe("full wallet navigation", () => {
     expect(source).toContain('lockWallet("manual_lock")');
     expect(source).toContain('emitUiLockState(true, "unlock")');
   });
+
+  it("names every page's language, English, so screen readers read it in an English voice", async () => {
+    const { readdir } = await import("node:fs/promises");
+    const pages = (await readdir(path.resolve(process.cwd(), "public"))).filter((f) => f.endsWith(".html")).map((f) => ["public", f]);
+    expect(pages.map((p) => p[1])).toEqual(expect.arrayContaining(["popup.html", "full.html", "notification.html", "options.html"]));
+    for (const file of [...pages, ["index.html"]]) {
+      const source = await readFile(path.resolve(process.cwd(), ...file), "utf8");
+      expect(source, file.join("/")).toMatch(/<html lang="en">/);
+    }
+    // The shells the build generates say so too.
+    const generator = await readFile(path.resolve(process.cwd(), "scripts", "generate-shells.js"), "utf8");
+    expect(generator).not.toMatch(/<html>/);
+  });
 });

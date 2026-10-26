@@ -272,6 +272,18 @@ describe("sign approvals", () => {
     expect(visibleText(account)).toBe(MAIN);
     expect(buttons()).toEqual(["Reject", "Sign in"]);
   });
+
+  it("says when a sign-in expires, with the time zone", async () => {
+    const zone = process.env.TZ;
+    process.env.TZ = "Europe/Amsterdam";
+    try {
+      await render("sign_auth", { chainId: "dusk:2", nonce: "n-1", expiresAt: "2026-10-26T12:22:00Z" });
+      expect(visibleText(row("Expires"))).toBe("26 Oct 2026, 13:22 CET");
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+  });
 });
 
 describe("a site's request to pay", () => {
@@ -308,6 +320,22 @@ describe("a site's request to pay", () => {
   ])("says what becomes visible to everyone %s", async (_label, params, over, line) => {
     await render("send_tx", params, over);
     expect(app.querySelector(".ap-visible")?.textContent ?? null).toBe(line);
+  });
+
+  it("says what becomes visible right under the amount, before the fee, in every window", async () => {
+    const deposit = fixtures.calls.find((c) => c.name === "deposit-shoot");
+    for (const params of [
+      transfer(BOB, { memo: "Order 1042" }),
+      transfer(BRIDGE_SERVICE_ACCOUNTS.testnet.account, { memo: deposit.expected.to }),
+      { kind: "contract_call", contractId: BRIDGE_CONTRACTS.testnet.bridge, fnName: deposit.fnName, fnArgs: deposit.args, deposit: deposit.expected.amountLux, chainId: "dusk:2", nodeUrl: TESTNET },
+      { kind: "contract_call", privacy: "public", contractId: `0x${"11".repeat(32)}`, fnName: "x", fnArgs: "0x00", deposit: "5", nodeUrl: TESTNET },
+    ]) {
+      await render("send_tx", params);
+      const children = [...app.children];
+      const visibleAt = children.findIndex((el) => el.classList.contains("ap-visible"));
+      expect(visibleAt, params.fnName ?? params.to).toBe(children.indexOf(head()) + 1);
+      expect(visibleAt).toBeLessThan(children.findIndex((el) => el.localName === "dusk-gas-editor"));
+    }
   });
 
   it("names the paying profile and the rail in plain words", async () => {

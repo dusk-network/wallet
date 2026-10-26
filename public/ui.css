@@ -4441,10 +4441,16 @@ p.contacts-empty {
   font-size: 13px;
 }
 
-button.text-btn.contacts-delete-all,
 button.text-btn.contacts-delete {
   align-self: center;
   margin-top: 6px;
+  color: var(--danger);
+  text-decoration-color: color-mix(in oklab, var(--danger) 45%, transparent);
+}
+
+/* Settings' Advanced: Delete all contacts, away from the list */
+button.text-btn.settings-delete-contacts {
+  align-self: flex-start;
   color: var(--danger);
   text-decoration-color: color-mix(in oklab, var(--danger) 45%, transparent);
 }
@@ -4604,9 +4610,14 @@ label.settings-switch input[type="checkbox"] {
   margin-right: 0;
 }
 
-.row-icon.asset-letter {
+.row-icon.asset-letter,
+.row-icon.contact-letter {
   font-size: 15px;
   font-weight: 500;
+}
+
+.tx-hero-icon.contact-letter {
+  font-size: 20px;
 }
 
 .asset-row .row-sub {

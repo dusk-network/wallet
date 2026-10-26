@@ -92,15 +92,15 @@ export function homeView(ov, { state, actions } = {}) {
     "aria-label": "Refresh",
     onclick: () => actions?.refresh?.()?.catch?.(() => {}),
   });
-  // Hide balances: every balance shows as •••• until it's pressed again. Its
-  // name stays; aria-pressed says whether they're hidden.
+  // Hide balances: every balance shows as •••• until it's pressed again. It's
+  // named for what pressing it does: Show balances while they're hidden.
+  const eyeLabel = hidden ? "Show balances" : "Hide balances";
   const eyeBtn = h("button", {
     class: "balance-eye",
     type: "button",
     html: iconSvg(hidden ? "eye-off" : "eye"),
-    title: "Hide balances",
-    "aria-label": "Hide balances",
-    "aria-pressed": hidden,
+    title: eyeLabel,
+    "aria-label": eyeLabel,
     onclick: async () => {
       // At once and for the rest of this popup, then saved for the next one.
       state.hideBalances = !hidden;

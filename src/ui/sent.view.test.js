@@ -168,7 +168,7 @@ describe("after Confirm", () => {
       ["done", "Sent to the network", ""],
       ["done", "Completed", "In block 1,234,567"],
     ]);
-    expect(steps()[0][2]).toMatch(/^\d\d:\d\d · from your public balance$/);
+    expect(steps()[0][2]).toMatch(/^\d\d:\d\d [A-Z][A-Za-z0-9+:−-]* · from your public balance$/);
     // Finished: no note about closing the wallet.
     expect(note()).toBeNull();
     expect(rows().at(-1)).toBe("Network fee0.0003 DUSK");

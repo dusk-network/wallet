@@ -13,6 +13,7 @@ import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
+import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
 import { shortAddress } from "../lib/strings.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
@@ -134,16 +135,12 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
   return frac ? `${intPart}.${frac}` : intPart;
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-// A time as the popup writes it: "26 Oct 2026, 14:10". One that isn't a
+// A time as the popup writes it: "26 Oct 2026, 14:10 CET". One that isn't a
 // time shows as it came.
 function dateText(value) {
   const d = new Date(String(value ?? ""));
   if (!Number.isFinite(d.getTime())) return String(value ?? "");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm}`;
+  return fullDateText(d.getTime());
 }
 
 // The network of a known chain ID: "dusk:2" is Testnet.
@@ -1015,6 +1012,8 @@ export async function renderNotification() {
         [
           site,
           head,
+          // What everyone sees, under the amount, before the fee: in view without scrolling.
+          shielded ? null : note(visible, "eye", { className: "ap-visible" }),
           service && !service.recipientOk
             ? warning(
                 `The memo isn't an address on ${service.short}`,
@@ -1022,7 +1021,6 @@ export async function renderNotification() {
               )
             : null,
           gasEditor,
-          shielded ? null : note(visible, "eye", { className: "ap-visible" }),
           group([
             kv("From", shielded ? "Your shielded balance" : payerLine(rail)),
             service
@@ -1169,10 +1167,10 @@ export async function renderNotification() {
         [
           site,
           head,
+          visible(bridge.kind === "deposit" ? "the amount, the DuskEVM recipient" : "this call, the withdrawal"),
           decoded,
           extra,
           gasEditor,
-          visible(bridge.kind === "deposit" ? "the amount, the DuskEVM recipient" : "this call, the withdrawal"),
           callRows(),
           detailsBlock(),
         ],
@@ -1271,6 +1269,7 @@ export async function renderNotification() {
             to: (isTransfer || isTransferFrom) && toStr ? toLine(toStr) : null,
             sub: `${name} · DRC20`,
           }),
+          visible("this call, the tokens it moves"),
           group([
             kv("From", payerLine(rail)),
             isTransfer || isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
@@ -1284,7 +1283,6 @@ export async function renderNotification() {
             : null,
           callRows(),
           gasEditor,
-          visible("this call, the tokens it moves"),
           detailsBlock(),
         ],
         bar.nodes
@@ -1322,6 +1320,7 @@ export async function renderNotification() {
             to: isTransferFrom && toStr ? toLine(toStr) : null,
             sub: `${name} (${sym})${tokenIdStr ? ` · #${tokenIdStr}` : ""}`,
           }),
+          visible("this call"),
           group([
             kv("From", payerLine(rail)),
             tokenIdStr ? kv("Token ID", mono(tokenIdStr)) : null,
@@ -1337,7 +1336,6 @@ export async function renderNotification() {
             : null,
           callRows(),
           gasEditor,
-          visible("this call"),
           detailsBlock(),
         ],
         bar.nodes
@@ -1366,10 +1364,10 @@ export async function renderNotification() {
           title: summary.title,
           amount: sendsLux > 0n ? { value: formatDuskExact(sendsLux), unit: "DUSK" } : null,
         }),
+        visible("this call, the DUSK it sends"),
         callRows({ from: true }),
         unchecked,
         gasEditor,
-        visible("this call, the DUSK it sends"),
         detailsBlock(),
       ],
       bar.nodes

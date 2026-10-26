@@ -65,7 +65,7 @@ function mount(addressBook = {}, ov = { nodeUrl: NODE, accounts: [OWN], selected
 }
 
 describe("contacts", () => {
-  it("lists contacts by name with their address, and keeps Delete all apart, asking first", async () => {
+  it("lists contacts by name with their address and first letter, and leaves Delete all to Settings", async () => {
     let view = mount();
     expect(dom.document.body.querySelector('input[type="search"]').getAttribute("aria-label")).toBe("Search contacts");
     expect(view.buttons()).toEqual(["← Back", "New contact"]);
@@ -73,17 +73,19 @@ describe("contacts", () => {
 
     view = mount({ items: [ALICE, { id: "2", name: "Shop", address: ACCOUNT, type: "account", duskName: "alice-shop.dusk", checkedAt: 1 }] });
     expect(dom.document.body.querySelectorAll(".contact-row").map(visibleText)).toEqual([
-      "Alice26FCH7…Tck927 · Public",
-      "Shopalice-shop.dusk · Public",
+      "AAlice26FCH7…Tck927 · Public",
+      "SShopalice-shop.dusk · Public",
     ]);
-    // The last thing on the page, away from New contact.
-    expect(view.buttons().at(-1)).toBe("Delete all contacts");
-    const confirm = vi.fn(() => true);
-    vi.stubGlobal("confirm", confirm);
-    view.button("Delete all contacts").click();
-    await settle();
-    expect(confirm).toHaveBeenCalledWith("Delete all contacts?");
-    expect(clearAddressBook).toHaveBeenCalledTimes(1);
+    // Each by the first letter of its name, not a picture that can come out blank.
+    const avatars = dom.document.body.querySelectorAll(".contact-row .row-icon");
+    expect(avatars.map((a) => [a.className, a.textContent, a.getAttribute("aria-hidden")])).toEqual([
+      ["row-icon contact-letter", "A", "true"],
+      ["row-icon contact-letter", "S", "true"],
+    ]);
+    expect(dom.document.body.querySelector(".identicon")).toBeNull();
+    // Delete all isn't beside the list.
+    expect(view.buttons()).not.toContain("Delete all contacts");
+    expect(clearAddressBook).not.toHaveBeenCalled();
   });
 
   it("offers this profile's recent recipients to pick or save, but never its own account", () => {
@@ -93,7 +95,7 @@ describe("contacts", () => {
     ];
     const view = mount({ mode: "pick", pickReturnRoute: "send" }, { nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs });
     const rows = dom.document.body.querySelectorAll(".contacts-section .contact-row");
-    expect(rows.map(visibleText)).toEqual(["alice.dusk Public Save"].map((t) => t.replace(/ /g, "")));
+    expect(rows.map(visibleText)).toEqual(["A alice.dusk Public Save"].map((t) => t.replace(/ /g, "")));
     const save = rows[0].querySelector(".mini-btn");
     expect(accessibleName(save)).toBe("Save alice.dusk to Contacts");
     save.click();
@@ -169,6 +171,6 @@ describe("contacts", () => {
     expect(visibleText(dom.document.body.querySelector(".contact-name-check"))).toBe(
       "alice-shop.dusk now points to another address. Edit the contact before you send to it."
     );
-    expect(visibleText(dom.document.body.querySelector(".contact-hero"))).toBe("Shopalice-shop.dusk26FCH7…Tck927Public");
+    expect(visibleText(dom.document.body.querySelector(".contact-hero"))).toBe("SShopalice-shop.dusk26FCH7…Tck927Public");
   });
 });

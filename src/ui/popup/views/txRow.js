@@ -17,6 +17,7 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
+import { MONTHS, clockText, dateText } from "../../lib/time.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
 
 export const MINUS = "−";
@@ -30,28 +31,17 @@ export const ACTIVITY_FILTERS = Object.freeze([
 ]);
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const two = (n) => String(n).padStart(2, "0");
-
-/** "14:32", in the popup's time zone. */
-export function clockText(ms) {
-  const d = new Date(ms);
-  return `${two(d.getHours())}:${two(d.getMinutes())}`;
-}
+// "14:32", and a transaction's Date row in full with its time zone, "26 Oct
+// 2026, 14:32 CET".
+export { clockText, dateText };
 
 const startOfDay = (ms) => {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 };
-
-/** "26 Oct 2026, 14:32": a transaction's Date row. */
-export function dateText(ms) {
-  const d = new Date(ms);
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${clockText(ms)}`;
-}
 
 /** A day group's title: "Today", "Yesterday", "Fri, 24 Oct", or with its year when it isn't this one. */
 export function dayLabel(ms, now = Date.now()) {

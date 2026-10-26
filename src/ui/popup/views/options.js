@@ -4,6 +4,7 @@ import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
 import { AUTO_LOCK_OPTIONS, normalizeCustomGas } from "../../../shared/settings.js";
 import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { setAccountName } from "../../../shared/accountNames.js";
+import { clearAddressBook } from "../../../shared/addressBook.js";
 import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
 import { platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
@@ -16,7 +17,8 @@ import { fieldLabel, integerInput, textInput, urlInput } from "../../components/
 import { profileLabelOf } from "../../components/ProfileName.js";
 
 // Settings: the profile, security, connected sites, contacts and the network,
-// then Advanced (custom gas), and Reset wallet on its own at the end.
+// then Advanced (custom gas, Delete all contacts), and Reset wallet on its
+// own at the end.
 
 const autoLockLabel = (minutes) =>
   AUTO_LOCK_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} minutes`;
@@ -400,6 +402,22 @@ export function optionsView(ov, { state, actions } = {}) {
     saveGas(gasToggle.checked ? normalizeCustomGas({ limit: limitInput.value, price: priceInput.value }) : null);
   });
   showGasNote();
+  // Deletes every saved contact, away from the list, and asks first.
+  const clearContactsBtn = h("button", {
+    class: "text-btn settings-delete-contacts",
+    type: "button",
+    text: "Delete all contacts",
+    onclick: async () => {
+      if (!confirm("Delete all saved contacts from this wallet? This can't be undone.")) return;
+      try {
+        await clearAddressBook();
+        if (state.addressBook) Object.assign(state.addressBook, { loaded: false, items: null, query: "" });
+        actions?.showToast?.("Deleted all contacts");
+      } catch (e) {
+        actions?.showToast?.(e?.message ?? String(e), 2500);
+      }
+    },
+  });
   const advanced = h("details", { class: "advanced settings-advanced", open: Boolean(st.advancedOpen) }, [
     h("summary", { text: "Advanced" }),
     h("div", { class: "advanced-body" }, [
@@ -407,6 +425,7 @@ export function optionsView(ov, { state, actions } = {}) {
       gasNote,
       gasFields,
       h("p", { class: "settings-note", text: "Remote NFT media is off." }),
+      clearContactsBtn,
     ]),
   ]);
   advanced.addEventListener("toggle", () => {

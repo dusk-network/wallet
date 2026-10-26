@@ -303,7 +303,7 @@ describe("a transaction's details", () => {
     await settle();
     expect(visibleText(body().querySelector(".tx-hero"))).toBe("Sent tofaucet.dusk" + `${short(FAUCET)}−25 DUSKCompleted`);
     expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText)).toEqual([
-      "Date22 Oct 2026, 14:32",
+      "Date22 Oct 2026, 14:32 UTC",
       "MemoOrder 1042",
       "Network fee0.0037 DUSK",
       "Fromalice.dusk · Public",
@@ -330,7 +330,7 @@ describe("a transaction's details", () => {
       "Gas used3,700,000 of 10,000,000",
       "Gas price1 LUX",
       "Exact fee0.0037 DUSK",
-      "Submitted22 Oct 2026, 14:32",
+      "Submitted22 Oct 2026, 14:32 UTC",
     ]);
     button("View in Dusk explorer").click();
     await settle();

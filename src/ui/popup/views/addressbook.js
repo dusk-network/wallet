@@ -13,7 +13,6 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
-import { identiconEl } from "../../components/Identicon.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, searchInput, textInput } from "../../components/FormControls.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
@@ -22,7 +21,6 @@ import { activityRows } from "../activity.js";
 import { blockTimes, contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
 
 import {
-  clearAddressBook,
   listAddressBook,
   markAddressBookNameChecked,
   removeAddressBookEntry,
@@ -53,6 +51,19 @@ function normalizeRecipient(raw) {
 }
 
 const lower = (v) => String(v ?? "").trim().toLowerCase();
+
+/**
+ * A contact's picture: the first letter of its name, as Assets shows a
+ * token's; a person icon for one known by its address alone.
+ * @param {string} name
+ * @param {string} [className]
+ */
+export function contactAvatar(name, className = "row-icon contact-letter") {
+  const letter = Array.from(String(name ?? "").trim())[0]?.toUpperCase() ?? "";
+  return letter
+    ? h("span", { class: className, "aria-hidden": "true", text: letter })
+    : h("span", { class: className, "aria-hidden": "true", html: iconSvg("contacts") });
+}
 
 function ownAddresses(ov) {
   const idx = Math.max(0, Math.floor(Number(ov?.selectedAccountIndex) || 0));
@@ -221,7 +232,7 @@ export function addressBookView(ov, { state, actions } = {}) {
           { class: "group" },
           recent.map((d) =>
             h("div", { class: "list-row contact-row" }, [
-              h("span", { class: "row-icon", "aria-hidden": "true" }, [identiconEl(d.address)]),
+              contactAvatar(d.isAddress ? "" : d.name),
               h("button", { class: "contact-row__main", type: "button", onclick: () => pick(d.address) }, [
                 h("span", { class: d.isAddress ? "row-title mono" : "row-title", text: d.name }),
                 h("span", { class: "row-sub", text: typeLabel(ProfileGenerator.typeOf(d.address)) }),
@@ -266,7 +277,7 @@ export function addressBookView(ov, { state, actions } = {}) {
               },
             },
             [
-              h("span", { class: "row-icon", "aria-hidden": "true" }, [identiconEl(addr || "dusk")]),
+              contactAvatar(String(entry?.name ?? "")),
               h("span", { class: "row-main" }, [
                 h("span", { class: "row-title", text: String(entry?.name ?? "") || "(No name)" }),
                 h("span", { class: entry?.duskName ? "row-sub" : "row-sub mono", text: rowLine(entry) }),
@@ -278,29 +289,6 @@ export function addressBookView(ov, { state, actions } = {}) {
       );
     }
 
-    // Deletes every contact, so it asks first, sits apart, and only shows when there are some.
-    const clearBtn =
-      ab.mode === "manage" && items.length
-        ? h("button", {
-            class: "text-btn contacts-delete-all",
-            type: "button",
-            text: "Delete all contacts",
-            onclick: async () => {
-              if (!confirm("Delete all contacts?")) return;
-              try {
-                await clearAddressBook();
-                ab.loaded = false;
-                ab.items = null;
-                ab.query = "";
-                actions?.showToast?.("Deleted all contacts");
-                rerender();
-              } catch (e) {
-                actions?.showToast?.(e?.message ?? String(e), 2500);
-              }
-            },
-          })
-        : null;
-
     return [
       subnav({ title: ab.mode === "pick" ? "Select contact" : "Contacts", onBack: goBack }),
       h("div", { class: "row contacts" }, [
@@ -308,7 +296,6 @@ export function addressBookView(ov, { state, actions } = {}) {
         recentGroup,
         recentGroup ? h("h2", { class: "contacts-section-title", text: "Contacts" }) : null,
         listBody,
-        clearBtn,
       ].filter(Boolean)),
     ];
   };
@@ -361,7 +348,7 @@ export function addressBookView(ov, { state, actions } = {}) {
     });
 
     const hero = h("div", { class: "tx-hero contact-hero" }, [
-      h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true" }, [identiconEl(addr || "dusk")]),
+      contactAvatar(String(entry?.name ?? ""), "row-icon tx-hero-icon contact-letter"),
       h("h2", { class: "tx-hero-name", text: String(entry?.name ?? "") || "(No name)" }),
       entry.duskName ? h("div", { class: "tx-hero-lead", text: entry.duskName }) : null,
       h("div", { class: "tx-hero-addr" }, [h("span", { class: "mono", title: addr, text: shortAddress(addr) }), copyBtn]),
