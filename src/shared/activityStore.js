@@ -223,20 +223,23 @@ export async function listActivityEntries(ownerKey, { limit = 200, before } = {}
   return out;
 }
 
-/** Forget an account's kept history on one network: entries and sync state. */
-export async function clearActivity(ownerKey) {
-  const db = await openDb();
-  const tx = db.transaction([STORE_META, STORE_ENTRIES], "readwrite");
-  tx.objectStore(STORE_META).delete(ownerKey);
-  const index = tx.objectStore(STORE_ENTRIES).index("byOwnerHeight");
-  const req = index.openCursor(IDBKeyRange.bound([ownerKey, -Infinity], [ownerKey, Infinity]));
-  req.onsuccess = () => {
-    const cursor = req.result;
-    if (!cursor) return;
-    cursor.delete();
-    cursor.continue();
-  };
-  await done(tx);
+/**
+ * Forget an account's kept history on one network: entries and sync state.
+ * @param {string} ownerKey
+ * @param {number} [epoch] - getActivityEpoch when the work began
+ */
+export async function clearActivity(ownerKey, epoch) {
+  await guardedWrite([STORE_META, STORE_ENTRIES], epoch, (tx) => {
+    tx.objectStore(STORE_META).delete(ownerKey);
+    const index = tx.objectStore(STORE_ENTRIES).index("byOwnerHeight");
+    const req = index.openCursor(IDBKeyRange.bound([ownerKey, -Infinity], [ownerKey, Infinity]));
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) return;
+      cursor.delete();
+      cursor.continue();
+    };
+  });
 }
 
 /**

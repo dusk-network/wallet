@@ -100,6 +100,15 @@ describe("createLeafHeightTap", () => {
     expect(Array.from(call.mock.calls[0][0])).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
     expect(call.mock.calls[0][1]).toEqual({ headers: { "Rusk-Feeder": "true" } });
   });
+
+  it("reads the leaves added since a position, for a tree that grew", async () => {
+    const call = vi.fn(async () => new Response(stream([L492, L493, L494, L495], 333)));
+    const network = { contracts: { transferContract: { call: { leaves_from_pos: call } } } };
+    await expect(readNoteHeights(network, 496n, { from: 492n })).resolves.toEqual([3577762, 3602438, 3861643]);
+    expect(Array.from(call.mock.calls[0][0])).toEqual([236, 1, 0, 0, 0, 0, 0, 0]);
+    // A stream that doesn't start there gives nothing.
+    await expect(readNoteHeights(network, 497n, { from: 491n })).resolves.toBeNull();
+  });
 });
 
 describe("pickHeights", () => {

@@ -590,16 +590,25 @@ async function executeMoonlightTransaction(network, tx, profileIndex) {
   return result;
 }
 
-async function persistPendingNullifiersForTx(result, profileIndex) {
+// The wallet a send began under, taken before it runs: what it keeps is kept
+// for that wallet only, and only while it is still the one unlocked.
+function walletSession() {
+  return { generation: unlockGeneration, walletId: getWalletId(), netKey: getNetworkKey() };
+}
+
+async function persistPendingNullifiersForTx(result, profileIndex, session) {
   if (!Array.isArray(result?.nullifiers) || !result.nullifiers.length) return 0;
-  const walletId = getWalletId();
-  if (!walletId) return 0;
+  if (!session?.walletId) return 0;
+  // No lock, reset or other wallet since the send began.
+  const current = () => state.unlocked && unlockGeneration === session.generation && getWalletId() === session.walletId;
+  if (!current()) return 0;
   return await putPendingNullifiers(
-    getNetworkKey(),
-    walletId,
+    session.netKey,
+    session.walletId,
     Number(profileIndex) || 0,
     result.nullifiers,
-    result.hash
+    result.hash,
+    { fence: current }
   );
 }
 
@@ -2473,15 +2482,20 @@ async function keepNoteHeights(tap, total, epochPromise) {
   }
 }
 
-// The note tree's heights on this network: kept, or read once from the tree.
+// The note tree's heights on this network: kept, read once from the tree,
+// and extended with the leaves added since (a custom network's tree keeps
+// growing). Null while the tree can't be read.
 async function noteHeightPool(network, nodeUrl, epoch) {
   const key = activityNetworkKey(nodeUrl);
   const kept = await getNoteHeightPool(key).catch(() => null);
-  if (kept?.heights?.length) return kept.heights;
+  const have = kept?.heights?.length && Number.isSafeInteger(kept.notes) ? BigInt(kept.notes) : 0n;
   const total = await readTransferContractBookmark(network);
   if (!total) return null;
-  const heights = await readNoteHeights(network, total);
-  if (heights) await putNoteHeightPool(key, heights, Number(total), epoch).catch(() => {});
+  if (have && total <= have) return kept.heights;
+  const added = await readNoteHeights(network, total, { from: have });
+  if (!added) return null;
+  const heights = have ? [...new Set([...kept.heights, ...added])] : added;
+  await putNoteHeightPool(key, heights, Number(total), epoch).catch(() => {});
   return heights;
 }
 
@@ -2560,9 +2574,11 @@ export async function getShieldedHistory() {
     const network = await ensureNetwork();
     const pool = await noteHeightPool(network, nodeUrl, epoch);
     assertCurrent();
-    // Without other heights to ask among, the node isn't asked at all.
-    if (!pool) return { profileIndex, entries: kept?.entries ?? [], pending: true };
     const real = [...new Set(notes.map((n) => leafInfo(n.leaf).height))];
+    // Without other heights to ask among, the node isn't asked at all; nor for
+    // a height the tree as read doesn't have, as no decoy could be one.
+    const inTree = new Set(pool ?? []);
+    if (!pool || real.some((h) => !inTree.has(h))) return { profileIndex, entries: kept?.entries ?? [], pending: true };
     const { heights, decoys } = pickHeights(pool, real, { keep: kept?.decoys ?? [] });
     const blocks = await fetchBlocks(url, heights);
     assertCurrent();
@@ -2666,8 +2682,9 @@ async function executeStakeTransaction(idx, params, makeTx) {
     await ensureShieldedSpendReady(idx);
     const tx = await makeTx();
     await assertApprovalContext(params, idx);
+    const session = walletSession();
     const result = await state.network.execute(tx);
-    await persistPendingNullifiersForTx(result, idx);
+    await persistPendingNullifiersForTx(result, idx, session);
     return { hash: result.hash, nullifiers: result.nullifiers };
   });
 }
@@ -2756,8 +2773,10 @@ export async function transfer(params) {
       }
 
       await assertApprovalContext(params, idx);
+
+      const session = walletSession();
       const result = await network.execute(tx);
-      await persistPendingNullifiersForTx(result, idx);
+      await persistPendingNullifiersForTx(result, idx, session);
       return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
     });
   }
@@ -2871,8 +2890,10 @@ async function sendTransactionUnlocked(params) {
       if (gas) tx = tx.gas(gas);
 
       await assertApprovalContext(params, idx);
+
+      const session = walletSession();
       const result = await network.execute(tx);
-      await persistPendingNullifiersForTx(result, idx);
+      await persistPendingNullifiersForTx(result, idx, session);
       return { hash: result.hash, nullifiers: result.nullifiers };
     });
   }
@@ -3056,8 +3077,10 @@ async function sendTransactionUnlocked(params) {
         }
 
         await assertApprovalContext(params, idx);
+
+        const session = walletSession();
         const result = await network.execute(tx);
-        await persistPendingNullifiersForTx(result, idx);
+        await persistPendingNullifiersForTx(result, idx, session);
         return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
       });
     }

@@ -61,6 +61,16 @@ describe("historyRow", () => {
     const failed = entry(B, 3407780);
     expect(historyRow(failed)).toMatchObject({ status: "failed", error: "Panic: DRC20Phoenix: invalid proof" });
   });
+
+  it("reads a call that sent its value to its own account as the call it was, once its call data came", () => {
+    // Derived: A's register call as it would read had it sent 5 DUSK to itself.
+    const call = activityEntry({ ...registered(), direction: "self", kind: "transfer", counterparty: A, value: "5000000000", payer: true });
+    expect(historyRow(call)).toMatchObject({ kind: "contract_call", direction: "out", amount: "0", contractId: STORE, fnName: "register" });
+    expect(historyRow(call).to).toBeUndefined();
+    expect(historyRow(call).deposit).toBeUndefined();
+    // Before its details, it is the transfer it reads as.
+    expect(historyRow({ ...call, contractId: undefined, fnName: undefined })).toMatchObject({ kind: "transfer", direction: "self" });
+  });
 });
 
 describe("mergeActivity", () => {
@@ -93,6 +103,28 @@ describe("mergeActivity", () => {
       const [row] = mergeActivity({ local: [local], history: [unknown], profileIndex: 0 });
       expect(row).toMatchObject({ source: "both", status, error: local.error, detailsAt: undefined });
     }
+  });
+
+  it("takes a shielded row's outcome over the wallet's own that stopped waiting", () => {
+    const hash = "ab".repeat(32);
+    const local = { hash, kind: "transfer", privacy: "shielded", status: "unknown", recoveryReason: "watcher_timeout", amount: "5", profileIndex: 0 };
+    for (const [status, error] of [["executed", undefined], ["failed", "Panic: out of gas"]]) {
+      const shielded = [{ hash, source: "shielded", privacy: "shielded", kind: "transfer", direction: "out", amount: "5", feePaid: "1", status, error, blockHeight: 9 }];
+      const [row] = mergeActivity({ local: [local], shielded, profileIndex: 0 });
+      expect(row).toMatchObject({ source: "both", status, error });
+    }
+  });
+
+  it("keeps the amount a send meant to move when it didn't go through, and the chain's when it did", () => {
+    // B's call that failed on chain: its value never moved.
+    const failed = entry(B, 3407780);
+    const local = { hash: failed.hash, kind: "contract_call", fnName: "transfer_private", amount: "0", deposit: "2000000000", status: "failed", profileIndex: 0 };
+    const [row] = mergeActivity({ local: [local], history: [failed], profileIndex: 0 });
+    expect(row).toMatchObject({ source: "both", status: "failed", deposit: "2000000000" });
+    // A's register went through: the chain's deposit stands.
+    const done = registered();
+    const [ok] = mergeActivity({ local: [{ ...local, hash: done.hash, deposit: "1" }], history: [done], profileIndex: 0 });
+    expect(ok).toMatchObject({ status: "executed", deposit: "100000000000" });
   });
 
   it("gives an unshield the fee its shielded side paid", () => {

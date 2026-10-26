@@ -5,6 +5,8 @@ import { toBytes } from "../shared/bytes.js";
 const mocks = vi.hoisted(() => ({
   addListener: vi.fn(),
   runtimeSendMessage: vi.fn(async () => undefined),
+  sendTransaction: vi.fn(async () => ({ hash: "0xsent" })),
+  waitTxExecuted: vi.fn(async () => ({ payload: {} })),
   lookupPrimaryName: vi.fn(async () => "alice.dusk"),
   lookupRecipientName: vi.fn(async () => "carol.dusk"),
   unlocked: true,
@@ -22,6 +24,10 @@ vi.mock("../shared/walletEngine.js", async (importOriginal) => ({
   preloadProtocolDriver: vi.fn(async () => undefined),
   isUnlocked: vi.fn(() => mocks.unlocked),
   getAccounts: vi.fn(() => ["own0", "own1"]),
+  sendTransaction: mocks.sendTransaction,
+  waitTxExecuted: mocks.waitTxExecuted,
+  waitTxRemoved: vi.fn(() => new Promise(() => {})),
+  startShieldedSync: vi.fn(async () => undefined),
 }));
 
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
@@ -86,5 +92,17 @@ describe("engine name checks", () => {
     });
     expect(mocks.lookupRecipientName).toHaveBeenCalledWith("someone", { nodeUrl });
     expect(mocks.lookupPrimaryName).not.toHaveBeenCalledWith("someone", expect.anything());
+  });
+});
+
+describe("a send's watcher", () => {
+  it("hands the send's store count back with its events, and not to the send", async () => {
+    mocks.runtimeSendMessage.mockClear();
+    const response = await engineCall("dusk_sendTransaction", { kind: "transfer", amount: "1", txEpoch: 4 });
+    expect(response.result).toEqual({ hash: "0xsent" });
+    expect(mocks.sendTransaction).toHaveBeenLastCalledWith({ kind: "transfer", amount: "1" });
+    await vi.waitFor(() =>
+      expect(mocks.runtimeSendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_TX_EXECUTED", hash: "0xsent", epoch: 4 }))
+    );
   });
 });

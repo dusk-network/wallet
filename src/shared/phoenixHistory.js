@@ -56,15 +56,17 @@ export function leafInfo(leaf) {
 }
 
 /**
- * A pass-through for the note-tree stream (`leaves_from_pos` from position 0)
- * that notes each leaf's height on the way, for the decoy heights. `stream()`
- * makes the transform; `heights(total)` gives the distinct heights of the
- * first `total` leaves once all of them passed in order, else null. It never
- * changes or stops the stream, whatever it reads.
+ * A pass-through for the note-tree stream (`leaves_from_pos` from position
+ * `from`, 0 by default) that notes each leaf's height on the way, for the
+ * decoy heights. `stream()` makes the transform; `heights(total)` gives the
+ * distinct heights of the leaves from `from` up to `total` once all of them
+ * passed in order, else null. It never changes or stops the stream, whatever
+ * it reads.
  */
-export function createLeafHeightTap() {
+export function createLeafHeightTap({ from = 0n } = {}) {
+  const start = BigInt(from);
   let rest = new Uint8Array(0);
-  let next = 0n;
+  let next = start;
   let broken = false;
   const heights = [];
 
@@ -94,7 +96,7 @@ export function createLeafHeightTap() {
         },
       }),
     heights(total) {
-      const n = Number(total);
+      const n = Number(total) - Number(start);
       if (broken || !Number.isSafeInteger(n) || n <= 0 || heights.length < n) return null;
       return [...new Set(heights.slice(0, n))];
     },
@@ -109,13 +111,16 @@ function concat(a, b) {
 }
 
 /**
- * The note tree's heights from one stream of every leaf.
+ * The note tree's heights from one stream of its leaves, from position `from`.
  * @param {object} network - a w3sper Network
  * @param {bigint} total - the tree's size (num_notes)
+ * @param {{ from?: bigint }} [opts]
  */
-export async function readNoteHeights(network, total) {
-  const tap = createLeafHeightTap();
-  const response = await network.contracts.transferContract.call.leaves_from_pos(new Uint8Array(8), {
+export async function readNoteHeights(network, total, { from = 0n } = {}) {
+  const tap = createLeafHeightTap({ from });
+  const pos = new Uint8Array(8);
+  new DataView(pos.buffer).setBigUint64(0, BigInt(from), true);
+  const response = await network.contracts.transferContract.call.leaves_from_pos(pos, {
     headers: { "Rusk-Feeder": "true" },
   });
   if (!response?.body) throw new Error("The node sent no note tree");

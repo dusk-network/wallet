@@ -555,9 +555,10 @@ async function syncOnce({
 
   // Another chain under the same name (a reset devnet or local node): start over.
   if (meta?.genesis && genesis && meta.genesis !== genesis) {
-    await store.clearActivity(ownerKey);
+    // Still the run's own: a reset meanwhile refuses both (StaleActivityError).
+    await store.clearActivity(ownerKey, epoch);
     meta = null;
-    return syncOnce({ nodeUrl, archiverUrl, account, maxRequests: budget.left + 1, maxDetailRequests, store, onStep });
+    return syncOnce({ nodeUrl, archiverUrl, account, maxRequests: budget.left + 1, maxDetailRequests, store, onStep, epoch });
   }
 
   const head = { genesis: genesis || meta?.genesis || "", finalized, target, headAt: Date.now() };

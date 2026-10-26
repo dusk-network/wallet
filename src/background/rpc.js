@@ -41,7 +41,7 @@ import {
 import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { readCurrent, siteNames } from "./siteNames.js";
-import { putTxMeta } from "../shared/txStore.js";
+import { getTxEpoch, putTxMeta } from "../shared/txStore.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
 import {
   broadcastChainChangedAll,
@@ -743,11 +743,14 @@ export async function handleRpc(origin, request) {
       finalParams.gas = validateGasShape(finalParams.gas);
 
       const idx = executionContext.profileIndex;
+      // What this send and its watcher keep is dropped after a wallet reset.
+      const txEpoch = await getTxEpoch();
       const engineParams = {
         ...finalParams,
         // Never allow a dApp to select an arbitrary local profile.
         profileIndex: idx,
         _approvalContext: executionContext,
+        txEpoch,
       };
       const result = await engineCall("dusk_sendTransaction", engineParams);
       const hash = result?.hash ?? "";
@@ -789,7 +792,7 @@ export async function handleRpc(origin, request) {
             reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
             submittedAt: Date.now(),
             status: "submitted",
-          });
+          }, { epoch: txEpoch });
         }
 
         // Best-effort system notification (extension).

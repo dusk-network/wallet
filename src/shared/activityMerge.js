@@ -5,8 +5,9 @@
 // A transaction both know is the chain's once it is final: its outcome,
 // amount, time and fee come from the archive. The wallet's own record adds
 // what the chain doesn't say, such as the .dusk name typed for the recipient,
-// the site that asked or the token sent. Until the archive has it, the
-// wallet's record shows it, pending or not.
+// the site that asked or the token sent, and the amount it meant to send
+// when it didn't go through. Until the archive has it, the wallet's record
+// shows it, pending or not.
 
 import { TX_KIND } from "./constants.js";
 
@@ -22,23 +23,29 @@ const lower = (hash) => String(hash ?? "").toLowerCase();
  * @param {{ nodeUrl?: string }} [ctx]
  */
 export function historyRow(entry, { nodeUrl } = {}) {
-  const amount = entry.value?.toString?.() ?? String(entry.value ?? "0");
-  const call = entry.kind === TX_KIND.CONTRACT_CALL;
+  // A call this account made reads as a transfer until its call data comes
+  // with its details; its value sent to itself moved nothing.
+  const callData = entry.kind === TX_KIND.TRANSFER && entry.direction !== "in" && Boolean(entry.contractId && entry.fnName);
+  const self = callData && entry.direction === "self";
+  const kind = callData ? TX_KIND.CONTRACT_CALL : entry.kind;
+  const direction = self ? "out" : entry.direction;
+  const amount = self ? "0" : entry.value?.toString?.() ?? String(entry.value ?? "0");
+  const call = kind === TX_KIND.CONTRACT_CALL;
   return {
     hash: lower(entry.hash),
     source: "archive",
     nodeUrl,
     privacy: "public",
-    kind: entry.kind,
-    direction: entry.direction,
+    kind,
+    direction,
     // Final on chain, but its outcome is unknown until its details come.
     success: entry.success ?? null,
     status: entry.success === true ? "executed" : entry.success === false ? "failed" : "unknown",
     error: entry.success === false ? entry.error : undefined,
     amount,
     counterparty: entry.counterparty ?? null,
-    to: entry.direction === "out" && !call ? entry.counterparty ?? undefined : undefined,
-    from: entry.direction === "in" ? entry.counterparty ?? undefined : undefined,
+    to: direction === "out" && !call ? entry.counterparty ?? undefined : undefined,
+    from: direction === "in" ? entry.counterparty ?? undefined : undefined,
     contractId: entry.contractId ?? (call ? entry.counterparty ?? undefined : undefined),
     fnName: entry.fnName,
     deposit: call && amount !== "0" ? amount : undefined,
@@ -93,11 +100,18 @@ export function mergeActivity({ local = [], history = [], shielded = [], profile
       continue;
     }
     const extra = Object.fromEntries(LOCAL_ONLY.filter((k) => tx[k] !== undefined).map((k) => [k, tx[k]]));
-    // Until the chain's outcome is known, the wallet's own status stands.
-    const outcome = typeof known.success === "boolean" ? { status: known.status, error: known.error } : { status: tx.status ?? known.status, error: tx.error };
+    // Until the chain's outcome is known, the wallet's own status stands; a
+    // shielded history row's outcome is the chain's.
+    const final = typeof known.success === "boolean" || (known.source === "shielded" && ["executed", "failed"].includes(known.status));
+    const outcome = final ? { status: known.status, error: known.error } : { status: tx.status ?? known.status, error: tx.error };
+    // Unless it went through, its value didn't move on chain: the amount it
+    // was sent with shows what stayed in the wallet.
+    const intent =
+      final && known.status === "executed" ? {} : Object.fromEntries(["amount", "deposit"].filter((k) => tx[k] != null).map((k) => [k, tx[k]]));
     rows.set(hash, {
       ...known,
       ...extra,
+      ...intent,
       ...outcome,
       source: "both",
       // What the wallet sent, when the chain names it less closely: a token

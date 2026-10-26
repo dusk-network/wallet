@@ -68,6 +68,29 @@ afterEach(() => {
 });
 
 describe("local sends", () => {
+  it("keep the profile that paid, which a stake's may not be the one selected", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { getTxMeta } = await import("../shared/txStore.js");
+    engine.sendTransaction.mockResolvedValueOnce({ hash: "cc".repeat(32), nonce: 1n });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "stake", amount: "1000000000000", profileIndex: 1 } });
+    await expect(getTxMeta("cc".repeat(32))).resolves.toMatchObject({ kind: "stake", profileIndex: 1 });
+  });
+
+  it("keep nothing of a send that finished after a wallet reset", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { clearTxs, listTxs } = await import("../shared/txStore.js");
+    const sent = Promise.withResolvers();
+    engine.sendTransaction.mockReturnValueOnce(sent.promise);
+    const params = { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1" };
+    const response = localSend({ type: "DUSK_UI_SEND_TX", params });
+    await vi.waitFor(() => expect(engine.sendTransaction).toHaveBeenCalled());
+    // The reset's clear, while the send was out.
+    await clearTxs();
+    sent.resolve({ hash: "dd".repeat(32), nonce: 1n });
+    await expect(response).resolves.toMatchObject({ ok: true });
+    await expect(listTxs()).resolves.toEqual([]);
+  });
+
   it("keep the .dusk name the recipient was typed as, and nothing that isn't one", async () => {
     const { localSend } = await import("./localBus.js");
     const { listTxs } = await import("../shared/txStore.js");

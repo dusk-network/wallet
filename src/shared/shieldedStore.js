@@ -475,8 +475,10 @@ export async function getSpentNullifiers(networkKey, walletId, profileIndex = 0)
 /**
  * Store locally pending nullifiers for a submitted phoenix tx.
  * These are filtered out from spendable notes until they become spent on chain.
+ * `fence`, when given, is asked right before the write: false keeps nothing
+ * (the wallet that sent it was locked or reset meanwhile).
  */
-export async function putPendingNullifiers(networkKey, walletId, profileIndex, nullifiers, txHash) {
+export async function putPendingNullifiers(networkKey, walletId, profileIndex, nullifiers, txHash, { fence } = {}) {
   const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
   const hash = String(txHash || "");
@@ -506,6 +508,8 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
   }
 
   if (!rows.length) return 0;
+  // Asked with no wait before the write begins, so a reset's clear comes after it or refuses it.
+  if (fence && !fence()) return 0;
 
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");

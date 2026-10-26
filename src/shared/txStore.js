@@ -3,6 +3,17 @@ import { withStorageLock } from "./storageLock.js";
 
 const mutate = (fn) => withStorageLock(STORAGE_KEYS.TXS, fn);
 
+// How many times a wallet reset cleared the store. A send or watcher reads it
+// when its work begins (getTxEpoch) and passes it with its writes: after a
+// reset since, they are dropped, so nothing of the old wallet comes back.
+const readEpoch = async () => Number((await storage.get(STORAGE_KEYS.TXS_EPOCH))?.[STORAGE_KEYS.TXS_EPOCH]) || 0;
+const stale = async (epoch) => epoch !== undefined && (await readEpoch()) !== epoch;
+
+/** The store's reset count, for a writer to pass with its writes. */
+export async function getTxEpoch() {
+  return readEpoch();
+}
+
 /**
  * @typedef {Object} TxMeta
  * @property {string} origin
@@ -77,10 +88,12 @@ function prune(store, protectedHash = "", limit = 50) {
  * Add submission metadata without overwriting an earlier lifecycle observation.
  * @param {string} hash
  * @param {TxMeta} meta
+ * @param {{ epoch?: number }} [opts] - `epoch`: getTxEpoch when the work began
  */
-export async function putTxMeta(hash, meta) {
+export async function putTxMeta(hash, meta, { epoch } = {}) {
   if (!hash) return;
   return mutate(async () => {
+    if (await stale(epoch)) return;
     const current = await getAll();
     const next = { ...meta, ...current[hash] };
     const terminal = next.status === "executed" || next.status === "failed";
@@ -99,10 +112,12 @@ export async function putTxMeta(hash, meta) {
  * Patch tx metadata.
  * @param {string} hash
  * @param {Partial<TxMeta>} patch
+ * @param {{ epoch?: number }} [opts] - `epoch`: getTxEpoch when the work began
  */
-export async function patchTxMeta(hash, patch) {
+export async function patchTxMeta(hash, patch, { epoch } = {}) {
   if (!hash) return;
   return mutate(async () => {
+    if (await stale(epoch)) return;
     const current = await getAll();
     const prev = current[hash] ?? {};
     const terminal = prev.status === "executed" || prev.status === "failed";
@@ -118,9 +133,12 @@ export async function patchTxMeta(hash, patch) {
   });
 }
 
-/** Forget every transaction's metadata, for a wallet reset. */
+/** Forget every transaction's metadata, for a wallet reset, and count the reset. */
 export async function clearTxs() {
-  return mutate(() => storage.remove(STORAGE_KEYS.TXS));
+  return mutate(async () => {
+    await storage.set({ [STORAGE_KEYS.TXS_EPOCH]: (await readEpoch()) + 1 });
+    await storage.remove(STORAGE_KEYS.TXS);
+  });
 }
 
 /**

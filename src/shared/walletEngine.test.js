@@ -1138,6 +1138,30 @@ describe("walletEngine", () => {
     expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xsecond")).toEqual(["bb"]);
   });
 
+  it("keeps no reservation of a Phoenix send that a lock and a new unlock overtook", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const store = await import("./shieldedStore.js");
+    await store.clearNotes(NETWORK_KEY, WALLET_ID, 0);
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([[new Uint8Array([0xaa]), new Uint8Array([0x01])]]));
+
+    const started = Promise.withResolvers();
+    const executed = Promise.withResolvers();
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async () => {
+      started.resolve();
+      await executed.promise;
+      return { hash: "0xlate", nullifiers: [new Uint8Array([0xaa])] };
+    });
+    const send = engine.sendTransaction({ kind: "transfer", privacy: "shielded", to: "addr0", amount: "1" });
+    await started.promise;
+    // Reset meanwhile: locked, then unlocked again (here with the same accounts).
+    engine.lock();
+    await engine.unlockWithMnemonic(MNEMONIC);
+    executed.resolve();
+    await send.catch(() => {});
+    expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xlate")).toEqual([]);
+  });
+
   it("persists returned nullifiers for shielded contract calls", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
@@ -1422,6 +1446,26 @@ describe("walletEngine", () => {
       await vi.waitFor(async () => expect(await activity.getNoteHeightPool("mainnet")).toMatchObject({ heights: [184423, 226951, 234329, 234369], notes: 6 }));
     });
 
+    // The tree since the scan, grown to Testnet's leaves 492 to 495 (the
+    // unshield's outputs and the shield's note): leaves 6 to 491 made up, all
+    // at one height between.
+    const GROWN = 300_000;
+    async function growTree(leavesFromPos) {
+      const made = [];
+      for (let pos = 6; pos < 492; pos++) {
+        const leaf = FIRST[5].slice();
+        const view = new DataView(leaf.buffer);
+        view.setBigUint64(648, BigInt(pos), true);
+        view.setBigUint64(728, BigInt(GROWN), true);
+        made.push(leaf);
+      }
+      const grown = [...made, ...leaves(phoenix.leaves492)];
+      const network = await engine.ensureNetwork();
+      network.contracts.transferContract.call.num_notes = async () => 496n;
+      leavesFromPos.mockImplementation(async () => new Response(Uint8Array.from(grown.flatMap((l) => [...l]))));
+    }
+    const position = (bytes) => new DataView(bytes.buffer, bytes.byteOffset).getBigUint64(0, true);
+
     // The first profile's notes as its sync keeps them: two the unshield
     // spent, its two outputs, and the shield's note, with the values its
     // keys give them, by position.
@@ -1461,6 +1505,7 @@ describe("walletEngine", () => {
     it("asks for the profile's notes' blocks among the tree's other heights, once, and nothing for a profile without notes", async () => {
       const { leavesFromPos } = await scanTree();
       await profileNotes();
+      await growTree(leavesFromPos);
       const queries = archive();
 
       const first = await engine.getShieldedHistory();
@@ -1469,12 +1514,16 @@ describe("walletEngine", () => {
         [3861643, "shield", "in", "2000000000", undefined],
         [3602438, "unshield", "out", String(10_500_000_000n - 1_012_000_000n - 12_429_102n), "12429102"],
       ]);
-      // The profile's two heights went out among the tree's four others, all in one request.
+      // The profile's heights went out among the tree's others, all in one request.
       expect(queries).toHaveLength(1);
       const asked = [...queries[0].matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h)).sort((a, b) => a - b);
-      expect(asked).toEqual([184423, 226951, 234329, 234369, 3602438, 3861643]);
-      // The scan's heights served: the tree wasn't read again.
-      expect(leavesFromPos).toHaveBeenCalledTimes(1);
+      // Leaf 492 (3577762) and the made-up ones are among them: the tree as it grew.
+      expect(asked).toEqual([184423, 226951, 234329, 234369, GROWN, 3577762, 3602438, 3861643]);
+      // The scan's heights served, and only the leaves added since it were read.
+      expect(leavesFromPos).toHaveBeenCalledTimes(2);
+      expect(position(leavesFromPos.mock.calls[1][0])).toBe(6n);
+      const activity = await import("./activityStore.js");
+      expect(await activity.getNoteHeightPool("mainnet")).toMatchObject({ notes: 496 });
 
       // Kept: asking again asks the node nothing.
       await expect(engine.getShieldedHistory()).resolves.toEqual(first);
@@ -1490,8 +1539,9 @@ describe("walletEngine", () => {
       const activity = await import("./activityStore.js");
       // Nothing kept by an earlier test.
       await activity.clearActivityStore();
-      await scanTree();
+      const { leavesFromPos } = await scanTree();
       await profileNotes();
+      await growTree(leavesFromPos);
       const asked = Promise.withResolvers();
       const held = Promise.withResolvers();
       archive(async () => {
@@ -1510,6 +1560,19 @@ describe("walletEngine", () => {
 
       await expect(build).rejects.toThrow();
       expect(await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`)).toBeNull();
+    });
+
+    it("asks nothing for a note at a height the tree it read doesn't have", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      // The scan's six leaves, and the tree said to have no more: the
+      // unshield's and the shield's heights would be the only ones not
+      // drawn from it.
+      await scanTree();
+      await profileNotes();
+      const queries = archive();
+      await expect(engine.getShieldedHistory()).resolves.toMatchObject({ profileIndex: 0, entries: [], pending: true });
+      expect(queries).toHaveLength(0);
     });
 
     it("keeps no note heights a scan read before a reset", async () => {

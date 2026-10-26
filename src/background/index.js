@@ -45,7 +45,14 @@ import {
 } from "./txNotify.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { listAddressBook } from "../shared/addressBook.js";
-import { getTxMeta, patchTxMeta, putTxMeta, listTxs, typedRecipientName } from "../shared/txStore.js";
+import {
+  getTxEpoch,
+  getTxMeta,
+  patchTxMeta as patchStored,
+  putTxMeta,
+  listTxs,
+  typedRecipientName,
+} from "../shared/txStore.js";
 import { beginReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { handleUiCommand } from "../wallet/uiCommands.js";
 import {
@@ -264,8 +271,19 @@ async function emitUiLockState(isUnlocked, reason = "") {
   }
 }
 
-async function reconcileTxPresence(hash, { preserveRemoved = false } = {}) {
+// The store's reset count an engine event carries: its send's (see engine/runtime.js).
+const eventEpoch = (message) => (Number.isInteger(message?.epoch) ? message.epoch : undefined);
+
+/**
+ * @param {string} hash
+ * @param {{ preserveRemoved?: boolean, epoch?: number }} [opts] - `epoch`: the
+ *   store's reset count when the work began; after a reset since, nothing is kept
+ */
+async function reconcileTxPresence(hash, { preserveRemoved = false, epoch } = {}) {
   const meta = await getTxMeta(hash);
+  // Nothing kept to reconcile: cleared by a reset, or never this wallet's.
+  if (!meta) return { status: "unknown", origin: "Wallet", nodeUrl: "", error: "" };
+  const patchTxMeta = (h, patch) => patchStored(h, patch, { epoch });
   const settings = await getSettings();
   const nodeUrl = meta?.nodeUrl ?? settings?.nodeUrl ?? "";
   const origin = meta?.origin ?? "Wallet";
@@ -585,6 +603,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       // Offscreen notifies us when a tx lifecycle event is observed (best-effort).
       if (message?.type === "DUSK_TX_EXECUTED") {
         const hash = String(message.hash ?? "");
+        const epoch = eventEpoch(message);
         const observedOk = message.ok !== false;
         const observedError = message.error ? String(message.error) : "";
         const observedStatus = observedOk ? "executed" : "failed";
@@ -599,15 +618,19 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         try {
           const meta = await getTxMeta(hash);
           const now = Date.now();
-          await patchTxMeta(hash, {
-            status: observedStatus,
-            executedAt: now,
-            lastCheckedAt: now,
-            error: observedOk ? undefined : observedError || undefined,
-            reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
-            reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
-          });
-          reconciled = await reconcileTxPresence(hash);
+          await patchStored(
+            hash,
+            {
+              status: observedStatus,
+              executedAt: now,
+              lastCheckedAt: now,
+              error: observedOk ? undefined : observedError || undefined,
+              reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
+              reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
+            },
+            { epoch }
+          );
+          reconciled = await reconcileTxPresence(hash, { epoch });
         } catch {
           // Execution notifications remain best-effort when storage is unavailable.
         }
@@ -630,7 +653,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       if (message?.type === "DUSK_TX_REMOVED") {
         const hash = String(message.hash ?? "");
-        const reconciled = await reconcileTxPresence(hash, { preserveRemoved: true });
+        const reconciled = await reconcileTxPresence(hash, { preserveRemoved: true, epoch: eventEpoch(message) });
         emitUiTxStatus({
           hash,
           status: reconciled.status || "removed",
@@ -643,23 +666,28 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       if (message?.type === "DUSK_TX_UNKNOWN") {
         const hash = String(message.hash ?? "");
+        const epoch = eventEpoch(message);
         const reason = message.reason ? String(message.reason) : "watcher_timeout";
         const meta = await getTxMeta(hash);
         const now = Date.now();
 
         const preserveRemoved =
           meta?.status === "removed" || meta?.recoveryReason === "removed_unconfirmed";
-        await patchTxMeta(hash, {
-          status: meta?.status === "removed" ? "removed" : "unknown",
-          lastCheckedAt: now,
-          reservationStatus:
-            meta?.status === "removed" || !isShieldedTxMeta(meta)
-              ? meta?.reservationStatus
-              : "pending",
-          recoveryReason: preserveRemoved ? meta?.recoveryReason : reason,
-        });
+        await patchStored(
+          hash,
+          {
+            status: meta?.status === "removed" ? "removed" : "unknown",
+            lastCheckedAt: now,
+            reservationStatus:
+              meta?.status === "removed" || !isShieldedTxMeta(meta)
+                ? meta?.reservationStatus
+                : "pending",
+            recoveryReason: preserveRemoved ? meta?.recoveryReason : reason,
+          },
+          { epoch }
+        );
 
-        const reconciled = await reconcileTxPresence(hash, { preserveRemoved });
+        const reconciled = await reconcileTxPresence(hash, { preserveRemoved, epoch });
         emitUiTxStatus({
           hash,
           status: reconciled.status || "unknown",
@@ -676,10 +704,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "hash is required");
         }
 
+        const epoch = await getTxEpoch();
         const meta = await getTxMeta(hash);
         const reconciled = await reconcileTxPresence(hash, {
           preserveRemoved:
             meta?.status === "removed" || meta?.recoveryReason === "removed_unconfirmed",
+          epoch,
         });
         emitUiTxStatus({
           hash,
@@ -1230,6 +1260,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         if (!status.isUnlocked) {
           throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
         }
+        // What this send and its watcher keep is dropped after a reset meanwhile.
+        const txEpoch = await getTxEpoch();
         await ensureEngineConfigured();
         // Fetch live gas price from node (cached for 30s) to use as default.
         let dynamicPrice;
@@ -1241,7 +1273,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
         // Apply standard gas defaults for wallet initiated transactions.
         const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
-        const result = await engineCall("dusk_sendTransaction", baseParams);
+        const result = await engineCall("dusk_sendTransaction", { ...baseParams, txEpoch });
 
         // Persist metadata (see rpc.js comments).
         const hash = result?.hash ?? "";
@@ -1298,7 +1330,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
               reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
               submittedAt: Date.now(),
               status: "submitted",
-            });
+            }, { epoch: txEpoch });
           }
 
           await notifyTxSubmitted({ hash, origin: "Wallet", nodeUrl });

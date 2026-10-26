@@ -12,7 +12,7 @@ import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { getTxMeta, listTxs, patchTxMeta, putTxMeta, typedRecipientName } from "../shared/txStore.js";
+import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta, typedRecipientName } from "../shared/txStore.js";
 import { beginReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { bytesToHex } from "../shared/bytes.js";
 import {
@@ -367,6 +367,9 @@ export async function localSend(message) {
       if (!status.isUnlocked) {
         throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
       }
+      // What this send and its watcher keep is dropped after a reset meanwhile.
+      const txEpoch = await getTxEpoch();
+      const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });
 
       await ensureEngineConfigured();
       // Fetch live gas price from node (cached for 30s) to use as default.
@@ -393,7 +396,12 @@ export async function localSend(message) {
             nodeUrl,
             kind,
             privacy: baseParams?.privacy ? String(baseParams.privacy) : undefined,
-            profileIndex: Number(status.selectedAccountIndex ?? 0) || 0,
+            // The profile that paid, as the extension keeps it: a stake's own
+            // profile may not be the one selected.
+            profileIndex:
+              baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
+                ? Number(baseParams.profileIndex) || 0
+                : Number(status.selectedAccountIndex ?? 0) || 0,
             ownerProfileIndex:
               baseParams?.ownerProfileIndex !== undefined && baseParams?.ownerProfileIndex !== null
                 ? Number(baseParams.ownerProfileIndex) || 0
@@ -428,7 +436,7 @@ export async function localSend(message) {
             reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
             submittedAt: Date.now(),
             status: "submitted",
-          });
+          }, { epoch: txEpoch });
 
           // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
           (async () => {
@@ -451,7 +459,7 @@ export async function localSend(message) {
 
                   if (presence.state === "executed_success" || presence.state === "executed_failed") {
                     const ok = presence.state === "executed_success";
-                    await patchTxMeta(hash, {
+                    await patch(hash, {
                       status: ok ? "executed" : "failed",
                       error: ok ? undefined : presence.error || undefined,
                       executedAt: now,
@@ -460,20 +468,20 @@ export async function localSend(message) {
                       reservationUpdatedAt: isShielded ? now : meta?.reservationUpdatedAt,
                     });
                   } else if (presence.state === "not_found") {
-                    await patchTxMeta(hash, {
+                    await patch(hash, {
                       status: "unknown",
                       lastCheckedAt: now,
                       recoveryReason: "removed_unconfirmed",
                       reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
                     });
                   } else if (presence.state === "mempool") {
-                    await patchTxMeta(hash, {
+                    await patch(hash, {
                       status: "mempool",
                       lastCheckedAt: now,
                       reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
                     });
                   } else {
-                    await patchTxMeta(hash, {
+                    await patch(hash, {
                       status: "unknown",
                       lastCheckedAt: now,
                       recoveryReason: "removed_unconfirmed",
@@ -486,7 +494,7 @@ export async function localSend(message) {
               const error = ok ? "" : executionEventError(executedEvent);
 
               const now = Date.now();
-              await patchTxMeta(hash, {
+              await patch(hash, {
                 status: ok ? "executed" : "failed",
                 error: ok ? undefined : (error || undefined),
                 executedAt: now,
@@ -499,7 +507,7 @@ export async function localSend(message) {
               const presence = await classifyTxPresence(nodeUrl, hash);
               if (presence.state === "executed_success" || presence.state === "executed_failed") {
                 const finalizedOk = ok && presence.state === "executed_success";
-                await patchTxMeta(hash, {
+                await patch(hash, {
                   ...finalizedTxMetadata(presence.tx),
                   status: finalizedOk ? "executed" : "failed",
                   error: finalizedOk ? undefined : error || presence.error || undefined,
@@ -515,7 +523,7 @@ export async function localSend(message) {
                 const now = Date.now();
                 if (presence.state === "executed_success" || presence.state === "executed_failed") {
                   const ok = presence.state === "executed_success";
-                  await patchTxMeta(hash, {
+                  await patch(hash, {
                     status: ok ? "executed" : "failed",
                     error: ok ? undefined : presence.error || undefined,
                     executedAt: now,
@@ -524,7 +532,7 @@ export async function localSend(message) {
                     reservationUpdatedAt: pendingNullifiers.length ? now : meta?.reservationUpdatedAt,
                   });
                 } else if (presence.state === "not_found") {
-                  await patchTxMeta(hash, {
+                  await patch(hash, {
                     status: "removed",
                     removedAt: now,
                     lastCheckedAt: now,
@@ -533,10 +541,10 @@ export async function localSend(message) {
                     reservationUpdatedAt: pendingNullifiers.length ? now : meta?.reservationUpdatedAt,
                   });
                 } else {
-                  await patchTxMeta(hash, { lastCheckedAt: now });
+                  await patch(hash, { lastCheckedAt: now });
                 }
               } else if (!hasExecution) {
-                await patchTxMeta(hash, {
+                await patch(hash, {
                   status: "unknown",
                   lastCheckedAt: Date.now(),
                   recoveryReason: timedOut ? "watcher_timeout" : "watcher_unavailable",

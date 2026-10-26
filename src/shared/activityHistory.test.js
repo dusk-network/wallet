@@ -275,6 +275,28 @@ describe("a wallet reset during a sync", () => {
     expect(await kept(A)).toEqual([]);
     expect(await store.getActivityMeta(store.activityOwnerKey("testnet", A))).toBeNull();
   });
+
+  it("keeps nothing when the node's chain changed too", async () => {
+    const node = fakeArchive();
+    await sync(A);
+    // The next run's first request waits; the wallet is reset meanwhile, and
+    // the node answers for another chain.
+    const held = Promise.withResolvers();
+    const reached = Promise.withResolvers();
+    node.before = async () => {
+      reached.resolve();
+      await held.promise;
+    };
+    const run = sync(A);
+    await reached.promise;
+    await store.clearActivityStore();
+    node.before = null;
+    node.genesis = "ff".repeat(32);
+    held.resolve();
+    await expect(run).rejects.toBeInstanceOf(store.StaleActivityError);
+    expect(await kept(A)).toEqual([]);
+    expect(await store.getActivityMeta(store.activityOwnerKey("testnet", A))).toBeNull();
+  });
 });
 
 describe("a block with more than a page of the account's entries", () => {
