@@ -3700,6 +3700,10 @@ input.amount-field__input:focus {
   text-align: center;
 }
 
+.stake-estimate__main {
+  color: var(--text);
+}
+
 /* Facts as rows: a small icon, a line, a muted line under it */
 .group.info .list-row {
   grid-template-columns: 30px minmax(0, 1fr) auto;

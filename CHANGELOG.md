@@ -15,6 +15,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Named Activity's counterparties by their verified `.dusk` names.
 - Added day groups and All, Sent, Received and Staking filters to Activity's full list.
 - Labelled DuskEVM bridge transfers in Activity.
+- Suggested a close `.dusk` name from contacts and past transfers when a typed one isn't registered.
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
@@ -31,7 +32,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Gave the popup a calmer look: lists on one surface, pill buttons, round home actions and plain section titles, in each system's own fonts.
 - Reworked Staking into an overview with native and liquid staking as two equal choices, an amount screen that checks the 1,000 DUSK minimum as you type, and the owner and stake account under Advanced.
-- Named Sozu as a third party wherever liquid staking shows, and said how much stDUSK a stake gets and what each is worth.
+- Named Sozu as a third party wherever liquid staking shows, and said how much stDUSK a stake gets and what it's worth now.
 - Showed toasts at the bottom of the popup, outside the page that scrolls, long enough to reach their action, and announced to screen readers.
 - Showed errors under their field instead of only in a toast.
 - Hid amounts in toasts and on the Sent screen while balances are hidden.

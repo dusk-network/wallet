@@ -318,7 +318,7 @@ describe("hidden balances", () => {
       ["•••• DUSK", "hidden DUSK"],
       ["•••• DUSK", "hidden DUSK"],
     ]);
-    expect(visibleText(body.querySelector(".stake-sum .stake-cap"))).toBe("Locked: •••• DUSK. It stays yours; unstaking returns it.");
+    expect(visibleText(body.querySelector(".stake-sum .stake-cap"))).toBe("Locked: •••• DUSK. It's still yours, and unstaking returns it.");
     expect(visibleText(body.querySelector(".stake-avail"))).toBe("•••• DUSK available to stake, from your public balance");
     // Advanced keeps what isn't a balance.
     expect(body.querySelectorAll("details.advanced .kv").map(visibleText)).toContain("Active fromActive now");
@@ -351,9 +351,9 @@ describe("hidden balances", () => {
     ]);
     button("Max").click();
     expect(st.depositAmountDusk).toBe("1482.4383");
-    // The rate isn't a balance; what the typed amount gets, worked out from it, shows.
-    expect(visibleText(body.querySelector(".stake-estimate"))).toBe(
-      "You get about 1,411.84 stDUSK. Each stDUSK is worth 1.05 DUSK and grows as rewards come in."
+    // What the typed amount gets isn't a balance: it shows.
+    expect(visibleText(body.querySelector(".stake-estimate .stake-estimate__main"))).toBe(
+      "You get about 1,411.84 stDUSK, worth 1,482.4383 DUSK now."
     );
   });
 });

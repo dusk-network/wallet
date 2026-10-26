@@ -27,6 +27,7 @@ import {
 } from "../../components/RecipientBadge.js";
 
 import { listAddressBook } from "../../../shared/addressBook.js";
+import { closeDuskName } from "../../lib/nameSuggest.js";
 import {
   duskNameErrorText,
   duskNameRecipient,
@@ -432,6 +433,17 @@ export function sendFormView(ov, { state, actions } = {}) {
   // the address it sends to, never the name.
   let shownName = null;
 
+  // The .dusk names this wallet knows: contacts saved under one, the names
+  // typed for past sends, and past transfers' verified names.
+  const knownDuskNames = () => {
+    const names = [
+      ...(state.addressBook?.items ?? []).map((c) => c?.name),
+      ...(Array.isArray(ov?.txs) ? ov.txs : []).map((tx) => tx?.toName),
+      ...(state.activity?.names instanceof Map ? state.activity.names.values() : []),
+    ];
+    return names.filter((n) => typeof n === "string" && isDuskName(n));
+  };
+
   // Points the form at the address `result` sends to: the balance line and
   // Review follow it. True when Review can go ahead.
   const showNameAddress = (result) => {
@@ -456,8 +468,22 @@ export function sendFormView(ov, { state, actions } = {}) {
       hideRecipientBadge(toTypePill);
       showSelfNote("");
       const failed = result.ok ? { name: result.name, reason: "no_account" } : result;
+      // A name that isn't registered may be a typo of one the wallet knows.
+      const suggestion = failed.reason === "not_registered" ? closeDuskName(v, knownDuskNames()) : null;
       showNameBox([
         h("div", { class: "err", text: duskNameErrorText(failed) }),
+        suggestion
+          ? h("button", {
+              class: "text-btn text-btn--inline name-suggestion",
+              type: "button",
+              text: `Did you mean ${suggestion}?`,
+              onclick: () => {
+                to.value = suggestion;
+                onRecipientInput();
+                to.focus?.();
+              },
+            })
+          : null,
         failed.reason === "lookup_failed"
           ? h("div", { class: "btnrow" }, [
               h("button", {
@@ -602,12 +628,13 @@ export function sendFormView(ov, { state, actions } = {}) {
     };
   };
 
-  to.addEventListener("input", () => {
+  function onRecipientInput() {
     chainNote.textContent = "";
     chainNote.hidden = true;
     updateToType();
     syncDraft();
-  });
+  }
+  to.addEventListener("input", onRecipientInput);
   // Amount input is managed by the shared amount slider component.
   memo.addEventListener("input", syncDraft);
   to.addEventListener("paste", (e) => {

@@ -217,9 +217,7 @@ test.describe("Sozu liquid staking", () => {
     await expect(page.getByLabel("Stake amount")).toHaveValue("4999.5");
 
     await page.getByLabel("Stake amount").fill("5");
-    await expect(page.locator(".stake-estimate")).toHaveText(
-      /^You get about [\d.,]+ stDUSK\. Each stDUSK is worth 1\.51 DUSK and grows as rewards come in\.$/
-    );
+    await expect(page.locator(".stake-estimate__main")).toHaveText(/^You get about [\d.,]+ stDUSK, worth 5 DUSK now\.$/);
     await page.getByRole("button", { name: "Review stake" }).click();
     let st = await state(page);
     expect(st.sozuDraft).toMatchObject({
