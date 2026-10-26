@@ -126,6 +126,20 @@ test("a DuskEVM deposit shows what it does on top, and its bytes' hash under Det
   expect(callY).toBeLessThan(rawY);
 });
 
+test("a gas limit under the transaction's minimum keeps the window open, saying why", async ({ page }) => {
+  await open(page, pendingFor("send_tx", pay));
+  await page.getByText("Custom fee", { exact: true }).click();
+  await page.getByLabel("Gas limit", { exact: true }).fill("1500000");
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(page.locator(".ap-actions__error")).toHaveText("The gas limit can't be under 2,000,000 for this transaction.");
+  expect(await page.evaluate(() => window.decisions)).toEqual([]);
+  await page.getByLabel("Gas limit", { exact: true }).fill("2000000");
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.decisions.map((d) => [d.decision, d.approvedParams?.gas?.limit]))).toEqual([
+    ["approve", "2000000"],
+  ]);
+});
+
 test("a locked wallet shows what the site asks, with Reject beside Unlock", async ({ page }) => {
   await open(page, pendingFor("send_tx", pay, { isUnlocked: false, accounts: [], duskNames: {} }));
   await expect(page.getByRole("heading", { name: "Pay" })).toBeVisible();
