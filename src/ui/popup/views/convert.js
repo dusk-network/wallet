@@ -1,7 +1,7 @@
 import {
   UI_DISPLAY_DECIMALS,
+  formatDusk,
   formatFee,
-  formatLuxShort,
   formatLuxToDusk,
   parseDuskToLux,
   safeBigInt,
@@ -23,7 +23,7 @@ import { sendFromReview } from "./sent.js";
 
 function fmtAvail(lux) {
   try {
-    return formatLuxShort(lux, UI_DISPLAY_DECIMALS);
+    return formatDusk(lux, UI_DISPLAY_DECIMALS);
   } catch {
     return "—";
   }
@@ -237,7 +237,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
     }
     confirmError.hidden = true;
     confirmBtn.disabled = true;
-    if (state.draft) state.draft.gas = gas;
+    d.gas = gas;
 
     const capGas = gas ?? defaultGas;
     await sendFromReview({
@@ -261,7 +261,8 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       backRoute: "convert_confirm",
       doneRoute: "home",
       onSent: () => {
-        state.draft = null;
+        // Done with, unless a newer draft took its place meanwhile.
+        if (state.draft === d) state.draft = null;
       },
     });
     confirmBtn.disabled = false;

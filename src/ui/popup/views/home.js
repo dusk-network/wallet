@@ -226,6 +226,8 @@ export function homeView(ov, { state, actions } = {}) {
     }),
     actionBtn("Stake", "stake", () => {
       state.route = "stake";
+      // Staking opens on its overview.
+      if (state.staking) state.staking.screen = "overview";
       actions?.render?.().catch(() => {});
     }),
   ]);

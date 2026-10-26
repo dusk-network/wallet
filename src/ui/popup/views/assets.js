@@ -936,7 +936,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
     }
     confirmError.hidden = true;
     confirmBtn.disabled = true;
-    state.assetTxDraft.gas = gas;
+    d.gas = gas;
 
     const capGas = gas ?? defaultGas;
     const counterparty = String(op === "approve" ? d?.asset?.spender ?? "" : d?.asset?.to ?? "");
@@ -965,7 +965,8 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
           const cid = String(token?.contractId ?? "");
           if (state.assets?.balancesAt && cid) state.assets.balancesAt[cid] = 0;
         } catch {}
-        state.assetTxDraft = null;
+        // Done with, unless a newer draft took its place meanwhile.
+        if (state.assetTxDraft === d) state.assetTxDraft = null;
       },
     });
     confirmBtn.disabled = false;

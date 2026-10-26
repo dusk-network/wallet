@@ -1,7 +1,7 @@
 import {
   UI_DISPLAY_DECIMALS,
+  formatDusk,
   formatFee,
-  formatLuxShort,
   formatLuxToDusk,
   parseDuskToLux,
   safeBigInt,
@@ -188,13 +188,13 @@ export function sendFormView(ov, { state, actions } = {}) {
       const feeLux = feeLuxForRecipientType("address");
       amountMetaMain.replaceChildren(
         "Spendable (shielded): ",
-        balance(hidden, formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)),
+        balance(hidden, formatDusk(maxLux)),
         " DUSK"
       );
 
       const parts = [];
       if (shSpendLux != null && shValueLux > shSpendLux) {
-        parts.push(["Total shielded: ", balance(hidden, formatLuxShort(shValueLux, UI_DISPLAY_DECIMALS)), " DUSK"]);
+        parts.push(["Total shielded: ", balance(hidden, formatDusk(shValueLux)), " DUSK"]);
       }
       if (feeLux > 0n) {
         parts.push([`Fee cap: ${formatFee(feeLux)} DUSK`]);
@@ -204,7 +204,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       const feeLux = feeLuxForRecipientType("account");
       amountMetaMain.replaceChildren(
         "Available (public): ",
-        balance(hidden, formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)),
+        balance(hidden, formatDusk(maxLux)),
         " DUSK"
       );
       amountMetaSub.textContent = feeLux > 0n ? `Fee cap: ${formatFee(feeLux)} DUSK` : "";
@@ -216,13 +216,17 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   const currentChain = normalizeChainId(chainIdFromNodeUrl(ov?.nodeUrl ?? ""));
 
+  // A request for another network says so under the recipient, and stays
+  // until the recipient changes: Review doesn't clear it.
+  const chainNote = h("div", { class: "field-error", role: "alert", hidden: true });
   const warnChainMismatch = (reqChain) => {
     const want = normalizeChainId(reqChain);
-    if (!want || !currentChain || want === currentChain) return;
-    const wantLabel = chainLabel(want) || `Chain ${want}`;
-    const curLabel = chainLabel(currentChain) || `Chain ${currentChain}`;
-    // Said in the form, where it stays until Review, not in a toast that goes.
-    setErr(`This request is for ${wantLabel}. You are on ${curLabel}.`);
+    const mismatch = Boolean(want && currentChain && want !== currentChain);
+    // Labelled from the full chain ids ("dusk:1"): the bare references don't name a network.
+    const wantLabel = chainLabel(reqChain) || `Chain ${want}`;
+    const curLabel = chainLabel(chainIdFromNodeUrl(ov?.nodeUrl ?? "")) || `Chain ${currentChain}`;
+    chainNote.textContent = mismatch ? `This request is for ${wantLabel}. You are on ${curLabel}.` : "";
+    chainNote.hidden = !mismatch;
   };
 
   const applyRequest = (req, { source = "request" } = {}) => {
@@ -599,6 +603,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   to.addEventListener("input", () => {
+    chainNote.textContent = "";
+    chainNote.hidden = true;
     updateToType();
     syncDraft();
   });
@@ -774,6 +780,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       fieldLabel(to, "To"),
       toRow,
       toTypePill,
+      chainNote,
       nameBox,
       selfNote,
       fieldLabel(amount, "Amount"),
@@ -964,8 +971,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     confirmError.hidden = true;
     confirmBtn.disabled = true;
 
-    // Persist edits so Back/forward keeps them.
-    if (state.draft) state.draft.gas = gas;
+    // Persist edits so Back/forward keeps them, on this review's own draft.
+    d.gas = gas;
 
     const capGas = gas ?? defaultGas;
     const contactName = findContactName(state.addressBook?.items);
@@ -996,7 +1003,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       backRoute: "confirm",
       doneRoute: "home",
       onSent: () => {
-        state.draft = null;
+        // Done with, unless a newer draft took its place meanwhile.
+        if (state.draft === d) state.draft = null;
       },
     });
     confirmBtn.disabled = false;

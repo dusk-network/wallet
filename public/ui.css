@@ -1073,9 +1073,12 @@ button:disabled {
   background: #FFFFFF;
 }
 
-/* A button that can't be pressed looks it: flat and dim, not a pale pill. */
+/* A button that can't be pressed looks it: flat and dim, not a pale pill,
+   and the pointer doesn't light it up. */
 .btn-primary:disabled,
-.btn-outline:disabled {
+.btn-outline:disabled,
+.btn-primary:disabled:hover,
+.btn-outline:disabled:hover {
   opacity: 1;
   background: color-mix(in oklab, var(--surface-2) 70%, transparent);
   color: var(--text-subtle);
@@ -1364,8 +1367,6 @@ button:disabled {
   border: 0;
   border-radius: var(--radius-lg);
   background: var(--surface-1);
-    linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0)),
-    color-mix(in oklab, var(--secondary) 78%, var(--card));
 }
 
 .site-bar-main {
@@ -2512,7 +2513,7 @@ button.balance-refresh:hover {
   place-items: center;
   border: 0;
   background: transparent;
-  color: var(--primary);
+  color: var(--text);
   line-height: 1;
   transition: transform 180ms ease, color 180ms ease;
 }
@@ -3897,6 +3898,14 @@ body.page--popup .brand-mark {
   text-align: right;
 }
 
+/* Review's fee and total are amounts: the text font, not the code font */
+dusk-gas-editor .hrow code {
+  font-family: inherit;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  word-break: normal;
+}
+
 .hrow-right {
   display: inline-flex;
   align-items: center;
@@ -3904,335 +3913,397 @@ body.page--popup .brand-mark {
 }
 
 /* ---- Staking -------------------------------------------------------- */
-.staking-shell {
-  gap: 16px;
-}
-
-body.page--popup .staking-shell .tabs,
-body.page--popup .staking-shell .box {
-  order: initial;
-}
-
-.staking-mode-tabs {
-  margin-bottom: 2px;
-}
-
-.staking-section-title {
-  margin-top: 2px;
-}
-
-.stake-card,
-.stake-editor,
-.sozu-panel {
+/* The overview: what is staked and earned, then the two ways to stake */
+.group.stake-sum {
   padding: 14px;
 }
 
-.stake-position-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.stake-account {
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
 }
 
-.stake-card {
-  display: flex;
-  flex-direction: column;
+.stake-sum__two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  text-align: left;
 }
 
-.stake-card.is-selected {
-  border-color: color-mix(in oklab, var(--dusk-light-gray) 22%, var(--border));
-  background: color-mix(in oklab, var(--card) 94%, var(--dusk-light-gray));
+.stake-lbl {
+  font-size: 12.5px;
+  color: var(--text-muted);
 }
 
-.stake-card--compact {
-  cursor: pointer;
-  gap: 10px;
-  background: color-mix(in oklab, var(--card) 82%, transparent);
+.stake-big {
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
-.stake-card--compact:hover {
-  border-color: color-mix(in oklab, var(--dusk-light-gray) 18%, var(--border));
-  background: color-mix(in oklab, var(--card) 90%, var(--dusk-light-gray));
+.stake-big .balance-unit {
+  margin-left: 2px;
+  font-size: 14px;
 }
 
-.stake-card--empty {
+.stake-pair {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  padding-top: 12px;
-  padding-bottom: 12px;
 }
 
-.stake-card--empty .stake-card__note {
-  margin-top: -2px;
+.stake-pair > button {
+  min-height: 38px;
+  padding: 8px 12px;
 }
 
-.stake-card__head,
-.stake-editor__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+.stake-cap {
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 
-.stake-card__head > div:first-child,
-.stake-editor__head > div:first-child {
-  min-width: 0;
+.stake-cap .balance-unit {
+  margin-left: 0;
+  font-size: inherit;
 }
 
-.stake-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 26px;
-  padding: 6px 9px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in oklab, var(--dusk-light-gray) 18%, var(--border));
-  background: color-mix(in oklab, var(--dusk-light-gray) 7%, transparent);
-  color: var(--foreground);
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
+.stake-avail {
+  margin-top: -4px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
 }
 
-.stake-badge--warn {
-  border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
-  background: color-mix(in oklab, var(--warn) 12%, transparent);
-}
-
-.stake-badge--third-party {
-  border-color: color-mix(in oklab, var(--dusk-light-gray) 26%, var(--border));
-  background: color-mix(in oklab, var(--dusk-light-gray) 11%, transparent);
-}
-
-.stake-card__note {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.stake-card__note--warn,
+/* "This is your own account": a quiet note in the send form */
 .send-self-note {
   padding: 10px 12px;
-  border-radius: var(--radius);
-  border: 1px solid color-mix(in oklab, var(--warn) 34%, var(--border));
-  background: color-mix(in oklab, var(--warn) 9%, transparent);
-  color: color-mix(in oklab, var(--dusk-snow-white) 88%, var(--warn));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--pending) 10%, var(--surface-1));
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.4;
 }
 
-.send-self-note {
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.stake-metrics {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.stake-card--compact .stake-metrics {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.stake-metrics > .hrow {
-  min-height: 58px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: color-mix(in oklab, var(--secondary) 70%, transparent);
+/* Amount entry: one large field, its error, then the balance it comes from */
+.amount-entry {
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
+  gap: 10px;
 }
 
-.stake-metrics > .hrow + .hrow {
-  border-top: 1px solid var(--line);
+.amount-field {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  min-height: 76px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1.5px transparent;
+  cursor: text;
+  transition: box-shadow 160ms ease;
 }
 
-.stake-metrics > .hrow code {
-  width: 100%;
-  text-align: left;
-  font-size: 12px;
-  color: var(--foreground);
+.amount-field:focus-within {
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--ring) 70%, transparent);
 }
 
-.sozu-stat-link {
-  position: relative;
-  width: 100%;
-  padding-right: 30px !important;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
+.amount-field.is-invalid {
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--danger) 80%, transparent);
 }
 
-.sozu-stat-link:hover,
-.sozu-stat-link:focus-visible {
-  border-color: color-mix(in oklab, var(--primary) 30%, var(--border));
-  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+input.amount-field__input {
+  field-sizing: content;
+  width: auto;
+  min-width: 1ch;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1.1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
-.sozu-stat-link::after {
-  content: "›";
-  position: absolute;
-  right: 11px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--muted-foreground);
+input.amount-field__input:hover,
+input.amount-field__input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.amount-field.is-long input.amount-field__input {
+  font-size: 30px;
+}
+
+/* Without field-sizing, the number sits right before its unit */
+@supports not (field-sizing: content) {
+  input.amount-field__input {
+    flex: 1 1 0;
+    width: 0;
+    text-align: right;
+  }
+}
+
+.amount-field__unit {
   font-size: 18px;
-  line-height: 1;
-  opacity: 0.55;
-  transition: opacity 120ms ease, transform 120ms ease;
+  color: var(--text-muted);
 }
 
-.sozu-stat-link:hover::after,
-.sozu-stat-link:focus-visible::after {
-  opacity: 0.9;
-  transform: translate(2px, -50%);
+.amount-field__error {
+  justify-content: center;
+  text-align: center;
 }
 
-.stake-gas-line {
+.amount-avail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.stake-estimate {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Facts as rows: a small icon, a line, a muted line under it */
+.group.info .list-row {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 11px 14px;
+}
+
+.group.info .list-row + .list-row::before {
+  left: 54px;
+}
+
+.group.info .row-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.group.info .row-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.group.info .row-title {
+  font-size: 13.5px;
+}
+
+.group.info .list-row > .mini-btn {
+  align-self: center;
+}
+
+button.text-btn.text-btn--inline {
+  display: inline;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: 500;
+}
+
+/* Rows that lead somewhere: Native staking, Liquid staking */
+.stake-choices .list-row {
+  padding: 12px 14px;
+}
+
+.stake-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stake-liquid-link {
+  font-size: 13px;
+  text-align: center;
+}
+
+/* Review: what it is, the amount, then key-value rows */
+.review-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px;
+}
+
+.review-kind,
+.review-line {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Advanced: choices most people leave as they are */
+details.advanced {
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+details.advanced > summary {
+  list-style: none;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 10px 0 0;
-  border-top: 1px solid var(--border);
-  color: var(--muted-foreground);
-  font-size: 12px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  color: var(--text-muted);
+  font-size: 13.5px;
 }
 
-.stake-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+details.advanced > summary::-webkit-details-marker {
+  display: none;
 }
 
-.stake-actions > button {
-  width: 100%;
-  padding-left: 8px;
-  padding-right: 8px;
+details.advanced > summary::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 160ms ease;
 }
 
-.stake-editor {
+details.advanced[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+details.advanced > summary:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--ring) 75%, transparent);
+}
+
+.advanced-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  padding: 0 14px 14px;
 }
 
-.stake-action-tabs,
+.advanced-body .stake-cap {
+  margin-top: 0;
+}
+
+.advanced-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Fields in the Advanced panel sit one step up from it */
+.advanced-body select,
+.advanced-body input {
+  background: var(--surface-2);
+}
+
+/* A group inside a group: one step lighter */
+.group.group--inset {
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+}
+
+/* A list of choices, one picked: the stake account */
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+button.choice {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  text-align: left;
+  font-weight: 400;
+}
+
+button.choice.is-picked {
+  box-shadow: inset 0 0 0 1.5px var(--text);
+}
+
+.choice-dot {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--text-muted);
+}
+
+button.choice.is-picked .choice-dot {
+  box-shadow: inset 0 0 0 1.5px var(--text);
+  background: radial-gradient(circle, var(--text) 0 3px, transparent 3.5px);
+}
+
+.choice-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.choice-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.choice-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.choice-sub .balance-unit {
+  margin-left: 0;
+  font-size: inherit;
+}
+
+/* Liquid staking: who holds the DUSK, said first */
+.liquid-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.liquid-who {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.liquid-intro p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
 .sozu-action-tabs {
   width: 100%;
-  margin-bottom: 2px;
-}
-
-.stake-review-row {
-  display: grid;
-  grid-template-columns: minmax(72px, 0.32fr) minmax(0, 1fr);
-  gap: 8px;
-}
-
-.stake-review-row > button {
-  width: 100%;
-}
-
-.sozu-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow: hidden;
-}
-
-.sozu-hero {
-  padding: 2px 0 0;
-}
-
-.sozu-brand-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.sozu-title {
-  margin: 0;
-  max-width: 100%;
-  color: var(--foreground);
-  font-size: 28px;
-  font-weight: 650;
-  line-height: 1;
-  letter-spacing: 0;
-}
-
-.sozu-subtitle {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  margin-top: 10px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-  line-height: 1.35;
-}
-
-.sozu-link {
-  color: var(--foreground);
-  font-weight: 700;
-  text-decoration: none;
-  border-bottom: 1px solid color-mix(in oklab, var(--foreground) 42%, transparent);
-}
-
-.sozu-link::after {
-  content: "↗";
-  margin-left: 4px;
-  font-size: 10px;
-  color: var(--muted-foreground);
-}
-
-.sozu-link:hover {
-  color: var(--dusk-snow-white);
-  border-bottom-color: var(--dusk-snow-white);
-}
-
-.sozu-stats {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.sozu-action-card {
-  display: flex;
-  flex-direction: column;
-  gap: 13px;
-  padding: 14px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: color-mix(in oklab, var(--secondary) 58%, transparent);
-}
-
-.sozu-action-card > .btn-primary,
-.sozu-action-card > button {
-  width: 100%;
-}
-
-.sozu-action-card label {
-  margin-top: 3px;
-}
-
-.sozu-action-card input {
-  margin-bottom: 6px;
-}
-
-.sozu-amount-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.sozu-amount-row input {
-  margin-bottom: 0;
-}
-
-.sozu-amount-row .btn-outline {
-  min-width: 64px;
 }
 
 /* MetaMask-like text action ("Edit") */
@@ -4977,6 +5048,18 @@ p.sent-note {
   background: var(--danger);
   box-shadow: none;
   color: #1A0E0E;
+}
+
+/* Not confirmed: amber, it may still be on its way */
+.step.is-unknown .step-mark {
+  box-shadow: none;
+  color: var(--pending);
+}
+
+.step.is-unknown .step-mark svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2;
 }
 
 .step-body {

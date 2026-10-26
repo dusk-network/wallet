@@ -144,14 +144,6 @@ async function installStakeHarness(page, scenario) {
   );
 }
 
-async function setEditorAction(page, action) {
-  await page.evaluate((nextAction) => {
-    window.__stakeState.staking.actionKind = nextAction;
-    window.__stakeState.staking.activePositionKey = "stake:1";
-    window.__renderStake();
-  }, action);
-}
-
 async function clickEnabled(page, label) {
   await page.evaluate((buttonLabel) => {
     const button = [...document.querySelectorAll("button")].find(
@@ -171,29 +163,30 @@ async function stakeState(page) {
   }));
 }
 
-test.describe("owner-aware staking position view", () => {
+test.describe("owner-aware staking", () => {
   test("keeps unsupported owner-separated positions visible but not submittable", async ({ page }) => {
     await installStakeHarness(page, ownerStatusFor("local-no-gas"));
 
-    await expect(page.getByText("Profile 1 owns this Profile 2 stake.")).toBeVisible();
-    await expect(page.getByText("Profile 2 public · 0 DUSK")).toBeVisible();
+    // The overview shows Profile 2's stake; Unstake and Claim say why they can't go ahead.
+    await expect(page.locator(".stake-account")).toContainText("Profile 2");
     await expect(page.getByText(/Add gas funds to Profile 2/)).toHaveCount(1);
-    await expect(page.locator('button:has-text("Review")[disabled]')).not.toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Unstake", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Claim rewards", exact: true })).toBeDisabled();
+    await page.locator("details.advanced > summary").click();
+    await expect(page.getByText("Profile 1 owns this Profile 2 stake.")).toBeVisible();
 
     await installStakeHarness(page, ownerStatusFor("missing"));
     await expect(page.getByText("Owner key not found in this wallet.").first()).toBeVisible();
-    await expect(page.locator('button:has-text("Review")[disabled]')).not.toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Unstake", exact: true })).toBeDisabled();
 
     await installStakeHarness(page, ownerStatusFor("contract"));
     await expect(page.getByText("Contract-owned stake. View only.").first()).toBeVisible();
-    await expect(page.locator('button:has-text("Review")[disabled]')).not.toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Unstake", exact: true })).toBeDisabled();
   });
 
   test("drafts full claim/full unstake and custom stake actions with explicit profiles", async ({ page }) => {
     await installStakeHarness(page, ownerStatusFor("local-funded"));
-    await setEditorAction(page, "claim");
-    await expect(page.getByLabel("Reward amount")).toHaveCount(0);
-    await clickEnabled(page, "Review claim rewards");
+    await clickEnabled(page, "Claim rewards");
 
     let state = await stakeState(page);
     expect(state.route).toBe("stake_confirm");
@@ -213,11 +206,12 @@ test.describe("owner-aware staking position view", () => {
       ownerProfileIndex: 0,
     });
     expect(state.messages.find((m) => m?.type === "DUSK_UI_SEND_TX").params).not.toHaveProperty("amount");
+    // Confirm shows the transaction's steps rather than a toast.
+    expect(state.route).toBe("sent");
+    expect(state.toasts).toEqual([]);
 
     await installStakeHarness(page, ownerStatusFor("local-funded"));
-    await setEditorAction(page, "unstake");
-    await expect(page.getByLabel("Unstake amount")).toHaveCount(0);
-    await clickEnabled(page, "Review unstake");
+    await clickEnabled(page, "Unstake");
     state = await stakeState(page);
     expect(state.draft).toMatchObject({
       kind: "unstake",
@@ -227,10 +221,12 @@ test.describe("owner-aware staking position view", () => {
       amountMode: "all",
     });
 
+    // Native staking on a position with a stake adds to it.
     await installStakeHarness(page, ownerStatusFor("local-funded"));
-    await setEditorAction(page, "topup");
-    await page.getByLabel("Add stake amount").fill("5");
-    await page.getByRole("button", { name: /Review add stake/i }).click();
+    await page.getByRole("button", { name: /Native staking/ }).click();
+    await expect(page.locator(".subnav-title")).toHaveText("Stake more");
+    await page.getByLabel("Amount to add").fill("5");
+    await page.getByRole("button", { name: "Review stake" }).click();
     state = await stakeState(page);
     expect(state.draft).toMatchObject({
       kind: "stake",
@@ -241,9 +237,9 @@ test.describe("owner-aware staking position view", () => {
     });
 
     await installStakeHarness(page, ownerStatusFor("local-funded"));
-    await setEditorAction(page, "topup");
+    await page.getByRole("button", { name: /Native staking/ }).click();
     await clickEnabled(page, "Max");
-    await page.getByRole("button", { name: /Review add stake/i }).click();
+    await page.getByRole("button", { name: "Review stake" }).click();
     state = await stakeState(page);
     expect(state.draft).toMatchObject({
       kind: "stake",
@@ -253,18 +249,25 @@ test.describe("owner-aware staking position view", () => {
     });
   });
 
-  test("supports choosing another local owner for new stake", async ({ page }) => {
+  test("says the minimum under the amount, and supports choosing another local owner for new stake", async ({ page }) => {
     await installStakeHarness(page, ownerStatusFor("create-self"));
-    await expect(page.getByText("Most people leave this as it is.")).toBeVisible();
+    await page.getByRole("button", { name: /Native staking/ }).click();
+    await page.getByLabel("Stake amount").fill("100");
+    await expect(page.locator(".amount-field__error")).toHaveText("The minimum stake is 1,000 DUSK.");
+    await expect(page.getByRole("button", { name: "Review stake" })).toBeDisabled();
+
+    await page.locator("details.advanced > summary").click();
     await page.locator("#stake-owner-profile").selectOption("1");
-    await page.getByLabel("Stake amount").fill("1000");
-    await page.getByRole("button", { name: /Review stake/i }).click();
+    await page.getByRole("button", { name: "Use 1,000" }).click();
+    await page.getByRole("button", { name: "Review stake" }).click();
 
     const state = await stakeState(page);
     expect(state.draft).toMatchObject({
       kind: "stake",
       profileIndex: 0,
       ownerProfileIndex: 1,
+      amountLux: dusk(1000),
     });
+    expect(state.toasts).toEqual([]);
   });
 });

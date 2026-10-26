@@ -48,7 +48,7 @@ describe("shield and unshield", () => {
       dom.document.body.replaceChildren(...convertFormView(ov, { state: { route: "convert", draft: { kind } }, actions: actions() }));
       return dom.document.body.querySelectorAll(".row > .box > .muted").map((line) => line.textContent);
     };
-    expect(lines(TX_KIND.SHIELD)).toEqual(["Available (public): 1482.8883 DUSK", "Fee cap: 0.0500 DUSK"]);
+    expect(lines(TX_KIND.SHIELD)).toEqual(["Available (public): 1,482.8883 DUSK", "Fee cap: 0.0500 DUSK"]);
     expect(lines(TX_KIND.UNSHIELD)).toEqual(["Spendable (shielded): 24.95 DUSK", "Fee cap: 0.0500 DUSK"]);
     expect(dom.document.body.querySelector("input.amount-input").getAttribute("placeholder")).toBe("e.g. 1.25 DUSK");
   });

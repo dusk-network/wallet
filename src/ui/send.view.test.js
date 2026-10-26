@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TX_KIND } from "../shared/constants.js";
 import { lookupDuskName } from "../shared/duskNames.js";
 import { shortAddress } from "./lib/strings.js";
-import { installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
+import { parseDuskQrPayload } from "./components/QrScanModal.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
 
 vi.mock("./components/QrScanModal.js", () => ({
@@ -684,5 +685,27 @@ describe("a slow name lookup on Review", () => {
 
     expect(state).toMatchObject(after);
     if (after.route === "send") expect(state.draft.duskName).toBeUndefined();
+  });
+});
+
+describe("a request for another network", () => {
+  it("says so under the recipient, and Review doesn't clear it", async () => {
+    // A Mainnet request link pasted while the wallet is on Testnet.
+    parseDuskQrPayload.mockReturnValueOnce({ kind: "public", to: ALICE.account, amountDusk: "1", chainId: "dusk:1" });
+    const state = newState();
+    const form = mount(state);
+    form.to.value = "dusk:mainnet-request";
+    form.to.dispatchEvent(fakeEvent("blur"));
+    await settle();
+    const note = () => dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
+    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+
+    form.review.click();
+    await settle();
+    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+
+    // A recipient typed instead drops it.
+    typeInto(form.to, BOB.account);
+    expect(note()).toBeUndefined();
   });
 });

@@ -17,6 +17,22 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 
 const FINAL = new Set(["executed", "failed", "removed"]);
 
+// Errors that mean the wallet or the node refused the transaction before it
+// ran: nothing went out, so there is no fee. Anything else (a reply that got
+// lost, a timeout, a failure after the hand-over) may have reached the network.
+const REFUSED =
+  /wallet locked|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed/i;
+
+/**
+ * Whether a send's error says it was refused before it ran (true), rather
+ * than leaving open whether it reached the network.
+ * @param {string} error
+ */
+export function sendRefused(error) {
+  const text = String(error ?? "").trim();
+  return Boolean(text) && REFUSED.test(text);
+}
+
 let sentSeq = 0;
 
 function clock(ts) {
@@ -68,6 +84,19 @@ export function sentSteps(sent, ov) {
   if (phase === "not_sent") {
     return [
       { label: "Not sent", state: "failed", sub: [reasonText(error), "No fee was charged."].filter(Boolean).join(" ") },
+      { label: "Sent to the network", state: "upcoming", sub: "" },
+      { label: "Completed", state: "upcoming", sub: "" },
+    ];
+  }
+  if (phase === "unconfirmed") {
+    return [
+      {
+        label: "Not confirmed",
+        state: "unknown",
+        sub: [reasonText(error), "It may still have reached the network: check Activity before you send it again."]
+          .filter(Boolean)
+          .join(" "),
+      },
       { label: "Sent to the network", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
@@ -128,7 +157,9 @@ export function noteTxStatus(sent, msg) {
   const hash = String(msg?.hash ?? "");
   if (!sent || !hash || sent.hash !== hash) return false;
   sent.status = String(msg?.status ?? "").toLowerCase() || sent.status;
-  if (msg?.error) sent.error = String(msg.error);
+  // Only a failure's error is a reason to show; other statuses carry the
+  // watcher's own codes.
+  if (sent.status === "failed" && msg?.error) sent.error = String(msg.error);
   if (msg?.feePaid != null) sent.feePaid = String(msg.feePaid);
   if (msg?.blockHeight != null) sent.blockHeight = String(msg.blockHeight);
   return true;
@@ -137,7 +168,7 @@ export function noteTxStatus(sent, msg) {
 /** Whether the steps have stopped: completed, failed, or never sent. */
 export function sentIsFinal(sent, ov) {
   const { phase, status } = sentStatus(sent, ov);
-  return phase === "not_sent" || (phase === "sent" && FINAL.has(status));
+  return phase === "not_sent" || phase === "unconfirmed" || (phase === "sent" && FINAL.has(status));
 }
 
 /**
@@ -180,12 +211,19 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     blockHeight: null,
     startedAt: Date.now(),
     sentAt: 0,
+    // The explorer of the network it went to, whatever the popup switches to.
+    nodeUrl: String(state.overview?.nodeUrl ?? ""),
     backRoute,
     doneRoute,
   };
   state.sent = sent;
   state.route = "sent";
-  await actions?.render?.();
+  // A redraw that fails must not keep the transaction from going out.
+  try {
+    await actions?.render?.();
+  } catch {
+    // The screen catches up on the next draw.
+  }
 
   let res;
   try {
@@ -195,13 +233,15 @@ export async function sendFromReview({ state, actions, message, summary, backRou
   }
 
   if (res?.error || !res?.ok) {
-    sent.phase = "not_sent";
-    sent.error = res?.error?.message ?? "The network didn't take it.";
+    sent.error = String(res?.error?.message ?? "");
+    sent.phase = sendRefused(sent.error) ? "not_sent" : "unconfirmed";
   } else {
     sent.phase = "sent";
     sent.status = "submitted";
     sent.hash = String(res.result?.hash ?? "");
     sent.sentAt = Date.now();
+    // Activity marks it when the popup goes back home.
+    state.highlightTx = sent.hash || null;
     try {
       onSent?.(sent.hash);
     } catch {
@@ -212,7 +252,23 @@ export async function sendFromReview({ state, actions, message, summary, backRou
   if (state.sent === sent && state.route === "sent") {
     actions?.announce?.(sentAnnouncement(sent, state.overview));
     state.needsRefresh = true;
-    await actions?.render?.({ forceRefresh: true });
+    try {
+      await actions?.render?.({ forceRefresh: true });
+    } catch {
+      // The screen catches up on the next draw.
+    }
+  } else if (sent.phase === "not_sent") {
+    // Left before the network answered: the refusal still has to be said.
+    const reason = reasonText(sent.error);
+    actions?.showToast?.({
+      text: `${sent.title || "Transaction"} failed. ${reason ? `${reason} ` : ""}No fee was charged.`,
+      tone: "bad",
+    });
+  } else if (sent.phase === "unconfirmed") {
+    actions?.showToast?.({
+      text: `${sent.title || "Transaction"} may not have gone through. Check Activity before you send it again.`,
+      tone: "bad",
+    });
   }
   return sent;
 }
@@ -220,10 +276,11 @@ export async function sendFromReview({ state, actions, message, summary, backRou
 function stepMark(stepState) {
   if (stepState === "done") return h("span", { class: "step-mark", html: iconSvg("check") });
   if (stepState === "failed") return h("span", { class: "step-mark", html: iconSvg("close") });
+  if (stepState === "unknown") return h("span", { class: "step-mark", html: iconSvg("alert") });
   return h("span", { class: "step-mark" });
 }
 
-const STATE_WORDS = { done: "Done: ", current: "Now: ", failed: "Failed: ", upcoming: "Next: " };
+const STATE_WORDS = { done: "Done: ", current: "Now: ", failed: "Failed: ", unknown: "Unclear: ", upcoming: "Next: " };
 
 /**
  * The Sent screen: what was sent, its steps, its transaction ID and fee, and
@@ -237,7 +294,7 @@ export function sentView(ov, { state, actions } = {}) {
   const steps = sentSteps(sent, ov);
   const final = sentIsFinal(sent, ov);
   const capLux = safeBigInt(sent.feeCapLux ?? 0, 0n);
-  const explorerUrl = sent.hash ? explorerTxUrl(String(ov?.nodeUrl ?? sent.nodeUrl ?? ""), sent.hash) : null;
+  const explorerUrl = sent.hash ? explorerTxUrl(String(sent.nodeUrl || ov?.nodeUrl || ""), sent.hash) : null;
 
   // The amount in DUSK, or in a token's units, hidden with Hide balances; or
   // words such as "All rewards" when the wallet doesn't know the amount.
@@ -304,6 +361,7 @@ export function sentView(ov, { state, actions } = {}) {
 
   const feeRow = (() => {
     if (phase === "not_sent" || status === "removed") return ["Network fee", "None charged"];
+    if (phase === "unconfirmed") return capLux > 0n ? ["Network fee", `Up to ${formatFee(capLux)} DUSK, if it went out`] : null;
     if (feePaid != null) return [status === "failed" ? "Fee charged" : "Network fee", `${formatFee(feePaid)} DUSK`];
     if (capLux > 0n) return ["Network fee", `Up to ${formatFee(capLux)} DUSK`];
     return null;
@@ -320,8 +378,10 @@ export function sentView(ov, { state, actions } = {}) {
     feeRow ? kv(feeRow[0], feeRow[1]) : null,
   ].filter(Boolean));
 
-  // Nothing sent: Back to review leads, to fix it and try again.
+  // Nothing sent: Back to review leads, to fix it and try again. Not
+  // confirmed: Done leads, and Back is there once Activity says it didn't go.
   const notSent = phase === "not_sent" && Boolean(sent.backRoute);
+  const unconfirmed = phase === "unconfirmed" && Boolean(sent.backRoute);
   const done = h("button", {
     class: notSent ? "btn-outline sent-secondary" : "btn-primary",
     type: "button",
@@ -334,9 +394,9 @@ export function sentView(ov, { state, actions } = {}) {
       actions?.render?.({ forceRefresh: true })?.catch?.(() => {});
     },
   });
-  const back = notSent
+  const back = notSent || unconfirmed
     ? h("button", {
-        class: "btn-primary",
+        class: notSent ? "btn-primary" : "btn-outline sent-secondary",
         type: "button",
         text: "Back to review",
         onclick: () => {
@@ -376,7 +436,7 @@ export function sentView(ov, { state, actions } = {}) {
       note,
       stepper,
       details.children.length ? details : null,
-      h("div", { class: "sent-actions" }, (notSent ? [back, done] : [done, explorer]).filter(Boolean)),
+      h("div", { class: "sent-actions" }, (notSent ? [back, done] : unconfirmed ? [done, back] : [done, explorer]).filter(Boolean)),
     ].filter(Boolean)),
   ];
 }

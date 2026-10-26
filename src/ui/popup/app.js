@@ -183,6 +183,8 @@ function pulseViewAnimation() {
 
 // Retain the mounted unlock nodes, not a password copy in application state.
 let activeLockedView = null;
+// The screen last drawn, to start a new one at its top.
+let lastScreen = "";
 
 function setApp(children) {
   if (!app) return;
@@ -205,7 +207,26 @@ function setApp(children) {
     // ignore
   }
 
+  // A new screen opens at its top, not where the last one was scrolled to.
+  let sameScreen = false;
+  try {
+    const screen = `${state?.route ?? ""}|${state?.route === "stake" ? state?.staking?.screen ?? "" : ""}`;
+    sameScreen = screen === lastScreen;
+    if (!sameScreen) {
+      lastScreen = screen;
+      const scroller = app.closest?.(".panel-content");
+      if (scroller) scroller.scrollTop = 0;
+      // The full view scrolls the page itself.
+      if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+    }
+  } catch {
+    // ignore
+  }
+
   if (children !== activeLockedView) {
+    // Redrawn in place (a watcher event, a refresh), the screen keeps the
+    // focus on the same button.
+    const focused = sameScreen ? focusedButton() : null;
     const password = app.querySelector("#unlock-password");
     if (password) password.value = "";
     activeLockedView = null;
@@ -213,6 +234,30 @@ function setApp(children) {
     const siteBar = activeSiteBar(state.overview);
     if (siteBar) app.appendChild(siteBar);
     for (const child of children) app.appendChild(child);
+    if (focused) refocusButton(focused);
+  }
+}
+
+// The focused button in #app, by its words and its place among buttons with
+// the same words.
+function focusedButton() {
+  try {
+    const el = document.activeElement;
+    if (!el || el.tagName !== "BUTTON" || !app.contains(el)) return null;
+    const key = (b) => `${b.textContent}\n${b.getAttribute("aria-label") ?? ""}`;
+    const same = [...app.querySelectorAll("button")].filter((b) => key(b) === key(el));
+    return { key: key(el), index: same.indexOf(el), keyOf: key };
+  } catch {
+    return null;
+  }
+}
+
+function refocusButton({ key, index, keyOf }) {
+  try {
+    const match = [...app.querySelectorAll("button")].filter((b) => keyOf(b) === key)[index];
+    match?.focus?.();
+  } catch {
+    // ignore
   }
 }
 
@@ -253,6 +298,8 @@ if (fullNav) {
     netMenu.close();
     acctMenu.close();
     state.route = route;
+    // Staking opens on its overview.
+    if (route === "stake" && state.staking) state.staking.screen = "overview";
     state.needsRefresh = true;
     if (route !== "home") state.highlightTx = null;
     await render({ forceRefresh: true });

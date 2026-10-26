@@ -263,39 +263,38 @@ describe("hidden balances", () => {
       relatedStakes: [],
       ...over,
     });
-    const staking = (actionKind, ownerStatus) => ({
+    const staking = (ownerStatus, screen) => ({
       loaded: true,
       loading: false,
       profileIndex: 0,
       minimumStakeLux: dusk(1000),
-      actionKind,
+      actionKind: "topup",
       stakeAmountDusk: "",
       ownerProfileIndex: 0,
       ownerStatus,
+      screen,
     });
     const act = actions();
     const draw = (state) => show(stakeFormView(overview(HIDDEN), { state, actions: act }));
-    const editorLines = () =>
-      body.querySelectorAll(".stake-editor .stake-gas-line, .stake-editor > .muted, .stake-editor .hrow").map(visibleText);
 
-    // A new stake: the balance that pays it and what Max leaves after the fee.
-    const state = { route: "stake", staking: staking("topup", owner()) };
+    // A new stake: the balance that pays it, hidden; Max fills in the real amount.
+    const state = { route: "stake", staking: staking(owner(), "native") };
     await draw(state);
-    expect(editorLines()).toEqual(["Most people leave this as it is.", "Paid fromProfile 1 public · •••• DUSK", "Max after the fee: •••• DUSK."]);
-    expect(screenReaderText(body.querySelector(".stake-gas-line"))).toBe("Paid fromProfile 1 public · hidden DUSK");
+    expect(seen(body.querySelector(".amount-avail span"))).toEqual([
+      "Available •••• DUSK from your public balance",
+      "Available hidden DUSK from your public balance",
+    ]);
     button("Max").click();
     expect(state.staking.stakeAmountDusk).toBe("1482.8883");
 
-    // Too much: the check holds, and doesn't give the balance away.
-    state.staking.stakeAmountDusk = "5000";
-    await draw(state);
-    button("Review stake").click();
-    expect(act.showToast).toHaveBeenCalledWith(
-      "Profile 1 public balance is short by •••• DUSK including the estimated fee.",
-      3000
+    // Too much: the check holds, under the field, and doesn't give the balance away.
+    typeInto(body.querySelector("input.amount-field__input"), "5000");
+    expect(body.querySelector(".amount-field__error").textContent).toBe(
+      "That's •••• DUSK more than the public balance, with the network fee."
     );
+    expect(act.showToast).not.toHaveBeenCalled();
 
-    // Profile 2's stake, which Profile 1 owns.
+    // Profile 2's stake, which Profile 1 owns: staked, rewards and locked hidden.
     const stake = {
       profileIndex: 1,
       account: OTHER_ACCOUNT,
@@ -311,24 +310,15 @@ describe("hidden balances", () => {
       ownerProfileIndex: 0,
       manageable: true,
     };
-    for (const [actionKind, amountLine] of [
-      ["unstake", "AmountFull stake · •••• DUSK"],
-      ["claim", "AmountAll rewards · •••• DUSK"],
-    ]) {
-      await draw({ route: "stake", staking: staking(actionKind, owner({ relatedStakes: [stake] })) });
-      const metrics = body.querySelectorAll(".stake-card.is-selected .stake-metrics .hrow");
-      expect(metrics.map(visibleText)).toEqual([
-        "Staked•••• DUSK",
-        "Locked•••• DUSK",
-        "EligibilityEligible now",
-        "Rewards•••• DUSK",
-        "Faults0 / 0",
-      ]);
-      expect(metrics.map((row) => row.querySelector("code").getAttribute("title") || null).filter(Boolean)).toEqual([
-        "Stake contract eligibility value: 0",
-      ]);
-      expect(editorLines()).toEqual(["Paid fromProfile 2 public · •••• DUSK", amountLine]);
-    }
+    await draw({ route: "stake", staking: staking(owner({ relatedStakes: [stake] }), "overview") });
+    expect(body.querySelectorAll(".stake-sum .stake-big").map(seen)).toEqual([
+      ["•••• DUSK", "hidden DUSK"],
+      ["•••• DUSK", "hidden DUSK"],
+    ]);
+    expect(visibleText(body.querySelector(".stake-sum .stake-cap"))).toBe("Locked: •••• DUSK. It stays yours; unstaking returns it.");
+    expect(visibleText(body.querySelector(".stake-avail"))).toBe("•••• DUSK available to stake, from your public balance");
+    // Advanced keeps what isn't a balance.
+    expect(body.querySelectorAll("details.advanced .kv").map(visibleText)).toContain("Active fromActive now");
   });
 
   it("hide what Sozu holds for the profile, but not the pool's rate", async () => {
@@ -352,14 +342,16 @@ describe("hidden balances", () => {
     };
     const state = { route: "stake", sozu: st };
     await show(sozuLiquidStakingView(overview(HIDDEN), { state, actions: actions() }));
-    expect(body.querySelectorAll(".sozu-stats .hrow").map(visibleText)).toEqual([
-      "Pool balance•••• DUSK",
-      "Available•••• DUSK",
-      "stDUSK•••• stDUSK",
-      "Rate1.05",
+    expect(body.querySelectorAll(".kv").map(visibleText).slice(0, 2)).toEqual([
+      "Staked with Sozu•••• DUSK",
+      "stDUSK•••• stDUSKAdd to Assets",
     ]);
     button("Max").click();
     expect(st.depositAmountDusk).toBe("1482.4383");
+    // The rate isn't a balance; what the typed amount gets, worked out from it, shows.
+    expect(visibleText(body.querySelector(".stake-estimate"))).toBe(
+      "You get about 1,411.84 stDUSK. Each stDUSK is worth 1.05 DUSK and grows as rewards come in."
+    );
   });
 });
 
@@ -381,7 +373,7 @@ describe("still shown with balances hidden", () => {
       stakeDraft: { kind: TX_KIND.STAKE, stakeProfileIndex: 0, profileIndex: 0, ownerProfileIndex: 0, amountLux: dusk(1000), payment: "account" },
     };
     await show(stakeConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect([amountOf(), ...fee()]).toEqual(["1000 DUSK", "0.0500 DUSK", "1,000.05 DUSK"]);
+    expect([amountOf(), ...fee()]).toEqual(["1,000 DUSK", "0.0500 DUSK", "1,000.05 DUSK"]);
 
     state = {
       route: "sozu_confirm",

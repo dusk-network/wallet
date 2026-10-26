@@ -193,11 +193,32 @@ describe("after Confirm", () => {
     ]);
     expect(rows().at(-1)).toBe("Fee charged0.0025 DUSK");
 
-    // Dropped before it ran: nothing was charged.
-    noteTxStatus(state.sent, { hash: HASH, status: "removed" });
+    // Dropped before it ran: nothing was charged, and the watcher's code isn't a reason.
+    noteTxStatus(state.sent, { hash: HASH, status: "removed", error: "reconciliation_unavailable" });
     app.draw();
     expect(steps()[2]).toEqual(["failed", "Failed", "The network dropped it before it ran. No fee was charged."]);
     expect(rows().at(-1)).toBe("Network feeNone charged");
+  });
+
+  it("doesn't claim nothing went out when the reply was lost, and leads with Done", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    (await app.confirm()).resolve({ error: { message: "The message port closed before a response was received." } });
+    await settle();
+    expect(steps()[0]).toEqual([
+      "unknown",
+      "Not confirmed",
+      "The message port closed before a response was received. It may still have reached the network: check Activity before you send it again.",
+    ]);
+    expect(rows().at(-1)).toBe("Network feeUp to 0.0025 DUSK, if it went out");
+    expect(body.querySelectorAll(".sent-actions button").map((b) => [b.textContent, b.className])).toEqual([
+      ["Done", "btn-primary"],
+      ["Back to review", "btn-outline sent-secondary"],
+    ]);
+    // The draft stays for Back, and nothing says no fee was charged.
+    expect(visibleText(body)).not.toContain("No fee was charged");
+    expect(state.draft).toMatchObject({ to: OTHER });
   });
 
   it("keeps a send the network didn't take on the Sent screen, with Back to the review as it was", async () => {
@@ -221,6 +242,38 @@ describe("after Confirm", () => {
     expect(state.route).toBe("confirm");
     expect(state.draft).toMatchObject({ to: OTHER, amountLux: dusk(1500), memo: "Lunch" });
     expect(button("Confirm")).toBeTruthy();
+  });
+
+  it("leaves a newer review's draft alone when an earlier send finishes", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    const reply = await app.confirm();
+    // Done while Sending, then a new send drafted.
+    button("Done").click();
+    await settle();
+    const newer = { to: OTHER, privacy: "public", amountDusk: "2", amountLux: dusk(2), memo: "" };
+    state.draft = newer;
+    reply.resolve({ ok: true, result: { hash: HASH } });
+    await settle();
+    expect(state.draft).toBe(newer);
+    // Activity marks the transaction that went out.
+    expect(state.highlightTx).toBe(HASH);
+  });
+
+  it("still says a refusal that comes after Done", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    const reply = await app.confirm();
+    button("Done").click();
+    await settle();
+    expect(state.route).toBe("home");
+    reply.resolve({ error: { message: "Insufficient balance" } });
+    await settle();
+    expect(app.actions.showToast).toHaveBeenCalledWith({ text: "Send failed. Insufficient balance. No fee was charged.", tone: "bad" });
+    // The review is still there to go back to.
+    expect(state.draft).toMatchObject({ to: OTHER, amountLux: dusk(1500) });
   });
 
   it("hides the amount with Hide balances, and leaves the fee", async () => {
