@@ -95,6 +95,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Kept a profile label being typed when Settings redraws, and saved it when the field is left.
 - Made the profile and network menus work from the keyboard.
 - Gave every popup screen a heading for screen readers.
+- Accepted a `Uint8Array` message in `dusk_signMessage` in Chrome, whose extension messaging turns it into an object.
 - Fixed the popup moving Receive's QR and Review's recipient below the rest of the page. ([#125])
 - Raised the shielded (Phoenix) transfer default gas limit to 50M and its minimum to 30M so shielded sends clear the node's spend-gas admission floor.
 - Preserved the active unlock form, including entered text and in-flight submission state, across passive rerenders. ([#110](https://github.com/dusk-network/wallet/issues/110))

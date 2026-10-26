@@ -852,6 +852,21 @@ describe("walletEngine", () => {
     expect(res.payload.endsWith(memoHex)).toBe(true);
   });
 
+  it("signMessage signs a Uint8Array that extension messaging turned into an object, as its bytes", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    const bytes = new TextEncoder().encode("I agree to the shop terms");
+    const res = await engine.signMessage({
+      origin: "https://example.com",
+      chainId: "dusk:2",
+      message: JSON.parse(JSON.stringify(bytes)),
+      profileIndex: 0,
+    });
+    expect(res.messageHash).toBe(`0x${await sha256Hex(bytes)}`);
+    expect(res.messageLen).toBe(bytes.length);
+  });
+
   it("signMessage refuses plain text instead of signing bytes guessed from it", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);

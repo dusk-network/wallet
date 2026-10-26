@@ -1721,6 +1721,10 @@ describe("background rpc handler", () => {
     ["an empty string", ""],
     ["byte values out of range", [72, 256]],
     ["a fractional byte value", [72.5]],
+    ["an object with a gap in its keys", { 0: 72, 2: 105 }],
+    ["an object with an extra key", { 0: 72, 1: 105, length: 2 }],
+    ["an object with a value out of range", { 0: 72, 1: 300 }],
+    ["an empty object, as an ArrayBuffer arrives from Chrome", {}],
   ])("dusk_signMessage refuses %s before approval instead of guessing its bytes", async (_label, message) => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -1743,6 +1747,7 @@ describe("background rpc handler", () => {
     ["bare hex, as Dusk Connect writes bytes", "48656C6C6F2C204475736B21"],
     ["base64: prefixed base64", "base64:SGVsbG8sIER1c2sh"],
     ["an array of byte values", [...new TextEncoder().encode("Hello, Dusk!")]],
+    ["a Uint8Array as Chrome's extension messaging delivers it", JSON.parse(JSON.stringify(new TextEncoder().encode("Hello, Dusk!")))],
   ])("dusk_signMessage reads %s as the bytes it encodes", async (_label, message) => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

@@ -70,10 +70,33 @@ export function toBytes(value) {
   throw new Error("Unsupported byte encoding (use hex string, base64 string, or number[])");
 }
 
+const isByte = (b) => Number.isInteger(b) && b >= 0 && b <= 255;
+
+// A Uint8Array after Chrome's extension messaging, which serializes it as
+// JSON: { "0": 72, "1": 105 }. Only a plain object whose keys are exactly
+// "0" to "n-1", each an integer from 0 to 255, and at least one of them: an
+// ArrayBuffer comes through as {} too, and its bytes are lost.
+function jsonUint8Array(value) {
+  if (value === null || typeof value !== "object") return null;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return null;
+  const keys = Object.keys(value);
+  if (!keys.length) return null;
+  const out = new Uint8Array(keys.length);
+  for (let i = 0; i < keys.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(value, String(i))) return null;
+    const b = value[String(i)];
+    if (!isByte(b)) return null;
+    out[i] = b;
+  }
+  return out;
+}
+
 /**
  * The bytes of a message to sign, from an explicit encoding only: a
- * Uint8Array, an ArrayBuffer, an array of byte values, hex (0x-prefixed, or
- * bare as Dusk Connect writes it) or `base64:`-prefixed base64. Anything
+ * Uint8Array (also as Chrome's messaging delivers one, an object with keys
+ * "0" to "n-1"), an ArrayBuffer, an array of byte values, hex (0x-prefixed,
+ * or bare as Dusk Connect writes it) or `base64:`-prefixed base64. Anything
  * else, plain text above all, is refused rather than guessed at: decoding
  * "I agree" as base64 signs other bytes than the ones the site showed.
  *
@@ -84,7 +107,7 @@ export function messageBytes(value) {
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (Array.isArray(value)) {
-    if (!value.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) {
+    if (!value.every(isByte)) {
       throw new Error("Message bytes must be integers from 0 to 255");
     }
     return Uint8Array.from(value);
@@ -94,6 +117,8 @@ export function messageBytes(value) {
     if (/^0x/i.test(s) || isHexString(s)) return hexToBytes(s);
     if (/^base64:/i.test(s)) return base64ToBytes(s);
   }
+  const transported = jsonUint8Array(value);
+  if (transported) return transported;
   throw new Error("Unsupported message encoding (use 0x-hex, base64:-prefixed base64, or bytes)");
 }
 

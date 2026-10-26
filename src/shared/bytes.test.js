@@ -182,7 +182,34 @@ describe("messageBytes", () => {
     for (const value of [[256], [-1], [1.5], ["1"]]) {
       expect(() => messageBytes(value), JSON.stringify(value)).toThrow("Message bytes must be integers from 0 to 255");
     }
-    for (const value of [null, undefined, 7, {}, { 0: 72 }]) {
+    for (const value of [null, undefined, 7, {}]) {
+      expect(() => messageBytes(value), JSON.stringify(value)).toThrow("Unsupported message encoding");
+    }
+  });
+
+  it("reads a Uint8Array that Chrome's extension messaging turned into an object", () => {
+    // Chrome serializes extension messages as JSON; Firefox clones them.
+    expect(messageBytes(JSON.parse(JSON.stringify(hello)))).toEqual(hello);
+    expect(messageBytes(structuredClone(hello))).toEqual(hello);
+    expect(messageBytes({ 1: 2, 0: 1 })).toEqual(new Uint8Array([1, 2]));
+    expect(messageBytes(Object.assign(Object.create(null), { 0: 255 }))).toEqual(new Uint8Array([255]));
+  });
+
+  it("refuses an object that isn't a whole Uint8Array", () => {
+    class Bytes {}
+    for (const value of [
+      { 0: 72, 2: 105 }, // a gap
+      { 1: 72 }, // not from 0
+      { 0: 72, 1: 105, length: 2 }, // an extra key
+      { 0: 72, 1: 256 }, // out of range
+      { 0: -1 },
+      { 0: 1.5 },
+      { 0: "72" },
+      {}, // an ArrayBuffer arrives as {}: its bytes are lost
+      JSON.parse(JSON.stringify(new ArrayBuffer(4))),
+      Object.assign(new Bytes(), { 0: 72 }), // not a plain object
+      new Uint16Array([72, 105]), // another typed array
+    ]) {
       expect(() => messageBytes(value), JSON.stringify(value)).toThrow("Unsupported message encoding");
     }
   });

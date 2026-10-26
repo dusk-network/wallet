@@ -411,8 +411,10 @@ Requires connection + unlocked wallet.
 `number[]` of byte values. Any other string, plain text included, is rejected
 with `INVALID_PARAMS` rather than guessed at: to sign text, send its UTF-8
 bytes, for example as `0x` + hex. Unprefixed base64 is no longer accepted.
-Across Chrome's extension messaging prefer a string or `number[]`, as for
-`fnArgs` below.
+A `Uint8Array` works in Chrome too, whose extension messaging delivers it as
+an object with keys `"0"` to `"n-1"`: the wallet reads that back as bytes when
+every value is an integer from 0 to 255. An `ArrayBuffer` arrives in Chrome as
+an empty object and is refused; send its bytes as a `Uint8Array` instead.
 
 > The wallet does **not** sign the caller's bytes directly. It signs a Moonlight memo whose text begins with `Dusk Connect SignMessage v1` and includes the origin, chain ID, account, SHA-256 message hash, and message length. The resulting signature will not verify as a raw BLS short-signature over a caller-supplied 32-byte digest. Do not use this method for on-chain digest verification; raw-digest signing is tracked in [#90](https://github.com/dusk-network/wallet/issues/90). The approval UI may show a readable UTF-8 preview when safe; binary, invalid, or large messages are shown as opaque bytes with hash and length. Prefer `dusk_signAuth` for login/session authentication flows.
 
