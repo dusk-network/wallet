@@ -17,7 +17,7 @@ import {
   isAllowedDappEndpoint,
   isAllowedDappOrigin,
 } from "../shared/securityPolicy.js";
-import { bytesToHex, sha256Hex, toBytes } from "../shared/bytes.js";
+import { bytesToHex, messageBytes, sha256Hex, toBytes } from "../shared/bytes.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import {
   hashTypedDataHex,
@@ -193,19 +193,23 @@ export async function handleRpc(origin, request) {
     return n.toString();
   }
 
+  // A site may set the gas limit alone: the wallet then fills in the node's
+  // gas price, as it does for its own defaults. A price needs a limit.
   function validateGasShape(gas) {
     if (gas === undefined || gas === null) return gas;
     if (typeof gas !== "object" || Array.isArray(gas)) {
-      throw rpcError(ERROR_CODES.INVALID_PARAMS, "gas must be an object with { limit, price } or null");
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "gas must be an object with { limit, price? } or null");
     }
-    if (!isCompleteGas(gas)) {
-      throw rpcError(ERROR_CODES.INVALID_PARAMS, "gas must include both limit and price, or neither");
+    const given = (v) => v !== undefined && v !== null && v !== "";
+    if (!given(gas.limit) && !given(gas.price)) return gas;
+    if (!given(gas.limit)) {
+      throw rpcError(ERROR_CODES.INVALID_PARAMS, "gas.limit is required when gas.price is set");
     }
-    if (!("limit" in gas) && !("price" in gas)) return gas;
+    const { price, ...rest } = gas;
     return {
-      ...gas,
+      ...rest,
       limit: validateU64(gas.limit, "gas.limit", { required: true, allowZero: false }),
-      price: validateU64(gas.price, "gas.price", { required: true, allowZero: false }),
+      ...(given(price) ? { price: validateU64(price, "gas.price", { required: true, allowZero: false }) } : {}),
     };
   }
 
@@ -924,19 +928,21 @@ export async function handleRpc(origin, request) {
         throw rpcError(ERROR_CODES.INVALID_PARAMS, "params.message is required");
       }
 
-      // Compute a stable message hash for the approval UI.
+      // Compute a stable message hash for the approval UI. The message must
+      // be bytes in an explicit encoding: plain text is refused, not guessed
+      // at, so the approval shows the bytes the site meant.
       let messageLen = 0;
       let messageHash = "";
       let messagePreview = null;
       try {
-        const msgBytes = toBytes(params.message);
+        const msgBytes = messageBytes(params.message);
         messageLen = msgBytes.length;
         messageHash = await sha256Hex(msgBytes);
         messagePreview = describeSignMessagePreview(msgBytes);
       } catch {
         throw rpcError(
           ERROR_CODES.INVALID_PARAMS,
-          "params.message must be bytes (hex string, base64 string, Uint8Array, ArrayBuffer, or number[])"
+          "params.message must be bytes: 0x-hex, base64: followed by base64, or an array of bytes. To sign text, send its UTF-8 bytes as 0x-hex."
         );
       }
 

@@ -70,6 +70,33 @@ export function toBytes(value) {
   throw new Error("Unsupported byte encoding (use hex string, base64 string, or number[])");
 }
 
+/**
+ * The bytes of a message to sign, from an explicit encoding only: a
+ * Uint8Array, an ArrayBuffer, an array of byte values, hex (0x-prefixed, or
+ * bare as Dusk Connect writes it) or `base64:`-prefixed base64. Anything
+ * else, plain text above all, is refused rather than guessed at: decoding
+ * "I agree" as base64 signs other bytes than the ones the site showed.
+ *
+ * @param {unknown} value
+ * @returns {Uint8Array}
+ */
+export function messageBytes(value) {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (Array.isArray(value)) {
+    if (!value.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) {
+      throw new Error("Message bytes must be integers from 0 to 255");
+    }
+    return Uint8Array.from(value);
+  }
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (/^0x/i.test(s) || isHexString(s)) return hexToBytes(s);
+    if (/^base64:/i.test(s)) return base64ToBytes(s);
+  }
+  throw new Error("Unsupported message encoding (use 0x-hex, base64:-prefixed base64, or bytes)");
+}
+
 export async function sha256Hex(bytes) {
   const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
   const digest = await crypto.subtle.digest("SHA-256", b);

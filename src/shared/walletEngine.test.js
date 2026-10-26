@@ -852,6 +852,17 @@ describe("walletEngine", () => {
     expect(res.payload.endsWith(memoHex)).toBe(true);
   });
 
+  it("signMessage refuses plain text instead of signing bytes guessed from it", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+
+    for (const message of ["I agree to the shop terms", "SGVsbG8sIER1c2sh"]) {
+      await expect(
+        engine.signMessage({ origin: "https://example.com", chainId: "dusk:2", message, profileIndex: 0 })
+      ).rejects.toThrow("Unsupported message encoding");
+    }
+  });
+
   it("rejects a public balance read when the approved engine context changed", async () => {
     engine.configure({
       nodeUrl: NETWORK_KEY,
