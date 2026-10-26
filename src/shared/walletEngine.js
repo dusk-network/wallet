@@ -2599,6 +2599,15 @@ export async function getShieldedHistory() {
     const { heights, decoys } = pickHeights(pool, real, { keep: kept?.decoys ?? [] });
     // Not one other height to ask among: asking would name the profile's own.
     if (!decoys.length) return { profileIndex, entries: kept?.entries ?? [], pending: true };
+    // The decoys are kept before any of them is asked for, with what was
+    // kept before: a build that fails partway asks among the same ones next
+    // time, so no two requests differ in their decoys alone. Nothing is
+    // asked unless they are kept.
+    const before = new Set(kept?.decoys ?? []);
+    if (decoys.length !== before.size || decoys.some((h) => !before.has(h))) {
+      await putShieldedHistoryRecord(key, { fingerprint: kept?.fingerprint ?? "", entries: kept?.entries ?? [], decoys }, epoch);
+      assertCurrent();
+    }
     const blocks = await fetchBlocks(url, heights);
     assertCurrent();
     const entries = buildShieldedHistory({ notes, blocks });

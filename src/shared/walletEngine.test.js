@@ -1450,13 +1450,14 @@ describe("walletEngine", () => {
     // unshield's outputs and the shield's note): leaves 6 to 491 made up, all
     // at one height between.
     const GROWN = 300_000;
-    async function growTree(leavesFromPos) {
+    // `distinct`: each made-up leaf at a height of its own, for a pool of hundreds.
+    async function growTree(leavesFromPos, { distinct = false } = {}) {
       const made = [];
       for (let pos = 6; pos < 492; pos++) {
         const leaf = FIRST[5].slice();
         const view = new DataView(leaf.buffer);
         view.setBigUint64(648, BigInt(pos), true);
-        view.setBigUint64(728, BigInt(GROWN), true);
+        view.setBigUint64(728, BigInt(distinct ? GROWN + pos : GROWN), true);
         made.push(leaf);
       }
       const grown = [...made, ...leaves(phoenix.leaves492)];
@@ -1571,7 +1572,10 @@ describe("walletEngine", () => {
 
       await expect(build).rejects.toThrow();
       scan?.mockRestore();
-      expect(await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`)).toBeNull();
+      // Nothing it read is kept: at most the decoys it was to ask among, kept
+      // before it asked, for next time.
+      const record = await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`);
+      expect(record?.entries ?? []).toEqual([]);
     });
 
     it("asks nothing for a note at a height the tree it read doesn't have", async () => {
@@ -1585,6 +1589,59 @@ describe("walletEngine", () => {
       const queries = archive();
       await expect(engine.getShieldedHistory()).resolves.toMatchObject({ profileIndex: 0, entries: [], pending: true });
       expect(queries).toHaveLength(0);
+    });
+
+    it.each(["a block request", "keeping the history"])("asks among the same decoys again after %s failed", async (failing) => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      // Hundreds of heights to draw decoys from: two draws all but never match.
+      await growTree(leavesFromPos, { distinct: true });
+      const heightsOf = (query) => [...query.matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h));
+      let fail = failing === "a block request";
+      const queries = archive(async () => {
+        if (!fail) return;
+        fail = false;
+        throw new TypeError("fetch failed");
+      });
+      const keep = activity.putShieldedHistoryRecord;
+      const put = vi.spyOn(activity, "putShieldedHistoryRecord");
+      if (failing === "keeping the history") {
+        // The decoys are kept; the history after the lookups isn't.
+        put.mockImplementation(async (key, record, epoch) => {
+          if (record.entries.length) throw new DOMException("The store is full", "QuotaExceededError");
+          return keep(key, record, epoch);
+        });
+      }
+      const first = await engine.getShieldedHistory().catch((error) => error);
+      const askedFirst = new Set(queries.flatMap(heightsOf));
+      expect(askedFirst.size).toBeGreaterThan(0);
+      if (failing === "keeping the history") expect(first.entries.length).toBeGreaterThan(0);
+      else expect(first).toBeInstanceOf(TypeError);
+      put.mockRestore();
+
+      queries.length = 0;
+      await engine.getShieldedHistory();
+      const askedAgain = new Set(queries.flatMap(heightsOf));
+      // Everything asked the first time is asked again: the same decoys.
+      expect([...askedFirst].filter((h) => !askedAgain.has(h))).toEqual([]);
+    });
+
+    it("asks for no block when it can't keep the decoys first", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      await growTree(leavesFromPos, { distinct: true });
+      const queries = archive();
+      const put = vi.spyOn(activity, "putShieldedHistoryRecord").mockRejectedValue(new DOMException("The store is full", "QuotaExceededError"));
+      try {
+        await expect(engine.getShieldedHistory()).rejects.toThrow("The store is full");
+        expect(queries).toHaveLength(0);
+      } finally {
+        put.mockRestore();
+      }
     });
 
     it("asks nothing while the tree has no height but the profile's own", async () => {
