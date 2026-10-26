@@ -78,6 +78,14 @@ describe("transaction details", () => {
     expect(convert.body.querySelector(".tx-assets")).toBeNull();
   });
 
+  it("names the site a transaction came from, and none for the wallet's own", () => {
+    const send = { kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed" };
+    expect(details({ ...send, origin: "https://shop.example" }).rows).toContain("Siteshop.example");
+    for (const origin of ["Wallet", undefined]) {
+      expect(details({ ...send, origin }).rows.filter((r) => r.startsWith("Site")), String(origin)).toEqual([]);
+    }
+  });
+
   it("says when a transaction isn't in Activity, and still opens it in the explorer", () => {
     const state = { route: "tx", txDetailHash: "ef".repeat(32), txDetailFrom: "home" };
     dom.document.body.replaceChildren(...txDetailsView({ nodeUrl: NODE, txs: [] }, { state, actions: {} }));
