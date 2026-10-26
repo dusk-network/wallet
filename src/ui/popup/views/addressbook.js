@@ -24,6 +24,7 @@ import { blockTimes, contactNames, describeTx, recentText, txRowEl, whenText } f
 import {
   clearAddressBook,
   listAddressBook,
+  markAddressBookNameChecked,
   removeAddressBookEntry,
   upsertAddressBookEntry,
 } from "../../../shared/addressBook.js";
@@ -337,8 +338,8 @@ export function addressBookView(ov, { state, actions } = {}) {
           if (!res?.ok) return;
           const now = duskNameRecipient(res, { shielded: typ === "address" });
           if (now === addr) {
-            await upsertAddressBookEntry({ ...entry, checkedAt: Date.now() });
-            await refreshItems();
+            // On the contact as saved now: one edited or deleted meanwhile stays so.
+            if (await markAddressBookNameChecked(entry)) await refreshItems();
           } else {
             nameCheck.textContent = `${entry.duskName} now points to another address. Edit the contact before you send to it.`;
             nameCheck.hidden = false;

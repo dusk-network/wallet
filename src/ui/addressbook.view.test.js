@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { clearAddressBook, upsertAddressBookEntry } from "../shared/addressBook.js";
+import { clearAddressBook, markAddressBookNameChecked, upsertAddressBookEntry } from "../shared/addressBook.js";
 import { lookupDuskName } from "../shared/duskNames.js";
 import { TX_KIND } from "../shared/constants.js";
 import { accessibleName, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
@@ -9,6 +9,7 @@ import { addressBookView, NAME_RECHECK_MS } from "./popup/views/addressbook.js";
 vi.mock("../shared/addressBook.js", () => ({
   listAddressBook: vi.fn(async () => []),
   clearAddressBook: vi.fn(async () => {}),
+  markAddressBookNameChecked: vi.fn(async (entry) => entry),
   removeAddressBookEntry: vi.fn(async () => {}),
   upsertAddressBookEntry: vi.fn(async (entry) => ({ id: entry.id ?? "new", ...entry })),
 }));
@@ -31,6 +32,7 @@ let dom;
 beforeEach(() => {
   dom = installFakeDom();
   clearAddressBook.mockClear();
+  markAddressBookNameChecked.mockClear();
   upsertAddressBookEntry.mockClear();
   lookupDuskName.mockReset();
   lookupDuskName.mockImplementation((name) => {
@@ -145,6 +147,15 @@ describe("contacts", () => {
     expect(view.buttons()).toEqual(["← Back", "Save", "Delete contact"]);
     dom.document.body.querySelector(".subnav-back").click();
     expect(view.state.addressBook.view).toBe("detail");
+  });
+
+  it("marks an hour-old .dusk name checked on the contact as saved, never writing back the copy it showed", async () => {
+    const shop = { id: "2", name: "Shop", address: ADDRESS, type: "address", duskName: "alice-shop.dusk", checkedAt: Date.now() - NAME_RECHECK_MS - 1 };
+    mount({ view: "detail", detailId: "2", items: [shop] });
+    await settle();
+    expect(markAddressBookNameChecked).toHaveBeenCalledWith(shop);
+    expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+    expect(isShown(dom.document.body.querySelector(".contact-name-check"))).toBe(false);
   });
 
   it("checks an hour-old .dusk name again, and says so when it points elsewhere now", async () => {

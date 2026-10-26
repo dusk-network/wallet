@@ -122,6 +122,28 @@ export async function upsertAddressBookEntry(entry) {
 }
 
 /**
+ * Mark a contact's .dusk name checked, on the contact as saved now and only
+ * while it's the one that was checked: the same name, address and .dusk
+ * name. A contact edited or deleted during the check stays as it is, and
+ * nothing else changes, its place in the list included.
+ * @param {AddressBookEntry} checked - the contact as the check found it
+ * @param {number} [checkedAt]
+ * @returns {Promise<AddressBookEntry|null>} the contact, or null when it changed
+ */
+export async function markAddressBookNameChecked(checked, checkedAt = Date.now()) {
+  const id = checked?.id;
+  if (!id || !checked?.duskName) return null;
+  const all = await getAll();
+  const prev = all[id];
+  if (!prev || prev.name !== checked.name || prev.address !== checked.address || prev.duskName !== checked.duskName) {
+    return null;
+  }
+  all[id] = { ...prev, checkedAt };
+  await setAll(all);
+  return all[id];
+}
+
+/**
  * Remove an entry.
  * @param {string} id
  */

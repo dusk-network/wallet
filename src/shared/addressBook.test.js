@@ -27,6 +27,7 @@ const {
   listAddressBook,
   getAddressBookEntry,
   upsertAddressBookEntry,
+  markAddressBookNameChecked,
   removeAddressBookEntry,
   clearAddressBook,
 } = await import("./addressBook.js");
@@ -232,6 +233,30 @@ describe("addressBook", () => {
       } finally {
         nowSpy.mockRestore();
       }
+    });
+  });
+
+  describe("markAddressBookNameChecked", () => {
+    it("marks the name checked on the contact as saved, and only while it's the one checked", async () => {
+      const checked = await upsertAddressBookEntry({ name: "Shop", address: "addr", duskName: "shop.dusk", checkedAt: 1 });
+      const marked = await markAddressBookNameChecked(checked, 5000);
+      expect(marked).toEqual({ ...checked, checkedAt: 5000 });
+      expect(await getAddressBookEntry(checked.id)).toEqual(marked);
+
+      // Edited during the check: the edit stands.
+      const edited = await upsertAddressBookEntry({ ...checked, name: "Corner shop", checkedAt: 2 });
+      expect(await markAddressBookNameChecked(checked, 6000)).toBeNull();
+      expect(await getAddressBookEntry(checked.id)).toEqual(edited);
+      for (const change of [{ address: "other" }, { duskName: "other.dusk" }]) {
+        const changed = await upsertAddressBookEntry({ ...edited, ...change });
+        expect(await markAddressBookNameChecked(edited, 7000)).toBeNull();
+        expect((await getAddressBookEntry(checked.id)).checkedAt).toBe(changed.checkedAt);
+      }
+
+      // Deleted during the check: it stays deleted.
+      await removeAddressBookEntry(checked.id);
+      expect(await markAddressBookNameChecked(checked, 8000)).toBeNull();
+      expect(await listAddressBook()).toEqual([]);
     });
   });
 
