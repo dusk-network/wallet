@@ -171,6 +171,27 @@ describe("the request's network", () => {
     await render("connect", { requestedProfiles: true }, { networkName: "Devnet" });
     expect(chip.textContent).toBe("Devnet");
   });
+
+  it("says at the top that test DUSK has no value on a test network, and nothing on Mainnet", async () => {
+    // The window's panel, its header first, as notification.html has it.
+    const panel = dom.document.createElement("div");
+    panel.className = "panel";
+    const header = dom.document.createElement("div");
+    header.className = "panel-header";
+    panel.append(header, app);
+    dom.document.body.appendChild(panel);
+    const strips = () => dom.document.body.querySelectorAll(".testnet-strip");
+
+    await render("send_tx", { kind: "transfer", privacy: "public", to: SHOP, amount: "1", networkName: "Testnet", nodeUrl: TESTNET });
+    expect(strips().map((s) => s.textContent)).toEqual(["Testnet · Test DUSK has no value"]);
+    expect(panel.children[0]).toBe(strips()[0]);
+    // A locked wallet's window says it too.
+    await render("connect", { requestedProfiles: true }, { isUnlocked: false, accounts: [], duskNames: {} });
+    expect(strips()).toHaveLength(1);
+
+    await render("sign_message", { chainId: "dusk:1", messageLen: 1 }, { networkName: "Testnet" });
+    expect(strips()).toHaveLength(0);
+  });
 });
 
 describe("contract-call decoding", () => {

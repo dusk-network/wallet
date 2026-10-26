@@ -12,6 +12,7 @@ import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
+import { syncTestnetStrip } from "../components/TestnetStrip.js";
 import { h, setChildren } from "../lib/dom.js";
 import { shortAddress } from "../lib/strings.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
@@ -73,8 +74,10 @@ function renderError(text) {
   show([h("div", { class: "err", role: "alert", text })]);
 }
 
-// The network the request is on, in the header beside the wallet's name.
+// The network the request is on, in the header beside the wallet's name, and
+// on a test network the strip at the top that says its DUSK has no value.
 function showNetwork(name) {
+  syncTestnetStrip(app?.closest?.(".panel") ?? document.body, name);
   const chip = document.getElementById("approval-network");
   if (!chip) return;
   chip.textContent = name || "";

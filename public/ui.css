@@ -29,6 +29,10 @@
   --online: #3FB871;
   --pill: #F2F0EB;                 /* the primary button and the toast */
   --on-pill: #141416;
+  /* Violet is a test network, as on the bridge and the web wallet. */
+  --test: #B9AEFF;
+  --test-bg: #1B1830;
+  --test-line: rgba(185,174,255,0.28);
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -213,6 +217,22 @@ body[data-runtime="tauri"].page--full .panel {
   flex-direction: column;
 
   background: var(--background);
+}
+
+/* On a test network, one line above the header: its DUSK has no value. */
+.testnet-strip {
+  flex: 0 0 auto;
+  padding: 7px 16px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--test-line);
+  background: var(--test-bg);
+  color: var(--test);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel-header {
