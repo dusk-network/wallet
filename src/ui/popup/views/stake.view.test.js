@@ -420,7 +420,7 @@ describe("liquid staking", () => {
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
       "Any amount, no node neededYou get stDUSK, a token for your share of Sozu's pool.Add to Assets",
       "Network fee up to 0.5 DUSK",
-      `Sozu's contract${"72".repeat(4)}…${"72".repeat(4)}Copy`,
+      `Sozu's contract${"72".repeat(3)}…${"72".repeat(3)}Copy`,
     ]);
     expect(body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Add stDUSK to Assets")).toBeTruthy();
   });

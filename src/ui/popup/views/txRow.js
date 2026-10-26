@@ -12,7 +12,7 @@ import { listAddressBook } from "../../../shared/addressBook.js";
 import { SOZU_FN } from "../../../shared/sozuAdapter.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
@@ -119,7 +119,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
       .map((s) => String(s ?? "").trim())
       .find(Boolean);
     if (name) return { name, address: addr || null, isAddress: false };
-    if (addr) return { name: truncateMiddle(addr, 6, 6), address: addr, isAddress: true };
+    if (addr) return { name: shortAddress(addr), address: addr, isAddress: true };
     return null;
   };
   const dusk = (lux, sign) => (positive(lux) ? { sign, value: formatDusk(lux), unit: "DUSK" } : null);

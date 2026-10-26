@@ -6,7 +6,7 @@ import { networkNameFromNodeUrl } from "../../../shared/network.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
@@ -87,9 +87,9 @@ function technicalRows(tx, ov, nodeUrl) {
     used || limit ? kv("Gas used", used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
     finalKnown && ["executed", "failed"].includes(String(tx?.status ?? "")) ? kv("Finality", "Final") : null,
-    kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", mono(String(tx.contractId), truncateMiddle(String(tx.contractId), 8, 8))) : null,
+    kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", mono(String(tx.contractId), shortAddress(String(tx.contractId)))) : null,
     tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,
-    tx?.blockHash ? kv("Block hash", mono(String(tx.blockHash), truncateMiddle(String(tx.blockHash), 8, 8))) : null,
+    tx?.blockHash ? kv("Block hash", mono(String(tx.blockHash), shortAddress(String(tx.blockHash)))) : null,
     at("Submitted", tx?.submittedAt),
     at("Seen in mempool", tx?.mempoolSeenAt),
     at("Last checked", tx?.lastCheckedAt),
@@ -147,7 +147,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
       nav,
       h("div", { class: "tx-detail" }, [
         h("p", { class: "tx-missing", text: "This transaction isn't in your activity." }),
-        h("div", { class: "group" }, [kv("Transaction ID", mono(hash, truncateMiddle(hash, 8, 8)))]),
+        h("div", { class: "group" }, [kv("Transaction ID", mono(hash, shortAddress(hash)))]),
         explorerButton(explorerUrl, actions),
       ].filter(Boolean)),
     ];
@@ -176,7 +176,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
       desc.isAddress ? copyButton(desc.address, { showToast }) : null,
     ].filter(Boolean)),
     other
-      ? h("div", { class: "tx-hero-addr" }, [mono(other, truncateMiddle(other, 6, 6)), copyButton(other, { label: otherLabel, showToast })])
+      ? h("div", { class: "tx-hero-addr" }, [mono(other, shortAddress(other)), copyButton(other, { label: otherLabel, showToast })])
       : null,
     amountEl(desc.amount, hidden, "tx-hero-amount"),
     h("div", { class: `tx-hero-status is-${desc.tone}` }, [
@@ -212,9 +212,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
     class: "text-btn tx-id",
     type: "button",
     title: explorerUrl ? "Open in Dusk explorer" : hash,
-    "aria-label": explorerUrl ? `Transaction ${truncateMiddle(hash, 8, 8)}, open in Dusk explorer` : undefined,
+    "aria-label": explorerUrl ? `Transaction ${shortAddress(hash)}, open in Dusk explorer` : undefined,
     disabled: !explorerUrl,
-    text: truncateMiddle(hash, 8, 8),
+    text: shortAddress(hash),
     onclick: async () => {
       const ok = explorerUrl ? await openUrl(explorerUrl) : false;
       if (!ok) showToast?.("Couldn't open the explorer");

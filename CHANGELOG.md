@@ -21,6 +21,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said on a public send's Review what everyone can see: the amount, the memo and your name.
 - Saved contacts from `.dusk` names, keeping the name and checking it again before it's an hour old.
 - Added a Disconnect for each connected site, and custom gas under Settings' Advanced.
+- Showed a new wallet how to get its first DUSK, with Receive, instead of empty Tokens and NFTs.
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
@@ -46,6 +47,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Restyled Send, Shield and Unshield: one large amount field, what's available after fees with Max, and errors under the field.
 - Stopped offering Save to Contacts for your own account or address.
 - Restyled Receive, Contacts and Settings, and showed what a `.dusk` name reaches under it on Receive.
+- Restyled the token and NFT screens, onboarding and Unlock, and kept the full view's pages to one readable column.
+- Shortened every address, contract ID and transaction ID the same way, to its first and last six characters.
 - Named profiles by their verified `.dusk` names in Settings and its profile pickers.
 - Offered auto-lock after 5 or 15 minutes, 15 by default, or Off; an open popup nobody uses locks too.
 - Asked before disconnecting all sites, and moved Reset wallet to the end of Settings.
@@ -55,7 +58,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said known chain errors in plain words, with the chain's own under Technical details.
 - Moved the account's explorer link from Home's History ↗ to the end of Activity, on the Dusk explorer instead of DuskScan.
 - Cleared the wallet's transactions, shielded notes and history on reset.
-- Moved Review's gas price line and presets behind the fee's Edit, and removed Review's Cancel. ([#126])
+- Removed Review's Cancel. ([#126])
 - Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])
 - Opened Receive on the public account, as the web wallet does. ([web-wallet#970])
 - Picked the profile to connect from option cards instead of a dropdown. ([#127])
@@ -75,6 +78,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Gave every popup screen a heading for screen readers.
 - Fixed the popup moving Receive's QR and Review's recipient below the rest of the page. ([#125])
 - Raised the shielded (Phoenix) transfer default gas limit to 50M and its minimum to 30M so shielded sends clear the node's spend-gas admission floor.
 - Preserved the active unlock form, including entered text and in-flight submission state, across passive rerenders. ([#110](https://github.com/dusk-network/wallet/issues/110))

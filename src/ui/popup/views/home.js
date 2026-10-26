@@ -3,6 +3,8 @@ import { TX_KIND } from "../../../shared/constants.js";
 import { h } from "../../lib/dom.js";
 import { assetsSectionsView } from "./assets.js";
 import { activityView, recentActivitySection } from "./activityView.js";
+import { activityRows } from "../activity.js";
+import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
@@ -229,10 +231,24 @@ export function homeView(ov, { state, actions } = {}) {
   // Activity: the newest rows, the full list behind See all.
   if (state?.route === "activity") return activityView(ov, { state, actions });
 
+  // A wallet with nothing in it yet: how to get DUSK, in place of empty
+  // Tokens and NFTs. Both balances must be known: shielded DUSK still
+  // syncing isn't nothing.
+  const assets = state?.assets;
+  const empty =
+    hasBalance &&
+    pubLux === 0n &&
+    shieldLuxBI === 0n &&
+    shieldedSync?.state !== "syncing" &&
+    !activityRows(ov, state).length &&
+    !(assets?.tokens?.length || assets?.nfts?.length);
+  const getStarted = empty ? getStartedSection(ov, { state, actions }) : null;
+
   // Full mode should feel like an app dashboard, while popup remains a compact
   // single-column wallet. CSS handles the responsive collapse.
   return [
     h("div", { class: "wallet-dashboard" }, [
+      h("h1", { class: "sr-only", text: "Dusk Wallet" }),
       dashboardTopbar,
       hero,
       h("div", { class: "dashboard-actions" }, [
@@ -241,7 +257,35 @@ export function homeView(ov, { state, actions } = {}) {
       ]),
       // Activity first, then the assets, as on a bank app's home.
       recentActivitySection(ov, { state, actions }),
-      ...assetsSectionsView(ov, { state, actions }),
+      ...(getStarted ? [getStarted] : assetsSectionsView(ov, { state, actions })),
     ]),
   ];
+}
+
+/**
+ * How to get DUSK, for a wallet with nothing in it yet: Receive, and where
+ * DUSK comes from.
+ * @returns {HTMLElement}
+ */
+function getStartedSection(ov, { state, actions } = {}) {
+  const testnet = detectPresetIdFromNodeUrl(String(ov?.nodeUrl ?? "")) === "testnet";
+  return h("section", { class: "box home-get-started" }, [
+    bracketTitle({ text: "Get your first DUSK" }),
+    h("div", { class: "group get-started-card" }, [
+      h("p", {
+        text: testnet
+          ? "Ask someone to send you test DUSK. They need your account, from Receive."
+          : "Withdraw DUSK from an exchange, or ask someone to send you some. Both start with your account, from Receive.",
+      }),
+      h("button", {
+        class: "btn-primary",
+        type: "button",
+        text: "Receive",
+        onclick: () => {
+          state.route = "receive";
+          actions?.render?.()?.catch?.(() => {});
+        },
+      }),
+    ]),
+  ]);
 }

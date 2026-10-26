@@ -34,8 +34,8 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
 
   // Paste full phrase into first slot (MnemonicInput distributes it).
   await page.getByLabel("Word 1", { exact: true }).fill(MNEMONIC_12);
-  await page.getByPlaceholder("Create password (min 8 chars)").fill(PASSWORD);
-  await page.getByPlaceholder("Confirm password").fill(PASSWORD);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await page.getByLabel("Confirm password", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Import wallet" }).click();
 
   // Home view
@@ -46,16 +46,16 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await expect(page.getByText("Settings")).toBeVisible();
   await expect(page.locator("select#account option")).toHaveCount(2);
 
-  // Set per-profile names (saved on change/blur).
-  const name1 = page.getByLabel("Profile 1 name");
+  // Set per-profile labels (saved on change/blur).
+  const name1 = page.getByLabel("Profile 1 label");
   await name1.fill("Main");
   await name1.press("Tab");
-  await expect(page.getByLabel("Profile 1 name")).toHaveValue("Main");
+  await expect(page.getByLabel("Profile 1 label")).toHaveValue("Main");
 
-  const name2 = page.getByLabel("Profile 2 name");
+  const name2 = page.getByLabel("Profile 2 label");
   await name2.fill("Spending");
   await name2.press("Tab");
-  await expect(page.getByLabel("Profile 2 name")).toHaveValue("Spending");
+  await expect(page.getByLabel("Profile 2 label")).toHaveValue("Spending");
 
   // Back to home so the header switcher is visible
   await page.getByRole("button", { name: "← Back" }).click();

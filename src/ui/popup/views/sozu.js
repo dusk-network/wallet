@@ -21,7 +21,7 @@ import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -422,7 +422,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
           h("span", { class: "row-icon", html: iconSvg("server") }),
           h("span", { class: "row-main" }, [
             h("span", { class: "row-title", text: "Sozu's contract" }),
-            h("span", { class: "row-sub" }, [h("span", { class: "mono", title: poolContract, text: truncateMiddle(poolContract, 8, 8) })]),
+            h("span", { class: "row-sub" }, [h("span", { class: "mono", title: poolContract, text: shortAddress(poolContract) })]),
           ]),
           copyContract,
         ].filter(Boolean))

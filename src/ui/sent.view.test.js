@@ -132,7 +132,7 @@ describe("after Confirm", () => {
       ["upcoming", "Completed"],
     ]);
     expect(steps()[1][2]).toBe("Waiting for a block, usually about 10 seconds");
-    expect(rows()).toEqual(["Transaction ID3e6a0ec6…7eae84baCopy", "MemoLunch", "Network feeUp to 0.0025 DUSK"]);
+    expect(rows()).toEqual(["Transaction ID3e6a0e…ae84baCopy", "MemoLunch", "Network feeUp to 0.0025 DUSK"]);
     expect(app.actions.announce).toHaveBeenLastCalledWith("Sent to the network. Waiting for a block, usually about 10 seconds");
     // The review's draft is done with.
     expect(state.draft).toBeNull();

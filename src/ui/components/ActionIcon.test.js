@@ -39,9 +39,10 @@ describe("popup icons", () => {
       expect(iconSvg(name)).toMatch(/^<svg viewBox="0 0 24 24" aria-hidden="true"><(path|rect|circle) [^>]+\/>/);
     }
 
-    // The NFT mark and the icon-only buttons size and colour theirs.
+    // The icon-only buttons size and colour theirs, and rows their icons, the NFT mark among them.
     const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-    expect(css).toMatch(/\.icon-btn\.icon-only svg,\s*\.asset-ico svg,\s*button\.balance-refresh svg,/);
+    expect(css).toMatch(/\.icon-btn\.icon-only svg,\s*button\.balance-refresh svg,/);
+    expect(css).toMatch(/\.row-icon svg,\s*\.row-chev svg,/);
   });
 
   it("closes the QR scanner with a labelled close icon", async () => {

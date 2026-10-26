@@ -102,7 +102,7 @@ describe("Hide balances", () => {
       ["1,507.9383 DUSK", "1,507.9383 DUSK"],
       ["1,482.9383 DUSK", "1,482.9383 DUSK"],
       ["25 DUSK", "25 DUSK"],
-      ["123.45", "123.45"],
+      ["123.45 TKN", "123.45 TKN"],
     ]);
     expect(titles()).toEqual(["1,507.9383", null, "1,482.9383", "Reserved 5 DUSK", "25"]);
 
@@ -115,15 +115,11 @@ describe("Hide balances", () => {
     expect(act.render).toHaveBeenCalledTimes(1);
     expect(dom.document.activeElement).toBe(eye());
     expect(eyeState()).toEqual(["Hide balances", "Hide balances", "true", iconSvg("eye-off")]);
-    expect(values()).toEqual([...Array(3).fill(["•••• DUSK", "hidden DUSK"]), ["••••", "hidden"]]);
+    expect(values()).toEqual([...Array(3).fill(["•••• DUSK", "hidden DUSK"]), ["•••• TKN", "hidden TKN"]]);
     // No tooltip gives them away either, the shielded amount held back included.
     expect(titles()).toEqual([null, null, null, null, null]);
     // Their labels stay.
-    expect(body.querySelectorAll(".balance-split-label, .asset-sub").map(visibleText)).toEqual([
-      "Public",
-      "Shielded · Pending",
-      "Balance",
-    ]);
+    expect(body.querySelectorAll(".balance-split-label").map(visibleText)).toEqual(["Public", "Shielded · Pending"]);
     // Activity hides what transactions moved too.
     expect([visibleText(body.querySelector(".tx-amount")), screenReaderText(body.querySelector(".tx-amount"))]).toEqual([
       "•••• DUSK",
@@ -229,15 +225,15 @@ describe("hidden balances", () => {
   it("hide token balances on the dashboard and on the token's page", async () => {
     const state = { route: "asset_token", assets: assets(), assetTokenContractId: TOKEN };
     await show(assetsSectionsView(overview(HIDDEN), { state, actions: actions() }));
-    expect(seen(body.querySelector(".asset-amt"))).toEqual(["••••", "hidden"]);
+    expect(seen(body.querySelector(".asset-amt"))).toEqual(["•••• TKN", "hidden TKN"]);
 
     await show(assetTokenView(overview(HIDDEN), { state, actions: actions() }));
-    expect(seen(body.querySelector(".asset-token-balance-value"))).toEqual(["••••", "hidden"]);
-    const units = body.querySelectorAll(".asset-token-meta-row").find((row) => row.textContent.startsWith("Atomic units"));
-    expect([visibleText(units), units.querySelector("code").hasAttribute("title")]).toEqual(["Atomic units••••", false]);
+    expect(seen(body.querySelector(".asset-token-balance-value"))).toEqual(["•••• TKN", "hidden TKN"]);
+    const units = body.querySelectorAll(".kv").find((row) => row.textContent.startsWith("Atomic units"));
+    expect([visibleText(units), units.querySelector(".asset-token-units").hasAttribute("title")]).toEqual(["Atomic units••••", false]);
 
     await show(assetTokenView(overview(), { state, actions: actions() }));
-    expect(body.querySelector(".asset-token-balance-value").textContent).toBe("123.45");
+    expect(body.querySelector(".asset-token-balance-value").textContent).toBe("123.45 TKN");
   });
 
   it("hide Stake's balance, staked amounts and rewards, while Max and the balance check use the real ones", async () => {

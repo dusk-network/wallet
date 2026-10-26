@@ -47,8 +47,9 @@ describe("home dashboard action icons", () => {
       "utf8"
     );
 
-    expect(source).toContain('actionIcon("create", { className: "action-icon" })');
-    expect(source).toContain('actionIcon("import", { className: "action-icon" })');
+    expect(source).toContain('choice("create", "Create wallet"');
+    expect(source).toContain('choice("import", "Import wallet"');
+    expect(source).toContain('html: iconSvg(icon)');
     expect(source).not.toContain('class: "action-icon", text: "+"');
     expect(source).not.toContain("Testing? Create a wallet");
     expect(iconSource).toContain('create: [');
@@ -130,6 +131,42 @@ describe("home balance", () => {
 
     // Five show on the dashboard; See all lists them all.
     expect(render([1, 2, 3, 4, 5, 6].map((n) => tx(n, TX_KIND.SHIELD)))).toHaveLength(5);
+  });
+
+  it("shows an empty wallet how to get DUSK, with Receive, in place of Tokens and NFTs", async () => {
+    const { document } = installFakeDom();
+    const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const draw = (over = {}) => {
+      const ov = {
+        isUnlocked: true,
+        nodeUrl: "https://testnet.nodes.dusk.network",
+        accounts: [],
+        balance: { value: "0" },
+        shieldedBalance: { value: "0", spendable: "0" },
+        txs: [],
+        ...over,
+      };
+      document.body.replaceChildren(...homeView(ov, { state, actions }));
+      return document.body.querySelector(".home-get-started");
+    };
+    const card = draw();
+    expect(card.querySelector(".bracket-title").textContent).toBe("Get your first DUSK");
+    expect(card.querySelector("p").textContent).toBe("Ask someone to send you test DUSK. They need your account, from Receive.");
+    card.querySelector("button").click();
+    expect(state.route).toBe("receive");
+
+    // With DUSK, or anything that happened, the card makes way; so it does
+    // while the shielded balance is unknown or still syncing.
+    state.route = "home";
+    expect(draw({ balance: { value: "1000000000" } })).toBeNull();
+    expect(draw({ shieldedBalance: null })).toBeNull();
+    expect(draw({ shieldedSync: { state: "syncing", progress: 0.4 } })).toBeNull();
+    expect(draw({ txs: [{ hash: "ab".repeat(32), kind: TX_KIND.TRANSFER, amount: "1", status: "executed" }] })).toBeNull();
+    // On Mainnet, from an exchange too.
+    expect(draw({ nodeUrl: "https://nodes.dusk.network" }).querySelector("p").textContent).toBe(
+      "Withdraw DUSK from an exchange, or ask someone to send you some. Both start with your account, from Receive."
+    );
   });
 
   it("refreshes through the header's old Refresh action", async () => {

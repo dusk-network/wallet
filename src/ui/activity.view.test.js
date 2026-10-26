@@ -277,11 +277,11 @@ describe("a transaction's details", () => {
       "MemoOrder 1042",
       "Network fee0.0037 DUSK",
       "Fromalice.dusk · Public",
-      "Transaction ID3e6a0ec6…7eae84baCopy",
+      "Transaction ID3e6a0e…ae84baCopy",
     ]);
     // The ID opens Dusk's explorer; Copy and the address's copy say what they copy.
     const explorerUrl = `https://apps.testnet.dusk.network/explorer/transactions/transaction/?id=${sent.hash}`;
-    button(`Transaction 3e6a0ec6…7eae84ba, open in Dusk explorer`).click();
+    button(`Transaction 3e6a0e…ae84ba, open in Dusk explorer`).click();
     await settle();
     expect(openUrl).toHaveBeenLastCalledWith(explorerUrl);
     button("Copy transaction ID").click();

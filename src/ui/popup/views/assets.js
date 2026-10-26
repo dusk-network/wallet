@@ -3,7 +3,8 @@ import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { useNetworkGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { shortAddress } from "../../lib/strings.js";
+import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
@@ -16,10 +17,10 @@ const MAX_U64 = 18446744073709551615n;
 
 function normalizeContractIdInput(s) {
   const raw = String(s ?? "").trim();
-  if (!raw) throw new Error("Missing contract ID");
+  if (!raw) throw new Error("Enter a contract ID.");
   if (/^0x[0-9a-f]{64}$/i.test(raw)) return raw.toLowerCase();
   if (/^[0-9a-f]{64}$/i.test(raw)) return `0x${raw.toLowerCase()}`;
-  throw new Error("Invalid contract ID (expected 32-byte hex)");
+  throw new Error("That isn't a contract ID: it has 64 hex characters, after 0x.");
 }
 
 function contractIdsEqual(a, b) {
@@ -32,20 +33,20 @@ function contractIdsEqual(a, b) {
 
 function parseU64(s, { name = "value" } = {}) {
   const raw = String(s ?? "").trim();
-  if (!raw) throw new Error(`Missing ${name}`);
+  if (!raw) throw new Error(`Enter a ${name}.`);
   let n;
   try {
     n = BigInt(raw);
   } catch {
-    throw new Error(`Invalid ${name}: must be a u64 decimal string`);
+    throw new Error(`Enter the ${name} as a whole number.`);
   }
-  if (n < 0n || n > MAX_U64) throw new Error(`${name} out of range for u64`);
+  if (n < 0n || n > MAX_U64) throw new Error(`That ${name} is too large.`);
   return n.toString();
 }
 
 function parseDrcAccount(s, { name = "account" } = {}) {
   const raw = String(s ?? "").trim();
-  if (!raw) throw new Error(`Missing ${name}`);
+  if (!raw) throw new Error(`Enter a ${name}.`);
   if (/^0x[0-9a-f]{64}$/i.test(raw)) return { Contract: raw.toLowerCase() };
   return { External: raw };
 }
@@ -87,8 +88,8 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
 
 function parseTokenAmountHuman(raw, decimals) {
   const s = String(raw ?? "").trim();
-  if (!s) throw new Error("Missing amount");
-  if (s.startsWith("-")) throw new Error("Amount must be >= 0");
+  if (!s) throw new Error("Enter an amount.");
+  if (s.startsWith("-")) throw new Error("Enter an amount of 0 or more.");
 
   let d = Number(decimals ?? 0);
   if (!Number.isFinite(d) || d < 0) d = 0;
@@ -96,24 +97,25 @@ function parseTokenAmountHuman(raw, decimals) {
 
   if (!s.includes(".")) {
     // Integer amount in human units.
+    if (!/^[0-9]+$/.test(s)) throw new Error("Enter an amount such as 1 or 0.5.");
     const n = BigInt(s);
     const out = n * 10n ** BigInt(d);
-    if (out > MAX_U64) throw new Error("Amount out of range for u64");
+    if (out > MAX_U64) throw new Error("That amount is too large.");
     return out.toString();
   }
 
   const [intRaw, fracRaw = ""] = s.split(".");
-  if (intRaw && !/^[0-9]+$/.test(intRaw)) throw new Error("Invalid amount");
-  if (fracRaw && !/^[0-9]+$/.test(fracRaw)) throw new Error("Invalid amount");
+  if (intRaw && !/^[0-9]+$/.test(intRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
+  if (fracRaw && !/^[0-9]+$/.test(fracRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
 
   const intPart = intRaw ? BigInt(intRaw) : 0n;
   const fracDigits = fracRaw;
-  if (fracDigits.length > d) throw new Error(`Too many decimals (max ${d})`);
+  if (fracDigits.length > d) throw new Error(d ? `This token has at most ${d} decimals.` : "This token has no decimals.");
 
   const fracPadded = fracDigits.padEnd(d, "0");
   const combined = `${intPart.toString()}${fracPadded}`;
   const out = BigInt(combined);
-  if (out > MAX_U64) throw new Error("Amount out of range for u64");
+  if (out > MAX_U64) throw new Error("That amount is too large.");
   return out.toString();
 }
 
@@ -223,6 +225,31 @@ function inlineError() {
   };
 }
 
+// A key-value row, as Review and the details use them.
+const kv = (label, value, className = "") =>
+  h("div", { class: ["kv", className].filter(Boolean).join(" ") }, [
+    h("span", { class: "kv-label", text: label }),
+    h("span", { class: "kv-value" }, [].concat(value)),
+  ]);
+
+// A contract ID, short, with Copy beside it.
+function contractValue(cid, actions) {
+  return [
+    h("span", { class: "mono", title: cid, text: shortAddress(cid) }),
+    h("button", {
+      class: "copy-ico",
+      type: "button",
+      title: "Copy contract ID",
+      "aria-label": "Copy contract ID",
+      html: iconSvg("copy"),
+      onclick: async () => {
+        const ok = await copyToClipboard(cid);
+        actions?.showToast?.(ok ? "Contract ID copied" : "Couldn't copy the contract ID");
+      },
+    }),
+  ];
+}
+
 export function assetsSectionsView(ov, { state, actions } = {}) {
   const st = ensureTokenBalancesLoaded(ov, { state, actions });
   const hidden = balancesHidden(ov);
@@ -250,7 +277,8 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
     return h(
       "button",
       {
-        class: "activity-item asset-click-row",
+        class: "list-row asset-row",
+        type: "button",
         title: `Open ${sym}`,
         onclick: () => {
           state.assetTokenContractId = cid;
@@ -259,18 +287,12 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
         },
       },
       [
-        h("div", { class: "asset-ico", text: sym.slice(0, 1).toUpperCase() }),
-        h("div", { class: "asset-main" }, [
-          h("div", { class: "asset-sym", text: sym }),
-          h("div", { class: "asset-name", text: name, title: cid }),
+        h("span", { class: "row-icon asset-letter", "aria-hidden": "true", text: sym.slice(0, 1).toUpperCase() }),
+        h("span", { class: "row-main" }, [
+          h("span", { class: "row-title", text: sym }),
+          h("span", { class: "row-sub", text: name, title: cid }),
         ]),
-        h("div", { class: "asset-row-tail" }, [
-          h("div", { class: "asset-bal" }, [
-            h("div", { class: "asset-amt" }, [balance(hidden, bal)]),
-            h("div", { class: "asset-sub", text: "Balance" }),
-          ]),
-          h("div", { class: "activity-chevron", text: "›" }),
-        ]),
+        h("span", { class: "tx-amount asset-amt" }, [balance(hidden, bal), bal === "—" ? null : h("span", { class: "tx-unit", text: ` ${sym}` })].filter(Boolean)),
       ]
     );
   });
@@ -283,7 +305,8 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
     return h(
       "button",
       {
-        class: "activity-item asset-click-row",
+        class: "list-row asset-row",
+        type: "button",
         title: `Open ${sym} #${tokenId || "?"}`,
         onclick: () => {
           state.assetNft = { contractId: cid, tokenId };
@@ -292,41 +315,31 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
         },
       },
       [
-        h("div", { class: "asset-ico", html: iconSvg("nft") }),
-        h("div", { class: "asset-main" }, [
-          h("div", { class: "asset-sym", text: `${sym} #${tokenId || "?"}` }),
-          h("div", { class: "asset-name", text: name, title: cid }),
+        h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg("nft") }),
+        h("span", { class: "row-main" }, [
+          h("span", { class: "row-title", text: `${sym} #${tokenId || "?"}` }),
+          h("span", { class: "row-sub", text: name, title: cid }),
         ]),
-        h("div", { class: "asset-row-tail" }, [
-          h("div", { class: "asset-bal" }, [
-            h("div", { class: "asset-amt", text: "1" }),
-            h("div", { class: "asset-sub", text: "NFT" }),
-          ]),
-          h("div", { class: "activity-chevron", text: "›" }),
-        ]),
+        h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
       ]
     );
   });
 
-  const tokensCard = h("div", { class: "box asset-section-card" }, [
-    h("div", { class: "hrow" }, [
-      bracketTitle({ class: "asset-section-title", text: "Tokens" }),
-      h("button", { class: "btn-outline", text: "Add token", onclick: openAddToken }),
-    ]),
-    st?.loading ? h("div", { class: "muted", text: "Loading…" }) : null,
-    st?.error ? h("div", { class: "err", text: String(st.error) }) : null,
-    tokenRows.length ? h("div", { class: "activity-list" }, tokenRows) : h("div", { class: "muted", text: "No tokens added." }),
-  ].filter(Boolean));
-
-  const nftCard = h("div", { class: "box asset-section-card" }, [
-    h("div", { class: "hrow" }, [
-      bracketTitle({ class: "asset-section-title", text: "NFTs" }),
-      h("button", { class: "btn-outline", text: "Import NFT", onclick: openAddNft }),
-    ]),
-    nftRows.length ? h("div", { class: "activity-list" }, nftRows) : h("div", { class: "muted", text: "No NFTs added." }),
-  ]);
-
-  return [tokensCard, nftCard];
+  // Tokens and NFTs, one section with its two actions in its head.
+  const link = (text, onclick) => h("button", { class: "see-all", type: "button", text, onclick });
+  const rows = [...tokenRows, ...nftRows];
+  return [
+    h("section", { class: "box home-assets" }, [
+      h("div", { class: "section-head" }, [
+        bracketTitle({ text: "Tokens and NFTs" }),
+        h("div", { class: "section-actions" }, [link("Add token", openAddToken), link("Import NFT", openAddNft)]),
+      ]),
+      st?.error ? h("div", { class: "err", text: String(st.error) }) : null,
+      rows.length
+        ? h("div", { class: "group" }, rows)
+        : h("div", { class: "group" }, [h("p", { class: "tx-empty", text: st?.loading ? "Loading…" : "No tokens or NFTs yet." })]),
+    ].filter(Boolean)),
+  ];
 }
 
 export function assetAddTokenView(ov, { state, actions } = {}) {
@@ -353,7 +366,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
 
   const lookupBtn = h("button", {
     class: "btn-outline",
-    text: "Lookup",
+    text: st.loading ? "Looking up…" : "Look up",
     disabled: Boolean(st.loading),
     onclick: async () => {
       try {
@@ -405,10 +418,10 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
   });
   const addError = inlineError();
   const metaBox = st.meta
-    ? h("div", { class: "box" }, [
-        h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Name" }), h("code", { text: String(st.meta?.name ?? "—") })]),
-        h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Symbol" }), h("code", { text: String(st.meta?.symbol ?? "—") })]),
-        h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Decimals" }), h("code", { text: String(st.meta?.decimals ?? "—") })]),
+    ? h("div", { class: "group" }, [
+        kv("Name", String(st.meta?.name ?? "—")),
+        kv("Symbol", String(st.meta?.symbol ?? "—")),
+        kv("Decimals", String(st.meta?.decimals ?? "—")),
       ])
     : null;
 
@@ -417,10 +430,11 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
     h("div", { class: "row" }, [
       fieldLabel(input, "Contract ID"),
       input,
-      h("div", { class: "btnrow" }, [lookupBtn, addBtn]),
-      addError.el,
-      st.error ? h("div", { class: "err", text: String(st.error) }) : null,
+      st.error ? h("div", { class: "field-error", role: "alert", text: String(st.error) }) : null,
+      lookupBtn,
       metaBox,
+      addError.el,
+      addBtn,
     ].filter(Boolean)),
   ];
 }
@@ -459,7 +473,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
 
   const lookupBtn = h("button", {
     class: "btn-outline",
-    text: "Lookup",
+    text: st.loading ? "Looking up…" : "Look up",
     disabled: Boolean(st.loading),
     onclick: async () => {
       try {
@@ -503,12 +517,12 @@ export function assetAddNftView(ov, { state, actions } = {}) {
     disabled: Boolean(st.loading) || !st.info,
     onclick: async () => {
       try {
-        if (!st.info) throw new Error("Lookup an NFT first");
+        if (!st.info) throw new Error("Look up the NFT first.");
         const me = String(ov?.accounts?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "").trim();
         const owner = st.info?.owner;
         const ownerStr = accountEnumToString(owner);
         if (!me || !(owner && typeof owner === "object" && owner.External === me)) {
-          throw new Error(`You do not own this NFT (owner is ${truncateMiddle(ownerStr, 10, 8)})`);
+          throw new Error(`This NFT belongs to ${shortAddress(ownerStr)}, not to this profile.`);
         }
 
         const resp = await actions?.send?.({
@@ -539,13 +553,15 @@ export function assetAddNftView(ov, { state, actions } = {}) {
         const owned = Boolean(owner && typeof owner === "object" && owner.External === me);
         const ownerStr = accountEnumToString(owner);
 
-        return h("div", { class: "box" }, [
-          h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Name" }), h("code", { text: String(st.info?.meta?.name ?? "—") })]),
-          h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Symbol" }), h("code", { text: String(st.info?.meta?.symbol ?? "—") })]),
-          h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Token ID" }), h("code", { text: String(st.info?.tokenId ?? "—") })]),
-          h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Owner" }), h("code", { text: ownerStr || "—", title: ownerStr })]),
-          h("div", { class: owned ? "muted" : "err", text: owned ? "Owned by this account." : "Not owned by this account." }),
-          st.info?.tokenUri ? h("div", { class: "muted", text: `Token URI: ${st.info.tokenUri}` }) : h("div", { class: "muted", text: "Token URI is empty for this contract." }),
+        return h("div", { class: "group" }, [
+          kv("Name", String(st.info?.meta?.name ?? "—")),
+          kv("Symbol", String(st.info?.meta?.symbol ?? "—")),
+          kv("Token ID", String(st.info?.tokenId ?? "—")),
+          kv("Owner", [
+            h("span", { class: "mono", title: ownerStr, text: ownerStr ? shortAddress(ownerStr) : "—" }),
+            h("span", { class: owned ? "kv-muted" : "kv-bad", text: owned ? " · this profile" : " · not this profile" }),
+          ]),
+          kv("Token URI", st.info?.tokenUri ? String(st.info.tokenUri) : "None", "kv--wrap"),
         ]);
       })()
     : null;
@@ -557,10 +573,11 @@ export function assetAddNftView(ov, { state, actions } = {}) {
       contractInput,
       fieldLabel(tokenIdInput, "Token ID"),
       tokenIdInput,
-      h("div", { class: "btnrow" }, [lookupBtn, importBtn]),
-      importError.el,
-      st.error ? h("div", { class: "err", text: String(st.error) }) : null,
+      st.error ? h("div", { class: "field-error", role: "alert", text: String(st.error) }) : null,
+      lookupBtn,
       infoBox,
+      importError.el,
+      importBtn,
     ].filter(Boolean)),
   ];
 }
@@ -626,7 +643,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     try {
       const to = parseDrcAccount(form.to, { name: "recipient" });
       const valueUnits = parseTokenAmountHuman(form.amount, dec);
-      if (safeBigInt(valueUnits, 0n) <= 0n) throw new Error("Amount must be > 0");
+      if (safeBigInt(valueUnits, 0n) <= 0n) throw new Error("Enter an amount greater than 0.");
 
       const enc = await actions?.send?.({
         type: "DUSK_UI_DRC20_ENCODE_INPUT",
@@ -671,7 +688,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     try {
       const spender = parseDrcAccount(form.spender, { name: "spender" });
       const valueUnits = max ? MAX_U64.toString() : parseTokenAmountHuman(form.approveAmount, dec);
-      if (safeBigInt(valueUnits, 0n) < 0n) throw new Error("Amount must be >= 0");
+      if (safeBigInt(valueUnits, 0n) < 0n) throw new Error("Enter an amount of 0 or more.");
 
       const enc = await actions?.send?.({
         type: "DUSK_UI_DRC20_ENCODE_INPUT",
@@ -713,31 +730,22 @@ export function assetTokenView(ov, { state, actions } = {}) {
   };
   const approveError = inlineError();
 
-  const tokenHero = h("div", { class: "box asset-token-hero" }, [
-    h("div", { class: "asset-token-head" }, [
-      h("div", { class: "asset-token-icon", text: sym.slice(0, 1).toUpperCase() }),
-      h("div", { class: "asset-token-titleblock" }, [
-        h("div", { class: "asset-token-symbol", text: sym }),
-        h("div", { class: "asset-token-name", text: name, title: cid }),
-      ]),
-    ]),
-    h("div", { class: "asset-token-balance" }, [
-      h("div", { class: "asset-token-balance-label", text: "Balance" }),
-      h("div", { class: "asset-token-balance-value" }, [balance(hidden, balHuman)]),
-    ]),
-    h("div", { class: "asset-token-meta" }, [
-      h("div", { class: "asset-token-meta-row" }, [
-        h("span", { text: "Contract" }),
-        h("code", { text: truncateMiddle(cid, 12, 10), title: cid }),
-      ]),
-      balUnits != null
-        ? h("div", { class: "asset-token-meta-row" }, [
-            h("span", { text: "Atomic units" }),
-            h("code", { title: hidden ? undefined : String(balUnits) }, [balance(hidden, String(balUnits))]),
-          ])
-        : null,
+  // The token: its letter, its name, then its balance, large.
+  const tokenHero = h("div", { class: "tx-hero asset-token-hero" }, [
+    h("span", { class: "row-icon tx-hero-icon asset-letter", "aria-hidden": "true", text: sym.slice(0, 1).toUpperCase() }),
+    h("div", { class: "tx-hero-lead", text: name, title: cid }),
+    h("div", { class: "tx-hero-amount asset-token-balance-value" }, [
+      balance(hidden, balHuman),
+      balHuman === "—" ? null : h("span", { class: "tx-unit", text: ` ${sym}` }),
     ].filter(Boolean)),
   ]);
+  const tokenMeta = h("div", { class: "group" }, [
+    kv("Contract", contractValue(cid, actions)),
+    kv("Decimals", String(dec)),
+    balUnits != null
+      ? kv("Atomic units", h("span", { class: "mono asset-token-units", title: hidden ? undefined : String(balUnits) }, [balance(hidden, String(balUnits))]))
+      : null,
+  ].filter(Boolean));
 
   const transferToInput = textInput({
     name: "assetTokenRecipient",
@@ -761,10 +769,8 @@ export function assetTokenView(ov, { state, actions } = {}) {
 
   const reviewTransferBtn = h("button", { class: "btn-primary", text: "Review transfer", onclick: reviewTransfer });
 
-  const sendSection = h("div", { class: "box asset-action-section" }, [
-    h("div", { class: "asset-action-head" }, [
-      h("div", { class: "asset-action-title", text: "Send" }),
-    ]),
+  const sendSection = h("section", { class: "asset-action-section" }, [
+    h("h2", { class: "bracket-title asset-action-title" }, [h("span", { class: "bracket-title__text", text: `Send ${sym}` })]),
     fieldLabel(transferToInput, "Recipient"),
     transferToInput,
     fieldLabel(transferAmountInput, "Amount"),
@@ -774,9 +780,10 @@ export function assetTokenView(ov, { state, actions } = {}) {
   ]);
 
   const approveMaxBtn = h("button", {
-    class: "btn-outline",
-    text: "MAX",
-    title: "Unlimited allowance (u64::MAX). Use with caution.",
+    class: "mini-btn",
+    type: "button",
+    text: "Unlimited",
+    title: "No limit on what the spender can move. Use with care.",
     onclick: async () => reviewApprove({ max: true }),
   });
 
@@ -805,33 +812,25 @@ export function assetTokenView(ov, { state, actions } = {}) {
     text: "Review approval",
     onclick: () => reviewApprove({ max: false }),
   });
-  const approveSection = h("div", { class: "box asset-action-section" }, [
-    h("div", { class: "asset-action-head" }, [
-      h("div", { class: "asset-action-title", text: "Approve" }),
-      h("div", { class: "asset-action-subtitle", text: `Let another account or contract spend ${sym}.` }),
-    ]),
+  const approveSection = h("section", { class: "asset-action-section" }, [
+    h("h2", { class: "bracket-title asset-action-title" }, [h("span", { class: "bracket-title__text", text: "Approve" })]),
+    h("p", { class: "asset-action-note", text: `Let another account or contract spend your ${sym}. An exact amount is safer than Unlimited.` }),
     fieldLabel(approveSpenderInput, "Spender"),
     approveSpenderInput,
     fieldLabel(approveAmountInput, "Allowance"),
-    h("div", { class: "hrow" }, [
-      approveAmountInput,
-      approveMaxBtn,
-    ]),
+    h("div", { class: "asset-allowance" }, [approveAmountInput, approveMaxBtn]),
     approveError.el,
     reviewApproveBtn,
-    h("div", {
-      class: "asset-action-note",
-      text: "MAX approvals grant broad spending permission. Prefer exact amounts.",
-    }),
   ]);
 
   return [
     subnav({ title: sym, onBack }),
     h("div", { class: "row asset-token-page" }, [
       tokenHero,
+      tokenMeta,
       sendSection,
       approveSection,
-      h("button", { class: "btn-outline asset-remove-btn", text: "Remove token", onclick: doUnwatch }),
+      h("button", { class: "text-btn asset-remove-btn", type: "button", text: "Remove token", onclick: doUnwatch }),
     ]),
   ];
 }
@@ -882,29 +881,12 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   const valueUnits = String(d?.asset?.valueUnits ?? d?.asset?.value ?? "0");
   const valueHuman = formatTokenUnits(valueUnits, dec, { maxFrac: UI_DISPLAY_DECIMALS });
 
-  const title =
-    op === "transfer"
-      ? `Send ${valueHuman} ${sym}`
-      : op === "approve"
-      ? `Approve ${sym}`
-      : "Contract call";
-
-  const subtitle =
-    op === "transfer"
-      ? d?.asset?.to
-        ? `to ${truncateMiddle(String(d.asset.to), 12, 10)}`
-        : ""
-      : op === "approve"
-      ? d?.asset?.spender
-        ? `spender ${truncateMiddle(String(d.asset.spender), 12, 10)}`
-        : ""
-      : "";
-
   const warn =
     op === "approve" && d?.asset?.isMax
-      ? h("div", {
-          class: "err",
-          text: "Unlimited approval. The spender can transfer any amount of this token from your account.",
+      ? h("p", {
+          class: "field-error asset-unlimited",
+          role: "alert",
+          text: `Unlimited: the spender can move any amount of your ${sym}.`,
         })
       : null;
 
@@ -942,7 +924,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
         amountDisplay: op === "approve" && d?.asset?.isMax ? "" : valueHuman,
         amountText: op === "approve" && d?.asset?.isMax ? "Unlimited" : "",
         unit: sym,
-        to: counterparty ? { name: "", address: counterparty, short: truncateMiddle(counterparty, 6, 6) } : null,
+        to: counterparty ? { name: "", address: counterparty, short: shortAddress(counterparty) } : null,
         from: "from your public balance",
         feeCapLux: (safeBigInt(capGas?.limit, 0n) * safeBigInt(capGas?.price, 0n)).toString(),
       },
@@ -962,14 +944,23 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   });
   submitOnGasEnter(gasEditor, confirmBtn);
 
+  const counterpartyAddr = String(op === "approve" ? d?.asset?.spender ?? "" : d?.asset?.to ?? "");
   return [
     subnav({ title: "Review", onBack }),
-    h("div", { class: "row" }, [
-      h("div", { class: "box tx-summary" }, [
-        h("div", { class: "muted", text: title }),
-        subtitle ? h("div", { class: "muted", text: subtitle }) : null,
-        h("div", { class: "muted", text: `Units: ${valueUnits}` }),
-        h("div", { class: "muted" }, [h("code", { text: String(params?.contractId ?? "") })]),
+    h("div", { class: "row asset-review" }, [
+      h("div", { class: "review-head" }, [
+        h("div", { class: "review-kind", text: op === "approve" ? `Approve ${sym}` : op === "transfer" ? `Send ${sym}` : "Contract call" }),
+        h("div", { class: "balance-amount" }, [
+          op === "approve" && d?.asset?.isMax ? "Unlimited" : valueHuman,
+          h("span", { class: "balance-unit", text: ` ${sym}` }),
+        ]),
+      ].filter(Boolean)),
+      h("div", { class: "group" }, [
+        counterpartyAddr
+          ? kv(op === "approve" ? "Spender" : "To", h("span", { class: "mono review-to__address", text: counterpartyAddr }), "kv--wrap")
+          : null,
+        kv("Token", contractValue(String(params?.contractId ?? ""), actions)),
+        kv("Atomic units", h("span", { class: "mono", text: valueUnits })),
       ].filter(Boolean)),
       warn,
       gasEditor,
@@ -1028,19 +1019,19 @@ export function assetNftView(ov, { state, actions } = {}) {
 
   return [
     subnav({ title: `${sym} #${tokenId}`, onBack }),
-    h("div", { class: "row" }, [
-      h("div", { class: "box tx-summary" }, [
-        h("div", { class: "muted", text: name }),
-        h("div", { class: "muted" }, [h("code", { text: cid })]),
-        tokenUri ? h("div", { class: "muted", text: `Token URI: ${tokenUri}` }) : h("div", { class: "muted", text: "Token URI is empty." }),
+    h("div", { class: "row asset-nft-page" }, [
+      h("div", { class: "tx-hero" }, [
+        h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true", html: iconSvg("nft") }),
+        h("h2", { class: "tx-hero-name", text: `${sym} #${tokenId}` }),
+        h("div", { class: "tx-hero-lead", text: name }),
       ]),
-      tokenUri
-        ? h("div", {
-            class: "muted",
-            text: "Media previews are disabled for now.",
-          })
-        : null,
-      h("button", { class: "btn-outline", text: "Remove NFT", onclick: doUnwatch }),
+      h("div", { class: "group" }, [
+        kv("Contract", contractValue(cid, actions)),
+        kv("Token ID", tokenId),
+        kv("Token URI", tokenUri || "None", "kv--wrap"),
+      ]),
+      tokenUri ? h("p", { class: "asset-action-note", text: "Media previews are off for now." }) : null,
+      h("button", { class: "text-btn asset-remove-btn", type: "button", text: "Remove NFT", onclick: doUnwatch }),
     ].filter(Boolean)),
   ];
 }
