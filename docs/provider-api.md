@@ -343,6 +343,17 @@ field schema. A short `{ label: "Human-readable action" }` is the recommended
 minimum for custom calls with opaque arguments. Users must still verify the
 contract ID, function, amounts, and deposit shown separately by the wallet.
 
+The approval shows every call's arguments as their size and SHA-256
+(`40 bytes · sha256=2f64b19f5ac0…731c7c2a`), so a dApp can show the same line
+for users to match. The wallet reads the DuskEVM bridge's own calls on
+Testnet, through the Testnet node: `depositETHToWithValue` on the
+L1StandardBridge (the DuskEVM recipient and amount, checked against the
+`deposit`), and `proveWithdrawalTransaction` and
+`finalizeWithdrawalTransaction` on the OptimismPortal (the withdrawal's amount
+and the Dusk account it pays). It marks them "Known DuskEVM bridge call".
+Arguments that don't decode exactly as the bridge encodes them, and every
+call on Mainnet until the bridge is configured there, stay opaque.
+
 ---
 
 ### `dusk_watchAsset`

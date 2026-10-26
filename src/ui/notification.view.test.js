@@ -1,6 +1,8 @@
 import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
+import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
 import { fakeEvent, installFakeDom, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
 
@@ -63,6 +65,8 @@ async function render(kind, params = {}, over = {}) {
     kind,
     origin: "https://dapp.example",
     params,
+    nodeUrl: TESTNET,
+    networkName: "Testnet",
     hasVault: true,
     isUnlocked: true,
     accounts: [MAIN, SAVINGS],
@@ -79,9 +83,15 @@ async function render(kind, params = {}, over = {}) {
   await renderNotification();
 }
 
-// The value box under a row's muted label.
-const box = (label) =>
-  app.querySelectorAll(".row").find((row) => row.children[0]?.textContent === label)?.children[1];
+// A key-value row's value, by its label.
+const row = (label) =>
+  app.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === label)?.querySelector(".kv-value");
+// The bar with Reject and the approve button, under the page.
+const bar = () => dom.document.getElementById("approval-actions");
+const buttons = () => bar().querySelectorAll("button").map((b) => b.textContent);
+const approve = () => bar().querySelector(".btn-primary");
+const head = () => app.querySelector(".ap-head");
+const decision = (decision) => mocks.sent.find((m) => m.type === "DUSK_PENDING_DECISION" && m.decision === decision);
 
 const TESTNET = "https://testnet.nodes.dusk.network";
 
@@ -93,14 +103,16 @@ const transfer = (to, over = {}) => ({
   amount: "1000000000",
   chainId: "dusk:2",
   nodeUrl: TESTNET,
+  networkName: "Testnet",
   ...over,
 });
 
-// The To box's full address, and the line under it: null when there is none.
+// Whom the head says it pays: the name or short address that leads, and your
+// label for it (null without one).
 function recipient() {
-  const to = box("To");
-  const line = to.querySelector(".recipient-line");
-  return { address: to.querySelector("code").textContent, line: line && visibleText(line) };
+  const lead = head().querySelector(".ap-recipient__lead");
+  const tag = head().querySelector(".ap-recipient__tag");
+  return { lead: lead.textContent, tag: tag && visibleText(tag) };
 }
 
 // The recipients whose .dusk name the approval asked the background for.
@@ -109,19 +121,20 @@ const nameAsks = () => mocks.sent.filter((m) => m.type === "DUSK_UI_RECIPIENT_NA
 // A name over its account, the account short (6…6) with the full one in its
 // tooltip and, for screen readers, in place of the short one.
 function expectNamedAccount(el, name, account) {
-  expect(el.classList.contains("named-address")).toBe(true);
-  expect(el.querySelector(".dusk-name").textContent).toBe(name);
-  const code = el.querySelector("code");
+  const named = el.querySelector(".named-address");
+  expect(named.querySelector(".dusk-name").textContent).toBe(name);
+  const code = named.querySelector("code");
   expect([visibleText(code), code.title, screenReaderText(code)]).toEqual([shortAddress(account), account, account]);
-  expect(visibleText(el)).toBe(`${name}${shortAddress(account)}`);
+  expect(visibleText(named)).toBe(`${name}${shortAddress(account)}`);
 }
 
 describe("connect approval", () => {
   it("offers each profile as a card with its label, its checked .dusk name and its short account", async () => {
     await render("connect", { requestedProfiles: true });
 
+    expect(head().querySelector("h1").textContent).toBe("Connect this site?");
     const group = app.querySelector("[role=radiogroup]");
-    expect(app.querySelector(`#${group.getAttribute("aria-labelledby")}`).textContent).toBe("Profile");
+    expect(app.querySelector(`#${group.getAttribute("aria-labelledby")}`).textContent).toBe("Choose a profile");
     expect(app.querySelector("select")).toBeNull();
 
     const [main, savings] = group.querySelectorAll(".profile-option");
@@ -138,6 +151,18 @@ describe("connect approval", () => {
     expect(visibleText(savings)).toBe(`Profile 2${shortAddress(SAVINGS)}`);
   });
 
+  it("says plainly what the site sees, that it can't move funds, and until when", async () => {
+    await render("connect", { requestedProfiles: true });
+
+    const facts = app.querySelectorAll(".ap-facts .list-row").map(visibleText);
+    expect(facts).toEqual([
+      `Sees your public address, .dusk name and balancealice.dusk · ${shortAddress(MAIN)}, until you disconnect it`,
+      "Can't move funds without your approvalEvery payment and signature asks you here first.",
+    ]);
+    expect(app.textContent).not.toContain("only be able to use");
+    expect(buttons()).toEqual(["Reject", "Connect"]);
+  });
+
   it("picks the connected profile with native radios and connects the one picked", async () => {
     await render("connect", { requestedProfiles: true }, { permissionAccountIndex: 1 });
 
@@ -151,13 +176,15 @@ describe("connect approval", () => {
     expect(radios.map((radio) => radio.checked)).toEqual([false, true]);
     expect(cards.map((card) => card.classList.contains("is-checked"))).toEqual([false, true]);
 
-    // Arrow keys or a click check the other radio, which reports a change.
+    // Arrow keys or a click check the other radio, which reports a change, and
+    // the facts follow the profile picked.
     radios[0].checked = true;
     radios[0].dispatchEvent(fakeEvent("change"));
     expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
     expect(cards.map((card) => card.classList.contains("is-checked"))).toEqual([true, false]);
+    expect(visibleText(app.querySelector(".ap-facts"))).toContain(`alice.dusk · ${shortAddress(MAIN)}`);
 
-    app.querySelector(".btn-primary").click();
+    approve().click();
     await vi.waitFor(() =>
       expect(mocks.sent).toContainEqual({
         type: "DUSK_PENDING_DECISION",
@@ -168,19 +195,42 @@ describe("connect approval", () => {
     );
   });
 
-  it("keeps the shielded disclosure with the profile that has the grant", async () => {
+  it("gives a request for the shielded address its own title, facts and button", async () => {
+    // A connected site asks for more.
+    await render("connect", { requestedProfiles: true, shieldedReceiveAddress: true, currentAccountIndex: 0, currentGrants: {} });
+    expect(head().querySelector("h1").textContent).toBe("Share your shielded address?");
+    const facts = () => app.querySelectorAll(".ap-facts .row-title").map((t) => t.textContent);
+    expect(facts()).toEqual(["Gets your shielded address", "Can't move funds without your approval"]);
+    expect(buttons()).toEqual(["Reject", "Share"]);
+    approve().click();
+    await vi.waitFor(() => expect(decision("approve")?.approvedParams).toEqual({ accountIndex: 0, shieldedReceiveAddress: true }));
+
+    // A site that isn't connected yet asks for both.
+    await render("connect", { requestedProfiles: true, shieldedReceiveAddress: true, currentAccountIndex: null }, { permissionAccountIndex: null });
+    expect(head().querySelector("h1").textContent).toBe("Connect and share your shielded address?");
+    expect(facts()).toEqual([
+      "Sees your public address, .dusk name and balance",
+      "Gets your shielded address",
+      "Can't move funds without your approval",
+    ]);
+    expect(buttons()).toEqual(["Reject", "Connect"]);
+  });
+
+  it("keeps the shielded address with the profile that has the grant", async () => {
     await render(
       "connect",
       { requestedProfiles: true, currentAccountIndex: 1, currentGrants: { shieldedReceiveAddress: true } },
       { permissionAccountIndex: 1 }
     );
-    const disclosure = () => box("Profile").parentNode.children[2].textContent;
-    expect(disclosure()).toContain("shareable shielded receive address");
+    const facts = () => app.querySelectorAll(".ap-facts .row-title").map((t) => t.textContent);
+    expect(facts()).toContain("Gets your shielded address");
 
     const radio = app.querySelectorAll(".profile-option input")[0];
     radio.checked = true;
     radio.dispatchEvent(fakeEvent("change"));
-    expect(disclosure()).toBe("The site will only be able to use the selected profile's public account.");
+    expect(facts()).not.toContain("Gets your shielded address");
+    approve().click();
+    await vi.waitFor(() => expect(decision("approve")?.approvedParams).toEqual({ accountIndex: 0, shieldedReceiveAddress: false }));
   });
 
   it("shows a single profile as its card, with nothing to pick", async () => {
@@ -194,79 +244,127 @@ describe("connect approval", () => {
   });
 });
 
-describe("sign and send approvals", () => {
-  it("shows the signing profile's checked .dusk name over its short account", async () => {
-    await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: 2 });
-    expectNamedAccount(box("Account"), "alice.dusk", MAIN);
+describe("sign approvals", () => {
+  it("shows a readable message as text and the signing profile's checked .dusk name", async () => {
+    await render("sign_message", {
+      chainId: "dusk:2",
+      messageHash: `0x${"ab".repeat(32)}`,
+      messageLen: 25,
+      messagePreview: { kind: "text", text: "I agree to the shop terms", truncated: false },
+    });
+    expect(app.querySelector(".ap-message").textContent).toBe("I agree to the shop terms");
+    expectNamedAccount(row("Account"), "alice.dusk", MAIN);
+    expect(row("Message hash").textContent).toBe(`25 bytes · sha256=0x${"ab".repeat(5)}…${"ab".repeat(4)}`);
+    expect(buttons()).toEqual(["Reject", "Sign"]);
+    // The chain sits under Details.
+    expect(app.querySelector("details").textContent).toContain("dusk:2");
+  });
+
+  it("says bytes that aren't text are bytes", async () => {
+    await render("sign_message", { chainId: "dusk:2", messageLen: 3, messagePreview: { kind: "opaque", reason: "invalid_utf8" } });
+    expect(visibleText(app.querySelector(".ap-message"))).toBe("3 bytesIt isn't readable text. Only sign it if you trust this site.");
   });
 
   it("shows the account alone, in full, while no checked name is known", async () => {
     await render("sign_auth", { chainId: "dusk:2", nonce: "n-1" }, { duskNames: {} });
-    const account = box("Account");
-    expect(account.classList.contains("named-address")).toBe(false);
+    const account = row("Account");
+    expect(account.querySelector(".dusk-name")).toBeNull();
     expect(visibleText(account)).toBe(MAIN);
+    expect(buttons()).toEqual(["Reject", "Sign in"]);
+  });
+});
+
+describe("a site's request to pay", () => {
+  it("leads with the amount, whom it pays and Approve; the chain and node sit under Details", async () => {
+    await render("send_tx", transfer(BOB, { amount: "1500000000", memo: "Order 1042" }));
+
+    expect(app.children[0].classList.contains("ap-site")).toBe(true);
+    expect(app.children[1]).toBe(head());
+    expect(head().querySelector("h1").textContent).toBe("Pay");
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("1.5 DUSK");
+    expect(buttons()).toEqual(["Reject", "Approve"]);
+    // dusk:2 and the node's URL only under Details.
+    const details = app.querySelector("details");
+    expect(details.open).toBe(false);
+    for (const technical of ["dusk:2", TESTNET]) {
+      expect(details.textContent).toContain(technical);
+      expect(app.textContent.split(technical)).toHaveLength(2);
+    }
   });
 
-  it("names the profile that pays a public transfer, and a recipient of yours by its label", async () => {
-    // The recipient is the wallet's other profile, whose name is known.
-    await render("send_tx", transfer(SAVINGS), { duskNames: { [MAIN]: "alice.dusk", [SAVINGS]: "bob.dusk" } });
-    expectNamedAccount(box("From"), "alice.dusk", MAIN);
-    expect(recipient()).toEqual({ address: SAVINGS, line: "Profile 2 · your profile" });
-    expect(app.textContent).not.toContain("bob.dusk");
+  it("shows exactly the amount asked, every decimal", async () => {
+    await render("send_tx", transfer(BOB, { amount: "1000090001" }));
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("1.000090001 DUSK");
   });
 
-  it("names no one for a shielded transfer, which the shielded balance pays", async () => {
-    await render("send_tx", { kind: "transfer", privacy: "shielded", to: ADDRESS, amount: "1", chainId: "dusk:2" });
-    expect(visibleText(box("From"))).toBe("Phoenix shielded balance");
-    expect(app.textContent).not.toContain("alice.dusk");
+  it("says what a public transfer makes visible to everyone, under which name", async () => {
+    const visible = () => app.querySelector(".ap-visible")?.textContent ?? null;
+    await render("send_tx", transfer(BOB, { memo: "Order 1042" }));
+    expect(visible()).toBe("Visible to everyone: amount, memo, and your name alice.dusk.");
+    await render("send_tx", transfer(BOB));
+    expect(visible()).toBe("Visible to everyone: amount and your name alice.dusk.");
+    await render("send_tx", transfer(BOB, { memo: "x" }), { duskNames: {} });
+    expect(visible()).toBe("Visible to everyone: amount, memo, and your public address.");
+    await render("send_tx", transfer(ADDRESS, { privacy: "shielded" }));
+    expect(visible()).toBeNull();
   });
 
-  it("names the profile that pays a contract call", async () => {
-    await render("send_tx", {
-      kind: "contract_call",
-      contractId: `0x${"11".repeat(32)}`,
-      fnName: "stake",
-      fnArgs: "0x00",
-      chainId: "dusk:2",
-    });
-    expectNamedAccount(box("From"), "alice.dusk", MAIN);
-    expect(visibleText(box("Contract"))).toBe(`0x${"11".repeat(32)}`);
+  it("names the paying profile and the rail in plain words", async () => {
+    await render("send_tx", transfer(BOB));
+    expect(visibleText(row("From"))).toBe("alice.dusk · Public");
+    await render("send_tx", transfer(ADDRESS, { privacy: "shielded" }));
+    expect(visibleText(row("From"))).toBe("Your shielded balance");
+    expect(app.textContent).not.toMatch(/Moonlight|Phoenix/);
+  });
+
+  it("refuses a gas edit that won't do under the buttons, and sends nothing", async () => {
+    await render("send_tx", transfer(BOB));
+    const editorError = new Error("Provide both gas limit and gas price (or clear both to use wallet defaults).");
+    app.querySelector("dusk-gas-editor").readOverrideGas = () => {
+      throw editorError;
+    };
+    approve().click();
+    await settle();
+    const error = bar().querySelector(".field-error");
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toBe(editorError.message);
+    expect(decision("approve")).toBeUndefined();
+    expect(globalThis.alert).not.toHaveBeenCalled();
   });
 });
 
 describe("the recipient of a site's request to send", () => {
-  const setByRecipient = (name) => `${name} · name set by the recipient`;
   const answerName = (result) => {
     mocks.answers.DUSK_UI_RECIPIENT_NAME = async () => ({ ok: true, result });
   };
 
-  it("shows the .dusk name the recipient set, once checked, under its full address and nowhere else", async () => {
+  it("leads with the .dusk name the recipient set, once checked, and shows the full address under To", async () => {
     answerName("carol.dusk");
     await render("send_tx", transfer(CAROL));
 
-    await vi.waitFor(() => expect(recipient()).toEqual({ address: CAROL, line: setByRecipient("carol.dusk") }));
+    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: null }));
     expect(mocks.sent).toContainEqual({ type: "DUSK_UI_RECIPIENT_NAME", rid: "r1", recipient: CAROL });
-    expect(box("To").querySelector(".recipient-line__label").title).toBe("carol.dusk");
+    expect(head().querySelector(".ap-recipient__lead").title).toBe(`carol.dusk · ${CAROL}`);
+    expect(row("To").textContent).toBe(CAROL);
     expect(app.textContent.split("carol.dusk")).toHaveLength(2);
   });
 
-  it("keeps the name's line from the first paint, so nothing moves when it comes and Approve doesn't wait", async () => {
+  it("shows the short address until the name comes, in the same line, and Approve doesn't wait", async () => {
     let answer;
     mocks.answers.DUSK_UI_RECIPIENT_NAME = () => new Promise((resolve) => (answer = resolve));
     await render("send_tx", transfer(CAROL));
-    const to = box("To");
-    const line = to.querySelector(".recipient-line");
-    expect(recipient()).toEqual({ address: CAROL, line: "" });
+    const lead = head().querySelector(".ap-recipient__lead");
+    expect(recipient()).toEqual({ lead: shortAddress(CAROL), tag: null });
+    expect(lead.classList.contains("mono")).toBe(true);
 
-    app.querySelector(".btn-primary").click();
-    await vi.waitFor(() =>
-      expect(mocks.sent).toContainEqual(expect.objectContaining({ type: "DUSK_PENDING_DECISION", decision: "approve" }))
-    );
+    approve().click();
+    await vi.waitFor(() => expect(decision("approve")).toBeTruthy());
 
     answer({ ok: true, result: "carol.dusk" });
     await settle();
-    expect(to.children).toEqual([to.querySelector("code"), line]);
-    expect(visibleText(line)).toBe(setByRecipient("carol.dusk"));
+    expect(head().querySelector(".ap-recipient__lead")).toBe(lead);
+    expect(lead.textContent).toBe("carol.dusk");
+    expect(lead.classList.contains("mono")).toBe(false);
   });
 
   it.each([
@@ -274,35 +372,47 @@ describe("the recipient of a site's request to send", () => {
     ["fails", async () => ({ ok: false, error: { message: "Engine call timed out" } })],
     ["gets no answer", async () => undefined],
     ["can't reach the background", async () => Promise.reject(new Error("Could not establish connection"))],
-  ])("shows no name when the lookup %s", async (_label, reply) => {
+  ])("keeps the short address when the lookup %s", async (_label, reply) => {
     mocks.answers.DUSK_UI_RECIPIENT_NAME = reply;
     await render("send_tx", transfer(CAROL));
     await settle();
     expect(nameAsks()).toEqual([CAROL]);
-    expect(recipient()).toEqual({ address: CAROL, line: "" });
+    expect(recipient()).toEqual({ lead: shortAddress(CAROL), tag: null });
   });
 
-  it("names one of your profiles, then a saved contact, and looks neither up", async () => {
+  it("shows a saved contact's label beside the name the recipient set, never instead of it", async () => {
+    answerName("bob-shop.dusk");
+    await render("send_tx", transfer(BOB));
+    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "bob-shop.dusk", tag: "Bob · saved contact" }));
+    expect(nameAsks()).toEqual([BOB]);
+
+    // Without a name, the label still shows beside the short address.
+    answerName(null);
+    await render("send_tx", transfer(BOB));
+    await settle();
+    expect(recipient()).toEqual({ lead: shortAddress(BOB), tag: "Bob · saved contact" });
+  });
+
+  it("names one of your profiles by its checked name and label, and looks it up nowhere", async () => {
     answerName("carol.dusk");
-    // SAVINGS is saved as a contact too, and goes by its profile's label.
     const contacts = [
       { name: "Bob", address: ` ${BOB} ` },
       { name: "Old savings", address: SAVINGS },
     ];
-    for (const [params, line] of [
-      [transfer(SAVINGS), "Profile 2 · your profile"],
-      [transfer(MAIN), "Main · your profile"],
-      [transfer(ADDRESS, { privacy: "shielded" }), "Profile 2 · your profile"],
-      [transfer(BOB), "Bob · saved contact"],
+    for (const [params, expected] of [
+      [transfer(SAVINGS), { lead: "bob.dusk", tag: "Profile 2 · your profile" }],
+      [transfer(MAIN), { lead: "alice.dusk", tag: "Main · your profile" }],
+      [transfer(ADDRESS, { privacy: "shielded" }), { lead: shortAddress(ADDRESS), tag: "Profile 2 · your profile" }],
     ]) {
-      await render("send_tx", params, { contacts });
-      expect(recipient().line).toBe(line);
+      await render("send_tx", params, { contacts, duskNames: { [MAIN]: "alice.dusk", [SAVINGS]: "bob.dusk" } });
+      expect(recipient()).toEqual(expected);
     }
+    await settle();
     expect(nameAsks()).toEqual([]);
 
     // A site picks the address: one that differs from a contact's in case only is not that contact.
     await render("send_tx", transfer(CAROL), { contacts: [{ name: "Carol", address: CAROL.toLowerCase() }] });
-    await vi.waitFor(() => expect(recipient().line).toBe(setByRecipient("carol.dusk")));
+    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: null }));
   });
 
   it("asks for no name for a shielded address or off Mainnet and Testnet", async () => {
@@ -312,7 +422,7 @@ describe("the recipient of a site's request to send", () => {
       transfer(CAROL, { nodeUrl: "http://127.0.0.1:8080" }),
     ]) {
       await render("send_tx", params);
-      expect(recipient().line).toBeNull();
+      expect(recipient().tag).toBeNull();
     }
     await settle();
     expect(nameAsks()).toEqual([]);
@@ -340,7 +450,8 @@ describe("the recipient of a site's request to send", () => {
     Object.assign(mocks.answers, answers);
     answerName("carol.dusk");
     await render("send_tx", params);
-    await vi.waitFor(() => expect(recipient()).toEqual({ address: CAROL, line: setByRecipient("carol.dusk") }));
+    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: null }));
+    expect(row("To").textContent).toBe(CAROL);
   });
 
   it("asks for no name for a token spender, which receives nothing", async () => {
@@ -349,7 +460,109 @@ describe("the recipient of a site's request to send", () => {
     answerName("carol.dusk");
     await render("send_tx", params);
     await settle();
-    expect(visibleText(box("Spender"))).toBe(CAROL);
+    expect(row("Spender").textContent).toBe(CAROL);
     expect(nameAsks()).toEqual([]);
+  });
+});
+
+describe("contract calls", () => {
+  const { bridge, portal } = BRIDGE_CONTRACTS.testnet;
+  const fixture = (name) => fixtures.calls.find((c) => c.name === name);
+  const contractCall = (contractId, name, over = {}) => ({
+    kind: "contract_call",
+    privacy: "public",
+    contractId: `0x${contractId}`,
+    fnName: fixture(name).fnName,
+    fnArgs: fixture(name).args,
+    amount: "0",
+    deposit: "0",
+    chainId: "dusk:2",
+    nodeUrl: TESTNET,
+    networkName: "Testnet",
+    ...over,
+  });
+  const order = (...els) => els.map((el) => app.children.indexOf(el.closest("#app > *")));
+
+  it("says the wallet can't read an unknown call's arguments, and shows their size and hash", async () => {
+    await render("send_tx", {
+      kind: "contract_call",
+      privacy: "public",
+      contractId: `0x${"11".repeat(32)}`,
+      fnName: "stake",
+      fnArgs: "0x00",
+      deposit: "10000000000",
+      chainId: "dusk:2",
+      nodeUrl: TESTNET,
+    });
+    expect(head().querySelector("h1").textContent).toBe("Contract call");
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("10 DUSK");
+    expect(visibleText(row("From"))).toBe("alice.dusk · Public");
+    expect(row("Contract").querySelector(".mono").title).toBe(`0x${"11".repeat(32)}`);
+    expect(row("Call data").textContent).toMatch(/^1 bytes · sha256=6e340b9cffb3…/);
+    expect(app.querySelector(".ap-opaque").textContent).toBe("The wallet can't read this call's arguments. Check them on the site before you approve.");
+    expect(app.textContent).not.toContain("Known DuskEVM bridge call");
+  });
+
+  it("reads a DuskEVM deposit: its recipient and amount above the call, with the call data's hash in view", async () => {
+    const shoot = fixture("deposit-shoot");
+    await render(
+      "send_tx",
+      contractCall(bridge, "deposit-shoot", { deposit: "100000000", display: { label: "Bridge 0.1 DUSK to DuskEVM", recipient: "0x96BA8D18dBa0a9B933c2e733EA07F47767dc893e" } })
+    );
+
+    expect(head().querySelector("h1").textContent).toBe("Bridge to DuskEVM");
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("0.1 DUSK");
+    expect(head().querySelector(".ap-tag").textContent).toBe("Known DuskEVM bridge call");
+    expect(row("DuskEVM recipient").textContent).toBe(shoot.expected.to);
+    expect(row("Amount").textContent).toBe("0.1 DUSK");
+    // The line the bridge's review page shows, to match against.
+    expect(row("Call data").textContent).toBe(`40 bytes · sha256=${shoot.sha256.slice(0, 12)}…${shoot.sha256.slice(-8)}`);
+    expect(row("Call data").textContent).toBe("40 bytes · sha256=2f64b19f5ac0…731c7c2a");
+    // Decoded fields first, the raw bytes after them; the site's own words apart.
+    const raw = app.querySelectorAll("details").find((d) => d.querySelector("summary").textContent === "Raw call data");
+    expect(raw.querySelector("code").textContent).toBe(shoot.args);
+    const [decoded, callData, rawAt] = order(row("DuskEVM recipient"), row("Call data"), raw);
+    expect(decoded).toBeLessThan(callData);
+    expect(callData).toBeLessThan(rawAt);
+    expect(app.querySelector(".ap-site-details pre").textContent).toContain('"label": "Bridge 0.1 DUSK to DuskEVM"');
+    expect(app.querySelector(".ap-visible").textContent).toBe(
+      "Visible to everyone: the amount, the DuskEVM recipient, and your name alice.dusk."
+    );
+  });
+
+  it("warns when a deposit sends other DUSK than it bridges, and doesn't call it known", async () => {
+    await render("send_tx", contractCall(bridge, "deposit", { deposit: "200000000" }));
+    expect(head().querySelector(".ap-tag")).toBeNull();
+    expect(app.querySelector(".callout.warn").textContent).toBe(
+      "The amounts don't matchThis call sends 0.2 DUSK but bridges 0.1 DUSK. Reject it unless the site told you why."
+    );
+  });
+
+  it.each([
+    ["prove-account", "Prove a DuskEVM withdrawal", "Proving moves no DUSK. You claim it once the waiting period ends."],
+    ["claim-external-account", "Claim a DuskEVM withdrawal", "Claiming pays this DUSK to the account above. You pay only the network fee."],
+  ])("reads %s: the withdrawal's amount and whom it pays on Dusk", async (name, title, noteText) => {
+    // It pays the wallet's second profile.
+    await render("send_tx", contractCall(portal, name), { duskNames: { [MAIN]: "alice.dusk", [SAVINGS]: "bob.dusk" } });
+    expect(head().querySelector("h1").textContent).toBe(title);
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("1,008 DUSK");
+    expect(recipient()).toEqual({ lead: "bob.dusk", tag: "Profile 2 · your profile" });
+    expect(row("Pays to").textContent).toBe(SAVINGS);
+    expect(row("Sent from DuskEVM").textContent).toBe(fixture(name).expected.from);
+    expect(app.textContent).toContain(noteText);
+    expect(head().querySelector(".ap-tag").textContent).toBe("Known DuskEVM bridge call");
+  });
+
+  it("names a withdrawal that pays a contract", async () => {
+    await render("send_tx", contractCall(portal, "claim-contract"));
+    expect(row("Pays to contract").textContent).toBe(fixture("claim-contract").expected.recipient);
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("1 DUSK");
+  });
+
+  it("leaves the same call undecoded on Mainnet, where no bridge is configured", async () => {
+    await render("send_tx", contractCall(bridge, "deposit", { deposit: "100000000", chainId: "dusk:1", nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }));
+    expect(head().querySelector("h1").textContent).toBe("Contract call");
+    expect(app.textContent).not.toContain("Known DuskEVM bridge call");
+    expect(app.querySelector(".ap-opaque")).not.toBeNull();
   });
 });

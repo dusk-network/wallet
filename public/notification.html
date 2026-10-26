@@ -2,8 +2,10 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dusk Wallet Request</title>
     <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="notification.css" />
   </head>
   <body class="page--notification">
     <div class="panel">
@@ -14,14 +16,17 @@
           </div>
           <div class="brand-text">
             <div class="panel-title">Dusk Wallet</div>
-            <div class="panel-subtitle">Confirm request</div>
+            <div class="panel-subtitle">Site request</div>
           </div>
         </div>
+        <div class="ap-network" id="approval-network" hidden></div>
       </div>
 
       <div class="panel-content">
-        <div id="app"></div>
+        <main id="app"></main>
       </div>
+
+      <div class="ap-actions" id="approval-actions" hidden></div>
     </div>
 
     <script type="module" src="notification.js"></script>

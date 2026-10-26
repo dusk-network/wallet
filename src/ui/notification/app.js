@@ -1,26 +1,41 @@
-import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
+// The window a site's request opens: the site that asks and what it asks for
+// first, then the facts that matter, with Reject and the approve button fixed
+// at the bottom where they always show. Chain, node and raw bytes sit under
+// Details. A locked wallet shows what is asked, with Unlock and Reject.
+
+import { UI_DISPLAY_DECIMALS, safeBigInt } from "../../shared/amount.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
+import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
 import { h, setChildren } from "../lib/dom.js";
+import { shortAddress } from "../lib/strings.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
 import "../components/GasEditor.js";
 import {
-  runtimeGetURL,
-  runtimeSendMessage,
-  tabsCreate,
-} from "../../platform/extensionApi.js";
+  details,
+  exactDusk,
+  facts,
+  group,
+  headTag,
+  kv,
+  mono,
+  note,
+  requestHead,
+  sectionTitle,
+  shortMono,
+  siteChip,
+  siteDetails,
+  warning,
+} from "./parts.js";
+import { bridgeCallOf, callArgs, requestSummary, withdrawalAmount } from "./summary.js";
+import { runtimeGetURL, runtimeSendMessage, tabsCreate } from "../../platform/extensionApi.js";
 
 const app = document.getElementById("app");
 const MAX_U64 = 18446744073709551615n;
-
-function setApp(children) {
-  app.innerHTML = "";
-  for (const child of children) app.appendChild(child);
-}
 
 async function send(msg) {
   return runtimeSendMessage(msg, { allowLastError: true });
@@ -33,27 +48,51 @@ function getRid() {
 
 const rid = getRid();
 
-function renderError(text) {
-  setApp([h("div", { class: "err", text })]);
-}
-
-// The profile that signs or pays: its verified .dusk name, which the wallet
-// checked lately, over its account, which then shows short and muted; the
-// account alone, in full, without one.
-function profileBox(account, name) {
-  if (!account || !name) return h("div", { class: "box" }, [h("code", { text: account || "(none)" })]);
-  return h("div", { class: "box named-address" }, [
-    h("div", { class: "dusk-name", text: name, title: name }),
-    shortAddressEl(account),
-  ]);
-}
-
-function prettyAmount(v) {
-  try {
-    return BigInt(v).toString();
-  } catch {
-    return String(v);
+// Reject and the approve button live in a bar under the page that scrolls,
+// so they show whatever the request's length. A page without the bar (a test
+// harness) gets one after its #app.
+function actionsHost() {
+  let bar = document.getElementById("approval-actions");
+  if (!bar) {
+    bar = h("div", { id: "approval-actions", class: "ap-actions" });
+    (app?.closest?.(".panel") ?? document.body).appendChild(bar);
   }
+  return bar;
+}
+
+function show(body, actions = []) {
+  setChildren(app, body.filter(Boolean));
+  const bar = actionsHost();
+  const kept = actions.filter(Boolean);
+  setChildren(bar, kept);
+  bar.hidden = kept.length === 0;
+}
+
+function renderError(text) {
+  show([h("div", { class: "err", role: "alert", text })]);
+}
+
+// The network the request is on, in the header beside the wallet's name.
+function showNetwork(name) {
+  const chip = document.getElementById("approval-network");
+  if (!chip) return;
+  chip.textContent = name || "";
+  chip.hidden = !name;
+}
+
+async function sendResult(message) {
+  const res = await send(message);
+  if (!res) throw new Error("No response");
+  const err = res?.error;
+  if (err) {
+    if (typeof err === "string") throw new Error(err);
+    throw new Error(err?.message ?? "Request failed");
+  }
+  if (res?.ok === false) {
+    if (typeof res?.error === "string") throw new Error(res.error);
+    throw new Error(res?.error?.message ?? "Request failed");
+  }
+  return Object.prototype.hasOwnProperty.call(res, "result") ? res.result : res;
 }
 
 function accountEnumToString(a) {
@@ -91,19 +130,27 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
   return frac ? `${intPart}.${frac}` : intPart;
 }
 
-async function sendResult(message) {
-  const res = await send(message);
-  if (!res) throw new Error("No response");
-  const err = res?.error;
-  if (err) {
-    if (typeof err === "string") throw new Error(err);
-    throw new Error(err?.message ?? "Request failed");
-  }
-  if (res?.ok === false) {
-    if (typeof res?.error === "string") throw new Error(res.error);
-    throw new Error(res?.error?.message ?? "Request failed");
-  }
-  return Object.prototype.hasOwnProperty.call(res, "result") ? res.result : res;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// A time as the popup writes it: "26 Oct 2026, 14:10". One that isn't a
+// time shows as it came.
+function dateText(value) {
+  const d = new Date(String(value ?? ""));
+  if (!Number.isFinite(d.getTime())) return String(value ?? "");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm}`;
+}
+
+// The network of a known chain ID: "dusk:2" is Testnet.
+function chainName(chainId) {
+  return { "dusk:1": "Mainnet", "dusk:2": "Testnet", "dusk:3": "Devnet", "dusk:0": "Local" }[String(chainId ?? "").trim()] ?? "";
+}
+
+// "40 bytes · sha256=2f64b19f5ac0…731c7c2a": a call's arguments as the
+// bridge's review page prints them, so the two can be matched.
+function argsLine(bytes, hash) {
+  return hash ? `${bytes.length} bytes · sha256=${hash.slice(0, 12)}…${hash.slice(-8)}` : `${bytes.length} bytes`;
 }
 
 // Keep a live approval window active while the user is reviewing it.
@@ -143,6 +190,45 @@ document.addEventListener(
   { passive: true }
 );
 
+async function decide(decision, approvedParams) {
+  await send({ type: "DUSK_PENDING_DECISION", rid, decision, ...(decision === "approve" ? { approvedParams } : {}) });
+  window.close();
+}
+
+/**
+ * Reject and the approve button, side by side. Input that won't do (a gas
+ * edit, a missing MAX) says so above them; nothing is sent.
+ */
+function decisionBar({ approveText = "Approve", approveDisabled = false, approveTitle = "", getApprovedParams } = {}) {
+  const error = h("div", { class: "field-error ap-actions__error", role: "alert", hidden: true });
+  const rejectBtn = h("button", {
+    class: "btn-outline",
+    type: "button",
+    text: "Reject",
+    onclick: () => decide("reject"),
+  });
+  const approveBtn = h("button", {
+    class: "btn-primary",
+    type: "button",
+    text: approveText,
+    disabled: Boolean(approveDisabled),
+    title: approveTitle || undefined,
+    onclick: async () => {
+      let approvedParams = null;
+      try {
+        approvedParams = typeof getApprovedParams === "function" ? getApprovedParams() : null;
+      } catch (e) {
+        error.textContent = e?.message ?? String(e);
+        error.hidden = false;
+        return;
+      }
+      error.hidden = true;
+      await decide("approve", approvedParams);
+    },
+  });
+  return { nodes: [error, rejectBtn, approveBtn], approveBtn, rejectBtn, error };
+}
+
 export async function renderNotification() {
   if (!rid) {
     renderError("Missing request id.");
@@ -153,7 +239,7 @@ export async function renderNotification() {
   if (!pending) {
     approvalLive = false;
     stopActivityHeartbeat();
-    renderError("Request not found (maybe already handled). You can close this window.");
+    renderError("This request is no longer waiting: it was handled or it expired. You can close this window.");
     return;
   }
 
@@ -182,6 +268,13 @@ export async function renderNotification() {
     .trim()
     .toLowerCase();
 
+  // The network: a transaction's own, which it was approved for, a
+  // signature's chain, or the wallet's.
+  const nodeUrl = String(params?.nodeUrl ?? pending.nodeUrl ?? "");
+  showNetwork(
+    String(params?.networkName ?? "") || chainName(params?.chainId) || String(pending.networkName ?? "") || (nodeUrl ? networkNameFromNodeUrl(nodeUrl) : "")
+  );
+
   const accountsArr = Array.isArray(accounts) ? accounts : [];
   const permIdxRaw =
     permissionAccountIndex === null || permissionAccountIndex === undefined
@@ -193,70 +286,186 @@ export async function renderNotification() {
   const idxForOrigin = permIdx ?? selIdx;
   const activeAccount = accountsArr[idxForOrigin] ?? accountsArr[0] ?? "";
   // The checked .dusk names of the wallet's own profiles. A recipient's name
-  // is the engine's to look up (recipientBox).
+  // is the engine's to look up (recipientName).
   const nameOf = (account) => {
     const name = duskNames && typeof duskNames === "object" ? duskNames[account] : "";
     return typeof name === "string" ? name : "";
   };
-  const activeProfileBox = () => profileBox(activeAccount, nameOf(activeAccount));
   const nameMap = accountNames && typeof accountNames === "object" ? accountNames : {};
   // A profile's label: the one the user gave it, or its number.
   const profileLabel = (i) => String(nameMap?.[String(i)] ?? "").trim() || `Profile ${i + 1}`;
 
-  // Who the wallet knows a recipient as: one of its profiles, by its public
-  // account or shielded address, or else a saved contact. A site picks the
-  // address, so it must be the saved one exactly: Send and Review match
-  // contacts in any case, but base58 tells cases apart.
-  const ownAddresses = Array.isArray(addresses) ? addresses : [];
-  const savedContacts = Array.isArray(contacts) ? contacts : [];
-  const knownRecipient = (to) => {
-    const own = [accountsArr.indexOf(to), ownAddresses.indexOf(to)].find((i) => i >= 0);
-    if (own !== undefined) return [profileLabel(own), "your profile"];
-    const contact = savedContacts.find((c) => String(c?.address ?? "").trim() === to);
-    const label = String(contact?.name ?? "").trim();
-    return label ? [label, "saved contact"] : null;
+  // The profile that signs or pays: its verified .dusk name over its short
+  // account, or the account in full without one.
+  const profileValue = (account = activeAccount) => {
+    const name = nameOf(account);
+    if (!account || !name) return h("span", { class: "named-address" }, [h("code", { text: account || "(none)" })]);
+    return h("span", { class: "named-address" }, [h("span", { class: "dusk-name", text: name, title: name }), shortAddressEl(account)]);
+  };
+  // The paying profile in one line: "alice.dusk · Public".
+  const payerLine = (rail) => {
+    const name = nameOf(activeAccount);
+    return h("span", {}, [
+      name ? h("span", { text: name, title: activeAccount }) : shortMono(activeAccount, 6, 6),
+      h("span", { class: "kv-muted", text: ` · ${rail}` }),
+    ]);
   };
 
-  const header = h("div", { class: "row" }, [
-    h("div", { class: "muted", text: "Request from" }),
-    h("div", { class: "box" }, [h("code", { text: origin })]),
-  ]);
+  // Who the wallet knows an account or address as: one of its profiles, by
+  // its public account or shielded address, or a saved contact. A site picks
+  // the address, so it must be the saved one exactly: base58 tells cases
+  // apart.
+  const ownAddresses = Array.isArray(addresses) ? addresses : [];
+  const savedContacts = Array.isArray(contacts) ? contacts : [];
+  const knownAs = (to) => {
+    const own = [accountsArr.indexOf(to), ownAddresses.indexOf(to)].find((i) => i >= 0);
+    if (own !== undefined) return { label: profileLabel(own), source: "your profile", own: accountsArr[own] === to };
+    const contact = savedContacts.find((c) => String(c?.address ?? "").trim() === to);
+    const label = String(contact?.name ?? "").trim();
+    return label ? { label, source: "saved contact", own: false } : null;
+  };
 
-  if (!hasVault) {
-    const openBtn = h("button", {
-      class: "btn-primary",
-      text: "Set up wallet",
-      onclick: async () => {
-        try {
-          const url = runtimeGetURL("full.html");
-          await tabsCreate({ url });
-        } catch {
-          // ignore
-        }
-        window.close();
-      },
-    });
+  /**
+   * A Dusk recipient: the .dusk name the recipient set for its public
+   * account, which the engine checks points back to it, leads; your own label
+   * for it (a profile, a saved contact) follows as a tag, so a label never
+   * hides what the chain says. Until the name comes, and without one, the
+   * short address leads. The name is asked for once the window shows; it
+   * replaces the short address in its line, so nothing moves and Approve
+   * never waits for it.
+   */
+  const recipient = (address) => {
+    const to = String(address ?? "").trim();
+    const known = to ? knownAs(to) : null;
+    const lead = h("span", { class: "ap-recipient__lead mono", text: shortAddress(to) || "(missing)", title: to });
+    const showName = (name) => {
+      lead.textContent = name;
+      lead.title = `${name} · ${to}`;
+      lead.classList.remove("mono");
+    };
+    const ownName = known?.own ? nameOf(to) : "";
+    if (ownName) {
+      showName(ownName);
+    } else if (!known?.own && classifyDuskIdentifier(to) === "account" && duskNamesNetwork(nodeUrl)) {
+      send({ type: "DUSK_UI_RECIPIENT_NAME", rid, recipient: to })
+        .then((res) => {
+          const name = res?.ok ? res.result : null;
+          if (typeof name === "string" && name) showName(name);
+        })
+        .catch(() => {});
+    }
+    const tag = known
+      ? h("span", { class: "ap-recipient__tag", title: known.label }, [
+          h("span", { class: "ap-recipient__label", text: known.label }),
+          h("span", { class: "ap-recipient__source", text: ` · ${known.source}` }),
+        ])
+      : null;
+    return { lead, tag, known };
+  };
 
-    setApp([
-      header,
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Your Dusk Wallet is not set up yet." }),
-        h("div", { class: "muted", text: "Create or import a recovery phrase to continue." }),
-        h("div", { class: "btnrow" }, [openBtn]),
+  // "to wallet-both.dusk", and under it your label for it, for a head's
+  // `to` line.
+  const toLine = (address, { network = "" } = {}) => {
+    const r = recipient(address);
+    return h("span", { class: "ap-recipient" }, [
+      h("span", { class: "ap-recipient__line" }, [
+        h("span", { class: "ap-recipient__to", text: "to " }),
+        r.lead,
+        network ? h("span", { class: "ap-recipient__to", text: ` ${network}` }) : null,
+      ]),
+      r.tag,
+    ]);
+  };
+  // An address without a name: "to 0x96BA…893e on DuskEVM".
+  const plainTo = (value, network, head = 6, tail = 4) =>
+    h("span", { class: "ap-recipient" }, [
+      h("span", { class: "ap-recipient__line" }, [
+        h("span", { class: "ap-recipient__to", text: "to " }),
+        shortMono(value, head, tail),
+        network ? h("span", { class: "ap-recipient__to", text: ` ${network}` }) : null,
       ]),
     ]);
+
+  const site = siteChip(origin);
+
+  if (!hasVault) {
+    show(
+      [
+        site,
+        requestHead({ title: "Set up Dusk Wallet first", sub: "Create or import a recovery phrase, then try again on the site." }),
+      ],
+      [
+        h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject") }),
+        h("button", {
+          class: "btn-primary",
+          type: "button",
+          text: "Set up wallet",
+          onclick: async () => {
+            try {
+              await tabsCreate({ url: runtimeGetURL("full.html") });
+            } catch {
+              // ignore
+            }
+            window.close();
+          },
+        }),
+      ]
+    );
     return;
   }
 
-  const lockBox = () => {
-    const pwd = passwordInput({ placeholder: "Password", onEnter: () => unlock() });
-    const errBox = h("div", { class: "err", style: "display:none" });
+  if (!isUnlocked) {
+    renderLocked();
+    return;
+  }
 
-    const unlockBtn = h("button", {
-      class: "btn-primary",
-      text: "Unlock",
+  switch (kindNorm) {
+    case "connect":
+      return renderConnect();
+    case "switch_network":
+      return renderSwitchNetwork();
+    case "sign_message":
+      return renderSignMessage();
+    case "sign_auth":
+      return renderSignAuth();
+    case "sign_typed_data":
+      return renderSignTypedData();
+    case "watch_asset":
+      return renderWatchAsset();
+    case "send_tx":
+      return renderSendTx();
+    default:
+      renderError(`Unknown kind: ${kindNorm || String(kind)}`);
+  }
+
+  // ---- Locked --------------------------------------------------------------
+
+  // What the site asks, then the password, with Reject beside Unlock: no
+  // need to unlock to say no.
+  function renderLocked() {
+    const summary = requestSummary(kindNorm, params);
+    const pwd = passwordInput({
+      id: "approval-password",
+      autocomplete: "current-password",
+      placeholder: "Password",
+      onEnter: () => unlock(),
     });
+    const errLine = h("div", { id: "approval-unlock-error", class: "field-error", role: "alert", hidden: true });
+    const showError = (text) => {
+      errLine.textContent = text || "";
+      errLine.hidden = !text;
+      if (text) {
+        pwd.setAttribute("aria-invalid", "true");
+        pwd.setAttribute("aria-describedby", "approval-unlock-error");
+      } else {
+        pwd.removeAttribute("aria-invalid");
+        pwd.removeAttribute("aria-describedby");
+      }
+    };
+    pwd.addEventListener("input", () => showError(""));
+    const busyNote = h("p", { class: "ap-sub", text: "This can take a moment.", hidden: true });
 
+    const unlockBtn = h("button", { class: "btn-primary", type: "button", text: "Unlock" });
     let busy = false;
     const unlock = async () => {
       if (busy) return;
@@ -264,131 +473,75 @@ export async function renderNotification() {
       busy = true;
       unlockBtn.disabled = true;
       pwd.disabled = true;
-      unlockBtn.textContent = "Unlocking...";
-      errBox.style.display = "none";
-      errBox.textContent = "";
+      unlockBtn.textContent = "Unlocking…";
+      busyNote.hidden = false;
+      showError("");
 
       try {
         const res = await send({ type: "DUSK_UI_UNLOCK", password: pwd.value });
         if (res?.error) {
-          errBox.textContent = res.error.message || "Unlock failed";
-          errBox.style.display = "block";
-          pwd.value = "";
+          showError(res.error.message || "Unlock failed");
           focusPassword = true;
           return;
         }
+        pwd.value = "";
         await renderNotification();
       } catch (error) {
-        errBox.textContent = error?.message || "Unlock failed";
-        errBox.style.display = "block";
+        showError(error?.message || "Unlock failed");
         focusPassword = true;
       } finally {
+        pwd.value = "";
         busy = false;
         unlockBtn.disabled = false;
         pwd.disabled = false;
         unlockBtn.textContent = "Unlock";
+        busyNote.hidden = true;
         if (focusPassword) pwd.focus();
       }
     };
-
     unlockBtn.addEventListener("click", unlock);
 
-    return h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "Wallet locked. Unlock to proceed." }),
-      h("div", { class: "row" }, [pwd]),
-      errBox,
-      h("div", { class: "btnrow" }, [unlockBtn]),
-    ]);
-  };
+    const to =
+      summary.to?.network === "duskevm"
+        ? plainTo(summary.to.address, "on DuskEVM")
+        : summary.to?.address
+          ? toLine(summary.to.address)
+          : null;
 
-  const decisionButtons = (approveText, getApprovedParams) =>
-    h("div", { class: "btnrow" }, [
-      h("button", {
-        class: "btn-outline",
-        text: "Reject",
-        onclick: async () => {
-          await send({ type: "DUSK_PENDING_DECISION", rid, decision: "reject" });
-          window.close();
-        },
-      }),
-      h("button", {
-        class: "btn-primary",
-        text: approveText,
-        onclick: async () => {
-          try {
-            const approvedParams = typeof getApprovedParams === "function" ? getApprovedParams() : null;
-            await send({
-              type: "DUSK_PENDING_DECISION",
-              rid,
-              decision: "approve",
-              approvedParams,
-            });
-            window.close();
-          } catch (e) {
-            // Keep it simple for MVP: block approval if inputs are invalid.
-            alert(e?.message ?? String(e));
-          }
-        },
-      }),
-    ]);
-
-  function decisionButtonsWithState({ approveText, approveDisabled, approveTitle, getApprovedParams } = {}) {
-    const rejectBtn = h("button", {
-      class: "btn-outline",
-      text: "Reject",
-      onclick: async () => {
-        await send({ type: "DUSK_PENDING_DECISION", rid, decision: "reject" });
-        window.close();
-      },
-    });
-
-    const approveBtn = h("button", {
-      class: "btn-primary",
-      text: approveText || "Approve",
-      disabled: Boolean(approveDisabled),
-      title: approveTitle || "",
-      onclick: async () => {
-        try {
-          const approvedParams =
-            typeof getApprovedParams === "function" ? getApprovedParams() : null;
-          await send({
-            type: "DUSK_PENDING_DECISION",
-            rid,
-            decision: "approve",
-            approvedParams,
-          });
-          window.close();
-        } catch (e) {
-          alert(e?.message ?? String(e));
-        }
-      },
-    });
-
-    return { row: h("div", { class: "btnrow" }, [rejectBtn, approveBtn]), approveBtn, rejectBtn };
+    show(
+      [
+        site,
+        requestHead({ title: summary.title, amount: summary.amount, to, sub: summary.sub }),
+        h("div", { class: "ap-unlock" }, [
+          h("label", { for: "approval-password", text: "Unlock to review and approve it" }),
+          pwd,
+          errLine,
+          busyNote,
+        ]),
+      ],
+      [h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject") }), unlockBtn]
+    );
   }
 
-  if (!isUnlocked) {
-    setApp([header, lockBox()]);
-    return;
-  }
+  // ---- Connect -------------------------------------------------------------
 
-  if (kindNorm === "connect") {
+  // A card per profile: its label, its .dusk name when the wallet checked it
+  // lately, and its short account, muted. With more than one profile the
+  // cards are native radios, so arrow keys pick one and screen readers read
+  // each card, the full account included. Then what the site will see and
+  // what it can't do, worded for this request: a site that asks for the
+  // shielded address says so in the title.
+  function renderConnect() {
     const requestedShielded = Boolean(params?.shieldedReceiveAddress);
     const currentAccountIndexRaw = Number(params?.currentAccountIndex);
     const currentAccountIndex =
-      Number.isFinite(currentAccountIndexRaw) && currentAccountIndexRaw >= 0
+      params?.currentAccountIndex != null && Number.isFinite(currentAccountIndexRaw) && currentAccountIndexRaw >= 0
         ? Math.floor(currentAccountIndexRaw)
         : null;
     const currentShieldedGrant = Boolean(params?.currentGrants?.shieldedReceiveAddress);
     const count = Math.max(1, Number(accountCount ?? (accountsArr.length || 1)) || 1);
-    const displayAccounts = accountsArr.length
-      ? accountsArr
-      : Array.from({ length: count }, () => "");
+    const displayAccounts = accountsArr.length ? accountsArr : Array.from({ length: count }, () => "");
 
-    // A card per profile: its label, its .dusk name when the wallet checked it
-    // lately, and its short account, muted. With more than one profile the
-    // cards are native radios, so arrow keys pick one and screen readers read
-    // each card, the full account included.
     const choosing = displayAccounts.length > 1;
     let selected = Math.max(0, Math.min(idxForOrigin, displayAccounts.length - 1));
     const options = displayAccounts.map((acct, i) => {
@@ -412,14 +565,34 @@ export async function renderNotification() {
       return { card, radio };
     });
 
-    const effectiveShieldedGrantForSelection = () =>
-      requestedShielded ||
-      (currentAccountIndex !== null && selected === currentAccountIndex && currentShieldedGrant);
-    const disclosureText = h("div", { class: "muted" });
-    const updateDisclosureText = () => {
-      disclosureText.textContent = effectiveShieldedGrantForSelection()
-        ? "The site will be able to use the selected profile's public account and shareable shielded receive address."
-        : "The site will only be able to use the selected profile's public account.";
+    // The site keeps a shielded address it has for the profile picked.
+    const sharesShielded = () =>
+      requestedShielded || (currentAccountIndex !== null && selected === currentAccountIndex && currentShieldedGrant);
+    const factsHost = h("div", { class: "ap-facts-host" });
+    const drawFacts = () => {
+      const account = String(displayAccounts[selected] ?? "");
+      const name = nameOf(account);
+      const who = [name, account ? shortAddress(account) : ""].filter(Boolean).join(" · ");
+      const connected = currentAccountIndex !== null && currentAccountIndex === selected;
+      setChildren(factsHost, [
+        sectionTitle("What the site gets", "ap-connect-facts"),
+        facts(
+          [
+            requestedShielded && connected
+              ? null
+              : {
+                  icon: "eye",
+                  title: "Sees your public address, .dusk name and balance",
+                  sub: `${who ? `${who}, ` : ""}until you disconnect it`,
+                },
+            sharesShielded()
+              ? { icon: "shield", title: "Gets your shielded address", sub: "It can send you shielded payments. It can't see your shielded balance." }
+              : null,
+            { icon: "lock", title: "Can't move funds without your approval", sub: "Every payment and signature asks you here first." },
+          ],
+          { label: "What the site gets" }
+        ),
+      ]);
     };
     const pick = (index) => {
       selected = index;
@@ -427,210 +600,178 @@ export async function renderNotification() {
         card.classList.toggle("is-checked", i === index);
         if (radio) radio.checked = i === index;
       });
-      updateDisclosureText();
+      drawFacts();
     };
     pick(selected);
 
-    setApp([
-      header,
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Connect this site to a Dusk profile?" }),
-      ]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", id: "connect-profile-label", text: "Profile" }),
-        h(
-          "div",
-          {
-            class: "name-choice",
-            ...(choosing && { role: "radiogroup", "aria-labelledby": "connect-profile-label" }),
-          },
-          options.map((o) => o.card)
-        ),
-        disclosureText,
-      ]),
-      decisionButtons("Connect", () => ({
-        accountIndex: selected,
-        shieldedReceiveAddress: effectiveShieldedGrantForSelection(),
-      })),
-    ]);
-    return;
+    const summary = requestSummary("connect", params);
+    const bar = decisionBar({
+      approveText: requestedShielded && currentAccountIndex !== null ? "Share" : "Connect",
+      getApprovedParams: () => ({ accountIndex: selected, shieldedReceiveAddress: sharesShielded() }),
+    });
+    show(
+      [
+        site,
+        requestHead({ title: summary.title }),
+        h("section", { class: "ap-profiles", "aria-labelledby": "connect-profile-label" }, [
+          sectionTitle(choosing ? "Choose a profile" : "Profile", "connect-profile-label"),
+          h(
+            "div",
+            {
+              class: "name-choice",
+              ...(choosing && { role: "radiogroup", "aria-labelledby": "connect-profile-label" }),
+            },
+            options.map((o) => o.card)
+          ),
+        ]),
+        factsHost,
+      ],
+      bar.nodes
+    );
   }
 
-  if (kindNorm === "switch_network") {
+  // ---- Switch network ------------------------------------------------------
+
+  function renderSwitchNetwork() {
     const from = params?.from ?? {};
     const to = params?.to ?? {};
-
-    setApp([
-      header,
-      h("div", { class: "row" }, [
-        h("div", {
-          class: "muted",
-          text: "This site is requesting to switch the wallet network.",
-        }),
-      ]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "From" }),
-        h("div", { class: "box" }, [
-          h("div", { text: String(from.networkName ?? "Unknown") }),
-          h("div", { class: "muted", text: String(from.chainId ?? "") }),
-          from.nodeUrl ? h("div", { class: "muted", text: String(from.nodeUrl) }) : null,
-        ].filter(Boolean)),
-      ]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "To" }),
-        h("div", { class: "box" }, [
-          h("div", { text: String(to.networkName ?? "Unknown") }),
-          h("div", { class: "muted", text: String(to.chainId ?? "") }),
-          to.nodeUrl ? h("div", { class: "muted", text: String(to.nodeUrl) }) : null,
-        ].filter(Boolean)),
-      ]),
-      decisionButtons("Switch"),
-    ]);
-    return;
+    const net = (n) =>
+      h("span", { class: "ap-net-value" }, [
+        h("span", { text: String(n.networkName ?? "Unknown") }),
+        n.chainId ? h("span", { class: "kv-muted", text: ` · ${n.chainId}` }) : null,
+      ]);
+    show(
+      [
+        site,
+        requestHead({ title: requestSummary("switch_network", params).title, sub: "The wallet then uses that network, for every site." }),
+        group([kv("From", net(from)), kv("To", net(to))]),
+        details("Details", [
+          group(
+            [
+              from.nodeUrl ? kv("From node", mono(from.nodeUrl), { stack: true }) : null,
+              to.nodeUrl ? kv("To node", mono(to.nodeUrl), { stack: true }) : null,
+            ],
+            { className: "group--inset" }
+          ),
+        ]),
+      ],
+      decisionBar({ approveText: "Switch" }).nodes
+    );
   }
 
-  if (kindNorm === "sign_message") {
+  // ---- Sign a message ------------------------------------------------------
+
+  function renderSignMessage() {
     const chainId = String(params?.chainId ?? "");
     const messageHash = String(params?.messageHash ?? "");
     const messageLen = Number(params?.messageLen ?? 0) || 0;
-    const preview = params?.messagePreview && typeof params.messagePreview === "object"
-      ? params.messagePreview
-      : null;
+    const preview = params?.messagePreview && typeof params.messagePreview === "object" ? params.messagePreview : null;
     const hashLine = messageHash
       ? `${messageLen} bytes · sha256=${messageHash.slice(0, 12)}…${messageHash.slice(-8)}`
       : `${messageLen} bytes`;
-    const signsCopy = preview?.kind === "text"
-      ? "This signs the message shown above. It does not submit a transaction."
-      : "This signs the message bytes described above. It does not submit a transaction.";
-    const previewRows = [];
 
+    let message;
     if (preview?.kind === "text") {
-      previewRows.push(
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: preview.truncated ? "Message preview" : "Message" }),
-          h("div", { class: "box" }, [
-            h("code", {
-              text: String(preview.text ?? ""),
-              title: preview.truncated ? "Preview truncated; verify the hash for exact bytes." : "",
-            }),
-            preview.truncated
-              ? h("div", {
-                  class: "muted",
-                  text: "Preview shortened. The full message is covered by the hash below.",
-                })
-              : null,
-          ]),
-        ])
-      );
+      message = h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-message-title" }, [
+        sectionTitle(preview.truncated ? "Message, shortened" : "Message", "ap-message-title"),
+        h("div", {
+          class: "ap-message",
+          text: String(preview.text ?? ""),
+          title: preview.truncated ? "Preview shortened; the hash covers the full message." : undefined,
+        }),
+        preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash below covers the full message." }) : null,
+      ]);
     } else {
       const reason = String(preview?.reason ?? "");
       const reasonText =
         reason === "too_large"
-          ? "Message is too large to preview safely."
+          ? "It's too large to show."
           : reason === "invalid_utf8"
-            ? "This message is not readable text."
+            ? "It isn't readable text."
             : reason === "control_characters"
-              ? "This message contains hidden control characters."
-              : "Message content is not previewed.";
-      previewRows.push(
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Message" }),
-          h("div", { class: "box" }, [
-            h("code", { text: "Opaque bytes" }),
-            h("div", { class: "muted", text: reasonText }),
-          ]),
-        ])
-      );
+              ? "It contains hidden control characters."
+              : "It isn't shown.";
+      message = h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-message-title" }, [
+        sectionTitle("Message", "ap-message-title"),
+        h("div", { class: "ap-message ap-message--bytes" }, [
+          h("div", { class: "ap-message__title", text: `${messageLen} bytes` }),
+          h("div", { class: "ap-sub", text: `${reasonText} Only sign it if you trust this site.` }),
+        ]),
+      ]);
     }
 
-    setApp([
-      header,
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Approve message signature" }),
-      ]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Account" }),
-        activeProfileBox(),
-      ]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Chain ID" }),
-        h("div", { class: "box" }, [h("code", { text: chainId || "—" })]),
-      ]),
-      ...previewRows,
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Message hash" }),
-        h("div", { class: "box" }, [
-          h("code", { text: hashLine }),
-        ]),
-      ]),
-        h("div", {
-          class: "muted",
-        text: signsCopy,
-      }),
-      decisionButtons("Sign"),
-    ]);
-    return;
+    show(
+      [
+        site,
+        requestHead({ title: "Sign a message?" }),
+        message,
+        group([kv("Account", profileValue()), kv("Message hash", mono(hashLine), { stack: true })]),
+        note("Signing sends no transaction and moves no funds.", "info"),
+        details("Details", [group([kv("Network", chainName(chainId) || "Custom network"), kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
+      ],
+      decisionBar({ approveText: "Sign" }).nodes
+    );
   }
 
-  if (kindNorm === "sign_auth") {
+  // ---- Sign in -------------------------------------------------------------
+
+  function renderSignAuth() {
     const chainId = String(params?.chainId ?? "");
     const nonce = String(params?.nonce ?? "");
     const statement = String(params?.statement ?? "").trim();
     const expiresAt = String(params?.expiresAt ?? "").trim();
 
-    setApp([
-      header,
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Approve sign-in" }),
-      ]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Account" }),
-        activeProfileBox(),
-      ]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Chain ID" }),
-        h("div", { class: "box" }, [h("code", { text: chainId || "—" })]),
-      ]),
-      statement
-        ? h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Statement" }),
-            h("div", { class: "box" }, [h("code", { text: statement })]),
-          ])
-        : h("div"),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Nonce" }),
-        h("div", { class: "box" }, [h("code", { text: nonce || "—" })]),
-      ]),
-      expiresAt
-        ? h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Expires" }),
-            h("div", { class: "box" }, [h("code", { text: expiresAt })]),
-          ])
-        : h("div"),
-      h("div", {
-        class: "muted",
-        text: "Only sign in if you trust this site.",
-      }),
-      decisionButtons("Sign in"),
-    ]);
-    return;
+    show(
+      [
+        site,
+        requestHead({ title: "Sign in to this site?" }),
+        statement
+          ? h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-statement-title" }, [
+              sectionTitle("The site's statement", "ap-statement-title"),
+              h("div", { class: "ap-message", text: statement }),
+            ])
+          : null,
+        group([
+          kv("Account", profileValue()),
+          kv("Nonce", mono(nonce || "—"), { stack: nonce.length > 24 }),
+          expiresAt ? kv("Expires", dateText(expiresAt)) : null,
+        ]),
+        note("Only sign in to sites you trust. Signing in moves no funds.", "info"),
+        details("Details", [group([kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
+      ],
+      decisionBar({ approveText: "Sign in" }).nodes
+    );
   }
 
-  if (kindNorm === "sign_typed_data") {
+  // ---- Sign typed data -----------------------------------------------------
+
+  async function renderSignTypedData() {
     const digestHex = String(params?.digestHex ?? "");
     let disclosure;
     try {
-      disclosure = prepareTypedDataDisclosure({
-        domain: params?.domain, types: params?.types,
-        primaryType: params?.primaryType, message: params?.message, origin,
-      }, digestHex);
+      disclosure = prepareTypedDataDisclosure(
+        {
+          domain: params?.domain,
+          types: params?.types,
+          primaryType: params?.primaryType,
+          message: params?.message,
+          origin,
+        },
+        digestHex
+      );
     } catch {
-      setApp([
-        header,
-        h("div", { class: "err", role: "alert", text:
-          "Cannot safely disclose the full signing request. Signing is disabled. Reject this request and ask the site for a smaller or corrected payload." }),
-        decisionButtonsWithState({ approveText: "Sign", approveDisabled: true }).row,
-      ]);
+      show(
+        [
+          site,
+          requestHead({ title: "Sign typed data?" }),
+          h("div", {
+            class: "err",
+            role: "alert",
+            text: "Cannot safely disclose the full signing request. Signing is disabled. Reject this request and ask the site for a smaller or corrected payload.",
+          }),
+        ],
+        decisionBar({ approveText: "Sign", approveDisabled: true }).nodes
+      );
       return;
     }
     // Both views use the same digest-checked snapshot, not a second read of params.
@@ -648,58 +789,58 @@ export async function renderNotification() {
       (row.flags ?? []).some((flag) => unsafeTextFlags.includes(flag))
     );
 
+    // A row's value as the wallet will sign it, its flags in the tooltip, and
+    // a notice when the preview cut it.
     const displayRow = (label, row) =>
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: label }),
-        h("div", { class: "box" }, [
+      kv(
+        label,
+        [
           h("code", { text: row.display, title: row.flags.length ? row.flags.join(", ") : "" }),
-        ]),
-        row.flags.includes("truncated")
-          ? h("div", { class: "muted", text: "Text truncated; the full value is signed." })
-          : null,
-      ]);
+          row.flags.includes("truncated") ? h("span", { class: "ap-kv-note", text: "Text truncated; the full value is signed." }) : null,
+        ],
+        { stack: true }
+      );
 
-    setApp(
+    show(
       [
-        displayRow("Request from", originPreview),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Approve typed data signature" }),
+        site,
+        requestHead({ title: "Sign typed data?" }),
+        group([
+          displayRow("Request from", originPreview),
+          kv("Account", profileValue()),
+          displayRow("Domain name", domainName),
+          displayRow("Domain version", domainVersion),
+          displayRow("Chain ID", domainChainId),
+          displayRow("Verifying contract", { display: verifyingContract || "32 zero bytes (default)", flags: [] }),
+          kv("Primary type", h("code", { text: primaryType }), { stack: true }),
         ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Account" }),
-          activeProfileBox(),
-        ]),
-        displayRow("Domain name", domainName),
-        displayRow("Domain version", domainVersion),
-        displayRow("Chain ID", domainChainId),
-        displayRow("Verifying contract", { display: verifyingContract || "32 zero bytes (default)", flags: [] }),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Primary type" }),
-          h("div", { class: "box" }, [h("code", { text: primaryType })]),
-        ]),
-        h("details", { class: "box" }, [
+        h("details", { class: "advanced ap-details" }, [
           h("summary", { text: "Full signing request (escaped JSON)" }),
-          h("p", { class: "muted", text:
-            "Complete values and declared schema, including bytes and omitted preview content. Non-ASCII characters use JSON \\uXXXX escapes; originals are not normalized. Unused types and extra metadata do not contribute to the digest." }),
-          h("textarea", {
-            readonly: true, rows: 12, wrap: "off", spellcheck: false, dir: "ltr",
-            "aria-label": "Full signing request (escaped JSON)",
-            style: "width:100%;box-sizing:border-box;font-family:monospace;resize:vertical;unicode-bidi:isolate;",
-            text: disclosure.json,
-          }),
+          h("div", { class: "ap-details__body" }, [
+            h("p", {
+              class: "ap-sub",
+              text: "Complete values and declared schema, including bytes and omitted preview content. Non-ASCII characters use JSON \\uXXXX escapes; originals are not normalized. Unused types and extra metadata do not contribute to the digest.",
+            }),
+            h("textarea", {
+              class: "ap-code",
+              readonly: true,
+              rows: 12,
+              wrap: "off",
+              spellcheck: false,
+              dir: "ltr",
+              "aria-label": "Full signing request (escaped JSON)",
+              text: disclosure.json,
+            }),
+          ]),
         ]),
-        h("div", { class: "muted", text: "Message fields" }),
-        ...rows.map((row) => displayRow(`${row.path} · ${row.type}`, row)),
+        sectionTitle("Message fields", "ap-typed-fields"),
+        group(rows.map((row) => displayRow(`${row.path} · ${row.type}`, row))),
         truncated
-          ? h("div", {
-              class: "muted",
+          ? h("p", {
+              class: "ap-sub",
               text: [
-                truncated.omittedCount > 0
-                  ? `${truncated.omittedCount} more field(s) not shown.`
-                  : "",
-                truncated.depthLimited
-                  ? "Some fields are nested deeper than this screen displays."
-                  : "",
+                truncated.omittedCount > 0 ? `${truncated.omittedCount} more field(s) not shown.` : "",
+                truncated.depthLimited ? "Some fields are nested deeper than this screen displays." : "",
                 "Open Full signing request (escaped JSON) above to inspect every value.",
                 "The digest below covers the whole message.",
               ]
@@ -707,701 +848,473 @@ export async function renderNotification() {
                 .join(" "),
             })
           : null,
-        h("div", { class: "row" }, [
-          h("details", { class: "box" }, [
-            h("summary", { text: "Digest (verify against the dApp)" }),
-            h("div", { class: "muted", style: "margin-top:8px;" }, [
-              h("code", { text: digestHex || "—" }),
-            ]),
-          ]),
+        h("details", { class: "advanced ap-details" }, [
+          h("summary", { text: "Digest (verify against the dApp)" }),
+          h("div", { class: "ap-details__body" }, [h("code", { class: "ap-digest", text: digestHex || "—" })]),
         ]),
         hasTextSafetyWarning
-          ? h("div", { class: "callout warn" }, [
-              h("div", { class: "callout-title", text: "Text needs review" }),
-              h("div", {
-                class: "muted",
-                text:
-                  "Some origin, domain or message text contains controls, formatting characters, line separators or non-NFC sequences. The preview may use placeholders or escapes. Inspect the originals in Full signing request before signing.",
-              }),
-            ])
+          ? warning(
+              "Text needs review",
+              "Some origin, domain or message text contains controls, formatting characters, line separators or non-NFC sequences. The preview may use placeholders or escapes. Inspect the originals in Full signing request before signing."
+            )
           : null,
-        h("div", {
-          class: "muted",
-          text:
-            "Signing authorizes this exact message for the site shown above. It does not submit a transaction. A malicious site can request a signature that references contracts or fields you don't intend to trust — verify every field before continuing.",
-        }),
-        decisionButtons("Sign"),
-      ].filter(Boolean)
+        note(
+          "Signing authorizes this exact message for the site shown above. It sends no transaction. Check every field: a site can ask for a signature over contracts or values you don't mean to trust.",
+          "info"
+        ),
+      ],
+      decisionBar({ approveText: "Sign" }).nodes
     );
-    return;
   }
 
-  if (kindNorm === "watch_asset") {
-    const typeRaw = String(params?.type ?? "").trim();
-    const type = typeRaw.toUpperCase();
-    const options = params?.options && typeof params.options === "object" ? params.options : {};
+  // ---- Add a token or NFT --------------------------------------------------
 
+  async function renderWatchAsset() {
+    const type = String(params?.type ?? "").trim().toUpperCase();
+    const options = params?.options && typeof params.options === "object" ? params.options : {};
     const contractId = String(options?.contractId ?? "");
     const tokenId = options?.tokenId != null ? String(options.tokenId) : "";
 
     let meta = null;
-    let owner = null;
     let tokenUri = "";
     let ownedKnown = false;
     let owned = true;
 
     if (type === "DRC20") {
-      try {
-        meta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId });
-      } catch {
-        meta = null;
-      }
+      meta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId }).catch(() => null);
     } else if (type === "DRC721") {
-      try {
-        meta = await sendResult({ type: "DUSK_UI_DRC721_GET_METADATA", contractId });
-      } catch {
-        meta = null;
-      }
+      meta = await sendResult({ type: "DUSK_UI_DRC721_GET_METADATA", contractId }).catch(() => null);
       if (tokenId) {
         try {
-          owner = await sendResult({ type: "DUSK_UI_DRC721_OWNER_OF", contractId, tokenId });
-          const ownerStr = accountEnumToString(owner);
+          const ownerStr = accountEnumToString(await sendResult({ type: "DUSK_UI_DRC721_OWNER_OF", contractId, tokenId }));
           ownedKnown = Boolean(ownerStr);
           owned = ownerStr === String(activeAccount ?? "");
         } catch {
           ownedKnown = false;
           owned = true;
         }
-        try {
-          tokenUri = String(
-            await sendResult({ type: "DUSK_UI_DRC721_TOKEN_URI", contractId, tokenId })
-          );
-        } catch {
-          tokenUri = "";
-        }
+        tokenUri = String(await sendResult({ type: "DUSK_UI_DRC721_TOKEN_URI", contractId, tokenId }).catch(() => ""));
       }
     }
 
-    const add = decisionButtonsWithState({
-      approveText: type === "DRC721" ? "Import NFT" : "Add token",
-      approveDisabled: type === "DRC721" && ownedKnown && !owned,
-    });
-
-    setApp([
-      header,
-      h("div", { class: "row" }, [h("div", { class: "muted", text: "Add asset" })]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Account" }),
-        activeProfileBox(),
-      ]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Type" }),
-        h("div", { class: "box" }, [h("code", { text: type || "(missing)" })]),
-      ]),
-      h("div", { class: "row" }, [
-        h("div", { class: "muted", text: "Contract" }),
-        h("div", { class: "box" }, [h("code", { text: contractId || "(missing)" })]),
-      ]),
-      type === "DRC721"
-        ? h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Token ID" }),
-            h("div", { class: "box" }, [h("code", { text: tokenId || "(missing)" })]),
-          ])
-        : h("div"),
-      meta
-        ? h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Metadata (on-chain)" }),
-            h("div", { class: "box" }, [
-              h("code", {
-                text: JSON.stringify(meta, null, 2),
-              }),
-            ]),
-          ])
-        : h("div"),
-      type === "DRC721" && tokenUri
-        ? h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Token URI (raw)" }),
-            h("div", { class: "box" }, [h("code", { text: tokenUri })]),
-          ])
-        : h("div"),
-      type === "DRC721" && ownedKnown && !owned
-        ? h("div", { class: "callout warn" }, [
-            h("div", { class: "callout-title", text: "Not owned" }),
-            h("div", {
-              class: "muted",
-              text: "This NFT is not owned by the connected account, so it cannot be imported.",
-            }),
-          ])
-        : h("div"),
-      h("div", {
-        class: "muted",
-        text: "Wallet verifies the standard interface and on-chain metadata before adding it.",
-      }),
-      add.row,
-    ]);
-    return;
+    const nft = type === "DRC721";
+    const label = [String(meta?.name ?? "").trim(), String(meta?.symbol ?? "").trim()].filter(Boolean).join(" · ");
+    const bar = decisionBar({ approveText: nft ? "Import NFT" : "Add token", approveDisabled: nft && ownedKnown && !owned });
+    show(
+      [
+        site,
+        requestHead({ title: requestSummary("watch_asset", params).title, sub: label || undefined }),
+        group([
+          kv("Standard", type || "(missing)"),
+          kv("Contract", contractId ? shortMono(contractId) : "(missing)"),
+          nft ? kv("Token ID", mono(tokenId || "(missing)")) : null,
+          kv("Account", profileValue()),
+        ]),
+        nft && ownedKnown && !owned
+          ? warning("Not yours", "The connected profile doesn't own this NFT, so it can't be imported.")
+          : null,
+        note("The wallet checks the contract's standard and its on-chain details before adding it.", "info"),
+        details("Details", [
+          group(
+            [
+              contractId ? kv("Contract ID", mono(contractId), { stack: true }) : null,
+              meta ? kv("On-chain details", h("code", { text: JSON.stringify(meta, null, 2) }), { stack: true }) : null,
+              nft && tokenUri ? kv("Token URI", mono(tokenUri), { stack: true }) : null,
+            ],
+            { className: "group--inset" }
+          ),
+        ]),
+      ],
+      bar.nodes
+    );
   }
 
-  if (kindNorm === "send_tx") {
+  // ---- Transactions --------------------------------------------------------
+
+  async function renderSendTx() {
     const txKind = String(params?.kind ?? "").toLowerCase();
     const txChainId = String(params?.chainId ?? "");
-    const txNetworkName = String(params?.networkName ?? "");
-    const txNodeUrl = String(params?.nodeUrl ?? "");
-    const networkRow = h("div", { class: "row" }, [
-      h("div", { class: "muted", text: "Network" }),
-      h("div", { class: "box" }, [
-        h("div", { text: txNetworkName || txChainId || "Unknown" }),
-        txChainId ? h("div", { class: "muted", text: txChainId }) : null,
-        txNodeUrl ? h("div", { class: "muted", text: txNodeUrl }) : null,
-      ].filter(Boolean)),
-    ]);
+    const networkName = String(params?.networkName ?? "") || networkNameFromNodeUrl(nodeUrl);
+    const privacy = String(params?.privacy ?? (txKind === TX_KIND.CONTRACT_CALL ? "public" : "")).trim().toLowerCase();
+    const shielded = privacy === "shielded";
+    const rail = shielded ? "Shielded" : "Public";
+    const gas = params?.gas ?? null;
+    const myName = nameOf(activeAccount);
+    const me = myName ? `your name ${myName}` : "your public address";
 
-    // A recipient's full address, which stays what the approval is about, and
-    // under it, on one line, who the wallet knows it as, or else the .dusk
-    // name the recipient set for its public account, which the engine checks
-    // points back to it. That name is asked for once the approval shows, into
-    // the line kept for it, so nothing below moves when it comes and Approve
-    // never waits for it; no answer leaves the line empty.
-    const recipientBox = (recipient) => {
-      const to = String(recipient ?? "").trim();
-      const address = h("code", { text: to || "(missing)" });
-      const known = to ? knownRecipient(to) : null;
-      const named = !known && classifyDuskIdentifier(to) === "account" && Boolean(duskNamesNetwork(txNodeUrl));
-      if (!known && !named) return h("div", { class: "box" }, [address]);
+    // The network's lines, which most people skip.
+    const networkRows = () => [
+      kv("Network", networkName || "Unknown"),
+      txChainId ? kv("Chain ID", mono(txChainId)) : null,
+      nodeUrl ? kv("Node", mono(nodeUrl), { stack: true }) : null,
+    ];
 
-      const line = h("div", { class: "muted recipient-line" });
-      const show = (label, source) =>
-        setChildren(line, [
-          h("span", { class: "recipient-line__label", text: label, title: label }),
-          h("span", { class: "recipient-line__source", text: ` · ${source}` }),
-        ]);
-      if (known) {
-        show(...known);
-      } else {
-        send({ type: "DUSK_UI_RECIPIENT_NAME", rid, recipient: to })
-          .then((res) => {
-            const name = res?.ok ? res.result : null;
-            if (typeof name === "string" && name) show(name, "name set by the recipient");
-          })
-          .catch(() => {});
-      }
-      return h("div", { class: "box recipient-box" }, [address, line]);
+    const gasEditorFor = (amountLux, extraLux = []) => {
+      const gasEditor = document.createElement("dusk-gas-editor");
+      gasEditor.amountLux = amountLux;
+      gasEditor.extraLux = extraLux;
+      gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
+      gasEditor.helpText = "Max fee = gas limit × gas price. Only the gas used is charged. Clear both to use the defaults.";
+      gasEditor.setGas(gas);
+      return gasEditor;
     };
 
     if (txKind === TX_KIND.TRANSFER) {
-      const to = params?.to ?? "";
-      const amount = params?.amount ?? "0";
-      const memo = params?.memo ?? "";
-      const gas = params?.gas ?? null;
-      const privacy = String(params?.privacy ?? "").trim().toLowerCase();
-      const isShieldedTransfer = privacy === "shielded";
-      // A shielded transfer is paid from the shielded balance: no account, so no name.
-      const fromBox = isShieldedTransfer
-        ? h("div", { class: "box" }, [h("code", { text: "Phoenix shielded balance" })])
-        : activeProfileBox();
-      const railLabel = isShieldedTransfer ? "Shielded (Phoenix)" : "Public (Moonlight)";
+      const to = String(params?.to ?? "").trim();
+      const amountLux = safeBigInt(params?.amount, 0n).toString();
+      const memo = String(params?.memo ?? "");
+      const gasEditor = gasEditorFor(amountLux);
+      const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
+      submitOnGasEnter(gasEditor, bar.approveBtn);
+      // A public transfer shows on chain for good: say what, and under
+      // which name.
+      const visible = memo
+        ? `Visible to everyone: amount, memo, and ${me}.`
+        : `Visible to everyone: amount and ${me}.`;
 
-      const amountLuxStr = prettyAmount(amount);
-      const amountDuskStr = formatLuxShort(amountLuxStr, UI_DISPLAY_DECIMALS);
-
-      const gasEditor = document.createElement("dusk-gas-editor");
-      gasEditor.amountLux = amountLuxStr;
-      gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-      gasEditor.helpText =
-        "Max fee shown is limit × price. If left blank, the protocol/node may choose defaults.";
-      gasEditor.setGas(gas);
-      const approveRow = decisionButtons("Approve", () => gasEditor.readOverrideGas(gas));
-      submitOnGasEnter(gasEditor, approveRow.querySelector(".btn-primary"));
-
-      setApp([
-        header,
-        networkRow,
-        h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve transfer" })]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "From" }),
-          fromBox,
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Privacy" }),
-          h("div", { class: "box" }, [h("code", { text: railLabel })]),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "To" }),
-          recipientBox(to),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Amount" }),
-          h("div", { class: "box" }, [
-            h("code", { text: `${amountDuskStr} DUSK`, title: `Lux: ${amountLuxStr}` }),
+      show(
+        [
+          site,
+          requestHead({ title: "Pay", amount: { value: exactDusk(amountLux), unit: "DUSK" }, to: toLine(to) }),
+          gasEditor,
+          shielded ? null : note(visible, "eye", { className: "ap-visible" }),
+          group([
+            kv("From", shielded ? "Your shielded balance" : payerLine(rail)),
+            kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
+            memo ? kv("Memo", memo, { stack: memo.length > 24 }) : null,
           ]),
-        ]),
-        memo
-          ? h("div", { class: "row" }, [
-              h("div", { class: "muted", text: "Memo" }),
-              h("div", { class: "box" }, [h("code", { text: memo })]),
-            ])
-          : h("div"),
-        gasEditor,
-        approveRow,
-      ]);
+          details("Details", [group(networkRows(), { className: "group--inset" })]),
+        ],
+        bar.nodes
+      );
       return;
     }
 
     if (txKind === TX_KIND.CONTRACT_CALL) {
-      const amount = params?.amount ?? "0";
-      const deposit = params?.deposit ?? "0";
-      const gas = params?.gas ?? null;
-      const privacy = String(params?.privacy ?? "public").trim().toLowerCase();
+      return renderContractCall({ networkRows, gasEditorFor, rail, me });
+    }
 
-      const amountLuxStr = prettyAmount(amount);
-      const depositLuxStr = prettyAmount(deposit);
-      const amountDuskStr = formatLuxShort(amountLuxStr, UI_DISPLAY_DECIMALS);
-      const depositDuskStr = formatLuxShort(depositLuxStr, UI_DISPLAY_DECIMALS);
+    renderError(`Unknown transaction kind: ${txKind || "(missing kind)"}`);
+  }
 
-      const gasEditor = document.createElement("dusk-gas-editor");
-      gasEditor.amountLux = amountLuxStr;
-      gasEditor.extraLux = [depositLuxStr];
-      gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-      gasEditor.helpText =
-        "Max fee shown is limit × price. If left blank, the protocol/node may choose defaults.";
-      gasEditor.setGas(gas);
+  async function renderContractCall({ networkRows, gasEditorFor, rail, me }) {
+    const gas = params?.gas ?? null;
+    const amountLux = safeBigInt(params?.amount, 0n).toString();
+    const depositLux = safeBigInt(params?.deposit, 0n).toString();
+    const gasEditor = gasEditorFor(amountLux, [depositLux]);
 
-      const contractIdRaw = params?.contractId;
-      let contractIdHex = "";
-      try {
-        if (typeof contractIdRaw === "string") {
-          contractIdHex = contractIdRaw.startsWith("0x") ? contractIdRaw : `0x${contractIdRaw}`;
-        } else {
-          contractIdHex = `0x${bytesToHex(toBytes(contractIdRaw))}`;
+    const contractIdRaw = params?.contractId;
+    let contractIdHex = "";
+    try {
+      contractIdHex =
+        typeof contractIdRaw === "string"
+          ? contractIdRaw.startsWith("0x")
+            ? contractIdRaw
+            : `0x${contractIdRaw}`
+          : `0x${bytesToHex(toBytes(contractIdRaw))}`;
+    } catch {
+      contractIdHex = String(contractIdRaw ?? "");
+    }
+
+    const fnName = String(params?.fnName ?? "");
+    const fnNameTrim = fnName.trim();
+    const fnNameLower = fnNameTrim.toLowerCase();
+
+    const argsBytes = callArgs(params);
+    const argsOk = Boolean(argsBytes);
+    const argsHex = argsOk ? `0x${bytesToHex(argsBytes)}` : "";
+    const argsHash = argsOk ? await sha256Hex(argsBytes) : "";
+    const callData = argsOk ? argsLine(argsBytes, argsHash) : String(params?.fnArgs ?? "");
+    const display = params?.display;
+    const sendsLux = safeBigInt(amountLux, 0n) + safeBigInt(depositLux, 0n);
+
+    // The call itself: contract, function and its arguments' size and hash,
+    // which the site can show too; the bytes themselves under Raw call data.
+    const callRows = ({ from = false } = {}) =>
+      group([
+        from ? kv("From", payerLine(rail)) : null,
+        kv("Contract", shortMono(contractIdHex)),
+        kv("Function", mono(fnName || "(none)")),
+        kv("Call data", mono(callData), { stack: true }),
+        safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${exactDusk(amountLux)} DUSK`) : null,
+        safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${exactDusk(depositLux)} DUSK`) : null,
+      ]);
+    const rawData = () =>
+      details("Raw call data", [h("code", { class: "ap-raw", text: argsHex || String(params?.fnArgs ?? "") })]);
+    const detailsBlock = () =>
+      details("Details", [group([...networkRows(), kv("Contract ID", mono(contractIdHex), { stack: true })], { className: "group--inset" })]);
+    const visible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
+
+    // A known DuskEVM bridge call: what it does, read from its arguments,
+    // above the call and its bytes.
+    const bridge = argsOk ? bridgeCallOf(params) : null;
+    if (bridge) {
+      const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
+      submitOnGasEnter(gasEditor, bar.approveBtn);
+      const summary = requestSummary("send_tx", params);
+      let head;
+      let decoded;
+      let extra = null;
+      if (bridge.kind === "deposit") {
+        // A deposit that sends other DUSK than it bridges is the bridge's
+        // call, but not one to approve without asking why.
+        const matches = bridge.sentLux === bridge.amountLux;
+        head = requestHead({
+          title: summary.title,
+          amount: summary.amount,
+          to: plainTo(bridge.recipient, "on DuskEVM"),
+          tag: matches ? headTag("Known DuskEVM bridge call") : null,
+        });
+        decoded = group([
+          kv("DuskEVM recipient", h("code", { class: "ap-address", text: bridge.recipient }), { stack: true }),
+          kv("Amount", `${exactDusk(bridge.amountLux)} DUSK`),
+          kv("From", payerLine(rail)),
+          bridge.extraDataBytes ? kv("Extra data", `${bridge.extraDataBytes} bytes`) : null,
+        ]);
+        if (!matches) {
+          extra = warning(
+            "The amounts don't match",
+            `This call sends ${exactDusk(depositLux)} DUSK but bridges ${exactDusk(bridge.amountLux)} DUSK. Reject it unless the site told you why.`
+          );
         }
-      } catch {
-        contractIdHex = String(contractIdRaw ?? "");
+      } else {
+        const paysTo =
+          bridge.recipient.kind === "account"
+            ? toLine(bridge.recipient.account, { network: "on Dusk" })
+            : plainTo(bridge.recipient.contractId, "on Dusk, a contract", 6, 6);
+        head = requestHead({
+          title: summary.title,
+          amount: withdrawalAmount(bridge.amountWei),
+          to: paysTo,
+          tag: headTag("Known DuskEVM bridge call"),
+        });
+        const amount = withdrawalAmount(bridge.amountWei);
+        decoded = group([
+          kv(
+            bridge.recipient.kind === "account" ? "Pays to" : "Pays to contract",
+            h("code", { class: "ap-address", text: bridge.recipient.kind === "account" ? bridge.recipient.account : bridge.recipient.contractId }),
+            { stack: true }
+          ),
+          kv("Amount", `${amount.value} ${amount.unit}`),
+          kv("Sent from DuskEVM", h("code", { class: "ap-address", text: bridge.sender }), { stack: true }),
+          bridge.proofSubmitter ? kv("Proved by", h("code", { class: "ap-address", text: bridge.proofSubmitter }), { stack: true }) : null,
+        ]);
+        extra = note(
+          bridge.kind === "prove"
+            ? "Proving moves no DUSK. You claim it once the waiting period ends."
+            : "Claiming pays this DUSK to the account above. You pay only the network fee.",
+          "info"
+        );
       }
 
-      const fnName = String(params?.fnName ?? "");
-      const fnNameTrim = fnName.trim();
-      const fnNameLower = fnNameTrim.toLowerCase();
+      show(
+        [
+          site,
+          head,
+          decoded,
+          extra,
+          gasEditor,
+          visible(bridge.kind === "deposit" ? "the amount, the DuskEVM recipient" : "this call, the withdrawal"),
+          callRows(),
+          rawData(),
+          siteDetails(display),
+          detailsBlock(),
+        ],
+        bar.nodes
+      );
+      return;
+    }
 
-      let argsBytes = new Uint8Array();
-      let argsLen = 0;
-      let argsHash = "";
-      let argsHex = "";
-      let argsOk = false;
+    const wantsDrc20 = argsOk && ["transfer", "approve", "transfer_from"].includes(fnNameLower);
+    const wantsDrc721 = argsOk && ["approve", "set_approval_for_all", "transfer_from"].includes(fnNameLower);
+
+    let drcKind = "";
+    let drcDriver = "";
+    let decoded = null;
+
+    if (wantsDrc20) {
       try {
-        argsBytes = toBytes(params?.fnArgs);
-        argsLen = argsBytes.length;
-        argsHex = `0x${bytesToHex(argsBytes)}`;
-        argsHash = await sha256Hex(argsBytes);
-        argsOk = true;
+        decoded = await sendResult({ type: "DUSK_UI_DRC20_DECODE_INPUT", fnName: fnNameTrim, fnArgs: argsHex });
+        drcKind = "DRC20";
+        drcDriver = "drc20";
       } catch {
-        // ignore; show raw below
-      }
-
-      const display = params?.display;
-
-      const wantsDrc20 =
-        argsOk && ["transfer", "approve", "transfer_from"].includes(fnNameLower);
-      const wantsDrc721 =
-        argsOk && ["approve", "set_approval_for_all", "transfer_from"].includes(fnNameLower);
-
-      let drcKind = "";
-      let drcDriver = "";
-      let decoded = null;
-
-      if (wantsDrc20) {
         try {
           decoded = await sendResult({
             type: "DUSK_UI_DRC20_DECODE_INPUT",
             fnName: fnNameTrim,
             fnArgs: argsHex,
+            driver: "sozu_staked_dusk",
           });
           drcKind = "DRC20";
-          drcDriver = "drc20";
-        } catch {
-          try {
-            decoded = await sendResult({
-              type: "DUSK_UI_DRC20_DECODE_INPUT",
-              fnName: fnNameTrim,
-              fnArgs: argsHex,
-              driver: "sozu_staked_dusk",
-            });
-            drcKind = "DRC20";
-            drcDriver = "sozu_staked_dusk";
-          } catch {
-            // ignore
-          }
-        }
-      }
-
-      if (!drcKind && wantsDrc721) {
-        try {
-          decoded = await sendResult({
-            type: "DUSK_UI_DRC721_DECODE_INPUT",
-            fnName: fnNameTrim,
-            fnArgs: argsHex,
-          });
-          drcKind = "DRC721";
+          drcDriver = "sozu_staked_dusk";
         } catch {
           // ignore
         }
       }
+    }
 
-      let drcMeta = null;
-      if (drcKind === "DRC20") {
-        try {
-          drcMeta = await sendResult({
-            type: "DUSK_UI_DRC20_GET_METADATA",
-            contractId: contractIdHex,
-            driver: drcDriver,
-          });
-        } catch {
-          drcMeta = null;
-        }
+    if (!drcKind && wantsDrc721) {
+      try {
+        decoded = await sendResult({ type: "DUSK_UI_DRC721_DECODE_INPUT", fnName: fnNameTrim, fnArgs: argsHex });
+        drcKind = "DRC721";
+      } catch {
+        // ignore
       }
-      if (drcKind === "DRC721") {
-        try {
-          drcMeta = await sendResult({ type: "DUSK_UI_DRC721_GET_METADATA", contractId: contractIdHex });
-        } catch {
-          drcMeta = null;
-        }
-      }
+    }
 
-      // Specialized approval UI for canonical token standards.
-      if (drcKind === "DRC20" && decoded && typeof decoded === "object") {
-        const sym = String(drcMeta?.symbol ?? "").trim() || "TOKEN";
-        const name = String(drcMeta?.name ?? "").trim() || "DRC20 token";
-        const dec = Number(drcMeta?.decimals ?? 0) || 0;
+    let drcMeta = null;
+    if (drcKind === "DRC20") {
+      drcMeta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId: contractIdHex, driver: drcDriver }).catch(() => null);
+    }
+    if (drcKind === "DRC721") {
+      drcMeta = await sendResult({ type: "DUSK_UI_DRC721_GET_METADATA", contractId: contractIdHex }).catch(() => null);
+    }
 
-        const toStr = accountEnumToString(decoded?.to);
-        const spenderStr = accountEnumToString(decoded?.spender);
-        const ownerStr = accountEnumToString(decoded?.owner);
-        const valueUnitsStr = decoded?.value != null ? String(decoded.value) : "";
-        const valueHuman = valueUnitsStr ? formatTokenUnits(valueUnitsStr, dec, { maxFrac: UI_DISPLAY_DECIMALS }) : "—";
+    // Token standards: what the call moves or allows, in the token's units.
+    if (drcKind === "DRC20" && decoded && typeof decoded === "object") {
+      const sym = String(drcMeta?.symbol ?? "").trim() || "TOKEN";
+      const name = String(drcMeta?.name ?? "").trim() || "DRC20 token";
+      const dec = Number(drcMeta?.decimals ?? 0) || 0;
 
-        const isApprove = fnNameLower === "approve";
-        const isTransfer = fnNameLower === "transfer";
-        const isTransferFrom = fnNameLower === "transfer_from";
+      const toStr = accountEnumToString(decoded?.to);
+      const spenderStr = accountEnumToString(decoded?.spender);
+      const ownerStr = accountEnumToString(decoded?.owner);
+      const valueUnitsStr = decoded?.value != null ? String(decoded.value) : "";
+      const valueHuman = valueUnitsStr ? formatTokenUnits(valueUnitsStr, dec, { maxFrac: UI_DISPLAY_DECIMALS }) : "—";
 
-        const isMax =
-          isApprove && safeBigInt(valueUnitsStr, -1n) === MAX_U64;
+      const isApprove = fnNameLower === "approve";
+      const isTransfer = fnNameLower === "transfer";
+      const isTransferFrom = fnNameLower === "transfer_from";
+      const isMax = isApprove && safeBigInt(valueUnitsStr, -1n) === MAX_U64;
 
-        const ackInput = textInput({
-          placeholder: "Type MAX to confirm",
-          onEnter: () => add.approveBtn.click(),
-          oninput: () => {
-            const ok = String(ackInput.value ?? "")
-              .trim()
-              .toUpperCase() === "MAX";
-            add.approveBtn.disabled = !(ok && isUnlocked);
-          },
-        });
+      const bar = decisionBar({
+        approveText: isTransfer ? "Approve transfer" : isApprove ? "Approve spending" : "Approve",
+        approveDisabled: Boolean(isMax),
+        approveTitle: isMax ? "Type MAX to enable approval" : "",
+        getApprovedParams: () => gasEditor.readOverrideGas(gas),
+      });
+      submitOnGasEnter(gasEditor, bar.approveBtn);
+      const ackInput = textInput({
+        placeholder: "Type MAX to confirm",
+        "aria-label": "Type MAX to confirm",
+        onEnter: () => bar.approveBtn.click(),
+        oninput: () => {
+          bar.approveBtn.disabled = String(ackInput.value ?? "").trim().toUpperCase() !== "MAX";
+        },
+      });
 
-        const add = decisionButtonsWithState({
-          approveText: isTransfer ? "Approve transfer" : isApprove ? "Approve spending" : "Approve",
-          approveDisabled: Boolean(isMax),
-          approveTitle: isMax ? "Type MAX to enable approval" : "",
-          getApprovedParams: () => gasEditor.readOverrideGas(gas),
-        });
-        submitOnGasEnter(gasEditor, add.approveBtn);
-
-        setApp([
-          header,
-          networkRow,
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Approve DRC20 contract call" }),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "From" }),
-            activeProfileBox(),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Token" }),
-            h("div", { class: "box" }, [
-              h("div", { text: `${name} (${sym})` }),
-              h("div", { class: "muted" }, [h("code", { text: contractIdHex })]),
-            ]),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Privacy" }),
-            h("div", { class: "box" }, [
-              h("code", { text: privacy === "shielded" ? "Shielded" : "Public" }),
-            ]),
-          ]),
-          isTransfer || isTransferFrom
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "To" }),
-                recipientBox(toStr),
-              ])
-            : h("div"),
-          isApprove
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "Spender" }),
-                h("div", { class: "box" }, [h("code", { text: spenderStr || "(missing)" })]),
-              ])
-            : h("div"),
-          isTransferFrom
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "Owner" }),
-                h("div", { class: "box" }, [h("code", { text: ownerStr || "(missing)" })]),
-              ])
-            : h("div"),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Amount" }),
-            h("div", { class: "box" }, [
-              h("code", {
-                text: valueUnitsStr ? `${valueHuman} ${sym}` : "—",
-                title: valueUnitsStr ? `Units: ${valueUnitsStr}` : "",
-              }),
-            ]),
+      show(
+        [
+          site,
+          requestHead({
+            title: isApprove ? "Allow spending?" : "Send tokens",
+            amount: valueUnitsStr ? { value: valueHuman, unit: sym } : null,
+            to: (isTransfer || isTransferFrom) && toStr ? toLine(toStr) : null,
+            sub: `${name} · DRC20`,
+          }),
+          group([
+            kv("From", payerLine(rail)),
+            isTransfer || isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
+            isApprove ? kv("Spender", h("code", { class: "ap-address", text: spenderStr || "(missing)" }), { stack: true }) : null,
+            isTransferFrom ? kv("Owner", h("code", { class: "ap-address", text: ownerStr || "(missing)" }), { stack: true }) : null,
+            kv("Token", h("span", {}, [h("span", { text: `${name} (${sym}) ` }), shortMono(contractIdHex, 6, 6)])),
+            valueUnitsStr ? kv("Units", mono(valueUnitsStr)) : null,
           ]),
           isMax
-            ? h("div", { class: "callout warn" }, [
-                h("div", { class: "callout-title", text: "Unlimited allowance (MAX)" }),
-                h("div", {
-                  class: "muted",
-                  text:
-                    "This approval grants unlimited spending permission (u64::MAX). Only continue if you trust the spender.",
-                }),
-                ackInput,
-              ])
-            : h("div"),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Args hash" }),
-            h("div", { class: "box" }, [
-              h("code", {
-                text: argsHash
-                  ? `${argsLen} bytes · sha256=${argsHash.slice(0, 12)}…${argsHash.slice(-8)}`
-                  : "—",
-              }),
-            ]),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Amount (DUSK)" }),
-            h("div", { class: "box" }, [
-              h("code", { text: `${amountDuskStr} DUSK`, title: `Lux: ${amountLuxStr}` }),
-            ]),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Deposit (DUSK)" }),
-            h("div", { class: "box" }, [
-              h("code", { text: `${depositDuskStr} DUSK`, title: `Lux: ${depositLuxStr}` }),
-            ]),
-          ]),
+            ? warning("Unlimited allowance", "This lets the spender move all of this token from your account, now and later. Only continue if you trust it.", [ackInput])
+            : null,
+          callRows(),
+          rawData(),
           gasEditor,
-          display
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "Site-provided details (unverified)" }),
-                h("div", { class: "box" }, [h("code", { text: JSON.stringify(display, null, 2) })]),
-              ])
-            : h("div"),
-          add.row,
-        ]);
-        return;
-      }
-
-      if (drcKind === "DRC721" && decoded && typeof decoded === "object") {
-        const sym = String(drcMeta?.symbol ?? "").trim() || "NFT";
-        const name = String(drcMeta?.name ?? "").trim() || "DRC721";
-
-        const approvedStr = accountEnumToString(decoded?.approved);
-        const operatorStr = accountEnumToString(decoded?.operator);
-        const fromStr = accountEnumToString(decoded?.from);
-        const toStr = accountEnumToString(decoded?.to);
-
-        const tokenIdStr =
-          decoded?.token_id != null
-            ? String(decoded.token_id)
-            : decoded?.tokenId != null
-              ? String(decoded.tokenId)
-              : "";
-
-        const isApprove = fnNameLower === "approve";
-        const isSetApprovalForAll = fnNameLower === "set_approval_for_all";
-        const isTransferFrom = fnNameLower === "transfer_from";
-
-        const approvedBool = Boolean(decoded?.approved);
-
-        const add = decisionButtonsWithState({
-          approveText: isTransferFrom ? "Approve transfer" : isApprove ? "Approve" : "Approve",
-          getApprovedParams: () => gasEditor.readOverrideGas(gas),
-        });
-        submitOnGasEnter(gasEditor, add.approveBtn);
-
-        setApp([
-          header,
-          networkRow,
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Approve DRC721 contract call" }),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "From" }),
-            activeProfileBox(),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Contract" }),
-            h("div", { class: "box" }, [
-              h("div", { text: `${name} (${sym})` }),
-              h("div", { class: "muted" }, [h("code", { text: contractIdHex })]),
-            ]),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Privacy" }),
-            h("div", { class: "box" }, [
-              h("code", { text: privacy === "shielded" ? "Shielded" : "Public" }),
-            ]),
-          ]),
-          tokenIdStr
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "Token ID" }),
-                h("div", { class: "box" }, [h("code", { text: tokenIdStr })]),
-              ])
-            : h("div"),
-          isApprove
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "Approved" }),
-                h("div", { class: "box" }, [h("code", { text: approvedStr || "(missing)" })]),
-              ])
-            : h("div"),
-          isSetApprovalForAll
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "Operator" }),
-                h("div", { class: "box" }, [h("code", { text: operatorStr || "(missing)" })]),
-              ])
-            : h("div"),
-          isSetApprovalForAll
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "Approved for all" }),
-                h("div", { class: "box" }, [
-                  h("code", { text: approvedBool ? "true" : "false" }),
-                ]),
-              ])
-            : h("div"),
-          isTransferFrom
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "From (owner)" }),
-                h("div", { class: "box" }, [h("code", { text: fromStr || "(missing)" })]),
-              ])
-            : h("div"),
-          isTransferFrom
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "To" }),
-                recipientBox(toStr),
-              ])
-            : h("div"),
-          isSetApprovalForAll && approvedBool
-            ? h("div", { class: "callout warn" }, [
-                h("div", { class: "callout-title", text: "High risk" }),
-                h("div", {
-                  class: "muted",
-                  text: "This grants an operator permission to transfer all of your NFTs in this collection.",
-                }),
-              ])
-            : h("div"),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Args hash" }),
-            h("div", { class: "box" }, [
-              h("code", {
-                text: argsHash
-                  ? `${argsLen} bytes · sha256=${argsHash.slice(0, 12)}…${argsHash.slice(-8)}`
-                  : "—",
-              }),
-            ]),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Amount (DUSK)" }),
-            h("div", { class: "box" }, [
-              h("code", { text: `${amountDuskStr} DUSK`, title: `Lux: ${amountLuxStr}` }),
-            ]),
-          ]),
-          h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Deposit (DUSK)" }),
-            h("div", { class: "box" }, [
-              h("code", { text: `${depositDuskStr} DUSK`, title: `Lux: ${depositLuxStr}` }),
-            ]),
-          ]),
-          gasEditor,
-          display
-            ? h("div", { class: "row" }, [
-                h("div", { class: "muted", text: "Site-provided details (unverified)" }),
-                h("div", { class: "box" }, [h("code", { text: JSON.stringify(display, null, 2) })]),
-              ])
-            : h("div"),
-          add.row,
-        ]);
-        return;
-      }
-
-      const approveRow = decisionButtons("Approve", () => gasEditor.readOverrideGas(gas));
-      submitOnGasEnter(gasEditor, approveRow.querySelector(".btn-primary"));
-
-      setApp([
-        header,
-        networkRow,
-        h("div", { class: "row" }, [h("div", { class: "muted", text: "Approve contract call" })]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "From" }),
-          activeProfileBox(),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Contract" }),
-          h("div", { class: "box" }, [h("code", { text: contractIdHex })]),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Privacy" }),
-          h("div", { class: "box" }, [
-            h("code", {
-              text: privacy === "shielded" ? "Shielded" : "Public",
-            }),
-          ]),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Function" }),
-          h("div", { class: "box" }, [h("code", { text: fnName || "(none)" })]),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Args (opaque bytes)" }),
-          h("div", { class: "box" }, [
-            h("code", {
-              text:
-                argsHash
-                  ? `${argsLen} bytes · sha256=${argsHash.slice(0, 12)}…${argsHash.slice(-8)}`
-                  : String(params?.fnArgs ?? ""),
-            }),
-          ]),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Amount" }),
-          h("div", { class: "box" }, [
-            h("code", { text: `${amountDuskStr} DUSK`, title: `Lux: ${amountLuxStr}` }),
-          ]),
-        ]),
-        h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Deposit" }),
-          h("div", { class: "box" }, [
-            h("code", { text: `${depositDuskStr} DUSK`, title: `Lux: ${depositLuxStr}` }),
-          ]),
-        ]),
-        gasEditor,
-        display
-          ? h("div", { class: "row" }, [
-              h("div", { class: "muted", text: "Site-provided details (unverified)" }),
-              h("div", { class: "box" }, [h("code", { text: JSON.stringify(display, null, 2) })]),
-            ])
-          : h("div"),
-        h("div", {
-          class: "muted",
-          text: "Warning: Contract args are opaque bytes. Verify details in the dApp before approving.",
-        }),
-        approveRow,
-      ]);
+          visible("this call, the tokens it moves"),
+          siteDetails(display),
+          detailsBlock(),
+        ],
+        bar.nodes
+      );
       return;
     }
 
-    renderError(`Unknown transaction kind: ${txKind || "(missing kind)"}`);
-    return;
-  }
+    if (drcKind === "DRC721" && decoded && typeof decoded === "object") {
+      const sym = String(drcMeta?.symbol ?? "").trim() || "NFT";
+      const name = String(drcMeta?.name ?? "").trim() || "DRC721";
 
-  renderError(`Unknown kind: ${kindNorm || String(kind)}`);
+      const approvedStr = accountEnumToString(decoded?.approved);
+      const operatorStr = accountEnumToString(decoded?.operator);
+      const fromStr = accountEnumToString(decoded?.from);
+      const toStr = accountEnumToString(decoded?.to);
+      const tokenIdStr =
+        decoded?.token_id != null ? String(decoded.token_id) : decoded?.tokenId != null ? String(decoded.tokenId) : "";
+
+      const isApprove = fnNameLower === "approve";
+      const isSetApprovalForAll = fnNameLower === "set_approval_for_all";
+      const isTransferFrom = fnNameLower === "transfer_from";
+      const approvedBool = Boolean(decoded?.approved);
+
+      const bar = decisionBar({
+        approveText: isTransferFrom ? "Approve transfer" : "Approve",
+        getApprovedParams: () => gasEditor.readOverrideGas(gas),
+      });
+      submitOnGasEnter(gasEditor, bar.approveBtn);
+
+      show(
+        [
+          site,
+          requestHead({
+            title: isTransferFrom ? "Send an NFT" : isSetApprovalForAll ? "Allow all your NFTs?" : "Allow an NFT?",
+            to: isTransferFrom && toStr ? toLine(toStr) : null,
+            sub: `${name} (${sym})${tokenIdStr ? ` · #${tokenIdStr}` : ""}`,
+          }),
+          group([
+            kv("From", payerLine(rail)),
+            tokenIdStr ? kv("Token ID", mono(tokenIdStr)) : null,
+            isApprove ? kv("Approved", h("code", { class: "ap-address", text: approvedStr || "(missing)" }), { stack: true }) : null,
+            isSetApprovalForAll ? kv("Operator", h("code", { class: "ap-address", text: operatorStr || "(missing)" }), { stack: true }) : null,
+            isSetApprovalForAll ? kv("Approved for all", approvedBool ? "Yes" : "No") : null,
+            isTransferFrom ? kv("Owner", h("code", { class: "ap-address", text: fromStr || "(missing)" }), { stack: true }) : null,
+            isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
+            kv("Collection", shortMono(contractIdHex, 6, 6)),
+          ]),
+          isSetApprovalForAll && approvedBool
+            ? warning("High risk", "This lets the operator move all of your NFTs in this collection.")
+            : null,
+          callRows(),
+          rawData(),
+          gasEditor,
+          visible("this call"),
+          siteDetails(display),
+          detailsBlock(),
+        ],
+        bar.nodes
+      );
+      return;
+    }
+
+    // Any other call: the wallet can't read its arguments, so it says so.
+    const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
+    submitOnGasEnter(gasEditor, bar.approveBtn);
+    const summary = requestSummary("send_tx", params);
+    show(
+      [
+        site,
+        requestHead({
+          title: summary.title,
+          amount: sendsLux > 0n ? { value: exactDusk(sendsLux), unit: "DUSK" } : null,
+          sub: fnNameTrim ? h("span", {}, ["Calls ", mono(fnNameTrim)]) : null,
+        }),
+        callRows({ from: true }),
+        note("The wallet can't read this call's arguments. Check them on the site before you approve.", "alert", {
+          className: "ap-opaque",
+        }),
+        gasEditor,
+        visible("this call, the DUSK it sends"),
+        rawData(),
+        siteDetails(display),
+        detailsBlock(),
+      ],
+      bar.nodes
+    );
+  }
 }
 
 export function mountNotification() {
