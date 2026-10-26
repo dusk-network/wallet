@@ -77,22 +77,20 @@ describe("field labels", () => {
     let body = await show(sendFormView(ov, { state, actions: actions() }));
     expect(fieldNames(body)).toEqual(["To", "Amount", "Memo"]);
 
-    // A recipient brings the slider, read out as the share it shows.
     typeInto(body.querySelector(".to-input-wrap input"), ACCOUNT);
-    expect(fieldNames(body)).toEqual(["To", "Amount", "Share of max", "Memo"]);
-    expect(body.querySelector("input.amount-range").getAttribute("aria-valuetext")).toBe("0%");
+    expect(fieldNames(body)).toEqual(["To", "Amount", "Memo"]);
 
+    // Review's gas fields wait under Custom fee, closed.
     state.route = "confirm";
     state.draft = { to: ACCOUNT, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" };
     body = await show(sendConfirmView(ov, { state, actions: actions() }));
-    expect(fieldNames(body)).toEqual([]);
-    body.querySelectorAll("button").find((b) => b.textContent === "Edit").click();
-    expect(fieldNames(body)).toEqual(["Gas limit", "Gas price"]);
+    expect(body.querySelector("details.gas-custom").open).toBe(false);
+    expect(fieldNames(body.querySelector("details.gas-custom"))).toEqual(["Gas limit", "Gas price (LUX)"]);
   });
 
   it("name Shield's and Receive's fields", async () => {
     let body = await show(convertFormView(ov, { state: { route: "convert", draft: { kind: TX_KIND.SHIELD } }, actions: actions() }));
-    expect(fieldNames(body)).toEqual(["Amount", "Share of max"]);
+    expect(fieldNames(body)).toEqual(["Amount"]);
 
     const state = { receive: { tab: "public", requestOpen: true, amountDusk: "", memo: "" } };
     body = await show(receiveView(ov, { state, actions: actions() }));

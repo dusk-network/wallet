@@ -1,6 +1,7 @@
 import { UI_DISPLAY_DECIMALS, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { getDefaultGas } from "../../../shared/txDefaults.js";
+import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
+import { useNetworkGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
 import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
@@ -867,28 +868,15 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   gasEditor.amountLux = "0";
   gasEditor.setGas(d?.gas ?? null);
 
-  // The gas price suggestion opens with the fee's Edit.
-  const gasHint = h("div", { class: "muted", text: "Loading gas price suggestion…" });
-  gasEditor.setEditContent([gasHint]);
-
-  (async () => {
-    try {
-      if (d?.gas) {
-        gasHint.textContent = defaultLimit ? `Default gas limit: ${defaultLimit}` : "Gas is set.";
-        return;
-      }
-      const resp = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
-      if (resp?.error) throw new Error(resp.error.message ?? "Failed to fetch gas price");
-      const stats = resp?.result ?? resp;
-      const median = String(stats?.median ?? stats?.average ?? "1");
-      gasHint.textContent = `Gas price suggestion (LUX): median ${median}`;
-      if (defaultLimit) gasEditor.setGas({ limit: defaultLimit, price: median });
-      else gasEditor.setGas({ limit: "", price: median || fallbackPrice });
-    } catch {
-      gasHint.textContent = "Gas price unavailable (using defaults).";
-      if (defaultLimit && fallbackPrice) gasEditor.setGas({ limit: defaultLimit, price: fallbackPrice });
-    }
-  })().catch(() => {});
+  // The network's gas price by default; Custom fee for gas of your own.
+  useNetworkGas({
+    actions,
+    defaultLimit,
+    fallbackPrice,
+    gas: d?.gas,
+    gasEditor,
+    minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL)?.limit,
+  });
 
   const valueUnits = String(d?.asset?.valueUnits ?? d?.asset?.value ?? "0");
   const valueHuman = formatTokenUnits(valueUnits, dec, { maxFrac: UI_DISPLAY_DECIMALS });

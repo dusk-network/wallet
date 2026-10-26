@@ -1,4 +1,4 @@
-import { UI_DISPLAY_DECIMALS, formatLuxToDusk, formatLuxShort, groupThousands, safeBigInt } from "../../../shared/amount.js";
+import { formatDusk, formatLuxToDusk, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { h } from "../../lib/dom.js";
 import { assetsSectionsView } from "./assets.js";
@@ -12,7 +12,7 @@ export function homeView(ov, { state, actions } = {}) {
   const hasBalance = Boolean(ov?.balance?.value);
   const pubLux = safeBigInt(ov?.balance?.value, 0n);
   const balFull = hasBalance ? formatLuxToDusk(pubLux) : "—";
-  const balDusk = hasBalance ? formatLuxShort(pubLux, UI_DISPLAY_DECIMALS) : "—";
+  const balDusk = hasBalance ? formatDusk(pubLux) : "—";
 
   // Shielded balance
   // If we can't compute it yet (sync in progress), we still show the row
@@ -25,7 +25,7 @@ export function homeView(ov, { state, actions } = {}) {
   // we show placeholders + sync state.
   const showShielded = true;
   const shieldFull = hasShieldValue ? formatLuxToDusk(shieldLux) : "—";
-  const shieldDusk = hasShieldValue ? formatLuxShort(shieldLux, UI_DISPLAY_DECIMALS) : "—";
+  const shieldDusk = hasShieldValue ? formatDusk(shieldLux) : "—";
 
   // Total (public + shielded) is only meaningful once shielded value is known.
   const shieldLuxBI = hasShieldValue ? safeBigInt(shieldLux, 0n) : null;
@@ -46,7 +46,7 @@ export function homeView(ov, { state, actions } = {}) {
   const hasTotal = hasBalance && typeof shieldLuxBI === "bigint";
   const totalLux = hasTotal ? pubLux + shieldLuxBI : null;
   const totalFull = hasTotal ? formatLuxToDusk(totalLux) : null;
-  const totalDusk = hasTotal ? formatLuxShort(totalLux, UI_DISPLAY_DECIMALS) : null;
+  const totalDusk = hasTotal ? formatDusk(totalLux) : null;
 
   // Shielded status suffix shown in Assets breakdown.
   // We only show a suffix when *not* fully healthy, to avoid "Shielded • Shielded".
@@ -73,7 +73,7 @@ export function homeView(ov, { state, actions } = {}) {
   // show a small hint.
   if (!shieldStatus && reservedLux > 0n) {
     shieldStatus = "Pending";
-    shieldStatusTitle = hidden ? undefined : `Reserved ${formatLuxShort(reservedLux, UI_DISPLAY_DECIMALS)} DUSK`;
+    shieldStatusTitle = hidden ? undefined : `Reserved ${formatDusk(reservedLux)} DUSK`;
   }
 
   // Home hero shows the total once shielded is available.
@@ -123,13 +123,15 @@ export function homeView(ov, { state, actions } = {}) {
     refreshBtn,
   ]);
 
-  // "Public 1,484.92 · Shielded 0" under the total.
+  // "Public 1,484.92 DUSK · Shielded 0 DUSK" under the total.
+  const unit = (amount) => (amount === "—" ? null : " DUSK");
   const balanceSplit = h("div", { class: "balance-split" }, [
     h("div", { class: "balance-split-item" }, [
       h("span", { class: "balance-split-label", text: "Public" }),
       h("span", { class: "balance-split-value", title: hidden ? undefined : groupThousands(balFull) }, [
-        balance(hidden, groupThousands(balDusk)),
-      ]),
+        balance(hidden, balDusk),
+        unit(balDusk),
+      ].filter(Boolean)),
     ]),
     showShielded
       ? h("div", { class: "balance-split-item" }, [
@@ -139,8 +141,9 @@ export function homeView(ov, { state, actions } = {}) {
             title: shieldStatusTitle,
           }),
           h("span", { class: "balance-split-value", title: hidden ? undefined : groupThousands(shieldFull) }, [
-            balance(hidden, groupThousands(shieldDusk)),
-          ]),
+            balance(hidden, shieldDusk),
+            unit(shieldDusk),
+          ].filter(Boolean)),
         ])
       : null,
   ].filter(Boolean));
@@ -206,7 +209,7 @@ export function homeView(ov, { state, actions } = {}) {
 
   // The balance sits on the page, the amount large with a muted unit; the
   // round actions follow it.
-  const heroText = groupThousands(heroAmt);
+  const heroText = heroAmt;
   const hero = h("div", { class: "home-balance home-hero" }, [
     balanceLabel,
     h(

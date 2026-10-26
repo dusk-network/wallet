@@ -821,193 +821,7 @@ body.page--popup .input-row > .icon-btn {
   height: 42px;
 }
 
-/* ---- Amount helpers (Send / Shield) ---- */
-/* Amount module: a normal input with a separate balance slider helper. */
-.amount-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-body.page--popup .amount-card {
-  gap: 7px;
-}
-
-.amount-input-row {
-  align-items: stretch;
-}
-
-.amount-card .amount-input {
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-.amount-card .amount-meta {
-  margin-top: 0;
-  padding: 0 2px;
-}
-
-.amount-card .amount-range-wrap {
-  margin-top: 2px;
-}
-
-body.page--popup .amount-card .amount-range-wrap {
-  margin-top: 2px;
-}
-
-.amount-meta {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 0;
-  padding: 2px 2px 0;
-  color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
-  font-size: 12px;
-}
-
-.amount-meta__stack {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.amount-meta__main {
-  color: color-mix(in oklab, var(--muted-foreground) 92%, transparent);
-  font-weight: 600;
-}
-
-.amount-meta__sub {
-  font-size: 11px;
-  color: color-mix(in oklab, var(--muted-foreground) 82%, transparent);
-}
-
-.amount-range-wrap {
-  margin-top: 10px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  border: 0;
-  background: var(--surface-1);
-}
-
-body.page--popup .amount-range-wrap {
-  margin-top: 8px;
-  padding: 9px 10px;
-}
-
-.amount-range__track {
-  position: relative;
-  flex: 1;
-  height: 22px;
-  display: flex;
-  align-items: center;
-}
-
-input[type="range"].amount-range {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 22px;
-
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-input[type="range"].amount-range:focus {
-  outline: none;
-}
-
-input[type="range"].amount-range::-webkit-slider-runnable-track {
-  height: 10px;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    var(--text-muted) 0%,
-    var(--text) var(--range-pct),
-    var(--surface-3) var(--range-pct),
-    var(--surface-3) 100%
-  );
-  box-shadow:
-    0 1px 0 rgba(255,255,255,0.08) inset,
-    0 0 0 1px rgba(0,0,0,0.26) inset;
-}
-
-input[type="range"].amount-range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.92);
-  border: 2px solid rgba(0,0,0,0.55);
-  box-shadow:
-    0 10px 24px rgba(0,0,0,0.35),
-    0 0 0 1px rgba(255,255,255,0.08),
-    0 0 0 4px rgba(242,240,235,0.08);
-  margin-top: -4px; /* center thumb on 10px track */
-  transition: transform 120ms ease, box-shadow 160ms ease;
-}
-
-input[type="range"].amount-range:active::-webkit-slider-thumb {
-  transform: scale(1.04);
-  box-shadow:
-    0 12px 28px rgba(0,0,0,0.38),
-    0 0 0 1px rgba(255,255,255,0.10),
-    0 0 0 4px rgba(242,240,235,0.12);
-}
-
-input[type="range"].amount-range:focus-visible::-webkit-slider-thumb {
-  box-shadow:
-    0 12px 28px rgba(0,0,0,0.38),
-    0 0 0 1px rgba(255,255,255,0.10),
-    0 0 0 4px color-mix(in oklab, var(--ring) 30%, transparent);
-}
-
-input[type="range"].amount-range:disabled {
-  opacity: 0.55;
-}
-
-.amount-range__ticks {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 10px;
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
-.amount-range__tick {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 2px;
-  height: 8px;
-  border-radius: 2px;
-  background: rgba(255,255,255,0.18);
-  box-shadow: 0 1px 0 rgba(0,0,0,0.35);
-  opacity: 0.85;
-}
-
-.amount-range__tick.is-edge {
-  height: 5px;
-  opacity: 0.55;
-}
-
-.amount-range__pct {
-  min-width: 46px;
-  text-align: right;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0;
-  color: var(--text-muted);
-}
-
+/* Placeholders, quieter than what's typed */
 ::placeholder {
   color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
 }
@@ -1461,7 +1275,7 @@ body.page--popup .site-bar-action {
   margin-top: 4px;
 }
 
-/* The gas price line and the presets, in the panel the fee's Edit opens */
+/* A note at the top of the Custom fee panel */
 .gas-edit-extra {
   display: flex;
   flex-direction: column;
@@ -1472,13 +1286,6 @@ body.page--popup .site-bar-action {
 .gas-edit-extra:empty {
   display: none;
 }
-
-.gas-quick-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
 /* Tx details key/value block (avoid input-like boxes) */
 .account-line {
   display: flex;
@@ -3514,14 +3321,6 @@ body.page--popup .brand-mark {
   text-align: right;
 }
 
-/* Review's fee and total are amounts: the text font, not the code font */
-dusk-gas-editor .hrow code {
-  font-family: inherit;
-  font-size: 13.5px;
-  font-variant-numeric: tabular-nums;
-  word-break: normal;
-}
-
 .hrow-right {
   display: inline-flex;
   align-items: center;
@@ -3927,29 +3726,6 @@ button.choice.is-picked .choice-dot {
 }
 
 /* MetaMask-like text action ("Edit") */
-.link-btn {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: none !important;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-
-.link-btn:hover {
-  text-decoration: underline;
-  box-shadow: none !important;
-}
-
-.link-btn:active {
-  transform: translateY(1px);
-}
-
 body[data-runtime="tauri"] {
   --dusk-safe-top-min: 0px;
   --dusk-safe-bottom-min: 0px;
@@ -5174,4 +4950,108 @@ p.tx-missing {
   .tx-row.is-pulse-bad {
     animation: none;
   }
+}
+
+/* -------------------------------------------------------
+   The fee on every Review: the network fee and the total, then Custom fee
+   ------------------------------------------------------- */
+dusk-gas-editor > * + * {
+  margin-top: 8px;
+}
+
+.gas-fee .kv-value {
+  font-variant-numeric: tabular-nums;
+}
+
+p.gas-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.gas-custom .advanced-body .muted.gas-help {
+  font-size: 12.5px;
+}
+
+.gas-custom .advanced-body > label {
+  margin-bottom: -4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+button.text-btn.gas-reset {
+  align-self: flex-start;
+}
+
+/* -------------------------------------------------------
+   Send: the recipient, the amount in one large field, then Review
+   ------------------------------------------------------- */
+.send-amount .amount-field {
+  min-height: 68px;
+}
+
+.amount-fee-note {
+  margin-top: -4px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* A pasted account's verified .dusk name, under the field */
+.name-verified {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.name-verified .btn-ico svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.name-verified__name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* Review: who it goes to, by name, over the full address */
+.review-to {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.review-to__names {
+  font-weight: 500;
+}
+
+.mono.review-to__address {
+  max-width: 230px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+button.text-btn.review-save-contact {
+  align-self: flex-start;
+}
+
+/* Shield and Unshield: which way it goes, under the switch */
+p.convert-flow {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
 }

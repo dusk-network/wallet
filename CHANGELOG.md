@@ -16,6 +16,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added day groups and All, Sent, Received and Staking filters to Activity's full list.
 - Labelled DuskEVM bridge transfers in Activity.
 - Suggested a close `.dusk` name from contacts and past transfers when a typed one isn't registered.
+- Showed a pasted public account's verified `.dusk` name on Send.
+- Named the profile that pays on Send's Review, and a contact by both its label and its verified name.
+- Said on a public send's Review what everyone can see: the amount, the memo and your name.
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
@@ -36,7 +39,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed toasts at the bottom of the popup, outside the page that scrolls, long enough to reach their action, and announced to screen readers.
 - Showed errors under their field instead of only in a toast.
 - Hid amounts in toasts and on the Sent screen while balances are hidden.
-- Showed fees with four decimals everywhere.
+- Showed every amount and fee in one format: at most 4 decimals, no trailing zeros, thousands grouped, with DUSK.
+- Set fees at the network's gas price, with one Custom fee for your own limit and price, and a warning under the minimum gas limit as you type.
+- Restyled Send, Shield and Unshield: one large amount field, what's available after fees with Max, and errors under the field.
+- Stopped offering Save to Contacts for your own account or address.
 - Showed Activity's rows with a direction icon and the other side's name first; a failed one says nothing was sent and the fee paid.
 - Reworked a transaction's details into a summary of who, how much and its status, then its date, memo, fee, profile and ID, with block and gas under Technical details.
 - Hid Activity's amounts and a transaction's amount while balances are hidden; fees stay visible.

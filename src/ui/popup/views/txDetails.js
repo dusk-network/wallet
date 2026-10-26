@@ -1,7 +1,6 @@
 import { STAKE_CONTRACT, TRANSFER_CONTRACT } from "../../../shared/activityHistory.js";
 import { formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { lookupPrimaryName } from "../../../shared/duskNames.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { networkNameFromNodeUrl } from "../../../shared/network.js";
 import { openUrl } from "../../../platform/index.js";
@@ -11,6 +10,7 @@ import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
+import { profileNameEl } from "../../components/ProfileName.js";
 import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
 import { amountEl, contactNames, copyButton, dateText, describeTx, txIconSvg, txTime } from "./txRow.js";
 import { reasonText } from "./sent.js";
@@ -57,22 +57,10 @@ const kv = (label, value, { className = "" } = {}) =>
 
 const mono = (value, shown = value) => h("span", { class: "mono", title: value, text: shown });
 
-// The profile a transaction left or reached: its name, or its verified .dusk
-// name once looked up, and the balance: "alice.dusk · Public".
+// The profile a transaction left or reached, by its name as the header shows
+// it, and the balance: "alice.dusk · Public".
 function profileValue(ov, tx, rail) {
-  const raw = Number(tx?.profileIndex ?? ov?.selectedAccountIndex ?? 0);
-  const idx = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
-  const own = String(ov?.accountNames?.[String(idx)] ?? "").trim();
-  const nameEl = h("span", { text: own || `Profile ${idx + 1}` });
-  const account = String(ov?.accounts?.[idx] ?? "");
-  if (!own && account) {
-    lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true })
-      ?.then?.((name) => {
-        if (name) nameEl.textContent = name;
-      })
-      ?.catch?.(() => {});
-  }
-  return h("span", {}, [nameEl, h("span", { class: "kv-muted", text: ` · ${rail}` })]);
+  return h("span", {}, [profileNameEl(ov, { index: tx?.profileIndex }), h("span", { class: "kv-muted", text: ` · ${rail}` })]);
 }
 
 function feeRow(tx, desc) {

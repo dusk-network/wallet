@@ -328,7 +328,7 @@ describe("native staking", () => {
       "Needs your own Dusk nodeA computer that runs Dusk's node software and stays online, with Profile 1's consensus key from this recovery phrase. How native staking works",
       "Rewards start in about 6 to 12 hoursUnstake any time, with no waiting period.",
       "If your node misses its turnPart of your stake gets locked. It's still yours, and unstaking returns it. If the node breaks the rules, part of the stake can be burned (lost).",
-      "Network fee up to 0.0500 DUSK",
+      "Network fee up to 0.05 DUSK",
     ]);
 
     // Adding to a stake says what a top-up locks, and has no minimum.
@@ -382,7 +382,8 @@ describe("native staking", () => {
     button("Review stake").click();
     await settle();
     expect(visibleText(body.querySelector(".review-head"))).toBe("Stake1,000 DUSKNative staking");
-    expect(body.querySelectorAll(".kv").map(visibleText)).toEqual([
+    // The review's rows; the fee's own come after them.
+    expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual([
       "Stake accountProfile 1",
       "OwnerProfile 1",
       "Fee paid fromProfile 1 public balance",
@@ -418,7 +419,7 @@ describe("liquid staking", () => {
     // With nothing staked yet, stDUSK can still be added to Assets.
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
       "Any amount, no node neededYou get stDUSK, a token for your share of Sozu's pool.Add to Assets",
-      "Network fee up to 0.5000 DUSK",
+      "Network fee up to 0.5 DUSK",
       `Sozu's contract${"72".repeat(4)}…${"72".repeat(4)}Copy`,
     ]);
     expect(body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Add stDUSK to Assets")).toBeTruthy();
@@ -495,7 +496,7 @@ describe("liquid staking", () => {
     expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available •••• DUSK from your public balance");
     typeInto(field("Stake amount"), "100");
     expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.55 stDUSK, worth 100 DUSK now.");
-    expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.5000 DUSK");
+    expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.5 DUSK");
   });
 });
 

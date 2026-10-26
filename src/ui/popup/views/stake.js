@@ -8,7 +8,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { getDefaultGas } from "../../../shared/txDefaults.js";
+import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
@@ -19,7 +19,7 @@ import { amountField } from "../../components/AmountField.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
-import { createGasQuickControls } from "../../components/GasQuickControls.js";
+import { useNetworkGas } from "../../components/NetworkGas.js";
 import { sozuLiquidStakingView } from "./sozu.js";
 import { sendFromReview } from "./sent.js";
 
@@ -781,9 +781,8 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
 
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
-  const defaultGas = getDefaultGas(kind, {
-    privacy: d.payment === FUNDING_SHIELDED ? "shielded" : "public",
-  });
+  const gasPrivacy = d.payment === FUNDING_SHIELDED ? "shielded" : "public";
+  const defaultGas = getDefaultGas(kind, { privacy: gasPrivacy });
   const defaultLimit =
     defaultGas?.limit !== undefined && defaultGas?.limit !== null ? String(defaultGas.limit) : "";
   const fallbackPrice =
@@ -794,13 +793,14 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   gasEditor.amountLux = kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0";
   gasEditor.setGas(d?.gas ?? null);
 
-  // The gas price line and the presets open with the fee's Edit.
-  createGasQuickControls({
+  // The network's gas price by default; Custom fee for gas of your own.
+  useNetworkGas({
     actions,
     defaultLimit,
     fallbackPrice,
     gas: d?.gas,
     gasEditor,
+    minLimit: getMinimumGas(kind, { privacy: gasPrivacy })?.limit,
   });
 
   // What moves: the amount staked, or all of the stake or the rewards. The

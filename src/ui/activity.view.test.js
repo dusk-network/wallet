@@ -360,7 +360,7 @@ describe("a transaction's details", () => {
     open({ local: [pending] }, pending.hash);
     expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Pending");
     expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("Still waiting to go through. Don't retry yet.");
-    expect(visibleText(body())).toContain("Network feeUp to 0.0100 DUSK");
+    expect(visibleText(body())).toContain("Network feeUp to 0.01 DUSK");
 
     const dropped = { ...pending, status: "removed" };
     open({ local: [dropped] }, dropped.hash);

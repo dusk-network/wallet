@@ -17,7 +17,7 @@ import {
   parseSozuPosition,
 } from "../../../shared/sozuAdapter.js";
 import { getSozuConfig } from "../../../shared/sozuConfig.js";
-import { getDefaultGas } from "../../../shared/txDefaults.js";
+import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
@@ -28,7 +28,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { submitOnGasEnter } from "../../components/FormControls.js";
-import { createGasQuickControls } from "../../components/GasQuickControls.js";
+import { useNetworkGas } from "../../components/NetworkGas.js";
 import { sendFromReview } from "./sent.js";
 
 function networkKey(ov) {
@@ -495,13 +495,14 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   gasEditor.amountLux = "0";
   gasEditor.extraLux = [String(draft.deposit ?? "0")];
   gasEditor.setGas(draft?.gas ?? null);
-  // The gas price line and the presets open with the fee's Edit.
-  createGasQuickControls({
+  // The network's gas price by default; Custom fee for gas of your own.
+  useNetworkGas({
     actions,
     gas: draft?.gas,
     defaultLimit,
     fallbackPrice,
     gasEditor,
+    minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL, { privacy: draft.privacy || "public" })?.limit,
   });
 
   const title = isStake ? "Liquid staking" : "Unstake from Sozu";

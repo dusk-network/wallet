@@ -310,8 +310,8 @@ describe("after Confirm", () => {
     button("Confirm").click();
     await settle();
     expect(state.route).toBe("convert_confirm");
-    expect(body.querySelector(".field-error").textContent).toBe(
-      "Provide both gas limit and gas price (or clear both to use wallet defaults)."
+    expect(body.querySelector(".convert-review > .field-error").textContent).toBe(
+      "Enter both the gas limit and the gas price, or clear both."
     );
     expect(app.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);
 
@@ -320,7 +320,7 @@ describe("after Confirm", () => {
     await settle();
     expect(state.route).toBe("sent");
     expect(visibleText(body.querySelector(".sent-head"))).toBe("Shield2 DUSKPublic → Shielded");
-    expect(rows().at(-1)).toBe("Network feeUp to 0.0300 DUSK");
+    expect(rows().at(-1)).toBe("Network feeUp to 0.03 DUSK");
   });
 });
 
