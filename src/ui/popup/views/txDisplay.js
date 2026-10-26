@@ -1,34 +1,29 @@
-import { TX_KIND } from "../../../shared/constants.js";
-
-export function txStatusLabel(status) {
+/**
+ * A status in one word, the same in Activity and a transaction's details:
+ * Pending until the network runs it, then Completed or Failed. Dropped (the
+ * node took it out of its queue) and Not confirmed (the wallet stopped
+ * waiting) are uncertain, so they tone as pending. Unknown is final on chain,
+ * its outcome not looked up yet: nothing waits on it, so it tones neutral.
+ * @param {string} status
+ * @param {{ final?: boolean }} [opts] - `final`: the chain has it, final
+ * @returns {"Pending"|"Completed"|"Failed"|"Dropped"|"Not confirmed"|"Unknown"}
+ */
+export function txStatusWord(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();
-  if (s === "executed") return "Executed";
-  if (s === "failed") return "Failed during execution";
-  if (s === "mempool") return "In mempool";
-  if (s === "removed") return "Removed from mempool";
-  if (s === "unknown") return "Unknown";
-  if (s === "submitted") return "Pending";
-  return s ? s.slice(0, 1).toUpperCase() + s.slice(1) : "Pending";
+  if (s === "executed") return "Completed";
+  if (s === "failed") return "Failed";
+  if (s === "removed") return "Dropped";
+  if (s === "unknown") return final ? "Unknown" : "Not confirmed";
+  return "Pending";
 }
 
-export function txActivityStatusLabel(status) {
-  const s = String(status ?? "").toLowerCase();
-  if (s === "executed") return "Finalized";
-  return txStatusLabel(status);
-}
-
-export function txStatusTone(status) {
+/** @returns {"ok"|"bad"|"pending"|"neutral"} */
+export function txStatusTone(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();
   if (s === "executed") return "ok";
   if (s === "failed") return "bad";
+  if (s === "unknown" && final) return "neutral";
   return "pending";
-}
-
-export function transferRailLabel(tx) {
-  const privacy = String(tx?.privacy ?? "").toLowerCase();
-  if (privacy === "shielded") return "Shielded (Phoenix)";
-  if (privacy === "public") return "Public (Moonlight)";
-  return "Transfer";
 }
 
 export function txRecoveryReasonLabel(reason) {
@@ -56,10 +51,4 @@ export function txRecoveryReasonLabel(reason) {
   }
 
   return raw;
-}
-
-export function txKindRailLabel(tx) {
-  const kind = String(tx?.kind ?? "").toLowerCase();
-  if (kind === TX_KIND.TRANSFER) return transferRailLabel(tx);
-  return "";
 }

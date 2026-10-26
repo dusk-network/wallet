@@ -238,14 +238,16 @@ function setApp(children) {
   }
 }
 
-// The focused button in #app, by its words and its place among buttons with
-// the same words.
+// The focused button (or disclosure) in #app, by its words and its place
+// among those with the same words.
+const FOCUS_KEPT = "button, summary";
+
 function focusedButton() {
   try {
     const el = document.activeElement;
-    if (!el || el.tagName !== "BUTTON" || !app.contains(el)) return null;
-    const key = (b) => `${b.textContent}\n${b.getAttribute("aria-label") ?? ""}`;
-    const same = [...app.querySelectorAll("button")].filter((b) => key(b) === key(el));
+    if (!el || !["BUTTON", "SUMMARY"].includes(el.tagName) || !app.contains(el)) return null;
+    const key = (b) => `${b.tagName}\n${b.textContent}\n${b.getAttribute("aria-label") ?? ""}`;
+    const same = [...app.querySelectorAll(FOCUS_KEPT)].filter((b) => key(b) === key(el));
     return { key: key(el), index: same.indexOf(el), keyOf: key };
   } catch {
     return null;
@@ -254,7 +256,7 @@ function focusedButton() {
 
 function refocusButton({ key, index, keyOf }) {
   try {
-    const match = [...app.querySelectorAll("button")].filter((b) => keyOf(b) === key)[index];
+    const match = [...app.querySelectorAll(FOCUS_KEPT)].filter((b) => keyOf(b) === key)[index];
     match?.focus?.();
   } catch {
     // ignore

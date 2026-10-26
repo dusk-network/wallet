@@ -124,8 +124,11 @@ describe("Hide balances", () => {
       "Shielded · Pending",
       "Balance",
     ]);
-    // Past transactions still show what they moved.
-    expect(body.querySelector(".activity-amount").textContent).toBe("-1 DUSK");
+    // Activity hides what transactions moved too.
+    expect([visibleText(body.querySelector(".tx-amount")), screenReaderText(body.querySelector(".tx-amount"))]).toEqual([
+      "•••• DUSK",
+      "hidden DUSK",
+    ]);
 
     eye().click();
     await settle();

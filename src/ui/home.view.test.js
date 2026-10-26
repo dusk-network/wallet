@@ -63,20 +63,9 @@ describe("home dashboard action icons", () => {
       "utf8"
     );
 
-    expect(source).toContain("Recent activity");
-    expect(source).toContain("View all");
-    expect(source).toContain("History ↗");
-    expect(source).toContain("explorerAccountUrl");
-    expect(source).toContain('state.route = "activity"');
-    expect(source).toContain("txs.slice(0, 5)");
-    expect(source).toContain("activity-head-actions");
-    expect(source).toContain("activity-card-footer");
-    expect(source).toContain("activityList(txs");
-    expect(source).toContain("listAddressBook()");
-    expect(source).toContain("contactForTx(tx)");
-    expect(source).toContain("activity-contact-badge");
-    expect(source).not.toContain("Cached activity");
-    expect(source).not.toContain('h("span", { text: "Activity" })');
+    expect(source).toContain("recentActivitySection(ov, { state, actions })");
+    expect(source).toContain('if (state?.route === "activity") return activityView(ov, { state, actions });');
+    expect(source).not.toContain("History ↗");
     expect(source).not.toContain('class: "tabs"');
     expect(source).not.toContain("switchTab");
   });
@@ -116,7 +105,7 @@ describe("home balance", () => {
     expect(actions.refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("names shield rows as the Shield view does, and offers View all only for more than the card shows", async () => {
+  it("names shield rows as the Shield view does, shows five, and offers See all", async () => {
     const { document } = installFakeDom();
     const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
     const state = { route: "home", addressBook: { loaded: true, items: [] } };
@@ -124,22 +113,23 @@ describe("home balance", () => {
     const render = (txs) => {
       const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs };
       document.body.replaceChildren(...homeView(ov, { state, actions }));
-      return document.body.querySelectorAll(".activity-tx-item");
+      return document.body.querySelectorAll(".tx-row");
     };
+    const seeAll = () => document.body.querySelector("button.see-all");
+
+    expect(render([])).toHaveLength(0);
+    expect(document.body.querySelector(".home-activity .tx-empty").textContent).toBe("No activity yet.");
+    expect(seeAll()).toBeNull();
 
     const rows = render([tx(1, TX_KIND.SHIELD), tx(2, TX_KIND.UNSHIELD)]);
-    expect(rows.map((row) => row.querySelector(".activity-title span").textContent)).toEqual(["Shield", "Unshield"]);
-    expect(rows.map((row) => row.querySelector(".activity-sub span").textContent)).toEqual([
-      "Public → Shielded",
-      "Shielded → Public",
+    expect(rows.map((row) => [row.querySelector(".tx-name").textContent, row.querySelector(".tx-sub").textContent])).toEqual([
+      ["Shield", "Public to shielded"],
+      ["Unshield", "Shielded to public"],
     ]);
-    expect(document.body.querySelector(".activity-view-all")).toBeNull();
+    expect(seeAll().textContent).toBe("See all");
 
-    // Five show on the dashboard; View all lists the rest too.
-    expect(render([1, 2, 3, 4, 5].map((n) => tx(n, TX_KIND.SHIELD)))).toHaveLength(5);
-    expect(document.body.querySelector(".activity-view-all")).toBeNull();
+    // Five show on the dashboard; See all lists them all.
     expect(render([1, 2, 3, 4, 5, 6].map((n) => tx(n, TX_KIND.SHIELD)))).toHaveLength(5);
-    expect(document.body.querySelector(".activity-view-all").textContent).toBe("View all");
   });
 
   it("refreshes through the header's old Refresh action", async () => {

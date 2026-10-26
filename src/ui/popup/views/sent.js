@@ -40,7 +40,8 @@ function clock(ts) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function reasonText(error) {
+/** An error as a short sentence: one line, at most 140 characters, ending in a full stop. */
+export function reasonText(error) {
   const text = String(error ?? "").trim().replace(/\s+/g, " ");
   if (!text) return "";
   const short = text.length > 140 ? `${text.slice(0, 139)}…` : text;

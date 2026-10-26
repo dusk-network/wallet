@@ -13,6 +13,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed the profile's full public history in Activity, including received transfers.
 - Showed the profile's shielded history in Activity.
 - Named Activity's counterparties by their verified `.dusk` names.
+- Added day groups and All, Sent, Received and Staking filters to Activity's full list.
+- Labelled DuskEVM bridge transfers in Activity.
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
@@ -34,7 +36,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed errors under their field instead of only in a toast.
 - Hid amounts in toasts and on the Sent screen while balances are hidden.
 - Showed fees with four decimals everywhere.
-- Opened account history on the Dusk explorer instead of DuskScan.
+- Showed Activity's rows with a direction icon and the other side's name first; a failed one says nothing was sent and the fee paid.
+- Reworked a transaction's details into a summary of who, how much and its status, then its date, memo, fee, profile and ID, with block and gas under Technical details.
+- Hid Activity's amounts and a transaction's amount while balances are hidden; fees stay visible.
+- Moved the account's explorer link from Home's History ↗ to the end of Activity, on the Dusk explorer instead of DuskScan.
 - Cleared the wallet's transactions, shielded notes and history on reset.
 - Moved Review's gas price line and presets behind the fee's Edit, and removed Review's Cancel. ([#126])
 - Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])

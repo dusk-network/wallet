@@ -1,23 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  transferRailLabel,
-  txActivityStatusLabel,
-  txRecoveryReasonLabel,
-  txStatusLabel,
-  txStatusTone,
-} from "./txDisplay.js";
+import { txRecoveryReasonLabel, txStatusTone, txStatusWord } from "./txDisplay.js";
 
 describe("tx display helpers", () => {
-  it("labels shielded transfer activity as Phoenix", () => {
-    expect(transferRailLabel({ kind: "transfer", privacy: "shielded" })).toBe("Shielded (Phoenix)");
-    expect(transferRailLabel({ kind: "transfer", privacy: "public" })).toBe("Public (Moonlight)");
-  });
-
-  it("uses non-redundant unknown status labels", () => {
-    expect(txStatusLabel("unknown")).toBe("Unknown");
-    expect(txActivityStatusLabel("unknown")).toBe("Unknown");
-    expect(txActivityStatusLabel("executed")).toBe("Finalized");
+  it("says each status in one plain word", () => {
+    expect(txStatusWord("submitted")).toBe("Pending");
+    expect(txStatusWord("mempool")).toBe("Pending");
+    expect(txStatusWord("executed")).toBe("Completed");
+    expect(txStatusWord("failed")).toBe("Failed");
+    expect(txStatusWord("removed")).toBe("Dropped");
+    expect(txStatusWord("unknown")).toBe("Not confirmed");
+    expect(txStatusWord(undefined)).toBe("Pending");
   });
 
   it("does not visually tone unknown or removed as failed", () => {
