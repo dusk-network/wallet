@@ -326,6 +326,8 @@ export class DuskGasEditor extends HTMLElement {
     if ((limit === "") !== (price === "")) {
       throw new Error("Enter both the gas limit and the gas price, or clear both.");
     }
+    // Never under the transaction's minimum: the approval stays open to fix it.
+    if (limit !== "" && this.#underMinimum()) throw new Error(this.#minimumText());
 
     const gas = {};
     let changed = false;

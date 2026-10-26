@@ -62,6 +62,22 @@ describe("fee editor", () => {
     expect(fee()).toBe("Network feeup to 0.006 DUSKTotalup to 1.006 DUSK");
   });
 
+  it("refuses an approval's override under the minimum too, so the window stays open to fix it", () => {
+    const editor = dom.document.createElement("dusk-gas-editor");
+    const base = { limit: "2500000", price: "1" };
+    editor.minLimit = "2000000";
+    editor.setGas(base);
+    dom.document.body.appendChild(editor);
+    const limit = editor.querySelectorAll("input").find((i) => accessibleName(i) === "Gas limit");
+
+    typeInto(limit, "1500000");
+    expect(() => editor.readOverrideGas(base)).toThrow("The gas limit can't be under 2,000,000 for this transaction.");
+    typeInto(limit, "2000000");
+    expect(editor.readOverrideGas(base)).toEqual({ gas: { limit: "2000000" } });
+    typeInto(limit, "2500000");
+    expect(editor.readOverrideGas(base)).toBeNull();
+  });
+
   it("rounds the fee and the total up, as the maximums they are", () => {
     const editor = dom.document.createElement("dusk-gas-editor");
     editor.amountLux = "1000000000";
