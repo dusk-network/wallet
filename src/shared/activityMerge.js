@@ -31,7 +31,9 @@ export function historyRow(entry, { nodeUrl } = {}) {
     privacy: "public",
     kind: entry.kind,
     direction: entry.direction,
-    status: entry.success === false ? "failed" : "executed",
+    // Final on chain, but its outcome is unknown until its details come.
+    success: entry.success ?? null,
+    status: entry.success === true ? "executed" : entry.success === false ? "failed" : "unknown",
     error: entry.success === false ? entry.error : undefined,
     amount,
     counterparty: entry.counterparty ?? null,
@@ -70,10 +72,14 @@ export function mergeActivity({ local = [], history = [], shielded = [], profile
     const row = historyRow(entry, { nodeUrl });
     if (row.hash) rows.set(row.hash, row);
   }
-  // The shielded side of a shield or unshield is the public row's.
+  // The shielded side of a shield or unshield is the public row's, with the
+  // fee the shielded side paid.
   for (const row of shielded) {
     const hash = lower(row?.hash);
-    if (hash && !rows.has(hash)) rows.set(hash, { ...row, hash });
+    if (!hash) continue;
+    const known = rows.get(hash);
+    if (!known) rows.set(hash, { ...row, hash });
+    else if (known.feePaid === undefined && row.feePaid !== undefined) rows.set(hash, { ...known, feePaid: row.feePaid });
   }
   for (const tx of local) {
     // The selected profile's own; a record without a profile is shown too.
@@ -87,9 +93,12 @@ export function mergeActivity({ local = [], history = [], shielded = [], profile
       continue;
     }
     const extra = Object.fromEntries(LOCAL_ONLY.filter((k) => tx[k] !== undefined).map((k) => [k, tx[k]]));
+    // Until the chain's outcome is known, the wallet's own status stands.
+    const outcome = typeof known.success === "boolean" ? { status: known.status, error: known.error } : { status: tx.status ?? known.status, error: tx.error };
     rows.set(hash, {
       ...known,
       ...extra,
+      ...outcome,
       source: "both",
       // What the wallet sent, when the chain names it less closely: a token
       // transfer is a contract call there.

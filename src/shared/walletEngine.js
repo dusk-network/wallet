@@ -47,6 +47,8 @@ import {
 } from "./shieldedStore.js";
 import { activityNetworkKey, assertArchive, historyArchiverUrl } from "./activityHistory.js";
 import {
+  StaleActivityError,
+  getActivityEpoch,
   getNoteHeightPool,
   getShieldedHistoryRecord,
   putNoteHeightPool,
@@ -2248,8 +2250,10 @@ export async function startShieldedSync({ force = false } = {}) {
 
     const run = async () => {
       // A scan from the first note streams the whole note tree: its heights
-      // are noted on the way, for the shielded history's decoy heights.
+      // are noted on the way, for the shielded history's decoy heights; kept
+      // unless the wallet is reset meanwhile.
       const tap = startBookmark === 0n ? createLeafHeightTap() : null;
+      const tapEpoch = tap ? getActivityEpoch().catch(() => undefined) : null;
       const syncer = createAddressSyncer(tap ? withLeafTap(network, tap) : network);
       let lastBookmark = startBookmark;
 
@@ -2375,7 +2379,7 @@ export async function startShieldedSync({ force = false } = {}) {
         if (isStale()) return;
 
         if (lastBookmark < targetBookmark) throw new Error("Node did not provide notes through the scan target");
-        if (tap) keepNoteHeights(tap, targetBookmark).catch(() => {});
+        if (tap) keepNoteHeights(tap, targetBookmark, tapEpoch).catch(() => {});
         // After discovery, reconcile spent/unspent state.
         await reconcileSpentNotes(syncer, { netKey, walletId, profileIndex: idx, signal });
         await assertAnchor();
@@ -2461,20 +2465,23 @@ function withLeafTap(network, tap) {
 }
 
 // Keep the note tree's heights a scan from the first note saw, once they are all there.
-async function keepNoteHeights(tap, total) {
+async function keepNoteHeights(tap, total, epochPromise) {
   const heights = tap.heights(total);
-  if (heights) await putNoteHeightPool(activityNetworkKey(engineConfig.nodeUrl), heights, Number(total));
+  const epoch = await epochPromise;
+  if (heights && epoch !== undefined) {
+    await putNoteHeightPool(activityNetworkKey(engineConfig.nodeUrl), heights, Number(total), epoch);
+  }
 }
 
 // The note tree's heights on this network: kept, or read once from the tree.
-async function noteHeightPool(network) {
-  const key = activityNetworkKey(engineConfig.nodeUrl);
+async function noteHeightPool(network, nodeUrl, epoch) {
+  const key = activityNetworkKey(nodeUrl);
   const kept = await getNoteHeightPool(key).catch(() => null);
   if (kept?.heights?.length) return kept.heights;
   const total = await readTransferContractBookmark(network);
   if (!total) return null;
   const heights = await readNoteHeights(network, total);
-  if (heights) await putNoteHeightPool(key, heights, Number(total)).catch(() => {});
+  if (heights) await putNoteHeightPool(key, heights, Number(total), epoch).catch(() => {});
   return heights;
 }
 
@@ -2497,15 +2504,35 @@ let shieldedHistoryRun = null;
 export async function getShieldedHistory() {
   if (!state.unlocked) throw new Error("Wallet locked");
   const netKey = getNetworkKey();
+  const nodeUrl = engineConfig.nodeUrl;
   const walletId = getWalletId();
   const profileIndex = getSelectedProfileIndex();
-  const key = `${activityNetworkKey(engineConfig.nodeUrl)}::${walletId}::${profileIndex}`;
-  if (shieldedHistoryRun?.key === key) return shieldedHistoryRun.promise;
+  const generation = unlockGeneration;
+  // The keys the notes' values are read with: this profile's, whatever is selected later.
+  const profile = getCurrentProfile();
+  const key = `${activityNetworkKey(nodeUrl)}::${walletId}::${profileIndex}`;
+  if (shieldedHistoryRun?.key === key && shieldedHistoryRun.generation === generation) return shieldedHistoryRun.promise;
+  // A lock, a reset, another profile or another node since the build began:
+  // it stops, and keeps nothing.
+  const assertCurrent = () => {
+    if (
+      !state.unlocked ||
+      unlockGeneration !== generation ||
+      getWalletId() !== walletId ||
+      getSelectedProfileIndex() !== profileIndex ||
+      engineConfig.nodeUrl !== nodeUrl
+    ) {
+      throw new Error("The wallet changed while its shielded history was read");
+    }
+  };
   const promise = (async () => {
+    // A reset of the activity store meanwhile refuses the write (StaleActivityError).
+    const epoch = await getActivityEpoch();
     const [unspent, spent] = await Promise.all([
       getNotesMap(netKey, walletId, profileIndex),
       getSpentNotesMap(netKey, walletId, profileIndex),
     ]);
+    assertCurrent();
     if (!unspent.size && !spent.size) return { profileIndex, entries: [] };
     const rows = [
       ...[...unspent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: false })),
@@ -2517,31 +2544,38 @@ export async function getShieldedHistory() {
       .sort()
       .join(",");
     const kept = await getShieldedHistoryRecord(key).catch(() => null);
+    assertCurrent();
     if (kept?.fingerprint === fingerprint) return { profileIndex, entries: kept.entries };
     // Notes still being discovered aren't the history yet.
     if (state.shielded.status.state !== "done") return { profileIndex, entries: kept?.entries ?? [], pending: true };
 
     // A node without the archive reads no note tree either.
-    const url = historyArchiverUrl({ nodeUrl: engineConfig.nodeUrl, archiverUrl: engineConfig.archiverUrl });
+    const url = historyArchiverUrl({ nodeUrl, archiverUrl: engineConfig.archiverUrl });
     await assertArchive(url);
-    const profile = getCurrentProfile();
     const notes = [];
     for (const r of rows) {
       notes.push({ nullifier: bytesToHex(r.nullifier), leaf: r.leaf, spent: r.spent, value: await noteValue(profile, r.nullifier, r.leaf) });
     }
+    assertCurrent();
     const network = await ensureNetwork();
-    const pool = await noteHeightPool(network);
+    const pool = await noteHeightPool(network, nodeUrl, epoch);
+    assertCurrent();
     // Without other heights to ask among, the node isn't asked at all.
     if (!pool) return { profileIndex, entries: kept?.entries ?? [], pending: true };
     const real = [...new Set(notes.map((n) => leafInfo(n.leaf).height))];
     const { heights, decoys } = pickHeights(pool, real, { keep: kept?.decoys ?? [] });
-    const entries = buildShieldedHistory({ notes, blocks: await fetchBlocks(url, heights) });
-    await putShieldedHistoryRecord(key, { fingerprint, entries, decoys }).catch(() => {});
+    const blocks = await fetchBlocks(url, heights);
+    assertCurrent();
+    const entries = buildShieldedHistory({ notes, blocks });
+    // Kept unless the wallet was reset meanwhile; a store that can't keep it asks again next time.
+    await putShieldedHistoryRecord(key, { fingerprint, entries, decoys }, epoch).catch((error) => {
+      if (error instanceof StaleActivityError) throw error;
+    });
     return { profileIndex, entries };
   })().finally(() => {
     if (shieldedHistoryRun?.promise === promise) shieldedHistoryRun = null;
   });
-  shieldedHistoryRun = { key, promise };
+  shieldedHistoryRun = { key, generation, promise };
   return promise;
 }
 

@@ -5,6 +5,10 @@
 //
 // The kept history paints at once. One sync run follows when the popup opens
 // and one after a transaction of this wallet goes through; nothing polls.
+//
+// What an account's activity keeps is tied to the store's epoch when the
+// popup first saw it: after a wallet reset since, nothing more is kept. A
+// lock drops it.
 
 import {
   fillActivityDetails,
@@ -13,7 +17,12 @@ import {
   syncActivity,
 } from "../../shared/activityHistory.js";
 import { mergeActivity } from "../../shared/activityMerge.js";
-import { getCounterpartyNames, putCounterpartyNames } from "../../shared/activityStore.js";
+import {
+  StaleActivityError,
+  getActivityEpoch,
+  getCounterpartyNames,
+  putCounterpartyNames,
+} from "../../shared/activityStore.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { lookupRecipientNames } from "../../shared/duskNames.js";
 import { VERIFIED_NAME_TTL_MS, duskNamesNetwork } from "../../shared/verifiedNames.js";
@@ -32,9 +41,10 @@ function selected(ov) {
   return { account, profileIndex };
 }
 
-const keyOf = (ov) => {
+/** One activity per node, archiver and account: a change of any starts over. */
+export const activityKey = (ov) => {
   const { account } = selected(ov);
-  return ov?.isUnlocked && account && ov?.nodeUrl ? `${ov.nodeUrl}\n${account}` : "";
+  return ov?.isUnlocked && account && ov?.nodeUrl ? `${ov.nodeUrl}\n${ov.archiverUrl ?? ""}\n${account}` : "";
 };
 
 let redrawTimer = null;
@@ -91,7 +101,8 @@ async function checkNames(a) {
     if (names.has(c)) a.names.set(c, names.get(c));
     else a.names.delete(c);
   }
-  await putCounterpartyNames(network, names).catch(() => {});
+  const epoch = await a.epoch;
+  if (epoch !== undefined) await putCounterpartyNames(network, names, { epoch }).catch(() => {});
   return names.size > 0;
 }
 
@@ -114,16 +125,21 @@ async function loadShielded(a, state, render) {
 }
 
 async function run(a, state, render) {
+  // The wallet was reset since this popup first saw the account.
+  if (a.stale) return;
   if (a.syncing) {
     a.again = true;
     return;
   }
   a.syncing = true;
   try {
+    const epoch = await a.epoch;
+    if (epoch === undefined) throw new Error("The activity store is out of reach");
     await syncActivity({
       nodeUrl: a.nodeUrl,
       archiverUrl: a.archiverUrl,
       account: a.account,
+      epoch,
       onStep: () => {
         if (state.activity !== a) return;
         reload(a)
@@ -133,12 +149,16 @@ async function run(a, state, render) {
     });
     a.error = null;
   } catch (error) {
-    a.error = error?.message ?? String(error);
-    noteActivityUnavailable(error);
+    if (error instanceof StaleActivityError) a.stale = true;
+    else {
+      a.error = error?.message ?? String(error);
+      noteActivityUnavailable(error);
+    }
   } finally {
     a.syncing = false;
   }
-  if (state.activity !== a) return;
+  // Another wallet's now: nothing more for this one.
+  if (state.activity !== a || a.stale) return;
   await reload(a).catch(() => {});
   redraw(state, render);
   if (await checkNames(a).catch(() => false)) redraw(state, render);
@@ -159,7 +179,9 @@ async function run(a, state, render) {
  *   `send` reaches the wallet, for the shielded history
  */
 export function ensureActivity(ov, { state, render, send }) {
-  const key = keyOf(ov);
+  const key = activityKey(ov);
+  // Locked: what the last account's work brings back is dropped.
+  if (ov?.isUnlocked === false) state.activity = null;
   if (!key) return;
   if (state.activity?.key === key) return;
   const { account, profileIndex } = selected(ov);
@@ -180,6 +202,8 @@ export function ensureActivity(ov, { state, render, send }) {
     send,
     syncing: false,
     error: null,
+    // The store's epoch now; undefined when it can't be read.
+    epoch: getActivityEpoch().catch(() => undefined),
   };
   state.activity = a;
   (async () => {
@@ -221,8 +245,9 @@ export async function showMoreActivity({ state, render }) {
   await reload(a).catch(() => {});
   redraw(state, render);
   const missing = a.entries.filter((e) => !e.detailsAt);
-  if (missing.length) {
-    await fillActivityDetails({ nodeUrl: a.nodeUrl, archiverUrl: a.archiverUrl, account: a.account, entries: missing }).catch(
+  const epoch = await a.epoch;
+  if (missing.length && epoch !== undefined) {
+    await fillActivityDetails({ nodeUrl: a.nodeUrl, archiverUrl: a.archiverUrl, account: a.account, entries: missing, epoch }).catch(
       () => {}
     );
     await reload(a).catch(() => {});
@@ -245,7 +270,11 @@ export function loadActivityDetail({ state, render }, hash) {
   const entry = a?.entries.find((e) => e.hash === hash);
   if (!entry || detailLoads.has(`${a.key}\n${hash}`)) return;
   detailLoads.add(`${a.key}\n${hash}`);
-  fillActivityDetails({ nodeUrl: a.nodeUrl, archiverUrl: a.archiverUrl, account: a.account, entries: [entry] })
+  a.epoch
+    .then((epoch) => {
+      if (epoch === undefined) throw new Error("The activity store is out of reach");
+      return fillActivityDetails({ nodeUrl: a.nodeUrl, archiverUrl: a.archiverUrl, account: a.account, entries: [entry], epoch });
+    })
     .then(() => reload(a))
     .then(() => redraw(state, render))
     .catch(() => {});
@@ -266,7 +295,7 @@ export function hasMoreActivity(state) {
  */
 export function activityRows(ov, state) {
   const local = Array.isArray(ov?.txs) ? ov.txs : [];
-  const key = keyOf(ov);
+  const key = activityKey(ov);
   const a = state?.activity;
   const ours = a && key && a.key === key ? a : null;
   const { profileIndex } = selected(ov);

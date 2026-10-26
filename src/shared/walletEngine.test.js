@@ -1389,8 +1389,9 @@ describe("walletEngine", () => {
     const NULLIFIERS = [bytes(event.data.slice(0, 64)), bytes(event.data.slice(64, 128))];
 
     // A first scan of a 6-note tree (Testnet's first leaves), as w3sper's
-    // syncer reads it: one stream of leaves from the first.
-    async function scanTree() {
+    // syncer reads it: one stream of leaves from the first. `hold` is awaited
+    // once the leaves are read.
+    async function scanTree(hold) {
       await engine.unlockWithMnemonic(MNEMONIC);
       const network = await engine.ensureNetwork();
       network.blockHeight = 4_000_000n;
@@ -1400,6 +1401,7 @@ describe("walletEngine", () => {
       const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockImplementation(async function () {
         const res = await this.network.contracts.transferContract.call.leaves_from_pos(new Uint8Array(8), {});
         await res.arrayBuffer();
+        await hold?.();
         return new ReadableStream({
           start(controller) {
             controller.enqueue([[new Map()], { bookmark: 5n, blockHeight: 234369n }]);
@@ -1420,27 +1422,32 @@ describe("walletEngine", () => {
       await vi.waitFor(async () => expect(await activity.getNoteHeightPool("mainnet")).toMatchObject({ heights: [184423, 226951, 234329, 234369], notes: 6 }));
     });
 
-    it("asks for the profile's notes' blocks among the tree's other heights, once, and nothing for a profile without notes", async () => {
-      const { leavesFromPos } = await scanTree();
+    // The first profile's notes as its sync keeps them: two the unshield
+    // spent, its two outputs, and the shield's note, with the values its
+    // keys give them, by position.
+    async function profileNotes() {
       const store = await import("./shieldedStore.js");
-      // Two notes the unshield spent, its two outputs, and the shield's note.
       await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([
         [NULLIFIERS[0], FIRST[0]], [NULLIFIERS[1], FIRST[1]],
         [bytes("aa".repeat(32)), L493], [bytes("bb".repeat(32)), L494], [bytes("cc".repeat(32)), L495],
       ]));
       await store.markNullifiersSpent(NETWORK_KEY, WALLET_ID, 0, NULLIFIERS);
-      // Note values, by position, as the profile's keys would give them.
       const values = { 0: 10_000_000_000n, 1: 500_000_000n, 493: 1_000_000_000n, 494: 12_000_000n, 495: 2_000_000_000n };
       globalThis.__W3SPER_BALANCE__ = async (_address, treasury) => {
         const [[, leaf]] = [...(await treasury.address())];
         const pos = new DataView(leaf.buffer, leaf.byteOffset).getBigUint64(648, true);
         return { value: values[Number(pos)], spendable: 0n };
       };
+    }
+
+    // The archive, with the recorded blocks; `hold` is awaited before each answer.
+    function archive(hold) {
       const queries = [];
       vi.stubGlobal("fetch", vi.fn(async (url, init) => {
         expect(String(url)).toBe("https://nodes.dusk.network/on/graphql/query");
         const query = String(init.body);
         queries.push(query);
+        await hold?.();
         const data = {};
         for (const [, h] of query.matchAll(/b(\d+): block\(/g)) {
           data[`e${h}`] = phoenix.blocks[`e${h}`] ?? { json: [] };
@@ -1448,6 +1455,13 @@ describe("walletEngine", () => {
         }
         return { ok: true, status: 200, text: async () => JSON.stringify(data) };
       }));
+      return queries;
+    }
+
+    it("asks for the profile's notes' blocks among the tree's other heights, once, and nothing for a profile without notes", async () => {
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      const queries = archive();
 
       const first = await engine.getShieldedHistory();
       expect(first.profileIndex).toBe(0);
@@ -1470,6 +1484,52 @@ describe("walletEngine", () => {
       await engine.selectAccountIndex({ index: 1 });
       await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 1, entries: [] });
       expect(queries).toHaveLength(1);
+    });
+
+    it.each(["lock", "profile", "network", "reset"])("keeps nothing of a build a %s change overtook", async (change) => {
+      const activity = await import("./activityStore.js");
+      // Nothing kept by an earlier test.
+      await activity.clearActivityStore();
+      await scanTree();
+      await profileNotes();
+      const asked = Promise.withResolvers();
+      const held = Promise.withResolvers();
+      archive(async () => {
+        asked.resolve();
+        await held.promise;
+      });
+
+      const build = engine.getShieldedHistory();
+      build.catch(() => {});
+      await asked.promise;
+      if (change === "lock") engine.lock();
+      else if (change === "profile") await engine.selectAccountIndex({ index: 1 });
+      else if (change === "network") engine.configure({ nodeUrl: "https://testnet.nodes.dusk.network" });
+      else await activity.clearActivityStore();
+      held.resolve();
+
+      await expect(build).rejects.toThrow();
+      expect(await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`)).toBeNull();
+    });
+
+    it("keeps no note heights a scan read before a reset", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const put = vi.spyOn(activity, "putNoteHeightPool");
+      const read = Promise.withResolvers();
+      const held = Promise.withResolvers();
+      const scan = scanTree(async () => {
+        read.resolve();
+        await held.promise;
+      });
+      await read.promise;
+      await activity.clearActivityStore();
+      held.resolve();
+      await scan;
+      await vi.waitFor(() => expect(put).toHaveBeenCalled());
+      await Promise.allSettled(put.mock.results.map((r) => r.value));
+      expect(await activity.getNoteHeightPool("mainnet")).toBeNull();
+      put.mockRestore();
     });
   });
 });

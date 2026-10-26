@@ -19,16 +19,18 @@ export function page(list, { fromBlock = 0, toBlock, maxCount, pageCount = 1 }) 
 
 /**
  * Stub `fetch` with a node holding the recorded history. Change `finalized`
- * (its last finalized block), `genesis`, `down` (every request fails) or
- * `archive` (false: a node without the archive's fields) as a test goes;
- * `log` keeps each query and its answer.
+ * (its last finalized block), `genesis`, `down` (every request fails),
+ * `archive` (false: a node without the archive's fields) or `before` (awaited
+ * with each query before its answer) as a test goes; `log` keeps each query
+ * and its answer.
  */
 export function fakeArchive({ accounts = fixture.accounts, finalized = fixture.head.last_finalized_block[0], genesis = fixture.head.genesis } = {}) {
-  const node = { finalized, genesis, down: false, archive: true, log: [] };
+  const node = { finalized, genesis, down: false, archive: true, before: null, log: [] };
   const fetchMock = vi.fn(async (url, init) => {
     expect(String(url)).toBe(`${fixture.nodeUrl}/on/graphql/query`);
     if (node.down) throw new TypeError("fetch failed");
     const query = String(init.body);
+    await node.before?.(query);
     // async-graphql refuses a whole query with a field the schema lacks.
     const missing = query.match(/\b(moonlightHistory|contractEvents)\(/);
     if (!node.archive && missing) {

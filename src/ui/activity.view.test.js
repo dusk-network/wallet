@@ -5,9 +5,16 @@ import { activityEntry, parseHistoryEntry } from "../shared/activityHistory.js";
 import { installFakeDom, visibleText } from "./testing/fakeDom.js";
 import { homeView } from "./popup/views/home.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
+import { activityKey } from "./popup/activity.js";
 
 // The token and NFT cards load on their own.
 vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
+// A details view asks for a synced entry's details through this.
+const detail = vi.hoisted(() => ({ load: vi.fn() }));
+vi.mock("./popup/activity.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  loadActivityDetail: detail.load,
+}));
 
 const [A] = Object.keys(fixture.accounts);
 const NODE = fixture.nodeUrl;
@@ -52,7 +59,7 @@ function setup({ local = [], names = new Map(), complete = true, route = "home" 
   const state = {
     route,
     addressBook: { loaded: true, items: [] },
-    activity: { key: `${NODE}\n${A}`, account: A, nodeUrl: NODE, entries: history(), names, loaded: true, complete, limit: 50 },
+    activity: { key: activityKey(ov), account: A, nodeUrl: NODE, entries: history(), names, loaded: true, complete, limit: 50 },
   };
   const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn() };
   return { ov, state, actions };
@@ -101,6 +108,20 @@ describe("Recent activity with the account's history", () => {
     state.activity.complete = true;
     dom.document.body.replaceChildren(...homeView(ov, { state, actions }));
     expect(dom.document.body.querySelector(".activity-view-all")).toBeNull();
+  });
+});
+
+describe("the details of a send the archive has without its outcome", () => {
+  it("looks its outcome up, keeping the wallet's pending status meanwhile", () => {
+    const { ov, state, actions } = setup();
+    const register = state.activity.entries.find((e) => e.fnName === "register");
+    Object.assign(register, { success: null, detailsAt: undefined });
+    ov.txs = [{ hash: register.hash, kind: "contract_call", status: "submitted", profileIndex: 0, submittedAt: Date.now() }];
+    Object.assign(state, { route: "tx", txDetailHash: register.hash, txDetailFrom: "home" });
+    detail.load.mockClear();
+    dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
+    expect(detail.load).toHaveBeenCalledWith(expect.objectContaining({ state }), register.hash);
+    expect(visibleText(dom.document.body)).toContain("Status: Pending");
   });
 });
 

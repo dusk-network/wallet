@@ -45,9 +45,8 @@ import {
 } from "./txNotify.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { listAddressBook } from "../shared/addressBook.js";
-import { clearTxs, getTxMeta, patchTxMeta, putTxMeta, listTxs, typedRecipientName } from "../shared/txStore.js";
-import { clearShieldedStore } from "../shared/shieldedStore.js";
-import { clearActivityStore } from "../shared/activityStore.js";
+import { getTxMeta, patchTxMeta, putTxMeta, listTxs, typedRecipientName } from "../shared/txStore.js";
+import { beginReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { handleUiCommand } from "../wallet/uiCommands.js";
 import {
   getNetworkStatus,
@@ -795,10 +794,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       if (message?.type === "DUSK_UI_RESET_WALLET") {
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           await lockWallet("reset");
+          await beginReset();
           await clearPermissions();
           await clearVault();
-          // Nothing of the old wallet stays: its transactions, shielded notes and history.
-          await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore()]);
+          // Nothing of the old wallet stays: its transactions, shielded notes
+          // and history. A store that can't be cleared fails the reset and
+          // keeps it pending (walletReset.js).
+          await finishReset();
         });
         sendResponse({ ok: true });
         return;
@@ -914,6 +916,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           if ((await getEngineStatusStrict())?.isUnlocked) {
             throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock or reset the current wallet first");
           }
+          // A reset that couldn't clear the old wallet's data finishes first.
+          await finishPendingReset();
 
           await createVault(mnemonic, password);
           await ensureEngineConfigured();

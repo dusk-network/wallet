@@ -32,7 +32,7 @@ const overview = (account = A, over = {}) => ({ isUnlocked: true, nodeUrl: NODE,
 
 async function until(check, ms = 5_000) {
   const end = Date.now() + ms;
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() > end) throw new Error("timed out");
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -72,6 +72,9 @@ describe("ensureActivity", () => {
   it("paints the kept history and names before the archive answers", async () => {
     const node = fakeArchive();
     await popup();
+    // The names the first popup checked are kept.
+    const kept = await import("../../shared/activityStore.js");
+    await until(async () => (await kept.getCounterpartyNames("testnet", [FAUCET])).has(FAUCET));
     const requests = node.log.length;
     node.down = true;
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -109,6 +112,48 @@ describe("ensureActivity", () => {
     expect(activity.activityRows(overview(B), state).length).toBeGreaterThan(0);
     // Rows are only ever the overview's account's.
     expect(activity.activityRows(overview(A), state)).toEqual([]);
+  });
+});
+
+describe("a change of archiver", () => {
+  it("starts the account's activity over with the new archiver", async () => {
+    fakeArchive();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const state = { route: "home" };
+    const render = vi.fn(async () => {});
+    activity.ensureActivity(overview(A, { archiverUrl: NODE }), { state, render });
+    const first = state.activity;
+    expect(first.archiverUrl).toBe(NODE);
+    activity.ensureActivity(overview(A, { archiverUrl: "https://archive.example" }), { state, render });
+    const second = state.activity;
+    expect(second).not.toBe(first);
+    expect(second.archiverUrl).toBe("https://archive.example");
+    await until(() => first.loaded && !first.syncing && second.loaded && !second.syncing);
+  });
+});
+
+describe("a wallet reset or lock", () => {
+  it("keeps nothing more for an account the popup saw before a reset elsewhere", async () => {
+    const node = fakeArchive();
+    const { state, render } = await popup();
+    const store = await import("../../shared/activityStore.js");
+    const owner = store.activityOwnerKey("testnet", A);
+    // The wallet is reset in another window; this popup still shows A.
+    await store.clearActivityStore();
+    const requests = node.log.length;
+    activity.refreshActivitySoon({ state, render }, 0);
+    await until(() => node.log.length > requests && !state.activity.syncing);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(await store.listActivityEntries(owner)).toEqual([]);
+    expect(await store.getActivityMeta(owner)).toBeNull();
+    expect(await store.getCounterpartyNames("testnet", [FAUCET, SENDER])).toEqual(new Map());
+  });
+
+  it("drops the activity when the wallet locks", async () => {
+    fakeArchive();
+    const { state, render } = await popup();
+    activity.ensureActivity(overview(A, { isUnlocked: false }), { state, render });
+    expect(state.activity).toBeNull();
   });
 });
 

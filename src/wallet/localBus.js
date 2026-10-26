@@ -12,9 +12,8 @@ import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { clearTxs, getTxMeta, listTxs, patchTxMeta, putTxMeta, typedRecipientName } from "../shared/txStore.js";
-import { clearShieldedStore } from "../shared/shieldedStore.js";
-import { clearActivityStore } from "../shared/activityStore.js";
+import { getTxMeta, listTxs, patchTxMeta, putTxMeta, typedRecipientName } from "../shared/txStore.js";
+import { beginReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { bytesToHex } from "../shared/bytes.js";
 import {
   executionEventError,
@@ -158,10 +157,13 @@ export async function localSend(message) {
       return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         lock();
         if (isUnlocked()) throw new Error("Wallet lock did not complete");
+        await beginReset();
         await clearPermissions();
         await clearVault();
-        // Nothing of the old wallet stays: its transactions, shielded notes and history.
-        await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore()]);
+        // Nothing of the old wallet stays: its transactions, shielded notes
+        // and history. A store that can't be cleared fails the reset and keeps
+        // it pending (walletReset.js).
+        await finishReset();
         return { ok: true };
       });
     }
@@ -178,6 +180,8 @@ export async function localSend(message) {
         if (isUnlocked()) {
           throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock or reset the current wallet first");
         }
+        // A reset that couldn't clear the old wallet's data finishes first.
+        await finishPendingReset();
         await createVault(mnemonic, password);
         await ensureEngineConfigured();
         await unlockWithMnemonic(String(mnemonic));

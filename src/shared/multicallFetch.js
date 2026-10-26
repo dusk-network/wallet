@@ -8,8 +8,9 @@
 // As the SDK's own batcher (src/frozen/batching.ts in @duskdomains/sdk 0.5.4,
 // MIT), which its full client uses: a read that ran out of its share of gas
 // is sent alone, a query that failed whole sends its reads alone (two in a
-// row turn batching off for 5 minutes), and a rate limit is every read's
-// answer.
+// row turn batching off for 5 minutes), and a rate limit (a 429, or a 503
+// that says when to come back) is every read's answer. A query is cancelled
+// once every read in it gave up.
 
 import {
   ARGBUF_LEN,
@@ -65,6 +66,37 @@ const bodyBytes = (body) => {
 const ok = (bytes) =>
   new Response(bytes.slice(), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
 
+// Whether a reply is the node limiting its rate, as the SDK's readers take it
+// (`rateLimit` in its batching.ts): a 429, or a 503 that says when to come
+// back, in seconds or as an HTTP date. Any other 503 is a failed query.
+const isRateLimit = (res) => {
+  if (res.status !== 503) return res.status === 429;
+  const wait = res.headers.get("Retry-After")?.trim() ?? "";
+  return /^\d+$/.test(wait) || (Number.isFinite(Date.parse(wait)) && /[a-z]/i.test(wait));
+};
+
+// A signal for a request several waiters share: it aborts once each of their
+// own signals has, as nobody waits for the answer then. A waiter without a
+// signal keeps the request. `release` stops listening to theirs.
+const whileAnyWaits = (waiters) => {
+  const controller = new AbortController();
+  const signals = waiters.map(({ init }) => init?.signal);
+  if (signals.some((signal) => !signal)) return { signal: controller.signal, release: () => {} };
+  const waiting = new Set(signals);
+  const onAbort = () => {
+    for (const signal of waiting) if (signal.aborted) waiting.delete(signal);
+    if (!waiting.size) controller.abort();
+  };
+  for (const signal of waiting) signal.addEventListener("abort", onAbort);
+  onAbort();
+  return {
+    signal: controller.signal,
+    release: () => {
+      for (const signal of signals) signal.removeEventListener("abort", onAbort);
+    },
+  };
+};
+
 /**
  * @param {{
  *   nodeUrl: string,
@@ -88,20 +120,21 @@ export function createMulticallFetch({ nodeUrl, fetch: base = (...args) => fetch
     if (length > (sizes.get(key) ?? 0)) sizes.set(key, length);
   };
 
-  // One read sent on its own, its answer given to every waiter. A lone waiter
-  // keeps its abort signal.
+  // One read sent on its own, its answer given to every waiter; cancelled
+  // once they all gave up.
   const alone = (call) => {
-    const [first] = call.waiters;
-    const init = call.waiters.length === 1 ? first.init : { ...first.init, signal: undefined };
-    base(call.input, init).then(
-      (res) => {
-        const copies = call.waiters.map((_, i) => (i === call.waiters.length - 1 ? res : res.clone()));
-        call.waiters.forEach((waiter, i) => waiter.resolve(copies[i]));
-      },
-      (error) => {
-        for (const waiter of call.waiters) waiter.reject(error);
-      }
-    );
+    const watch = whileAnyWaits(call.waiters);
+    base(call.input, { ...call.waiters[0].init, signal: watch.signal })
+      .then(
+        (res) => {
+          const copies = call.waiters.map((_, i) => (i === call.waiters.length - 1 ? res : res.clone()));
+          call.waiters.forEach((waiter, i) => waiter.resolve(copies[i]));
+        },
+        (error) => {
+          for (const waiter of call.waiters) waiter.reject(error);
+        }
+      )
+      .finally(watch.release);
   };
 
   const plan = (calls) => {
@@ -131,11 +164,16 @@ export function createMulticallFetch({ nodeUrl, fetch: base = (...args) => fetch
     return batches;
   };
 
-  const failed = (batch) => {
+  // One more query that failed: two in a row turn batching off.
+  const strike = () => {
     if (++streak >= STREAK) {
       offUntil = Date.now() + HOLDOFF_MS;
       streak = 0;
     }
+  };
+
+  const failed = (batch) => {
+    strike();
     for (const call of batch) alone(call);
   };
 
@@ -150,30 +188,33 @@ export function createMulticallFetch({ nodeUrl, fetch: base = (...args) => fetch
     } catch {
       return failed(batch);
     }
+    // Cancelled once every read in it gave up waiting, so hung queries don't pile up.
+    const watch = whileAnyWaits(batch.flatMap((call) => call.waiters));
     let res;
+    let decoded;
     try {
       res = await base(`${prefix}${MULTICALL_CONTRACT_ID}/aggregate`, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream", Accept: "application/octet-stream" },
         body: envelope,
+        signal: watch.signal,
       });
-    } catch {
-      return failed(batch);
-    }
-    // A rate limit is the node's answer to every read in the query.
-    if (res.status === 429 || res.status === 503) {
-      const headers = { "Retry-After": res.headers.get("Retry-After") ?? "" };
-      for (const call of batch) {
-        for (const waiter of call.waiters) waiter.resolve(new Response("Rate limited", { status: res.status, headers }));
+      // A rate limit is the node's answer to every read in the query.
+      if (isRateLimit(res)) {
+        const headers = { "Retry-After": res.headers.get("Retry-After") ?? "" };
+        for (const call of batch) {
+          for (const waiter of call.waiters) waiter.resolve(new Response("Rate limited", { status: res.status, headers }));
+        }
+        return;
       }
-      return;
-    }
-    let decoded;
-    try {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       decoded = decodeAggregate(new Uint8Array(await res.arrayBuffer()), batch.length);
     } catch {
+      // Nobody waits for the reads of a query they all gave up on: they aren't sent again.
+      if (watch.signal.aborted) return strike();
       return failed(batch);
+    } finally {
+      watch.release();
     }
     streak = 0;
     batch.forEach((call, i) => {

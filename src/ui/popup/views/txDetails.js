@@ -29,6 +29,7 @@ function statusLabel(status) {
 function statusHelp(tx) {
   const s = String(tx?.status ?? "").toLowerCase();
   if (s === "mempool") return "Still waiting to go through. Don't retry yet.";
+  if (s === "unknown" && tx?.source === "archive") return "It is final on chain. Its outcome is still being looked up.";
   if (s === "unknown") return "The wallet stopped waiting for a result. That doesn't mean it failed.";
   if (s === "removed") return "Shielded funds may still be reserved locally.";
   return "";
@@ -136,7 +137,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const txs = activityRows(ov, state);
   const tx = txs.find((t) => String(t?.hash ?? "") === hash.toLowerCase()) || null;
   // A synced entry not looked up yet gets its time, outcome and fee now.
-  if (tx?.source === "archive" && !tx.detailsAt) loadActivityDetail({ state, render: actions?.render }, tx.hash);
+  if ((tx?.source === "archive" || tx?.source === "both") && !tx.detailsAt) {
+    loadActivityDetail({ state, render: actions?.render }, tx.hash);
+  }
 
   const backRoute = state?.txDetailFrom || "home";
   const onBack = () => {

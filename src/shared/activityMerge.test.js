@@ -4,7 +4,7 @@ import fixture from "./fixtures/activity-testnet.json";
 import { activityEntry, parseHistoryEntry } from "./activityHistory.js";
 import { historyRow, mergeActivity } from "./activityMerge.js";
 
-const [A, B] = Object.keys(fixture.accounts);
+const [A, B, C] = Object.keys(fixture.accounts);
 const NODE = fixture.nodeUrl;
 const STORE = "4e2de1ed4f1fd53de83f4809a75367301c7645a546030fa199aff804e6854199";
 
@@ -52,6 +52,11 @@ describe("historyRow", () => {
     });
   });
 
+  it("leaves an entry whose outcome isn't looked up yet unknown, not executed", () => {
+    const unknown = { ...received(), success: null, timestamp: null, detailsAt: undefined };
+    expect(historyRow(unknown)).toMatchObject({ status: "unknown", success: null });
+  });
+
   it("marks a failed transaction failed with its error", () => {
     const failed = entry(B, 3407780);
     expect(historyRow(failed)).toMatchObject({ status: "failed", error: "Panic: DRC20Phoenix: invalid proof" });
@@ -79,6 +84,24 @@ describe("mergeActivity", () => {
       origin: "https://app.example",
       profileIndex: 0,
     });
+  });
+
+  it("keeps the wallet's own status while the archive's outcome is unknown", () => {
+    const unknown = { ...registered(), success: null, detailsAt: undefined };
+    for (const status of ["submitted", "unknown", "failed"]) {
+      const local = { hash: unknown.hash, kind: "contract_call", status, error: status === "failed" ? "OutOfGas" : undefined, profileIndex: 0 };
+      const [row] = mergeActivity({ local: [local], history: [unknown], profileIndex: 0 });
+      expect(row).toMatchObject({ source: "both", status, error: local.error, detailsAt: undefined });
+    }
+  });
+
+  it("gives an unshield the fee its shielded side paid", () => {
+    // C's unshield at 3602438: the fee was paid from the shielded notes.
+    const unshield = entry(C, 3602438);
+    expect(unshield.fee).toBeNull();
+    const shielded = [{ hash: unshield.hash, kind: "unshield", direction: "out", privacy: "shielded", source: "shielded", feePaid: "12429102" }];
+    const [row] = mergeActivity({ history: [unshield], shielded });
+    expect(row).toMatchObject({ kind: "unshield", direction: "in", source: "archive", feePaid: "12429102" });
   });
 
   it("keeps the wallet's own sends the archive doesn't have yet, shielded ones included, newest first", () => {

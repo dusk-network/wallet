@@ -113,6 +113,65 @@ describe("createMulticallFetch", () => {
     expect(base).toHaveBeenCalledTimes(8);
   });
 
+  it("sends the reads alone after a 503 that says nothing of when to come back", async () => {
+    const base = node((url) => (url === AGGREGATE ? new Response("busy", { status: 503 }) : new Response(bytes("aa"))));
+    const fetch = createMulticallFetch({ nodeUrl: NODE, fetch: base, gasFor });
+    const answers = await Promise.all([fetch(...read("reverse", [1])), fetch(...read("reverse", [2]))]);
+    expect(answers.map((r) => r.status)).toEqual([200, 200]);
+    expect(base.mock.calls.map(([url]) => url)).toEqual([AGGREGATE, `${NODE}/on/contracts:${LENS}/reverse`, `${NODE}/on/contracts:${LENS}/reverse`]);
+  });
+
+  it.each([["seconds", "3"], ["an HTTP date", "Wed, 21 Oct 2026 07:28:00 GMT"]])(
+    "takes a 503 with a wait in %s as a rate limit",
+    async (_label, wait) => {
+      const base = node(() => new Response("busy", { status: 503, headers: { "Retry-After": wait } }));
+      const fetch = createMulticallFetch({ nodeUrl: NODE, fetch: base, gasFor });
+      const answers = await Promise.all([fetch(...read("reverse", [1])), fetch(...read("reverse", [2]))]);
+      expect(answers.map((r) => [r.status, r.headers.get("Retry-After")])).toEqual([[503, wait], [503, wait]]);
+      expect(base).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("cancels a query once every read in it gave up, and sends nothing again", async () => {
+    let signal;
+    const base = node((url, init) => {
+      signal = init.signal;
+      return new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+    });
+    const fetch = createMulticallFetch({ nodeUrl: NODE, fetch: base, gasFor });
+    const one = new AbortController();
+    const two = new AbortController();
+    const answers = [
+      fetch(`${NODE}/on/contracts:${LENS}/reverse`, { method: "POST", body: new Uint8Array([1]), signal: one.signal }),
+      fetch(`${NODE}/on/contracts:${LENS}/reverse`, { method: "POST", body: new Uint8Array([2]), signal: two.signal }),
+    ];
+    await vi.waitFor(() => expect(base).toHaveBeenCalledTimes(1));
+    one.abort();
+    expect(signal.aborted).toBe(false);
+    two.abort();
+    expect(signal.aborted).toBe(true);
+    await Promise.allSettled(answers);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(base).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a query for a read that can't give up", async () => {
+    let signal;
+    const base = node((url, init) => {
+      signal = init.signal;
+      return new Response(reply([{ Ok: bytes("01") }, { Ok: bytes("02") }]));
+    });
+    const fetch = createMulticallFetch({ nodeUrl: NODE, fetch: base, gasFor });
+    const one = new AbortController();
+    const answers = Promise.allSettled([
+      fetch(`${NODE}/on/contracts:${LENS}/reverse`, { method: "POST", body: new Uint8Array([1]), signal: one.signal }),
+      fetch(...read("reverse", [2])),
+    ]);
+    one.abort();
+    await answers;
+    expect(signal.aborted).toBe(false);
+  });
+
   it("gives every read a rate limit's status and wait", async () => {
     const base = node(() => new Response("slow down", { status: 429, headers: { "Retry-After": "2" } }));
     const fetch = createMulticallFetch({ nodeUrl: NODE, fetch: base, gasFor });

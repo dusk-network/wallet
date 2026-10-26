@@ -77,6 +77,57 @@ const result = (req) =>
     req.onerror = () => reject(req.error || new Error("Activity store read failed"));
   });
 
+// The store's lifecycle: a count of wallet resets, kept beside the sync states.
+const LIFECYCLE = "lifecycle";
+
+/** A write refused because the wallet was reset since its work began. */
+export class StaleActivityError extends Error {
+  constructor() {
+    super("The wallet was reset since this work began");
+    this.name = "StaleActivityError";
+  }
+}
+
+/**
+ * How many times the store was cleared for a wallet reset. Work that reads
+ * it before it starts, and hands it to its writes, can't write anything back
+ * after a reset: each write checks it in its own transaction.
+ * @returns {Promise<number>}
+ */
+export async function getActivityEpoch() {
+  const db = await openDb();
+  const tx = db.transaction([STORE_META], "readonly");
+  return Number((await result(tx.objectStore(STORE_META).get(LIFECYCLE)))?.epoch) || 0;
+}
+
+/**
+ * One write transaction over `stores` that runs `write(tx)` only while the
+ * store's epoch is still `epoch` (no check when it is undefined).
+ * @returns {Promise<void>}
+ */
+async function guardedWrite(stores, epoch, write) {
+  const db = await openDb();
+  const tx = db.transaction([...new Set([STORE_META, ...stores])], "readwrite");
+  let stale = false;
+  if (epoch === undefined) write(tx);
+  else {
+    const life = tx.objectStore(STORE_META).get(LIFECYCLE);
+    life.onsuccess = () => {
+      if ((Number(life.result?.epoch) || 0) !== epoch) {
+        stale = true;
+        tx.abort();
+        return;
+      }
+      write(tx);
+    };
+  }
+  try {
+    await done(tx);
+  } catch (error) {
+    throw stale ? new StaleActivityError() : error;
+  }
+}
+
 /**
  * The key one account's history is kept under on one network.
  * @param {string} networkKey
@@ -101,27 +152,27 @@ export async function getActivityMeta(ownerKey) {
  * @param {string} ownerKey
  * @param {object[]} entries - each with a `hash` and a `blockHeight`
  * @param {(meta: object|null) => object} update
+ * @param {number} [epoch] - getActivityEpoch when the work began
  * @returns {Promise<object>} the state kept
  */
-export async function commitActivityStep(ownerKey, entries, update) {
-  const db = await openDb();
-  const tx = db.transaction([STORE_META, STORE_ENTRIES], "readwrite");
-  const metaStore = tx.objectStore(STORE_META);
-  const entryStore = tx.objectStore(STORE_ENTRIES);
+export async function commitActivityStep(ownerKey, entries, update, epoch) {
   let next = null;
-  const req = metaStore.get(ownerKey);
-  req.onsuccess = () => {
-    next = { ...update(req.result ?? null), ownerKey };
-    metaStore.put(next);
-  };
-  for (const entry of entries) {
-    // An entry read again (the finality overlap) is the same row: it keeps
-    // the details already added to it.
-    const id = `${ownerKey}::${entry.hash}`;
-    const get = entryStore.get(id);
-    get.onsuccess = () => entryStore.put({ ...(get.result ?? {}), ...entry, ownerKey, id });
-  }
-  await done(tx);
+  await guardedWrite([STORE_META, STORE_ENTRIES], epoch, (tx) => {
+    const metaStore = tx.objectStore(STORE_META);
+    const entryStore = tx.objectStore(STORE_ENTRIES);
+    const req = metaStore.get(ownerKey);
+    req.onsuccess = () => {
+      next = { ...update(req.result ?? null), ownerKey };
+      metaStore.put(next);
+    };
+    for (const entry of entries) {
+      // An entry read again (the finality overlap) is the same row: it keeps
+      // the details already added to it.
+      const id = `${ownerKey}::${entry.hash}`;
+      const get = entryStore.get(id);
+      get.onsuccess = () => entryStore.put({ ...(get.result ?? {}), ...entry, ownerKey, id });
+    }
+  });
   return next;
 }
 
@@ -130,19 +181,19 @@ export async function commitActivityStep(ownerKey, entries, update) {
  * that are not kept are left alone.
  * @param {string} ownerKey
  * @param {Map<string, object>} details
+ * @param {number} [epoch] - getActivityEpoch when the work began
  */
-export async function patchActivityEntries(ownerKey, details) {
+export async function patchActivityEntries(ownerKey, details, epoch) {
   if (!details?.size) return;
-  const db = await openDb();
-  const tx = db.transaction([STORE_ENTRIES], "readwrite");
-  const store = tx.objectStore(STORE_ENTRIES);
-  for (const [hash, patch] of details) {
-    const req = store.get(`${ownerKey}::${hash}`);
-    req.onsuccess = () => {
-      if (req.result) store.put({ ...req.result, ...patch });
-    };
-  }
-  await done(tx);
+  await guardedWrite([STORE_ENTRIES], epoch, (tx) => {
+    const store = tx.objectStore(STORE_ENTRIES);
+    for (const [hash, patch] of details) {
+      const req = store.get(`${ownerKey}::${hash}`);
+      req.onsuccess = () => {
+        if (req.result) store.put({ ...req.result, ...patch });
+      };
+    }
+  });
 }
 
 /**
@@ -214,17 +265,16 @@ export async function getCounterpartyNames(network, accounts) {
  * Keep name checks of counterparties.
  * @param {string} network
  * @param {Map<string, string|null>} names - by account
- * @param {number} [at]
+ * @param {{ at?: number, epoch?: number }} [opts] - `epoch`: getActivityEpoch when the lookups began
  */
-export async function putCounterpartyNames(network, names, at = Date.now()) {
+export async function putCounterpartyNames(network, names, { at = Date.now(), epoch } = {}) {
   if (!names.size) return;
-  const db = await openDb();
-  const tx = db.transaction([STORE_NAMES], "readwrite");
-  const store = tx.objectStore(STORE_NAMES);
-  for (const [account, name] of names) {
-    store.put({ id: `${network}::${account}`, network, account, name: name ?? null, at });
-  }
-  await done(tx);
+  await guardedWrite([STORE_NAMES], epoch, (tx) => {
+    const store = tx.objectStore(STORE_NAMES);
+    for (const [account, name] of names) {
+      store.put({ id: `${network}::${account}`, network, account, name: name ?? null, at });
+    }
+  });
 }
 
 /**
@@ -243,12 +293,12 @@ export async function getNoteHeightPool(network) {
  * @param {string} network
  * @param {number[]} heights
  * @param {number} notes - how many leaves they come from
+ * @param {number} [epoch] - getActivityEpoch when the work began
  */
-export async function putNoteHeightPool(network, heights, notes) {
-  const db = await openDb();
-  const tx = db.transaction([STORE_POOLS], "readwrite");
-  tx.objectStore(STORE_POOLS).put({ network, heights, notes, at: Date.now() });
-  await done(tx);
+export async function putNoteHeightPool(network, heights, notes, epoch) {
+  await guardedWrite([STORE_POOLS], epoch, (tx) => {
+    tx.objectStore(STORE_POOLS).put({ network, heights, notes, at: Date.now() });
+  });
 }
 
 /** A profile's kept shielded history: `{ ownerKey, fingerprint, entries, decoys }`, or null. */
@@ -258,12 +308,14 @@ export async function getShieldedHistoryRecord(ownerKey) {
   return (await result(tx.objectStore(STORE_SHIELDED).get(ownerKey))) ?? null;
 }
 
-/** Keep a profile's shielded history, with the decoy heights it was asked among. */
-export async function putShieldedHistoryRecord(ownerKey, record) {
-  const db = await openDb();
-  const tx = db.transaction([STORE_SHIELDED], "readwrite");
-  tx.objectStore(STORE_SHIELDED).put({ ...record, ownerKey, at: Date.now() });
-  await done(tx);
+/**
+ * Keep a profile's shielded history, with the decoy heights it was asked among.
+ * @param {number} [epoch] - getActivityEpoch when the work began
+ */
+export async function putShieldedHistoryRecord(ownerKey, record, epoch) {
+  await guardedWrite([STORE_SHIELDED], epoch, (tx) => {
+    tx.objectStore(STORE_SHIELDED).put({ ...record, ownerKey, at: Date.now() });
+  });
 }
 
 /** When `url` last answered without the archive, or null. */
@@ -282,10 +334,19 @@ export async function putArchiveRefusal(url, at = Date.now()) {
   await done(tx);
 }
 
-/** Forget everything kept here, for a wallet reset. */
+/**
+ * Forget everything kept here, for a wallet reset, and count the reset: work
+ * that began before it writes nothing after it (getActivityEpoch).
+ */
 export async function clearActivityStore() {
   const db = await openDb();
   const tx = db.transaction(STORES, "readwrite");
-  for (const name of STORES) tx.objectStore(name).clear();
+  const meta = tx.objectStore(STORE_META);
+  const life = meta.get(LIFECYCLE);
+  life.onsuccess = () => {
+    const epoch = (Number(life.result?.epoch) || 0) + 1;
+    for (const name of STORES) tx.objectStore(name).clear();
+    meta.put({ ownerKey: LIFECYCLE, epoch });
+  };
   await done(tx);
 }

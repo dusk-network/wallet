@@ -435,10 +435,14 @@ async function readRange(url, account, { from, to, head = false }) {
   return { head: head ? readHead(data) : null, entries, completeTo, fullPages, count: Math.max(out.length, inn.length) };
 }
 
-/** The rest of one block, a page at a time, for the direction(s) that filled a page there. */
-async function readBlock(url, account, height, budget) {
+/**
+ * One block holding more than a page, a page at a time from `fromPage`, while
+ * the budget lasts: `page` is where to carry on when it is not `complete`.
+ */
+async function readBlock(url, account, height, budget, fromPage) {
   const entries = [];
-  for (let page = 2; budget.left > 0; page++) {
+  let page = fromPage;
+  for (; budget.left > 0; page++) {
     budget.left -= 1;
     const data = await archiveQuery(url, rangeQuery(account, { from: height, to: height, page }));
     const out = listOf(data.out);
@@ -447,9 +451,9 @@ async function readBlock(url, account, height, budget) {
       const parsed = parseHistoryEntry(account, raw);
       if (parsed) entries.push(parsed);
     }
-    if (out.length < PAGE && inn.length < PAGE) return { entries, complete: true };
+    if (out.length < PAGE && inn.length < PAGE) return { entries, complete: true, page: page + 1 };
   }
-  return { entries, complete: false };
+  return { entries, complete: false, page };
 }
 
 function nextWindow(window, count) {
@@ -469,7 +473,11 @@ function nextWindow(window, count) {
  *   nodeUrl: string, archiverUrl?: string, account: string,
  *   maxRequests?: number, maxDetailRequests?: number,
  *   store?: typeof defaultStore, onStep?: (meta: object) => void,
- * }} opts
+ *   epoch?: number,
+ * }} opts - `epoch`: the store's lifecycle epoch when the caller first saw
+ *   the account (getActivityEpoch); after a wallet reset since, nothing is
+ *   kept and the run rejects with StaleActivityError. Read at the start when
+ *   not given.
  * @returns {Promise<{ meta: object, requests: number, added: number }>}
  */
 export async function syncActivity(opts = {}) {
@@ -492,37 +500,45 @@ async function syncOnce({
   maxDetailRequests = RUN_DETAIL_REQUESTS,
   store = defaultStore,
   onStep,
+  epoch: seen,
 } = {}) {
   if (!BASE58.test(String(account ?? ""))) throw new Error("A public account is required");
   const url = historyArchiverUrl({ nodeUrl, archiverUrl });
   if (!url) throw new Error("No archive configured");
   const ownerKey = store.activityOwnerKey(activityNetworkKey(nodeUrl), account);
 
+  // A wallet reset during the run makes its writes fail (StaleActivityError).
+  const epoch = seen ?? (await store.getActivityEpoch());
   let meta = await store.getActivityMeta(ownerKey);
   const budget = { left: Math.max(1, Math.floor(maxRequests)) };
   let detailsLeft = Math.max(0, Math.floor(maxDetailRequests));
   let added = 0;
 
   const commit = async (entries, patch) => {
-    meta = await store.commitActivityStep(ownerKey, entries.map(toStored), (kept) => {
-      // Two pages syncing at once: keep what the other one covered too.
-      let covered = kept?.covered ?? [];
-      for (const [lo, hi] of patch.cover ?? []) covered = addCoverage(covered, lo, hi);
-      return {
-        ...(kept ?? {}),
-        ...patch.set,
-        account,
-        covered,
-        updatedAt: Date.now(),
-      };
-    });
+    meta = await store.commitActivityStep(
+      ownerKey,
+      entries.map(toStored),
+      (kept) => {
+        // Two pages syncing at once: keep what the other one covered too.
+        let covered = kept?.covered ?? [];
+        for (const [lo, hi] of patch.cover ?? []) covered = addCoverage(covered, lo, hi);
+        return {
+          ...(kept ?? {}),
+          ...patch.set,
+          account,
+          covered,
+          updatedAt: Date.now(),
+        };
+      },
+      epoch
+    );
     added += entries.length;
     onStep?.(meta);
     // The first entries a run finds are the newest: their times and outcomes
     // come at once, before the run reads further down.
     if (entries.length && added === entries.length && detailsLeft > 0) {
       detailsLeft -= 1;
-      await fillDetails({ url, ownerKey, store, maxRequests: 1, onStep: () => onStep?.(meta) });
+      await fillDetails({ url, ownerKey, store, epoch, maxRequests: 1, onStep: () => onStep?.(meta) });
     }
   };
 
@@ -558,6 +574,13 @@ async function syncOnce({
     const gap = topGap(meta.covered ?? [], target);
     if (!gap) break;
     const [a, b] = gap;
+    // A block with more than a page at the top of what is missing: its pages
+    // carry on where an earlier step left them.
+    if (meta.crowded?.height === b) {
+      const block = await readBlock(url, account, b, budget, meta.crowded.page);
+      await commit(block.entries, block.complete ? { cover: [[b, b]], set: { crowded: null } } : { set: { crowded: { height: b, page: block.page } } });
+      continue;
+    }
     const lo = Math.max(a, b - window + 1);
     budget.left -= 1;
     const range = await readRange(url, account, { from: lo, to: b });
@@ -575,13 +598,23 @@ async function syncOnce({
       await commit(range.entries, { cover: [[lo, completeTo]], set: { window } });
       continue;
     }
-    // A page within one block: read the rest of that block page by page.
-    const block = await readBlock(url, account, lo, budget);
+    // A page filled within the window's lowest block, which holds more than
+    // a page: the heights above it come first, then its pages, from the
+    // second, kept as they go.
+    if (lo < b) {
+      window = b - lo;
+      await commit(range.entries, { set: { window, crowded: { height: lo, page: 2 } } });
+      continue;
+    }
+    const block = await readBlock(url, account, lo, budget, 2);
     window = 1;
-    await commit([...range.entries, ...block.entries], { cover: block.complete ? [[lo, lo]] : [], set: { window } });
+    await commit(
+      [...range.entries, ...block.entries],
+      block.complete ? { cover: [[lo, lo]], set: { window, crowded: null } } : { set: { window, crowded: { height: lo, page: block.page } } }
+    );
   }
 
-  await fillDetails({ url, ownerKey, store, maxRequests: detailsLeft, onStep: () => onStep?.(meta) });
+  await fillDetails({ url, ownerKey, store, epoch, maxRequests: detailsLeft, onStep: () => onStep?.(meta) });
   return { meta, requests: Math.max(1, Math.floor(maxRequests)) - budget.left, added };
 }
 
@@ -630,7 +663,7 @@ export async function fetchTxDetails(url, hashes) {
 }
 
 /** Details for the newest kept entries that have none, a batch per request. */
-async function fillDetails({ url, ownerKey, store, maxRequests, onStep, entries }) {
+async function fillDetails({ url, ownerKey, store, epoch, maxRequests, onStep, entries }) {
   let requests = Math.max(0, Math.floor(maxRequests));
   if (!requests) return;
   const missing = (entries ?? (await store.listActivityEntries(ownerKey, { limit: DETAILS_BATCH * requests })))
@@ -639,7 +672,7 @@ async function fillDetails({ url, ownerKey, store, maxRequests, onStep, entries 
   for (let i = 0; i < missing.length && requests > 0; i += DETAILS_BATCH, requests--) {
     const details = await fetchTxDetails(url, missing.slice(i, i + DETAILS_BATCH));
     // A transaction the node doesn't have yet is looked up again next time.
-    await store.patchActivityEntries(ownerKey, details);
+    await store.patchActivityEntries(ownerKey, details, epoch);
     onStep?.();
   }
 }
@@ -647,13 +680,15 @@ async function fillDetails({ url, ownerKey, store, maxRequests, onStep, entries 
 /**
  * Details for kept entries shown before a sync gave them any, as older ones
  * are: one request per 50.
- * @param {{ nodeUrl: string, archiverUrl?: string, account: string, entries: object[], store?: typeof defaultStore }} opts
+ * @param {{ nodeUrl: string, archiverUrl?: string, account: string, entries: object[], store?: typeof defaultStore, epoch?: number }} opts
+ *   `epoch` as for syncActivity
  */
-export async function fillActivityDetails({ nodeUrl, archiverUrl, account, entries, store = defaultStore }) {
+export async function fillActivityDetails({ nodeUrl, archiverUrl, account, entries, store = defaultStore, epoch: seen }) {
   const url = historyArchiverUrl({ nodeUrl, archiverUrl });
   const ownerKey = store.activityOwnerKey(activityNetworkKey(nodeUrl), account);
   const missing = entries.filter((e) => !e.detailsAt);
-  await fillDetails({ url, ownerKey, store, entries: missing, maxRequests: Math.ceil(missing.length / DETAILS_BATCH) });
+  const epoch = seen ?? (await store.getActivityEpoch());
+  await fillDetails({ url, ownerKey, store, epoch, entries: missing, maxRequests: Math.ceil(missing.length / DETAILS_BATCH) });
 }
 
 // ---------------------------------------------------------------------------

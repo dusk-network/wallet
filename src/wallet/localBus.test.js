@@ -102,4 +102,23 @@ describe("a wallet reset", () => {
     expect(await activity.listActivityEntries(owner)).toEqual([]);
     expect(await activity.getActivityMeta(owner)).toBeNull();
   });
+
+  it("fails while the old wallet's data can't be cleared, and makes no new wallet until it can", async () => {
+    const { localSend } = await import("./localBus.js");
+    const activity = await import("../shared/activityStore.js");
+    const epoch = await activity.getActivityEpoch();
+    const clear = vi.spyOn(IDBObjectStore.prototype, "clear").mockImplementation(() => {
+      throw new DOMException("The store is gone", "UnknownError");
+    });
+    try {
+      const reset = await localSend({ type: "DUSK_UI_RESET_WALLET" });
+      expect(reset.error.message).toMatch(/old wallet.s data couldn.t be cleared/);
+      const create = await localSend({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet B", password: "password123" });
+      expect(create.error.message).toMatch(/old wallet.s data couldn.t be cleared/);
+    } finally {
+      clear.mockRestore();
+    }
+    // The failed clear changed nothing.
+    expect(await activity.getActivityEpoch()).toBe(epoch);
+  });
 });

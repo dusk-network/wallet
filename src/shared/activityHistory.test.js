@@ -254,6 +254,54 @@ describe("syncActivity", () => {
   });
 });
 
+describe("a wallet reset during a sync", () => {
+  it("keeps nothing the sync reads after it", async () => {
+    const node = fakeArchive();
+    let release;
+    const held = new Promise((resolve) => (release = resolve));
+    let reached;
+    const atWindow = new Promise((resolve) => (reached = resolve));
+    node.before = async (query) => {
+      if (query.includes("toBlock")) {
+        reached();
+        await held;
+      }
+    };
+    const run = sync(A);
+    await atWindow;
+    await store.clearActivityStore();
+    release();
+    await expect(run).rejects.toBeInstanceOf(store.StaleActivityError);
+    expect(await kept(A)).toEqual([]);
+    expect(await store.getActivityMeta(store.activityOwnerKey("testnet", A))).toBeNull();
+  });
+});
+
+describe("a block with more than a page of the account's entries", () => {
+  // Derived: 450 transfers from B in one block, each a copy of one recorded
+  // entry with its own hash, more than one run's requests can page through.
+  const H = 4_600_000;
+  const template = entriesOf(B, "out").find((e) => e.events.length === 1);
+  const crowded = Array.from({ length: 450 }, (_, i) => ({
+    ...template,
+    block_height: H,
+    origin: i.toString(16).padStart(64, "0"),
+  }));
+
+  it("carries on paging it where the last run stopped", async () => {
+    const node = fakeArchive({ accounts: { [B]: { sender: crowded, receiver: [] } }, finalized: H + 20 });
+    for (let run = 0; run < 4; run++) await sync(B);
+    const rows = await kept(B);
+    expect(rows).toHaveLength(450);
+    const read = await history.readActivity({ nodeUrl: NODE, account: B, limit: 1_000 });
+    expect(read.complete).toBe(true);
+    // No page of the block was read twice: each run carried on where the last stopped.
+    const pages = node.historyQueries().map((l) => l.query.match(/pageCount: (\d+)/)?.[1]).filter(Boolean);
+    expect(pages.length).toBeGreaterThan(0);
+    expect(new Set(pages).size).toBe(pages.length);
+  });
+});
+
 describe("a node without the archive", () => {
   it("is asked nothing for an hour after its first refusal, then again", async () => {
     const node = fakeArchive();
