@@ -22,6 +22,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Saved contacts from `.dusk` names, keeping the name and checking it again before it's an hour old.
 - Added a Disconnect for each connected site, and custom gas under Settings' Advanced.
 - Showed a new wallet how to get its first DUSK, with Receive, instead of empty Tokens and NFTs.
+- Added a spinner on the network pill while the wallet switches network.
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
@@ -78,6 +79,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Made the profile and network menus work from the keyboard.
 - Gave every popup screen a heading for screen readers.
 - Fixed the popup moving Receive's QR and Review's recipient below the rest of the page. ([#125])
 - Raised the shielded (Phoenix) transfer default gas limit to 50M and its minimum to 30M so shielded sends clear the node's spend-gas admission floor.

@@ -2326,6 +2326,41 @@ button.net-menu-item--active {
 .net-menu-check {
   opacity: 0.95;
   flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+.net-menu-check svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* While the wallet moves to another network, the pill's dot turns */
+.network-pill.is-switching {
+  cursor: progress;
+}
+
+.network-pill.is-switching .net-status-dot {
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1.5px solid var(--text-muted);
+  border-top-color: transparent;
+  animation: stepTurn 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .network-pill.is-switching .net-status-dot {
+    animation: statusPulse 1.6s ease-in-out infinite;
+  }
 }
 
 .acct-menu-row {

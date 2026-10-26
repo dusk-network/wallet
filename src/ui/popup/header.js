@@ -36,6 +36,7 @@ export function createHeaderRenderer({
   let chip = null;
   let chipFor = "";
   let latest = null;
+  let refocusChip = false;
 
   return function renderHeader(ov) {
     latest = ov;
@@ -49,7 +50,8 @@ export function createHeaderRenderer({
     // Update network pill label in header
     const networkPill = document.getElementById("network-pill");
     const networkLabel = networkPill?.querySelector(".network-pill__label");
-    if (networkLabel) {
+    // While a switch runs, the pill names the network it goes to.
+    if (networkLabel && !networkPill.classList.contains("is-switching")) {
       networkLabel.textContent = ov?.networkName ?? "Network";
     }
 
@@ -146,6 +148,8 @@ export function createHeaderRenderer({
       const canOpenProfiles = Boolean(walletReady && acctMenu);
       const key = [account, host, connected, ov?.nodeUrl, canOpenProfiles].join("\n");
       if (!chip || chipFor !== key || !acctMenu?.isOpen) {
+        // A redrawn chip keeps the keyboard where it was.
+        refocusChip = Boolean(chip) && document.activeElement === chip;
         chipFor = key;
         chip = accountChipEl(account, {
           connected,
@@ -173,5 +177,9 @@ export function createHeaderRenderer({
     actions.push(optionsBtn);
 
     setChildren(headerActionsHost, actions);
+    if (refocusChip) {
+      refocusChip = false;
+      chip?.focus();
+    }
   };
 }

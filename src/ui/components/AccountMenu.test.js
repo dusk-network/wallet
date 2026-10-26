@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { lookupPrimaryName } from "../../shared/duskNames.js";
-import { installFakeDom, isShown, screenReaderText, settle, visibleText } from "../testing/fakeDom.js";
+import { accessibleName, installFakeDom, isShown, press, screenReaderText, settle, visibleText } from "../testing/fakeDom.js";
 import { iconSvg } from "./ActionIcon.js";
 import { createAccountMenuController } from "./AccountMenu.js";
 
@@ -54,19 +54,55 @@ describe("profile switcher", () => {
   it("gives each profile's row a copy button beside the row that selects it", () => {
     menu.open(anchor, overview);
     expect(rows()).toHaveLength(2);
-    for (const row of rows()) {
+    for (const [i, row] of rows().entries()) {
       const [select, copy] = row.children;
       expect(select.className).toContain("net-menu-item");
       expect(select.querySelector("button")).toBeNull();
       expect(copy.className).toBe("acct-menu-copy");
-      // An SVG icon rather than a glyph a font may lack, named for what it copies.
-      expect([copy.innerHTML, copy.textContent, copy.title, copy.getAttribute("aria-label")]).toEqual([
+      // An SVG icon rather than a glyph a font may lack, named for whose account it copies.
+      expect([copy.innerHTML, copy.textContent, copy.title, accessibleName(copy)]).toEqual([
         iconSvg("copy"),
         "",
         "Copy public account",
-        "Copy public account",
+        `Copy ${["Profile 1", "Spending"][i]}'s public account`,
       ]);
     }
+  });
+
+  it("is a menu: profiles to pick, the active one checked and focused, the arrow keys move, Escape goes back", () => {
+    menu.open(anchor, overview);
+    const list = dom.document.body.querySelector(".acct-menu [role=menu]");
+    expect(dom.document.getElementById(list.getAttribute("aria-labelledby")).textContent).toBe("Select profile");
+    const items = list.querySelectorAll("[role=menuitem], [role=menuitemradio]");
+    expect(items.map((el) => [el.getAttribute("role"), el.getAttribute("aria-checked")])).toEqual([
+      ["menuitemradio", "true"],
+      ["menuitem", null],
+      ["menuitemradio", "false"],
+      ["menuitem", null],
+      ["menuitem", null],
+    ]);
+    expect(list.querySelectorAll(".acct-menu-row").map((row) => row.getAttribute("role"))).toEqual(["none", "none"]);
+    expect(rows()[0].querySelector(".net-menu-check").innerHTML).toBe(iconSvg("check"));
+    expect(dom.document.activeElement).toBe(items[0]);
+
+    press(dom.document.activeElement, "ArrowDown");
+    press(dom.document.activeElement, "ArrowDown");
+    expect(dom.document.activeElement).toBe(items[2]);
+    press(dom.document.activeElement, "End");
+    expect(visibleText(dom.document.activeElement)).toBe("Manage profilesSettings");
+    press(dom.document.activeElement, "Escape");
+    expect([menu.isOpen, dom.document.activeElement]).toEqual([false, anchor]);
+  });
+
+  it("goes back to the chip when a profile is picked from the keyboard", async () => {
+    menu.open(anchor, overview);
+    press(dom.document.activeElement, "ArrowUp");
+    press(dom.document.activeElement, "ArrowUp");
+    press(dom.document.activeElement, "ArrowUp");
+    dom.document.activeElement.click();
+    await settle();
+    expect(onSelectAccountIndex).toHaveBeenCalledWith(1, { ov: overview });
+    expect(dom.document.activeElement).toBe(anchor);
   });
 
   it("shows two lines: the label, then the verified name or else the short account", async () => {

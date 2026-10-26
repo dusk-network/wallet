@@ -148,6 +148,39 @@ describe("header", () => {
     expect(chip()).not.toBe(opened);
   });
 
+  it("names the network it moves to on the pill while it switches", async () => {
+    const { dom, renderHeader } = await setup("popup");
+    // The pill, as popup.html has it.
+    const pill = dom.document.createElement("button");
+    pill.id = "network-pill";
+    pill.className = "network-pill";
+    const label = dom.document.createElement("span");
+    label.className = "network-pill__label";
+    pill.appendChild(label);
+    dom.document.body.appendChild(pill);
+    renderHeader(overview);
+    expect(label.textContent).toBe("Testnet");
+
+    const { setNetworkSwitching } = await import("../components/NetworkMenu.js");
+    setNetworkSwitching(pill, "Mainnet");
+    // A render meanwhile, from a toast or a poll, still has the old network.
+    renderHeader(overview);
+    expect(label.textContent).toBe("Mainnet");
+    setNetworkSwitching(pill, null);
+    renderHeader({ ...overview, networkName: "Mainnet" });
+    expect([label.textContent, pill.className]).toEqual(["Mainnet", "network-pill"]);
+  });
+
+  it("keeps the keyboard on the chip when another profile redraws it", async () => {
+    const { dom, renderHeader, chip } = await setup("popup");
+    renderHeader(overview);
+    const first = chip();
+    first.focus();
+    renderHeader({ ...overview, selectedAccountIndex: 1 });
+    expect(chip()).not.toBe(first);
+    expect(dom.document.activeElement).toBe(chip());
+  });
+
   it("leaves the chip out while the wallet is locked", async () => {
     const { host, renderHeader, chip } = await setup("popup");
     renderHeader({ ...overview, isUnlocked: false });

@@ -67,8 +67,8 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await expect(page.getByText("Main")).toBeVisible();
   await expect(page.getByText("Spending")).toBeVisible();
 
-  // The row, not its copy button ("Copy public account").
-  await page.getByRole("button", { name: /^Spending/ }).click();
+  // The row, not its copy button ("Copy Spending's public account").
+  await page.getByRole("menuitemradio", { name: /^Spending/ }).click();
 
   // Verify switch persisted (Settings selector now points to profile 2)
   await page.getByTitle("Settings").click();
