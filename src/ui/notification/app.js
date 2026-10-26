@@ -1047,21 +1047,30 @@ export async function renderNotification() {
     const display = params?.display;
     const sendsLux = safeBigInt(amountLux, 0n) + safeBigInt(depositLux, 0n);
 
-    // The call itself: contract, function and its arguments' size and hash,
-    // which the site can show too; the bytes themselves under Raw call data.
+    // The call as a person checks it: the contract and the DUSK it sends.
     const callRows = ({ from = false } = {}) =>
       group([
         from ? kv("From", payerLine(rail)) : null,
         kv("Contract", shortMono(contractIdHex)),
-        kv("Function", mono(fnName || "(none)")),
-        kv("Call data", mono(callData), { stack: true }),
         safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${formatDuskExact(amountLux)} DUSK`) : null,
         safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${formatDuskExact(depositLux)} DUSK`) : null,
       ]);
-    const rawData = () =>
-      details("Raw call data", [h("code", { class: "ap-raw", text: argsHex || String(params?.fnArgs ?? "") })]);
+    // Under Details: the network, the function, its arguments' size and hash
+    // (the line a site can show to match), the bytes, and the site's words.
     const detailsBlock = () =>
-      details("Details", [group([...networkRows(), kv("Contract ID", mono(contractIdHex), { stack: true })], { className: "group--inset" })]);
+      details("Details", [
+        group(
+          [
+            ...networkRows(),
+            kv("Contract ID", mono(contractIdHex), { stack: true }),
+            kv("Function", mono(fnName || "(none)")),
+            kv("Call data", mono(callData), { stack: true }),
+          ],
+          { className: "group--inset" }
+        ),
+        details("Raw call data", [h("code", { class: "ap-raw", text: argsHex || String(params?.fnArgs ?? "") })]),
+        siteDetails(display),
+      ]);
     const visible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
 
     // A known DuskEVM bridge call: what it does, read from its arguments,
@@ -1135,8 +1144,6 @@ export async function renderNotification() {
           gasEditor,
           visible(bridge.kind === "deposit" ? "the amount, the DuskEVM recipient" : "this call, the withdrawal"),
           callRows(),
-          rawData(),
-          siteDetails(display),
           detailsBlock(),
         ],
         bar.nodes
@@ -1244,10 +1251,8 @@ export async function renderNotification() {
             ? warning("Unlimited allowance", "This lets the spender move all of this token from your account, now and later. Only continue if you trust it.", [ackInput])
             : null,
           callRows(),
-          rawData(),
           gasEditor,
           visible("this call, the tokens it moves"),
-          siteDetails(display),
           detailsBlock(),
         ],
         bar.nodes
@@ -1299,10 +1304,8 @@ export async function renderNotification() {
             ? warning("High risk", "This lets the operator move all of your NFTs in this collection.")
             : null,
           callRows(),
-          rawData(),
           gasEditor,
           visible("this call"),
-          siteDetails(display),
           detailsBlock(),
         ],
         bar.nodes
@@ -1330,14 +1333,11 @@ export async function renderNotification() {
         requestHead({
           title: summary.title,
           amount: sendsLux > 0n ? { value: formatDuskExact(sendsLux), unit: "DUSK" } : null,
-          sub: fnNameTrim ? h("span", {}, ["Calls ", mono(fnNameTrim)]) : null,
         }),
         callRows({ from: true }),
         unchecked,
         gasEditor,
         visible("this call, the DUSK it sends"),
-        rawData(),
-        siteDetails(display),
         detailsBlock(),
       ],
       bar.nodes

@@ -104,12 +104,11 @@ function txSummary(p) {
         to: bridge.recipient.kind === "account" ? { address: bridge.recipient.account, network: "dusk" } : undefined,
       };
     }
+    // The function is under the approval's Details, with the arguments.
     const sends = safeBigInt(p.amount, 0n) + safeBigInt(p.deposit, 0n);
-    const fn = String(p.fnName ?? "").trim();
     return {
       title: "Contract call",
       amount: sends > 0n ? { value: formatDuskExact(sends), unit: "DUSK" } : undefined,
-      sub: fn ? `Calls ${fn}` : undefined,
     };
   }
   return { title: "Review this transaction" };

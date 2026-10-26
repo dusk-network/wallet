@@ -507,9 +507,11 @@ describe("contract calls", () => {
     networkName: "Testnet",
     ...over,
   });
-  const order = (...els) => els.map((el) => app.children.indexOf(el.closest("#app > *")));
+  // The window's Details, at the bottom, and whether `el` is folded in it.
+  const detailsBlock = () => app.children.find((el) => el.localName === "details" && el.querySelector("summary").textContent === "Details");
+  const folded = (el) => el.closest("#app > *") === detailsBlock();
 
-  it("says the wallet can't read an unknown call's arguments, and shows their size and hash", async () => {
+  it("says the wallet can't read an unknown call's arguments, with the function and their size and hash under Details", async () => {
     await render("send_tx", {
       kind: "contract_call",
       privacy: "public",
@@ -520,16 +522,20 @@ describe("contract calls", () => {
       chainId: "dusk:2",
       nodeUrl: TESTNET,
     });
-    expect(head().querySelector("h1").textContent).toBe("Contract call");
-    expect(visibleText(head().querySelector(".ap-amount"))).toBe("10 DUSK");
+    expect(visibleText(head())).toBe("Contract call10 DUSK");
     expect(visibleText(row("From"))).toBe("alice.dusk · Public");
     expect(row("Contract").querySelector(".mono").title).toBe(`0x${"11".repeat(32)}`);
-    expect(row("Call data").textContent).toMatch(/^1 bytes · sha256=6e340b9cffb3…/);
+    expect(folded(row("Contract"))).toBe(false);
     expect(app.querySelector(".ap-opaque").textContent).toBe("The wallet can't read this call's arguments. Check them on the site before you approve.");
     expect(app.textContent).not.toContain("Known DuskEVM bridge call");
+    // What a person checks stays on top; the rest is folded.
+    expect(row("Function").textContent).toBe("stake");
+    expect(row("Call data").textContent).toMatch(/^1 bytes · sha256=6e340b9cffb3…/);
+    const raw = app.querySelectorAll("details").find((d) => d.querySelector("summary").textContent === "Raw call data");
+    for (const el of [row("Function"), row("Call data"), raw]) expect(folded(el)).toBe(true);
   });
 
-  it("reads a DuskEVM deposit: its recipient and amount above the call, with the call data's hash in view", async () => {
+  it("reads a DuskEVM deposit: its recipient and amount on top, the call data's hash and the site's words under Details", async () => {
     const shoot = fixture("deposit-shoot");
     await render(
       "send_tx",
@@ -544,13 +550,19 @@ describe("contract calls", () => {
     // The line the bridge's review page shows, to match against.
     expect(row("Call data").textContent).toBe(`40 bytes · sha256=${shoot.sha256.slice(0, 12)}…${shoot.sha256.slice(-8)}`);
     expect(row("Call data").textContent).toBe("40 bytes · sha256=2f64b19f5ac0…731c7c2a");
-    // Decoded fields first, the raw bytes after them; the site's own words apart.
+    // Decoded fields on top; the function, the hash, the bytes and the site's
+    // own words folded under Details, in that order.
     const raw = app.querySelectorAll("details").find((d) => d.querySelector("summary").textContent === "Raw call data");
     expect(raw.querySelector("code").textContent).toBe(shoot.args);
-    const [decoded, callData, rawAt] = order(row("DuskEVM recipient"), row("Call data"), raw);
-    expect(decoded).toBeLessThan(callData);
+    const siteWords = app.querySelector(".ap-site-details");
+    expect(siteWords.querySelector("pre").textContent).toContain('"label": "Bridge 0.1 DUSK to DuskEVM"');
+    expect(folded(row("DuskEVM recipient"))).toBe(false);
+    for (const el of [row("Function"), row("Call data"), raw, siteWords]) expect(folded(el)).toBe(true);
+    const inDetails = detailsBlock().querySelectorAll("*");
+    const [fn, callData, rawAt, siteAt] = [row("Function"), row("Call data"), raw, siteWords].map((el) => inDetails.indexOf(el));
+    expect(fn).toBeLessThan(callData);
     expect(callData).toBeLessThan(rawAt);
-    expect(app.querySelector(".ap-site-details pre").textContent).toContain('"label": "Bridge 0.1 DUSK to DuskEVM"');
+    expect(rawAt).toBeLessThan(siteAt);
     expect(app.querySelector(".ap-visible").textContent).toBe(
       "Visible to everyone: the amount, the DuskEVM recipient, and your name alice.dusk."
     );

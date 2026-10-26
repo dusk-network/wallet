@@ -39,7 +39,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
-- Gave the site approval windows the calm look, with Reject and the approve button always in view and the chain, node and raw bytes under Details.
+- Gave the site approval windows the calm look, with Reject and the approve button always in view, and the chain, node, function, call data and the site's own details under Details.
 - Led a site's payment approval with the amount, the recipient's name and the fee.
 - Said in the connect approval what a site sees and that it can't move funds without your approval, with its own wording for a request for the shielded address.
 - Showed a saved contact's label beside the recipient's verified `.dusk` name in approvals, instead of in its place.

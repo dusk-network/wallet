@@ -88,7 +88,7 @@ test("a payment shows its amount, recipient, fee and both buttons without scroll
   expect(await page.evaluate(() => window.decisions.map((d) => d.decision))).toEqual(["reject"]);
 });
 
-test("a DuskEVM deposit shows what it does above its bytes, with the bytes' hash in view", async ({ page }) => {
+test("a DuskEVM deposit shows what it does on top, and its bytes' hash under Details", async ({ page }) => {
   const deposit = fixtures.calls.find((c) => c.name === "deposit-shoot");
   await open(
     page,
@@ -113,6 +113,8 @@ test("a DuskEVM deposit shows what it does above its bytes, with the bytes' hash
     expect(await inView(page, locator)).toBe(true);
   }
   const callData = page.getByText("40 bytes · sha256=2f64b19f5ac0…731c7c2a", { exact: true });
+  await expect(callData).toBeHidden();
+  await page.getByText("Details", { exact: true }).click();
   await callData.scrollIntoViewIfNeeded();
   await expect(callData).toBeVisible();
   const [recipientY, callY, rawY] = await Promise.all([
