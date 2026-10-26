@@ -183,6 +183,28 @@ describe("createMulticallFetch", () => {
     expect(base).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["a 503 with a wait as a date", 503, "Mon, 26 Oct 2026 04:00:05 GMT"],
+    ["a 429 with a wait in seconds", 429, "2"],
+  ])("gives every read of %s the node's own Date, which a date's wait counts from", async (_label, status, wait) => {
+    const headers = { Date: "Mon, 26 Oct 2026 04:00:00 GMT", "Retry-After": wait };
+    const base = node(() => new Response("slow down", { status, headers }));
+    const fetch = createMulticallFetch({ nodeUrl: NODE, fetch: base, gasFor });
+    const answers = await Promise.all([fetch(...read("reverse", [1])), fetch(...read("reverse", [2]))]);
+    expect(answers.map((r) => [r.status, r.headers.get("Date"), r.headers.get("Retry-After")])).toEqual([
+      [status, headers.Date, wait],
+      [status, headers.Date, wait],
+    ]);
+    expect(base).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds no Date to a rate limit's reads when the node sent none", async () => {
+    const base = node(() => new Response("slow down", { status: 429, headers: { "Retry-After": "2" } }));
+    const fetch = createMulticallFetch({ nodeUrl: NODE, fetch: base, gasFor });
+    const [answer] = await Promise.all([fetch(...read("reverse", [1])), fetch(...read("reverse", [2]))]);
+    expect(answer.headers.get("Date")).toBeNull();
+  });
+
   it(`puts at most ${MAX_BATCH} reads in one aggregate`, async () => {
     const sizes = [];
     const base = node((url, init) => {

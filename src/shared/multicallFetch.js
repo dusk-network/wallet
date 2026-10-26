@@ -199,9 +199,13 @@ export function createMulticallFetch({ nodeUrl, fetch: base = (...args) => fetch
         body: envelope,
         signal: watch.signal,
       });
-      // A rate limit is the node's answer to every read in the query.
+      // A rate limit is the node's answer to every read in the query: each
+      // gets its wait, and the node's Date, which a wait given as a date
+      // counts from. Without it the reader counts from this clock instead.
       if (isRateLimit(res)) {
         const headers = { "Retry-After": res.headers.get("Retry-After") ?? "" };
+        const date = res.headers.get("Date");
+        if (date) headers.Date = date;
         for (const call of batch) {
           for (const waiter of call.waiters) waiter.resolve(new Response("Rate limited", { status: res.status, headers }));
         }
