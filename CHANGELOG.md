@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Showed the selected profile's full public history in Activity, received transfers included, synced from the archive node by block height.
+- Showed the profile's shielded history in Activity, worked out once from the shielded notes the wallet syncs.
+- Named Activity's counterparties by their verified `.dusk` names, and kept the `.dusk` name a recipient was typed as.
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])

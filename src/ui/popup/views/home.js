@@ -18,6 +18,7 @@ import { recipientBadge } from "../../components/RecipientBadge.js";
 import { subnav } from "../../components/Subnav.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
+import { activityRows, hasMoreActivity, showMoreActivity } from "../activity.js";
 
 function timeAgo(ts) {
   const t = Number(ts || 0);
@@ -259,8 +260,8 @@ export function homeView(ov, { state, actions } = {}) {
       : null,
   ].filter(Boolean));
 
-  // Activity list
-  const txs = Array.isArray(ov?.txs) ? ov.txs : [];
+  // Activity list: this wallet's transactions with the account's history.
+  const txs = activityRows(ov, state);
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const accountIndexRaw = Number(ov?.selectedAccountIndex ?? 0);
   const accountIndex = Number.isFinite(accountIndexRaw) && accountIndexRaw >= 0 ? Math.floor(accountIndexRaw) : 0;
@@ -311,11 +312,31 @@ export function homeView(ov, { state, actions } = {}) {
     return txActivityStatusLabel(status);
   };
 
+  // The other side of a transfer: the .dusk name typed when sending, else its
+  // verified .dusk name, else its address.
+  const party = (tx, addr) => {
+    const name = String((tx?.direction === "in" ? "" : tx?.toName) || tx?.counterpartyName || "").trim();
+    return name || (addr ? truncateMiddle(String(addr), 10, 8) : "");
+  };
+
   const describe = (tx) => {
     const kind = String(tx?.kind ?? "").toLowerCase();
     if (kind === TX_KIND.TRANSFER) {
       const amt = tx?.amount != null ? formatLuxShort(tx.amount, UI_DISPLAY_DECIMALS) : "";
-      const to = tx?.to ? truncateMiddle(String(tx.to), 10, 8) : "";
+      if (tx?.direction === "in") {
+        const from = party(tx, tx?.from);
+        return {
+          title: from ? `Received from ${from}` : "Received DUSK",
+          sub: txKindRailLabel(tx),
+          amount: amt ? `+${amt} DUSK` : "",
+          tone: "in",
+          icon: "↓",
+        };
+      }
+      if (tx?.direction === "self") {
+        return { title: "Sent to yourself", sub: txKindRailLabel(tx), amount: amt ? `${amt} DUSK` : "", tone: "neutral", icon: "↑" };
+      }
+      const to = party(tx, tx?.to);
       return {
         title: to ? `Sent to ${to}` : "Sent DUSK",
         sub: txKindRailLabel(tx),
@@ -437,7 +458,7 @@ export function homeView(ov, { state, actions } = {}) {
 
   const contactForTx = (tx) => {
     const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
-    const addr = String(tx?.to || asset?.to || "").trim();
+    const addr = String(tx?.to || tx?.from || asset?.to || "").trim();
     if (!addr) return null;
     const entry = contactByAddress.get(addr.toLowerCase());
     const name = String(entry?.name ?? "").trim();
@@ -518,9 +539,10 @@ export function homeView(ov, { state, actions } = {}) {
       class: `activity-amount activity-amount--${tone || "neutral"}`,
       text: amount || "—",
     });
+    const at = tx?.timestamp ?? tx?.submittedAt;
     const timeEl = h("div", {
       class: "activity-time",
-      text: tx?.submittedAt ? timeAgo(tx.submittedAt) : "",
+      text: at ? timeAgo(at) : "",
     });
 
     const cls = [
@@ -620,6 +642,20 @@ export function homeView(ov, { state, actions } = {}) {
       actions?.render?.().catch(() => {});
     };
 
+    // Older history: kept rows past this page, or the next sync of older blocks.
+    const showMore = hasMoreActivity(state)
+      ? h("div", { class: "activity-card-footer" }, [
+          h("button", {
+            class: "activity-view-all",
+            text: "Show more",
+            onclick: (e) => {
+              e?.stopPropagation?.();
+              showMoreActivity({ state, render: actions?.render }).catch(() => {});
+            },
+          }),
+        ])
+      : null;
+
     return [
       subnav({
         title: "Activity",
@@ -629,8 +665,9 @@ export function homeView(ov, { state, actions } = {}) {
       }),
       h("div", { class: "wallet-dashboard" }, [
         h("div", { class: "activity-card activity-card--tx" }, [
-          activityList(txs, "No local wallet activity yet."),
-        ]),
+          activityList(txs, "No activity yet."),
+          showMore,
+        ].filter(Boolean)),
       ]),
     ];
   }
@@ -641,7 +678,7 @@ export function homeView(ov, { state, actions } = {}) {
       title: "Recent activity",
       actions: publicHistoryActions,
     }),
-    activityList(recentTxs, "No local wallet activity yet."),
+    activityList(recentTxs, "No activity yet."),
     // View all only when it shows more than the card does.
     txs.length > recentTxs.length ? h("div", { class: "activity-card-footer" }, [viewAllButton]) : null,
   ].filter(Boolean));

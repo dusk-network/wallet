@@ -10,6 +10,7 @@ const mutate = (fn) => withStorageLock(STORAGE_KEYS.TXS, fn);
  * @property {string} kind
  * @property {number=} profileIndex
  * @property {string=} to
+ * @property {string=} toName The .dusk name the recipient was typed as, for Activity.
  * @property {string=} amount
  * @property {string=} deposit
  * @property {string=} contractId
@@ -36,6 +37,17 @@ const mutate = (fn) => withStorageLock(STORAGE_KEYS.TXS, fn);
  * @property {string=} blockTimestamp
  * @property {number=} finalizedAt
  */
+
+/**
+ * The .dusk name a send's recipient was typed as, kept with the send for
+ * Activity: a short name ending in .dusk, else undefined.
+ * @param {unknown} value
+ * @returns {string|undefined}
+ */
+export function typedRecipientName(value) {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name.length <= 64 && /^[^\s\u0000-\u001f\u007f]+\.dusk$/i.test(name) ? name : undefined;
+}
 
 async function getAll() {
   const items = await storage.get(STORAGE_KEYS.TXS);

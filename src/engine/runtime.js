@@ -20,6 +20,7 @@ import {
   getStakeInfo,
   getStakeOwnerStatus,
   getShieldedBalance,
+  getShieldedHistory,
   getShieldedStatus,
   isUnlocked,
   lock,
@@ -387,6 +388,11 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
 
         case "dusk_getShieldedStatus": {
           sendResponse({ id, result: getShieldedStatus() });
+          return;
+        }
+
+        case "dusk_getShieldedHistory": {
+          sendResponse({ id, result: await getShieldedHistory() });
           return;
         }
 

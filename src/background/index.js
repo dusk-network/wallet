@@ -45,7 +45,7 @@ import {
 } from "./txNotify.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { listAddressBook } from "../shared/addressBook.js";
-import { getTxMeta, patchTxMeta, putTxMeta, listTxs } from "../shared/txStore.js";
+import { getTxMeta, patchTxMeta, putTxMeta, listTxs, typedRecipientName } from "../shared/txStore.js";
 import { handleUiCommand } from "../wallet/uiCommands.js";
 import {
   getNetworkStatus,
@@ -1266,6 +1266,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
                   : undefined,
               // Helpful fields for the Activity list UI
               to: baseParams?.to ? String(baseParams.to) : undefined,
+              toName: typedRecipientName(message?.toName),
               amount:
                 baseParams?.amount !== undefined && baseParams?.amount !== null
                   ? String(baseParams.amount)

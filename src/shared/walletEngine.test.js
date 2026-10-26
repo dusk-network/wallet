@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 
 import { bytesToHex, sha256Hex, toBytes } from "./bytes.js";
+import phoenix from "./fixtures/phoenix-testnet.json";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -220,7 +221,7 @@ vi.mock("@dusk/w3sper", () => {
     }
     balance(identifier) {
       if (typeof globalThis.__W3SPER_BALANCE__ === "function") {
-        return globalThis.__W3SPER_BALANCE__(identifier);
+        return globalThis.__W3SPER_BALANCE__(identifier, this.treasury);
       }
       return Promise.resolve({ nonce: 0n, value: 0n });
     }
@@ -310,7 +311,7 @@ vi.mock("@dusk/w3sper", () => {
   }
 
   class AddressSyncer extends EventTarget {
-    constructor(_network) { super(); }
+    constructor(network) { super(); this.network = network; }
     async spent() { return []; }
     async notes() { return new ReadableStream({ start(controller) { controller.close(); } }); }
     get root() {
@@ -1377,5 +1378,98 @@ describe("walletEngine", () => {
     });
     expect(globalThis.__W3SPER_LAST_EXEC_TX__.paymentValue).toBe("address");
     expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xstake")).toEqual(["ee"]);
+  });
+
+  describe("shielded history", () => {
+    const bytes = (hex) => Uint8Array.from(hex.match(/../g), (b) => parseInt(b, 16));
+    const leaves = (hex) => Array.from({ length: hex.length / 1472 }, (_, i) => bytes(hex.slice(i * 1472, (i + 1) * 1472)));
+    const FIRST = leaves(phoenix.firstLeaves);
+    const [, L493, L494, L495] = leaves(phoenix.leaves492);
+    const event = phoenix.blocks.e3602438.json.find((e) => e.topic === "phoenix");
+    const NULLIFIERS = [bytes(event.data.slice(0, 64)), bytes(event.data.slice(64, 128))];
+
+    // A first scan of a 6-note tree (Testnet's first leaves), as w3sper's
+    // syncer reads it: one stream of leaves from the first.
+    async function scanTree() {
+      await engine.unlockWithMnemonic(MNEMONIC);
+      const network = await engine.ensureNetwork();
+      network.blockHeight = 4_000_000n;
+      const leavesFromPos = vi.fn(async () => new Response(Uint8Array.from(FIRST.flatMap((l) => [...l]))));
+      network.contracts = { transferContract: { call: { num_notes: async () => 6n, leaves_from_pos: leavesFromPos } } };
+      const { AddressSyncer } = await import("@dusk/w3sper");
+      const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockImplementation(async function () {
+        const res = await this.network.contracts.transferContract.call.leaves_from_pos(new Uint8Array(8), {});
+        await res.arrayBuffer();
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue([[new Map()], { bookmark: 5n, blockHeight: 234369n }]);
+            controller.close();
+          },
+        });
+      });
+      await engine.startShieldedSync();
+      await vi.waitFor(() => expect(engine.getShieldedStatus().state).toBe("done"));
+      notes.mockRestore();
+      return { leavesFromPos };
+    }
+
+    it("keeps the note tree's heights from a scan that starts at the first note", async () => {
+      const { leavesFromPos } = await scanTree();
+      expect(leavesFromPos).toHaveBeenCalledTimes(1);
+      const activity = await import("./activityStore.js");
+      await vi.waitFor(async () => expect(await activity.getNoteHeightPool("mainnet")).toMatchObject({ heights: [184423, 226951, 234329, 234369], notes: 6 }));
+    });
+
+    it("asks for the profile's notes' blocks among the tree's other heights, once, and nothing for a profile without notes", async () => {
+      const { leavesFromPos } = await scanTree();
+      const store = await import("./shieldedStore.js");
+      // Two notes the unshield spent, its two outputs, and the shield's note.
+      await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([
+        [NULLIFIERS[0], FIRST[0]], [NULLIFIERS[1], FIRST[1]],
+        [bytes("aa".repeat(32)), L493], [bytes("bb".repeat(32)), L494], [bytes("cc".repeat(32)), L495],
+      ]));
+      await store.markNullifiersSpent(NETWORK_KEY, WALLET_ID, 0, NULLIFIERS);
+      // Note values, by position, as the profile's keys would give them.
+      const values = { 0: 10_000_000_000n, 1: 500_000_000n, 493: 1_000_000_000n, 494: 12_000_000n, 495: 2_000_000_000n };
+      globalThis.__W3SPER_BALANCE__ = async (_address, treasury) => {
+        const [[, leaf]] = [...(await treasury.address())];
+        const pos = new DataView(leaf.buffer, leaf.byteOffset).getBigUint64(648, true);
+        return { value: values[Number(pos)], spendable: 0n };
+      };
+      const queries = [];
+      vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+        expect(String(url)).toBe("https://nodes.dusk.network/on/graphql/query");
+        const query = String(init.body);
+        queries.push(query);
+        const data = {};
+        for (const [, h] of query.matchAll(/b(\d+): block\(/g)) {
+          data[`e${h}`] = phoenix.blocks[`e${h}`] ?? { json: [] };
+          data[`b${h}`] = phoenix.blocks[`b${h}`] ?? { header: { timestamp: 1 }, transactions: [] };
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify(data) };
+      }));
+
+      const first = await engine.getShieldedHistory();
+      expect(first.profileIndex).toBe(0);
+      expect(first.entries.map((e) => [e.blockHeight, e.kind, e.direction, e.amount, e.feePaid])).toEqual([
+        [3861643, "shield", "in", "2000000000", undefined],
+        [3602438, "unshield", "out", String(10_500_000_000n - 1_012_000_000n - 12_429_102n), "12429102"],
+      ]);
+      // The profile's two heights went out among the tree's four others, all in one request.
+      expect(queries).toHaveLength(1);
+      const asked = [...queries[0].matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h)).sort((a, b) => a - b);
+      expect(asked).toEqual([184423, 226951, 234329, 234369, 3602438, 3861643]);
+      // The scan's heights served: the tree wasn't read again.
+      expect(leavesFromPos).toHaveBeenCalledTimes(1);
+
+      // Kept: asking again asks the node nothing.
+      await expect(engine.getShieldedHistory()).resolves.toEqual(first);
+      expect(queries).toHaveLength(1);
+
+      // A profile without shielded notes reads nothing.
+      await engine.selectAccountIndex({ index: 1 });
+      await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 1, entries: [] });
+      expect(queries).toHaveLength(1);
+    });
   });
 });

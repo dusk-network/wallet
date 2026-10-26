@@ -12,7 +12,7 @@ import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
+import { getTxMeta, listTxs, patchTxMeta, putTxMeta, typedRecipientName } from "../shared/txStore.js";
 import { bytesToHex } from "../shared/bytes.js";
 import {
   executionEventError,
@@ -38,6 +38,7 @@ import {
   getDrc721OwnerOf,
   getDrc721TokenUri,
   getShieldedBalance,
+  getShieldedHistory,
   getShieldedStatus,
   isUnlocked,
   lock,
@@ -116,6 +117,7 @@ const localEngineMethods = {
   dusk_getDrc721TokenUri: getDrc721TokenUri,
   dusk_decodeDrc721Input: decodeDrc721Input,
   dusk_setShieldedCheckpointNow: setShieldedCheckpointNow,
+  dusk_getShieldedHistory: getShieldedHistory,
   engine_selectAccount: selectAccountIndex,
 };
 
@@ -394,6 +396,7 @@ export async function localSend(message) {
                 ? message.asset
                 : undefined,
             to: baseParams?.to ? String(baseParams.to) : undefined,
+            toName: typedRecipientName(message?.toName),
             amount:
               baseParams?.amount !== undefined && baseParams?.amount !== null
                 ? String(baseParams.amount)

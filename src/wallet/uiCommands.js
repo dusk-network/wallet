@@ -21,6 +21,7 @@ const ENGINE_COMMANDS = {
   DUSK_UI_DRC721_OWNER_OF: ["dusk_getDrc721OwnerOf", (message) => ({ contractId: message.contractId, tokenId: message.tokenId })],
   DUSK_UI_DRC721_TOKEN_URI: ["dusk_getDrc721TokenUri", (message) => ({ contractId: message.contractId, tokenId: message.tokenId })],
   DUSK_UI_DRC721_DECODE_INPUT: ["dusk_decodeDrc721Input", (message) => ({ fnName: message.fnName, fnArgs: message.fnArgs })],
+  DUSK_UI_GET_SHIELDED_HISTORY: ["dusk_getShieldedHistory", () => undefined],
 };
 
 const ASSET_COMMANDS = {
