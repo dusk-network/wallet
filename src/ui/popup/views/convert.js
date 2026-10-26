@@ -15,7 +15,7 @@ import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
-import { useNetworkGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { segmented } from "../../components/Segmented.js";
 import { sendFromReview } from "./sent.js";
@@ -34,11 +34,10 @@ export function convertFormView(ov, { state, actions } = {}) {
   const kind = draft.kind === TX_KIND.UNSHIELD ? TX_KIND.UNSHIELD : TX_KIND.SHIELD;
   const hidden = balancesHidden(ov);
 
-  const defaultGas = getDefaultGas(kind);
-  const feeLux =
-    defaultGas && defaultGas.limit != null && defaultGas.price != null
-      ? safeBigInt(defaultGas.limit, 0n) * safeBigInt(defaultGas.price, 0n)
-      : 0n;
+  // The fee Review starts from, so Max matches what Review asks.
+  const feeLux = gasFeeLux(
+    startingGas({ defaultGas: getDefaultGas(kind), minLimit: getMinimumGas(kind)?.limit, customGas: ov?.customGas, gas: draft.gas })
+  );
 
   // What it can move: the public balance, or the shielded one that can be
   // spent now, less the fee.

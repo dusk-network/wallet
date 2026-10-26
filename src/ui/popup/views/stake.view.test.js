@@ -322,6 +322,33 @@ describe("native staking", () => {
     });
   });
 
+  it("sets aside the fee Review starts from, with custom gas from Settings", async () => {
+    // Price 3 and staking's own 50M limit, as the custom 2.5M is under its minimum.
+    const state = { route: "stake", staking: staking(owner(), { screen: "native" }) };
+    popup(state, ov({ customGas: { limit: "2500000", price: "3" } }));
+    expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toContain("Network fee up to 0.15 DUSK");
+    typeInto(field("Stake amount"), "1482.8");
+    expect(body.querySelector(".amount-field__error").textContent).toBe(
+      "That's 0.0117 DUSK more than the public balance, with the network fee."
+    );
+    button("Max").click();
+    expect(field("Stake amount").value).toBe("1482.7883");
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.15 DUSKTotalup to 1,482.9383 DUSK");
+  });
+
+  it("sets aside Sozu's fee with custom gas from Settings: the custom price at the call's own limit", async () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    popup(state, ov({ customGas: { limit: "2500000", price: "3" } }));
+    button("Max").click();
+    expect(field("Stake amount").value).toBe("1481.4383");
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 1.5 DUSKTotalup to 1,482.9383 DUSK");
+    expect(button("Confirm").disabled).toBe(false);
+  });
+
   it("states the node, timing, penalty and fee facts from Dusk's staking docs", () => {
     popup({ route: "stake", staking: staking(owner(), { screen: "native" }) });
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([

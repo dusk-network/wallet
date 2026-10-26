@@ -175,7 +175,7 @@ describe("fee editor", () => {
   it("is used by every transaction review view, which has no presets and no Cancel", async () => {
     for (const name of ["send", "stake", "convert", "sozu", "assets"]) {
       const view = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "views", `${name}.js`), "utf8");
-      expect(view).toContain('import { useNetworkGas } from "../../components/NetworkGas.js";');
+      expect(view).toMatch(/import \{[^}]*\buseNetworkGas\b[^}]*\} from "\.\.\/\.\.\/components\/NetworkGas\.js";/);
       expect(view).toContain("minLimit: getMinimumGas(");
       expect(view).not.toMatch(/"Recommended"|"Low"|"High"|gasHint/);
       expect(view).not.toContain('text: "Cancel"');

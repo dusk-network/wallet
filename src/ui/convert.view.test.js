@@ -87,6 +87,27 @@ describe("shield and unshield", () => {
     expect(state).toMatchObject({ route: "convert_confirm", draft: { kind: TX_KIND.UNSHIELD, amountLux: "2000000000" } });
   });
 
+  it("sets aside the fee Review starts from, with custom gas from Settings", async () => {
+    // Price 3 and the shield's own 50M limit, as the custom 2.5M is under its minimum.
+    const custom = { ...ov, customGas: { limit: "2500000", price: "3" } };
+    const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
+    const show = () =>
+      dom.document.body.replaceChildren(
+        ...(state.route === "convert_confirm" ? convertConfirmView : convertFormView)(custom, {
+          state,
+          actions: { send: vi.fn(async () => ({})), render: vi.fn(async () => show()), showToast: vi.fn() },
+        })
+      );
+    show();
+    expect(visibleText(body().querySelector(".amount-avail__text"))).toBe("Available after fees 1,482.7883 DUSK");
+    expect(visibleText(body().querySelector(".amount-fee-note"))).toBe("Network fee up to 0.15 DUSK");
+    button("Max").click();
+    expect(body().querySelector("input.amount-field__input").value).toBe("1482.7883");
+    button("Review").click();
+    await settle();
+    expect(visibleText(body().querySelector(".gas-fee"))).toBe("Network feeup to 0.15 DUSKTotalup to 1,482.9383 DUSK");
+  });
+
   it("reviews the amount, the profile it moves within, and the fee, with Back and Confirm", async () => {
     const state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountLux: "1000000000", amountDusk: "1" } };
     draw(state);

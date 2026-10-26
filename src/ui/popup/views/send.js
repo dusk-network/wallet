@@ -19,7 +19,7 @@ import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
-import { useNetworkGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import {
   hideRecipientBadge,
@@ -87,19 +87,18 @@ export function sendFormView(ov, { state, actions } = {}) {
   // ------------------------------------------------------------
   // Amount helpers (MAX + slider)
   // ------------------------------------------------------------
-  // The send screen doesn't expose gas settings yet. We base MAX calculations
-  // on the wallet's safe defaults for transfers.
-  function defaultGasForRecipientType(type) {
-    return getDefaultGas(TX_KIND.TRANSFER, {
-      privacy: type === "address" ? "shielded" : "public",
-    });
-  }
-
+  // Max and the balance check reserve the fee Review starts from: the
+  // draft's own gas, custom gas from Settings, or the transfer's default.
   function feeLuxForRecipientType(type) {
-    const defaultGas = defaultGasForRecipientType(type);
-    return defaultGas && defaultGas.limit != null && defaultGas.price != null
-      ? safeBigInt(defaultGas.limit, 0n) * safeBigInt(defaultGas.price, 0n)
-      : 0n;
+    const privacy = type === "address" ? "shielded" : "public";
+    return gasFeeLux(
+      startingGas({
+        defaultGas: getDefaultGas(TX_KIND.TRANSFER, { privacy }),
+        minLimit: getMinimumGas(TX_KIND.TRANSFER, { privacy })?.limit,
+        customGas: ov?.customGas,
+        gas: draft?.gas,
+      })
+    );
   }
 
   // Balances from overview.

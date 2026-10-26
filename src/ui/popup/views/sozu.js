@@ -28,7 +28,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { submitOnGasEnter } from "../../components/FormControls.js";
-import { useNetworkGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { sendFromReview } from "./sent.js";
 
 function networkKey(ov) {
@@ -86,9 +86,17 @@ function draftAmountLux(draft) {
   return safeBigInt(draft?.fnArgsAmountLux ?? 0, 0n);
 }
 
-function defaultContractCallFeeLux() {
-  const gas = getDefaultGas(TX_KIND.CONTRACT_CALL, { privacy: "public" });
-  return safeBigInt(gas?.limit, 0n) * safeBigInt(gas?.price, 1n);
+// The fee Review starts from (startingGas), custom gas from Settings and a
+// draft's own gas included, so Max and the balance checks match it.
+function contractCallFeeLux(customGas = null, gas = null) {
+  return gasFeeLux(
+    startingGas({
+      defaultGas: getDefaultGas(TX_KIND.CONTRACT_CALL, { privacy: "public" }),
+      minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL, { privacy: "public" })?.limit,
+      customGas,
+      gas,
+    })
+  );
 }
 
 function stDuskWatchKey(profileIndex, contractId) {
@@ -178,7 +186,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const publicBalanceLux = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const poolBalanceLux = safeBigInt(position?.poolBalanceLux ?? 0, 0n);
   const stDuskLux = safeBigInt(position?.stDuskBalanceLux ?? 0, 0n);
-  const publicFeeLux = defaultContractCallFeeLux();
+  const publicFeeLux = contractCallFeeLux(ov?.customGas);
   const maxStakeLux = publicBalanceLux > publicFeeLux ? publicBalanceLux - publicFeeLux : 0n;
   const maxUnstakeLux = poolBalanceLux > 0n ? poolBalanceLux : 0n;
   const disabledReason = cfg
@@ -461,7 +469,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const liveStatus = st.status;
   const publicBalance = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const draftNeeds = draftAmountLux(draft);
-  const draftFeeLux = defaultContractCallFeeLux();
+  const draftFeeLux = contractCallFeeLux(ov?.customGas, draft?.gas);
   const isStake = draft.fnName === "sozu_stake";
   const stakeRequiredLux = isStake ? draftNeeds + draftFeeLux : draftFeeLux;
   const submitDisabled =

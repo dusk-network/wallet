@@ -423,6 +423,31 @@ describe("send's amount", () => {
     expect(state.route).toBe("send");
   });
 
+  it("sets aside the fee Review starts from, with custom gas from Settings", async () => {
+    // Price 3: a public transfer keeps the custom 2.5M limit; a shielded one
+    // its own 50M, as 2.5M is under its minimum.
+    const ov = overview({ customGas: { limit: "2500000", price: "3" } });
+    const state = newState();
+    const form = mount(state, ov);
+    typeInto(form.to, "alice.dusk");
+    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 177.979 DUSK", "Network fee up to 0.0075 DUSK"]);
+    form.radios()[1].click();
+    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 24.85 DUSK", "Network fee up to 0.15 DUSK"]);
+    form.radios()[0].click();
+    typeInto(form.amount, "177.98");
+    expect(form.amountError()).toBe("That's more than you have, with the network fee.");
+    dom.document.body.querySelector(".amount-avail button").click();
+    expect(form.amount.value).toBe("177.979");
+
+    // Review asks that fee: Max and the fee make up the whole balance.
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
+    mount(state, ov);
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".gas-fee"))).toBe("Network feeup to 0.0075 DUSKTotalup to 177.9865 DUSK");
+  });
+
   it("hides what's available with Hide balances, while Max still fills in the real amount", () => {
     const form = mount(newState(), overview({ hideBalances: true }));
     typeInto(form.to, ALICE.account);
