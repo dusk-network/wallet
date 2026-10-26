@@ -26,6 +26,7 @@ beforeEach(() => {
 
 afterEach(() => {
   menu.close();
+  vi.unstubAllGlobals();
 });
 
 const ov = { nodeUrl: "https://testnet.nodes.dusk.network" };
@@ -98,6 +99,18 @@ describe("network menu", () => {
     await settle();
     expect([pill.className, pill.getAttribute("aria-busy"), pill.getAttribute("aria-label")]).toEqual(["network-pill", null, null]);
     expect(dom.document.activeElement).toBe(pill);
+  });
+
+  it("names the network it's still on when the switch fails or throws", async () => {
+    vi.stubGlobal("alert", vi.fn());
+    for (const failure of [async () => false, async () => Promise.reject(new Error("offline"))]) {
+      onSelectPreset.mockImplementationOnce(failure);
+      menu.open(pill, ov);
+      item("Mainnet").click();
+      await settle();
+      expect([pill.className, pill.getAttribute("aria-busy"), pill.textContent]).toEqual(["network-pill", null, "Testnet"]);
+    }
+    expect(alert).toHaveBeenCalledWith("offline");
   });
 
   it("doesn't spin for the network it's on, or for Custom, which opens Settings", async () => {

@@ -655,6 +655,8 @@ const netMenu = createNetworkMenuController({
       await render({ forceRefresh: true });
     } catch (e) {
       showToast(e?.message ?? String(e));
+      // Still on its network: the menu names it on the pill again.
+      return false;
     }
   },
 });

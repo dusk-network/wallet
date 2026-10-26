@@ -27,6 +27,8 @@ export function setNetworkSwitching(pill, label) {
 /**
  * Small controller that renders the network selection menu under an anchor.
  * This intentionally keeps the original markup/classes so ui.css keeps working.
+ * `onSelectPreset(preset, { ov })` resolves false, or rejects, when the
+ * wallet stays on its network; the pill then names that network again.
  */
 export function createNetworkMenuController({
   onSelectPreset,
@@ -76,16 +78,24 @@ export function createNetworkMenuController({
           onclick: async () => {
             close();
             anchorEl.focus();
-            // The pill spins until the wallet is on the new network.
+            // The pill spins until the wallet is on the new network, and
+            // names the one it's on again if it doesn't get there.
             const switching = p.id !== "custom" && !active;
+            const label = anchorEl.querySelector(".network-pill__label");
+            const current = label?.textContent ?? "";
             if (switching) setNetworkSwitching(anchorEl, p.label);
+            let failed = false;
             try {
-              await onSelectPreset?.(p, { ov });
+              failed = (await onSelectPreset?.(p, { ov })) === false;
             } catch (e) {
+              failed = true;
               // Let caller decide how to surface errors, fall back to alert.
               alert(e?.message ?? String(e));
             } finally {
-              if (switching) setNetworkSwitching(anchorEl, null);
+              if (switching) {
+                setNetworkSwitching(anchorEl, null);
+                if (failed && label) label.textContent = current;
+              }
             }
           },
         },
