@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The fake DOM goes first: it defines HTMLElement for the gas editor to extend.
 import { accessibleName, installFakeDom, isShown, settle, typeInto, visibleText } from "../testing/fakeDom.js";
 import "./GasEditor.js";
-import { useNetworkGas } from "./NetworkGas.js";
+import { gasFeeLux, startingGas, useNetworkGas } from "./NetworkGas.js";
 
 let dom;
 
@@ -117,6 +117,40 @@ describe("fee editor", () => {
       "The wallet uses your custom gas from Settings.",
     ]);
     expect((await shield({ limit: "2500000", price: "3" }))[0]).toEqual({ limit: "50000000", price: "3" });
+  });
+
+  it("keeps a contract call's own limit with custom gas, as it has no minimum to hold the custom limit to", async () => {
+    const editor = dom.document.createElement("dusk-gas-editor");
+    const send = vi.fn(async () => ({ median: "2" }));
+    const customGas = { limit: "2500000", price: "3" };
+    useNetworkGas({ actions: { send }, defaultLimit: "500000000", fallbackPrice: "1", gas: null, gasEditor: editor, minLimit: null, customGas });
+    dom.document.body.appendChild(editor);
+    await settle();
+    expect(editor.readFinalGas()).toEqual({ limit: "500000000", price: "3" });
+    expect(visibleText(editor.querySelector(".gas-note"))).toBe("The wallet uses your custom gas from Settings.");
+  });
+
+  it("starts each Review from the draft's gas, else custom gas, else the transaction's default", () => {
+    const transfer = { limit: "2500000", price: "1" };
+    const custom = { limit: "3000000", price: "3" };
+    expect(startingGas({ defaultGas: transfer, minLimit: "2000000" })).toEqual(transfer);
+    expect(startingGas({ defaultGas: transfer, minLimit: "2000000", customGas: custom })).toEqual(custom);
+    expect(startingGas({ defaultGas: transfer, minLimit: "2000000", customGas: custom, gas: { limit: "4000000", price: "2" } })).toEqual({
+      limit: "4000000",
+      price: "2",
+    });
+    // Custom gas under the minimum, or with none known, keeps the transaction's own limit.
+    expect(startingGas({ defaultGas: { limit: "50000000", price: "1" }, minLimit: "30000000", customGas: custom })).toEqual({
+      limit: "50000000",
+      price: "3",
+    });
+    expect(startingGas({ defaultGas: { limit: "500000000", price: "1" }, minLimit: null, customGas: custom })).toEqual({
+      limit: "500000000",
+      price: "3",
+    });
+    expect(startingGas({ defaultGas: null, customGas: custom })).toBeNull();
+    expect(gasFeeLux({ limit: "500000000", price: "3" })).toBe(1500000000n);
+    expect(gasFeeLux(null)).toBe(0n);
   });
 
   it("leaves blank gas to the network where a site's request has none, as the approval page uses it", async () => {
