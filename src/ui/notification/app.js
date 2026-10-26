@@ -317,6 +317,8 @@ export async function renderNotification() {
   // the address, so it must be the saved one exactly: base58 tells cases
   // apart.
   const ownAddresses = Array.isArray(addresses) ? addresses : [];
+  // The accounts and addresses a bridge call may name as its `to`: the wallet's own.
+  const own = [...accountsArr, ...ownAddresses].filter(Boolean);
   const savedContacts = Array.isArray(contacts) ? contacts : [];
   const knownAs = (to) => {
     const own = [accountsArr.indexOf(to), ownAddresses.indexOf(to)].find((i) => i >= 0);
@@ -444,7 +446,7 @@ export async function renderNotification() {
   // What the site asks, then the password, with Reject beside Unlock: no
   // need to unlock to say no.
   function renderLocked() {
-    const summary = requestSummary(kindNorm, params);
+    const summary = requestSummary(kindNorm, params, { own });
     const pwd = passwordInput({
       id: "approval-password",
       autocomplete: "current-password",
@@ -1047,12 +1049,15 @@ export async function renderNotification() {
     const display = params?.display;
     const sendsLux = safeBigInt(amountLux, 0n) + safeBigInt(depositLux, 0n);
 
-    // The call as a person checks it: the contract and the DUSK it sends.
+    // The call as a person checks it: the contract and the DUSK it sends,
+    // and whom its amount pays when the site names someone.
+    const amountTo = String(params?.to ?? "").trim();
     const callRows = ({ from = false } = {}) =>
       group([
         from ? kv("From", payerLine(rail)) : null,
         kv("Contract", shortMono(contractIdHex)),
         safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${formatDuskExact(amountLux)} DUSK`) : null,
+        safeBigInt(amountLux, 0n) > 0n && amountTo ? kv("Amount to", h("code", { class: "ap-address", text: amountTo }), { stack: true }) : null,
         safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${formatDuskExact(depositLux)} DUSK`) : null,
       ]);
     // Under Details: the network, the function, its arguments' size and hash
@@ -1075,23 +1080,21 @@ export async function renderNotification() {
 
     // A known DuskEVM bridge call: what it does, read from its arguments,
     // above the call and its bytes.
-    const bridge = argsOk ? bridgeCallOf(params) : null;
+    const bridge = argsOk ? bridgeCallOf(params, { own }) : null;
     if (bridge) {
       const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
       submitOnGasEnter(gasEditor, bar.approveBtn);
-      const summary = requestSummary("send_tx", params);
+      const summary = requestSummary("send_tx", params, { own });
       let head;
       let decoded;
       let extra = null;
       if (bridge.kind === "deposit") {
-        // A deposit that sends other DUSK than it bridges is the bridge's
-        // call, but not one to approve without asking why.
-        const matches = bridge.sentLux === bridge.amountLux;
+        // Sent as the bridge expects (bridgeCallOf): its deposit is what it bridges.
         head = requestHead({
           title: summary.title,
           amount: summary.amount,
           to: plainTo(bridge.recipient, "on DuskEVM"),
-          tag: matches ? headTag("Known DuskEVM bridge call") : null,
+          tag: headTag("Known DuskEVM bridge call"),
         });
         decoded = group([
           kv("DuskEVM recipient", h("code", { class: "ap-address", text: bridge.recipient }), { stack: true }),
@@ -1099,12 +1102,6 @@ export async function renderNotification() {
           kv("From", payerLine(rail)),
           bridge.extraDataBytes ? kv("Extra data", `${bridge.extraDataBytes} bytes`) : null,
         ]);
-        if (!matches) {
-          extra = warning(
-            "The amounts don't match",
-            `This call sends ${formatDuskExact(depositLux)} DUSK but bridges ${formatDuskExact(bridge.amountLux)} DUSK. Reject it unless the site told you why.`
-          );
-        }
       } else {
         const paysTo =
           bridge.recipient.kind === "account"
@@ -1318,7 +1315,7 @@ export async function renderNotification() {
     // withdrawal off the bridge's route, gets a warning.
     const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
     submitOnGasEnter(gasEditor, bar.approveBtn);
-    const summary = requestSummary("send_tx", params);
+    const summary = requestSummary("send_tx", params, { own });
     const unchecked = callsBridge({ nodeUrl: params?.nodeUrl, contractId: contractIdHex })
       ? warning(
           "The wallet can't check this bridge call",

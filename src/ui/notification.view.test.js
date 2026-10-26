@@ -568,12 +568,43 @@ describe("contract calls", () => {
     );
   });
 
-  it("warns when a deposit sends other DUSK than it bridges, and doesn't call it known", async () => {
-    await render("send_tx", contractCall(bridge, "deposit", { deposit: "200000000" }));
+  // The call shown as the opaque one it is, with the bridge's warning, never as known.
+  const unchecked = () => {
+    expect(head().querySelector("h1").textContent).toBe("Contract call");
     expect(head().querySelector(".ap-tag")).toBeNull();
+    expect(app.textContent).not.toContain("Known DuskEVM bridge call");
     expect(app.querySelector(".callout.warn").textContent).toBe(
-      "The amounts don't matchThis call sends 0.2 DUSK but bridges 0.1 DUSK. Reject it unless the site told you why."
+      "The wallet can't check this bridge callIt goes to the DuskEVM bridge, but it isn't a transfer the wallet knows for this network. Reject it unless you know why the site sent it."
     );
+  };
+  // An account that isn't the wallet's.
+  const STRANGER = "oUgxBUWEPyFAekXW9T2UdJBcMF7xAuBfstrCX8ATXFk7MusqddFGoq2LN9euCbwVuXpSM5rGLKNUb6NVPFUVM5g4pA6CnXjNfNVBiy91NcH9eBVcdcG1eYUaKWQSYQ9t2um";
+
+  it("doesn't read a deposit that sends other DUSK than it bridges", async () => {
+    await render("send_tx", contractCall(bridge, "deposit", { deposit: "200000000" }));
+    unchecked();
+  });
+
+  it("doesn't read a deposit whose transfer also pays someone, and says whom", async () => {
+    await render("send_tx", contractCall(bridge, "deposit", { deposit: "100000000", amount: "5000000000", to: STRANGER }));
+    unchecked();
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("5.1 DUSK");
+    expect(row("Amount").textContent).toBe("5 DUSK");
+    expect(row("Amount to").textContent).toBe(STRANGER);
+  });
+
+  it.each([
+    ["an amount", { amount: "1000000000" }],
+    ["a deposit", { deposit: "1000000000" }],
+    ["an amount to someone", { amount: "1000000000", to: STRANGER }],
+  ])("doesn't read a withdrawal's proof sent with %s", async (_what, over) => {
+    await render("send_tx", contractCall(portal, "prove-account", over));
+    unchecked();
+  });
+
+  it("reads a deposit whose transfer names the wallet's own account", async () => {
+    await render("send_tx", contractCall(bridge, "deposit", { deposit: "100000000", to: MAIN }));
+    expect(head().querySelector(".ap-tag").textContent).toBe("Known DuskEVM bridge call");
   });
 
   it.each([

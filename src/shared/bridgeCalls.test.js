@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { BRIDGE_CONTRACTS } from "./bridge.js";
-import { BRIDGE_FUNCTIONS, callsBridge, checksumAddress, decodeBridgeCall, evmAddressOf, weiToDusk } from "./bridgeCalls.js";
+import { BRIDGE_FUNCTIONS, bridgeEnvelopeOk, callsBridge, checksumAddress, decodeBridgeCall, evmAddressOf, weiToDusk } from "./bridgeCalls.js";
 import { hexToBytes } from "./bytes.js";
 import fixtures from "./fixtures/duskevm-bridge-calls.json";
 
@@ -139,5 +139,28 @@ describe("DuskEVM bridge calls", () => {
     expect(weiToDusk(1008000000000000000000n)).toEqual({ lux: 1008000000000n, text: "" });
     expect(weiToDusk(1n)).toEqual({ lux: null, text: "0.000000000000000001" });
     expect(weiToDusk(1500000000000000001n)).toEqual({ lux: null, text: "1.500000000000000001" });
+  });
+});
+
+describe("bridgeEnvelopeOk", () => {
+  const deposit = { kind: "deposit", amountLux: 100_000_000n };
+  const prove = { kind: "prove", amountWei: 10n ** 18n };
+  const own = ["own-account", "own-address"];
+
+  it("takes a deposit that moves its bridged amount as the deposit, and nothing else", () => {
+    expect(bridgeEnvelopeOk(deposit, { amount: "0", deposit: "100000000" })).toBe(true);
+    expect(bridgeEnvelopeOk(deposit, { deposit: 100_000_000n, to: "own-account", own })).toBe(true);
+    expect(bridgeEnvelopeOk(deposit, { amount: "1", deposit: "100000000" })).toBe(false);
+    expect(bridgeEnvelopeOk(deposit, { deposit: "200000000" })).toBe(false);
+    expect(bridgeEnvelopeOk(deposit, { deposit: "100000000", to: "someone", own })).toBe(false);
+    expect(bridgeEnvelopeOk(deposit, { deposit: "not a number" })).toBe(false);
+  });
+
+  it("takes a proof or a claim that moves nothing", () => {
+    expect(bridgeEnvelopeOk(prove, {})).toBe(true);
+    expect(bridgeEnvelopeOk({ ...prove, kind: "claim" }, { amount: "0", deposit: "0", to: "own-address", own })).toBe(true);
+    expect(bridgeEnvelopeOk(prove, { deposit: "1" })).toBe(false);
+    expect(bridgeEnvelopeOk(prove, { amount: "1" })).toBe(false);
+    expect(bridgeEnvelopeOk(prove, { to: "someone" })).toBe(false);
   });
 });

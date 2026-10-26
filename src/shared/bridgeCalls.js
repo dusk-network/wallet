@@ -328,6 +328,33 @@ export function decodeBridgeCall({ nodeUrl, contractId, fnName, args, deposit } 
 }
 
 /**
+ * Whether the transfer a bridge call rides on is the one the bridge's route
+ * expects. The wallet sends a contract call as a transfer of `amount` to
+ * `to` that carries the call and its `deposit`: a deposit to DuskEVM moves
+ * its bridged amount as the deposit and no amount; a proof or a claim moves
+ * neither; and none pays an account but the payer's own (no `to`, or one of
+ * `own`). Anything else isn't the bridge's call alone.
+ *
+ * @param {object} call - from decodeBridgeCall
+ * @param {{ amount?: string|bigint, deposit?: string|bigint, to?: string, own?: string[] }} envelope
+ * @returns {boolean}
+ */
+export function bridgeEnvelopeOk(call, { amount, deposit, to, own = [] } = {}) {
+  const lux = (value) => {
+    try {
+      return BigInt(String(value ?? "").trim() || "0");
+    } catch {
+      return -1n;
+    }
+  };
+  if (!call || lux(amount) !== 0n) return false;
+  const sent = lux(deposit);
+  if (call.kind === "deposit" ? sent !== call.amountLux : sent !== 0n) return false;
+  const recipient = String(to ?? "").trim();
+  return !recipient || own.includes(recipient);
+}
+
+/**
  * Whether a call goes to the DuskEVM bridge's contracts on this network,
  * decoded or not. One that decodeBridgeCall doesn't read is the bridge's
  * contract doing something the wallet can't vouch for.

@@ -3,7 +3,7 @@
 // while the wallet is locked shows it above Unlock and Reject, so nobody has
 // to type a password to learn what a site wants.
 
-import { decodeBridgeCall, weiToDusk } from "../../shared/bridgeCalls.js";
+import { bridgeEnvelopeOk, decodeBridgeCall, weiToDusk } from "../../shared/bridgeCalls.js";
 import { toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { formatDuskExact, safeBigInt } from "../../shared/amount.js";
@@ -17,13 +17,18 @@ export function callArgs(params) {
   }
 }
 
-/** The DuskEVM bridge call a site's contract call is, if it is a known one. */
-export function bridgeCallOf(params) {
+/**
+ * The DuskEVM bridge call a site's contract call is, if it is a known one
+ * sent as the bridge's route expects (bridgeEnvelopeOk): `own` are the
+ * wallet's accounts and addresses, the only ones it may name as `to`.
+ */
+export function bridgeCallOf(params, { own = [] } = {}) {
   if (String(params?.kind ?? "").toLowerCase() !== TX_KIND.CONTRACT_CALL) return null;
   const args = callArgs(params);
-  return args
+  const call = args
     ? decodeBridgeCall({ nodeUrl: params?.nodeUrl, contractId: params?.contractId, fnName: params?.fnName, args, deposit: params?.deposit })
     : null;
+  return call && bridgeEnvelopeOk(call, { amount: params?.amount, deposit: params?.deposit, to: params?.to, own }) ? call : null;
 }
 
 /** A withdrawal's amount as `{ value, unit }`. */
@@ -41,9 +46,10 @@ export function withdrawalAmount(wei) {
  *
  * @param {string} kind - the approval kind (connect, send_tx, sign_message, ...)
  * @param {object} params - the request as rpc.js passes it on
+ * @param {{ own?: string[] }} [ctx] - the wallet's accounts and addresses (bridgeCallOf)
  * @returns {{ title: string, amount?: {value: string, unit: string}, to?: {address: string, network: "dusk"|"duskevm"}, sub?: string }}
  */
-export function requestSummary(kind, params = {}) {
+export function requestSummary(kind, params = {}, { own = [] } = {}) {
   const p = params ?? {};
   switch (String(kind ?? "").trim().toLowerCase()) {
     case "connect":
@@ -73,13 +79,13 @@ export function requestSummary(kind, params = {}) {
     case "watch_asset":
       return { title: String(p.type ?? "").toUpperCase() === "DRC721" ? "Import an NFT?" : "Add a token?" };
     case "send_tx":
-      return txSummary(p);
+      return txSummary(p, own);
     default:
       return { title: "Review this request" };
   }
 }
 
-function txSummary(p) {
+function txSummary(p, own) {
   const kind = String(p.kind ?? "").toLowerCase();
   if (kind === TX_KIND.TRANSFER) {
     return {
@@ -89,7 +95,7 @@ function txSummary(p) {
     };
   }
   if (kind === TX_KIND.CONTRACT_CALL) {
-    const bridge = bridgeCallOf(p);
+    const bridge = bridgeCallOf(p, { own });
     if (bridge?.kind === "deposit") {
       return {
         title: "Bridge to DuskEVM",
