@@ -329,6 +329,7 @@ describe("a transaction's details", () => {
       "Block4,658,100",
       "Gas used3,700,000 of 10,000,000",
       "Gas price1 LUX",
+      "Exact fee0.0037 DUSK",
       "Submitted22 Oct 2026, 14:32",
     ]);
     button("View in Dusk explorer").click();

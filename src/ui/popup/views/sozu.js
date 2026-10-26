@@ -590,7 +590,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     });
     confirmBtn.disabled = submitDisabled;
   });
-  submitOnGasEnter(gasEditor, confirmBtn);
+  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !submitDisabled });
 
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);

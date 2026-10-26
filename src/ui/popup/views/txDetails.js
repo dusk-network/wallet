@@ -1,4 +1,4 @@
-import { formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
+import { formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { networkNameFromNodeUrl } from "../../../shared/network.js";
@@ -85,6 +85,8 @@ function technicalRows(tx, ov, nodeUrl) {
     num(tx?.blockHeight) ? kv("Block", num(tx.blockHeight)) : null,
     used || limit ? kv("Gas used", used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
+    // The fee to the last LUX: the summary rounds it to 4 decimals.
+    safeBigInt(tx?.feePaid, 0n) > 0n ? kv("Exact fee", `${formatDuskExact(tx.feePaid)} DUSK`) : null,
     finalKnown && ["executed", "failed"].includes(String(tx?.status ?? "")) ? kv("Finality", "Final") : null,
     kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", mono(String(tx.contractId), shortAddress(String(tx.contractId)))) : null,
     tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,

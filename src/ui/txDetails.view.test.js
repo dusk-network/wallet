@@ -124,6 +124,17 @@ describe("transaction details", () => {
     expect(details(send).name).toBe("wallet-both.dusk");
   });
 
+  it("shows the exact fee under Technical details, the summary's rounded", () => {
+    const send = { kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", feePaid: "1856398", gasSpent: "1856398", gasPrice: "1", gasLimit: "2500000" };
+    const view = details(send);
+    expect(view.rows).toContain("Network fee0.0019 DUSK");
+    const tech = view.body.querySelectorAll(".tx-tech .kv").map(visibleText);
+    expect(tech).toContain("Exact fee0.001856398 DUSK");
+    expect(tech).toContain("Gas used1,856,398 of 2,500,000");
+    // None charged, none shown.
+    expect(details({ ...send, feePaid: "0" }).body.querySelectorAll(".tx-tech .kv").map(visibleText).filter((r) => r.startsWith("Exact fee"))).toEqual([]);
+  });
+
   it("names the site a transaction came from, and none for the wallet's own", () => {
     const send = { kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed" };
     expect(details({ ...send, origin: "https://shop.example" }).rows).toContain("Siteshop.example");

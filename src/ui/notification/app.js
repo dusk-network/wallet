@@ -1250,15 +1250,17 @@ export async function renderNotification() {
         approveTitle: isMax ? "Type MAX to enable approval" : "",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
       });
-      submitOnGasEnter(gasEditor, bar.approveBtn);
+      // An unlimited allowance waits for MAX, and any approval for gas that will do.
+      const acknowledged = () => !isMax || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
       const ackInput = textInput({
         placeholder: "Type MAX to confirm",
         "aria-label": "Type MAX to confirm",
         onEnter: () => bar.approveBtn.click(),
         oninput: () => {
-          bar.approveBtn.disabled = String(ackInput.value ?? "").trim().toUpperCase() !== "MAX";
+          bar.approveBtn.disabled = !acknowledged() || Boolean(gasEditor.error);
         },
       });
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: acknowledged });
 
       show(
         [

@@ -4259,6 +4259,13 @@ p.gas-note {
   line-height: 1.4;
 }
 
+/* What the limit and price come to, under them */
+.gas-custom .gas-max {
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
 .gas-custom .advanced-body .muted.gas-help {
   font-size: 12.5px;
 }

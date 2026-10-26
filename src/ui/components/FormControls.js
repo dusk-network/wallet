@@ -93,9 +93,33 @@ export function urlInput(attrs = {}) {
   return textInput({ ...attrs, type: "url" });
 }
 
-export function submitOnGasEnter(gasEditor, submitButton) {
+// Buttons a gas editor turned off, to turn back on once its gas will do.
+const offForGas = new WeakSet();
+
+/**
+ * Ties a page's submit button to its gas editor: Enter in the gas price
+ * presses it, and gas that won't do (a limit under the minimum, a price of 0)
+ * keeps it off while the editor says why. Once the gas will do, the button
+ * comes back on if `ready` says the rest of the page is ready too.
+ * @param {HTMLElement} gasEditor - a dusk-gas-editor
+ * @param {HTMLButtonElement} submitButton
+ * @param {{ ready?: () => boolean }} [opts]
+ */
+export function submitOnGasEnter(gasEditor, submitButton, { ready } = {}) {
   gasEditor?.addEventListener?.("dusk-gas-enter", () => {
     if (!submitButton?.disabled) submitButton?.click();
   });
+  const sync = () => {
+    if (!submitButton) return;
+    if (gasEditor?.error) {
+      submitButton.disabled = true;
+      offForGas.add(submitButton);
+    } else if (offForGas.has(submitButton)) {
+      offForGas.delete(submitButton);
+      submitButton.disabled = typeof ready === "function" ? !ready() : false;
+    }
+  };
+  gasEditor?.addEventListener?.("dusk-gas-validity", sync);
+  sync();
   return gasEditor;
 }

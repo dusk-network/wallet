@@ -41,6 +41,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Kept Confirm and Approve off while a custom gas limit is under the minimum or the gas price is 0, with the reason under the field.
+- Showed under Custom fee what the gas limit and price come to in DUSK.
+- Showed a transaction's exact fee under Technical details.
 - Said plainly that staking needs some public DUSK for the network fee, without an error before anything is typed.
 - Kept Max on Staking to 4 decimals, and left the fee to unstake later.
 - Said on both staking Reviews that a stake is public, named the profile by its `.dusk` name, and repeated the node warning before Confirm.
