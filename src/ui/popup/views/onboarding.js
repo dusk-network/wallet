@@ -310,7 +310,7 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
         const typed = confirmInput.getMnemonic();
         const expected = normalizeMnemonic(mnemonic);
         if (typed !== expected) {
-          phraseError.show("The words don't match your recovery phrase.");
+          phraseError.show(typed ? "The words don't match your recovery phrase." : "Enter your recovery phrase.");
           return;
         }
 

@@ -123,6 +123,9 @@ describe("setting up and unlocking", () => {
     const acts = actions();
     const body = show(onboardingCreateConfirmView({ state, actions: acts }));
     expect(body.querySelector(".auth-lead").textContent).toBe("Enter the words you wrote down.");
+    button(body, "Create wallet").click();
+    await settle();
+    expect(errorOf(body.querySelector("[role=group]"))).toBe("Enter your recovery phrase.");
     typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
     button(body, "Create wallet").click();
     await settle();
