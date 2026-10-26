@@ -442,11 +442,11 @@ export function sendFormView(ov, { state, actions } = {}) {
   // the address it sends to, never the name.
   let shownName = null;
 
-  // The .dusk names this wallet knows: contacts saved under one, the names
-  // typed for past sends, and past transfers' verified names.
+  // The .dusk names this wallet knows: contacts saved from one or named as
+  // one, the names typed for past sends, and past transfers' verified names.
   const knownDuskNames = () => {
     const names = [
-      ...(state.addressBook?.items ?? []).map((c) => c?.name),
+      ...(state.addressBook?.items ?? []).flatMap((c) => [c?.duskName, c?.name]),
       ...(Array.isArray(ov?.txs) ? ov.txs : []).map((tx) => tx?.toName),
       ...(state.activity?.names instanceof Map ? state.activity.names.values() : []),
     ];

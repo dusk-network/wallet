@@ -510,13 +510,19 @@ describe("names on Send and Review", () => {
 describe("a typed name that isn't registered", () => {
   it("offers the closest name from contacts and past transfers, from this device alone", () => {
     const state = newState();
-    state.addressBook.items = [{ name: "alice.dusk", address: ALICE.account }];
+    state.addressBook.items = [
+      { name: "alice.dusk", address: ALICE.account },
+      // Saved from dave.dusk, under a name of its own.
+      { name: "Dave's shop", address: vary(ACCOUNT, 5), duskName: "dave.dusk" },
+    ];
     state.activity = { names: new Map([[BOB.account, "bob.dusk"]]) };
     const form = mount(state);
+    typeInto(form.to, "dav.dusk");
+    expect(visibleText(form.nameBox())).toBe("dav.dusk isn't registered.Did you mean dave.dusk?");
     typeInto(form.to, "alcie.dusk");
     expect(visibleText(form.nameBox())).toBe("alcie.dusk isn't registered.Did you mean alice.dusk?");
-    // Only the typed name was looked up.
-    expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["alcie.dusk"]);
+    // Only the typed names were looked up.
+    expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["dav.dusk", "alcie.dusk"]);
 
     form.nameBox().querySelector("button.name-suggestion").click();
     expect(form.to.value).toBe("alice.dusk");
