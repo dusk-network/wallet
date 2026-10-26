@@ -121,7 +121,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     ]),
     maxBtn,
   ]);
-  const feeNote = feeLux > 0n ? h("div", { class: "amount-fee-note", text: `Network fee up to ${formatFee(feeLux)} DUSK` }) : null;
+  const feeNote = feeLux > 0n ? h("div", { class: "amount-fee-note", text: `Network fee up to ${formatFee(feeLux, { max: true })} DUSK` }) : null;
 
   const nextBtn = h("button", {
     class: "btn-primary",

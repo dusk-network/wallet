@@ -62,6 +62,15 @@ describe("fee editor", () => {
     expect(fee()).toBe("Network feeup to 0.006 DUSKTotalup to 1.006 DUSK");
   });
 
+  it("rounds the fee and the total up, as the maximums they are", () => {
+    const editor = dom.document.createElement("dusk-gas-editor");
+    editor.amountLux = "1000000000";
+    // 0.001840001 DUSK at most: 0.0018 to the nearest would read lower.
+    editor.setGas({ limit: "1840001", price: "1" });
+    dom.document.body.appendChild(editor);
+    expect(visibleText(editor.querySelector(".gas-fee"))).toBe("Network feeup to 0.0019 DUSKTotalup to 1.0019 DUSK");
+  });
+
   it("goes back to the network's price from a custom one", async () => {
     const { editor, field, button } = await feeEditor();
     typeInto(field("Gas price (LUX)"), "7");

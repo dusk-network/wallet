@@ -414,7 +414,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     h("div", { class: "list-row" }, [
       h("span", { class: "row-icon", html: iconSvg("fee") }),
       h("span", { class: "row-main" }, [
-        h("span", { class: "row-title", text: `Network fee up to ${formatFee(publicFeeLux)} DUSK` }),
+        h("span", { class: "row-title", text: `Network fee up to ${formatFee(publicFeeLux, { max: true })} DUSK` }),
       ]),
     ]),
     poolContract

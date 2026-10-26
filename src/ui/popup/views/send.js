@@ -216,7 +216,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     );
     available.hidden = false;
     const notes = [];
-    if (feeLux > 0n) notes.push(`Network fee up to ${formatFee(feeLux)} DUSK`);
+    if (feeLux > 0n) notes.push(`Network fee up to ${formatFee(feeLux, { max: true })} DUSK`);
     if (detectedRecipientType === "address" && shSpendLux != null && shValueLux > shSpendLux) {
       notes.push("Part of your shielded DUSK waits on a pending transaction");
     }

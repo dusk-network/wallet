@@ -81,7 +81,7 @@ export function sentSteps(sent, ov) {
   const { phase, status, error, feePaid, blockHeight } = sentStatus(sent, ov);
   const sentLine = [clock(sent?.sentAt || sent?.startedAt), sent?.from].filter(Boolean).join(" · ");
   const capLux = safeBigInt(sent?.feeCapLux ?? 0, 0n);
-  const charged = feePaid != null ? `Fee charged: ${formatFee(feePaid)} DUSK.` : capLux > 0n ? `Fee charged: up to ${formatFee(capLux)} DUSK.` : "";
+  const charged = feePaid != null ? `Fee charged: ${formatFee(feePaid)} DUSK.` : capLux > 0n ? `Fee charged: up to ${formatFee(capLux, { max: true })} DUSK.` : "";
 
   if (phase === "not_sent") {
     return [
@@ -367,9 +367,9 @@ export function sentView(ov, { state, actions } = {}) {
 
   const feeRow = (() => {
     if (phase === "not_sent" || status === "removed") return ["Network fee", "None charged"];
-    if (phase === "unconfirmed") return capLux > 0n ? ["Network fee", `Up to ${formatFee(capLux)} DUSK, if it went out`] : null;
+    if (phase === "unconfirmed") return capLux > 0n ? ["Network fee", `Up to ${formatFee(capLux, { max: true })} DUSK, if it went out`] : null;
     if (feePaid != null) return [status === "failed" ? "Fee charged" : "Network fee", `${formatFee(feePaid)} DUSK`];
-    if (capLux > 0n) return ["Network fee", `Up to ${formatFee(capLux)} DUSK`];
+    if (capLux > 0n) return ["Network fee", `Up to ${formatFee(capLux, { max: true })} DUSK`];
     return null;
   })();
 

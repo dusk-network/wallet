@@ -69,7 +69,7 @@ function feeRow(tx, desc) {
   const limit = safeBigInt(tx?.gasLimit, 0n);
   const price = safeBigInt(tx?.gasPrice, 0n);
   if (desc.tone === "pending" && tx?.source !== "archive" && limit > 0n && price > 0n) {
-    return kv("Network fee", `Up to ${formatFee(limit * price)} DUSK`);
+    return kv("Network fee", `Up to ${formatFee(limit * price, { max: true })} DUSK`);
   }
   return null;
 }

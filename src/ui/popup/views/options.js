@@ -343,7 +343,7 @@ export function optionsView(ov, { state, actions } = {}) {
     gasNote.textContent = !gasToggle.checked
       ? "The wallet uses the network's gas price, and a gas limit that suits each transaction."
       : gas
-      ? `Each transaction costs at most ${formatFee(BigInt(gas.limit) * BigInt(gas.price))} DUSK. One that needs more gas than this limit keeps its own.`
+      ? `Each transaction costs at most ${formatFee(BigInt(gas.limit) * BigInt(gas.price), { max: true })} DUSK. One that needs more gas than this limit keeps its own.`
       : "";
   };
   const saveGas = async (gas) => {

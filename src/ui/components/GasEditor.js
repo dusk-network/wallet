@@ -1,4 +1,4 @@
-import { UI_DISPLAY_DECIMALS, formatDusk, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { h, setChildren } from "../lib/dom.js";
 import { fieldLabel, integerInput } from "./FormControls.js";
 
@@ -268,13 +268,14 @@ export class DuskGasEditor extends HTMLElement {
       return;
     }
 
-    this.#feeValue.textContent = `up to ${formatFee(feeLux)} DUSK`;
+    this.#feeValue.textContent = `up to ${formatFee(feeLux, { max: true })} DUSK`;
     this.#feeValue.title = `Gas limit ${groupThousands(limit)} × gas price ${groupThousands(price)} LUX`;
 
     let totalLux = this.#amountLux + feeLux;
     for (const x of this.#extraLux) totalLux += x;
 
-    this.#totalValue.textContent = `up to ${formatDusk(totalLux.toString(), this.#maxDecimals)} DUSK`;
+    // A maximum too, so it rounds up as the fee does.
+    this.#totalValue.textContent = `up to ${formatFee(totalLux, { max: true })} DUSK`;
     this.#totalValue.title = "";
   }
 

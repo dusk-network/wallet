@@ -126,17 +126,19 @@ export function formatDuskExact(luxStr) {
 export const FEE_DECIMALS = UI_DISPLAY_DECIMALS;
 
 /**
- * A fee in DUSK, in the one number format, rounded half up rather than cut,
- * so a fee never reads lower than it is. A fee too small to show at that
- * precision shows in full rather than as zero.
+ * A fee in DUSK, in the one number format: exact up to 4 decimals. Past
+ * that, a maximum (`max`, shown as "up to") rounds up, so it never reads
+ * lower than it can be, and a fee paid rounds to the nearest (half up). A
+ * fee paid too small to show at that precision shows in full, not as zero.
  * @param {string|bigint|number} luxStr
+ * @param {{ max?: boolean }} [opts]
  * @returns {string}
  */
-export function formatFee(luxStr) {
+export function formatFee(luxStr, { max = false } = {}) {
   const lux = safeBigInt(luxStr, 0n);
   if (lux <= 0n) return "0";
   const step = 10n ** BigInt(LUX_DECIMALS - FEE_DECIMALS);
-  const units = (lux + step / 2n) / step;
+  const units = max ? (lux + step - 1n) / step : (lux + step / 2n) / step;
   if (units === 0n) return formatLuxToDusk(lux);
   const scale = 10n ** BigInt(FEE_DECIMALS);
   const frac = (units % scale).toString().padStart(FEE_DECIMALS, "0");

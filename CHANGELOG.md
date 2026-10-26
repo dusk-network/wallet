@@ -43,7 +43,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed toasts at the bottom of the popup, outside the page that scrolls, long enough to reach their action, and announced to screen readers.
 - Showed errors under their field instead of only in a toast.
 - Hid amounts in toasts and on the Sent screen while balances are hidden.
-- Showed every amount and fee in one format: at most 4 decimals, no trailing zeros, thousands grouped, with DUSK.
+- Showed every amount and fee in one format: at most 4 decimals, no trailing zeros, thousands grouped, with DUSK; a fee's maximum rounds up, a fee paid to the nearest.
 - Set fees at the network's gas price, with one Custom fee for your own limit and price, and a warning under the minimum gas limit as you type.
 - Restyled Send, Shield and Unshield: one large amount field, what's available after fees with Max, and errors under the field.
 - Stopped offering Save to Contacts for your own account or address.

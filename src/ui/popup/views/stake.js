@@ -698,7 +698,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
       "If your node misses its turn",
       "Part of your stake gets locked. It's still yours, and unstaking returns it. If the node breaks the rules, part of the stake can be burned (lost)."
     ),
-    infoRow("fee", `Network fee up to ${formatFee(feeLux)} DUSK`, null),
+    infoRow("fee", `Network fee up to ${formatFee(feeLux, { max: true })} DUSK`, null),
   ].filter(Boolean));
 
   // Who owns a new stake, and which account it is for: most people leave it.

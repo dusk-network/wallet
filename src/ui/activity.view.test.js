@@ -162,6 +162,28 @@ describe("Activity's rows", () => {
     expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);
   });
 
+  it("show a fee paid as its details do, rounded to the nearest, not up", () => {
+    const failed = {
+      hash: "bc".repeat(32),
+      kind: TX_KIND.TRANSFER,
+      privacy: "public",
+      to: FAUCET,
+      amount: dusk(1),
+      status: "failed",
+      // 0.001840001 DUSK: 0.0018 to the nearest, 0.0019 rounded up.
+      feePaid: "1840001",
+      gasLimit: "2500000",
+      gasPrice: "1",
+      submittedAt: NOW.getTime() - 3_600_000,
+      profileIndex: 0,
+    };
+    const view = setup({ local: [failed] });
+    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee 0.0018 DUSK paid1 DUSK`);
+    Object.assign(view.state, { route: "tx", txDetailHash: failed.hash, txDetailFrom: "home" });
+    view.draw();
+    expect(visibleText(body())).toContain("Fee charged0.0018 DUSK");
+  });
+
   it("hide their amounts with Hide balances, on Home and in the full list", () => {
     const { state, draw } = setup({ hidden: true });
     const amounts = () => body().querySelectorAll(".tx-amount, .activity-amount").map((el) => [visibleText(el), screenReaderText(el)]);
