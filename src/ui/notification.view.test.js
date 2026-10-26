@@ -1,7 +1,7 @@
 import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
+import { BRIDGE_CONTRACTS, BRIDGE_SERVICE_ACCOUNTS } from "../shared/bridge.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
 import { fakeEvent, installFakeDom, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
@@ -347,6 +347,61 @@ describe("a site's request to pay", () => {
     expect(error.textContent).toBe(editorError.message);
     expect(decision("approve")).toBeUndefined();
     expect(globalThis.alert).not.toHaveBeenCalled();
+  });
+});
+
+describe("a site's request to pay the bridge's account", () => {
+  const { testnet, mainnet } = BRIDGE_SERVICE_ACCOUNTS;
+  // A DuskEVM address with its checksum, as the bridge's own fixtures have it.
+  const EVM = fixtures.calls.find((c) => c.name === "deposit-shoot").expected.to;
+  const tag = () => head().querySelector(".ap-tag")?.textContent ?? null;
+  const warn = () => app.querySelector(".callout.warn .callout-title")?.textContent ?? null;
+
+  it("shows it as a bridge to the chain the memo's address is on, tagged as known", async () => {
+    await render("send_tx", transfer(testnet.account, { amount: "2000000000", memo: EVM }));
+    expect(head().querySelector("h1").textContent).toBe("Bridge to Ethereum (Sepolia)");
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("2 DUSK");
+    expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to ${EVM.slice(0, 6)}…${EVM.slice(-4)} on Sepolia`);
+    expect(tag()).toBe("Known bridge account");
+    expect(visibleText(row("Recipient on Sepolia"))).toBe(EVM);
+    expect(visibleText(row("To"))).toBe(`The bridge's account for Ethereum (Sepolia)${testnet.account}`);
+    expect(row("Memo")).toBeUndefined();
+    expect(app.querySelector(".ap-visible").textContent).toBe("Visible to everyone: amount, the recipient on Sepolia, and your name alice.dusk.");
+    expect(warn()).toBeNull();
+    // No name to look up for the bridge's account.
+    expect(nameAsks()).toEqual([]);
+
+    // Mainnet's pays out on BNB Smart Chain.
+    await render("send_tx", transfer(mainnet.account, { memo: EVM, chainId: "dusk:1", nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }));
+    expect(head().querySelector("h1").textContent).toBe("Bridge to BNB Smart Chain");
+    expect(visibleText(row("Recipient on BSC"))).toBe(EVM);
+  });
+
+  it.each([
+    ["isn't an address", "Order 1042"],
+    ["is missing", undefined],
+    ["has a wrong checksum", EVM.replace(/[a-f]/, (c) => c.toUpperCase())],
+  ])("warns when the memo %s", async (_label, memo) => {
+    await render("send_tx", transfer(testnet.account, { memo }));
+    expect(head().querySelector("h1").textContent).toBe("Bridge to Ethereum (Sepolia)");
+    expect(head().querySelector(".ap-recipient")).toBeNull();
+    expect(warn()).toBe("The memo isn't an address on Sepolia");
+    // All lower case has no checksum to get wrong.
+    await render("send_tx", transfer(testnet.account, { memo: EVM.toLowerCase() }));
+    expect(warn()).toBeNull();
+  });
+
+  it("is a plain payment on another network's account, or through a custom node", async () => {
+    await render("send_tx", transfer(mainnet.account, { memo: EVM }));
+    expect(head().querySelector("h1").textContent).toBe("Pay");
+    await render("send_tx", transfer(testnet.account, { memo: EVM, nodeUrl: "https://node.example" }));
+    expect([head().querySelector("h1").textContent, tag()]).toEqual(["Pay", null]);
+  });
+
+  it("says what it is before the wallet is unlocked", async () => {
+    await render("send_tx", transfer(testnet.account, { memo: EVM }), { isUnlocked: false, accounts: [], duskNames: {} });
+    expect(head().querySelector("h1").textContent).toBe("Bridge to Ethereum (Sepolia)");
+    expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to ${EVM.slice(0, 6)}…${EVM.slice(-4)} on Sepolia`);
   });
 });
 

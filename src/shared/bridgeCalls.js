@@ -14,7 +14,7 @@
 
 import { keccak_256 } from "@noble/hashes/sha3";
 
-import { BRIDGE_CONTRACTS } from "./bridge.js";
+import { BRIDGE_CONTRACTS, BRIDGE_SERVICE_ACCOUNTS } from "./bridge.js";
 import { toBytes } from "./bytes.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
 
@@ -208,9 +208,8 @@ function abiCall(data, selector, types) {
 
 // ---- Calls ----------------------------------------------------------------
 
-// The bridge's contracts when `nodeUrl` is its network's own node, with the
-// route its withdrawals take there (null without one: none decode).
-function bridgeContracts(nodeUrl) {
+// The network preset `nodeUrl` is the own node of, or null for a custom one.
+function presetOf(nodeUrl) {
   const origin = (url) => {
     try {
       return new URL(String(url ?? "")).origin;
@@ -219,7 +218,13 @@ function bridgeContracts(nodeUrl) {
     }
   };
   const at = origin(nodeUrl);
-  const preset = at ? NETWORK_PRESETS.find((p) => p.nodeUrl && origin(p.nodeUrl) === at) : null;
+  return at ? NETWORK_PRESETS.find((p) => p.nodeUrl && origin(p.nodeUrl) === at) ?? null : null;
+}
+
+// The bridge's contracts when `nodeUrl` is its network's own node, with the
+// route its withdrawals take there (null without one: none decode).
+function bridgeContracts(nodeUrl) {
+  const preset = presetOf(nodeUrl);
   const contracts = (preset && BRIDGE_CONTRACTS[preset.id]) || null;
   if (!contracts) return null;
   const l1Messenger = L1_MESSENGERS[preset.id];
@@ -384,6 +389,36 @@ export function callsBridge({ nodeUrl, contractId } = {}) {
   const contracts = bridgeContracts(nodeUrl);
   const id = norm(contractId);
   return Boolean(contracts && id && (id === contracts.bridge || id === contracts.portal));
+}
+
+/**
+ * Whether `value` is an EVM address: 20 bytes in hex after 0x, and a mixed
+ * case one with its EIP-55 checksum right.
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function isEvmAddress(value) {
+  const text = String(value ?? "");
+  if (!/^0x[0-9a-fA-F]{40}$/.test(text)) return false;
+  const digits = text.slice(2);
+  if (digits === digits.toLowerCase() || digits === digits.toUpperCase()) return true;
+  return checksumAddress(Uint8Array.from(digits.match(/../g), (b) => parseInt(b, 16))) === text;
+}
+
+/**
+ * A transfer to the bridge's account on Dusk (BRIDGE_SERVICE_ACCOUNTS),
+ * which pays its memo's EVM address on another chain: that chain, and
+ * whether the memo is an address there. Null for any other transfer, and
+ * on a node that isn't its network's own.
+ * @param {{ nodeUrl?: string, to?: string, memo?: string }} transfer
+ * @returns {{ chain: string, short: string, recipient: string, recipientOk: boolean } | null}
+ */
+export function bridgeServiceTransfer({ nodeUrl, to, memo } = {}) {
+  const preset = presetOf(nodeUrl);
+  const service = preset ? BRIDGE_SERVICE_ACCOUNTS[preset.id] : null;
+  if (!service || String(to ?? "").trim() !== service.account) return null;
+  const recipient = String(memo ?? "").trim();
+  return { chain: service.chain, short: service.short, recipient, recipientOk: isEvmAddress(recipient) };
 }
 
 /**

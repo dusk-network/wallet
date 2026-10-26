@@ -4,7 +4,7 @@
 // Details. A locked wallet shows what is asked, with Unlock and Reject.
 
 import { UI_DISPLAY_DECIMALS, formatDuskExact, groupThousands, safeBigInt } from "../../shared/amount.js";
-import { callsBridge } from "../../shared/bridgeCalls.js";
+import { bridgeServiceTransfer, callsBridge } from "../../shared/bridgeCalls.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { getMinimumGas } from "../../shared/txDefaults.js";
@@ -507,12 +507,12 @@ export async function renderNotification() {
     };
     unlockBtn.addEventListener("click", unlock);
 
-    const to =
-      summary.to?.network === "duskevm"
-        ? plainTo(summary.to.address, "on DuskEVM")
-        : summary.to?.address
-          ? toLine(summary.to.address)
-          : null;
+    // An address on another chain, else a Dusk recipient by its name.
+    const to = summary.to?.on
+      ? plainTo(summary.to.address, summary.to.on)
+      : summary.to?.address
+        ? toLine(summary.to.address)
+        : null;
 
     show(
       [
@@ -990,22 +990,52 @@ export async function renderNotification() {
       const gasEditor = gasEditorFor(amountLux);
       const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
       submitOnGasEnter(gasEditor, bar.approveBtn);
+      // To the bridge's account: the memo is the address the bridge pays
+      // out to on another chain, and one that isn't an address there is
+      // flagged.
+      const service = bridgeServiceTransfer({ nodeUrl, to, memo });
       // A public transfer shows on chain for good: say what, only what
       // applies, and under which name. A shielded one gets no line.
-      const visible = memo
-        ? `Visible to everyone: amount, memo, and ${me}.`
-        : `Visible to everyone: amount and ${me}.`;
+      const visible = service
+        ? `Visible to everyone: amount, the recipient on ${service.short}, and ${me}.`
+        : memo
+          ? `Visible to everyone: amount, memo, and ${me}.`
+          : `Visible to everyone: amount and ${me}.`;
+      const amount = { value: formatDuskExact(amountLux), unit: "DUSK" };
+      const head = service
+        ? requestHead({
+            title: `Bridge to ${service.chain}`,
+            amount,
+            to: service.recipientOk ? plainTo(service.recipient, `on ${service.short}`) : null,
+            tag: headTag("Known bridge account"),
+          })
+        : requestHead({ title: "Pay", amount, to: toLine(to) });
 
       show(
         [
           site,
-          requestHead({ title: "Pay", amount: { value: formatDuskExact(amountLux), unit: "DUSK" }, to: toLine(to) }),
+          head,
+          service && !service.recipientOk
+            ? warning(
+                `The memo isn't an address on ${service.short}`,
+                `The bridge pays out to the address in the memo. Reject this, and check the address on the site.`
+              )
+            : null,
           gasEditor,
           shielded ? null : note(visible, "eye", { className: "ap-visible" }),
           group([
             kv("From", shielded ? "Your shielded balance" : payerLine(rail)),
-            kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
-            memo ? kv("Memo", memo, { stack: memo.length > 24 }) : null,
+            service
+              ? kv("To", [h("span", { class: "ap-kv-note", text: `The bridge's account for ${service.chain}` }), h("code", { class: "ap-address", text: to })], {
+                  stack: true,
+                  className: "ap-to-row",
+                })
+              : kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
+            service
+              ? kv(`Recipient on ${service.short}`, h("code", { class: "ap-address", text: memo || "(none)" }), { stack: true })
+              : memo
+                ? kv("Memo", memo, { stack: memo.length > 24 })
+                : null,
           ]),
           details("Details", [group(networkRows(), { className: "group--inset" })]),
         ],
