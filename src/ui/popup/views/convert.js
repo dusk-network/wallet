@@ -1,5 +1,6 @@
 import {
   UI_DISPLAY_DECIMALS,
+  formatFee,
   formatLuxShort,
   formatLuxToDusk,
   parseDuskToLux,
@@ -18,6 +19,7 @@ import {
   privacyFlowBadgeOptions,
   recipientBadge,
 } from "../../components/RecipientBadge.js";
+import { sendFromReview } from "./sent.js";
 
 function fmtAvail(lux) {
   try {
@@ -109,7 +111,7 @@ export function convertFormView(ov, { state, actions } = {}) {
       " DUSK",
     ]),
     feeLux > 0n
-      ? h("div", { class: "muted", text: `Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK` })
+      ? h("div", { class: "muted", text: `Fee cap: ${formatFee(feeLux)} DUSK` })
       : null,
   ]);
 
@@ -221,47 +223,48 @@ export function convertConfirmView(ov, { state, actions } = {}) {
     overrideHint: "Gas override set.",
   });
 
+  // Gas that won't do says so above Confirm; nothing is sent.
+  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
+
   confirmBtn.addEventListener("click", async () => {
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Sending…";
-
+    let gas;
     try {
-      const gas = gasEditor.readFinalGas();
-      if (state.draft) state.draft.gas = gas;
+      gas = gasEditor.readFinalGas();
+    } catch (e) {
+      confirmError.textContent = e?.message ?? String(e);
+      confirmError.hidden = false;
+      return;
+    }
+    confirmError.hidden = true;
+    confirmBtn.disabled = true;
+    if (state.draft) state.draft.gas = gas;
 
-      const res = await actions?.send?.({
+    const capGas = gas ?? defaultGas;
+    await sendFromReview({
+      state,
+      actions,
+      message: {
         type: "DUSK_UI_SEND_TX",
         params: {
           kind,
           amount: d.amountLux,
           gas: gas || undefined,
         },
-      });
-
-      if (res?.error) throw new Error(res.error.message ?? "Transaction failed");
-      if (!res?.ok) throw new Error("Transaction failed");
-
-      const hash = res.result?.hash ?? "";
-      try {
-        const shortHash = hash && hash.length > 18 ? `${hash.slice(0, 10)}…${hash.slice(-8)}` : hash;
-        actions?.showToast?.(shortHash ? `Transaction submitted: ${shortHash}` : "Transaction submitted", 2500);
-      } catch {
-        // ignore
-      }
-
-      state.route = "home";
-      state.draft = null;
-      state.needsRefresh = true;
-      await actions?.render?.({ forceRefresh: true });
-    } catch (e) {
-      try {
-        actions?.showToast?.(e?.message ?? String(e), 3000);
-      } catch {
-        // ignore
-      }
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "Confirm";
-    }
+      },
+      summary: {
+        title: kind === TX_KIND.SHIELD ? "Shield" : "Unshield",
+        amountLux: d.amountLux,
+        line: `${fromLabel} → ${toLabel}`,
+        from: kind === TX_KIND.SHIELD ? "from your public balance" : "from your shielded balance",
+        feeCapLux: (safeBigInt(capGas?.limit, 0n) * safeBigInt(capGas?.price, 0n)).toString(),
+      },
+      backRoute: "convert_confirm",
+      doneRoute: "home",
+      onSent: () => {
+        state.draft = null;
+      },
+    });
+    confirmBtn.disabled = false;
   });
   submitOnGasEnter(gasEditor, confirmBtn);
 
@@ -286,6 +289,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "balance-sub", text: "DUSK" }),
       ]),
       gasEditor,
+      confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ]),
   ].filter(Boolean);

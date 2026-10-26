@@ -66,7 +66,10 @@ export function toastView(spec, { onAction } = {}) {
  * @param {Document} [opts.doc]
  * @param {Element} [opts.parent] - where the region goes; the panel by default
  * @param {Element|null} [opts.before] - the element the region goes before
- * @returns {{ region: HTMLElement, show: (spec: ToastSpec, ms?: number) => void, clear: () => void, readonly current: HTMLElement|null }}
+ * `announce` says a line to screen readers only, through a second live
+ * region, for screens that show their progress themselves.
+ *
+ * @returns {{ region: HTMLElement, show: (spec: ToastSpec, ms?: number) => void, clear: () => void, announce: (text: string) => void, readonly current: HTMLElement|null }}
  */
 export function createToaster({ doc = globalThis.document, parent, before } = {}) {
   const host = parent ?? doc.querySelector(".panel") ?? doc.body;
@@ -82,8 +85,14 @@ export function createToaster({ doc = globalThis.document, parent, before } = {}
     "aria-live": "polite",
     "aria-atomic": "true",
   });
-  if (ref && ref.parentNode === host) host.insertBefore(region, ref);
-  else host.appendChild(region);
+  const announcer = h("div", { class: "sr-only", role: "status", "aria-live": "polite" });
+  if (ref && ref.parentNode === host) {
+    host.insertBefore(region, ref);
+    host.insertBefore(announcer, ref);
+  } else {
+    host.appendChild(region);
+    host.appendChild(announcer);
+  }
 
   let current = null;
   let timer = null;
@@ -151,10 +160,15 @@ export function createToaster({ doc = globalThis.document, parent, before } = {}
     startTimer();
   };
 
+  const announce = (text) => {
+    announcer.textContent = String(text ?? "");
+  };
+
   return {
     region,
     show,
     clear,
+    announce,
     get current() {
       return current;
     },

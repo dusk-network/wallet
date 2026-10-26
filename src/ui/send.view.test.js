@@ -458,7 +458,7 @@ describe("review", () => {
     // Back is the way back to Send, so there is no Cancel.
     expect(shownButtons()).toEqual(["← Back", "Save to Contacts", "Edit", "Confirm"]);
     expect(visibleText(body.querySelector("dusk-gas-editor"))).toBe(
-      "Network fee (max)0.005 DUSKEditTotal (max)1.005 DUSK"
+      "Network fee (max)0.0050 DUSKEditTotal (max)1.005 DUSK"
     );
     expect(visibleText(body)).not.toContain("Gas price");
 

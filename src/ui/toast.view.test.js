@@ -55,7 +55,7 @@ describe("toasts", () => {
     // Not in #app or the scrolling content, and before the content in the
     // page's order: the keyboard reaches a toast's action right after the header.
     expect(content.contains(region)).toBe(false);
-    expect(panel.children.map((el) => el.className)).toEqual(["panel-header", "toast-region", "panel-content"]);
+    expect(panel.children.map((el) => el.className)).toEqual(["panel-header", "toast-region", "sr-only", "panel-content"]);
     expect(region.querySelector(".toast").textContent).toBe("Switched to Testnet");
 
     // A view redraw replaces #app's children; the toast stays.

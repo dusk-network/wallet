@@ -144,7 +144,7 @@ describe("home balance", () => {
 
   it("refreshes through the header's old Refresh action", async () => {
     const app = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "app.js"), "utf8");
-    expect(app).toContain("const actions = { send, render, showToast, refresh: onRefresh };");
+    expect(app).toMatch(/const actions = \{ send, render, showToast, refresh: onRefresh[,}]/);
     const onRefresh = app.match(/async function onRefresh\(\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
     expect(onRefresh).toContain("acctMenu.close();");
     expect(onRefresh).toContain("state.needsRefresh = true;");

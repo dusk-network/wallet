@@ -195,8 +195,8 @@ describe("hidden balances", () => {
     await settle();
     expect(visibleText(body.querySelector(".amount-meta__main"))).toBe("Spendable (shielded): •••• DUSK");
     expect(seen(body.querySelector(".amount-meta__sub"))).toEqual([
-      "Total shielded: •••• DUSK · Fee cap: 0.05 DUSK",
-      "Total shielded: hidden DUSK · Fee cap: 0.05 DUSK",
+      "Total shielded: •••• DUSK · Fee cap: 0.0500 DUSK",
+      "Total shielded: hidden DUSK · Fee cap: 0.0500 DUSK",
     ]);
     body.querySelector(".amount-input-row button").click();
     expect(amount.value).toBe("19.95");
@@ -218,7 +218,7 @@ describe("hidden balances", () => {
     const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
     await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
     const lines = () => body.querySelectorAll(".row > .box > .muted").map(visibleText);
-    expect(lines()).toEqual(["Available (public): •••• DUSK", "Fee cap: 0.05 DUSK"]);
+    expect(lines()).toEqual(["Available (public): •••• DUSK", "Fee cap: 0.0500 DUSK"]);
     expect(screenReaderText(body.querySelector(".row > .box > .muted"))).toBe("Available (public): hidden DUSK");
     body.querySelector(".amount-input-row button").click();
     expect(body.querySelector("input.amount-input").value).toBe("1482.8883");
@@ -232,7 +232,7 @@ describe("hidden balances", () => {
 
     state.draft = { kind: TX_KIND.UNSHIELD };
     await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
-    expect(lines()).toEqual(["Spendable (shielded): •••• DUSK", "Fee cap: 0.05 DUSK"]);
+    expect(lines()).toEqual(["Spendable (shielded): •••• DUSK", "Fee cap: 0.0500 DUSK"]);
   });
 
   it("hide token balances on the dashboard and on the token's page", async () => {
@@ -374,14 +374,14 @@ describe("still shown with balances hidden", () => {
 
     state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountLux: dusk(2), amountDusk: "2" } };
     await show(convertConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect([amountOf(), ...fee()]).toEqual(["2", "0.05 DUSK", "2.05 DUSK"]);
+    expect([amountOf(), ...fee()]).toEqual(["2", "0.0500 DUSK", "2.05 DUSK"]);
 
     state = {
       route: "stake_confirm",
       stakeDraft: { kind: TX_KIND.STAKE, stakeProfileIndex: 0, profileIndex: 0, ownerProfileIndex: 0, amountLux: dusk(1000), payment: "account" },
     };
     await show(stakeConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect([amountOf(), ...fee()]).toEqual(["1000 DUSK", "0.05 DUSK", "1000.05 DUSK"]);
+    expect([amountOf(), ...fee()]).toEqual(["1000 DUSK", "0.0500 DUSK", "1,000.05 DUSK"]);
 
     state = {
       route: "sozu_confirm",
@@ -389,6 +389,6 @@ describe("still shown with balances hidden", () => {
       sozuDraft: { fnName: "sozu_stake", deposit: dusk(10), profileIndex: 0, label: "Stake with Sozu" },
     };
     await show(sozuConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect([amountOf(), ...fee()]).toEqual(["10 DUSK", "0.5 DUSK", "10.5 DUSK"]);
+    expect([amountOf(), ...fee()]).toEqual(["10 DUSK", "0.5000 DUSK", "10.5 DUSK"]);
   });
 });

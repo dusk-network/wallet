@@ -9,6 +9,7 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { fieldLabel, integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
+import { sendFromReview } from "./sent.js";
 
 const MAX_U64 = 18446744073709551615n;
 
@@ -921,40 +922,53 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   // Back returns to the token, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
-  confirmBtn.addEventListener("click", async () => {
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Sending…";
-    try {
-      const gas = gasEditor.readFinalGas();
-      state.assetTxDraft.gas = gas;
+  // Gas that won't do says so above Confirm; nothing is sent.
+  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
 
-      const res = await actions?.send?.({
+  confirmBtn.addEventListener("click", async () => {
+    let gas;
+    try {
+      gas = gasEditor.readFinalGas();
+    } catch (e) {
+      confirmError.textContent = e?.message ?? String(e);
+      confirmError.hidden = false;
+      return;
+    }
+    confirmError.hidden = true;
+    confirmBtn.disabled = true;
+    state.assetTxDraft.gas = gas;
+
+    const capGas = gas ?? defaultGas;
+    const counterparty = String(op === "approve" ? d?.asset?.spender ?? "" : d?.asset?.to ?? "");
+    await sendFromReview({
+      state,
+      actions,
+      message: {
         type: "DUSK_UI_SEND_TX",
         params: { ...params, gas: gas || undefined },
         asset: d?.asset && typeof d.asset === "object" ? d.asset : undefined,
-      });
-      if (res?.error) throw new Error(res.error.message ?? "Transaction failed");
-      if (!res?.ok) throw new Error("Transaction failed");
-
-      const hash = res.result?.hash ?? "";
-      actions?.showToast?.(hash ? `Transaction submitted: ${truncateMiddle(hash, 10, 8)}` : "Transaction submitted", 2500);
-
-      // Invalidate balance cache for this token.
-      try {
-        const cid = String(token?.contractId ?? "");
-        if (state.assets?.balancesAt && cid) state.assets.balancesAt[cid] = 0;
-      } catch {}
-
-      state.assetTxDraft = null;
-      state.highlightTx = hash || null;
-      state.route = "home";
-      state.needsRefresh = true;
-      await actions?.render?.({ forceRefresh: true });
-    } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 3000);
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "Confirm";
-    }
+      },
+      summary: {
+        title: op === "transfer" ? `Send ${sym}` : op === "approve" ? `Approve ${sym}` : "Contract call",
+        amountDisplay: op === "approve" && d?.asset?.isMax ? "" : valueHuman,
+        amountText: op === "approve" && d?.asset?.isMax ? "Unlimited" : "",
+        unit: sym,
+        to: counterparty ? { name: "", address: counterparty, short: truncateMiddle(counterparty, 6, 6) } : null,
+        from: "from your public balance",
+        feeCapLux: (safeBigInt(capGas?.limit, 0n) * safeBigInt(capGas?.price, 0n)).toString(),
+      },
+      backRoute: "asset_token_confirm",
+      doneRoute: "asset_token",
+      onSent: () => {
+        // Invalidate balance cache for this token.
+        try {
+          const cid = String(token?.contractId ?? "");
+          if (state.assets?.balancesAt && cid) state.assets.balancesAt[cid] = 0;
+        } catch {}
+        state.assetTxDraft = null;
+      },
+    });
+    confirmBtn.disabled = false;
   });
   submitOnGasEnter(gasEditor, confirmBtn);
 
@@ -969,6 +983,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       warn,
       gasEditor,
+      confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ].filter(Boolean)),
   ];

@@ -20,6 +20,7 @@ import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { sozuConfirmView } from "./views/sozu.js";
+import { noteTxStatus, sentAnnouncement, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -228,6 +229,8 @@ function updateFullNav() {
         ? "convert"
         : rawRoute === "activity"
         ? "home"
+        : rawRoute === "sent"
+        ? state?.sent?.doneRoute || "home"
         : rawRoute;
     for (const item of fullNav.querySelectorAll("[data-route]")) {
       const itemRoute = item.getAttribute("data-route");
@@ -365,7 +368,7 @@ function schedulePendingTxPoll(ov) {
 
     if (isExtensionRuntime()) return;
     if (!ov?.isUnlocked) return;
-    if (state.route !== "home" && state.route !== "activity") return;
+    if (!["home", "activity", "sent"].includes(state.route)) return;
 
     const txs = Array.isArray(ov?.txs) ? ov.txs : [];
     const hasPending = txs.some((tx) => {
@@ -376,7 +379,7 @@ function schedulePendingTxPoll(ov) {
 
     pendingTxPollTimer = setTimeout(() => {
       try {
-        if (state.route !== "home" && state.route !== "activity") return;
+        if (!["home", "activity", "sent"].includes(state.route)) return;
         render({ forceRefresh: true }).catch(() => {});
       } catch {
         // ignore
@@ -486,7 +489,13 @@ function installTxStatusListener() {
           msg.status ?? (msg.ok === false ? "failed" : msg.ok === true ? "executed" : "unknown")
         ).toLowerCase();
 
-        if (["executed", "failed", "removed", "mempool", "unknown"].includes(status)) {
+        // The Sent screen shows its own transaction's steps; a toast would
+        // repeat them. It reads what the watcher reports from state.sent.
+        const forSent = noteTxStatus(state.sent, { ...msg, hash, status });
+        if (forSent && state.route === "sent") {
+          toaster.announce(sentAnnouncement(state.sent, state.overview));
+          render().catch(() => {});
+        } else if (["executed", "failed", "removed", "mempool", "unknown"].includes(status)) {
           showToast(txStatusToastFor(hash, status));
         }
 
@@ -738,7 +747,7 @@ export async function render({ forceRefresh = false } = {}) {
   ensureActivity(ov, { state, render, send });
 
   // `refresh` is the dashboard's Refresh, next to the balance.
-  const actions = { send, render, showToast, refresh: onRefresh };
+  const actions = { send, render, showToast, refresh: onRefresh, announce: (text) => toaster.announce(text) };
 
   // Settings should be accessible even when the wallet is locked or not yet imported.
   // TODO: Reconsider?
@@ -793,6 +802,14 @@ export async function render({ forceRefresh = false } = {}) {
   }
 
   // Unlocked routes
+  // After Confirm: the transaction's steps. Without one (a new popup), home.
+  if (state.route === "sent") {
+    if (state.sent) {
+      setApp(sentView(ov, { state, actions }));
+      return;
+    }
+    state.route = "home";
+  }
   if (state.route === "send") {
     setApp(sendFormView(ov, { state, actions }));
     return;
