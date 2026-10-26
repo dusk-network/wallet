@@ -19,15 +19,23 @@ export function page(list, { fromBlock = 0, toBlock, maxCount, pageCount = 1 }) 
 
 /**
  * Stub `fetch` with a node holding the recorded history. Change `finalized`
- * (its last finalized block), `genesis` or `down` (every request fails) as a
- * test goes; `log` keeps each query and its answer.
+ * (its last finalized block), `genesis`, `down` (every request fails) or
+ * `archive` (false: a node without the archive's fields) as a test goes;
+ * `log` keeps each query and its answer.
  */
 export function fakeArchive({ accounts = fixture.accounts, finalized = fixture.head.last_finalized_block[0], genesis = fixture.head.genesis } = {}) {
-  const node = { finalized, genesis, down: false, log: [] };
+  const node = { finalized, genesis, down: false, archive: true, log: [] };
   const fetchMock = vi.fn(async (url, init) => {
     expect(String(url)).toBe(`${fixture.nodeUrl}/on/graphql/query`);
     if (node.down) throw new TypeError("fetch failed");
     const query = String(init.body);
+    // async-graphql refuses a whole query with a field the schema lacks.
+    const missing = query.match(/\b(moonlightHistory|contractEvents)\(/);
+    if (!node.archive && missing) {
+      const errors = [{ message: `Unknown field "${missing[1]}" on type "Query".`, locations: [{ line: 1, column: 9 }] }];
+      node.log.push({ query, data: null });
+      return { ok: true, status: 200, text: async () => JSON.stringify({ data: null, errors }) };
+    }
     const data = {};
     if (query.includes("pair: lastBlockPair { json }")) {
       data.pair = { json: { last_block: [node.finalized + 1, "aa"], last_finalized_block: [node.finalized, "bb"] } };

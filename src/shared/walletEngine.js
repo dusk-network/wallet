@@ -45,7 +45,7 @@ import {
   putNotesMap,
   putShieldedMeta,
 } from "./shieldedStore.js";
-import { activityNetworkKey, historyArchiverUrl } from "./activityHistory.js";
+import { activityNetworkKey, assertArchive, historyArchiverUrl } from "./activityHistory.js";
 import {
   getNoteHeightPool,
   getShieldedHistoryRecord,
@@ -2521,6 +2521,9 @@ export async function getShieldedHistory() {
     // Notes still being discovered aren't the history yet.
     if (state.shielded.status.state !== "done") return { profileIndex, entries: kept?.entries ?? [], pending: true };
 
+    // A node without the archive reads no note tree either.
+    const url = historyArchiverUrl({ nodeUrl: engineConfig.nodeUrl, archiverUrl: engineConfig.archiverUrl });
+    await assertArchive(url);
     const profile = getCurrentProfile();
     const notes = [];
     for (const r of rows) {
@@ -2532,7 +2535,6 @@ export async function getShieldedHistory() {
     if (!pool) return { profileIndex, entries: kept?.entries ?? [], pending: true };
     const real = [...new Set(notes.map((n) => leafInfo(n.leaf).height))];
     const { heights, decoys } = pickHeights(pool, real, { keep: kept?.decoys ?? [] });
-    const url = historyArchiverUrl({ nodeUrl: engineConfig.nodeUrl, archiverUrl: engineConfig.archiverUrl });
     const entries = buildShieldedHistory({ notes, blocks: await fetchBlocks(url, heights) });
     await putShieldedHistoryRecord(key, { fingerprint, entries, decoys }).catch(() => {});
     return { profileIndex, entries };

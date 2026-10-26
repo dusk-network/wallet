@@ -18,6 +18,9 @@ const STORE_NAMES = "counterparty_names";
 // and each profile's history, kept for good: Phoenix is off.
 const STORE_POOLS = "phoenix_pools";
 const STORE_SHIELDED = "phoenix_history";
+// Nodes that answered without the archive, and when.
+const STORE_REFUSALS = "archive_refusals";
+const STORES = [STORE_META, STORE_ENTRIES, STORE_NAMES, STORE_POOLS, STORE_SHIELDED, STORE_REFUSALS];
 
 /** @type {Promise<IDBDatabase> | null} */
 let dbPromise = null;
@@ -47,6 +50,9 @@ function openDb() {
       }
       if (!db.objectStoreNames.contains(STORE_SHIELDED)) {
         db.createObjectStore(STORE_SHIELDED, { keyPath: "ownerKey" });
+      }
+      if (!db.objectStoreNames.contains(STORE_REFUSALS)) {
+        db.createObjectStore(STORE_REFUSALS, { keyPath: "url" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -257,5 +263,29 @@ export async function putShieldedHistoryRecord(ownerKey, record) {
   const db = await openDb();
   const tx = db.transaction([STORE_SHIELDED], "readwrite");
   tx.objectStore(STORE_SHIELDED).put({ ...record, ownerKey, at: Date.now() });
+  await done(tx);
+}
+
+/** When `url` last answered without the archive, or null. */
+export async function getArchiveRefusal(url) {
+  const db = await openDb();
+  const tx = db.transaction([STORE_REFUSALS], "readonly");
+  const row = await result(tx.objectStore(STORE_REFUSALS).get(String(url)));
+  return Number.isFinite(row?.at) ? row.at : null;
+}
+
+/** Note that `url` answered without the archive. */
+export async function putArchiveRefusal(url, at = Date.now()) {
+  const db = await openDb();
+  const tx = db.transaction([STORE_REFUSALS], "readwrite");
+  tx.objectStore(STORE_REFUSALS).put({ url: String(url), at });
+  await done(tx);
+}
+
+/** Forget everything kept here, for a wallet reset. */
+export async function clearActivityStore() {
+  const db = await openDb();
+  const tx = db.transaction(STORES, "readwrite");
+  for (const name of STORES) tx.objectStore(name).clear();
   await done(tx);
 }

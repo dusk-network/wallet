@@ -46,6 +46,9 @@ const mocks = vi.hoisted(() => {
     clearVault: vi.fn(async () => {}),
     createVault: vi.fn(async () => true),
     clearPermissions: vi.fn(async () => {}),
+    clearTxs: vi.fn(async () => {}),
+    clearShieldedStore: vi.fn(async () => {}),
+    clearActivityStore: vi.fn(async () => {}),
     cancelPendingApprovals: vi.fn(),
     engineCall: vi.fn(async (method) => {
       if (method === "engine_unlock") {
@@ -104,6 +107,21 @@ vi.mock("../shared/vault.js", () => ({
   createVault: mocks.createVault,
   loadVault: vi.fn(async () => mocks.vault),
   unlockVault: vi.fn(async () => "mnemonic"),
+}));
+
+vi.mock("../shared/txStore.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  clearTxs: mocks.clearTxs,
+}));
+
+vi.mock("../shared/shieldedStore.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  clearShieldedStore: mocks.clearShieldedStore,
+}));
+
+vi.mock("../shared/activityStore.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  clearActivityStore: mocks.clearActivityStore,
 }));
 
 vi.mock("../shared/permissions.js", () => ({
@@ -327,6 +345,17 @@ describe("background auto-lock activity", () => {
     expect(activityRecord()).toBeUndefined();
   });
 
+  it("resets the wallet with its transactions, shielded notes and history", async () => {
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET" });
+
+    expect(response).toEqual({ ok: true });
+    expect(mocks.clearVault).toHaveBeenCalledTimes(1);
+    expect(mocks.clearPermissions).toHaveBeenCalledTimes(1);
+    expect(mocks.clearTxs).toHaveBeenCalledTimes(1);
+    expect(mocks.clearShieldedStore).toHaveBeenCalledTimes(1);
+    expect(mocks.clearActivityStore).toHaveBeenCalledTimes(1);
+  });
+
   it("does not clear the vault when reset cannot lock the engine", async () => {
     mocks.engineCall.mockRejectedValueOnce(new Error("lock transport failed"));
 
@@ -335,6 +364,9 @@ describe("background auto-lock activity", () => {
     expect(response.error.message).toBe("lock transport failed");
     expect(mocks.clearVault).not.toHaveBeenCalled();
     expect(mocks.clearPermissions).not.toHaveBeenCalled();
+    expect(mocks.clearTxs).not.toHaveBeenCalled();
+    expect(mocks.clearShieldedStore).not.toHaveBeenCalled();
+    expect(mocks.clearActivityStore).not.toHaveBeenCalled();
     expect(mocks.cancelPendingApprovals).not.toHaveBeenCalled();
     expect(mocks.engineUnlocked).toBe(true);
   });

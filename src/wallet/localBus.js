@@ -12,7 +12,9 @@ import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { getTxMeta, listTxs, patchTxMeta, putTxMeta, typedRecipientName } from "../shared/txStore.js";
+import { clearTxs, getTxMeta, listTxs, patchTxMeta, putTxMeta, typedRecipientName } from "../shared/txStore.js";
+import { clearShieldedStore } from "../shared/shieldedStore.js";
+import { clearActivityStore } from "../shared/activityStore.js";
 import { bytesToHex } from "../shared/bytes.js";
 import {
   executionEventError,
@@ -158,6 +160,8 @@ export async function localSend(message) {
         if (isUnlocked()) throw new Error("Wallet lock did not complete");
         await clearPermissions();
         await clearVault();
+        // Nothing of the old wallet stays: its transactions, shielded notes and history.
+        await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore()]);
         return { ok: true };
       });
     }

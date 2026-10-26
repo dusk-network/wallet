@@ -164,4 +164,12 @@ describe("txStore", () => {
     });
     expect(meta.removedAt).toBeUndefined();
   });
+
+  it("forgets every transaction when the wallet is reset", async () => {
+    const { clearTxs, listTxs, putTxMeta } = await import("./txStore.js");
+    await putTxMeta("hash-a", { status: "submitted", submittedAt: 1 });
+    await putTxMeta("hash-b", { status: "executed", submittedAt: 2 });
+    await clearTxs();
+    expect(await listTxs()).toEqual([]);
+  });
 });

@@ -36,7 +36,12 @@ export const DETAILS_BATCH = 50;
 export const RUN_REQUESTS = 8;
 export const RUN_DETAIL_REQUESTS = 2;
 
+/** How long a node that answered without the archive is left alone. */
+export const NO_ARCHIVE_RETRY_MS = 60 * 60_000;
+
 const REQUEST_TIMEOUT_MS = 8_000;
+// What a node without the archive answers: its GraphQL has no history fields.
+const NO_ARCHIVE = /Unknown field\W+(?:moonlightHistory|contractEvents)\b/i;
 const MAX_WINDOW = 2 ** 40;
 const MAX_U64 = (1n << 64n) - 1n;
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
@@ -95,8 +100,18 @@ function losslessJson(text) {
   );
 }
 
+/** A node that answered without the archive, or was left alone for having done so. */
+export class NoArchiveError extends Error {
+  constructor(url, message = `${url} has no archive`) {
+    super(message);
+    this.name = "NoArchiveError";
+    this.url = url;
+  }
+}
+
 /**
- * One GraphQL request to a node's `/on/graphql/query`.
+ * One GraphQL request to a node's `/on/graphql/query`. A node without the
+ * archive's fields throws a NoArchiveError.
  * @param {string} baseUrl
  * @param {string} query
  * @returns {Promise<object>} the data
@@ -110,9 +125,25 @@ export async function archiveQuery(baseUrl, query, { timeoutMs = REQUEST_TIMEOUT
   if (!res.ok) throw new Error(`Archive request failed (${res.status})`);
   const json = losslessJson(await res.text());
   if (Array.isArray(json?.errors) && json.errors.length) {
-    throw new Error(json.errors.map((e) => e?.message || String(e)).join("; "));
+    const message = json.errors.map((e) => e?.message || String(e)).join("; ");
+    throw NO_ARCHIVE.test(message) ? new NoArchiveError(baseUrl, message) : new Error(message);
   }
   return json?.data && typeof json.data === "object" ? json.data : json ?? {};
+}
+
+/**
+ * Throw a NoArchiveError, without a request, for a node that answered
+ * without the archive in the last hour.
+ * @param {string} url
+ */
+export async function assertArchive(url, store = defaultStore, now = Date.now()) {
+  const at = await store.getArchiveRefusal(url).catch(() => null);
+  if (at !== null && now - at >= 0 && now - at < NO_ARCHIVE_RETRY_MS) throw new NoArchiveError(url);
+}
+
+/** Keep `url`'s refusal when `error` was one, for assertArchive. */
+export async function rememberNoArchive(url, error, store = defaultStore) {
+  if (error instanceof NoArchiveError && error.url === url) await store.putArchiveRefusal(url, Date.now()).catch(() => {});
 }
 
 const history = (alias, direction, account, { from, to, page }) => {
@@ -431,7 +462,8 @@ function nextWindow(window, count) {
  * Run a sync of `account`'s history: the newest heights first, then older
  * ones, at most `maxRequests` history requests and `maxDetailRequests`
  * details requests. Each step is kept as it lands, so a run that stops
- * anywhere is carried on by the next. `onStep` hears every kept step.
+ * anywhere is carried on by the next. `onStep` hears every kept step. A node
+ * that answered without the archive is asked nothing for an hour.
  *
  * @param {{
  *   nodeUrl: string, archiverUrl?: string, account: string,
@@ -440,7 +472,19 @@ function nextWindow(window, count) {
  * }} opts
  * @returns {Promise<{ meta: object, requests: number, added: number }>}
  */
-export async function syncActivity({
+export async function syncActivity(opts = {}) {
+  const url = historyArchiverUrl(opts);
+  const store = opts.store ?? defaultStore;
+  if (url) await assertArchive(url, store);
+  try {
+    return await syncOnce(opts);
+  } catch (error) {
+    await rememberNoArchive(url, error, store);
+    throw error;
+  }
+}
+
+async function syncOnce({
   nodeUrl,
   archiverUrl,
   account,
@@ -497,7 +541,7 @@ export async function syncActivity({
   if (meta?.genesis && genesis && meta.genesis !== genesis) {
     await store.clearActivity(ownerKey);
     meta = null;
-    return syncActivity({ nodeUrl, archiverUrl, account, maxRequests: budget.left + 1, maxDetailRequests, store, onStep });
+    return syncOnce({ nodeUrl, archiverUrl, account, maxRequests: budget.left + 1, maxDetailRequests, store, onStep });
   }
 
   const head = { genesis: genesis || meta?.genesis || "", finalized, target, headAt: Date.now() };

@@ -254,6 +254,35 @@ describe("syncActivity", () => {
   });
 });
 
+describe("a node without the archive", () => {
+  it("is asked nothing for an hour after its first refusal, then again", async () => {
+    const node = fakeArchive();
+    node.archive = false;
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(1_000_000_000);
+
+    await expect(sync(A)).rejects.toBeInstanceOf(history.NoArchiveError);
+    // The head, then the first window it refused.
+    expect(node.log).toHaveLength(2);
+    await expect(sync(A)).rejects.toBeInstanceOf(history.NoArchiveError);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(history.fetchRecentActivity({ archiverUrl: NODE, account: A })).resolves.toEqual([]);
+    expect(node.log).toHaveLength(2);
+
+    // An hour on, it is asked again: now with the archive.
+    now.mockReturnValue(1_000_000_000 + history.NO_ARCHIVE_RETRY_MS);
+    node.archive = true;
+    await sync(A);
+    expect((await history.readActivity({ nodeUrl: NODE, account: A })).entries).toHaveLength(4);
+  });
+
+  it("keeps the refusal to that node", async () => {
+    await store.putArchiveRefusal("https://testnet.nodes.dusk.network", Date.now());
+    await expect(history.assertArchive("https://testnet.nodes.dusk.network")).rejects.toBeInstanceOf(history.NoArchiveError);
+    await expect(history.assertArchive("https://my.archive.example")).resolves.toBeUndefined();
+  });
+});
+
 describe("fetchRecentActivity", () => {
   it("gives the newest entries with their time and outcome", async () => {
     fakeArchive();

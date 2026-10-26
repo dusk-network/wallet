@@ -1,6 +1,7 @@
+import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn() }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true }));
 
 // The wallet engine without the network: a transfer just gets its hash.
 vi.mock("../shared/walletEngine.js", () => ({
@@ -25,7 +26,10 @@ vi.mock("../shared/walletEngine.js", () => ({
     ].map((name) => [name, vi.fn()])
   ),
   configure: vi.fn(),
-  isUnlocked: () => true,
+  isUnlocked: () => engine.unlocked,
+  lock: () => {
+    engine.unlocked = false;
+  },
   getAccounts: () => ["acct0"],
   getSelectedAccountIndex: () => 0,
   getCachedGasPrice: vi.fn(async () => ({ median: "1" })),
@@ -56,6 +60,7 @@ const ACCOUNT =
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   engine.sendTransaction.mockReset();
+  engine.unlocked = true;
 });
 
 afterEach(() => {
@@ -76,5 +81,25 @@ describe("local sends", () => {
     const byHash = Object.fromEntries((await listTxs()).map((tx) => [tx.hash, tx]));
     expect(byHash["aa".repeat(32)]).toMatchObject({ to: ACCOUNT, toName: "alice.dusk", status: "submitted" });
     expect(byHash["bb".repeat(32)].toName).toBeUndefined();
+  });
+});
+
+describe("a wallet reset", () => {
+  it("leaves nothing of the old wallet: its transactions, shielded notes and history", async () => {
+    const { localSend } = await import("./localBus.js");
+    const txs = await import("../shared/txStore.js");
+    const shielded = await import("../shared/shieldedStore.js");
+    const activity = await import("../shared/activityStore.js");
+    const owner = activity.activityOwnerKey("testnet", ACCOUNT);
+    await txs.putTxMeta("aa".repeat(32), { status: "executed", submittedAt: 1 });
+    await shielded.putNotesMap("net", "acct0", 0, new Map([[new Uint8Array([1]), new Uint8Array([2])]]));
+    await activity.commitActivityStep(owner, [{ hash: "bb".repeat(32), blockHeight: 7 }], () => ({ covered: [[0, 9]] }));
+
+    await expect(localSend({ type: "DUSK_UI_RESET_WALLET" })).resolves.toEqual({ ok: true });
+
+    expect(await txs.listTxs()).toEqual([]);
+    expect(await shielded.countNotes("net", "acct0", 0)).toBe(0);
+    expect(await activity.listActivityEntries(owner)).toEqual([]);
+    expect(await activity.getActivityMeta(owner)).toBeNull();
   });
 });

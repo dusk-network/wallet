@@ -45,7 +45,9 @@ import {
 } from "./txNotify.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { listAddressBook } from "../shared/addressBook.js";
-import { getTxMeta, patchTxMeta, putTxMeta, listTxs, typedRecipientName } from "../shared/txStore.js";
+import { clearTxs, getTxMeta, patchTxMeta, putTxMeta, listTxs, typedRecipientName } from "../shared/txStore.js";
+import { clearShieldedStore } from "../shared/shieldedStore.js";
+import { clearActivityStore } from "../shared/activityStore.js";
 import { handleUiCommand } from "../wallet/uiCommands.js";
 import {
   getNetworkStatus,
@@ -795,6 +797,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           await lockWallet("reset");
           await clearPermissions();
           await clearVault();
+          // Nothing of the old wallet stays: its transactions, shielded notes and history.
+          await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore()]);
         });
         sendResponse({ ok: true });
         return;

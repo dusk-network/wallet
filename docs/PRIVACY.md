@@ -16,7 +16,7 @@ Users may configure their own endpoints. Network operators may be able to observ
 
 Looking up a .dusk name sends the name to your configured node. Showing your profiles' .dusk names sends their public accounts to it, as does showing the name of a public account a site asks you to send to.
 
-Activity reads a profile's public transaction history from your configured archiver, which sends it the profile's public account, and shows the .dusk names of the accounts in it, which sends those accounts to your node. A profile's shielded history reads the blocks its shielded notes were made in, once, each among four other blocks that hold shielded notes, so the archiver can't single out yours.
+Activity asks your configured archiver for each profile's public transaction history, which sends it the profile's public account, and asks your node for the .dusk names of the accounts in that history, several at a time through the Multicall for Dusk contract. Once for each profile that has shielded notes, it asks the archiver for the blocks those notes are in, each mixed with four other blocks that hold shielded notes, which makes the profile's blocks harder, though not impossible, to pick out.
 
 ## dApp connections
 

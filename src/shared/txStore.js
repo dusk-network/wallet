@@ -118,6 +118,11 @@ export async function patchTxMeta(hash, patch) {
   });
 }
 
+/** Forget every transaction's metadata, for a wallet reset. */
+export async function clearTxs() {
+  return mutate(() => storage.remove(STORAGE_KEYS.TXS));
+}
+
 /**
  * @param {string} hash
  * @returns {Promise<TxMeta|null>}
