@@ -9,6 +9,21 @@ export function lockedView({ state, actions } = {}) {
     onEnter: () => btn.click(),
   });
 
+  // A wrong password says so under the field, where the eyes are.
+  const errLine = h("div", { id: "unlock-error", class: "field-error", role: "alert", hidden: true });
+  const showError = (text) => {
+    errLine.textContent = text || "";
+    errLine.hidden = !text;
+    if (text) {
+      pwd.setAttribute("aria-invalid", "true");
+      pwd.setAttribute("aria-describedby", "unlock-error");
+    } else {
+      pwd.removeAttribute("aria-invalid");
+      pwd.removeAttribute("aria-describedby");
+    }
+  };
+  pwd.addEventListener("input", () => showError(""));
+
   // The button says "Unlocking…" meanwhile.
   const busyCallout = h("div", { class: "callout", style: "display:none" }, [
     h("div", { class: "muted", text: "This can take a moment." }),
@@ -25,6 +40,7 @@ export function lockedView({ state, actions } = {}) {
       pwd.disabled = true;
       btn.textContent = "Unlocking…";
       busyCallout.style.display = "block";
+      showError("");
 
       try {
         const res = await actions?.send?.({ type: "DUSK_UI_UNLOCK", password: pwd.value });
@@ -35,7 +51,7 @@ export function lockedView({ state, actions } = {}) {
         pwd.value = "";
         await actions?.render?.({ forceRefresh: true });
       } catch (err) {
-        if (pwd.isConnected) actions?.showToast?.(err?.message ?? String(err), 2500);
+        if (pwd.isConnected) showError(err?.message ?? String(err));
       } finally {
         pwd.value = "";
         busy = false;
@@ -48,7 +64,7 @@ export function lockedView({ state, actions } = {}) {
   });
   return [
     h("div", { class: "muted", text: "Wallet is locked." }),
-    h("div", { class: "row" }, [h("label", { for: "unlock-password", text: "Password" }), pwd]),
+    h("div", { class: "row" }, [h("label", { for: "unlock-password", text: "Password" }), pwd, errLine]),
     busyCallout,
     h("div", { class: "btnrow" }, [btn]),
   ].filter(Boolean);

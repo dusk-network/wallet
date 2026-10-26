@@ -7,6 +7,9 @@ import {
   clampDecimals,
   formatLuxShort,
   parseDuskToLux,
+  groupThousands,
+  formatDusk,
+  formatFee,
 } from "./amount.js";
 
 describe("amount constants", () => {
@@ -150,5 +153,30 @@ describe("parseDuskToLux", () => {
 
   it("handles whitespace", () => {
     expect(parseDuskToLux("  1.5  ")).toBe("1500000000");
+  });
+});
+
+describe("display formatting", () => {
+  it("groups the whole part in thousands and leaves the rest alone", () => {
+    expect(groupThousands("1484.9235")).toBe("1,484.9235");
+    expect(groupThousands("1234567")).toBe("1,234,567");
+    expect(groupThousands("999.123456")).toBe("999.123456");
+    expect(groupThousands("-1000")).toBe("-1,000");
+    expect(groupThousands("—")).toBe("—");
+    expect(formatDusk("1484923500000")).toBe("1,484.9235");
+    expect(formatDusk("1000000000000")).toBe("1,000");
+  });
+
+  it("shows fees with four decimals, so they read alike everywhere", () => {
+    expect(formatFee("50000000")).toBe("0.0500");
+    expect(formatFee("2500000")).toBe("0.0025");
+    expect(formatFee("500000000")).toBe("0.5000");
+    // Rounded half up at the fourth decimal.
+    expect(formatFee("1234567")).toBe("0.0012");
+    expect(formatFee("1250000")).toBe("0.0013");
+    expect(formatFee("1500000000000")).toBe("1,500.0000");
+    // Too small to show at that precision: in full, never as zero.
+    expect(formatFee("40000")).toBe("0.00004");
+    expect(formatFee("0")).toBe("0.0000");
   });
 });

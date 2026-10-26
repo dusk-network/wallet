@@ -3,7 +3,9 @@ import { isPopupView, isFullView } from "./env.js";
 import { state, ONBOARD_ROUTES } from "./state.js";
 import { refreshOverview, getActiveOrigin } from "./overview.js";
 import { h, setChildren } from "../lib/dom.js";
-import { toastView } from "../components/Toast.js";
+import { createToaster } from "../components/Toast.js";
+import { balancesHidden } from "../components/Balance.js";
+import { txStatusToast } from "./txToast.js";
 import { createNetworkMenuController } from "../components/NetworkMenu.js";
 import { createAccountMenuController } from "../components/AccountMenu.js";
 import { createHeaderRenderer } from "./header.js";
@@ -56,6 +58,8 @@ try {
 
 const app = document.getElementById("app");
 const headerActionsHost = document.getElementById("header-actions");
+// Toasts live outside #app, which scrolls and is redrawn.
+const toaster = createToaster();
 const fullNav = document.querySelector(".full-nav");
 const ext = getExtensionApi();
 
@@ -209,10 +213,6 @@ function setApp(children) {
     if (siteBar) app.appendChild(siteBar);
     for (const child of children) app.appendChild(child);
   }
-  // Refresh notices without detaching the live form (which would lose focus).
-  app.querySelector(":scope > .toast")?.remove();
-  const toast = toastView(state.toast);
-  if (toast) app.prepend(toast);
 }
 
 function showError(err) {
@@ -257,16 +257,10 @@ if (fullNav) {
 }
 
 // --- Toast ---------------------------------------------------------------
-let toastTimer = null;
-function showToast(text, ms = 1200) {
-  state.toast = String(text || "");
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    state.toast = null;
-    toastTimer = null;
-    render().catch(() => {});
-  }, ms);
-  render().catch(() => {});
+// A line of text or a toast spec (see Toast.js). It stays at least a few
+// seconds, longer with an action, and while the pointer or focus is on it.
+function showToast(spec, ms) {
+  toaster.show(spec, ms);
 }
 
 function activeSiteInfo(ov) {
@@ -414,6 +408,27 @@ function shieldedStatusKey(status) {
   }
 }
 
+// The toast for a status the watcher reports: what the transaction did, its
+// amount hidden with Hide balances, and View to open it.
+function txStatusToastFor(hash, status) {
+  const ov = state.overview;
+  const tx = hash && Array.isArray(ov?.txs) ? ov.txs.find((t) => String(t?.hash ?? "") === hash) : null;
+  const contacts = state.addressBook?.loaded && Array.isArray(state.addressBook.items) ? state.addressBook.items : [];
+  const contactName = (addr) => {
+    const key = String(addr ?? "").toLowerCase();
+    return String(contacts.find((c) => String(c?.address ?? "").toLowerCase() === key)?.name ?? "").trim();
+  };
+  const onView = hash
+    ? () => {
+        state.txDetailHash = hash;
+        state.txDetailFrom = state.route === "activity" ? "activity" : "home";
+        state.route = "tx";
+        render().catch(() => {});
+      }
+    : null;
+  return txStatusToast(tx, status, { hidden: balancesHidden(ov), contactName, onView });
+}
+
 function installTxStatusListener() {
   if (txStatusListenerInstalled) return;
   txStatusListenerInstalled = true;
@@ -470,21 +485,9 @@ function installTxStatusListener() {
         const status = String(
           msg.status ?? (msg.ok === false ? "failed" : msg.ok === true ? "executed" : "unknown")
         ).toLowerCase();
-        const sh =
-          hash && hash.length > 18
-            ? `${hash.slice(0, 10)}…${hash.slice(-8)}`
-            : hash;
 
-        if (status === "executed") {
-          showToast(sh ? `Transaction executed: ${sh}` : "Transaction executed", 2500);
-        } else if (status === "failed") {
-          showToast(sh ? `Transaction failed during execution: ${sh}` : "Transaction failed during execution", 3000);
-        } else if (status === "removed") {
-          showToast(sh ? `Transaction removed from mempool: ${sh}` : "Transaction removed from mempool", 3000);
-        } else if (status === "mempool") {
-          showToast(sh ? `Transaction is in mempool: ${sh}` : "Transaction is in mempool", 2500);
-        } else if (status === "unknown") {
-          showToast(sh ? `Transaction status unknown: ${sh}` : "Transaction status unknown", 3000);
+        if (["executed", "failed", "removed", "mempool", "unknown"].includes(status)) {
+          showToast(txStatusToastFor(hash, status));
         }
 
         // Best-effort immediate UI update so the Activity row can transition

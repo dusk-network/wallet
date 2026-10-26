@@ -99,12 +99,12 @@ describe("Hide balances", () => {
     expect(eyeState()).toEqual(["Hide balances", "Hide balances", "false", iconSvg("eye")]);
     // The total, its Public and Shielded split, and the token.
     expect(values()).toEqual([
-      ["1507.9383", "1507.9383"],
-      ["1482.9383", "1482.9383"],
+      ["1,507.9383 DUSK", "1,507.9383 DUSK"],
+      ["1,482.9383", "1,482.9383"],
       ["25", "25"],
       ["123.45", "123.45"],
     ]);
-    expect(titles()).toEqual(["1507.9383", null, "1482.9383", "Reserved 5 DUSK", "25"]);
+    expect(titles()).toEqual(["1,507.9383", null, "1,482.9383", "Reserved 5 DUSK", "25"]);
 
     eye().click();
     await settle();
@@ -115,7 +115,7 @@ describe("Hide balances", () => {
     expect(act.render).toHaveBeenCalledTimes(1);
     expect(dom.document.activeElement).toBe(eye());
     expect(eyeState()).toEqual(["Hide balances", "Hide balances", "true", iconSvg("eye-off")]);
-    expect(values()).toEqual(Array(4).fill(["••••", "hidden"]));
+    expect(values()).toEqual([["•••• DUSK", "hidden DUSK"], ...Array(3).fill(["••••", "hidden"])]);
     // No tooltip gives them away either, the shielded amount held back included.
     expect(titles()).toEqual([null, null, null, null, null]);
     // Their labels stay.
@@ -131,7 +131,7 @@ describe("Hide balances", () => {
     await settle();
     expect(act.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: false });
     expect(eyeState()).toEqual(["Hide balances", "Hide balances", "false", iconSvg("eye")]);
-    expect(values()[0]).toEqual(["1507.9383", "1507.9383"]);
+    expect(values()[0]).toEqual(["1,507.9383 DUSK", "1,507.9383 DUSK"]);
   });
 
   it("says so when the choice can't be saved, and keeps it in the popup", async () => {

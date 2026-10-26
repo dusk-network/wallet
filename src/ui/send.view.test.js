@@ -78,9 +78,11 @@ describe("send view", () => {
     expect(badgeComponent).not.toContain('icon: "S"');
 
     expect(css).toContain(".recipient-badge--contact");
-    expect(css).toMatch(/\.recipient-badge--contact\s*\{[^}]*var\(--ok\)/s);
+    // Calm chips: neither a saved contact nor Public/Shielded takes a colour.
+    expect(css).toMatch(/\.recipient-badge--contact\s*\{[^}]*var\(--surface-2\)/s);
     expect(css).toContain(".recipient-badge--rail");
-    expect(css).toMatch(/\.recipient-badge--rail\s*\{[^}]*var\(--primary\)/s);
+    expect(css).toMatch(/\.recipient-badge--rail\s*\{[^}]*var\(--surface-2\)/s);
+    expect(css).not.toMatch(/\.recipient-badge--(contact|rail)\s*\{[^}]*var\(--(ok|primary)\)/s);
     expect(css).toContain(".recipient-badge__glyph--svg svg");
   });
 });

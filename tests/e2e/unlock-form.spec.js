@@ -111,7 +111,7 @@ test("runtime refreshes and toast expiry preserve the mounted input", async ({ p
     await expect(page.locator(".network-pill__label")).toHaveText(message.type);
     await expectOriginalInput(page, { focused: true });
   }
-  await expect(page.locator(".toast")).toHaveText("Transaction executed");
+  await expect(page.locator(".toast")).toHaveText("Transaction completed");
   await expect(page.locator(".toast")).toHaveCount(0);
   await expectOriginalInput(page, { focused: true });
 });
@@ -135,7 +135,9 @@ test("rerendering an in-flight unlock keeps it busy, blocks duplicates and allow
   });
   expect(await page.evaluate(() => window.unlockRequests.length)).toBe(1);
   await page.evaluate(() => window.unlockReply.resolve({ error: { message: "Incorrect password" } }));
-  await expect(page.locator(".toast")).toHaveText("Incorrect password");
+  // Said under the field, not in a toast.
+  await expect(page.locator("#unlock-error")).toHaveText("Incorrect password");
+  await expect(page.locator(".toast")).toHaveCount(0);
   await expect(input).toBeEnabled();
   await expect(input).toHaveValue("");
   await input.fill(PASSWORD);
@@ -163,7 +165,7 @@ test("a rejected unlock transport recovers without an unhandled rejection", asyn
   await input.press("Enter");
   await expect.poll(() => page.evaluate(() => window.unlockRequests.length)).toBe(1);
   await page.evaluate(() => window.unlockReply.reject(new Error("Transport unavailable")));
-  await expect(page.locator(".toast")).toHaveText("Transport unavailable");
+  await expect(page.locator("#unlock-error")).toHaveText("Transport unavailable");
   await expect(input).toBeEnabled();
   await expect(input).toHaveValue("");
   await input.fill(PASSWORD);
@@ -263,6 +265,7 @@ for (const destination of ["options", "contacts", "reset"]) {
     await expect(input).toHaveValue(PASSWORD);
     await expect(input).toBeEnabled();
     await expect(page.locator(".toast")).toHaveCount(0);
+    await expect(page.locator("#unlock-error")).toBeHidden();
     // Detached handlers cannot submit another unlock.
     await page.evaluate(() => window.originalButton.dispatchEvent(new MouseEvent("click")));
     expect(await page.evaluate(() => window.unlockRequests.length)).toBe(1);

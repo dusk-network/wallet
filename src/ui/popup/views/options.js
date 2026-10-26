@@ -211,6 +211,16 @@ export function optionsView(ov, { state, actions } = {}) {
   networkSelect.addEventListener("change", syncFromSelect);
   nodeUrlInput.addEventListener("input", syncFromNodeUrl);
 
+  // A URL that won't do, or a save that failed, says so above Save.
+  const networkError = h("div", { class: "field-error", role: "alert", hidden: true });
+  const showNetworkError = (text) => {
+    networkError.textContent = text || "";
+    networkError.hidden = !text;
+  };
+  for (const input of [nodeUrlInput, proverUrlInput, archiverUrlInput]) {
+    input.addEventListener("input", () => showNetworkError(""));
+  }
+
   const saveBtn = h("button", {
     class: "btn-primary",
     text: "Save",
@@ -219,6 +229,7 @@ export function optionsView(ov, { state, actions } = {}) {
       try {
         saveBtn.disabled = true;
         saveBtn.textContent = "Saving...";
+        showNetworkError("");
         const v = nodeUrlInput.value.trim();
         const pv = proverUrlInput.value.trim();
         const av = archiverUrlInput.value.trim();
@@ -261,7 +272,7 @@ export function optionsView(ov, { state, actions } = {}) {
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
-        actions?.showToast?.(e?.message ?? String(e), 2500);
+        showNetworkError(e?.message ?? String(e));
       } finally {
         saveBtn.disabled = false;
         saveBtn.textContent = prevText;
@@ -435,6 +446,7 @@ export function optionsView(ov, { state, actions } = {}) {
         fieldLabel(archiverUrlInput, "Archiver URL"),
         archiverUrlInput,
       ]),
+      networkError,
       h("div", { class: "btnrow settings-actions" }, [saveBtn]),
     ]),
     settingsSection("Data", [

@@ -43,31 +43,37 @@ describe("explorerTxUrl", () => {
 });
 
 describe("explorerAccountUrl", () => {
-  it("returns mainnet account history on DuskScan", () => {
+  it("returns mainnet account history on the Dusk explorer", () => {
     const url = explorerAccountUrl(
       "https://nodes.dusk.network",
       "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927"
     );
 
     expect(url).toBe(
-      "https://duskscan.net/address/26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927"
+      "https://apps.dusk.network/explorer/accounts/?key=26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927"
     );
   });
 
-  it("returns testnet account history on DuskScan", () => {
+  it("returns testnet and devnet account history on the Dusk explorer, never DuskScan", () => {
     expect(explorerAccountUrl("https://testnet.nodes.dusk.network", "acct1")).toBe(
-      "https://testnet.duskscan.net/address/acct1"
+      "https://apps.testnet.dusk.network/explorer/accounts/?key=acct1"
     );
+    expect(explorerAccountUrl("https://devnet.nodes.dusk.network", "acct1")).toBe(
+      "https://apps.devnet.dusk.network/explorer/accounts/?key=acct1"
+    );
+    for (const node of ["https://nodes.dusk.network", "https://testnet.nodes.dusk.network"]) {
+      expect(explorerAccountUrl(node, "acct1")).not.toContain("duskscan");
+    }
   });
 
   it("encodes reserved characters in accounts", () => {
     expect(explorerAccountUrl("https://nodes.dusk.network", "acct/1")).toBe(
-      "https://duskscan.net/address/acct%2F1"
+      "https://apps.dusk.network/explorer/accounts/?key=acct%2F1"
     );
   });
 
-  it("returns null when account history is not supported", () => {
-    expect(explorerAccountUrl("https://devnet.nodes.dusk.network", "acct1")).toBeNull();
+  it("returns null when the network has no explorer", () => {
+    expect(explorerAccountUrl("http://127.0.0.1:8080", "acct1")).toBeNull();
     expect(explorerAccountUrl("https://my-custom-node.example.com", "acct1")).toBeNull();
     expect(explorerAccountUrl("https://nodes.dusk.network", "")).toBeNull();
   });

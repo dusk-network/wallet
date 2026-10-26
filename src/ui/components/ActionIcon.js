@@ -94,6 +94,36 @@ const ICON_PATHS = {
   nft: [
     '<path d="M12 3.5l7.36 4.25v8.5L12 20.5l-7.36-4.25v-8.5Z"/>',
   ],
+  check: ['<path d="M5 12.5l4.5 4.5L19 7.5"/>'],
+  alert: [
+    '<circle cx="12" cy="12" r="9"/>',
+    '<path d="M12 7.5v5"/>',
+    '<path d="M12 16.2h.01"/>',
+  ],
+  "chev-r": ['<path d="M9.5 6l6 6-6 6"/>'],
+  // Opens a page outside the wallet.
+  ext: ['<path d="M8 6h10v10"/>', '<path d="M18 6 6 18"/>'],
+  // A node: two stacked server units.
+  server: [
+    '<rect x="4" y="4" width="16" height="7" rx="2"/>',
+    '<rect x="4" y="13" width="16" height="7" rx="2"/>',
+    '<path d="M8 7.5h.01"/>',
+    '<path d="M8 16.5h.01"/>',
+  ],
+  // Liquid staking.
+  drop: ['<path d="M12 3.5c3.5 4.2 6 7.5 6 10.5a6 6 0 0 1-12 0c0-3 2.5-6.3 6-10.5Z"/>'],
+  clock: ['<circle cx="12" cy="12" r="8.5"/>', '<path d="M12 7.5V12l3 2"/>'],
+  lock: [
+    '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/>',
+    '<path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
+  ],
+  // The network fee: a fuel pump.
+  fee: [
+    '<path d="M5 20V6.5A2.5 2.5 0 0 1 7.5 4h5A2.5 2.5 0 0 1 15 6.5V20"/>',
+    '<path d="M4 20h12"/>',
+    '<path d="M7.5 9h5"/>',
+    '<path d="M15 9.5h1.5a2 2 0 0 1 2 2V16a1.5 1.5 0 0 0 3 0V8.5L19 6"/>',
+  ],
 };
 
 /**

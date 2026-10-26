@@ -218,7 +218,8 @@ export function sendFormView(ov, { state, actions } = {}) {
     if (!want || !currentChain || want === currentChain) return;
     const wantLabel = chainLabel(want) || `Chain ${want}`;
     const curLabel = chainLabel(currentChain) || `Chain ${currentChain}`;
-    actions?.showToast?.(`Request is for ${wantLabel}. You are on ${curLabel}.`, 4000);
+    // Said in the form, where it stays until Review, not in a toast that goes.
+    setErr(`This request is for ${wantLabel}. You are on ${curLabel}.`);
   };
 
   const applyRequest = (req, { source = "request" } = {}) => {
@@ -635,9 +636,9 @@ export function sendFormView(ov, { state, actions } = {}) {
         });
         if (!payload) return;
         const ok = maybeDecodeRequest(payload, { source: "qr" });
-        if (!ok) actions?.showToast?.("Unrecognized QR code", 2500);
+        if (!ok) setErr("This QR code isn't a Dusk account, address or request.");
       } catch (e) {
-        actions?.showToast?.(e?.message ?? String(e), 3000);
+        setErr(e?.message ?? String(e));
       }
     },
   });

@@ -209,6 +209,18 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
   return st;
 }
 
+// An action's error, said under it rather than in a toast that goes.
+function inlineError() {
+  const el = h("div", { class: "field-error", role: "alert", hidden: true });
+  return {
+    el,
+    show(text) {
+      el.textContent = text || "";
+      el.hidden = !text;
+    },
+  };
+}
+
 export function assetsSectionsView(ov, { state, actions } = {}) {
   const st = ensureTokenBalancesLoaded(ov, { state, actions });
   const hidden = balancesHidden(ov);
@@ -385,10 +397,11 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
         state.route = "home";
         actions?.render?.({ forceRefresh: true }).catch(() => {});
       } catch (e) {
-        actions?.showToast?.(e?.message ?? String(e), 2500);
+        addError.show(e?.message ?? String(e));
       }
     },
   });
+  const addError = inlineError();
   const metaBox = st.meta
     ? h("div", { class: "box" }, [
         h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Name" }), h("code", { text: String(st.meta?.name ?? "—") })]),
@@ -403,6 +416,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
       fieldLabel(input, "Contract ID"),
       input,
       h("div", { class: "btnrow" }, [lookupBtn, addBtn]),
+      addError.el,
       st.error ? h("div", { class: "err", text: String(st.error) }) : null,
       metaBox,
     ].filter(Boolean)),
@@ -511,10 +525,11 @@ export function assetAddNftView(ov, { state, actions } = {}) {
         state.route = "home";
         actions?.render?.({ forceRefresh: true }).catch(() => {});
       } catch (e) {
-        actions?.showToast?.(e?.message ?? String(e), 2800);
+        importError.show(e?.message ?? String(e));
       }
     },
   });
+  const importError = inlineError();
   const infoBox = st.info
     ? (() => {
         const me = String(ov?.accounts?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "").trim();
@@ -541,6 +556,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
       fieldLabel(tokenIdInput, "Token ID"),
       tokenIdInput,
       h("div", { class: "btnrow" }, [lookupBtn, importBtn]),
+      importError.el,
       st.error ? h("div", { class: "err", text: String(st.error) }) : null,
       infoBox,
     ].filter(Boolean)),
@@ -644,9 +660,10 @@ export function assetTokenView(ov, { state, actions } = {}) {
       state.route = "asset_token_confirm";
       actions?.render?.().catch(() => {});
     } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 2800);
+      transferError.show(e?.message ?? String(e));
     }
   };
+  const transferError = inlineError();
 
   const reviewApprove = async ({ max = false } = {}) => {
     try {
@@ -689,9 +706,10 @@ export function assetTokenView(ov, { state, actions } = {}) {
       state.route = "asset_token_confirm";
       actions?.render?.().catch(() => {});
     } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 2800);
+      approveError.show(e?.message ?? String(e));
     }
   };
+  const approveError = inlineError();
 
   const tokenHero = h("div", { class: "box asset-token-hero" }, [
     h("div", { class: "asset-token-head" }, [
@@ -749,6 +767,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     transferToInput,
     fieldLabel(transferAmountInput, "Amount"),
     transferAmountInput,
+    transferError.el,
     reviewTransferBtn,
   ]);
 
@@ -796,6 +815,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
       approveAmountInput,
       approveMaxBtn,
     ]),
+    approveError.el,
     reviewApproveBtn,
     h("div", {
       class: "asset-action-note",

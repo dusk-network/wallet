@@ -2,6 +2,7 @@ import {
   UI_DISPLAY_DECIMALS,
   formatLuxToDusk,
   formatLuxShort,
+  groupThousands,
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
@@ -166,17 +167,20 @@ export function homeView(ov, { state, actions } = {}) {
       }
     },
   });
-  const balanceLabel = bracketTitle({
-    class: "balance-sub balance-label",
-    text: heroLabel,
-    action: [eyeBtn, refreshBtn],
-  });
+  // "Total balance", then the eye and Refresh.
+  const balanceLabel = h("div", { class: "balance-label" }, [
+    h("span", { class: "balance-label__text", text: heroLabel }),
+    eyeBtn,
+    refreshBtn,
+  ]);
 
-  const balanceSubRow = h("div", { class: "balance-subrow" }, [balanceLabel]);
+  // "Public 1,484.92 · Shielded 0" under the total.
   const balanceSplit = h("div", { class: "balance-split" }, [
     h("div", { class: "balance-split-item" }, [
       h("span", { class: "balance-split-label", text: "Public" }),
-      h("span", { class: "balance-split-value", title: hidden ? undefined : balFull }, [balance(hidden, balDusk)]),
+      h("span", { class: "balance-split-value", title: hidden ? undefined : groupThousands(balFull) }, [
+        balance(hidden, groupThousands(balDusk)),
+      ]),
     ]),
     showShielded
       ? h("div", { class: "balance-split-item" }, [
@@ -185,8 +189,8 @@ export function homeView(ov, { state, actions } = {}) {
             text: shieldStatus ? `Shielded · ${shieldStatus}` : "Shielded",
             title: shieldStatusTitle,
           }),
-          h("span", { class: "balance-split-value", title: hidden ? undefined : shieldFull }, [
-            balance(hidden, shieldDusk),
+          h("span", { class: "balance-split-value", title: hidden ? undefined : groupThousands(shieldFull) }, [
+            balance(hidden, groupThousands(shieldDusk)),
           ]),
         ])
       : null,
@@ -249,11 +253,19 @@ export function homeView(ov, { state, actions } = {}) {
     ]),
   ]);
 
-  // Balance hero is a single surface block. Action buttons are intentionally
-  // rendered *outside* this container (more MetaMask-like, less "card-in-card").
+  // The balance sits on the page, the amount large with a muted unit; the
+  // round actions follow it.
+  const heroText = groupThousands(heroAmt);
   const hero = h("div", { class: "home-balance home-hero" }, [
-    balanceSubRow,
-    h("div", { class: "balance-amount", title: hidden ? undefined : heroAmtTitle }, [balance(hidden, heroAmt)]),
+    balanceLabel,
+    h(
+      "div",
+      {
+        class: !hidden && heroText.length > 11 ? "balance-amount is-long" : "balance-amount",
+        title: hidden ? undefined : groupThousands(heroAmtTitle),
+      },
+      [balance(hidden, heroText), heroAmt === "—" ? null : h("span", { class: "balance-unit", text: " DUSK" })].filter(Boolean)
+    ),
     balanceSplit,
     ov?.balanceError
       ? h("div", { class: "muted", text: `Balance error: ${ov.balanceError}` })

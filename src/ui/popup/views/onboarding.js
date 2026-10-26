@@ -184,14 +184,14 @@ export function onboardingCreatePhraseView({ state, actions } = {}) {
     },
   });
 
+  // Copy waits for Reveal: it can't be pressed before.
   const copyBtn = h("button", {
     class: "btn-outline",
     text: "Copy",
+    disabled: !state.onboard.reveal,
+    title: state.onboard.reveal ? undefined : "Reveal the phrase first",
     onclick: async () => {
-      if (!state.onboard.reveal) {
-        actions?.showToast?.("Reveal first");
-        return;
-      }
+      if (!state.onboard.reveal) return;
       const ok = await copyToClipboard(mnemonic);
       actions?.showToast?.(ok ? "Copied recovery phrase" : "Copy failed");
     },
