@@ -858,8 +858,20 @@ describe("a request for another network", () => {
     await settle();
     expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
 
-    // A recipient typed instead drops it.
-    typeInto(form.to, BOB.account);
+    // Review, drawn anew from the draft, says it too, and so does Send drawn again.
+    expect(state.route).toBe("confirm");
+    expect(state.draft.requestChainId).toBe("dusk:1");
+    mount(state);
+    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+    state.route = "send";
+    const again = mount(state);
+    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+
+    // A recipient typed instead drops it, for good.
+    typeInto(again.to, BOB.account);
+    expect(note()).toBeUndefined();
+    expect(state.draft.requestChainId).toBeUndefined();
+    mount(state);
     expect(note()).toBeUndefined();
   });
 });

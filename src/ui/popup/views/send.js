@@ -224,20 +224,16 @@ export function sendFormView(ov, { state, actions } = {}) {
     checkAmount();
   }
 
-  const currentChain = normalizeChainId(chainIdFromNodeUrl(ov?.nodeUrl ?? ""));
-
   // A request for another network says so under the recipient, and stays
-  // until the recipient changes: Review doesn't clear it.
+  // until the recipient changes: its network is kept with the draft, so
+  // Review and any redraw say it too.
   const chainNote = h("div", { class: "field-error", role: "alert", hidden: true });
   const warnChainMismatch = (reqChain) => {
-    const want = normalizeChainId(reqChain);
-    const mismatch = Boolean(want && currentChain && want !== currentChain);
-    // Labelled from the full chain ids ("dusk:1"): the bare references don't name a network.
-    const wantLabel = chainLabel(reqChain) || `Chain ${want}`;
-    const curLabel = chainLabel(chainIdFromNodeUrl(ov?.nodeUrl ?? "")) || `Chain ${currentChain}`;
-    chainNote.textContent = mismatch ? `This request is for ${wantLabel}. You are on ${curLabel}.` : "";
-    chainNote.hidden = !mismatch;
+    const text = chainMismatchText(reqChain, ov?.nodeUrl);
+    chainNote.textContent = text;
+    chainNote.hidden = !text;
   };
+  if (state.draft?.to) warnChainMismatch(state.draft.requestChainId);
 
   const applyRequest = (req, { source = "request" } = {}) => {
     if (!req?.to) return false;
@@ -270,6 +266,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       if (req.memo) nextDraft.memo = memo.value;
     }
 
+    nextDraft.requestChainId = req.chainId || undefined;
     state.draft = nextDraft;
 
     warnChainMismatch(req.chainId);
@@ -664,6 +661,8 @@ export function sendFormView(ov, { state, actions } = {}) {
     chainNote.hidden = true;
     updateToType();
     syncDraft();
+    // Another recipient: the request's network no longer applies.
+    if (state.draft) state.draft.requestChainId = undefined;
   }
   to.addEventListener("input", onRecipientInput);
   memo.addEventListener("input", syncDraft);
@@ -818,6 +817,8 @@ export function sendFormView(ov, { state, actions } = {}) {
           amountDusk: amount.value.trim(),
           memo: memoVal,
           gas: prevGas,
+          // A request link's network, for Review to say so when it isn't this one.
+          requestChainId: state.draft?.requestChainId,
         };
         state.route = "confirm";
         await actions?.render?.();
@@ -854,6 +855,22 @@ export function sendFormView(ov, { state, actions } = {}) {
       h("div", { class: "btnrow" }, [nextBtn]),
     ]),
   ].filter(Boolean);
+}
+
+/**
+ * "This request is for Mainnet. You are on Testnet." for a request link of
+ * another network than the wallet's, else "".
+ * @param {string} [reqChain] - the request's chain ID, "dusk:1"
+ * @param {string} [nodeUrl] - the wallet's node
+ * @returns {string}
+ */
+export function chainMismatchText(reqChain, nodeUrl) {
+  const want = normalizeChainId(reqChain);
+  const current = chainIdFromNodeUrl(String(nodeUrl ?? ""));
+  const have = normalizeChainId(current);
+  if (!want || !have || want === have) return "";
+  // Labelled from the full chain ids ("dusk:1"): the bare references don't name a network.
+  return `This request is for ${chainLabel(reqChain) || `Chain ${want}`}. You are on ${chainLabel(current) || `Chain ${have}`}.`;
 }
 
 /**
@@ -1085,6 +1102,10 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         // What a public send shows everyone; a shielded one has no such line.
         privacy === "public" ? visibleLine : null,
       ].filter(Boolean)),
+      // A request link for another network, still said before Confirm.
+      chainMismatchText(d.requestChainId, ov?.nodeUrl)
+        ? h("div", { class: "field-error send-chain-note", role: "alert", text: chainMismatchText(d.requestChainId, ov?.nodeUrl) })
+        : null,
       h("div", { class: "group" }, [
         kv("To", h("span", { class: "review-to" }, [toNames, h("span", { class: "mono review-to__address", text: toAddr })]), "kv--wrap"),
         kv("From", h("span", {}, [fromName, h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
