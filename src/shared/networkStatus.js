@@ -277,15 +277,31 @@ export async function resetNetworkStatus() {
 // Polling & Helpers
 // ============================================================================
 
+// The check under way for each set of endpoints: a caller while it runs, as
+// each popup render that finds the status stale, gets its answer rather than
+// probing every endpoint again.
+const runningChecks = new Map();
+
 /**
  * Check all endpoints and update status in storage.
  * This is designed to be called periodically from the background.
  * Each probe is wrapped in its own try/catch to ensure one failure
- * doesn't block the others.
+ * doesn't block the others. Callers while a check of the same endpoints
+ * runs share it.
  * @param {{nodeUrl: string, proverUrl: string, archiverUrl: string}} endpoints
  * @returns {Promise<NetworkStatusState>}
  */
-export async function checkAllEndpoints({ nodeUrl, proverUrl, archiverUrl }) {
+export function checkAllEndpoints(endpoints) {
+  const key = JSON.stringify([endpoints?.nodeUrl ?? "", endpoints?.proverUrl ?? "", endpoints?.archiverUrl ?? ""]);
+  let check = runningChecks.get(key);
+  if (!check) {
+    check = runEndpointChecks(endpoints).finally(() => runningChecks.delete(key));
+    runningChecks.set(key, check);
+  }
+  return check;
+}
+
+async function runEndpointChecks({ nodeUrl, proverUrl, archiverUrl }) {
   // Mark as checking
   await setNetworkStatus({
     nodeStatus: "checking",
