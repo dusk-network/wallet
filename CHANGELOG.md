@@ -43,7 +43,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Set section heads and balance labels in small capitals, the heads between grey brackets.
 - Showed links and a transaction's ID in blue.
-- Set block heights in the code font.
+- Set addresses, IDs and block heights in Söhne Mono.
 - Wrote times of day in the browser's own format, as the web wallet does.
 - Shortened Staking's section head to Stake.
 - Warned on a contact's page when its saved `.dusk` name has expired, isn't registered or has no address any more.

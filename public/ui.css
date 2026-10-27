@@ -1,3 +1,21 @@
+/* Söhne Mono, as the web wallet and the explorer ship it (the same files):
+   addresses, IDs, heights and the ledger's labels. */
+@font-face {
+  font-family: "Soehne Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("fonts/soehne-mono-buch.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Soehne Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("fonts/soehne-mono-kraftig.woff2") format("woff2");
+}
+
 :root {
   --dusk-smoky-black: #101010;
   --dusk-black-beauty: #27272A;
@@ -39,19 +57,19 @@
   --radius-lg: 16px;
   --radius-pill: 999px;
 
-  /* No web font ships with the extension. Each system's own interface font
-     reads close to Söhne: SF on macOS, Segoe UI on Windows, Ubuntu, Cantarell
-     or Noto on Linux. */
+  /* The text in each system's own interface font, which reads close to
+     Söhne: SF on macOS, Segoe UI on Windows, Ubuntu, Cantarell or Noto on
+     Linux. */
   --font-sans: "Sohne", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
     "Ubuntu Sans", Ubuntu, Cantarell, "Noto Sans", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
-  /* Addresses and hashes, in each system's code font, evenly spaced. Söhne
-     Mono stays out: its narrow m leaves what reads as a space ("Rprm eo"). */
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas,
+  /* Addresses, hashes and the ledger's labels in Söhne Mono, evenly spaced,
+     with each system's code font while it loads or where it can't. */
+  --font-mono: "Soehne Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas,
     "Ubuntu Sans Mono", "Ubuntu Mono", "Roboto Mono", "Noto Sans Mono", "Liberation Mono",
     "DejaVu Sans Mono", monospace;
   /* The ledger's type, as the explorer and the web wallet set it: section
-     heads and the labels of balances in small capitals of the code font
-     above, a little apart. */
+     heads and the labels of balances in small capitals of Söhne Mono, a
+     little apart. */
   --ledger-size: 11px;
   --ledger-tracking: 0.08em;
   /* The chain's blue: a text link that leads somewhere, a link to a chain

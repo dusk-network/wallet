@@ -104,16 +104,15 @@ describe("a section's head", () => {
     ]);
   });
 
-  it("is in the ledger's type, in the system's code font, with brackets in the muted text colour", async () => {
+  it("is in the ledger's type, in Söhne Mono, with brackets in the muted text colour", async () => {
     const sheet = await css();
     const head = rule(sheet, ".bracket-title");
     expect(head).toContain("font-family: var(--font-mono);");
     expect(head).toContain("letter-spacing: var(--ledger-tracking);");
     expect(head).toContain("text-transform: uppercase;");
     expect(rule(sheet, ".bracket-title__bracket")).toContain("color: var(--text-muted);");
-    // No web font: Söhne Mono's licence isn't cleared for the extension.
-    expect(sheet).not.toContain("@font-face");
-    expect(sheet).not.toMatch(/Soehne Mono|Söhne Mono/);
+    // Söhne Mono, the extension's own, as the web wallet and the explorer set it.
+    expect(sheet).toMatch(/--font-mono: "Soehne Mono", ui-monospace,/);
   });
 });
 
