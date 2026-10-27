@@ -375,8 +375,11 @@ export function addressBookView(ov, { state, actions } = {}) {
     const now = Date.now();
     const all = activityRows(ov, state);
     const times = blockTimes(all);
+    // A token's counterparties too: whom it went to or came from, and whom an approval lets spend it.
     const rows = all.filter((tx) =>
-      [tx?.to, tx?.from, tx?.counterparty, tx?.asset?.to].some((a) => a && lower(a) === lower(addr))
+      [tx?.to, tx?.from, tx?.counterparty, tx?.asset?.to, tx?.asset?.from, tx?.asset?.spender].some(
+        (a) => typeof a === "string" && a && lower(a) === lower(addr)
+      )
     );
     const activity = h("section", { class: "contacts-section" }, [
       h("h2", { class: "contacts-section-title", text: "Activity" }),

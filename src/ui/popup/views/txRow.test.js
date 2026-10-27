@@ -104,6 +104,30 @@ describe("what a row says", () => {
     expect(read({ kind: TX_KIND.UNSTAKE, status: "unknown" })).toEqual(["stake", "Unstake", "Staking · 14:32", "", "Not confirmed"]);
   });
 
+  it("names whom a token approval lets spend, and shows an allowance of 0 as a revoke", () => {
+    const spender = "c".repeat(40);
+    const contactName = (address) => (address === spender ? "Jan (flour)" : "");
+    const token = { type: "DRC20", symbol: "TKN", decimals: 2, op: "approve", spender };
+    const approve = describeTx({ kind: TX_KIND.CONTRACT_CALL, status: "executed", asset: { ...token, valueUnits: "1234" } }, { contactName });
+    expect([approve.lead, approve.name, approve.address, subText(approve, "14:32"), amountText(approve.amount, false)]).toEqual([
+      "Approved TKN for",
+      "Jan (flour)",
+      spender,
+      "Approval · 14:32",
+      "12.34 TKN",
+    ]);
+    const revoke = describeTx({ kind: TX_KIND.CONTRACT_CALL, status: "executed", asset: { ...token, valueUnits: "0" } });
+    expect([revoke.lead, revoke.name, revoke.isAddress, subText(revoke, "14:32"), amountText(revoke.amount, false)]).toEqual([
+      "Revoked TKN for",
+      "cccccc…cccccc",
+      true,
+      "Revoke · 14:32",
+      "0 TKN",
+    ]);
+    // Without a spender on record, the token and what it allows.
+    expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, status: "executed", asset: { ...token, spender: undefined, valueUnits: "0" } }).name).toBe("Revoke TKN");
+  });
+
   it("leads with a saved contact's own name, then its .dusk name, else the .dusk name", () => {
     const to = "b".repeat(40);
     const contactName = (address) => (address === to ? "Jan (flour)" : "");

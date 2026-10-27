@@ -151,6 +151,22 @@ describe("contacts", () => {
     expect(view.state.addressBook.view).toBe("detail");
   });
 
+  it("lists the token approvals that let the contact spend, in its Activity", () => {
+    const approval = {
+      hash: "ef".repeat(32),
+      kind: TX_KIND.CONTRACT_CALL,
+      status: "executed",
+      submittedAt: 3,
+      profileIndex: 0,
+      asset: { type: "DRC20", op: "approve", symbol: "TKN", decimals: 0, valueUnits: "5", spender: ACCOUNT },
+    };
+    const other = { ...approval, hash: "aa".repeat(32), asset: { ...approval.asset, spender: OWN } };
+    mount({ view: "detail", detailId: "1", items: [ALICE] }, { nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs: [approval, other] });
+    const rows = dom.document.body.querySelectorAll(".contact-detail .tx-row");
+    expect(rows.map((r) => visibleText(r.querySelector(".tx-name")))).toEqual(["Alice"]);
+    expect(visibleText(rows[0].querySelector(".tx-sub"))).toMatch(/^Approval · /);
+  });
+
   it("marks an hour-old .dusk name checked on the contact as saved, never writing back the copy it showed", async () => {
     const shop = { id: "2", name: "Shop", address: ADDRESS, type: "address", duskName: "alice-shop.dusk", checkedAt: Date.now() - NAME_RECHECK_MS - 1 };
     mount({ view: "detail", detailId: "2", items: [shop] });

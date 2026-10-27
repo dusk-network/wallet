@@ -234,12 +234,19 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
         amount: units !== "0" ? { sign: MINUS, value: units, unit: sym } : null,
       };
     } else if (op === "approve") {
+      // Whom it lets spend the token, as a counterparty; an allowance of 0 takes it back.
+      const p = party(asset.spender);
+      const revoke = !asset.isMax && units === "0" && (asset.valueUnits ?? asset.value) != null;
       d = {
         icon: "call",
         category: "sent",
-        name: `Approve ${sym}`,
-        word: "Approval",
-        amount: asset.isMax ? { sign: "", value: "Unlimited", unit: sym, text: true } : units !== "0" ? { sign: "", value: units, unit: sym } : null,
+        ...(p ? { ...p, lead: revoke ? `Revoked ${sym} for` : `Approved ${sym} for` } : { name: `${revoke ? "Revoke" : "Approve"} ${sym}` }),
+        word: revoke ? "Revoke" : "Approval",
+        amount: asset.isMax
+          ? { sign: "", value: "Unlimited", unit: sym, text: true }
+          : units !== "0" || revoke
+          ? { sign: "", value: units, unit: sym }
+          : null,
       };
     } else {
       d = { icon: "call", category: "sent", name: `${sym} ${fn || "call"}`, word: "Contract", amount: null };
