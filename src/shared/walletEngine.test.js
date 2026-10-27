@@ -339,17 +339,111 @@ vi.mock("@dusk/w3sper", () => {
     // no-op
   }
 
+  // A data-driver contract as w3sper's: an argument encoded and an answer
+  // decoded by its driver (here as JSON), a call sent as RUES sends it.
+  class Contract {
+    #id;
+    #driver;
+    #network;
+
+    constructor({ contractId, driver, network }) {
+      this.#id = Array.from(contractId, (b) => b.toString(16).padStart(2, "0")).join("");
+      this.#driver = driver;
+      this.#network = network;
+    }
+
+    get id() {
+      return this.#id;
+    }
+
+    async encode(_fnName, args) {
+      return new TextEncoder().encode(JSON.stringify(args ?? null));
+    }
+
+    get call() {
+      return new Proxy(
+        {},
+        {
+          get: (_t, fnName) => async (args) => {
+            const res = await fetch(new URL(`/on/contracts:${this.#id}/${String(fnName)}`, this.#network.url), {
+              method: "POST",
+              body: await this.encode(fnName, args),
+            });
+            return this.#driver.decodeOutputFn(String(fnName), new Uint8Array(await res.arrayBuffer()));
+          },
+        }
+      );
+    }
+  }
+
+  const dataDrivers = {
+    DataDriverRegistry: class {
+      register() {}
+      async get() {
+        return { decodeOutputFn: (_fnName, bytes) => JSON.parse(new TextDecoder().decode(bytes)) };
+      }
+    },
+  };
+
   return {
     Bookkeeper,
     Bookmark,
+    Contract,
     Network,
     ProfileGenerator,
     AddressSyncer,
     AccountSyncer,
     STAKE: "stake",
+    dataDrivers,
     useAsProtocolDriver,
   };
 });
+
+// The calls of a Multicall for Dusk `aggregate` envelope (rkyv 0.7): contract,
+// function and argument of each.
+function envelopeCalls(body) {
+  const b = new Uint8Array(body);
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const root = b.length - 8;
+  const array = root + v.getInt32(root, true);
+  const text = new TextDecoder();
+  const calls = [];
+  for (let i = 0; i < v.getUint32(root + 4, true); i++) {
+    const slot = array + i * 56;
+    const last = b[slot + 39];
+    const at = slot + 32 + v.getInt32(slot + 36, true);
+    const name = (last & 0x80) === 0 ? b.subarray(slot + 32, slot + 32 + last) : b.subarray(at, at + v.getUint32(slot + 32, true));
+    const args = slot + 40 + v.getInt32(slot + 40, true);
+    calls.push({
+      contract: Array.from(b.subarray(slot, slot + 32), (x) => x.toString(16).padStart(2, "0")).join(""),
+      fnName: text.decode(name),
+      args: text.decode(b.subarray(args, args + v.getUint32(slot + 44, true))),
+    });
+  }
+  return calls;
+}
+
+// An `aggregate` reply as the contract writes it (rkyv 0.7): each result's
+// bytes, then one 16-byte slot per result, then the root.
+function aggregateReply(results) {
+  const align = (n, to) => Math.ceil(n / to) * to;
+  const slots = align(results.reduce((n, r) => n + r.length, 0), 4);
+  const root = align(slots + 16 * results.length, 8);
+  const out = new Uint8Array(root + 16);
+  const view = new DataView(out.buffer);
+  let at = 0;
+  results.forEach((r, i) => {
+    const slot = slots + 16 * i;
+    out.set(r, at);
+    view.setInt32(slot + 4, at - (slot + 4), true);
+    view.setUint32(slot + 8, r.length, true);
+    at += r.length;
+  });
+  view.setBigUint64(root, 7n, true);
+  view.setInt32(root + 8, slots - (root + 8), true);
+  view.setUint32(root + 12, results.length, true);
+  return out;
+}
 
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -1247,6 +1341,56 @@ describe("walletEngine", () => {
       nullifiers: [new Uint8Array([0xdd])],
     });
     expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xunshield")).toEqual(["dd"]);
+  });
+
+  it("reads Sozu's hub names in one Multicall for Dusk query, then its pool and stDUSK in one", async () => {
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const MULTICALL = "93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4";
+    const ids = {
+      pool: "6fdfdc713a18fc6ca2ad20eb2b4a3305a935ef47d6a872d9a4df8bc9fd9d169e",
+      relayer: "1cc415d05b1cfbf2583bf2e8a0e39b2c768d263ef92d6a21a4787f76c6afa924",
+      substrate: "bc6f50f7404d098cdd1117b15dddab6f6f3dad01c5ce3c5ce9b68a8b60bc4c1d",
+      "staked-dusk": "eb158fce".padEnd(64, "0"),
+      vault: "ab".repeat(32),
+    };
+    const answer = (contract, fnName, args) => {
+      if (fnName === "contract") return ids[args];
+      if (fnName === "exchange_rate") return { numerator: "3", denominator: "1" };
+      return contract === ids.pool ? "5" : "7";
+    };
+    const json = (value) => new TextEncoder().encode(JSON.stringify(value));
+    const node = vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith(`/on/contracts:${MULTICALL}/aggregate`)) {
+        const calls = envelopeCalls(init.body);
+        return new Response(aggregateReply(calls.map((c) => json(answer(c.contract, c.fnName, JSON.parse(c.args))))));
+      }
+      const read = url.match(/\/on\/contracts:([0-9a-f]{64})\/(\w+)$/);
+      if (read) return new Response(json(answer(read[1], read[2], JSON.parse(new TextDecoder().decode(init.body)))));
+      return new Response(new ArrayBuffer(8));
+    });
+    vi.stubGlobal("fetch", node);
+
+    const status = await engine.getSozuStatus();
+
+    expect(status.configured).toBe(true);
+    expect(status.contracts.pool).toBe(ids.pool);
+    expect(status.pool.exchangeRate).toBe(3);
+    expect(status.position).toEqual({ poolBalanceLux: "5", stDuskBalanceLux: "7" });
+    const contractReads = node.mock.calls.map(([input]) => String(input)).filter((url) => url.includes("/on/contracts:"));
+    expect(contractReads).toEqual([
+      `${NETWORK_KEY}/on/contracts:${MULTICALL}/aggregate`,
+      `${NETWORK_KEY}/on/contracts:${MULTICALL}/aggregate`,
+    ]);
+    const [names, reads] = node.mock.calls.filter(([input]) => String(input).includes("/on/contracts:"));
+    expect(envelopeCalls(names[1].body).map((c) => c.args)).toEqual(
+      ["pool", "relayer", "substrate", "staked-dusk", "vault"].map((name) => JSON.stringify(name))
+    );
+    expect(envelopeCalls(reads[1].body).map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)).toEqual([
+      "6fdfdc71.exchange_rate",
+      "6fdfdc71.balance_of",
+      "eb158fce.balance_of",
+    ]);
   });
 
   it("returns owner-separated stake status for local owner profiles", async () => {
