@@ -196,17 +196,33 @@ async function decide(decision, approvedParams) {
   window.close();
 }
 
+// What a window says when its answer didn't reach the wallet.
+function answerFailedText(e) {
+  const reason = String(e?.message ?? e ?? "").trim();
+  return reason ? `Couldn't send your answer to the wallet: ${reason}` : "Couldn't send your answer to the wallet. Try again.";
+}
+
 /**
  * Reject and the approve button, side by side. Input that won't do (a gas
- * edit, a missing MAX) says so above them; nothing is sent.
+ * edit, a missing MAX) says so above them; nothing is sent. An answer that
+ * doesn't reach the wallet (Firefox's runtime rejects when the background is
+ * gone) says so there too, and the window stays open to try again.
  */
 function decisionBar({ approveText = "Approve", approveDisabled = false, approveTitle = "", getApprovedParams } = {}) {
   const error = h("div", { class: "field-error ap-actions__error", role: "alert", hidden: true });
+  const answer = async (decision, approvedParams) => {
+    try {
+      await decide(decision, approvedParams);
+    } catch (e) {
+      error.textContent = answerFailedText(e);
+      error.hidden = false;
+    }
+  };
   const rejectBtn = h("button", {
     class: "btn-outline",
     type: "button",
     text: "Reject",
-    onclick: () => decide("reject"),
+    onclick: () => answer("reject"),
   });
   const approveBtn = h("button", {
     class: "btn-primary",
@@ -224,7 +240,7 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
         return;
       }
       error.hidden = true;
-      await decide("approve", approvedParams);
+      await answer("approve", approvedParams);
     },
   });
   return { nodes: [error, rejectBtn, approveBtn], approveBtn, rejectBtn, error };
@@ -398,7 +414,7 @@ export async function renderNotification() {
         requestHead({ title: "Set up Dusk Wallet first", sub: "Create or import a recovery phrase, then try again on the site." }),
       ],
       [
-        h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject") }),
+        h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject").catch((e) => renderError(answerFailedText(e))) }),
         h("button", {
           class: "btn-primary",
           type: "button",
@@ -522,7 +538,7 @@ export async function renderNotification() {
           busyNote,
         ]),
       ],
-      [h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject") }), unlockBtn]
+      [h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject").catch((e) => showError(answerFailedText(e))) }), unlockBtn]
     );
   }
 

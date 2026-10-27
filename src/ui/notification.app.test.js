@@ -278,6 +278,29 @@ describe("typed-data approval", () => {
 });
 
 describe("decisions", () => {
+  it("says so when an answer doesn't reach the wallet, and stays open to try again", async () => {
+    // Firefox's runtime rejects when the background is gone.
+    mocks.answers.DUSK_PENDING_DECISION = async () => {
+      throw new Error("Receiving end does not exist.");
+    };
+    const failed = "Couldn't send your answer to the wallet: Receiving end does not exist.";
+    await render("connect", { requestedProfiles: true });
+    const error = () => bar().querySelector(".ap-actions__error");
+    button("Connect").click();
+    await vi.waitFor(() => expect(error().hidden).toBe(false));
+    expect(error().textContent).toBe(failed);
+    button("Reject").click();
+    await settle();
+    expect(error().textContent).toBe(failed);
+    expect(dom.window.close).not.toHaveBeenCalled();
+
+    // Locked, Reject says it under the password.
+    await render("connect", { requestedProfiles: true }, { isUnlocked: false, accounts: [], duskNames: {} });
+    button("Reject").click();
+    await vi.waitFor(() => expect(app.querySelector("#approval-unlock-error").hidden).toBe(false));
+    expect(app.querySelector("#approval-unlock-error").textContent).toBe(failed);
+  });
+
   it("sends the approval with what the window collected, then closes", async () => {
     await render("connect", { requestedProfiles: true });
     button("Connect").click();
