@@ -162,6 +162,11 @@ describe("staking overview", () => {
     expect(visibleText(body.querySelector(".stake-avail"))).toBe("1,482.9383 DUSK available to stake, from your public balance");
   });
 
+  it("heads the two choices Stake, short in the ledger's capitals, as the web wallet does", () => {
+    popup({ route: "stake", staking: staking() });
+    expect(body.querySelectorAll(".section-head .bracket-title").map(screenReaderText)).toEqual(["Stake"]);
+  });
+
   it("says why Unstake and Claim rewards can't be pressed", () => {
     popup({ route: "stake", staking: staking() });
     const sum = body.querySelector(".stake-sum");

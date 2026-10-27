@@ -559,7 +559,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
     subnav({ title: "Staking", onBack }),
     statusLine(st),
     summary,
-    h("div", { class: "section-head" }, [bracketTitle({ text: "Choose how to stake" })]),
+    h("div", { class: "section-head" }, [bracketTitle({ text: "Stake" })]),
     choices,
     available,
     advanced,

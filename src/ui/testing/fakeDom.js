@@ -538,9 +538,11 @@ class FakeDocument {
  * @param {object} [opts]
  * @param {Record<string, (el: object) => void>} [opts.elements] - custom tags to upgrade
  * @param {string} [opts.pathname] - the page's path, as env.js reads it
+ * @param {string} [opts.language] - the browser's language, which times follow:
+ *   British English by default, with its 24-hour clock
  * @returns {{ document: FakeDocument, window: object, clipboard: { writeText: Function } }}
  */
-export function installFakeDom({ elements, pathname = "/index.html" } = {}) {
+export function installFakeDom({ elements, pathname = "/index.html", language = "en-GB" } = {}) {
   const document = new FakeDocument({ elements });
   const window = {
     innerWidth: 400,
@@ -557,7 +559,7 @@ export function installFakeDom({ elements, pathname = "/index.html" } = {}) {
   vi.stubGlobal("document", document);
   vi.stubGlobal("window", window);
   vi.stubGlobal("location", { pathname, search: "" });
-  vi.stubGlobal("navigator", { clipboard });
+  vi.stubGlobal("navigator", { clipboard, language });
   vi.stubGlobal("requestAnimationFrame", (fn) => setTimeout(() => fn(Date.now()), 0));
   vi.stubGlobal("alert", vi.fn());
   return { document, window, clipboard };

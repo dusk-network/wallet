@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../../../shared/constants.js";
 import releases from "../../../shared/dusk-domains-releases.json";
 import { amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
 
 process.env.TZ = "UTC";
+// Times follow the browser's language: British English, with its 24-hour clock.
+beforeAll(() => vi.stubGlobal("navigator", { language: "en-GB" }));
+afterAll(() => vi.unstubAllGlobals());
 const TESTNET = "https://testnet.nodes.dusk.network";
 const NOW = Date.parse("2026-10-26T15:00:00Z");
 const at = (iso) => Date.parse(iso);

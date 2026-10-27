@@ -117,6 +117,17 @@ describe("a section's head", () => {
   });
 });
 
+describe("a head with a link beside it", () => {
+  it("sets the two on one baseline, as See all beside [ ACTIVITY ]", async () => {
+    const head = rule(await css(), ".section-head");
+    expect(head).toContain("align-items: baseline;");
+    expect(head).not.toContain("align-items: center;");
+    setup("home");
+    const row = body().querySelector(".home-activity .section-head");
+    expect(row.children.map((child) => child.className)).toEqual(["bracket-title", "see-all chain-link"]);
+  });
+});
+
 describe("a sub-page's title", () => {
   it("stays plain, without brackets, in the text font", async () => {
     const title = subnav({ title: "Staking", onBack: () => {} }).querySelector(".subnav-title");

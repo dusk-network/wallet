@@ -43,6 +43,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Set section heads as [ ACTIVITY ], in small capitals between grey brackets, and the balance and stake labels in the same type.
 - Showed See all, View in Dusk explorer, the docs links and a transaction's ID in blue, and block heights in the code font.
+- Wrote times of day as the browser's language writes them, as the web wallet does: 08:10 AM in American English, 08:10 in Dutch.
+- Shortened Staking's Choose how to stake head to Stake.
 - Warned on a contact's page when its saved `.dusk` name has expired, isn't registered or has no address any more.
 - Named whom a token approval lets spend in Activity, showed an allowance of 0 as a revoke, and listed approvals in the spender's contact Activity.
 - Named the eye button Show balances while balances are hidden.
@@ -113,6 +115,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Fixed See all and the other links beside a section's head sitting higher than the head.
 - Hid controls that showed while hidden: Review's Use the network's price, Max on an empty Send, and Settings' custom gas fields when off.
 - Kept a profile label being typed when Settings redraws, and saved it when the field is left.
 - Made the profile and network menus work from the keyboard.
