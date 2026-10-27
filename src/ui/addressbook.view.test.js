@@ -176,6 +176,24 @@ describe("contacts", () => {
     expect(isShown(dom.document.body.querySelector(".contact-name-check"))).toBe(false);
   });
 
+  it.each([
+    ["expired", "alice-shop.dusk has expired. Edit the contact before you send to it."],
+    ["not_registered", "alice-shop.dusk isn't registered. Edit the contact before you send to it."],
+    ["no_account", "alice-shop.dusk has no address to send to. Edit the contact before you send to it."],
+    ["lookup_failed", null],
+  ])("says so when an hour-old .dusk name no longer resolves (%s), not when the lookup failed", async (reason, text) => {
+    lookupDuskName.mockImplementation((name) => {
+      const result = { ok: false, name, reason };
+      return { result, promise: Promise.resolve(result) };
+    });
+    const shop = { id: "2", name: "Shop", address: ACCOUNT, type: "account", duskName: "alice-shop.dusk", checkedAt: Date.now() - NAME_RECHECK_MS - 1 };
+    mount({ view: "detail", detailId: "2", items: [shop] });
+    await settle();
+    const check = dom.document.body.querySelector(".contact-name-check");
+    expect(isShown(check) ? visibleText(check) : null).toBe(text);
+    expect(markAddressBookNameChecked).not.toHaveBeenCalled();
+  });
+
   it("checks an hour-old .dusk name again, and says so when it points elsewhere now", async () => {
     lookupDuskName.mockImplementation((name) => {
       const result = { ...SHOP, name, account: OWN };

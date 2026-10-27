@@ -41,6 +41,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Warned on a contact's page when its saved `.dusk` name has expired, isn't registered or has no address any more.
 - Named whom a token approval lets spend in Activity, showed an allowance of 0 as a revoke, and listed approvals in the spender's contact Activity.
 - Named the eye button Show balances while balances are hidden.
 - Moved what a site's request makes visible to everyone up, under the amount, in every approval window.

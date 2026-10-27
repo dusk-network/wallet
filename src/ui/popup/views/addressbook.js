@@ -35,6 +35,9 @@ import {
 /** How long a contact's .dusk name stays checked before its page looks it up again. */
 export const NAME_RECHECK_MS = 60 * 60_000;
 
+// Lookups that say a saved name no longer reaches anyone.
+const STALE_NAME_REASONS = new Set(["expired", "not_registered", "no_account"]);
+
 function typeLabel(t) {
   if (t === "address") return "Shielded";
   if (t === "account") return "Public";
@@ -316,13 +319,21 @@ export function addressBookView(ov, { state, actions } = {}) {
     const typ = entry?.type || ProfileGenerator.typeOf(addr) || "unknown";
     const nodeUrl = String(ov?.nodeUrl ?? "");
 
-    // A name an hour old is looked up again: one that points elsewhere now says so.
+    // A name an hour old is looked up again: one that points elsewhere now, or
+    // nowhere (expired, released, without an address), says so. A lookup that
+    // failed says nothing: the name may be fine.
     const nameCheck = h("p", { class: "field-error contact-name-check", role: "alert", hidden: true });
     if (entry.duskName && duskNamesNetwork(nodeUrl) && Date.now() - Number(entry.checkedAt || 0) > NAME_RECHECK_MS) {
       const { result, promise } = lookupDuskName(entry.duskName, { nodeUrl });
       Promise.resolve(result ?? promise)
         .then(async (res) => {
-          if (!res?.ok) return;
+          if (!res?.ok) {
+            if (STALE_NAME_REASONS.has(res?.reason)) {
+              nameCheck.textContent = `${duskNameErrorText({ name: entry.duskName, reason: res.reason })} Edit the contact before you send to it.`;
+              nameCheck.hidden = false;
+            }
+            return;
+          }
           const now = duskNameRecipient(res, { shielded: typ === "address" });
           if (now === addr) {
             // On the contact as saved now: one edited or deleted meanwhile stays so.
