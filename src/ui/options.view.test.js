@@ -195,6 +195,25 @@ describe("settings", () => {
     );
   });
 
+  it("keeps custom gas being typed through a redraw, until it's saved", async () => {
+    const view = await settings({ customGas: { limit: "3000000", price: "2" } });
+    const field = (name) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === name);
+    typeInto(field("Gas limit"), "4500000");
+    typeInto(field("Gas price (LUX)"), "3");
+    // A sync or status push draws Settings again before the field is left.
+    view.draw();
+    expect([field("Gas limit").value, field("Gas price (LUX)").value]).toEqual(["4500000", "3"]);
+    expect(view.actions.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_SET_CUSTOM_GAS" }));
+
+    // Left, it's saved, and the saved gas shows from then on.
+    field("Gas price (LUX)").dispatchEvent(fakeEvent("change"));
+    await settle();
+    expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_CUSTOM_GAS", customGas: { limit: "4500000", price: "3" } });
+    expect(view.state.settings.customGasDraft).toBeNull();
+    view.draw();
+    expect([field("Gas limit").value, field("Gas price (LUX)").value]).toEqual(["4500000", "3"]);
+  });
+
   it("keeps Delete all contacts under Advanced, asking first", async () => {
     const view = await settings();
     view.state.addressBook = { loaded: true, items: [{ id: "1", name: "Jan (flour)" }] };

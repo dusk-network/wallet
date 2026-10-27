@@ -355,8 +355,10 @@ export function optionsView(ov, { state, actions } = {}) {
   const custom = normalizeCustomGas(ov?.customGas);
   const gasOn = st.customGasOn ?? Boolean(custom);
   const gasToggle = h("input", { type: "checkbox", id: "custom-gas", checked: gasOn });
-  const limitInput = integerInput({ "aria-label": "Gas limit", placeholder: "Gas limit", value: custom?.limit ?? "2500000" });
-  const priceInput = integerInput({ "aria-label": "Gas price (LUX)", placeholder: "Gas price (LUX)", value: custom?.price ?? "1" });
+  // What's typed stays through a redraw (a sync or status push) until it's saved.
+  const draft = st.customGasDraft ?? null;
+  const limitInput = integerInput({ "aria-label": "Gas limit", placeholder: "Gas limit", value: draft?.limit ?? custom?.limit ?? "2500000" });
+  const priceInput = integerInput({ "aria-label": "Gas price (LUX)", placeholder: "Gas price (LUX)", value: draft?.price ?? custom?.price ?? "1" });
   const gasNote = h("p", { class: "settings-note" });
   const gasError = h("div", { class: "field-error", role: "alert", hidden: true });
   const gasFields = h("div", { class: "settings-gas-fields", hidden: !gasOn }, [
@@ -380,6 +382,9 @@ export function optionsView(ov, { state, actions } = {}) {
       if (res?.error) throw new Error(res.error.message ?? "Couldn't save custom gas");
       if (state.overview) state.overview.customGas = gas;
       if (ov && ov !== state.overview) ov.customGas = gas;
+      // Saved: the fields show what's saved from now on.
+      const kept = st.customGasDraft;
+      if (gas && kept && kept.limit === gas.limit && kept.price === gas.price) st.customGasDraft = null;
     } catch (e) {
       actions?.showToast?.(e?.message ?? String(e), 2500);
     }
@@ -393,8 +398,12 @@ export function optionsView(ov, { state, actions } = {}) {
   };
   limitInput.addEventListener("change", onGasInput);
   priceInput.addEventListener("change", onGasInput);
-  limitInput.addEventListener("input", showGasNote);
-  priceInput.addEventListener("input", showGasNote);
+  const keepDraft = () => {
+    st.customGasDraft = { limit: String(limitInput.value ?? ""), price: String(priceInput.value ?? "") };
+    showGasNote();
+  };
+  limitInput.addEventListener("input", keepDraft);
+  priceInput.addEventListener("input", keepDraft);
   gasToggle.addEventListener("change", () => {
     st.customGasOn = gasToggle.checked;
     gasFields.hidden = !gasToggle.checked;
