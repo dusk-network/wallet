@@ -111,25 +111,43 @@ export const SHIELDED_RETRY_MS = 60_000;
 
 // The profile's shielded history, from the engine, once Moonlight's is shown:
 // worked out once from the notes the shielded sync keeps, then kept. One the
-// wallet couldn't give yet is asked for again: by the next popup, or by a
-// long-lived view once its notes are synced, or a minute later.
+// wallet couldn't give yet, or gave no usable answer for, is asked for again:
+// by the next popup, or by a long-lived view once its notes are synced, or a
+// minute later, by a timer that goes with this activity.
 async function loadShielded(a, state, render) {
   if (a.shieldedAsked || !a.send) return;
   a.shieldedAsked = true;
+  clearTimeout(a.shieldedTimer);
   const again = () => {
     a.shieldedAsked = false;
     a.shieldedRetryAt = Date.now() + SHIELDED_RETRY_MS;
+    clearTimeout(a.shieldedTimer);
+    a.shieldedTimer = setTimeout(() => {
+      if (state.activity === a) loadShielded(a, state, render).catch(() => {});
+    }, SHIELDED_RETRY_MS);
   };
   try {
     const res = await a.send({ type: "DUSK_UI_GET_SHIELDED_HISTORY" });
+    // Another account's activity now: nothing more for this one.
+    if (state.activity !== a) return;
     const result = res?.result;
-    if (state.activity !== a || !Array.isArray(result?.entries) || result.profileIndex !== a.profileIndex) return;
+    // An error, or an answer that isn't this profile's history: asked again later.
+    if (res?.error || !Array.isArray(result?.entries) || result.profileIndex !== a.profileIndex) {
+      again();
+      return;
+    }
     a.shielded = result.entries;
     if (result.pending) again();
     if (result.entries.length) redraw(state, render);
   } catch {
-    again();
+    if (state.activity === a) again();
   }
+}
+
+// Drops the popup's activity, and the shielded retry that goes with it.
+function dropActivity(state) {
+  clearTimeout(state.activity?.shieldedTimer);
+  state.activity = null;
 }
 
 // A render of the same account: its shielded history asked for again once
@@ -199,12 +217,13 @@ async function run(a, state, render) {
 export function ensureActivity(ov, { state, render, send }) {
   const key = activityKey(ov);
   // Locked: what the last account's work brings back is dropped.
-  if (ov?.isUnlocked === false) state.activity = null;
+  if (ov?.isUnlocked === false) dropActivity(state);
   if (!key) return;
   if (state.activity?.key === key) {
     retryShielded(state.activity, ov, state, render);
     return;
   }
+  dropActivity(state);
   const { account, profileIndex } = selected(ov);
   const a = {
     key,
