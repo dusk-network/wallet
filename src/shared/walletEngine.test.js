@@ -379,7 +379,10 @@ vi.mock("@dusk/w3sper", () => {
   const dataDrivers = {
     DataDriverRegistry: class {
       register() {}
-      async get() {
+      async get(key) {
+        // A driver that takes this long (ms) to load, as a cold one does.
+        const ms = globalThis.__W3SPER_DRIVER_DELAYS__?.[key];
+        if (ms) await new Promise((resolve) => setTimeout(resolve, ms));
         return { decodeOutputFn: (_fnName, bytes) => JSON.parse(new TextDecoder().decode(bytes)) };
       }
     },
@@ -465,6 +468,7 @@ describe("walletEngine", () => {
     globalThis.__W3SPER_FAIL_WALLET_ID__ = false;
     globalThis.__W3SPER_LAST_SEEDER__ = null;
     globalThis.__W3SPER_PROFILE_GATE__ = null;
+    globalThis.__W3SPER_DRIVER_DELAYS__ = null;
 
     // walletEngine loads a WASM protocol driver via fetch() on first use.
     vi.stubGlobal(
@@ -495,6 +499,7 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_FAIL_WALLET_ID__;
     delete globalThis.__W3SPER_LAST_SEEDER__;
     delete globalThis.__W3SPER_PROFILE_GATE__;
+    delete globalThis.__W3SPER_DRIVER_DELAYS__;
   });
 
   async function prepareReviewCache(tip = 10n) {
@@ -1343,7 +1348,11 @@ describe("walletEngine", () => {
     expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xunshield")).toEqual(["dd"]);
   });
 
-  it("reads Sozu's hub names in one Multicall for Dusk query, then its pool and stDUSK in one", async () => {
+  it.each([
+    ["at hand", null],
+    ["loading at different times", { sozu_pool: 5, sozu_staked_dusk: 20 }],
+  ])("reads Sozu's hub names in one Multicall for Dusk query, then its pool and stDUSK in one, with drivers %s", async (_, delays) => {
+    globalThis.__W3SPER_DRIVER_DELAYS__ = delays;
     await engine.unlockWithMnemonic(MNEMONIC);
     const MULTICALL = "93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4";
     const ids = {

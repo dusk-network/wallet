@@ -1786,15 +1786,27 @@ async function discoverSozuContracts(network, bootstrap) {
   return Object.fromEntries(entries.filter(([, value]) => value));
 }
 
-async function readSozuPoolState(network, config) {
-  const driver = await getDriver(DRIVER_KEYS.SOZU_POOL);
-  const pool = new Contract({
-    contractId: toContractIdBytes(config.contracts.pool),
+// Sozu's pool and stDUSK token, with both drivers loaded first: the reads made
+// of them right after are then made in one task, and go as one query.
+async function sozuPoolContracts(network, config) {
+  const tokenId = config.contracts["staked-dusk"];
+  const [poolDriver, tokenDriver] = await Promise.all([
+    getDriver(DRIVER_KEYS.SOZU_POOL),
+    tokenId ? getDriver(DRIVER_KEYS.SOZU_STAKED_DUSK) : null,
+  ]);
+  const at = (id, driver) => ({
+    contract: new Contract({ contractId: toContractIdBytes(id), driver, network }),
     driver,
-    network,
   });
+  return {
+    pool: at(config.contracts.pool, poolDriver),
+    token: tokenId ? at(tokenId, tokenDriver) : null,
+  };
+}
+
+async function readSozuPoolState(pool) {
   const exchangeRate = await withTimeout(
-    readSozu(pool, driver, "exchange_rate"),
+    readSozu(pool.contract, pool.driver, "exchange_rate"),
     8_000,
     "Timed out reading Sozu pool exchange rate"
   );
@@ -1802,36 +1814,22 @@ async function readSozuPoolState(network, config) {
 }
 
 // The pool's and the stDUSK token's balances, read together.
-async function readSozuPosition(network, config, profile) {
+async function readSozuPosition(pool, token, profile) {
   const account = profile.account.toString();
-  const readPool = async () => {
-    const poolDriver = await getDriver(DRIVER_KEYS.SOZU_POOL);
-    const pool = new Contract({
-      contractId: toContractIdBytes(config.contracts.pool),
-      driver: poolDriver,
-      network,
-    });
-    return withTimeout(
-      readSozu(pool, poolDriver, "balance_of", account),
+  const [balance, stDuskBalance] = await Promise.all([
+    withTimeout(
+      readSozu(pool.contract, pool.driver, "balance_of", account),
       8_000,
       "Timed out reading Sozu position"
-    );
-  };
-  const readToken = async () => {
-    if (!config.contracts["staked-dusk"]) return "0";
-    const tokenDriver = await getDriver(DRIVER_KEYS.SOZU_STAKED_DUSK);
-    const token = new Contract({
-      contractId: toContractIdBytes(config.contracts["staked-dusk"]),
-      driver: tokenDriver,
-      network,
-    });
-    return withTimeout(
-      readSozu(token, tokenDriver, "balance_of", account),
-      8_000,
-      "Timed out reading stDUSK balance"
-    );
-  };
-  const [balance, stDuskBalance] = await Promise.all([readPool(), readToken()]);
+    ),
+    token
+      ? withTimeout(
+          readSozu(token.contract, token.driver, "balance_of", account),
+          8_000,
+          "Timed out reading stDUSK balance"
+        )
+      : "0",
+  ]);
 
   return parseSozuPosition({ balance, stDuskBalance });
 }
@@ -1883,9 +1881,10 @@ export async function getSozuStatus(params = {}) {
   let position = null;
   let readError = "";
   try {
+    const { pool, token } = await sozuPoolContracts(network, config);
     [poolState, position] = await Promise.all([
-      readSozuPoolState(network, config),
-      readSozuPosition(network, config, profile),
+      readSozuPoolState(pool),
+      readSozuPosition(pool, token, profile),
     ]);
   } catch (e) {
     readError = e?.message ?? String(e);
