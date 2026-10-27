@@ -416,7 +416,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     : null;
 
   const sozuLink = h("button", {
-    class: "text-btn text-btn--inline",
+    class: "text-btn text-btn--inline chain-link",
     type: "button",
     text: "sozu.fi",
     onclick: async () => {

@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
-import { installFakeDom } from "./testing/fakeDom.js";
+import { installFakeDom, screenReaderText, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
 import { homeView } from "./popup/views/home.js";
 
@@ -151,7 +151,9 @@ describe("home balance", () => {
       return document.body.querySelector(".home-get-started");
     };
     const card = draw();
-    expect(card.querySelector(".bracket-title").textContent).toBe("Get your first DUSK");
+    // A section head, its brackets drawn and not read.
+    expect(visibleText(card.querySelector(".bracket-title"))).toBe("[Get your first DUSK]");
+    expect(screenReaderText(card.querySelector(".bracket-title"))).toBe("Get your first DUSK");
     expect(card.querySelector("p").textContent).toBe("Ask someone to send you test DUSK. They need your account, from Receive.");
     card.querySelector("button").click();
     expect(state.route).toBe("receive");

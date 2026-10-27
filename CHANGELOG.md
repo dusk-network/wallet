@@ -41,6 +41,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Set section heads as [ ACTIVITY ], in small capitals between grey brackets, and the balance and stake labels in the same type.
+- Showed See all, View in Dusk explorer, the docs links and a transaction's ID in blue, and block heights in the code font.
 - Warned on a contact's page when its saved `.dusk` name has expired, isn't registered or has no address any more.
 - Named whom a token approval lets spend in Activity, showed an allowance of 0 as a revoke, and listed approvals in the spender's contact Activity.
 - Named the eye button Show balances while balances are hidden.

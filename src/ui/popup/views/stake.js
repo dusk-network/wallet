@@ -546,7 +546,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
           ? kvRow(
               "Active from",
               safeBigInt(pos.info?.amount?.eligibility ?? 0, 0n) > 0n
-                ? `Block ${groupThousands(safeBigInt(pos.info.amount.eligibility, 0n).toString())}`
+                ? ["Block ", h("span", { class: "mono", text: groupThousands(safeBigInt(pos.info.amount.eligibility, 0n).toString()) })]
                 : "Active now"
             )
           : null,
@@ -693,7 +693,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   ].filter(Boolean));
 
   const nodeLink = h("button", {
-    class: "text-btn text-btn--inline",
+    class: "text-btn text-btn--inline chain-link",
     type: "button",
     text: "How native staking works",
     onclick: async () => {
@@ -773,7 +773,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   // Under the minimum, the way that takes any amount, named as a third party.
   const liquidLink = isNew
     ? h("button", {
-        class: "text-btn stake-liquid-link",
+        class: "text-btn stake-liquid-link chain-link",
         type: "button",
         text: `Less than ${fmtLux(minLux)} DUSK? Use liquid staking (Sozu, third party)`,
         onclick: () => setScreen(st, SCREEN_LIQUID, actions),

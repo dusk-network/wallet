@@ -18,7 +18,7 @@ describe("assets view", () => {
 
 describe("tokens and NFTs on Home", () => {
   it("shows them in one section with its two actions, the token's balance with its symbol", async () => {
-    const { installFakeDom, visibleText } = await import("../../testing/fakeDom.js");
+    const { installFakeDom, screenReaderText, visibleText } = await import("../../testing/fakeDom.js");
     const { vi } = await import("vitest");
     const { document } = installFakeDom();
     const { assetsSectionsView } = await import("./assets.js");
@@ -41,7 +41,7 @@ describe("tokens and NFTs on Home", () => {
     const state = { route: "home", assets: assets([]) };
     draw(state);
     const section = () => document.body.querySelector(".home-assets");
-    expect(section().querySelector(".bracket-title").textContent).toBe("Tokens and NFTs");
+    expect(screenReaderText(section().querySelector(".bracket-title"))).toBe("Tokens and NFTs");
     expect(section().querySelectorAll(".section-actions button").map((b) => b.textContent)).toEqual(["Add token", "Import NFT"]);
     expect(visibleText(section().querySelector(".tx-empty"))).toBe("No tokens or NFTs yet.");
 

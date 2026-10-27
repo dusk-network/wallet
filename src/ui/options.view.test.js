@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAccountName } from "../shared/accountNames.js";
 import { clearAddressBook } from "../shared/addressBook.js";
-import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { accessibleName, fakeEvent, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 vi.mock("../shared/accountNames.js", () => ({ setAccountName: vi.fn(async () => {}) }));
 vi.mock("../shared/addressBook.js", () => ({ clearAddressBook: vi.fn(async () => {}) }));
@@ -51,7 +51,10 @@ async function settings(over = {}) {
   const section = (title) =>
     dom.document.body
       .querySelectorAll(".settings-section")
-      .find((s) => s.querySelector(".bracket-title__text")?.textContent === title);
+      .find((s) => {
+        const head = s.querySelector(".bracket-title__text");
+        return head && screenReaderText(head) === title;
+      });
   const shownButtons = (el) => el.querySelectorAll("button").filter(isShown).map((b) => b.textContent);
   return { ov, state, actions, draw, section, shownButtons };
 }
@@ -137,7 +140,7 @@ describe("settings", () => {
 
   it("disconnects one site, or all of them after asking, away from Reset wallet", async () => {
     let view = await settings();
-    expect(visibleText(view.section("Connected sites"))).toBe("Connected sitesNo sites are connected.");
+    expect(visibleText(view.section("Connected sites"))).toBe("[Connected sites]No sites are connected.");
 
     const permissions = [
       { origin: "https://app.example", accountIndex: 1 },

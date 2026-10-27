@@ -326,7 +326,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
   });
 
   // Tokens and NFTs, one section with its two actions in its head.
-  const link = (text, onclick) => h("button", { class: "see-all", type: "button", text, onclick });
+  const link = (text, onclick) => h("button", { class: "see-all chain-link", type: "button", text, onclick });
   const rows = [...tokenRows, ...nftRows];
   return [
     h("section", { class: "box home-assets" }, [
@@ -770,7 +770,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
   const reviewTransferBtn = h("button", { class: "btn-primary", text: "Review transfer", onclick: reviewTransfer });
 
   const sendSection = h("section", { class: "asset-action-section" }, [
-    h("h2", { class: "bracket-title asset-action-title" }, [h("span", { class: "bracket-title__text", text: `Send ${sym}` })]),
+    bracketTitle({ class: "asset-action-title", text: `Send ${sym}` }),
     fieldLabel(transferToInput, "Recipient"),
     transferToInput,
     fieldLabel(transferAmountInput, "Amount"),
@@ -813,7 +813,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     onclick: () => reviewApprove({ max: false }),
   });
   const approveSection = h("section", { class: "asset-action-section" }, [
-    h("h2", { class: "bracket-title asset-action-title" }, [h("span", { class: "bracket-title__text", text: "Approve" })]),
+    bracketTitle({ class: "asset-action-title", text: "Approve" }),
     h("p", { class: "asset-action-note", text: `Let another account or contract spend your ${sym}. An exact amount is safer than Unlimited.` }),
     fieldLabel(approveSpenderInput, "Spender"),
     approveSpenderInput,
