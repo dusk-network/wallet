@@ -4,7 +4,7 @@
 // Details. A locked wallet shows what is asked, with Unlock and Reject.
 
 import { UI_DISPLAY_DECIMALS, formatDuskExact, groupThousands, safeBigInt } from "../../shared/amount.js";
-import { bridgeServiceTransfer, callsBridge } from "../../shared/bridgeCalls.js";
+import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, callsBridge } from "../../shared/bridgeCalls.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { getMinimumGas } from "../../shared/txDefaults.js";
@@ -1005,8 +1005,9 @@ export async function renderNotification() {
       submitOnGasEnter(gasEditor, bar.approveBtn);
       // To the bridge's account: the memo is the address the bridge pays
       // out to on another chain, and one that isn't an address there is
-      // flagged.
-      const service = bridgeServiceTransfer({ nodeUrl, to, memo });
+      // flagged, as are its fee taking the whole amount and a route it
+      // doesn't pay out on now.
+      const service = bridgeServiceTransfer({ nodeUrl, to, memo, amount: amountLux });
       // A public transfer shows on chain for good: say what, only what
       // applies, and under which name. A shielded one gets no line.
       const visible = service
@@ -1020,6 +1021,8 @@ export async function renderNotification() {
             title: `Bridge to ${service.chain}`,
             amount,
             to: service.recipientOk ? plainTo(service.recipient, `on ${service.short}`) : null,
+            // What arrives there, once the bridge takes its fee.
+            sub: bridgeServiceLine(service),
             tag: headTag("Known bridge account"),
           })
         : requestHead({ title: "Pay", amount, to: toLine(to) });
@@ -1030,6 +1033,7 @@ export async function renderNotification() {
           head,
           // What everyone sees, under the amount, before the fee: in view without scrolling.
           shielded ? null : note(visible, "eye", { className: "ap-visible" }),
+          ...(service ? bridgeServiceWarnings(service).map((w) => warning(w.title, w.text)) : []),
           service && !service.recipientOk
             ? warning(
                 `The memo isn't an address on ${service.short}`,

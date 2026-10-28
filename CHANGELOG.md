@@ -12,6 +12,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed Sozu's fees on Liquid staking as its contract has them: its share of rewards, the deposit fee and no fee to unstake.
 - Showed Sozu's deposit fee on each stake as it's typed and on Review, and took it off what the stake gets.
 - Turned staking with Sozu off while Sozu has paused deposits, and warned while its pool is synchronizing.
+- Showed the 1 DUSK bridge fee and what arrives on BNB Smart Chain when paying the bridge's account, in its approval and on Send's Review.
+- Said that the testnet bridge to Sepolia isn't running right now, in its approval and on Send's Review.
 - Added Export to Activity: the rows listed as a CSV file with the web wallet's columns, your contact names only when asked.
 - Showed a site's payment to the bridge's account as a bridge to BNB Smart Chain, or Ethereum (Sepolia) on Testnet, with the memo as the recipient there, and a warning when the memo isn't an address there.
 - Said at the top of a test network, in the popup, the full view and site approvals, that test DUSK has no value.
@@ -128,6 +130,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Fixed
 
 - Refused a stake with Sozu too small to get any stDUSK, and said the minimum.
+- Kept Confirm off on Send's Review when the bridge's 1 DUSK fee takes the whole amount.
 - Underlined links inside a sentence, such as sozu.fi and How native staking works.
 - Fixed links sitting higher than the section head beside them.
 - Hid controls that showed while hidden: Review's Use the network's price, Max on an empty Send, and Settings' custom gas fields when off.

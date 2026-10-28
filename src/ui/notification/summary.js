@@ -3,7 +3,7 @@
 // while the wallet is locked shows it above Unlock and Reject, so nobody has
 // to type a password to learn what a site wants.
 
-import { bridgeEnvelopeOk, bridgeServiceTransfer, decodeBridgeCall, weiToDusk } from "../../shared/bridgeCalls.js";
+import { bridgeEnvelopeOk, bridgeServiceLine, bridgeServiceTransfer, decodeBridgeCall, weiToDusk } from "../../shared/bridgeCalls.js";
 import { toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { formatDuskExact, safeBigInt } from "../../shared/amount.js";
@@ -90,8 +90,9 @@ function txSummary(p, own) {
   const kind = String(p.kind ?? "").toLowerCase();
   if (kind === TX_KIND.TRANSFER) {
     const amount = { value: formatDuskExact(p.amount), unit: "DUSK" };
-    // To the bridge's account, which pays the memo's address on another chain.
-    const service = bridgeServiceTransfer({ nodeUrl: p.nodeUrl, to: p.to, memo: p.memo });
+    // To the bridge's account, which pays the memo's address on another
+    // chain what's left once it takes its fee.
+    const service = bridgeServiceTransfer({ nodeUrl: p.nodeUrl, to: p.to, memo: p.memo, amount: p.amount });
     if (service) {
       return {
         title: `Bridge to ${service.chain}`,
@@ -99,6 +100,7 @@ function txSummary(p, own) {
         to: service.recipientOk
           ? { address: service.recipient, network: "evm", on: `on ${service.short}` }
           : { address: String(p.to ?? "").trim(), network: "dusk" },
+        sub: bridgeServiceLine(service),
       };
     }
     return { title: "Pay", amount, to: { address: String(p.to ?? "").trim(), network: "dusk" } };
