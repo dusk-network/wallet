@@ -261,6 +261,36 @@ describe("contacts", () => {
       expect(localStorage.getItem("dusk_contacts_v2")).toBeNull();
     });
 
+    // The new vault's write fails once, after the old vault went: a storage
+    // error, or the app shut between the two.
+    const failNextVaultWrite = () => {
+      const write = localStorage.setItem;
+      localStorage.setItem = (key, value) => {
+        if (key === "dusk_vault_v1") {
+          localStorage.setItem = write;
+          throw new Error("Storage is full");
+        }
+        return write(key, value);
+      };
+    };
+
+    it.each([
+      ["keep for the next import of the same wallet", "wallet A", [LABEL]],
+      ["go for an import of another wallet", "wallet B", []],
+    ])("cut short before the new vault, %s", async (_, phrase, names) => {
+      const localSend = await walletA();
+      failNextVaultWrite();
+      const restore = await localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" });
+      expect(restore.error.message).toBe("Storage is full");
+      await expect(localSend({ type: "DUSK_UI_STATUS" })).resolves.toMatchObject({ hasVault: false });
+
+      // Onboarding's import, the only way on from there.
+      await expect(localSend({ type: "DUSK_UI_CREATE_WALLET", mnemonic: phrase, password: "password456" })).resolves.toMatchObject({ ok: true });
+      expect((await contacts({ op: "list" })).map((e) => e.name)).toEqual(names);
+      // Done: the next wallet made after a reset starts with none.
+      expect(localStorage.getItem("dusk_reset_pending_v1")).toBeNull();
+    });
+
     it("leave everything as it was for a phrase that isn't one", async () => {
       const localSend = await walletA();
       const txs = await import("../shared/txStore.js");

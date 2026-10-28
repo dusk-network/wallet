@@ -732,9 +732,11 @@ async function onExpand() {
       const r = String(state?.route ?? "");
       if (r) qs.set("route", r);
 
-      // Preserve tx details if we're currently looking at a tx.
+      // Preserve tx details if we're currently looking at a tx, with the
+      // page it was opened from: the sidebar marks it, and Back goes there.
       if (r === "tx" && state?.txDetailHash) {
         qs.set("hash", String(state.txDetailHash));
+        if (state?.txDetailFrom) qs.set("from", String(state.txDetailFrom));
       }
 
       // Preserve transaction highlight (used when opened from a notification).

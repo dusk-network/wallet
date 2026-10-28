@@ -44,7 +44,7 @@ import {
   registerTxNotificationHandlers,
 } from "./txNotify.js";
 import { getAccountNames } from "../shared/accountNames.js";
-import { clearContacts, contactsStore, moveLegacyContacts } from "../shared/contactsStore.js";
+import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
   getTxEpoch,
   getTxMeta,
@@ -53,7 +53,7 @@ import {
   listTxs,
   typedRecipientName,
 } from "../shared/txStore.js";
-import { beginReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
+import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
 import {
   getNetworkStatus,
@@ -955,11 +955,19 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock or reset the current wallet first");
           }
           // A reset that couldn't clear the old wallet's data finishes first.
-          await finishPendingReset();
-          // A new wallet starts with no contacts: any kept here are another's.
-          await clearContacts();
+          const { pending, keepContactsOf } = await finishPendingReset();
+          if (keepContactsOf) {
+            // A restore cut short before its vault: its wallet's contacts
+            // stay if this is that wallet, and go if it's another.
+            await ensureEngineConfigured();
+            await keepOnlyContactsOf(await engineCall("engine_walletId", { mnemonic: String(mnemonic) }, { timeoutMs: 120_000 }));
+          } else {
+            // A new wallet starts with no contacts: any kept here are another's.
+            await clearContacts();
+          }
 
           await createVault(mnemonic, password);
+          if (pending) await endReset();
           await ensureEngineConfigured();
           const result = await unlockEngine(String(mnemonic));
           await updateActivity();
@@ -992,11 +1000,15 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           const walletId = await engineCall("engine_walletId", { mnemonic: String(mnemonic) }, { timeoutMs: 120_000 });
 
           await lockWallet("restore");
-          await beginReset();
+          // Noted with the wallet it makes until that wallet's vault is: cut
+          // short in between, the next wallet made here keeps those contacts
+          // only if it's the same one.
+          await beginReset({ keepContactsOf: walletId });
           await clearPermissions();
-          await finishReset({ keepContactsOf: walletId });
+          await clearWalletData({ keepContactsOf: walletId });
           await clearVault();
           await createVault(mnemonic, password);
+          await endReset();
           const result = await unlockEngine(String(mnemonic));
           await updateActivity();
           setupAutoLockAlarm().catch(console.error);

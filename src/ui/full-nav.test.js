@@ -5,6 +5,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { installFakeDom, settle } from "./testing/fakeDom.js";
 
 vi.mock("../wallet/bus.js", () => ({ send: vi.fn() }));
+vi.mock("../platform/extensionApi.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  runtimeGetURL: vi.fn((path) => `chrome-extension://wallet/${path}`),
+  tabsCreate: vi.fn(async () => ({})),
+  tabsQuery: vi.fn(async () => []),
+}));
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupPrimaryName: vi.fn(async () => null),
@@ -100,6 +106,80 @@ describe("full wallet navigation", () => {
     state.txDetailFrom = "home";
     await render();
     expect(marked()).toEqual(["Dashboard"]);
+  });
+
+  describe("a transaction's details, expanded from the popup", () => {
+    const ACCOUNT =
+      "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
+    const HASH = "ab".repeat(32);
+    // A page of the wallet, its sidebar from full.html in the full view, drawn by app.js.
+    const open = async (pathname, search = "") => {
+      const dom = installFakeDom({ pathname });
+      vi.stubGlobal("location", { pathname, search });
+      dom.window.close = vi.fn();
+      const make = (tag, props = {}) => Object.assign(dom.document.createElement(tag), props);
+      const nav = make("nav", { className: "full-nav" });
+      if (pathname === "/full.html") {
+        dom.document.body.classList.add("page--full");
+        const shell = await readFile(path.resolve(process.cwd(), "public", "full.html"), "utf8");
+        for (const [, route, label] of shell.matchAll(/data-route="([^"]+)">([^<]+)</g)) {
+          const item = make("button", { className: "full-nav-item", textContent: label });
+          item.setAttribute("data-route", route);
+          nav.appendChild(item);
+        }
+      } else {
+        dom.document.body.classList.add("page--popup");
+        vi.stubGlobal("chrome", { runtime: { id: "wallet", sendMessage: () => {}, onMessage: { addListener: () => {} } } });
+      }
+      const pill = make("button", { id: "network-pill" });
+      pill.appendChild(make("span", { className: "network-pill__label" }));
+      const app = make("div", { id: "app" });
+      dom.document.body.append(pill, nav, make("div", { id: "header-actions" }), app);
+      vi.resetModules();
+      const { send } = await import("../wallet/bus.js");
+      send.mockImplementation(async (message) =>
+        message.type === "DUSK_UI_OVERVIEW"
+          ? {
+              hasVault: true,
+              isUnlocked: true,
+              networkName: "Testnet",
+              nodeUrl: "https://testnet.nodes.dusk.network",
+              accounts: [ACCOUNT],
+              selectedAccountIndex: 0,
+              balance: { value: "0" },
+              txs: [{ hash: HASH, kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1000000000", status: "executed", submittedAt: 1 }],
+            }
+          : {}
+      );
+      const { render } = await import("./popup/app.js");
+      const { state } = await import("./popup/state.js");
+      return { dom, nav, app, render, state, marked: () => nav.querySelectorAll("[aria-current=page]").map((item) => item.textContent) };
+    };
+
+    it("passes on the page it was opened from", async () => {
+      const popup = await open("/popup.html");
+      Object.assign(popup.state, { route: "tx", txDetailHash: HASH, txDetailFrom: "activity" });
+      await popup.render();
+      await settle();
+      popup.dom.document.body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Expand view").click();
+      await settle();
+      const { tabsCreate } = await import("../platform/extensionApi.js");
+      expect(tabsCreate).toHaveBeenLastCalledWith({ url: `chrome-extension://wallet/full.html?route=tx&hash=${HASH}&from=activity` });
+    });
+
+    it("opens under that page in the full view, and goes back to it", async () => {
+      const full = await open("/full.html", `?route=tx&hash=${HASH}&from=activity`);
+      await full.render();
+      await settle();
+      expect([full.state.route, full.state.txDetailFrom, full.marked()]).toEqual(["tx", "activity", ["Activity"]]);
+      full.app.querySelectorAll("button").find((b) => b.textContent.includes("Back")).click();
+      await settle();
+      expect([full.state.route, full.marked()]).toEqual(["activity", ["Activity"]]);
+
+      // A page the wallet has no such place for is none.
+      const odd = await open("/full.html", `?route=tx&hash=${HASH}&from=options`);
+      expect(odd.state.txDetailFrom).toBeNull();
+    });
   });
 
   it("refreshes stale lock state from full-view navigation and profile switching", async () => {

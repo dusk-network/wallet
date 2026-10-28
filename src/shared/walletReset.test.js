@@ -84,11 +84,29 @@ describe("walletReset", () => {
     expect(await activity.listActivityEntries(owner)).toEqual([]);
     expect(await pending()).toBe(true);
 
-    // A new wallet waits for it.
+    // A new wallet waits for it; the reset ends once that wallet's vault is made.
     await expect(reset.finishPendingReset()).rejects.toThrow("couldn't be cleared");
     fail.shielded = false;
-    await reset.finishPendingReset();
+    await expect(reset.finishPendingReset()).resolves.toEqual({ pending: true, keepContactsOf: null });
+    expect(await pending()).toBe(true);
+    await reset.endReset();
     expect(await pending()).toBe(false);
+  });
+
+  it("notes the wallet a restore makes until its vault is, so a restore cut short keeps only that wallet's contacts", async () => {
+    const { storage, STORAGE_KEYS } = await import("./storage.js");
+    const { contactsNamespace } = await import("./contactsCrypto.js");
+    const [mine, theirs] = await Promise.all([contactsNamespace("acct-restored"), contactsNamespace("acct-other")]);
+    await storage.set({ [STORAGE_KEYS.CONTACTS]: { [mine]: { v: 1 }, [theirs]: { v: 1 } } });
+    await reset.beginReset({ keepContactsOf: "acct-restored" });
+    await reset.clearWalletData({ keepContactsOf: "acct-restored" });
+    // Cut short here, before the vault: still noted, with its wallet.
+    expect(await pending()).toBe(true);
+    // The next wallet made here learns which, and keeps only that wallet's contacts meanwhile.
+    await storage.set({ [STORAGE_KEYS.CONTACTS]: { [mine]: { v: 1 }, [theirs]: { v: 1 } } });
+    await expect(reset.finishPendingReset()).resolves.toEqual({ pending: true, keepContactsOf: "acct-restored" });
+    expect((await storage.get(STORAGE_KEYS.CONTACTS))[STORAGE_KEYS.CONTACTS]).toEqual({ [mine]: { v: 1 } });
+    expect(await pending()).toBe(true);
   });
 
   it("deletes the contacts: every wallet's record and any plain copy from before", async () => {
@@ -105,7 +123,7 @@ describe("walletReset", () => {
 
   it("does nothing more for a wallet made without a pending reset", async () => {
     await txs.putTxMeta("aa".repeat(32), { status: "executed", submittedAt: 1 });
-    await reset.finishPendingReset();
+    await expect(reset.finishPendingReset()).resolves.toEqual({ pending: false, keepContactsOf: null });
     expect(await txs.listTxs()).toHaveLength(1);
   });
 });
