@@ -14,7 +14,7 @@
 import { TX_KIND } from "./constants.js";
 
 // What the wallet's record of a transaction adds to the chain's.
-const LOCAL_ONLY = ["toName", "origin", "asset", "payment", "ownerProfileIndex", "submittedAt", "pendingNullifiers", "reservationStatus", "bridgeTo"];
+const LOCAL_ONLY = ["toName", "origin", "asset", "payment", "ownerProfileIndex", "submittedAt", "pendingNullifiers", "reservationStatus", "bridgeTo", "registeredName"];
 
 const lower = (hash) => String(hash ?? "").toLowerCase();
 
@@ -61,6 +61,8 @@ export function historyRow(entry, { nodeUrl } = {}) {
     gasLimit: entry.gasLimit,
     // A deposit to DuskEVM's address there, read from its call; null when it names none.
     bridgeTo: entry.bridgeTo,
+    // The .dusk name a registration registered, read from its call; null when it doesn't read.
+    registeredName: entry.registeredName,
     detailsAt: entry.detailsAt,
   };
 }

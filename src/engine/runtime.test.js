@@ -28,6 +28,10 @@ vi.mock("../shared/walletEngine.js", async (importOriginal) => ({
   waitTxExecuted: mocks.waitTxExecuted,
   waitTxRemoved: vi.fn(() => new Promise(() => {})),
   startShieldedSync: vi.fn(async () => undefined),
+  walletIdOf: vi.fn(async (mnemonic) => {
+    if (mnemonic !== "phrase") throw new Error("That isn't a valid recovery phrase.");
+    return "acct0";
+  }),
 }));
 
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
@@ -92,6 +96,13 @@ describe("engine name checks", () => {
     });
     expect(mocks.lookupRecipientName).toHaveBeenCalledWith("someone", { nodeUrl });
     expect(mocks.lookupPrimaryName).not.toHaveBeenCalledWith("someone", expect.anything());
+  });
+});
+
+describe("a restore's wallet", () => {
+  it("is named from its phrase, and a phrase that isn't one says so", async () => {
+    await expect(engineCall("engine_walletId", { mnemonic: "phrase" })).resolves.toEqual({ id: "engine_walletId", result: "acct0" });
+    await expect(engineCall("engine_walletId", { mnemonic: "words" })).resolves.toMatchObject({ error: { message: "That isn't a valid recovery phrase." } });
   });
 });
 

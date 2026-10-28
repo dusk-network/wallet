@@ -6,7 +6,7 @@
 import { bridgeEnvelopeOk, bridgeServiceLine, bridgeServiceTransfer, decodeBridgeCall, weiToDusk } from "../../shared/bridgeCalls.js";
 import { toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
-import { formatDuskExact, safeBigInt } from "../../shared/amount.js";
+import { formatDuskExact, formatFee, safeBigInt } from "../../shared/amount.js";
 
 /** A contract call's arguments as bytes, or null when they aren't any. */
 export function callArgs(params) {
@@ -37,18 +37,39 @@ export function withdrawalAmount(wei) {
   return { value: lux === null ? text : formatDuskExact(lux), unit: "DUSK" };
 }
 
+/** The most a request's gas comes to: its limit times its price, or null without both. */
+function gasMaxFee(gas) {
+  const limit = String(gas?.limit ?? "");
+  const price = String(gas?.price ?? "");
+  return /^\d+$/.test(limit) && /^\d+$/.test(price) ? BigInt(limit) * BigInt(price) : null;
+}
+
+/**
+ * What a withdrawal's proof or claim costs, as its head leads with it: at
+ * most the fee, "Costs up to 0.051 DUSK", or "—" while it isn't known.
+ * @param {bigint|null} feeLux
+ */
+export function withdrawalCost(feeLux) {
+  return feeLux == null
+    ? { lead: "Costs up to", value: "—" }
+    : { lead: "Costs up to", value: formatFee(feeLux, { max: true }), unit: "DUSK" };
+}
+
 /**
  * The title of a request's approval, and what it is about.
  *
- * - `amount`: `{ value, unit }` for a request that moves DUSK
- * - `to`: `{ address, network, on? }` of whom it pays, for the window to
- *   name: `on` says where an address on another chain is, "on Sepolia"
+ * - `amount`: `{ value, unit }` for a request that moves DUSK, or a
+ *   withdrawal's proof or claim's cost, `{ lead, value, unit }`, which moves
+ *   none of the profile's
+ * - `to`: `{ address, network, on?, prefix? }` of whom it pays, for the window
+ *   to name: `on` says where the address is, "on Sepolia", and `prefix` what
+ *   comes before it in place of "to "
  * - `sub`: a line of small print
  *
  * @param {string} kind - the approval kind (connect, send_tx, sign_message, ...)
  * @param {object} params - the request as rpc.js passes it on
  * @param {{ own?: string[] }} [ctx] - the wallet's accounts and addresses (bridgeCallOf)
- * @returns {{ title: string, amount?: {value: string, unit: string}, to?: {address: string, network: "dusk"|"duskevm"|"evm", on?: string}, sub?: string }}
+ * @returns {{ title: string, amount?: {lead?: string, value: string, unit?: string}, to?: {address: string, network: "dusk"|"contract"|"duskevm"|"evm", on?: string, prefix?: string}, sub?: string }}
  */
 export function requestSummary(kind, params = {}, { own = [] } = {}) {
   const p = params ?? {};
@@ -115,10 +136,21 @@ function txSummary(p, own) {
       };
     }
     if (bridge) {
+      // What it costs leads, as on the bridge's review: it moves no DUSK of
+      // the profile's. Then the withdrawal it's for, and whom that pays.
+      const { value, unit } = withdrawalAmount(bridge.amountWei);
+      const prefix = `for a ${value} ${unit} withdrawal that pays `;
       return {
         title: bridge.kind === "prove" ? "Prove a DuskEVM withdrawal" : "Claim a DuskEVM withdrawal",
-        amount: withdrawalAmount(bridge.amountWei),
-        to: bridge.recipient.kind === "account" ? { address: bridge.recipient.account, network: "dusk" } : undefined,
+        amount: withdrawalCost(gasMaxFee(p.gas)),
+        to:
+          bridge.recipient.kind === "account"
+            ? { address: bridge.recipient.account, network: "dusk", on: "on Dusk", prefix }
+            : { address: bridge.recipient.contractId, network: "contract", on: "on Dusk, a contract", prefix },
+        sub:
+          bridge.kind === "prove"
+            ? "Proving moves no DUSK. You claim it once the waiting period ends."
+            : "Claiming pays this DUSK to the account above. You pay only the network fee.",
       };
     }
     // The function is under the approval's Details, with the arguments.

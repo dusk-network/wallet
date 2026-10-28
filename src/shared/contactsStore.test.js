@@ -27,7 +27,7 @@ vi.mock("./storage.js", () => {
 });
 
 const { storage, STORAGE_KEYS, __reset, __data } = await import("./storage.js");
-const { clearContacts, contactsStore, moveLegacyContacts } = await import("./contactsStore.js");
+const { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } = await import("./contactsStore.js");
 
 const ACCOUNT_A = "qxwSidLBa1rJ74ngfP4GUCaNsAYjMboDPHzbmiVEMmNNK26hVkYe8QccH6ipYdVRsUDnx9QS1KBeu8ZoMDFpXJJE6YCcHy2AykvJ7eEAGc7PGDgCZFV5YJBxzukADkQ2Bgr";
 const ACCOUNT_B = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
@@ -179,6 +179,21 @@ describe("deleting every contact", () => {
     await clearContacts();
     expect(__data()).toEqual({});
     expect(await book.list()).toEqual([]);
+  });
+});
+
+describe("a restore", () => {
+  it("keeps only the restored wallet's record, and no plain copy, which no wallet can be told by", async () => {
+    await book.upsert({ name: LABEL, address: ACCOUNT_B });
+    await contactsStore(vaultOf(2, ACCOUNT_B)).upsert({ name: "Mine", address: "addr" });
+    await storage.set(plainOf([{ id: "9", name: "Old", address: "addr9" }]));
+    await keepOnlyContactsOf(ACCOUNT_A);
+    expect(Object.keys(__data())).toEqual([STORAGE_KEYS.CONTACTS]);
+    expect(Object.keys(records())).toEqual([await contactsNamespace(ACCOUNT_A)]);
+    expect((await book.list()).map((e) => e.name)).toEqual([LABEL]);
+    // A wallet with none here keeps none.
+    await keepOnlyContactsOf(ACCOUNT_B);
+    expect(__data()).toEqual({});
   });
 });
 

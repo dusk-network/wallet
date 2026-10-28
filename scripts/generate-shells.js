@@ -54,6 +54,7 @@ function fullNav() {
   return [
     `<nav class="full-nav" aria-label="Wallet">`,
     `  <button class="full-nav-item" type="button" data-route="home">Dashboard</button>`,
+    `  <button class="full-nav-item" type="button" data-route="activity">Activity</button>`,
     `  <button class="full-nav-item" type="button" data-route="send">Send</button>`,
     `  <button class="full-nav-item" type="button" data-route="receive">Receive</button>`,
     `  <button class="full-nav-item" type="button" data-route="convert">Shield</button>`,
@@ -114,8 +115,8 @@ function walletShell({
     lines.push(`    <div class="panel">`);
   }
 
-  // Header
-  lines.push(`${innerIndent}<div class="panel-header">`);
+  // Header: a landmark, the page's top row (the full view's sidebar)
+  lines.push(`${innerIndent}<header class="panel-header">`);
   lines.push(`${innerIndent}  <div class="brand">`);
   for (const l of brandMarkIcon()) lines.push(`${innerIndent}    ${l}`);
   if (isFull) {
@@ -129,13 +130,13 @@ function walletShell({
     lines.push(``);
   }
   lines.push(`${innerIndent}  <div class="header-actions" id="header-actions"></div>`);
-  lines.push(`${innerIndent}</div>`);
+  lines.push(`${innerIndent}</header>`);
   lines.push(``);
 
-  // Content
-  lines.push(`${innerIndent}<div class="panel-content">`);
+  // Content: the main landmark
+  lines.push(`${innerIndent}<main class="panel-content">`);
   lines.push(`${innerIndent}  <div id="app"></div>`);
-  lines.push(`${innerIndent}</div>`);
+  lines.push(`${innerIndent}</main>`);
 
   // Close wrappers
   if (isFull) {
@@ -185,7 +186,7 @@ ${devComment}
   <body class="page--full">
     <div class="full-wrap">
       <div class="panel">
-        <div class="panel-header">
+        <header class="panel-header">
           <div class="brand">
             <div class="brand-mark" aria-hidden="true">
               <img class="brand-mark__glyph" src="icons/dusk-glyph.svg" alt="" />
@@ -207,6 +208,7 @@ ${devComment}
 
           <nav class="full-nav" aria-label="Wallet">
             <button class="full-nav-item" type="button" data-route="home">Dashboard</button>
+            <button class="full-nav-item" type="button" data-route="activity">Activity</button>
             <button class="full-nav-item" type="button" data-route="send">Send</button>
             <button class="full-nav-item" type="button" data-route="receive">Receive</button>
             <button class="full-nav-item" type="button" data-route="convert">Shield</button>
@@ -215,11 +217,11 @@ ${devComment}
           </nav>
 
           <div class="header-actions" id="header-actions"></div>
-        </div>
+        </header>
 
-        <div class="panel-content">
+        <main class="panel-content">
           <div id="app"></div>
-        </div>
+        </main>
       </div>
     </div>
 

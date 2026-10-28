@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { truncateMiddle, shortAddress, shortHash, normalizeMnemonic } from "./strings.js";
+import { truncateMiddle, shortAddress, shortHash, normalizeMnemonic, siteName } from "./strings.js";
 
 describe("truncateMiddle", () => {
   it("returns short strings unchanged", () => {
@@ -88,5 +88,16 @@ describe("normalizeMnemonic", () => {
     const input = "  Abandon  abandon ABANDON abandon  abandon abandon abandon abandon abandon abandon abandon about  ";
     const expected = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
     expect(normalizeMnemonic(input)).toBe(expected);
+  });
+});
+
+describe("siteName", () => {
+  it("names a site as its approval does: its host and port, and a local http:// site's whole origin", () => {
+    expect(siteName("https://app.dusk.network")).toBe("app.dusk.network");
+    expect(siteName("https://app.example:8443")).toBe("app.example:8443");
+    expect(siteName("http://127.0.0.1:5354")).toBe("http://127.0.0.1:5354");
+    expect(siteName("http://localhost")).toBe("http://localhost");
+    expect(siteName("not a url")).toBe("not a url");
+    expect(siteName(undefined)).toBe("");
   });
 });

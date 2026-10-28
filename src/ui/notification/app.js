@@ -20,6 +20,7 @@ import { passwordInput, submitOnGasEnter, textInput } from "../components/FormCo
 import { shortAddressEl } from "../components/ShortAddress.js";
 import "../components/GasEditor.js";
 import {
+  amountParts,
   details,
   facts,
   group,
@@ -34,7 +35,7 @@ import {
   siteDetails,
   warning,
 } from "./parts.js";
-import { bridgeCallOf, callArgs, requestSummary, withdrawalAmount } from "./summary.js";
+import { bridgeCallOf, callArgs, requestSummary, withdrawalAmount, withdrawalCost } from "./summary.js";
 import { runtimeGetURL, runtimeSendMessage, tabsCreate } from "../../platform/extensionApi.js";
 
 const app = document.getElementById("app");
@@ -383,12 +384,12 @@ export async function renderNotification() {
   };
 
   // "to wallet-both.dusk", and under it your label for it, for a head's
-  // `to` line.
-  const toLine = (address, { network = "" } = {}) => {
+  // `to` line; `prefix` in place of "to ".
+  const toLine = (address, { network = "", prefix = "to " } = {}) => {
     const r = recipient(address);
     return h("span", { class: "ap-recipient" }, [
       h("span", { class: "ap-recipient__line" }, [
-        h("span", { class: "ap-recipient__to", text: "to " }),
+        h("span", { class: "ap-recipient__to", text: prefix }),
         r.lead,
         network ? h("span", { class: "ap-recipient__to", text: ` ${network}` }) : null,
       ]),
@@ -396,14 +397,21 @@ export async function renderNotification() {
     ]);
   };
   // An address without a name: "to 0x96BA…893e on DuskEVM".
-  const plainTo = (value, network, head = 6, tail = 4) =>
+  const plainTo = (value, network, { head = 6, tail = 4, prefix = "to " } = {}) =>
     h("span", { class: "ap-recipient" }, [
       h("span", { class: "ap-recipient__line" }, [
-        h("span", { class: "ap-recipient__to", text: "to " }),
+        h("span", { class: "ap-recipient__to", text: prefix }),
         shortMono(value, head, tail),
         network ? h("span", { class: "ap-recipient__to", text: ` ${network}` }) : null,
       ]),
     ]);
+  // A summary's `to` (summary.js) as its head's line: a Dusk account by its
+  // name, any other address as it is, a contract's ID 6…6.
+  const headTo = (to) => {
+    if (!to?.address) return null;
+    if (to.network === "dusk") return toLine(to.address, { network: to.on ?? "", prefix: to.prefix });
+    return plainTo(to.address, to.on, { ...(to.network === "contract" ? { tail: 6 } : {}), prefix: to.prefix });
+  };
 
   const site = siteChip(origin);
 
@@ -520,17 +528,10 @@ export async function renderNotification() {
     };
     unlockBtn.addEventListener("click", unlock);
 
-    // An address on another chain, else a Dusk recipient by its name.
-    const to = summary.to?.on
-      ? plainTo(summary.to.address, summary.to.on)
-      : summary.to?.address
-        ? toLine(summary.to.address)
-        : null;
-
     show(
       [
         site,
-        requestHead({ title: summary.title, amount: summary.amount, to, sub: summary.sub }),
+        requestHead({ title: summary.title, amount: summary.amount, to: headTo(summary.to), sub: summary.sub }),
         h("div", { class: "ap-unlock" }, [
           h("label", { for: "approval-password", text: "Unlock to review and approve it" }),
           pwd,
@@ -1138,7 +1139,6 @@ export async function renderNotification() {
       const summary = requestSummary("send_tx", params, { own });
       let head;
       let decoded;
-      let extra = null;
       if (bridge.kind === "deposit") {
         // Sent as the bridge expects (bridgeCallOf): its deposit is what it bridges.
         head = requestHead({
@@ -1154,16 +1154,17 @@ export async function renderNotification() {
           bridge.extraDataBytes ? kv("Extra data", `${bridge.extraDataBytes} bytes`) : null,
         ]);
       } else {
-        const paysTo =
-          bridge.recipient.kind === "account"
-            ? toLine(bridge.recipient.account, { network: "on Dusk" })
-            : plainTo(bridge.recipient.contractId, "on Dusk, a contract", 6, 6);
+        // What it costs leads, then the withdrawal and whom it pays, and the
+        // cost follows the fee as Custom fee changes it.
         head = requestHead({
           title: summary.title,
-          amount: withdrawalAmount(bridge.amountWei),
-          to: paysTo,
+          amount: summary.amount,
+          to: headTo(summary.to),
+          sub: summary.sub,
           tag: headTag("Known DuskEVM bridge call"),
         });
+        const cost = head.querySelector(".ap-amount");
+        gasEditor.addEventListener("dusk-gas-fee", (event) => cost.replaceChildren(...amountParts(withdrawalCost(event.detail?.feeLux ?? null))));
         const amount = withdrawalAmount(bridge.amountWei);
         decoded = group([
           kv(
@@ -1175,12 +1176,6 @@ export async function renderNotification() {
           kv("Sent from DuskEVM", h("code", { class: "ap-address", text: bridge.sender }), { stack: true }),
           bridge.proofSubmitter ? kv("Proved by", h("code", { class: "ap-address", text: bridge.proofSubmitter }), { stack: true }) : null,
         ]);
-        extra = note(
-          bridge.kind === "prove"
-            ? "Proving moves no DUSK. You claim it once the waiting period ends."
-            : "Claiming pays this DUSK to the account above. You pay only the network fee.",
-          "info"
-        );
       }
 
       show(
@@ -1189,7 +1184,6 @@ export async function renderNotification() {
           head,
           visible(bridge.kind === "deposit" ? "the amount, the DuskEVM recipient" : "this call, the withdrawal"),
           decoded,
-          extra,
           gasEditor,
           callRows(),
           detailsBlock(),

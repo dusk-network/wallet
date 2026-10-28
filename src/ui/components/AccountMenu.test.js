@@ -105,7 +105,7 @@ describe("profile switcher", () => {
     expect(dom.document.activeElement).toBe(anchor);
   });
 
-  it("shows two lines: the label, then the verified name or else the short account", async () => {
+  it("shows two lines: the label, then the verified name beside the short account, as the connect window does", async () => {
     lookupPrimaryName.mockImplementation(async (acct) => (acct === ACCOUNTS[0] ? "a-rather-long-name.dusk" : null));
     menu.open(anchor, overview);
     expect(lookupPrimaryName).toHaveBeenCalledWith(ACCOUNTS[0], { nodeUrl: overview.nodeUrl });
@@ -114,9 +114,9 @@ describe("profile switcher", () => {
 
     await settle();
     const [named, unnamed] = rows();
-    expect(shownLines(named)).toEqual(["Profile 1", "a-rather-long-name.dusk"]);
-    expect(lines(named)[1].title).toBe("a-rather-long-name.dusk");
-    expect(screenReaderText(named.querySelector(".net-menu-item"))).not.toContain(ACCOUNTS[0]);
+    expect(shownLines(named)).toEqual(["Profile 1", "a-rather-long-name.dusk · 26FCH7…Tck927"]);
+    expect(lines(named)[1].querySelector(".dusk-name").title).toBe("a-rather-long-name.dusk");
+    expect(screenReaderText(lines(named)[1])).toBe(`a-rather-long-name.dusk · ${ACCOUNTS[0]}`);
 
     expect(shownLines(unnamed)).toEqual(["Spending", "21n5nc…fMMLNz"]);
     expect(lines(unnamed)[1].querySelector("[title]").title).toBe(ACCOUNTS[1]);

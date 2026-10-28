@@ -94,8 +94,11 @@ describe("mergeActivity", () => {
       origin: "https://app.example",
       toName: "shpongle.dusk",
       bridgeTo: "0x5A3d8e1B7c2f4A6b9e0D1C3f5A7b9C2D4e6F8a01",
+      registeredName: "shpongle.dusk",
       submittedAt: 1_792_687_500_000,
     };
+    // The name a registration registered, read from its call by the archive's details or the wallet.
+    expect(historyRow({ ...registered(), registeredName: "shpongle.dusk" }).registeredName).toBe("shpongle.dusk");
     const [row] = mergeActivity({ local: [pending], history: [registered()], profileIndex: 0 });
     expect(row).toMatchObject({
       source: "both",
@@ -106,6 +109,7 @@ describe("mergeActivity", () => {
       origin: "https://app.example",
       // Where a deposit to DuskEVM pays: the chain has it only in the call's bytes.
       bridgeTo: "0x5A3d8e1B7c2f4A6b9e0D1C3f5A7b9C2D4e6F8a01",
+      registeredName: "shpongle.dusk",
       profileIndex: 0,
     });
   });

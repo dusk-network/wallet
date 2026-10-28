@@ -1,4 +1,5 @@
 import { h, setChildren } from "../lib/dom.js";
+import { siteName } from "../lib/strings.js";
 import { iconSvg } from "../components/ActionIcon.js";
 import { accountChipEl } from "../components/AccountChip.js";
 import { isFullView, isPopupView } from "./env.js";
@@ -140,13 +141,7 @@ export function createHeaderRenderer({
       if (platform.capabilities.dapp) {
         const origin = ov?.activeOrigin;
         connected = Boolean(origin && ov?.activeConnected);
-        if (origin) {
-          try {
-            host = new URL(origin).hostname;
-          } catch {
-            host = String(origin);
-          }
-        }
+        if (origin) host = siteName(origin);
       }
 
       // The switcher's rows copy each account.

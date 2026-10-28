@@ -4,6 +4,7 @@ import { emptyAddressBook, state, ONBOARD_ROUTES } from "./state.js";
 import { switchContext } from "./context.js";
 import { refreshOverview, getActiveOrigin } from "./overview.js";
 import { h, setChildren } from "../lib/dom.js";
+import { siteName } from "../lib/strings.js";
 import { createToaster } from "../components/Toast.js";
 import { balancesHidden } from "../components/Balance.js";
 import { txStatusToast } from "./txToast.js";
@@ -39,6 +40,7 @@ import {
   onboardingCreatePhraseView,
   onboardingCreateConfirmView,
   onboardingImportView,
+  restoreWalletView,
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
 import { getRuntimeKind, isExtensionRuntime } from "../../platform/runtime.js";
@@ -185,8 +187,10 @@ function pulseViewAnimation() {
   }
 }
 
-// Retain the mounted unlock nodes, not a password copy in application state.
+// Retain the mounted unlock nodes, not a password copy in application state:
+// the unlock form's, or the restore's ("unlock" | "restore").
 let activeLockedView = null;
+let activeLockedScreen = "";
 // The screen last drawn, to start a new one at its top.
 let lastScreen = "";
 
@@ -201,7 +205,7 @@ function setApp(children) {
       // Keep lastAnimatedRoute in sync even if we skip animation.
       lastAnimatedRoute = r;
 
-      // Activity is an internal dashboard subview, not a top-level nav item.
+      // Home and its full Activity list move without the transition.
       const isHomeTab = (x) => x === "home" || x === "activity";
       if (!(isHomeTab(prev) && isHomeTab(r))) {
         pulseViewAnimation();
@@ -284,17 +288,18 @@ function updateFullNav() {
   try {
     if (!fullNav) return;
     const rawRoute = state?.route || "home";
+    // A transaction's details stay under the item they were opened from.
     const route =
       rawRoute === "convert_confirm"
         ? "convert"
-        : rawRoute === "activity"
-        ? "home"
+        : rawRoute === "tx"
+        ? state?.txDetailFrom || "home"
         : rawRoute === "sent"
         ? state?.sent?.doneRoute || "home"
         : rawRoute;
     for (const item of fullNav.querySelectorAll("[data-route]")) {
       const itemRoute = item.getAttribute("data-route");
-      const active = itemRoute === route || (itemRoute === "home" && route === "tx");
+      const active = itemRoute === route;
       item.classList.toggle("is-active", active);
       if (active) item.setAttribute("aria-current", "page");
       else item.removeAttribute("aria-current");
@@ -313,8 +318,9 @@ if (fullNav) {
     netMenu.close();
     acctMenu.close();
     state.route = route;
-    // Staking opens on its overview.
+    // Staking opens on its overview, and Activity on all of it, as See all does.
     if (route === "stake" && state.staking) state.staking.screen = "overview";
+    if (route === "activity") state.activityFilter = "all";
     state.needsRefresh = true;
     if (route !== "home") state.highlightTx = null;
     await render({ forceRefresh: true });
@@ -333,16 +339,10 @@ function activeSiteInfo(ov) {
   if (!origin) return null;
   if (!origin.startsWith("https://") && !origin.startsWith("http://")) return null;
 
-  let host = origin;
-  try {
-    host = new URL(origin).hostname;
-  } catch {
-    // keep origin fallback
-  }
-
+  // As its approval named it: "http://127.0.0.1:5354", "app.dusk.network".
   return {
     origin,
-    host,
+    host: siteName(origin),
     connected: Boolean(ov?.activeConnected),
   };
 }
@@ -732,9 +732,11 @@ async function onExpand() {
       const r = String(state?.route ?? "");
       if (r) qs.set("route", r);
 
-      // Preserve tx details if we're currently looking at a tx.
+      // Preserve tx details if we're currently looking at a tx, with the
+      // page it was opened from: the sidebar marks it, and Back goes there.
       if (r === "tx" && state?.txDetailHash) {
         qs.set("hash", String(state.txDetailHash));
+        if (state?.txDetailFrom) qs.set("from", String(state.txDetailFrom));
       }
 
       // Preserve transaction highlight (used when opened from a notification).
@@ -861,13 +863,21 @@ export async function render({ forceRefresh = false } = {}) {
   }
 
   if (!ov.isUnlocked) {
-    const children = activeLockedView ?? lockedView({ state, actions });
+    const screen = state.route === "restore" ? "restore" : "unlock";
+    const children =
+      activeLockedView && activeLockedScreen === screen
+        ? activeLockedView
+        : screen === "restore"
+        ? restoreWalletView({ state, actions })
+        : lockedView({ state, actions });
     setApp(children);
     activeLockedView = children;
+    activeLockedScreen = screen;
     return;
   }
 
-  // Unlocked routes
+  // Unlocked routes. A restore that another window's unlock overtook goes home.
+  if (state.route === "restore") state.route = "home";
   // After Confirm: the transaction's steps. Without one (a new popup), home.
   if (state.route === "sent") {
     if (state.sent) {

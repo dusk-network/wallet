@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added Activity to the full view's sidebar.
+- Added Forgot your password? to the unlock screen: a restore from the recovery phrase that keeps the same wallet's contacts.
 - Showed Sozu's fees on Liquid staking as its contract has them: its share of rewards, the deposit fee and no fee to unstake.
 - Showed Sozu's deposit fee on each stake as it's typed and on Review, and took it off what the stake gets.
 - Turned staking with Sozu off while Sozu has paused deposits or they can't be checked, and warned while its pool is synchronizing.
@@ -48,6 +50,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Led a withdrawal's prove and claim approvals with what they cost, then the withdrawal.
+- Named the connected site in the popup as its approval did: with its port, and http:// for a local one.
+- Marked the popup's top row as its header and its page as main, for screen readers.
+- Showed a profile's `.dusk` name beside its short account in the profile switcher.
+- Said that native staking's Max keeps both fees: this stake's and the one to unstake later.
+- Named a `.dusk` name's registration in Activity by the name it registered.
+- Moved a contract call's contract from under its title to Technical details, with Copy.
+- Hid a failed row's fee in Activity while balances are hidden.
 - Said that unstaking from Sozu returns the DUSK in the same transaction, with no fee and no waiting.
 - Gave stakes with Sozu a 5M gas limit and unstakes 10M, at the network's price, never under 2.5M and 4M, and said a failed call is charged its whole limit.
 - Showed a deposit to DuskEVM as To its DuskEVM address in Activity and its details, with Copy, and listed bridge transfers under Sent and Received.

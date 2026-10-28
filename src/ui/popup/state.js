@@ -90,7 +90,15 @@ export const state = {
       return null;
     }
   })(),
-  txDetailFrom: null,
+  // The page a transaction's details were opened from, as an expanded popup passes it on.
+  txDetailFrom: (() => {
+    try {
+      const from = new URLSearchParams(location.search).get("from");
+      return ["activity", "contacts", "home"].includes(from) ? from : null;
+    } catch {
+      return null;
+    }
+  })(),
   overview: null,
   // Hide balances as chosen in this popup, once chosen: an overview read
   // before the choice was saved doesn't undo it.

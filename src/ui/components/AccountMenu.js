@@ -2,7 +2,6 @@ import { h } from "../lib/dom.js";
 import { copyToClipboard } from "../lib/clipboard.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
 import { iconSvg } from "./ActionIcon.js";
-import { duskNameEl } from "./DuskName.js";
 import { shortAddressEl } from "./ShortAddress.js";
 import { menuKeys } from "./MenuKeys.js";
 
@@ -52,21 +51,22 @@ export function createAccountMenuController({
       const name = String(nameMap?.[String(i)] ?? "").trim();
       const label = name || `Profile ${i + 1}`;
 
-      // Two lines: the label, then the profile's verified .dusk name, looked
-      // up when the menu opens, or its short account until it has one.
+      // Two lines: the label, then the profile's short account, after its
+      // verified .dusk name once the lookup when the menu opens gives one:
+      // "alice.dusk · qxwSid…kQ2Bgr", as the connect window shows it.
       const lookup = acct ? lookupPrimaryName(String(acct), { nodeUrl: ov?.nodeUrl }) : null;
+      const verifiedEl = h("span", { class: "dusk-name", hidden: true });
+      const dot = h("span", { text: " · ", hidden: true });
       const hint = acct
-        ? h("div", { class: "net-menu-item-hint" }, [shortAddressEl(String(acct), { tag: "span" })])
+        ? h("div", { class: "net-menu-item-hint" }, [verifiedEl, dot, shortAddressEl(String(acct), { tag: "span" })])
         : h("div");
       lookup?.then((verified) => {
-        if (verified) hint.hidden = true;
+        if (!verified) return;
+        Object.assign(verifiedEl, { textContent: verified, title: verified, hidden: false });
+        dot.hidden = false;
       });
 
-      const left = h("div", { class: "net-menu-item-left" }, [
-        h("div", { class: "net-menu-item-label", text: label }),
-        lookup ? duskNameEl(lookup) : null,
-        hint,
-      ]);
+      const left = h("div", { class: "net-menu-item-left" }, [h("div", { class: "net-menu-item-label", text: label }), hint]);
 
       const check = h("span", { class: "net-menu-check", "aria-hidden": "true", html: active ? iconSvg("check") : "" });
 

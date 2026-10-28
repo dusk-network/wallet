@@ -15,8 +15,10 @@
 // Contacts kept in plain text before (STORAGE_KEYS.ADDRESS_BOOK) move into
 // the unlocked wallet's record the first time it opens, and the plain copy
 // goes. A wallet reset deletes every record and any plain copy, as does
-// making a new wallet here: it starts with none.
+// making a new wallet here: it starts with none. A wallet restored in place
+// of the one here keeps its own record, and only that.
 
+import { contactsNamespace } from "./contactsCrypto.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
 
@@ -225,4 +227,20 @@ export async function moveLegacyContacts(vault) {
  */
 export function clearContacts() {
   return one(() => storage.remove([RECORDS, PLAIN]));
+}
+
+/**
+ * Keep only the contacts of a wallet restored here: its own record stays,
+ * every other wallet's goes, and so does any plain copy from before they were
+ * encrypted, which no wallet can be told by. It needs no key.
+ * @param {string} walletId - the restored wallet's first public account
+ */
+export function keepOnlyContactsOf(walletId) {
+  return one(async () => {
+    const namespace = await contactsNamespace(walletId);
+    const records = (await storage.get(RECORDS))?.[RECORDS];
+    const own = isObject(records) && Object.hasOwn(records, namespace) ? records[namespace] : null;
+    if (own) await storage.set({ [RECORDS]: { [namespace]: own } });
+    await storage.remove(own ? PLAIN : [RECORDS, PLAIN]);
+  });
 }

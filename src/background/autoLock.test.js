@@ -47,13 +47,16 @@ const mocks = vi.hoisted(() => {
     createVault: vi.fn(async () => true),
     clearPermissions: vi.fn(async () => {}),
     beginReset: vi.fn(async () => {}),
+    clearWalletData: vi.fn(async () => {}),
+    endReset: vi.fn(async () => {}),
     finishReset: vi.fn(async () => {}),
-    finishPendingReset: vi.fn(async () => {}),
+    finishPendingReset: vi.fn(async () => ({ pending: false, keepContactsOf: null })),
     cancelPendingApprovals: vi.fn(),
     engineCall: vi.fn(async (method) => {
       if (method === "engine_unlock") {
         return { accounts: ["acct0"] };
       }
+      if (method === "engine_walletId") return "acct0";
       if (method === "engine_lock") {
         mocks.engineUnlocked = false;
       }
@@ -112,6 +115,8 @@ vi.mock("../shared/vault.js", () => ({
 
 vi.mock("../shared/walletReset.js", () => ({
   beginReset: mocks.beginReset,
+  clearWalletData: mocks.clearWalletData,
+  endReset: mocks.endReset,
   finishReset: mocks.finishReset,
   finishPendingReset: mocks.finishPendingReset,
 }));
@@ -360,6 +365,59 @@ describe("background auto-lock activity", () => {
     const create = await sendBackgroundMessage({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet B", password: "password123" });
     expect(create.error.message).toBe(failure.message);
     expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
+  it("restores a wallet in place of the one here once its phrase makes one: as Reset does, keeping its contacts", async () => {
+    mocks.engineUnlocked = false;
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" });
+    expect(response).toEqual({ ok: true, accounts: ["acct0"] });
+    const order = (fn) => fn.mock.invocationCallOrder[0];
+    const methods = mocks.engineCall.mock.calls.map(([method]) => method);
+    const named = mocks.engineCall.mock.invocationCallOrder[methods.indexOf("engine_walletId")];
+    expect(named).toBeLessThan(order(mocks.beginReset));
+    expect(order(mocks.beginReset)).toBeLessThan(order(mocks.clearPermissions));
+    expect(order(mocks.clearPermissions)).toBeLessThan(order(mocks.clearWalletData));
+    expect(order(mocks.clearWalletData)).toBeLessThan(order(mocks.clearVault));
+    expect(order(mocks.clearVault)).toBeLessThan(order(mocks.createVault));
+    // Noted, with the wallet it makes, until that wallet's vault is.
+    expect(mocks.beginReset).toHaveBeenCalledWith({ keepContactsOf: "acct0" });
+    expect(mocks.clearWalletData).toHaveBeenCalledWith({ keepContactsOf: "acct0" });
+    expect(order(mocks.createVault)).toBeLessThan(order(mocks.endReset));
+    expect(mocks.finishReset).not.toHaveBeenCalled();
+    expect(mocks.createVault).toHaveBeenCalledWith("wallet A", "new password");
+    expect(methods.at(-1)).toBe("engine_unlock");
+  });
+
+  it("keeps a restore noted when its new vault can't be made, so the next import of that wallet keeps its contacts", async () => {
+    mocks.engineUnlocked = false;
+    mocks.createVault.mockRejectedValueOnce(new Error("Storage is full"));
+    const restore = await sendBackgroundMessage({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" });
+    expect(restore.error.message).toBe("Storage is full");
+    expect(mocks.clearVault).toHaveBeenCalledTimes(1);
+    expect(mocks.endReset).not.toHaveBeenCalled();
+
+    // The next import finds it, and keeps the contacts only of the wallet it makes, if it's that one.
+    mocks.vault = null;
+    mocks.finishPendingReset.mockResolvedValueOnce({ pending: true, keepContactsOf: "acct0" });
+    const create = await sendBackgroundMessage({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet A", password: "password123" });
+    expect(create).toEqual({ ok: true, accounts: ["acct0"] });
+    const methods = mocks.engineCall.mock.calls.map(([method]) => method);
+    expect(methods.filter((m) => m === "engine_walletId")).toHaveLength(2);
+    const order = (fn) => fn.mock.invocationCallOrder.at(-1);
+    expect(order(mocks.createVault)).toBeLessThan(order(mocks.endReset));
+  });
+
+  it("leaves the wallet here as it was when the phrase makes no wallet, or the wallet is unlocked", async () => {
+    mocks.engineUnlocked = false;
+    mocks.engineCall.mockRejectedValueOnce(new Error("That isn't a valid recovery phrase."));
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "not a phrase", password: "new password" });
+    expect(response.error.message).toBe("That isn't a valid recovery phrase.");
+    mocks.engineUnlocked = true;
+    const unlocked = await sendBackgroundMessage({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" });
+    expect(unlocked.error.message).toMatch(/lock the wallet first/i);
+    for (const fn of [mocks.beginReset, mocks.clearPermissions, mocks.finishReset, mocks.clearVault, mocks.createVault, mocks.cancelPendingApprovals]) {
+      expect(fn).not.toHaveBeenCalled();
+    }
   });
 
   it("does not clear the vault when reset cannot lock the engine", async () => {

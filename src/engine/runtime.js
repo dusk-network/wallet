@@ -36,6 +36,7 @@ import {
   waitTxExecuted,
   waitTxRemoved,
   unlockWithMnemonic,
+  walletIdOf,
   preloadProtocolDriver,
   setEngineDebugHook,
 } from "../shared/walletEngine.js";
@@ -245,6 +246,11 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
         case "engine_lock":
           lock();
           sendResponse({ id, result: true });
+          return;
+
+        // The wallet a restore's phrase makes, before anything is replaced.
+        case "engine_walletId":
+          sendResponse({ id, result: await walletIdOf(params?.mnemonic) });
           return;
 
         case "engine_selectAccount": {

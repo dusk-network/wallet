@@ -44,7 +44,7 @@ import {
   registerTxNotificationHandlers,
 } from "./txNotify.js";
 import { getAccountNames } from "../shared/accountNames.js";
-import { clearContacts, contactsStore, moveLegacyContacts } from "../shared/contactsStore.js";
+import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
   getTxEpoch,
   getTxMeta,
@@ -53,7 +53,7 @@ import {
   listTxs,
   typedRecipientName,
 } from "../shared/txStore.js";
-import { beginReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
+import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
 import {
   getNetworkStatus,
@@ -955,17 +955,65 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock or reset the current wallet first");
           }
           // A reset that couldn't clear the old wallet's data finishes first.
-          await finishPendingReset();
-          // A new wallet starts with no contacts: any kept here are another's.
-          await clearContacts();
+          const { pending, keepContactsOf } = await finishPendingReset();
+          if (keepContactsOf) {
+            // A restore cut short before its vault: its wallet's contacts
+            // stay if this is that wallet, and go if it's another.
+            await ensureEngineConfigured();
+            await keepOnlyContactsOf(await engineCall("engine_walletId", { mnemonic: String(mnemonic) }, { timeoutMs: 120_000 }));
+          } else {
+            // A new wallet starts with no contacts: any kept here are another's.
+            await clearContacts();
+          }
 
           await createVault(mnemonic, password);
+          if (pending) await endReset();
           await ensureEngineConfigured();
           const result = await unlockEngine(String(mnemonic));
           await updateActivity();
           setupAutoLockAlarm().catch(console.error);
           broadcastProfilesChangedAll().catch(() => {});
           emitUiLockState(true, "create").catch(() => {});
+          return Array.isArray(result?.accounts)
+            ? result.accounts
+            : (await getEngineStatusStrict()).accounts;
+        });
+
+        sendResponse({ ok: true, accounts });
+        return;
+      }
+
+      // A forgotten password: the wallet restored from its recovery phrase in
+      // place of the one here. Nothing goes until the phrase has made its
+      // wallet; then the vault, sites, history and notes are replaced as
+      // Reset does, and of the contacts only that wallet's stay.
+      if (message?.type === "DUSK_UI_RESTORE_WALLET") {
+        const accounts = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const { mnemonic, password } = message;
+          if (!mnemonic || !password) {
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "mnemonic and password required");
+          }
+          if ((await getEngineStatusStrict())?.isUnlocked) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock the wallet first");
+          }
+          await ensureEngineConfigured();
+          const walletId = await engineCall("engine_walletId", { mnemonic: String(mnemonic) }, { timeoutMs: 120_000 });
+
+          await lockWallet("restore");
+          // Noted with the wallet it makes until that wallet's vault is: cut
+          // short in between, the next wallet made here keeps those contacts
+          // only if it's the same one.
+          await beginReset({ keepContactsOf: walletId });
+          await clearPermissions();
+          await clearWalletData({ keepContactsOf: walletId });
+          await clearVault();
+          await createVault(mnemonic, password);
+          await endReset();
+          const result = await unlockEngine(String(mnemonic));
+          await updateActivity();
+          setupAutoLockAlarm().catch(console.error);
+          broadcastProfilesChangedAll().catch(() => {});
+          emitUiLockState(true, "restore").catch(() => {});
           return Array.isArray(result?.accounts)
             ? result.accounts
             : (await getEngineStatusStrict()).accounts;

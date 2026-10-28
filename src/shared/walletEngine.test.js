@@ -846,6 +846,14 @@ describe("walletEngine", () => {
     expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
   });
 
+  it("names the wallet a recovery phrase makes without unlocking it, and refuses one that isn't a phrase", async () => {
+    await expect(engine.walletIdOf("not a recovery phrase")).rejects.toThrow("That isn't a valid recovery phrase.");
+    expect(globalThis.__W3SPER_LAST_SEEDER__).toBeNull();
+    await expect(engine.walletIdOf(MNEMONIC)).resolves.toBe(WALLET_ID);
+    expect(engine.isUnlocked()).toBe(false);
+    expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
+  });
+
   it("does not let a superseded unlock commit after lock", async () => {
     let releaseProfile;
     let profileStarted;

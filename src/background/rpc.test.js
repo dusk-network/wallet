@@ -1607,6 +1607,25 @@ describe("background rpc handler", () => {
     expect(putTxMeta.mock.lastCall[1].bridgeTo).toBeUndefined();
   });
 
+  it("dusk_sendTransaction keeps the .dusk name a registration registers on its record, read from its call", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    const { calls } = (await import("../shared/fixtures/dusk-domains-registrations.json")).default;
+    const [alice] = calls;
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+
+    const call = { kind: "contract_call", privacy: "public", contractId: `0x${alice.contractId}`, fnName: "register", fnArgs: alice.data, amount: "0", deposit: "10000000000" };
+    await handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params: call });
+    expect(putTxMeta).toHaveBeenLastCalledWith("0xhash", expect.objectContaining({ registeredName: "alice.dusk" }), { epoch: 7 });
+
+    // Arguments that don't read keep none.
+    await handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params: { ...call, fnArgs: "0x00ff" } });
+    expect(putTxMeta.mock.lastCall[1].registeredName).toBeUndefined();
+  });
+
   it.each([
     ["non-object params", null],
     ["unsupported type", { type: "ERC20", options: { contractId: `0x${"02".repeat(32)}` } }],

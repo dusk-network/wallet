@@ -45,7 +45,7 @@ function srpGridEl(mnemonic, { blurred = false } = {}) {
 }
 
 // A new password and its repeat, each with its error under it.
-function newPasswordFields({ onDone }) {
+function newPasswordFields({ onDone, label = "Password" }) {
   const pwd = passwordInput({
     placeholder: "At least 8 characters",
     autocomplete: "new-password",
@@ -63,7 +63,7 @@ function newPasswordFields({ onDone }) {
   return {
     pwd,
     pwd2,
-    els: [fieldLabel(pwd, "Password"), pwd, pwdError.el, fieldLabel(pwd2, "Confirm password"), pwd2, pwd2Error.el],
+    els: [fieldLabel(pwd, label), pwd, pwdError.el, fieldLabel(pwd2, "Confirm password"), pwd2, pwd2Error.el],
     // The password, or null after saying what's wrong with it.
     read() {
       pwdError.show("");
@@ -359,25 +359,22 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
   ];
 }
 
-export function onboardingImportView({ state, actions } = {}) {
+// A recovery phrase and a new password, for Import wallet and for a restore
+// in place of the wallet here: what's wrong with the phrase under it, with
+// the password under each field, then one message to the wallet.
+function phraseForm({ state, actions, title, lead = "", passwordLabel, verb, busyVerb, type, onBack }) {
   const mnemonicInput = createMnemonicInput({
     wordCount: 12,
     allowWordCountToggle: true,
     onComplete: () => fields.pwd.focus(),
   });
   const phraseError = fieldError(mnemonicInput.el, { markInvalid: false });
-  const fields = newPasswordFields({ onDone: () => btn.click() });
+  const fields = newPasswordFields({ onDone: () => btn.click(), label: passwordLabel });
   const err = formError();
 
   const busyBody = h("p", { class: "auth-note", style: "display:none", text: "Encrypting your wallet. Keep this window open." });
 
-  const nav = subnav({
-    title: "Import wallet",
-    onBack: () => {
-      state.route = "onboard_welcome";
-      actions?.render?.().catch(() => {});
-    },
-  });
+  const nav = subnav({ title, onBack });
   const backBtn = nav.querySelector("button");
 
   let busy = false;
@@ -390,7 +387,7 @@ export function onboardingImportView({ state, actions } = {}) {
     if (backBtn) backBtn.disabled = busy;
     if (btn) {
       btn.disabled = busy;
-      btn.textContent = busy ? "Importing…" : "Import wallet";
+      btn.textContent = busy ? busyVerb : verb;
     }
     busyBody.style.display = busy ? "block" : "none";
   };
@@ -417,7 +414,7 @@ export function onboardingImportView({ state, actions } = {}) {
   btn = h("button", {
     class: "btn-primary btn-full",
     type: "button",
-    text: "Import wallet",
+    text: verb,
     onclick: async () => {
       try {
         if (busy) return;
@@ -428,19 +425,17 @@ export function onboardingImportView({ state, actions } = {}) {
         if (password == null) return;
 
         setBusy(true);
-        const res = await actions?.send?.({
-          type: "DUSK_UI_CREATE_WALLET",
-          mnemonic: m,
-          password,
-        });
-        if (res?.error) throw new Error(res.error.message ?? "Failed to import wallet");
+        const res = await actions?.send?.({ type, mnemonic: m, password });
+        if (res?.error) throw new Error(res.error.message ?? `Couldn't ${verb.toLowerCase()}`);
 
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
         state.route = "home";
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
-        if (await showPersistedVault(state, actions)) return;
+        // An import that made its vault before it failed opens that wallet; a
+        // restore keeps one either way, so it says what went wrong.
+        if (type === "DUSK_UI_CREATE_WALLET" && (await showPersistedVault(state, actions))) return;
         err.show(e?.message ?? String(e));
         setBusy(false);
       }
@@ -449,6 +444,7 @@ export function onboardingImportView({ state, actions } = {}) {
   return [
     nav,
     h("div", { class: "row onboard-form" }, [
+      lead ? h("p", { class: "auth-lead", text: lead }) : null,
       groupLabel(mnemonicInput.el, "Recovery phrase"),
       mnemonicInput.el,
       phraseError.el,
@@ -456,6 +452,43 @@ export function onboardingImportView({ state, actions } = {}) {
       err.el,
       btn,
       busyBody,
-    ]),
+    ].filter(Boolean)),
   ];
+}
+
+export function onboardingImportView({ state, actions } = {}) {
+  return phraseForm({
+    state,
+    actions,
+    title: "Import wallet",
+    verb: "Import wallet",
+    busyVerb: "Importing…",
+    type: "DUSK_UI_CREATE_WALLET",
+    onBack: () => {
+      state.route = "onboard_welcome";
+      actions?.render?.().catch(() => {});
+    },
+  });
+}
+
+/**
+ * A forgotten password: the wallet restored from its recovery phrase in
+ * place of the one here, with a new password. It says first what that does;
+ * Back returns to the unlock form.
+ */
+export function restoreWalletView({ state, actions } = {}) {
+  return phraseForm({
+    state,
+    actions,
+    title: "Restore wallet",
+    lead: "This removes the wallet from this browser and sets it up again with a new password. Contacts stay if it's the same wallet.",
+    passwordLabel: "New password",
+    verb: "Restore wallet",
+    busyVerb: "Restoring…",
+    type: "DUSK_UI_RESTORE_WALLET",
+    onBack: () => {
+      state.route = "home";
+      actions?.render?.().catch(() => {});
+    },
+  });
 }

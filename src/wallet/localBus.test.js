@@ -43,6 +43,11 @@ vi.mock("../shared/walletEngine.js", () => ({
     engine.wallet = mnemonic;
     engine.unlocked = true;
   },
+  // The wallet a phrase makes; here every phrase is "wallet …".
+  walletIdOf: async (mnemonic) => {
+    if (!String(mnemonic).startsWith("wallet ")) throw new Error("That isn't a valid recovery phrase.");
+    return `account of ${mnemonic}`;
+  },
   openContactsRecords: async (records) => {
     const { openContacts } = await import("../shared/contactsCrypto.js");
     const { key, namespace } = await contactsKeys();
@@ -228,5 +233,74 @@ describe("contacts", () => {
     expect(kept()).not.toContain("landlord");
     expect((await contacts({ op: "list" })).map((e) => e.name)).toEqual([LABEL, "Bob"]);
   });
-});
 
+  describe("on a restore after a forgotten password", () => {
+    // Wallet A with a contact, locked, as its owner finds it.
+    const walletA = async () => {
+      const { localSend } = await import("./localBus.js");
+      await localSend({ type: "DUSK_UI_RESET_WALLET" });
+      await localSend({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet A", password: "password123" });
+      await contacts({ op: "upsert", entry: { name: LABEL, address: ACCOUNT } });
+      await localSend({ type: "DUSK_UI_LOCK" });
+      return localSend;
+    };
+
+    it("stay for the same wallet, under its new password, and go for another's", async () => {
+      const localSend = await walletA();
+      leavePlain([{ id: "1", name: "Old", address: ACCOUNT, updatedAt: 1 }]);
+      await expect(localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" })).resolves.toMatchObject({ ok: true });
+      expect((await contacts({ op: "list" })).map((e) => e.name)).toEqual([LABEL]);
+      // No wallet can be told by a plain copy: it goes.
+      expect(localStorage.getItem("dusk_addressbook_v1")).toBeNull();
+      await localSend({ type: "DUSK_UI_LOCK" });
+      await expect(localSend({ type: "DUSK_UI_UNLOCK", password: "new password" })).resolves.toMatchObject({ ok: true });
+
+      await localSend({ type: "DUSK_UI_LOCK" });
+      await expect(localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet B", password: "new password" })).resolves.toMatchObject({ ok: true });
+      expect(await contacts({ op: "list" })).toEqual([]);
+      expect(localStorage.getItem("dusk_contacts_v2")).toBeNull();
+    });
+
+    // The new vault's write fails once, after the old vault went: a storage
+    // error, or the app shut between the two.
+    const failNextVaultWrite = () => {
+      const write = localStorage.setItem;
+      localStorage.setItem = (key, value) => {
+        if (key === "dusk_vault_v1") {
+          localStorage.setItem = write;
+          throw new Error("Storage is full");
+        }
+        return write(key, value);
+      };
+    };
+
+    it.each([
+      ["keep for the next import of the same wallet", "wallet A", [LABEL]],
+      ["go for an import of another wallet", "wallet B", []],
+    ])("cut short before the new vault, %s", async (_, phrase, names) => {
+      const localSend = await walletA();
+      failNextVaultWrite();
+      const restore = await localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" });
+      expect(restore.error.message).toBe("Storage is full");
+      await expect(localSend({ type: "DUSK_UI_STATUS" })).resolves.toMatchObject({ hasVault: false });
+
+      // Onboarding's import, the only way on from there.
+      await expect(localSend({ type: "DUSK_UI_CREATE_WALLET", mnemonic: phrase, password: "password456" })).resolves.toMatchObject({ ok: true });
+      expect((await contacts({ op: "list" })).map((e) => e.name)).toEqual(names);
+      // Done: the next wallet made after a reset starts with none.
+      expect(localStorage.getItem("dusk_reset_pending_v1")).toBeNull();
+    });
+
+    it("leave everything as it was for a phrase that isn't one", async () => {
+      const localSend = await walletA();
+      const txs = await import("../shared/txStore.js");
+      await txs.putTxMeta("aa".repeat(32), { status: "executed", submittedAt: 1 });
+      const before = kept();
+      const restore = await localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "not a phrase", password: "new password" });
+      expect(restore.error.message).toBe("That isn't a valid recovery phrase.");
+      expect(kept()).toBe(before);
+      await expect(localSend({ type: "DUSK_UI_UNLOCK", password: "password123" })).resolves.toMatchObject({ ok: true });
+      expect((await contacts({ op: "list" })).map((e) => e.name)).toEqual([LABEL]);
+    });
+  });
+});

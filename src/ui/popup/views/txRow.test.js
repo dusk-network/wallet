@@ -157,6 +157,8 @@ describe("what a row says", () => {
       "sent",
     ]);
     expect(call("commit").name).toBe("Reserved a .dusk name");
+    // A registration by its name, once read from its call.
+    expect(call("register", { registeredName: "alice.dusk" }).name).toBe("Registered alice.dusk");
     // On another network's node, or a custom one, it's any contract.
     expect(call("register", { nodeUrl: "https://nodes.dusk.network" }).name).toBe("Call register");
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: store, fnName: "register" }, { nodeUrl: "https://node.example" }).name).toBe("Call register");
