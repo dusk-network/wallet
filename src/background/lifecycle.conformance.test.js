@@ -24,4 +24,20 @@ describe("background lock lifecycle conformance", () => {
       /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockVault\(password\)[\s\S]*?unlockEngine\(mnemonic\)[\s\S]*?broadcastProfilesChangedAll/
     );
   });
+
+  it("keeps contacts to their wallet: a new one starts with none, unlock moves plain ones in, approvals read them unlocked", async () => {
+    const source = await readFile(path.resolve(process.cwd(), "src/background/index.js"), "utf8");
+
+    expect(source).toMatch(
+      /message\?\.type === "DUSK_UI_CREATE_WALLET"[\s\S]*?finishPendingReset\(\)[\s\S]*?clearContacts\(\)[\s\S]*?createVault\(mnemonic, password\)/
+    );
+    expect(source).toMatch(
+      /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockEngine\(mnemonic\)[\s\S]*?moveLegacyContacts\(engineContactsVault\(engineCall\)\)/
+    );
+    expect(source).toMatch(
+      /entry\.kind === "send_tx" && status\.isUnlocked[\s\S]*?contactsStore\(engineContactsVault\(engineCall\)\)\.list\(\)/
+    );
+    // Nothing reads them in plain text any more.
+    expect(source).not.toContain("listAddressBook");
+  });
 });

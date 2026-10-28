@@ -17,6 +17,7 @@ Dusk Wallet is a self-custody wallet — users control their own keys. This docu
 | Mnemonic phrase | **Critical** | Encrypted in vault |
 | Private keys | **Critical** | Derived in-memory from mnemonic |
 | Shielded notes | High | IndexedDB (per-network) |
+| Contacts | Medium | Platform storage, AES-GCM-256 per wallet; the key is HKDF-SHA-256 over the seed, held by the engine while unlocked |
 | dApp permissions | Medium | Platform storage |
 | User settings | Low | Platform storage |
 

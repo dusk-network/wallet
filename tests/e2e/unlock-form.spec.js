@@ -42,6 +42,7 @@ test.beforeEach(async ({ page }) => {
       }
       if (message.type === "DUSK_UI_GET_SOZU_STATUS") return { error: { message: "No position in renderer test" } };
       if (message.type === "DUSK_UI_ASSETS_GET") return { tokens: [], nfts: [] };
+      if (message.type === "DUSK_UI_CONTACTS") return window.overview.isUnlocked ? { ok: true, result: [] } : { error: { message: "Wallet locked" } };
       throw new Error(`Unexpected renderer test message: ${message.type}`);
     };
     const { state } = await import("/src/ui/popup/state.js");
@@ -203,7 +204,6 @@ test("success refreshes a replacement unlock form after returning before complet
 
 for (const [destination, placeholder, draft] of [
   ["options", "https://provers.dusk.network", "https://unsaved.example"],
-  ["contacts", "e.g. Alice", "Unsaved contact"],
 ]) {
   test(`a late successful unlock preserves the active ${destination} draft`, async ({ page }) => {
     await page.getByPlaceholder("Password", { exact: true }).fill(PASSWORD);
@@ -211,13 +211,6 @@ for (const [destination, placeholder, draft] of [
     await expect.poll(() => page.evaluate(() => window.unlockRequests.length)).toBe(1);
     await page.getByTitle("Settings", { exact: true }).click();
     await expect(page.getByText("Settings", { exact: true })).toBeVisible();
-    if (destination === "contacts") {
-      await page.evaluate(async () => {
-        window.uiState.route = "contacts";
-        await window.renderPopup();
-      });
-      await page.getByRole("button", { name: "New contact", exact: true }).click();
-    }
     const field = page.getByPlaceholder(placeholder, { exact: true });
     await field.fill(draft);
     await field.evaluate(el => { window.draftField = el; });
@@ -241,7 +234,28 @@ for (const [destination, placeholder, draft] of [
   });
 }
 
-for (const destination of ["options", "contacts", "reset"]) {
+// Contacts open only unlocked: their key is the wallet's.
+test("Contacts wait for the unlock: the form being sent stays, and Contacts open once it succeeds", async ({ page }) => {
+  const input = page.getByPlaceholder("Password", { exact: true });
+  await input.fill(PASSWORD);
+  await input.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.unlockRequests.length)).toBe(1);
+  await page.evaluate(async () => {
+    window.uiState.route = "contacts";
+    await window.renderPopup({ forceRefresh: true });
+  });
+  await expect(page.getByRole("button", { name: "New contact", exact: true })).toHaveCount(0);
+  expect(await input.evaluate(el => el === window.originalPassword)).toBe(true);
+  await page.evaluate(() => {
+    window.overview.isUnlocked = true;
+    window.unlockReply.resolve({ ok: true });
+  });
+  await expect(page.getByRole("button", { name: "New contact", exact: true })).toBeVisible();
+  await expect(input).toHaveCount(0);
+  await expect(page.getByText("No contacts yet.", { exact: true })).toBeVisible();
+});
+
+for (const destination of ["options", "reset"]) {
   test(`leaving for ${destination} clears the old input and ignores a late unlock error`, async ({ page }) => {
     const input = page.getByPlaceholder("Password", { exact: true });
     await input.fill(PASSWORD);

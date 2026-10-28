@@ -770,6 +770,11 @@ export async function render({ forceRefresh = false } = {}) {
   if (overviewRefreshed) {
     await maybeAutoWatchDashboardStDusk(ov);
   }
+  // Locked or reset: the contacts this page read go with their key, and are
+  // read again once a wallet is unlocked.
+  if (!ov?.isUnlocked && (state.addressBook?.items || state.addressBook?.error)) {
+    state.addressBook = { ...state.addressBook, loaded: false, loading: false, error: null, items: null };
+  }
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";
   } catch {
@@ -801,12 +806,6 @@ export async function render({ forceRefresh = false } = {}) {
   // TODO: Reconsider?
   if (state.route === "options") {
     setApp(optionsView(ov, { state, actions }));
-    return;
-  }
-
-  // Contacts are also safe to show without unlocking.
-  if (state.route === "contacts") {
-    setApp(addressBookView(ov, { state, actions }));
     return;
   }
 
@@ -912,6 +911,11 @@ export async function render({ forceRefresh = false } = {}) {
   }
   if (state.route === "tx") {
     setApp(txDetailsView(ov, { state, actions }));
+    return;
+  }
+  // Contacts open only unlocked: the wallet's key opens them.
+  if (state.route === "contacts") {
+    setApp(addressBookView(ov, { state, actions }));
     return;
   }
 

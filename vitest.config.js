@@ -25,6 +25,8 @@ export default defineConfig({
         "src/shared/networkPresets.js",
         "src/shared/txDefaults.js",
         "src/shared/addressBook.js",
+        "src/shared/contactsCrypto.js",
+        "src/shared/contactsStore.js",
         "src/ui/lib/strings.js",
       ],
       exclude: [

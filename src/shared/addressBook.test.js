@@ -1,336 +1,51 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock the storage module before importing addressBook
-vi.mock("./storage.js", () => {
-  let store = {};
-  return {
-    storage: {
-      get: vi.fn(async (key) => ({ [key]: store[key] })),
-      set: vi.fn(async (obj) => {
-        Object.assign(store, obj);
-      }),
-    },
-    STORAGE_KEYS: {
-      ADDRESS_BOOK: "dusk_address_book_v1",
-    },
-    // Helper to reset store between tests
-    __resetStore: () => {
-      store = {};
-    },
-    __getStore: () => store,
-  };
+// The pages ask the background, which keeps the contacts encrypted.
+vi.mock("../wallet/bus.js", () => ({ send: vi.fn() }));
+
+const { send } = await import("../wallet/bus.js");
+const { clearAddressBook, listAddressBook, markAddressBookNameChecked, removeAddressBookEntry, upsertAddressBookEntry } = await import(
+  "./addressBook.js"
+);
+
+beforeEach(() => {
+  send.mockReset();
+  send.mockResolvedValue({ ok: true, result: null });
 });
 
-// Import after mocking
-const { storage, STORAGE_KEYS, __resetStore, __getStore } = await import("./storage.js");
-const {
-  listAddressBook,
-  getAddressBookEntry,
-  upsertAddressBookEntry,
-  markAddressBookNameChecked,
-  removeAddressBookEntry,
-  clearAddressBook,
-} = await import("./addressBook.js");
-
-describe("addressBook", () => {
-  beforeEach(() => {
-    __resetStore();
-    vi.clearAllMocks();
-  });
-
-  describe("listAddressBook", () => {
-    it("returns empty array when no entries", async () => {
-      const result = await listAddressBook();
-      expect(result).toEqual([]);
-    });
-
-    it("returns entries sorted by name", async () => {
-      const store = {
-        "1": { id: "1", name: "Charlie", address: "addr1", updatedAt: 100 },
-        "2": { id: "2", name: "Alice", address: "addr2", updatedAt: 200 },
-        "3": { id: "3", name: "Bob", address: "addr3", updatedAt: 150 },
-      };
-      await storage.set({ [STORAGE_KEYS.ADDRESS_BOOK]: store });
-
-      const result = await listAddressBook();
-      expect(result.map((e) => e.name)).toEqual(["Alice", "Bob", "Charlie"]);
-    });
-
-    it("filters by query (name)", async () => {
-      const store = {
-        "1": { id: "1", name: "Alice Smith", address: "addr1", updatedAt: 100 },
-        "2": { id: "2", name: "Bob Jones", address: "addr2", updatedAt: 200 },
-      };
-      await storage.set({ [STORAGE_KEYS.ADDRESS_BOOK]: store });
-
-      const result = await listAddressBook({ query: "alice" });
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe("Alice Smith");
-    });
-
-    it("filters by query (address)", async () => {
-      const store = {
-        "1": { id: "1", name: "Alice", address: "abc123", updatedAt: 100 },
-        "2": { id: "2", name: "Bob", address: "xyz789", updatedAt: 200 },
-      };
-      await storage.set({ [STORAGE_KEYS.ADDRESS_BOOK]: store });
-
-      const result = await listAddressBook({ query: "xyz" });
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe("Bob");
-    });
-
-    it("is case insensitive for queries", async () => {
-      const store = {
-        "1": { id: "1", name: "Alice", address: "ABC123", updatedAt: 100 },
-      };
-      await storage.set({ [STORAGE_KEYS.ADDRESS_BOOK]: store });
-
-      const result = await listAddressBook({ query: "abc" });
-      expect(result).toHaveLength(1);
-    });
-  });
-
-  describe("getAddressBookEntry", () => {
-    it("returns null for non-existent entry", async () => {
-      const result = await getAddressBookEntry("non-existent");
-      expect(result).toBeNull();
-    });
-
-    it("returns null for empty id", async () => {
-      expect(await getAddressBookEntry("")).toBeNull();
-      expect(await getAddressBookEntry(null)).toBeNull();
-    });
-
-    it("returns entry by id", async () => {
-      const store = {
-        "test-id": { id: "test-id", name: "Alice", address: "addr1" },
-      };
-      await storage.set({ [STORAGE_KEYS.ADDRESS_BOOK]: store });
-
-      const result = await getAddressBookEntry("test-id");
-      expect(result).toMatchObject({ id: "test-id", name: "Alice" });
-    });
-  });
-
-  describe("upsertAddressBookEntry", () => {
-    it("creates new entry with generated id", async () => {
-      const result = await upsertAddressBookEntry({
-        name: "Alice",
-        address: "addr123",
-      });
-
-      expect(result.id).toBeDefined();
-      expect(result.name).toBe("Alice");
-      expect(result.address).toBe("addr123");
-      expect(result.createdAt).toBeDefined();
-      expect(result.updatedAt).toBeDefined();
-    });
-
-    it("updates existing entry", async () => {
-      const created = await upsertAddressBookEntry({
-        name: "Alice",
-        address: "addr123",
-      });
-
-      const updated = await upsertAddressBookEntry({
-        id: created.id,
-        name: "Alice Updated",
-        address: "newaddr",
-      });
-
-      expect(updated.id).toBe(created.id);
-      expect(updated.name).toBe("Alice Updated");
-      expect(updated.address).toBe("newaddr");
-      expect(updated.createdAt).toBe(created.createdAt);
-      expect(updated.updatedAt).toBeGreaterThanOrEqual(created.updatedAt);
-    });
-
-    it("trims name and address", async () => {
-      const result = await upsertAddressBookEntry({
-        name: "  Alice  ",
-        address: "  addr123  ",
-      });
-
-      expect(result.name).toBe("Alice");
-      expect(result.address).toBe("addr123");
-    });
-
-    it("defaults type to unknown", async () => {
-      const result = await upsertAddressBookEntry({
-        name: "Alice",
-        address: "addr",
-      });
-
-      expect(result.type).toBe("unknown");
-    });
-
-    it("preserves existing type on update", async () => {
-      const created = await upsertAddressBookEntry({
-        name: "Alice",
-        address: "addr",
-        type: "account",
-      });
-
-      const updated = await upsertAddressBookEntry({
-        id: created.id,
-        name: "Alice Updated",
-        address: "addr",
-      });
-
-      expect(updated.type).toBe("account");
-    });
-
-    it("falls back to timestamp id when crypto.randomUUID throws", async () => {
-      const c = globalThis.crypto;
-      expect(c).toBeTruthy();
-
-      // Override crypto.randomUUID to throw to exercise the catch branch.
-      Object.defineProperty(c, "randomUUID", {
-        value: () => {
-          throw new Error("boom");
-        },
-        configurable: true,
-      });
-
-      try {
-        const result = await upsertAddressBookEntry({ name: "Alice", address: "addr123" });
-        expect(typeof result.id).toBe("string");
-        expect(result.id.length).toBeGreaterThan(0);
-      } finally {
-        // Restore prototype-provided randomUUID.
-        try {
-          delete c.randomUUID;
-        } catch {
-          // ignore
-        }
-      }
-    });
-
-    it("prunes to 200 entries by oldest updatedAt", async () => {
-      const nowSpy = vi.spyOn(Date, "now");
-      let t = 1;
-      nowSpy.mockImplementation(() => t++);
-
-      try {
-        for (let i = 0; i < 205; i++) {
-          await upsertAddressBookEntry({
-            id: String(i),
-            name: `Name ${i}`,
-            address: `addr${i}`,
-          });
-        }
-
-        const stored = __getStore()?.[STORAGE_KEYS.ADDRESS_BOOK] ?? {};
-        expect(Object.keys(stored)).toHaveLength(200);
-
-        // Oldest 5 should be gone.
-        for (let i = 0; i < 5; i++) {
-          expect(stored[String(i)]).toBeUndefined();
-        }
-        expect(stored["5"]).toBeTruthy();
-        expect(stored["204"]).toBeTruthy();
-      } finally {
-        nowSpy.mockRestore();
-      }
-    });
-  });
-
-  describe("markAddressBookNameChecked", () => {
-    it("marks the name checked on the contact as saved, and only while it's the one checked", async () => {
-      const checked = await upsertAddressBookEntry({ name: "Shop", address: "addr", duskName: "shop.dusk", checkedAt: 1 });
-      const marked = await markAddressBookNameChecked(checked, 5000);
-      expect(marked).toEqual({ ...checked, checkedAt: 5000 });
-      expect(await getAddressBookEntry(checked.id)).toEqual(marked);
-
-      // Edited during the check: the edit stands.
-      const edited = await upsertAddressBookEntry({ ...checked, name: "Corner shop", checkedAt: 2 });
-      expect(await markAddressBookNameChecked(checked, 6000)).toBeNull();
-      expect(await getAddressBookEntry(checked.id)).toEqual(edited);
-      for (const change of [{ address: "other" }, { duskName: "other.dusk" }]) {
-        const changed = await upsertAddressBookEntry({ ...edited, ...change });
-        expect(await markAddressBookNameChecked(edited, 7000)).toBeNull();
-        expect((await getAddressBookEntry(checked.id)).checkedAt).toBe(changed.checkedAt);
-      }
-
-      // Deleted during the check: it stays deleted.
-      await removeAddressBookEntry(checked.id);
-      expect(await markAddressBookNameChecked(checked, 8000)).toBeNull();
-      expect(await listAddressBook()).toEqual([]);
-    });
-  });
-
-  describe("concurrent changes", () => {
-    // A name check whose read of the book waits, holding the book as it was.
-    function holdNextRead() {
-      const read = Promise.withResolvers();
-      const held = Promise.withResolvers();
-      const get = storage.get.getMockImplementation();
-      storage.get.mockImplementationOnce(async (key) => {
-        const before = structuredClone(await get(key));
-        read.resolve();
-        await held.promise;
-        return before;
-      });
-      return { read: read.promise, release: held.resolve };
-    }
-
-    it.each([
-      ["deleted", (entry) => removeAddressBookEntry(entry.id), () => []],
-      ["edited", (entry) => upsertAddressBookEntry({ ...entry, name: "Corner shop" }), () => [expect.objectContaining({ name: "Corner shop" })]],
-    ])("leave a contact %s while its name was checked as the change left it", async (_change, change, expected) => {
-      const checked = await upsertAddressBookEntry({ name: "Shop", address: "addr", duskName: "shop.dusk", checkedAt: 1 });
-      const { read, release } = holdNextRead();
-      const mark = markAddressBookNameChecked(checked, 5000);
-      await read;
-      const changed = change(checked);
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      release();
-      await Promise.all([mark, changed]);
-      expect(await listAddressBook()).toEqual(expected());
-    });
-  });
-
-  describe("removeAddressBookEntry", () => {
-    it("removes entry by id", async () => {
-      const created = await upsertAddressBookEntry({
-        name: "Alice",
-        address: "addr",
-      });
-
-      await removeAddressBookEntry(created.id);
-
-      const result = await getAddressBookEntry(created.id);
-      expect(result).toBeNull();
-    });
-
-    it("does nothing for non-existent id", async () => {
-      // Should not throw
-      await removeAddressBookEntry("non-existent");
-    });
-
-    it("does nothing for empty id", async () => {
-      await removeAddressBookEntry("");
-      await removeAddressBookEntry(null);
-    });
-  });
-
-  it("sorts by updatedAt when names are equal (newest first)", async () => {
-    const store = {
-      "1": { id: "1", name: "Alice", address: "addr1", updatedAt: 100 },
-      "2": { id: "2", name: "Alice", address: "addr2", updatedAt: 200 },
-    };
-    await storage.set({ [STORAGE_KEYS.ADDRESS_BOOK]: store });
-
-    const result = await listAddressBook();
-    expect(result.map((e) => e.id)).toEqual(["2", "1"]);
-  });
-
-  it("clears all address book entries", async () => {
-    await upsertAddressBookEntry({ name: "Alice", address: "addr" });
-    expect(await listAddressBook()).toHaveLength(1);
-
+describe("the pages' contacts", () => {
+  it("ask the background for each change, by what it is", async () => {
+    const entry = { id: "1", name: "Shop", address: "addr", duskName: "shop.dusk" };
+    send.mockResolvedValueOnce({ ok: true, result: [entry] });
+    expect(await listAddressBook({ query: "sh" })).toEqual([entry]);
+    send.mockResolvedValueOnce({ ok: true, result: entry });
+    expect(await upsertAddressBookEntry({ name: "Shop", address: "addr" })).toEqual(entry);
+    await markAddressBookNameChecked(entry, 5000);
+    await removeAddressBookEntry("1");
     await clearAddressBook();
+    expect(send.mock.calls.map(([message]) => message)).toEqual([
+      { type: "DUSK_UI_CONTACTS", op: "list", query: "sh" },
+      { type: "DUSK_UI_CONTACTS", op: "upsert", entry: { name: "Shop", address: "addr" } },
+      { type: "DUSK_UI_CONTACTS", op: "markChecked", entry, checkedAt: 5000 },
+      { type: "DUSK_UI_CONTACTS", op: "remove", id: "1" },
+      { type: "DUSK_UI_CONTACTS", op: "clear" },
+    ]);
+  });
+
+  it("list none when the answer holds none, and ask nothing to delete no contact", async () => {
     expect(await listAddressBook()).toEqual([]);
+    expect(send).toHaveBeenLastCalledWith({ type: "DUSK_UI_CONTACTS", op: "list", query: "" });
+    send.mockClear();
+    await removeAddressBookEntry("");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("fail with the background's reason, as while the wallet is locked", async () => {
+    send.mockResolvedValueOnce({ error: { code: 4100, message: "Wallet locked" } });
+    await expect(listAddressBook()).rejects.toThrow("Wallet locked");
+    send.mockResolvedValueOnce({ ok: false, error: "Unknown message" });
+    await expect(upsertAddressBookEntry({ name: "A", address: "a" })).rejects.toThrow("Contacts are unavailable");
+    send.mockResolvedValueOnce(undefined);
+    await expect(clearAddressBook()).rejects.toThrow("Contacts are unavailable");
   });
 });

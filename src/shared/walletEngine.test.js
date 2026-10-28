@@ -866,6 +866,39 @@ describe("walletEngine", () => {
     expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
   });
 
+  it("keeps the contacts' key from the seed, here and only while unlocked: another seed's fails closed", async () => {
+    await expect(engine.sealContactsRecord("{}")).rejects.toThrow("Wallet locked");
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const { contactsNamespace } = await import("./contactsCrypto.js");
+    const book = JSON.stringify({ 1: { id: "1", name: "Alice (landlord, private)", address: "acct9" } });
+    const sealed = await engine.sealContactsRecord(book);
+    expect(sealed.namespace).toBe(await contactsNamespace(WALLET_ID));
+    expect(JSON.stringify(sealed.record)).not.toContain("landlord");
+    const records = { [sealed.namespace]: sealed.record };
+    expect(await engine.openContactsRecords(records)).toEqual({ namespace: sealed.namespace, text: book });
+    // No record at its place: none.
+    expect(await engine.openContactsRecords({ elsewhere: sealed.record })).toEqual({ namespace: sealed.namespace, text: null });
+
+    engine.lock();
+    await expect(engine.openContactsRecords(records)).rejects.toThrow("Wallet locked");
+    await expect(engine.sealContactsRecord(book)).rejects.toThrow("Wallet locked");
+
+    // Another recovery phrase at the same place (this mock's profiles don't
+    // depend on the seed) can't read them.
+    await engine.unlockWithMnemonic("legal winner thank year wave sausage worth useful legal winner thank yellow");
+    await expect(engine.openContactsRecords(records)).rejects.toThrow("couldn't be read with this wallet's key");
+    // The same one again can.
+    await engine.unlockWithMnemonic(MNEMONIC);
+    expect((await engine.openContactsRecords(records)).text).toBe(book);
+  });
+
+  it("drops a contacts key made for a wallet that locked meanwhile", async () => {
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const sealing = engine.sealContactsRecord("{}");
+    engine.lock();
+    await expect(sealing).rejects.toThrow("Wallet locked");
+  });
+
   it("restores multiple derived accounts on unlock", async () => {
     engine.configure({ accountCount: 2, selectedAccountIndex: 1 });
     await engine.unlockWithMnemonic(MNEMONIC);

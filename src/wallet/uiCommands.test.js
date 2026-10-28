@@ -16,6 +16,20 @@ vi.mock("../shared/settings.js", () => ({
   setSettings: mocks.setSettings,
 }));
 
+// The contacts store, as built on the engine's vault.
+const contacts = vi.hoisted(() => ({
+  store: { list: vi.fn(), upsert: vi.fn(), markChecked: vi.fn(), remove: vi.fn() },
+  vault: null,
+  clearContacts: vi.fn(async () => {}),
+}));
+vi.mock("../shared/contactsStore.js", () => ({
+  contactsStore: (vault) => {
+    contacts.vault = vault;
+    return contacts.store;
+  },
+  clearContacts: contacts.clearContacts,
+}));
+
 vi.mock("../shared/assetsStore.js", () => ({
   getWatchedAssets: mocks.getWatchedAssets,
   watchToken: mocks.watchToken,
@@ -174,6 +188,42 @@ describe("shared UI command dispatcher", () => {
       "dusk_setShieldedCheckpointNow",
       { profileIndex: 0 }
     );
+  });
+
+  it("asks the contacts store for the pages' contacts, which the engine's key opens", async () => {
+    const adapters = createAdapters({ namespace: "place", text: null });
+    const entry = { id: "1", name: "Shop", address: "addr" };
+    contacts.store.list.mockResolvedValueOnce([entry]);
+    contacts.store.upsert.mockResolvedValueOnce(entry);
+    contacts.store.markChecked.mockResolvedValueOnce(null);
+    contacts.store.remove.mockResolvedValueOnce(undefined);
+    const ask = (message) => handleUiCommand({ type: "DUSK_UI_CONTACTS", ...message }, adapters);
+
+    await expect(ask({ op: "list", query: "sh" })).resolves.toEqual({ ok: true, result: [entry] });
+    expect(contacts.store.list).toHaveBeenCalledWith({ query: "sh" });
+    await expect(ask({ op: "upsert", entry })).resolves.toEqual({ ok: true, result: entry });
+    expect(contacts.store.upsert).toHaveBeenCalledWith(entry);
+    await expect(ask({ op: "markChecked", entry, checkedAt: 5 })).resolves.toEqual({ ok: true, result: null });
+    expect(contacts.store.markChecked).toHaveBeenCalledWith(entry, 5);
+    await expect(ask({ op: "remove", id: "1" })).resolves.toEqual({ ok: true, result: null });
+    expect(contacts.store.remove).toHaveBeenCalledWith("1");
+
+    // The store opens and seals through the engine, which holds the key.
+    await contacts.vault.open({ place: { v: 1 } });
+    await contacts.vault.seal("{}");
+    expect(adapters.engineCall.mock.calls).toEqual([
+      ["engine_contactsOpen", { records: { place: { v: 1 } } }],
+      ["engine_contactsSeal", { text: "{}" }],
+    ]);
+    await expect(ask({ op: "toString" })).rejects.toMatchObject({ message: "Unknown contacts operation" });
+  });
+
+  it("deletes every contact without the engine, the wallet locked or not", async () => {
+    const adapters = createAdapters();
+    adapters.getEngineStatus.mockResolvedValue({ isUnlocked: false, accounts: [] });
+    await expect(handleUiCommand({ type: "DUSK_UI_CONTACTS", op: "clear" }, adapters)).resolves.toEqual({ ok: true, result: true });
+    expect(contacts.clearContacts).toHaveBeenCalledTimes(1);
+    expect(adapters.engineCall).not.toHaveBeenCalled();
   });
 
   it("rejects commands while the wallet is locked", async () => {

@@ -46,6 +46,7 @@ import {
   putNotesMap,
   putShieldedMeta,
 } from "./shieldedStore.js";
+import { contactsNamespace, deriveContactsKey, openContacts, sealContacts } from "./contactsCrypto.js";
 import { activityNetworkKey, assertArchive, historyArchiverUrl } from "./activityHistory.js";
 import {
   StaleActivityError,
@@ -529,6 +530,9 @@ const state = {
   bookkeeper: null,
   treasuryAll: null,
   bookkeeperAll: null,
+  // The contacts' key and place, made from the seed when first needed:
+  // { generation, keys: Promise<{ key, namespace }> }. Gone on lock.
+  contacts: null,
   protocolLoaded: false,
   drivers: {
     registry: null,
@@ -757,6 +761,7 @@ function clearWalletState() {
     } catch {}
   }
   state.seed = null;
+  state.contacts = null;
   state.profiles = [];
   state.profileGenerator = null;
   state.currentIndex = 0;
@@ -785,6 +790,53 @@ function clearWalletState() {
 export function lock() {
   unlockGeneration += 1;
   clearWalletState();
+}
+
+// ---------------------------------------------------------------------------
+// Contacts: their key comes from the seed and stays here (contactsCrypto.js)
+// ---------------------------------------------------------------------------
+
+// This wallet's contacts key and place, made once per unlock.
+function contactsKeys() {
+  if (!state.unlocked || !state.seed) throw new Error("Wallet locked");
+  if (state.contacts?.generation !== unlockGeneration) {
+    const seed = state.seed.slice();
+    state.contacts = {
+      generation: unlockGeneration,
+      keys: Promise.all([deriveContactsKey(seed), contactsNamespace(getWalletId())])
+        .then(([key, namespace]) => ({ key, namespace }))
+        .finally(() => seed.fill(0)),
+    };
+  }
+  const { generation, keys } = state.contacts;
+  return keys.then((made) => {
+    // Locked, or another wallet unlocked, while the key was being made.
+    if (!state.unlocked || generation !== unlockGeneration) throw new Error("Wallet locked");
+    return made;
+  });
+}
+
+/**
+ * This wallet's contacts, from the records kept: its place, and its own
+ * record's text, or null when it has none. A record that doesn't open with
+ * this wallet's key throws.
+ * @param {Record<string, object>} records - by place
+ * @returns {Promise<{ namespace: string, text: string|null }>}
+ */
+export async function openContactsRecords(records) {
+  const { key, namespace } = await contactsKeys();
+  const record = records && typeof records === "object" && Object.hasOwn(records, namespace) ? records[namespace] : null;
+  return { namespace, text: record ? await openContacts(key, namespace, record) : null };
+}
+
+/**
+ * This wallet's contacts, encrypted for keeping at its place.
+ * @param {string} text
+ * @returns {Promise<{ namespace: string, record: object }>}
+ */
+export async function sealContactsRecord(text) {
+  const { key, namespace } = await contactsKeys();
+  return { namespace, record: await sealContacts(key, namespace, String(text ?? "")) };
 }
 
 /**

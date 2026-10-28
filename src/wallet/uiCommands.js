@@ -1,5 +1,6 @@
 import { getSettings, normalizeCustomGas, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
+import { clearContacts, contactsStore } from "../shared/contactsStore.js";
 import {
   getWatchedAssets,
   watchToken,
@@ -35,6 +36,27 @@ const ASSET_COMMANDS = {
     watchNft(walletId, nodeUrl, profileIndex, message.nft),
   DUSK_UI_ASSETS_UNWATCH_NFT: (walletId, nodeUrl, profileIndex, message) =>
     unwatchNft(walletId, nodeUrl, profileIndex, message.contractId, message.tokenId),
+};
+
+/**
+ * The engine's contacts key, for the contacts store: it opens and seals this
+ * wallet's record while the wallet is unlocked, and throws "Wallet locked"
+ * otherwise. The key itself never leaves the engine.
+ * @param {(method: string, params?: object) => Promise<any>} engineCall
+ */
+export function engineContactsVault(engineCall) {
+  return {
+    open: (records) => engineCall("engine_contactsOpen", { records }),
+    seal: (text) => engineCall("engine_contactsSeal", { text }),
+  };
+}
+
+// The pages' contacts (shared/addressBook.js), by what they ask.
+const CONTACT_OPS = {
+  list: (store, message) => store.list({ query: message.query }),
+  upsert: (store, message) => store.upsert(message.entry),
+  markChecked: (store, message) => store.markChecked(message.entry, message.checkedAt),
+  remove: (store, message) => store.remove(message.id),
 };
 
 function profileIndex(message, status) {
@@ -98,6 +120,18 @@ export async function handleUiCommand(
   if (type === "DUSK_UI_GET_CACHED_GAS_PRICE") {
     await ensureEngineConfigured();
     return { ok: true, result: await engineCall("dusk_getCachedGasPrice") };
+  }
+
+  // Contacts: read and changed only while the wallet is unlocked, as the
+  // engine holds their key; deleting them all needs none.
+  if (type === "DUSK_UI_CONTACTS") {
+    if (message.op === "clear") {
+      await clearContacts();
+      return { ok: true, result: true };
+    }
+    const op = Object.hasOwn(CONTACT_OPS, message.op) ? CONTACT_OPS[message.op] : null;
+    if (!op) throw rpcError(ERROR_CODES.INVALID_PARAMS, "Unknown contacts operation");
+    return { ok: true, result: (await op(contactsStore(engineContactsVault(engineCall)), message)) ?? null };
   }
 
   const engineCommand = ENGINE_COMMANDS[type];

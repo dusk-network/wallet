@@ -41,6 +41,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Asked to unlock before showing Contacts.
 - Set section heads and balance labels in small capitals, the heads between grey brackets.
 - Showed links and a transaction's ID in blue.
 - Set addresses, IDs and block heights in Söhne Mono.
@@ -110,6 +111,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Security
 
+- Encrypted contacts with a key only the unlocked wallet has, kept apart for each wallet, and moved plain ones in on the first unlock.
+- Deleted contacts on Reset wallet, and started a new or imported wallet with none.
 - Rejected non-integer and out-of-u8-range profile indices before BLS key derivation. ([#117])
 - Pinned direct Noble dependencies to exact reviewed versions. ([#22])
 - Typed-data signatures cover a domain-separated message rather than the bare 32-byte digest, so they cannot be produced by, or replayed as, a signature over a caller-supplied digest.

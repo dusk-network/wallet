@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { clearAddressBook, markAddressBookNameChecked, upsertAddressBookEntry } from "../shared/addressBook.js";
+import { clearAddressBook, listAddressBook, markAddressBookNameChecked, upsertAddressBookEntry } from "../shared/addressBook.js";
 import { lookupDuskName } from "../shared/duskNames.js";
 import { TX_KIND } from "../shared/constants.js";
 import { accessibleName, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
@@ -65,6 +65,27 @@ function mount(addressBook = {}, ov = { nodeUrl: NODE, accounts: [OWN], selected
 }
 
 describe("contacts", () => {
+  it("reads the list once a visit: one that failed says why, and a locked wallet shows its unlock form", async () => {
+    listAddressBook.mockRejectedValueOnce(new Error("Couldn't read your contacts"));
+    const view = mount({ loaded: false, items: null });
+    await settle();
+    view.draw();
+    view.draw();
+    await settle();
+    expect(listAddressBook).toHaveBeenCalledTimes(1);
+    expect(visibleText(dom.document.body)).toContain("Couldn't read your contacts");
+    expect(view.actions.render).toHaveBeenCalledWith();
+
+    // The wallet locked meanwhile: the app reads its state again, and shows the unlock form.
+    listAddressBook.mockClear();
+    listAddressBook.mockRejectedValueOnce(new Error("Wallet locked"));
+    const locked = mount({ loaded: false, items: null });
+    await settle();
+    expect(listAddressBook).toHaveBeenCalledTimes(1);
+    expect(locked.actions.render).toHaveBeenCalledWith({ forceRefresh: true });
+    listAddressBook.mockClear();
+  });
+
   it("lists contacts by name with their address and first letter, and leaves Delete all to Settings", async () => {
     let view = mount();
     expect(dom.document.body.querySelector('input[type="search"]').getAttribute("aria-label")).toBe("Search contacts");

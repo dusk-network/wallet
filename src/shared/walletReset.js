@@ -1,5 +1,5 @@
 // What a wallet reset clears besides the vault and the site permissions: the
-// wallet's transactions, its shielded notes and its history.
+// wallet's transactions, its shielded notes, its history and its contacts.
 //
 // A reset is noted before the vault goes. If any of these can't be cleared,
 // the reset fails and stays noted, and no new wallet is made until another
@@ -7,6 +7,7 @@
 // the old one's data.
 
 import { clearActivityStore } from "./activityStore.js";
+import { clearContacts } from "./contactsStore.js";
 import { clearShieldedStore } from "./shieldedStore.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { clearTxs } from "./txStore.js";
@@ -21,7 +22,7 @@ export async function beginReset() {
  * when a store couldn't be cleared, and the reset stays pending.
  */
 export async function finishReset() {
-  const results = await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore()]);
+  const results = await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore(), clearContacts()]);
   if (results.some((r) => r.status === "rejected")) {
     throw new Error("The old wallet's data couldn't be cleared. Try again.");
   }

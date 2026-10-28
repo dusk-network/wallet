@@ -78,6 +78,18 @@ describe("walletReset", () => {
     expect(await pending()).toBe(false);
   });
 
+  it("deletes the contacts: every wallet's record and any plain copy from before", async () => {
+    const { storage, STORAGE_KEYS } = await import("./storage.js");
+    await storage.set({
+      [STORAGE_KEYS.CONTACTS]: { place: { v: 1, iv: "aXY=", data: "ZGF0YQ==" } },
+      [STORAGE_KEYS.ADDRESS_BOOK]: { 1: { id: "1", name: "Alice (landlord, private)", address: "addr" } },
+    });
+    await reset.beginReset();
+    await reset.finishReset();
+    expect(await storage.get([STORAGE_KEYS.CONTACTS, STORAGE_KEYS.ADDRESS_BOOK])).toEqual({});
+    expect(await pending()).toBe(false);
+  });
+
   it("does nothing more for a wallet made without a pending reset", async () => {
     await txs.putTxMeta("aa".repeat(32), { status: "executed", submittedAt: 1 });
     await reset.finishPendingReset();

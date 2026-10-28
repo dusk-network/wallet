@@ -95,6 +95,17 @@ describe("engine name checks", () => {
   });
 });
 
+describe("the contacts' key", () => {
+  it("opens and seals contacts here, and nothing while the wallet is locked", async () => {
+    for (const [method, params] of [
+      ["engine_contactsOpen", { records: {} }],
+      ["engine_contactsSeal", { text: "{}" }],
+    ]) {
+      await expect(engineCall(method, params)).resolves.toMatchObject({ id: method, error: { message: "Wallet locked" } });
+    }
+  });
+});
+
 describe("a send's watcher", () => {
   it("hands the send's store count back with its events, and not to the send", async () => {
     mocks.runtimeSendMessage.mockClear();
