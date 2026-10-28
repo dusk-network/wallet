@@ -44,7 +44,7 @@ function fmtLux(value) {
   return formatDusk(value ?? "0", UI_DISPLAY_DECIMALS);
 }
 
-// Sozu's site, for its own rules.
+// Sozu's site.
 const SOZU_URL = "https://sozu.fi/";
 
 /**
@@ -673,7 +673,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     : null;
 
   const sozuLink = h("button", {
-    class: "text-btn text-btn--inline chain-link",
+    class: "text-btn chain-link sozu-site",
     type: "button",
     text: "sozu.fi",
     onclick: async () => {
@@ -712,8 +712,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   return [
     subnav({ title: "Liquid staking", onBack: back }),
     h("div", { class: "liquid-intro" }, [
-      h("div", { class: "liquid-who" }, ["Sozu", h("span", { class: "tag", text: "third party" })]),
-      h("p", {}, ["Sozu, not Dusk, holds the DUSK you stake here and returns it under Sozu's own rules: ", sozuLink, "."]),
+      h("div", { class: "liquid-who" }, ["Sozu", h("span", { class: "tag", text: "third party" }), sozuLink]),
     ]),
     st.notice ? h("div", { class: "muted sozu-notice", role: "status", text: st.notice }) : null,
     st.loading && !st.loaded ? h("div", { class: "muted", text: "Loading Sozu…" }) : null,
@@ -957,11 +956,8 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         quote && quoteRate ? kv("Deposit fee", depositFeeText(quoteRate, safeBigInt(quote.fee, 0n))) : null,
         kv(isStake ? "From" : "To", [h("span", {}, [profileName, h("span", { class: "kv-muted", text: " · Public" })])]),
       ].filter(Boolean)),
-      // Who holds the DUSK, and how it comes back.
-      h("p", {
-        class: "stake-cap",
-        text: isStake ? "Sozu, not Dusk, holds this DUSK and returns it under Sozu's own rules." : SOZU_UNSTAKE_LINE,
-      }),
+      // How an unstake comes back.
+      isStake ? null : h("p", { class: "stake-cap", text: SOZU_UNSTAKE_LINE }),
       submitDisabledReason ? h("div", { class: "field-error", role: "alert", text: submitDisabledReason }) : null,
       gasEditor,
       h("p", { class: "stake-cap review-fee-note", text: FAILED_CALL_NOTE }),

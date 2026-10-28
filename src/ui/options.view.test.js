@@ -27,11 +27,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Settings as the extension draws it, where dApps connect.
-async function settings(over = {}) {
-  vi.stubGlobal("browser", {
-    runtime: { id: "dusk-wallet", sendMessage: () => {}, getManifest: () => ({ version: "0.3.0" }) },
-  });
+// Settings as the extension draws it, where dApps connect; `{ app: true }`
+// as the desktop app does, with no extension around it.
+async function settings(over = {}, { app = false } = {}) {
+  vi.stubGlobal(
+    "browser",
+    app
+      ? undefined
+      : {
+          runtime: { id: "dusk-wallet", sendMessage: () => {}, getManifest: () => ({ version: "0.3.0" }) },
+          tabs: { create: vi.fn(async () => ({})) },
+        }
+  );
   vi.resetModules();
   const { optionsView } = await import("./popup/views/options.js");
   const ov = {
@@ -275,5 +282,33 @@ describe("settings", () => {
     expect(clearAddressBook).toHaveBeenCalledTimes(1);
     expect(view.state.addressBook).toMatchObject({ loaded: false, items: null });
     expect(view.actions.showToast).toHaveBeenCalledWith("Deleted all contacts");
+  });
+});
+
+describe("about", () => {
+  const legal = (section) => section("About").querySelectorAll("button").filter(isShown);
+
+  it("links Dusk's terms of use and privacy policy, as the network's file names them, and nowhere else", async () => {
+    const { section, actions } = await settings();
+    expect(visibleText(section("About").querySelector(".settings-legal"))).toBe("Terms of use·Privacy policy");
+    expect(section("About").querySelector(".settings-legal .sep").getAttribute("aria-hidden")).toBe("true");
+    expect(dom.document.body.querySelectorAll("button").filter((b) => /Terms|Privacy/.test(b.textContent))).toHaveLength(2);
+
+    for (const link of legal(section)) link.click();
+    await settle();
+    expect(globalThis.browser.tabs.create.mock.calls.map(([options]) => options.url)).toEqual([
+      "https://dusk.network/terms-of-use",
+      "https://dusk.network/privacy-policy",
+    ]);
+    expect(actions.showToast).not.toHaveBeenCalled();
+  });
+
+  it("keeps them on a custom node, and in the desktop app, which has no version to show", async () => {
+    const custom = await settings({ nodeUrl: "https://my-node.example" });
+    expect(legal(custom.section).map((b) => b.textContent)).toEqual(["Terms of use", "Privacy policy"]);
+
+    const app = await settings({}, { app: true });
+    expect(visibleText(app.section("About"))).not.toMatch(/Dusk Wallet v/);
+    expect(legal(app.section).map((b) => b.textContent)).toEqual(["Terms of use", "Privacy policy"]);
   });
 });

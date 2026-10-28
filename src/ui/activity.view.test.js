@@ -589,7 +589,7 @@ describe("the chain's blue", () => {
     expect(openUrl).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps an underline at rest on a link inside a sentence, sozu.fi and the staking docs: its blue alone isn't enough", async () => {
+  it("keeps an underline at rest on a link inside a sentence, such as the staking docs: its blue alone isn't enough", async () => {
     const sheet = await css();
     const inline = rule(sheet, "button.chain-link.text-btn--inline:not(:disabled)");
     expect(inline).toContain("text-decoration-line: underline;");
