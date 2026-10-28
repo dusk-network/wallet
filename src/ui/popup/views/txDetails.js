@@ -200,11 +200,16 @@ export function txDetailsView(ov, { state, actions } = {}) {
       ? [kv("From", profileValue(ov, tx, "Shielded")), kv("To", profileValue(ov, tx, "Public"))]
       : [kv(tx?.direction === "in" ? "To" : "From", profileValue(ov, tx, rail))];
 
+  // The site that asked for it. The wallet records its own transactions'
+  // origin as "Wallet": they come from no site, so they show none.
+  const origin = String(tx?.origin ?? "");
   let site = "";
-  try {
-    site = tx?.origin ? new URL(String(tx.origin)).host || String(tx.origin) : "";
-  } catch {
-    site = String(tx?.origin ?? "");
+  if (origin && origin.toLowerCase() !== "wallet") {
+    try {
+      site = new URL(origin).host || origin;
+    } catch {
+      site = origin;
+    }
   }
 
   const when = txTime(tx);

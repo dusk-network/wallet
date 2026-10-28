@@ -1,0 +1,403 @@
+/* Approval windows: a site's request in the calm look. Built on the tokens
+   and the components in ui.css (groups, key-value rows, pills); only what
+   these windows need is here. The window is about 380 by 590. */
+
+body.page--notification .panel-header {
+  padding: 12px 16px;
+}
+
+/* The network the request is on, beside the wallet's name */
+.ap-network {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ap-network[hidden] {
+  display: none;
+}
+
+body.page--notification .panel-content {
+  padding: 4px 16px 16px;
+}
+
+body.page--notification .panel-content #app {
+  gap: 12px;
+}
+
+/* The site that asks */
+.ap-site {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 4px 12px 4px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.ap-site__icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.ap-site__icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ap-site__host {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+/* What it asks for: centred, the amount large */
+.ap-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0 0;
+  text-align: center;
+}
+
+h1.ap-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.ap-amount {
+  max-width: 100%;
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.ap-amount__unit {
+  font-size: 17px;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+.ap-to {
+  max-width: 100%;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.ap-sub,
+p.ap-sub {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.ap-head .ap-sub {
+  max-width: 320px;
+}
+
+/* "Known DuskEVM bridge call" */
+.ap-tag {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 11px 3px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.ap-tag .btn-ico svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Whom it pays: the name, or the short address until one comes, then your
+   own label for it */
+.ap-recipient {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+}
+
+.ap-recipient__line {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.ap-recipient__to {
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.ap-recipient__lead {
+  font-weight: 500;
+}
+
+.ap-recipient__lead.mono,
+.ap-recipient .mono {
+  font-size: 13.5px;
+  font-weight: 400;
+}
+
+.ap-recipient__tag {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.ap-recipient__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.ap-recipient__source {
+  flex: none;
+  white-space: pre;
+}
+
+/* A small heading over a group */
+h2.ap-section {
+  margin: 4px 2px -4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* Key-value rows with a long value: the value under its label */
+.kv.ap-kv--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.kv.ap-kv--stack .kv-value {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  text-align: left;
+}
+
+.kv-value code {
+  font-size: 12.5px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+code.ap-address {
+  color: var(--text);
+}
+
+.ap-kv-note {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* The profile that pays or signs, its name over its short account */
+.kv-value .named-address {
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.kv-value .named-address .dusk-name {
+  font-size: 13.5px;
+  font-weight: 400;
+}
+
+/* Profiles to connect */
+.ap-profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* What the site gets, as facts */
+ul.ap-facts {
+  margin: 0;
+  padding: 3px 0;
+  list-style: none;
+}
+
+.ap-facts-host {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A message to sign */
+.ap-message-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ap-message {
+  max-height: 180px;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ap-message--bytes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ap-message__title {
+  font-weight: 500;
+}
+
+/* Short notes: what becomes visible, what signing does */
+p.ap-note {
+  margin: 0;
+  padding: 0 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+p.ap-note .btn-ico {
+  margin-top: 1px;
+}
+
+p.ap-note .btn-ico svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Details: chain, node, the raw bytes */
+.ap-details__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 8px 8px;
+}
+
+.ap-details__body > .ap-sub {
+  padding: 0 6px;
+}
+
+code.ap-raw,
+code.ap-digest {
+  display: block;
+  max-height: 150px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: 11.5px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+pre.ap-code,
+textarea.ap-code {
+  width: 100%;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  unicode-bidi: isolate;
+}
+
+textarea.ap-code {
+  max-height: none;
+  background: var(--surface-2);
+  white-space: pre;
+  word-break: normal;
+  resize: vertical;
+}
+
+.ap-site-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Unlock, under what the site asks */
+.ap-unlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Reject and the approve button, always in view under the page */
+.ap-actions {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--background);
+}
+
+.ap-actions[hidden] {
+  display: none;
+}
+
+.ap-actions > button {
+  width: 100%;
+  min-height: 46px;
+  font-size: 14.5px;
+}
+
+.ap-actions > .ap-actions__error {
+  grid-column: 1 / -1;
+}

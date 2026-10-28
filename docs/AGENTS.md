@@ -248,7 +248,7 @@ transfers already require this field at the provider boundary.
 
 3. **Shielded sync required**: Phoenix (shielded) notes must be synced before spending. Check `getShieldedStatus()` before shielded transactions.
 
-4. **Gas completeness**: Gas must have both `limit` AND `price`, or neither (null = auto). Partial gas objects are invalid.
+4. **Gas completeness**: Gas sent to the engine has both `limit` AND `price`, or neither (null = auto). A dApp may send `{ limit }` alone: `rpc.js` fills the node's gas price before the approval. A price without a limit is invalid.
 
 5. **Pending shielded spends**: `waitTxExecuted` timeout/errors are not transaction failures. Phoenix txs can remain in a node mempool after the wallet watcher times out, so keep them pending/unknown unless an executed event reports an error or a deliberate pending-clear path is used. See `docs/investigations/phoenix-tx-lifecycle.md`.
 

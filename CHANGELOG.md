@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Read the DuskEVM bridge's deposit, prove and claim calls on Testnet in their approvals: amount and recipient, marked as a known bridge call.
+- Accepted a gas limit without a price from sites, at the node's gas price.
 - Added a Sent screen after Confirm that follows the transaction: Sending, Sent to the network, then Completed or Failed with the reason and the fee charged, with its ID, Copy and the Dusk explorer link.
 - Showed the profile's full public history in Activity, including received transfers.
 - Showed the profile's shielded history in Activity.
@@ -37,6 +39,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Gave the site approval windows the calm look, with Reject and the approve button always in view, and the chain, node, function, call data and the site's own details under Details.
+- Led a site's payment approval with the amount, the recipient's name and the fee.
+- Said in the connect approval what a site sees and that it can't move funds without your approval, with its own wording for a request for the shielded address.
+- Showed a saved contact's label beside the recipient's verified `.dusk` name in approvals, instead of in its place.
+- Said on a public transfer's approval what becomes visible to everyone, and under which name.
+- Showed what a site asks while the wallet is locked, with Reject beside Unlock.
+- Showed the exact amount a site asks to send, every decimal.
+- Refused `dusk_signMessage` strings that aren't hex or `base64:`-prefixed, instead of reading plain text as base64.
 - Gave the popup a calmer look: lists on one surface, pill buttons, round home actions and plain section titles, in each system's own fonts.
 - Reworked Staking into an overview with native and liquid staking as two equal choices, an amount screen that checks the 1,000 DUSK minimum as you type, and the owner and stake account under Advanced.
 - Named Sozu as a third party wherever liquid staking shows, and said how much stDUSK a stake gets and what it's worth now.
@@ -85,6 +95,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Kept a profile label being typed when Settings redraws, and saved it when the field is left.
 - Made the profile and network menus work from the keyboard.
 - Gave every popup screen a heading for screen readers.
+- Accepted a `Uint8Array` message in `dusk_signMessage` in Chrome, whose extension messaging turns it into an object.
 - Fixed the popup moving Receive's QR and Review's recipient below the rest of the page. ([#125])
 - Raised the shielded (Phoenix) transfer default gas limit to 50M and its minimum to 30M so shielded sends clear the node's spend-gas admission floor.
 - Preserved the active unlock form, including entered text and in-flight submission state, across passive rerenders. ([#110](https://github.com/dusk-network/wallet/issues/110))

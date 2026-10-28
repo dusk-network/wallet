@@ -156,7 +156,7 @@ const numericChainId = Number(match[1]);
 `0x`-prefixed hexadecimal. If an ABI requires bare hex, normalize with
 `value.replace(/^0x/, "")` at that boundary.
 
-**Gas:** `{ limit: LuxString, price: LuxString }` or omit for wallet defaults. Transfer defaults are privacy-aware: public transfers use a lower Moonlight default, while shielded transfers use a higher Phoenix default.
+**Gas:** `{ limit: LuxString, price?: LuxString }` or omit for wallet defaults. A limit without a price pays the node's current gas price, as the wallet's own defaults do; a price without a limit is rejected. Transfer defaults are privacy-aware: public transfers use a lower Moonlight default, while shielded transfers use a higher Phoenix default.
 
 ---
 
@@ -302,7 +302,7 @@ const tx = await dusk.request({
     to: "2Z8m...",           // AccountId for public, Address for shielded
     amount: "1000000000",    // 1 DUSK in LUX
     memo: "optional",
-    gas: { limit: "2000000", price: "1" }   // optional; shielded defaults higher
+    gas: { limit: "2000000" }   // optional; price defaults to the node's, shielded limits default higher
   }
 });
 // → { hash: "abc...", nonce: "5" }
@@ -342,6 +342,20 @@ object as **site-provided, unverified** details; it does not interpret a stable
 field schema. A short `{ label: "Human-readable action" }` is the recommended
 minimum for custom calls with opaque arguments. Users must still verify the
 contract ID, function, amounts, and deposit shown separately by the wallet.
+
+Under Details, the approval shows every call's function and its arguments'
+size and SHA-256 (`40 bytes · sha256=2f64b19f5ac0…731c7c2a`), so a dApp can
+show the same line for users to match, with the bytes and the `display`
+object. The wallet reads the DuskEVM bridge's own calls on
+Testnet, through the Testnet node: `depositETHToWithValue` on the
+L1StandardBridge (the DuskEVM recipient and amount, checked against the
+`deposit`), and `proveWithdrawalTransaction` and
+`finalizeWithdrawalTransaction` on the OptimismPortal (the withdrawal's amount
+and the Dusk account it pays, on the bridge's own route: from DuskEVM's
+messenger to Dusk's, relaying DuskEVM's bridge to Dusk's). It marks them
+"Known DuskEVM bridge call". Arguments that don't decode exactly as the bridge
+encodes them stay opaque, with a warning on a call to the bridge's contracts,
+and so does every call on Mainnet until the bridge is configured there.
 
 ---
 
@@ -394,12 +408,23 @@ Sign arbitrary **bytes** for low-level off-chain use.
 
 Requires connection + unlocked wallet.
 
+`message` must be bytes in an explicit encoding: a `0x`-prefixed hex string
+(bare hex is read as hex too, as Dusk Connect writes bytes), a
+`base64:`-prefixed base64 string, a `Uint8Array`, an `ArrayBuffer` or a
+`number[]` of byte values. Any other string, plain text included, is rejected
+with `INVALID_PARAMS` rather than guessed at: to sign text, send its UTF-8
+bytes, for example as `0x` + hex. Unprefixed base64 is no longer accepted.
+A `Uint8Array` works in Chrome too, whose extension messaging delivers it as
+an object with keys `"0"` to `"n-1"`: the wallet reads that back as bytes when
+every value is an integer from 0 to 255. An `ArrayBuffer` arrives in Chrome as
+an empty object and is refused; send its bytes as a `Uint8Array` instead.
+
 > The wallet does **not** sign the caller's bytes directly. It signs a Moonlight memo whose text begins with `Dusk Connect SignMessage v1` and includes the origin, chain ID, account, SHA-256 message hash, and message length. The resulting signature will not verify as a raw BLS short-signature over a caller-supplied 32-byte digest. Do not use this method for on-chain digest verification; raw-digest signing is tracked in [#90](https://github.com/dusk-network/wallet/issues/90). The approval UI may show a readable UTF-8 preview when safe; binary, invalid, or large messages are shown as opaque bytes with hash and length. Prefer `dusk_signAuth` for login/session authentication flows.
 
 ```js
 const sig = await dusk.request({
   method: "dusk_signMessage",
-  params: { message: "0x..." } // bytes (hex/base64/Uint8Array/ArrayBuffer/number[])
+  params: { message: "0x48656c6c6f" } // bytes: 0x-hex, "base64:…", Uint8Array, ArrayBuffer or number[]
 });
 // → { account, origin, chainId, messageHash, messageLen, signature, payload }
 ```

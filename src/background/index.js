@@ -763,6 +763,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           kind: entry.kind,
           origin: entry.origin,
           params: entry.params,
+          // The wallet's network, for the approval's header.
+          nodeUrl: String(settings?.nodeUrl ?? ""),
+          networkName: networkNameFromNodeUrl(String(settings?.nodeUrl ?? "")),
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
           accounts: status.accounts,

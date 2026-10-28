@@ -22,6 +22,8 @@ let settings = {
   archiverUrl: "https://testnet.nodes.dusk.network",
 };
 let engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+// The node's gas price stats (dusk_getCachedGasPrice).
+let gasPriceStats = { average: "1", max: "1", median: "1", min: "1" };
 // The .dusk name checks kept in verifiedNames.js.
 let verifiedNames = {};
 
@@ -69,7 +71,7 @@ const setSettings = vi.fn(async (patch) => {
 
 const engineCall = vi.fn(async (method, params) => {
   if (method === "dusk_getCachedGasPrice") {
-    return { average: "1", max: "1", median: "1", min: "1" };
+    return gasPriceStats;
   }
   if (method === "dusk_getPublicBalance") {
     return { nonce: "0", value: "0", __params: params };
@@ -171,6 +173,7 @@ describe("background rpc handler", () => {
       archiverUrl: "https://testnet.nodes.dusk.network",
     };
     engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+    gasPriceStats = { average: "1", max: "1", median: "1", min: "1" };
     verifiedNames = {};
 
     vi.clearAllMocks();
@@ -1002,6 +1005,32 @@ describe("background rpc handler", () => {
     expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
   });
 
+  it.each([
+    ["a public transfer", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { limit: "3000000" } }, "3000000"],
+    [
+      "a contract call",
+      { kind: "contract_call", privacy: "public", contractId: `0x${"02".repeat(32)}`, fnName: "deposit", fnArgs: "0x00", deposit: "5", gas: { limit: "5000000", price: "" } },
+      "5000000",
+    ],
+  ])("dusk_sendTransaction takes a gas limit without a price for %s and pays the node's price", async (_label, params, limit) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+    gasPriceStats = { average: "4", max: "9", median: "3", min: "1" };
+
+    await expect(handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params })).resolves.toEqual({
+      hash: "0xhash",
+      nonce: "5",
+    });
+
+    const gas = { limit, price: "3" };
+    expect(requestUserApproval).toHaveBeenCalledWith("send_tx", "https://dapp.example", expect.objectContaining({ gas }));
+    expect(engineCall).toHaveBeenCalledWith("dusk_sendTransaction", expect.objectContaining({ gas }));
+  });
+
   it("dusk_sendTransaction can unlock in the approval window", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -1370,7 +1399,8 @@ describe("background rpc handler", () => {
     ["amount larger than u64", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "18446744073709551616" }],
     ["non-string memo", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", memo: { text: "hi" } }],
     ["oversized memo", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", memo: "x".repeat(513) }],
-    ["partial gas", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { limit: "1" } }],
+    ["a gas price without a limit", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { price: "1" } }],
+    ["a gas limit under the floor", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { limit: "1" } }],
     ["non-object gas", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: "auto" }],
     ["zero gas", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { limit: "0", price: "1" } }],
     ["decimal gas", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { limit: "1.5", price: "1" } }],
@@ -1683,6 +1713,62 @@ describe("background rpc handler", () => {
       })
     ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
     expect(requestUserApproval).not.toHaveBeenCalledWith("sign_message", expect.anything(), expect.anything());
+  });
+
+  it.each([
+    ["plain text", "I agree to the shop terms"],
+    ["base64 without its prefix", "SGVsbG8sIER1c2sh"],
+    ["an empty string", ""],
+    ["byte values out of range", [72, 256]],
+    ["a fractional byte value", [72.5]],
+    ["an object with a gap in its keys", { 0: 72, 2: 105 }],
+    ["an object with an extra key", { 0: 72, 1: 105, length: 2 }],
+    ["an object with a value out of range", { 0: 72, 1: 300 }],
+    ["an empty object, as an ArrayBuffer arrives from Chrome", {}],
+  ])("dusk_signMessage refuses %s before approval instead of guessing its bytes", async (_label, message) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signMessage", params: { message } })
+    ).rejects.toMatchObject({
+      code: ERROR_CODES.INVALID_PARAMS,
+      message: expect.stringContaining("To sign text, send its UTF-8 bytes as 0x-hex."),
+    });
+    expect(requestUserApproval).not.toHaveBeenCalledWith("sign_message", expect.anything(), expect.anything());
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_signMessage", expect.anything());
+  });
+
+  it.each([
+    ["0x-hex", "0x48656c6c6f2c204475736b21"],
+    ["bare hex, as Dusk Connect writes bytes", "48656C6C6F2C204475736B21"],
+    ["base64: prefixed base64", "base64:SGVsbG8sIER1c2sh"],
+    ["an array of byte values", [...new TextEncoder().encode("Hello, Dusk!")]],
+    ["a Uint8Array as Chrome's extension messaging delivers it", JSON.parse(JSON.stringify(new TextEncoder().encode("Hello, Dusk!")))],
+  ])("dusk_signMessage reads %s as the bytes it encodes", async (_label, message) => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"] };
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_signMessage", params: { message } })
+    ).resolves.toMatchObject({ ok: true });
+
+    const bytes = new TextEncoder().encode("Hello, Dusk!");
+    expect(requestUserApproval).toHaveBeenCalledWith(
+      "sign_message",
+      "https://dapp.example",
+      expect.objectContaining({
+        messageHash: `0x${await sha256Hex(bytes)}`,
+        messageLen: 12,
+        messagePreview: expect.objectContaining({ kind: "text", text: "Hello, Dusk!" }),
+      })
+    );
   });
 
   it("dusk_signMessage rejects missing message before approval", async () => {

@@ -12,7 +12,7 @@ import {
   dataDrivers,
   useAsProtocolDriver,
 } from "@dusk/w3sper";
-import { bytesToHex, hexToBytes, sha256Hex, toBytes } from "./bytes.js";
+import { bytesToHex, hexToBytes, messageBytes, sha256Hex, toBytes } from "./bytes.js";
 import { signProfileTypedDataDigest } from "./blsDigest.js";
 import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
@@ -3268,9 +3268,9 @@ export async function signMessage(params) {
   if (!origin) throw new Error("origin is required");
   if (!chainId) throw new Error("chainId is required");
 
-  const messageBytes = toBytes(params.message);
-  const messageLen = messageBytes.length;
-  const messageHash = await sha256Hex(messageBytes);
+  const msgBytes = messageBytes(params.message);
+  const messageLen = msgBytes.length;
+  const messageHash = await sha256Hex(msgBytes);
 
   const profileIndex = resolveProfileIndex(params.profileIndex);
   const profile = await ensureProfileIndex(profileIndex);

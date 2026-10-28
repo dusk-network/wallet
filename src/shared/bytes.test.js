@@ -5,6 +5,7 @@ import {
   bytesToHex,
   bytesToTransportHex,
   base64ToBytes,
+  messageBytes,
   toBytes,
 } from "./bytes.js";
 
@@ -149,5 +150,67 @@ describe("toBytes", () => {
   it("throws on unsupported types", () => {
     expect(() => toBytes({})).toThrow("Unsupported byte encoding");
     expect(() => toBytes(123)).toThrow("Unsupported byte encoding");
+  });
+});
+
+describe("messageBytes", () => {
+  const hello = new TextEncoder().encode("Hello, Dusk!");
+
+  it("reads only explicit encodings", () => {
+    expect(messageBytes("0x48656c6c6f2c204475736b21")).toEqual(hello);
+    expect(messageBytes(" 48656C6C6F2C204475736B21 ")).toEqual(hello);
+    expect(messageBytes("base64:SGVsbG8sIER1c2sh")).toEqual(hello);
+    expect(messageBytes("BASE64:SGVsbG8sIER1c2sh")).toEqual(hello);
+    expect(messageBytes([...hello])).toEqual(hello);
+    expect(messageBytes(hello)).toBe(hello);
+    expect(messageBytes(hello.buffer)).toEqual(hello);
+    expect(messageBytes("0x")).toEqual(new Uint8Array());
+  });
+
+  it("refuses plain text and unprefixed base64 rather than guessing", () => {
+    for (const value of ["I agree to the shop terms", "SGVsbG8sIER1c2sh", "", "abc"]) {
+      expect(() => messageBytes(value), value).toThrow("Unsupported message encoding");
+    }
+    // Explicit encodings that don't decode are refused too.
+    expect(() => messageBytes("0xzz")).toThrow("Invalid hex");
+    expect(() => messageBytes("base64:***")).toThrow();
+    // What the old guess made of the sentence: 15 other bytes.
+    expect(toBytes("I agree to the shop terms")).toHaveLength(15);
+  });
+
+  it("refuses anything but whole byte values", () => {
+    for (const value of [[256], [-1], [1.5], ["1"]]) {
+      expect(() => messageBytes(value), JSON.stringify(value)).toThrow("Message bytes must be integers from 0 to 255");
+    }
+    for (const value of [null, undefined, 7, {}]) {
+      expect(() => messageBytes(value), JSON.stringify(value)).toThrow("Unsupported message encoding");
+    }
+  });
+
+  it("reads a Uint8Array that Chrome's extension messaging turned into an object", () => {
+    // Chrome serializes extension messages as JSON; Firefox clones them.
+    expect(messageBytes(JSON.parse(JSON.stringify(hello)))).toEqual(hello);
+    expect(messageBytes(structuredClone(hello))).toEqual(hello);
+    expect(messageBytes({ 1: 2, 0: 1 })).toEqual(new Uint8Array([1, 2]));
+    expect(messageBytes(Object.assign(Object.create(null), { 0: 255 }))).toEqual(new Uint8Array([255]));
+  });
+
+  it("refuses an object that isn't a whole Uint8Array", () => {
+    class Bytes {}
+    for (const value of [
+      { 0: 72, 2: 105 }, // a gap
+      { 1: 72 }, // not from 0
+      { 0: 72, 1: 105, length: 2 }, // an extra key
+      { 0: 72, 1: 256 }, // out of range
+      { 0: -1 },
+      { 0: 1.5 },
+      { 0: "72" },
+      {}, // an ArrayBuffer arrives as {}: its bytes are lost
+      JSON.parse(JSON.stringify(new ArrayBuffer(4))),
+      Object.assign(new Bytes(), { 0: 72 }), // not a plain object
+      new Uint16Array([72, 105]), // another typed array
+    ]) {
+      expect(() => messageBytes(value), JSON.stringify(value)).toThrow("Unsupported message encoding");
+    }
   });
 });
