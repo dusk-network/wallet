@@ -6,7 +6,7 @@
 // its check.
 
 import { isExtensionRuntime } from "../platform/runtime.js";
-import { detectPresetIdFromNodeUrl } from "./network.js";
+import { networkForNode } from "./nodeNetwork.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
 
@@ -17,13 +17,15 @@ export const VERIFIED_NAME_TTL_MS = 10 * 60_000;
 const RECHECK_MS = 60_000;
 
 /**
- * The Dusk Domains network for a node URL, or null where names are off.
+ * The Dusk Domains network of a node, by the chain ID it gave
+ * (nodeNetwork.js), or null where names are off: a network without Dusk
+ * Domains, or one that isn't known.
  * @param {string} nodeUrl
  * @returns {"mainnet"|"testnet"|null}
  */
 export function duskNamesNetwork(nodeUrl) {
-  const preset = detectPresetIdFromNodeUrl(String(nodeUrl ?? ""));
-  return preset === "mainnet" || preset === "testnet" ? preset : null;
+  const net = networkForNode(String(nodeUrl ?? ""));
+  return net?.duskDomains && (net.name === "mainnet" || net.name === "testnet") ? net.name : null;
 }
 
 const age = (entry, now) => now - Number(entry?.at);

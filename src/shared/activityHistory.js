@@ -19,7 +19,7 @@
 // .dusk name, which name it. The shielded history is phoenixHistory.js's.
 
 import { fetchWithTimeout } from "./networkStatus.js";
-import { detectPresetIdFromNodeUrl } from "./network.js";
+import { chainIdForNode, networkForNode } from "./nodeNetwork.js";
 import { TX_KIND } from "./constants.js";
 import { depositsToBridge } from "./bridge.js";
 import { depositRecipientOf } from "./bridgeCalls.js";
@@ -56,12 +56,10 @@ const HASH = /^[0-9a-f]{64}$/;
 // Endpoints
 // ---------------------------------------------------------------------------
 
-const PRESETS = new Set(["mainnet", "testnet", "devnet", "local"]);
-
 /**
  * The archive to read a network's history from: the configured archiver, or
- * the node when the archiver is on another known network (an install whose
- * settings kept Mainnet's archiver beside a Testnet node).
+ * the node when the archiver is on another network, by their chain IDs (an
+ * install whose settings kept Mainnet's archiver beside a Testnet node).
  * @param {{ nodeUrl?: string, archiverUrl?: string }} urls
  * @returns {string}
  */
@@ -69,19 +67,19 @@ export function historyArchiverUrl({ nodeUrl, archiverUrl } = {}) {
   const node = String(nodeUrl ?? "").trim();
   const archiver = String(archiverUrl ?? "").trim();
   if (!archiver) return node;
-  const nodeNet = detectPresetIdFromNodeUrl(node);
-  const archiverNet = detectPresetIdFromNodeUrl(archiver);
-  return PRESETS.has(nodeNet) && PRESETS.has(archiverNet) && nodeNet !== archiverNet ? node : archiver;
+  const nodeChain = chainIdForNode(node);
+  const archiverChain = chainIdForNode(archiver);
+  return nodeChain !== null && archiverChain !== null && nodeChain !== archiverChain ? node : archiver;
 }
 
 /**
- * The network a history belongs to: Mainnet and Testnet by name, any other
- * node by its origin.
+ * The network a history belongs to: Mainnet and Testnet by name, whichever
+ * node of theirs it's read from, any other node by its origin.
  * @param {string} nodeUrl
  */
 export function activityNetworkKey(nodeUrl) {
-  const preset = detectPresetIdFromNodeUrl(String(nodeUrl ?? ""));
-  if (preset === "mainnet" || preset === "testnet") return preset;
+  const name = networkForNode(String(nodeUrl ?? ""))?.name;
+  if (name === "mainnet" || name === "testnet") return name;
   try {
     return new URL(String(nodeUrl)).origin;
   } catch {

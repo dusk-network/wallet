@@ -4,7 +4,7 @@ import { h } from "../../lib/dom.js";
 import { assetsSectionsView } from "./assets.js";
 import { activityView, recentActivitySection } from "./activityView.js";
 import { activityRows } from "../activity.js";
-import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
+import { networkForNode } from "../../../shared/nodeNetwork.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
@@ -268,7 +268,7 @@ export function homeView(ov, { state, actions } = {}) {
  * @returns {HTMLElement}
  */
 function getStartedSection(ov, { state, actions } = {}) {
-  const testnet = detectPresetIdFromNodeUrl(String(ov?.nodeUrl ?? "")) === "testnet";
+  const testnet = networkForNode(String(ov?.nodeUrl ?? ""))?.name === "testnet";
   return h("section", { class: "box home-get-started" }, [
     bracketTitle({ text: "Get your first DUSK" }),
     h("div", { class: "group get-started-card" }, [

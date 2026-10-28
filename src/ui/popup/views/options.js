@@ -1,3 +1,5 @@
+import { networks } from "@dusk-network/networks";
+
 import { formatFee } from "../../../shared/amount.js";
 import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
@@ -245,9 +247,10 @@ export function optionsView(ov, { state, actions } = {}) {
     : null;
 
   // Network: the preset, and its node addresses for a custom one.
-  const nodeUrlInput = urlInput({ value: currentNodeUrl, placeholder: "https://nodes.dusk.network", onEnter: () => saveBtn.click() });
-  const proverUrlInput = urlInput({ value: currentProverUrl, placeholder: "https://provers.dusk.network", onEnter: () => saveBtn.click() });
-  const archiverUrlInput = urlInput({ value: currentArchiverUrl, placeholder: "https://nodes.dusk.network", onEnter: () => saveBtn.click() });
+  const { urls } = networks.mainnet;
+  const nodeUrlInput = urlInput({ value: currentNodeUrl, placeholder: urls.node, onEnter: () => saveBtn.click() });
+  const proverUrlInput = urlInput({ value: currentProverUrl, placeholder: urls.prover, onEnter: () => saveBtn.click() });
+  const archiverUrlInput = urlInput({ value: currentArchiverUrl, placeholder: urls.archive, onEnter: () => saveBtn.click() });
   const networkSelect = h(
     "select",
     { id: "network", "aria-label": "Network" },

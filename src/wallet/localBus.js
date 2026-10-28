@@ -11,6 +11,7 @@ import { clearPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { knownChainId } from "../shared/nodeNetwork.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
 import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
@@ -372,6 +373,7 @@ export async function localSend(message) {
         ipfsGateway: settings.ipfsGateway ?? "",
         hideBalances: settings.hideBalances === true,
         customGas: settings.customGas ?? null,
+        chainId: await knownChainId(settings.nodeUrl),
         networkName: networkNameFromNodeUrl(settings.nodeUrl),
         activeOrigin,
         activeConnected,

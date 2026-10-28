@@ -1,16 +1,16 @@
-import { detectPresetIdFromNodeUrl } from "./network.js";
-import { NETWORK_PRESETS } from "./networkPresets.js";
+import { networkForNode } from "./nodeNetwork.js";
 
+// The Dusk explorer of the node's network, from its file in
+// @dusk-network/networks; none on a local or unknown network.
 function explorerBase(nodeUrl) {
-  const presetId = detectPresetIdFromNodeUrl(nodeUrl);
-  return NETWORK_PRESETS.find((p) => p.id === presetId)?.explorerBase ?? null;
+  return networkForNode(String(nodeUrl ?? ""))?.apps.explorer ?? null;
 }
 
 /**
  * Returns a URL to view a transaction on the official Dusk explorer.
  *
- * For "local"/"custom" networks we return null because there is no canonical
- * hosted explorer.
+ * For a local network, or one the node hasn't named, we return null because
+ * there is no canonical hosted explorer.
  *
  * @param {string} nodeUrl
  * @param {string} hash
@@ -26,7 +26,7 @@ export function explorerTxUrl(nodeUrl, hash) {
 
 /**
  * Returns a URL to view a public account's history on the Dusk explorer.
- * Local and custom networks have none.
+ * Local and unknown networks have none.
  *
  * @param {string} nodeUrl
  * @param {string} account

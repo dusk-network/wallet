@@ -1,6 +1,7 @@
 import { fixedOrigin } from "./env.js";
 import { state } from "./state.js";
 import { tabsQuery } from "../../platform/extensionApi.js";
+import { noteChainId } from "../../shared/nodeNetwork.js";
 
 export async function getActiveOrigin() {
   if (fixedOrigin) return fixedOrigin;
@@ -23,6 +24,8 @@ export async function refreshOverview(send, { force = false } = {}) {
   }
 
   state.overview = await send({ type: "DUSK_UI_OVERVIEW", origin, route: state.route });
+  // The node's network, by the chain ID it gave, for what the popup knows only by the node.
+  noteChainId(state.overview?.nodeUrl, state.overview?.chainId);
   if (typeof state.hideBalances === "boolean" && state.overview) {
     state.overview.hideBalances = state.hideBalances;
   }

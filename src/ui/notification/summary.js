@@ -119,7 +119,7 @@ function txSummary(p, own) {
         title: `Bridge to ${service.chain}`,
         amount,
         to: service.recipientOk
-          ? { address: service.recipient, network: "evm", on: `on ${service.short}` }
+          ? { address: service.recipient, network: "evm", on: `on ${service.chain}` }
           : { address: String(p.to ?? "").trim(), network: "dusk" },
         sub: bridgeServiceLine(service),
       };

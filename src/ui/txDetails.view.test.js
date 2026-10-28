@@ -1,3 +1,4 @@
+import { networks } from "@dusk-network/networks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
@@ -83,6 +84,14 @@ describe("transaction details", () => {
     expect(view.body.querySelector(".tx-assets")).toBeNull();
     expect(view.body.querySelectorAll("button").map((b) => b.textContent)).not.toEqual(expect.arrayContaining(["Add token"]));
     expect(view.body.querySelectorAll("button").map((b) => b.textContent)).not.toEqual(expect.arrayContaining(["Import NFT"]));
+  });
+
+  it("names a call's contract as the network's file does, in the title and beside its ID", () => {
+    const { pool } = networks.testnet.sozu.fallbacks;
+    const view = details({ kind: TX_KIND.CONTRACT_CALL, contractId: pool, fnName: "exchange_rate", status: "executed" });
+    expect([visibleText(view.lead), view.name]).toEqual(["Sozu pool", "Call exchange_rate"]);
+    const contract = view.body.querySelectorAll(".tx-tech .kv").find((row) => row.querySelector(".kv-label").textContent === "Contract");
+    expect(visibleText(contract)).toBe(`ContractSozu pool · ${pool.slice(0, 6)}…${pool.slice(-6)}`);
   });
 
   it("says what a Dusk Domains call did, on its own network", () => {

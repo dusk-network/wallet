@@ -1,10 +1,11 @@
+// Sozu as the wallet sends and shows it: a stake or an unstake as the
+// wallet's transaction (the pool's call, from @dusk-network/networks), the
+// stDUSK token, and the engine's status figures parsed for the views.
+
+import { SOZU_FN, sozuCall } from "@dusk-network/networks/sozu";
+
 import { TX_KIND } from "./constants.js";
 import { LUX_DECIMALS } from "./amount.js";
-
-export const SOZU_FN = Object.freeze({
-  STAKE: "sozu_stake",
-  UNSTAKE: "sozu_unstake",
-});
 
 export const SOZU_ST_DUSK_DRIVER = "sozu_staked_dusk";
 
@@ -28,53 +29,26 @@ function toU64(value, name = "amountLux") {
   }
 }
 
-export function encodeSozuU64(value) {
-  const out = new Uint8Array(8);
-  new DataView(out.buffer).setBigUint64(0, toU64(value), true);
-  return out;
-}
-
-function sozuContractCall({ config, fnName, amountLux, depositLux = 0n, privacy = "public" }) {
-  const cfg = config;
-  if (!cfg?.contracts?.pool) throw new Error("Sozu pool is not configured for this network");
-  const amount = toU64(amountLux);
-  if (amount <= 0n) throw new Error("amountLux must be > 0");
-
+// A call of the pool from a public account, as the wallet sends it.
+function sozuTx(config, fnName, amountLux) {
+  if (!config?.contracts?.pool) throw new Error("Sozu pool is not configured for this network");
+  const call = sozuCall(config.contracts.pool, fnName, toU64(amountLux));
   return Object.freeze({
     kind: TX_KIND.CONTRACT_CALL,
-    privacy,
-    contractId: cfg.contracts.pool,
-    fnName,
-    fnArgs: Array.from(encodeSozuU64(amount)),
+    privacy: "public",
+    contractId: call.contractId,
+    fnName: call.fnName,
+    fnArgs: Array.from(call.fnArgs),
     amount: "0",
-    deposit: toU64(depositLux, "depositLux").toString(),
+    deposit: call.deposit.toString(),
   });
 }
 
-export function buildSozuDepositTx(params = {}) {
-  const amount = toU64(params.amountLux);
-  return sozuContractCall({
-    config: params.config,
-    fnName: SOZU_FN.STAKE,
-    amountLux: amount,
-    depositLux: amount,
-    privacy: params.privacy,
-  });
-}
+/** A stake: the amount goes along as the call's deposit. */
+export const buildSozuDepositTx = ({ config, amountLux } = {}) => sozuTx(config, SOZU_FN.STAKE, amountLux);
 
-export function buildSozuWithdrawTx(params = {}) {
-  return sozuContractCall({
-    config: params.config,
-    fnName: SOZU_FN.UNSTAKE,
-    amountLux: params.amountLux,
-    depositLux: 0n,
-    privacy: params.privacy,
-  });
-}
-
-export function buildSozuClaimTx() {
-  throw new Error("Sozu v1 does not expose a wallet claim action");
-}
+/** An unstake: nothing goes along; the pool pays out in the same transaction. */
+export const buildSozuWithdrawTx = ({ config, amountLux } = {}) => sozuTx(config, SOZU_FN.UNSTAKE, amountLux);
 
 export function parseSozuPoolState(value = {}) {
   if (value.totalStakeLux != null || value.tokenTotalSupply != null) {
@@ -102,13 +76,6 @@ export function parseSozuPoolState(value = {}) {
         ? Number((numerator * 1_000_000n) / denominator) / 1_000_000
         : null,
   });
-}
-
-export function estimateSozuPositionValue(position = {}, pool = {}) {
-  const shares = toU64(position.stDuskBalanceLux ?? position.shares ?? 0, "position.stDuskBalanceLux");
-  const totalStake = toU64(pool.totalStakeLux ?? pool.exchangeRate?.numerator ?? 0, "pool.totalStakeLux");
-  const totalSupply = toU64(pool.tokenTotalSupply ?? pool.exchangeRate?.denominator ?? 0, "pool.tokenTotalSupply");
-  return totalSupply > 0n ? ((shares * totalStake) / totalSupply).toString() : "0";
 }
 
 export function parseSozuPosition(value = {}) {

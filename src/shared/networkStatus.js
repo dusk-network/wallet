@@ -14,6 +14,7 @@
  * - Don't block saving settings on validation failures
  */
 
+import { chainIdOfInfo, rememberChainId } from "./nodeNetwork.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 
 // ============================================================================
@@ -39,6 +40,7 @@ import { storage, STORAGE_KEYS } from "./storage.js";
  * @typedef {Object} ProbeResult
  * @property {boolean} ok - Whether the endpoint is reachable
  * @property {string} [error] - Error message if not reachable
+ * @property {number|null} [chainId] - A node's chain ID, from its /on/node/info
  */
 
 // ============================================================================
@@ -92,9 +94,15 @@ export async function probeNode(baseUrl, timeoutMs = 6000) {
       timeoutMs
     );
 
+    // The node's chain ID names its network (nodeNetwork.js).
+    if (resp.ok) {
+      const info = await resp.json().catch(() => null);
+      return { ok: true, chainId: chainIdOfInfo(info) };
+    }
+
     // Rusk can return 400/424 when Rusk-Version/Rusk-Session-Id headers are
     // missing or mismatched. Still means the node is alive.
-    if (resp.ok || resp.status === 400 || resp.status === 424) {
+    if (resp.status === 400 || resp.status === 424) {
       return { ok: true };
     }
 
@@ -327,6 +335,10 @@ async function runEndpointChecks({ nodeUrl, proverUrl, archiverUrl }) {
     safeProbe(probeProver, proverUrl, "Prover"),
     safeProbe(probeArchiver, archiverUrl, "Archiver"),
   ]);
+
+  if (Number.isInteger(nodeResult.chainId)) {
+    await rememberChainId(nodeUrl, nodeResult.chainId).catch(() => {});
+  }
 
   // Update status
   return setNetworkStatus({

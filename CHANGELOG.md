@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Warned about a recipient listed as compromised or a scam, on Send and in a site's request, and sent it nothing.
 - Added Activity to the full view's sidebar.
 - Added Forgot your password? to the unlock screen: a restore from the recovery phrase that keeps the same wallet's contacts.
 - Showed Sozu's fees on Liquid staking as its contract has them: its share of rewards, the deposit fee and no fee to unstake.
@@ -50,6 +51,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Found the network by the chain ID its node gives, not its address: a custom node gets its network's names, Sozu, bridge, explorer and history, and one that hasn't said is Custom, not Mainnet.
+- Named the contracts and accounts the network's file names, in Activity and Technical details.
+- Named the bridge's chains as the network's routes do: BNB Smart Chain, and Sepolia on Testnet.
 - Led a withdrawal's prove and claim approvals with what they cost, then the withdrawal.
 - Named the connected site in the popup as its approval did: with its port, and http:// for a local one.
 - Marked the popup's top row as its header and its page as main, for screen readers.

@@ -1,3 +1,4 @@
+import { networks } from "@dusk-network/networks";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
@@ -46,10 +47,10 @@ export function normalizeCustomGas(value) {
 }
 
 export const DEFAULT_SETTINGS = {
-  // Default to Mainnet.
-  nodeUrl: "https://nodes.dusk.network",
-  proverUrl: "https://provers.dusk.network",
-  archiverUrl: "https://nodes.dusk.network",
+  // Default to Mainnet, at its endpoints in @dusk-network/networks.
+  nodeUrl: networks.mainnet.urls.node,
+  proverUrl: networks.mainnet.urls.prover,
+  archiverUrl: networks.mainnet.urls.archive,
   /** Auto-lock timeout in minutes (0 = disabled) */
   autoLockTimeoutMinutes: DEFAULT_AUTO_LOCK_MINUTES,
   /** A gas limit and price for every Review, or null for the network's price */

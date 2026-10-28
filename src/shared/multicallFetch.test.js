@@ -4,6 +4,7 @@ import recorded from "./fixtures/multicall-testnet.json";
 import { decodeAggregate, encodeAggregate } from "../vendor/duskdomains-multicall.js";
 import { MAX_BATCH, MULTICALL_CONTRACT_ID, createMulticallFetch } from "./multicallFetch.js";
 import { aggregateReply as reply } from "./fixtures/multicallCodec.js";
+import { noteChainId } from "./nodeNetwork.js";
 
 const NODE = "https://testnet.nodes.dusk.network";
 const AGGREGATE = `${NODE}/on/contracts:${MULTICALL_CONTRACT_ID}/aggregate`;
@@ -196,6 +197,27 @@ describe("createMulticallFetch", () => {
     answers = await round();
     expect(sizes).toEqual([32, 32, 6]);
     expect(answers.every((r) => r.status === 200)).toBe(true);
+  });
+
+  it("batches only on a network whose file has Multicall for Dusk, by the chain ID the node gave", async () => {
+    const reads = async (nodeUrl) => {
+      const base = node(() => new Response(bytes("aa")));
+      const fetch = createMulticallFetch({ nodeUrl, fetch: base, gasFor });
+      const at = (fn) => [`${nodeUrl}/on/contracts:${LENS}/${fn}`, { method: "POST", body: new Uint8Array([1]) }];
+      await Promise.all([fetch(...at("binding")), fetch(...at("reverse"))]);
+      return base.mock.calls.map(([url]) => url.slice(nodeUrl.length));
+    };
+    // Devnet has none, and a node that hasn't said its network may have none.
+    expect(await reads("https://devnet.nodes.dusk.network")).toEqual([`/on/contracts:${LENS}/binding`, `/on/contracts:${LENS}/reverse`]);
+    const custom = "https://rusk.example.net";
+    expect(await reads(custom)).toHaveLength(2);
+    noteChainId(custom, 2);
+    // Testnet's: one aggregate (whose reply here is no aggregate, so each read goes alone after it).
+    expect(await reads(custom)).toEqual([
+      `/on/contracts:${MULTICALL_CONTRACT_ID}/aggregate`,
+      `/on/contracts:${LENS}/binding`,
+      `/on/contracts:${LENS}/reverse`,
+    ]);
   });
 
   it("leaves other requests alone", async () => {

@@ -12,7 +12,8 @@ import { TX_KIND } from "../../../shared/constants.js";
 import { bridgeTransfer } from "../../../shared/bridge.js";
 import { knownCall } from "../../../shared/knownCalls.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
-import { SOZU_FN } from "../../../shared/sozuAdapter.js";
+import { labelForNode } from "../../../shared/nodeNetwork.js";
+import { SOZU_FN } from "@dusk-network/networks/sozu";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress, truncateMiddle } from "../../lib/strings.js";
@@ -141,9 +142,11 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
   const fn = String(tx?.fnName ?? asset?.action ?? "");
 
+  // The network's file, for the names it gives contracts and accounts.
+  const network = tx?.nodeUrl || nodeUrl;
   // The other side: a saved contact's own name, with its .dusk name (as
   // typed when sending, else verified) beside it; else the .dusk name; else
-  // its short address.
+  // what the network's file calls it; else its short address.
   const party = (address, typed = "") => {
     const addr = String(address ?? "").trim();
     const contact = String((addr && contactName?.(addr)) ?? "").trim();
@@ -153,17 +156,19 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
       return { name: contact, alias, address: addr || null, isAddress: false };
     }
     if (dusk) return { name: dusk, address: addr || null, isAddress: false };
+    const label = labelForNode(network, addr);
+    if (label) return { name: label, address: addr, isAddress: false };
     if (addr) return { name: shortAddress(addr), address: addr, isAddress: true };
     return null;
   };
   const dusk = (lux, sign) => (positive(lux) ? { sign, value: formatDusk(lux), unit: "DUSK" } : null);
 
   let d;
-  const bridge = bridgeTransfer(tx, tx?.nodeUrl || nodeUrl);
+  const bridge = bridgeTransfer(tx, network);
   // A known contract's call, by what it did.
   const named =
     kind === TX_KIND.CONTRACT_CALL
-      ? knownCall({ contractId: tx?.contractId, fnName: fn, nodeUrl: tx?.nodeUrl || nodeUrl, registeredName: tx?.registeredName })
+      ? knownCall({ contractId: tx?.contractId, fnName: fn, nodeUrl: network, registeredName: tx?.registeredName })
       : null;
   if (bridge) {
     const value = tx?.amount ?? tx?.deposit;
@@ -278,9 +283,12 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   } else if (kind === TX_KIND.CONTRACT_CALL) {
     const value = positive(tx?.deposit) ? tx.deposit : tx?.amount;
     const moved = positive(value);
+    // The contract by what the network's file calls it, where it does.
+    const label = labelForNode(network, tx?.contractId);
     d = {
       icon: moved ? "out" : "call",
       category: dir === "in" ? "received" : "sent",
+      ...(label ? { lead: label } : {}),
       name: fn ? `Call ${fn}` : "Contract call",
       word: "Contract",
       amount: dusk(value, dir === "in" ? "+" : MINUS),

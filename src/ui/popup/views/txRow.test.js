@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { networks, routes } from "@dusk-network/networks";
+
 import { TX_KIND } from "../../../shared/constants.js";
 import releases from "../../../shared/dusk-domains-releases.json";
 import { amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
@@ -163,6 +165,20 @@ describe("what a row says", () => {
     expect(call("register", { nodeUrl: "https://nodes.dusk.network" }).name).toBe("Call register");
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: store, fnName: "register" }, { nodeUrl: "https://node.example" }).name).toBe("Call register");
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, fnName: "sozu_stake", deposit: "1000000000" }).name).toBe("Staked with Sozu");
+  });
+
+  it("names the contracts and accounts the network's file names: a call by its contract, a transfer by whom it paid", () => {
+    const MAINNET = "https://nodes.dusk.network";
+    const { hub } = networks.mainnet.sozu;
+    const hubCall = describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: `0x${hub.toUpperCase()}`, fnName: "contract" }, { nodeUrl: MAINNET });
+    expect([hubCall.lead, hubCall.name]).toEqual(["Sozu hub", "Call contract"]);
+    const bsc = routes(networks.mainnet).find((route) => route.kind === "service").account;
+    const paid = describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc, amount: "2000000000" }, { nodeUrl: MAINNET });
+    expect([paid.lead, paid.name, paid.address, paid.isAddress]).toEqual(["Sent to", "BSC bridge", bsc, false]);
+    // A contact's own name still comes first; another network's file names nothing here.
+    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: MAINNET, contactName: () => "Bridge" }).name).toBe("Bridge");
+    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: TESTNET }).isAddress).toBe(true);
+    expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: hub, fnName: "contract" }, { nodeUrl: TESTNET }).lead).toBe("");
   });
 
   it("puts each under one filter: DUSK bridged to DuskEVM under Sent, back from it under Received, a proof under All", () => {

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { dataDrivers } from "@dusk/w3sper";
 
-import { decodeRatio, decodeU64 } from "./sozuStatus.js";
+import { decodeU64, parseFeeRate } from "@dusk-network/networks/sozu";
 
 async function loadDriverFromPublic(relPath) {
   const wasmPath = path.resolve(process.cwd(), "public", "drivers", relPath);
@@ -114,7 +114,7 @@ describe("Canonical data-drivers conformance (DRC20 / DRC721)", () => {
 
   it("Sozu's pool and stDUSK drivers take the account alike, and answer as the wallet reads them by hand", async () => {
     // The wallet encodes the account once, with the pool's driver, for both
-    // balance_of reads, and decodes their replies itself (sozuStatus.js).
+    // balance_of reads, and its reads decode their replies (@dusk-network/networks/sozu).
     const pool = await loadDriverFromPublic("sozu_pool_data_driver.wasm");
     const token = await loadDriverFromPublic("sozu_staked_dusk_data_driver.wasm");
     const account = pool.encodeInputFn("balance_of", JSON.stringify(EXAMPLE_PK));
@@ -126,7 +126,7 @@ describe("Canonical data-drivers conformance (DRC20 / DRC721)", () => {
     new DataView(rate.buffer).setBigUint64(0, 42_969_128_319_245_900n, true);
     new DataView(rate.buffer).setBigUint64(8, 33_347_850_501_719_821n, true);
     expect(pool.decodeOutputFn("exchange_rate", rate)).toEqual({ numerator: "42969128319245900", denominator: "33347850501719821" });
-    expect(decodeRatio(rate)).toEqual({ numerator: 42_969_128_319_245_900n, denominator: 33_347_850_501_719_821n });
+    expect(parseFeeRate(rate)).toEqual({ numerator: 42_969_128_319_245_900n, denominator: 33_347_850_501_719_821n });
     const balance = new Uint8Array([42, 0, 0, 0, 0, 0, 0, 0]);
     expect([pool.decodeOutputFn("balance_of", balance), token.decodeOutputFn("balance_of", balance)]).toEqual(["42", "42"]);
     expect(decodeU64(balance)).toBe(42n);

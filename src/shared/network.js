@@ -1,3 +1,5 @@
+import { chainIdForNode, networkLabelOf } from "./nodeNetwork.js";
+
 // Shared network helpers.
 
 /**
@@ -21,23 +23,16 @@ export function detectPresetIdFromNodeUrl(nodeUrl) {
 }
 
 /**
- * Heuristic mapping of node URL to display name.
- * NOTE: This intentionally matches the original MVP behavior:
- * anything not matching local/testnet/devnet is treated as "Mainnet".
+ * A node's network as the wallet names it: its file's label, by the chain ID
+ * the node gave (nodeNetwork.js), "Local" for a node on this machine, else
+ * "Custom"; "Unknown" for an address that isn't one.
  * @param {string} nodeUrl
  */
 export function networkNameFromNodeUrl(nodeUrl) {
   try {
-    const { hostname } = new URL(nodeUrl);
-    const h = hostname.toLowerCase();
-
-    // Local development
-    if (h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0") return "Local";
-    if (h.includes("testnet")) return "Testnet";
-    if (h.includes("devnet")) return "Devnet";
-    if (h.includes("local")) return "Local";
-    return "Mainnet";
+    new URL(nodeUrl);
   } catch {
     return "Unknown";
   }
+  return networkLabelOf(chainIdForNode(nodeUrl), nodeUrl);
 }

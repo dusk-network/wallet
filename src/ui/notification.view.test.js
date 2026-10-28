@@ -2,7 +2,9 @@ import { hashTypedDataHex } from "@dusk/typed-data";
 import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BRIDGE_CONTRACTS, BRIDGE_SERVICE_ACCOUNTS } from "../shared/bridge.js";
+import { networks, routes } from "@dusk-network/networks";
+
+import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
 import { fakeEvent, installFakeDom, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
@@ -288,6 +290,25 @@ describe("sign approvals", () => {
 });
 
 describe("a site's request to pay", () => {
+  it("says why it won't pay a recipient the network's file blocks, as the web wallet does, and offers only Reject", async () => {
+    const { account } = networks.testnet.display.blocklist.find((entry) => entry.reason === "scam");
+    await render("send_tx", transfer(account));
+    const callout = app.querySelector(".callout.warn");
+    expect(app.children[2]).toBe(callout);
+    expect(visibleText(callout)).toBe(
+      "Blocked recipient addressTransfer restricted: this recipient address is associated with reported fraud/scam activity."
+    );
+    expect(approve().disabled).toBe(true);
+    approve().click();
+    await settle();
+    expect(decision("approve")).toBeUndefined();
+
+    // Anyone else's request has none, and can be approved.
+    await render("send_tx", transfer(BOB));
+    expect(app.querySelector(".callout.warn")).toBeNull();
+    expect(approve().disabled).toBe(false);
+  });
+
   it("leads with the amount, whom it pays and Approve; the chain and node sit under Details", async () => {
     await render("send_tx", transfer(BOB, { amount: "1500000000", memo: "Order 1042" }));
 
@@ -327,7 +348,7 @@ describe("a site's request to pay", () => {
     const deposit = fixtures.calls.find((c) => c.name === "deposit-shoot");
     for (const params of [
       transfer(BOB, { memo: "Order 1042" }),
-      transfer(BRIDGE_SERVICE_ACCOUNTS.testnet.account, { memo: deposit.expected.to }),
+      transfer(routes(networks.testnet).find((route) => route.kind === "service").account, { memo: deposit.expected.to }),
       { kind: "contract_call", contractId: BRIDGE_CONTRACTS.testnet.bridge, fnName: deposit.fnName, fnArgs: deposit.args, deposit: deposit.expected.amountLux, chainId: "dusk:2", nodeUrl: TESTNET },
       { kind: "contract_call", privacy: "public", contractId: `0x${"11".repeat(32)}`, fnName: "x", fnArgs: "0x00", deposit: "5", nodeUrl: TESTNET },
     ]) {
@@ -380,7 +401,7 @@ describe("a site's request to pay", () => {
 });
 
 describe("a site's request to pay the bridge's account", () => {
-  const { testnet, mainnet } = BRIDGE_SERVICE_ACCOUNTS;
+  const [mainnet, testnet] = [networks.mainnet, networks.testnet].map((net) => routes(net).find((route) => route.kind === "service"));
   // A DuskEVM address with its checksum, as the bridge's own fixtures have it.
   const EVM = fixtures.calls.find((c) => c.name === "deposit-shoot").expected.to;
   const tag = () => head().querySelector(".ap-tag")?.textContent ?? null;
@@ -390,12 +411,12 @@ describe("a site's request to pay the bridge's account", () => {
 
   it("shows it as a bridge to the chain the memo's address is on, tagged as known", async () => {
     await render("send_tx", transfer(testnet.account, { amount: "2000000000", memo: EVM }));
-    expect(head().querySelector("h1").textContent).toBe("Bridge to Ethereum (Sepolia)");
+    expect(head().querySelector("h1").textContent).toBe("Bridge to Sepolia");
     expect(visibleText(head().querySelector(".ap-amount"))).toBe("2 DUSK");
     expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to ${EVM.slice(0, 6)}…${EVM.slice(-4)} on Sepolia`);
     expect(tag()).toBe("Known bridge account");
     expect(visibleText(row("Recipient on Sepolia"))).toBe(EVM);
-    expect(visibleText(row("To"))).toBe(`The bridge's account for Ethereum (Sepolia)${testnet.account}`);
+    expect(visibleText(row("To"))).toBe(`The bridge's account for Sepolia${testnet.account}`);
     expect(row("Memo")).toBeUndefined();
     expect(app.querySelector(".ap-visible").textContent).toBe("Visible to everyone: amount, the recipient on Sepolia, and your name alice.dusk.");
     expect(warns()).toEqual([OFF]);
@@ -405,7 +426,7 @@ describe("a site's request to pay the bridge's account", () => {
     // Mainnet's pays out on BNB Smart Chain.
     await render("send_tx", transfer(mainnet.account, { amount: "2000000000", memo: EVM, ...onMainnet }));
     expect(head().querySelector("h1").textContent).toBe("Bridge to BNB Smart Chain");
-    expect(visibleText(row("Recipient on BSC"))).toBe(EVM);
+    expect(visibleText(row("Recipient on BNB Smart Chain"))).toBe(EVM);
     expect(warns()).toEqual([]);
   });
 
@@ -424,11 +445,11 @@ describe("a site's request to pay the bridge's account", () => {
     expect(visibleText(head().querySelector(".ap-sub"))).toBe(
       "2 DUSK sent · 1 DUSK bridge fee · Nothing arrives without a BNB Smart Chain address in the memo"
     );
-    expect(warns()).toEqual(["The memo isn't an address on BSC"]);
+    expect(warns()).toEqual(["The memo isn't an address on BNB Smart Chain"]);
 
     await render("send_tx", transfer(mainnet.account, { amount: "1000000000", memo: EVM, ...onMainnet }));
     expect(visibleText(head().querySelector(".ap-sub"))).toBe("1 DUSK sent · 1 DUSK bridge fee · Nothing arrives on BNB Smart Chain");
-    expect(warns()).toEqual(["Nothing arrives on BSC"]);
+    expect(warns()).toEqual(["Nothing arrives on BNB Smart Chain"]);
     expect(app.querySelector(".callout.warn .muted").textContent).toBe(
       "The bridge takes its 1 DUSK fee from the amount, and this is no more than that."
     );
@@ -443,7 +464,7 @@ describe("a site's request to pay the bridge's account", () => {
       "The bridge isn't paying out on Sepolia at the moment, so DUSK sent to it doesn't arrive there."
     );
     // Nothing arrives there while it isn't running.
-    expect(visibleText(head().querySelector(".ap-sub"))).toBe("5 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Ethereum (Sepolia)");
+    expect(visibleText(head().querySelector(".ap-sub"))).toBe("5 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Sepolia");
   });
 
   it.each([
@@ -452,7 +473,7 @@ describe("a site's request to pay the bridge's account", () => {
     ["has a wrong checksum", EVM.replace(/[a-f]/, (c) => c.toUpperCase())],
   ])("warns when the memo %s", async (_label, memo) => {
     await render("send_tx", transfer(testnet.account, { amount: "2000000000", memo }));
-    expect(head().querySelector("h1").textContent).toBe("Bridge to Ethereum (Sepolia)");
+    expect(head().querySelector("h1").textContent).toBe("Bridge to Sepolia");
     expect(head().querySelector(".ap-recipient")).toBeNull();
     expect(warns()).toEqual([OFF, "The memo isn't an address on Sepolia"]);
     // All lower case has no checksum to get wrong.
@@ -469,9 +490,9 @@ describe("a site's request to pay the bridge's account", () => {
 
   it("says what it is before the wallet is unlocked, with what arrives", async () => {
     await render("send_tx", transfer(testnet.account, { memo: EVM }), { isUnlocked: false, accounts: [], duskNames: {} });
-    expect(head().querySelector("h1").textContent).toBe("Bridge to Ethereum (Sepolia)");
+    expect(head().querySelector("h1").textContent).toBe("Bridge to Sepolia");
     expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to ${EVM.slice(0, 6)}…${EVM.slice(-4)} on Sepolia`);
-    expect(visibleText(head().querySelector(".ap-sub"))).toBe("1 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Ethereum (Sepolia)");
+    expect(visibleText(head().querySelector(".ap-sub"))).toBe("1 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Sepolia");
   });
 });
 

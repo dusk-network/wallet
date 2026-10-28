@@ -116,6 +116,21 @@ describe("verified names", () => {
     expect(mocks.store).toEqual({});
   });
 
+  it("reads names on a custom node's network once the node gave its chain ID, never by its name", async () => {
+    const custom = "https://testnet.example.org";
+    expect(names.duskNamesNetwork(custom)).toBeNull();
+    (await import("./nodeNetwork.js")).noteChainId(custom, 2);
+    expect(names.duskNamesNetwork(`${custom}/rusk`)).toBe("testnet");
+    expect([names.duskNamesNetwork(MAINNET), names.duskNamesNetwork(TESTNET), ...NAMES_OFF.map(names.duskNamesNetwork)]).toEqual([
+      "mainnet",
+      "testnet",
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+
   it("never throws when storage fails", async () => {
     mocks.broken = true;
     await expect(names.rememberVerifiedName(TESTNET, ACCOUNT, "alice.dusk")).resolves.toBeUndefined();

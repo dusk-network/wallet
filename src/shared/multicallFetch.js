@@ -22,6 +22,7 @@ import {
   envelopeLength,
   replyLength,
 } from "../vendor/duskdomains-multicall.js";
+import { networkForNode } from "./nodeNetwork.js";
 
 export { MULTICALL_CONTRACT_ID };
 
@@ -109,6 +110,10 @@ const whileAnyWaits = (waiters) => {
  */
 export function createMulticallFetch({ nodeUrl, fetch: base = (...args) => fetch(...args), gasFor = () => 0n, maxBatch = MAX_BATCH }) {
   const prefix = `${String(nodeUrl).replace(/\/$/, "")}/on/contracts:`;
+  // Multicall for Dusk on the node's network, from its file: none on a
+  // network without it, or while the node's network isn't known, whose reads
+  // go as they are.
+  const multicallOf = () => networkForNode(String(nodeUrl ?? ""))?.contracts.multicall ?? null;
   const sizes = new Map();
   let queue = [];
   let pending = new Map();
@@ -179,7 +184,8 @@ export function createMulticallFetch({ nodeUrl, fetch: base = (...args) => fetch
 
   const send = async (batch) => {
     // A batch of one gains nothing from the multicall.
-    if (batch.length === 1) return alone(batch[0]);
+    const multicall = multicallOf();
+    if (batch.length === 1 || !multicall) return alone(batch[0]);
     let envelope;
     try {
       envelope = encodeAggregate(
@@ -193,7 +199,7 @@ export function createMulticallFetch({ nodeUrl, fetch: base = (...args) => fetch
     let res;
     let decoded;
     try {
-      res = await base(`${prefix}${MULTICALL_CONTRACT_ID}/aggregate`, {
+      res = await base(`${prefix}${multicall}/aggregate`, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream", Accept: "application/octet-stream" },
         body: envelope,
@@ -247,7 +253,8 @@ export function createMulticallFetch({ nodeUrl, fetch: base = (...args) => fetch
     const url = String(input?.href ?? input?.url ?? input);
     const match = url.startsWith(prefix) ? /^([0-9a-f]{64})\/([A-Za-z0-9_]+)$/.exec(url.slice(prefix.length)) : null;
     const args = match ? bodyBytes(init.body) : null;
-    if (!match || !args || match[1] === MULTICALL_CONTRACT_ID || String(init.method).toUpperCase() !== "POST" || Date.now() < offUntil) {
+    const multicall = multicallOf();
+    if (!match || !args || !multicall || match[1] === multicall || String(init.method).toUpperCase() !== "POST" || Date.now() < offUntil) {
       return base(input, init);
     }
     return new Promise((resolve, reject) => {

@@ -7,7 +7,7 @@
 
 import { formatLuxToDusk, safeBigInt } from "../../shared/amount.js";
 import { TX_KIND } from "../../shared/constants.js";
-import { SOZU_FN } from "../../shared/sozuAdapter.js";
+import { SOZU_FN } from "@dusk-network/networks/sozu";
 import { describeTx, subText, txTime } from "./views/txRow.js";
 
 /** The columns of an export. */

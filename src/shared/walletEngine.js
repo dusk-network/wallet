@@ -12,16 +12,17 @@ import {
   dataDrivers,
   useAsProtocolDriver,
 } from "@dusk/w3sper";
+import { networks } from "@dusk-network/networks";
+import { readSozuStatus } from "@dusk-network/networks/sozu";
 import { bytesToHex, hexToBytes, messageBytes, sha256Hex, toBytes } from "./bytes.js";
 import { signProfileTypedDataDigest } from "./blsDigest.js";
 import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
-import { detectPresetIdFromNodeUrl } from "./network.js";
 import { createContractReads } from "./contractReads.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
-import { getSozuHubBootstrap } from "./sozuConfig.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
-import { readSozuStatus } from "./sozuStatus.js";
+import { blockedRecipient } from "./recipientBlocklist.js";
+import { chainIdForNode, chainIdOfInfo, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
 
 import {
   clearNotes,
@@ -265,9 +266,9 @@ async function withTimeout(promise, ms, message, onTimeout) {
 // We keep it in a small mutable object so we can reconfigure network routing
 // without restarting the whole engine.
 let engineConfig = {
-  nodeUrl: "https://nodes.dusk.network",
-  proverUrl: "https://provers.dusk.network",
-  archiverUrl: "https://nodes.dusk.network",
+  nodeUrl: networks.mainnet.urls.node,
+  proverUrl: networks.mainnet.urls.prover,
+  archiverUrl: networks.mainnet.urls.archive,
   accountCount: 2,
   selectedAccountIndex: 0,
 };
@@ -1282,6 +1283,13 @@ export async function ensureNetwork() {
   state.bookkeeper = state.bookkeeper ?? new Bookkeeper(state.treasury);
   state.bookkeeperAll = state.bookkeeperAll ?? new Bookkeeper(state.treasuryAll);
 
+  // The node's chain ID, once for this connection, so what the engine keys by
+  // the node, such as its history, finds the node's network.
+  if (!state.network.__duskChainAsked) {
+    state.network.__duskChainAsked = true;
+    await nodeChainId(state.network);
+  }
+
   return state.network;
 }
 
@@ -1811,8 +1819,24 @@ export async function getDrc721TokenUri(params = {}) {
   return String(out ?? "");
 }
 
+// The node's chain ID, which names its network (nodeNetwork.js): from its
+// /on/node/info, which w3sper keeps once read; until the node can say, the
+// network whose own node it is.
+async function nodeChainId(network) {
+  try {
+    const id = chainIdOfInfo(await withTimeout(Promise.resolve(network.node.info), 5_000, "Timed out reading the node"));
+    if (id !== null) {
+      noteChainId(engineConfig.nodeUrl, id);
+      return id;
+    }
+  } catch {
+    // what's known of the node, below
+  }
+  return chainIdForNode(engineConfig.nodeUrl);
+}
+
 // Sozu's contracts are read through Multicall for Dusk: one query a refresh
-// (sozuStatus.js), with one batcher per node.
+// (readSozuStatus), with one batcher per node.
 let sozuReads = null;
 
 function readSozu(contractId, fnName, args) {
@@ -1844,10 +1868,11 @@ export async function getSozuStatus(params = {}) {
   const network = await ensureNetwork();
   const idx = resolveProfileIndex(params?.profileIndex);
   const profile = await ensureProfileIndex(idx);
-  const networkKey = detectPresetIdFromNodeUrl(engineConfig.nodeUrl);
-  const bootstrap = getSozuHubBootstrap(networkKey);
+  const chainId = await nodeChainId(network);
+  const networkKey = networkKeyOf(chainId, engineConfig.nodeUrl);
+  const sozu = networkOf(chainId)?.sozu ?? null;
 
-  if (!bootstrap) {
+  if (!sozu) {
     return Object.freeze({
       networkKey,
       configured: false,
@@ -1855,6 +1880,8 @@ export async function getSozuStatus(params = {}) {
       reason: "Sozu liquid staking is not configured for this network.",
     });
   }
+  const { pool: poolId, stDusk, substrate } = sozu.fallbacks;
+  const fallbackContracts = { hub: sozu.hub, pool: poolId, substrate, "staked-dusk": stDusk };
 
   const balanceRead = withTimeout(
     state.bookkeeper.balance(profile.account),
@@ -1865,32 +1892,31 @@ export async function getSozuStatus(params = {}) {
   let read = null;
   let reason = "";
   try {
-    const account = await sozuAccountArgs(network, bootstrap.fallbackContracts.pool, profile);
-    read = await readSozuStatus({
-      read: readSozu,
-      nodeUrl: String(engineConfig.nodeUrl || ""),
-      contracts: bootstrap.fallbackContracts,
-      account,
-    });
+    const account = await sozuAccountArgs(network, poolId, profile);
+    read = await readSozuStatus({ read: readSozu, contracts: sozu, account });
     reason = read.error;
   } catch (e) {
     reason = e?.message ?? String(e);
   }
   const balance = await balanceRead;
-  const { pool, position, fees, features } = read ?? {};
+  const { contracts, pool, position, fees, flags } = read ?? {};
+  // Both balances, or neither: what the views show the profile has.
+  const both = position && position.balance !== null && position.stDusk !== null;
 
   return Object.freeze({
     networkKey,
     configured: true,
     source: read?.source ?? "fallback",
-    contracts: read?.contracts ?? { ...bootstrap.fallbackContracts },
+    contracts: contracts
+      ? { hub: contracts.hub, pool: contracts.pool, substrate: contracts.substrate, "staked-dusk": contracts.stDusk }
+      : fallbackContracts,
     reason,
     pool: pool ? parseSozuPoolState({ totalStakeLux: pool.stake, tokenTotalSupply: pool.supply }) : null,
-    position: position
+    position: both
       ? { poolBalanceLux: position.balance.toString(), stDuskBalanceLux: position.stDusk.toString() }
       : null,
     fees: fees ? { deposit: ratioJson(fees.deposit), reward: ratioJson(fees.reward) } : null,
-    features: features ?? null,
+    features: flags ?? null,
     profileIndex: idx,
     account: profile.account.toString(),
     publicBalance: balance
@@ -2875,6 +2901,10 @@ async function sendTransactionUnlocked(params) {
   const profile = await ensureProfileIndex(idx);
 
   if (kind === TX_KIND.TRANSFER) {
+    // A recipient the network's file blocks gets nothing, whichever screen
+    // or site asked: the forms say why first (recipientBlocklist.js).
+    const blocked = blockedRecipient(String(params.to ?? ""), await nodeChainId(network));
+    if (blocked) throw new Error(blocked);
     // Reuse existing transfer logic for now.
     return await transfer(params);
   }

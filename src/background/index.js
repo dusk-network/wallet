@@ -13,6 +13,7 @@ import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { knownChainId, loadKnownChains } from "../shared/nodeNetwork.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -531,6 +532,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
   (async () => {
     try {
+      // What this worker knows of each node's chain, kept from before it started.
+      await loadKnownChains().catch(() => {});
       const common = await handleUiCommand(message, {
         engineCall,
         ensureEngineConfigured,
@@ -743,8 +746,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           kind: entry.kind,
           origin: entry.origin,
           params: entry.params,
-          // The wallet's network, for the approval's header.
+          // The wallet's network, for the approval's header, by the chain ID its node gave.
           nodeUrl: String(settings?.nodeUrl ?? ""),
+          chainId: await knownChainId(String(settings?.nodeUrl ?? "")),
           networkName: networkNameFromNodeUrl(String(settings?.nodeUrl ?? "")),
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
@@ -1174,6 +1178,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           accountNames = {};
         }
 
+        // The node's network, by the chain ID it gave (nodeNetwork.js).
+        const chainId = await knownChainId(settings.nodeUrl);
+
         // Get network status and check if we need to refresh it
         let networkStatus = await getNetworkStatus();
         if (isStatusStale(networkStatus, 30000)) {
@@ -1270,6 +1277,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           nftMetadataEnabled: settings.nftMetadataEnabled !== false,
           ipfsGateway: settings.ipfsGateway ?? "",
           hideBalances: settings.hideBalances === true,
+          chainId,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           networkStatus,
           activeOrigin,

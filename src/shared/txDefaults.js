@@ -6,6 +6,8 @@
 //
 // Values are expressed in LUX (1 LUX = 10^-9 DUSK) as decimal strings.
 
+import { SOZU_GAS as PACKAGE_SOZU_GAS } from "@dusk-network/networks/sozu";
+
 import { TX_KIND } from "./constants.js";
 
 /**
@@ -139,17 +141,18 @@ export const MIN_SHIELDED_STAKING_GAS = Object.freeze({
 
 /**
  * Gas for the wallet's own calls of Sozu's liquid staking pool, which are
- * public. Under Rusk 1.7.1 a stake spends about 2.2M, and an unstake 2.8M to
- * 3.7M on mainnet and testnet, about 6.3M at worst for one that reaches
- * every provisioner of the mainnet pool. A failed call is charged its whole
- * limit, so the limits stay close: 5M for a stake and 10M for an unstake,
- * never under 2.5M and 4M. The web wallet uses the same numbers. A site's
- * contract call keeps the contract call default.
+ * public: @dusk-network/networks' limits and minimums, at the network's
+ * price (the wallet's default until the node answers). A site's contract
+ * call keeps the contract call default.
  */
-export const SOZU_GAS = Object.freeze({
-  sozu_stake: Object.freeze({ limit: "5000000", price: "1", minimum: "2500000" }),
-  sozu_unstake: Object.freeze({ limit: "10000000", price: "1", minimum: "4000000" }),
-});
+export const SOZU_GAS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(PACKAGE_SOZU_GAS).map(([fnName, { limit, minimum }]) => [
+      fnName,
+      Object.freeze({ limit: String(limit), price: "1", minimum: String(minimum) }),
+    ])
+  )
+);
 
 // Sozu's gas for one of the wallet's own public calls of its pool, by its function.
 function sozuGasFor(kind, opts = {}) {

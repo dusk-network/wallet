@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./storage.js", () => {
   const items = {};
   return {
-    STORAGE_KEYS: { NETWORK_STATUS: "dusk_network_status_v1" },
+    STORAGE_KEYS: { NETWORK_STATUS: "dusk_network_status_v1", NODE_CHAINS: "dusk_node_chains_v1" },
     storage: {
       get: async (key) => ({ [key]: items[key] }),
       set: async (patch) => {
@@ -64,5 +64,21 @@ describe("checkAllEndpoints", () => {
     ]);
 
     expect(node).toHaveBeenCalledTimes(12);
+  });
+
+  it("keeps the chain ID a node gives, which names its network", async () => {
+    const { knownChainId } = await import("./nodeNetwork.js");
+    const custom = { ...ENDPOINTS, nodeUrl: "https://my-node.example:8443/rusk" };
+    node.mockImplementation(async (url) =>
+      new URL(url).pathname === "/on/node/info" ? new Response('{"chain_id":2,"version":"1.7.1"}') : new Response("{}")
+    );
+    expect(await knownChainId(custom.nodeUrl)).toBeNull();
+    await checkAllEndpoints(custom);
+    expect(await knownChainId("https://my-node.example:8443")).toBe(2);
+
+    // A reply without one keeps what the node gave before.
+    node.mockImplementation(async () => new Response("{}"));
+    await checkAllEndpoints(custom);
+    expect(await knownChainId(custom.nodeUrl)).toBe(2);
   });
 });

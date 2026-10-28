@@ -10,16 +10,16 @@ import {
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
+import { SOZU_FN, feePercent, leastSozuStake, parsePool, sozuStake, sozuUnstakeAllowed } from "@dusk-network/networks/sozu";
+
 import {
-  SOZU_FN,
   buildSozuDepositTx,
   buildSozuWithdrawTx,
   makeSozuStDuskToken,
   parseSozuPoolState,
   parseSozuPosition,
 } from "../../../shared/sozuAdapter.js";
-import { feePercent, leastSozuStake, parsePool, sozuStakeQuote, sozuUnstakeOk } from "../../../shared/sozuAmounts.js";
-import { getSozuConfig } from "../../../shared/sozuConfig.js";
+import { sozuConfigOf } from "../../../shared/sozuConfig.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
@@ -36,12 +36,9 @@ import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkG
 import { profileNameEl } from "../../components/ProfileName.js";
 import { sendFromReview } from "./sent.js";
 
-function networkKey(ov) {
-  const name = String(ov?.networkName ?? "").trim().toLowerCase();
-  if (name === "mainnet") return "mainnet";
-  if (name === "testnet") return "testnet";
-  return name || "custom";
-}
+// What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
+// rate and the deposit fee are read; null until then.
+const stakeQuote = (amount, pool, depositFee) => (pool && depositFee ? sozuStake(amount, pool, depositFee) : null);
 
 function fmtLux(value) {
   return formatDusk(value ?? "0", UI_DISPLAY_DECIMALS);
@@ -173,7 +170,7 @@ async function readStakeTerms(actions, draft) {
     // Not read: nothing is sent.
   }
   const { pool, depositFee } = stakeTerms(status);
-  const quote = sozuStakeQuote(draftAmountLux(draft), pool, depositFee);
+  const quote = stakeQuote(draftAmountLux(draft), pool, depositFee);
   const poolId = hexId(status?.contracts?.pool);
   return quote && /^[0-9a-f]{64}$/.test(poolId) ? { status, quote, depositFee, poolId } : null;
 }
@@ -404,7 +401,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   // The popup's context as this form is drawn: what its figures are for.
   const formContext = state.context;
   const st = ensureSozuLoaded(ov, { state, actions });
-  const staticCfg = getSozuConfig(networkKey(ov));
+  const staticCfg = sozuConfigOf(ov?.chainId ?? null);
   const liveStatus = st.status;
   const cfg = liveStatus?.configured && liveStatus?.contracts?.pool
     ? { networkKey: liveStatus.networkKey, contracts: liveStatus.contracts }
@@ -500,7 +497,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       return null;
     }
     if (isWithdraw) {
-      if (!sozuUnstakeOk(lux, maxUnstakeLux)) {
+      if (!sozuUnstakeAllowed(lux, maxUnstakeLux)) {
         field.setError("That's more than you have staked with Sozu.");
         reviewBtn.disabled = true;
         return null;
@@ -510,7 +507,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       return lux;
     }
     // A stake needs the pool's rate and Sozu's fee, read now.
-    const quote = sozuStakeQuote(lux, pool, depositFee);
+    const quote = stakeQuote(lux, pool, depositFee);
     if (!quote) {
       field.setError(st.loading ? "" : "Sozu's rate and fees couldn't be read. Try again later.");
       reviewBtn.disabled = true;
@@ -547,7 +544,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       field.input.focus();
       return;
     }
-    const quote = isWithdraw ? null : sozuStakeQuote(amountLux, pool, depositFee);
+    const quote = isWithdraw ? null : stakeQuote(amountLux, pool, depositFee);
     const profileIndex = Number(ov?.selectedAccountIndex ?? 0) || 0;
     st.notice = "";
     state.sozuDraft = {

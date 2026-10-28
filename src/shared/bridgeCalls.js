@@ -3,21 +3,23 @@
 // deposit's DuskEVM recipient and amount, and a withdrawal's amount and Dusk
 // recipient when it is proved or claimed.
 //
-// Only the contracts in BRIDGE_CONTRACTS, through their network's own node: a
-// network without them (Mainnet, for now) decodes nothing, and neither does a
-// custom node, whose contract at the same ID could be anything. The
-// arguments are rkyv, as
-// the bridge's encoder and the portal's data driver write them, and must
-// decode exactly: every pointer in bounds, a withdrawal's amount the same in
-// each place it's written, and its route the bridge's own. Anything else
-// stays undecoded.
+// Only the bridge's contracts on the node's network, by the chain ID the node
+// gave (bridge.js): a transaction carries that chain ID and goes through
+// only on that chain, where the IDs are the bridge's. A network without them
+// (Mainnet, for now) decodes nothing, and neither does a node whose network
+// isn't known. The arguments are rkyv, as the bridge's encoder and the
+// portal's data driver write them, and must decode exactly: every pointer in
+// bounds, a withdrawal's amount the same in each place it's written, and its
+// route the bridge's own. Anything else stays undecoded.
 
 import { keccak_256 } from "@noble/hashes/sha3";
 
+import { routes } from "@dusk-network/networks";
+
 import { formatDuskExact, safeBigInt } from "./amount.js";
-import { BRIDGE_CONTRACTS, BRIDGE_SERVICE_ACCOUNTS } from "./bridge.js";
+import { bridgeContractsOf } from "./bridge.js";
 import { toBytes } from "./bytes.js";
-import { NETWORK_PRESETS } from "./networkPresets.js";
+import { networkForNode } from "./nodeNetwork.js";
 
 export const BRIDGE_FUNCTIONS = Object.freeze({
   deposit: "depositETHToWithValue",
@@ -38,18 +40,13 @@ const CLAIM_WITH_PROOF_OF_ROOT = WITHDRAWAL + 20;
 const RELAY_MESSAGE = "d764ad0b";
 const FINALIZE_BRIDGE_ETH = "1635f5fd";
 
-// The route a DUSK withdrawal takes: DuskEVM's messenger sends it to Dusk's,
-// relaying DuskEVM's bridge to Dusk's. The DuskEVM side are OP-stack
-// predeploys; the Dusk side are the EVM addresses DuskEVM gives Dusk's
-// contracts (L2CrossDomainMessenger.otherMessenger, L2StandardBridge.
-// otherBridge), the bridge's being its contract ID's (evmAddressOf). A
-// withdrawal on any other route is some other message through the portal.
-const L2_MESSENGER = "4200000000000000000000000000000000000007";
-const L2_BRIDGE = "4200000000000000000000000000000000000010";
-const L1_MESSENGERS = Object.freeze({
-  testnet: "8b6aa15321d9656c91ad2d5fbc2ae8b750ad6f9a",
-});
-
+// The route a DUSK withdrawal takes, from the network's file: DuskEVM's
+// messenger sends it to Dusk's, relaying DuskEVM's bridge to Dusk's. The
+// DuskEVM side are OP-stack predeploys; the Dusk side are the EVM addresses
+// DuskEVM gives Dusk's contracts (L2CrossDomainMessenger.otherMessenger,
+// L2StandardBridge.otherBridge), the bridge's being its contract ID's
+// (evmAddressOf). A withdrawal on any other route is some other message
+// through the portal.
 const WEI_PER_LUX = 1_000_000_000n;
 
 const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -209,28 +206,20 @@ function abiCall(data, selector, types) {
 
 // ---- Calls ----------------------------------------------------------------
 
-// The network preset `nodeUrl` is the own node of, or null for a custom one.
-function presetOf(nodeUrl) {
-  const origin = (url) => {
-    try {
-      return new URL(String(url ?? "")).origin;
-    } catch {
-      return "";
-    }
-  };
-  const at = origin(nodeUrl);
-  return at ? NETWORK_PRESETS.find((p) => p.nodeUrl && origin(p.nodeUrl) === at) ?? null : null;
-}
-
-// The bridge's contracts when `nodeUrl` is its network's own node, with the
-// route its withdrawals take there (null without one: none decode).
+// The bridge's contracts on the node's network, with the route its
+// withdrawals take there (null without one: none decode).
 function bridgeContracts(nodeUrl) {
-  const preset = presetOf(nodeUrl);
-  const contracts = (preset && BRIDGE_CONTRACTS[preset.id]) || null;
+  const contracts = bridgeContractsOf(nodeUrl);
   if (!contracts) return null;
-  const l1Messenger = L1_MESSENGERS[preset.id];
+  const evm = networkForNode(String(nodeUrl ?? "")).duskEvm;
+  const l1Messenger = norm(evm.contracts.l1_cross_domain_messenger?.evmAddress);
   const route = l1Messenger
-    ? { l2Messenger: L2_MESSENGER, l1Messenger, l2Bridge: L2_BRIDGE, l1Bridge: evmAddressOf(contracts.bridge) }
+    ? {
+        l2Messenger: norm(evm.predeploys.l2CrossDomainMessenger),
+        l1Messenger,
+        l2Bridge: norm(evm.predeploys.l2StandardBridge),
+        l1Bridge: evmAddressOf(contracts.bridge),
+      }
     : null;
   return { ...contracts, route };
 }
@@ -422,32 +411,32 @@ export function isEvmAddress(value) {
 }
 
 /**
- * A transfer to the bridge's account on Dusk (BRIDGE_SERVICE_ACCOUNTS),
- * which pays its memo's EVM address on another chain: that chain, whether
- * the memo is an address there, whether the bridge pays out there now, and
- * what arrives of the amount once the bridge takes its fee. Null for any
- * other transfer, and on a node that isn't its network's own.
+ * A transfer to the bridge's account on Dusk, a service route of the node's
+ * network (@dusk-network/networks), which pays its memo's EVM address on
+ * another chain: that chain, whether the memo is an address there, whether
+ * the bridge pays out there now, and what arrives of the amount once the
+ * bridge takes its fee. Null for any other transfer, and on a node whose
+ * network isn't known.
  * @param {{ nodeUrl?: string, to?: string, memo?: string, amount?: string|bigint }} transfer - `amount` in Lux
- * @returns {{ chain: string, short: string, network: string, recipient: string, recipientOk: boolean,
+ * @returns {{ chain: string, network: string, recipient: string, recipientOk: boolean,
  *   running: boolean, sentLux: bigint, feeLux: bigint, arrivesLux: bigint } | null}
  */
 export function bridgeServiceTransfer({ nodeUrl, to, memo, amount } = {}) {
-  const preset = presetOf(nodeUrl);
-  const service = preset ? BRIDGE_SERVICE_ACCOUNTS[preset.id] : null;
-  if (!service || String(to ?? "").trim() !== service.account) return null;
+  const net = networkForNode(String(nodeUrl ?? ""));
+  const account = String(to ?? "").trim();
+  const route = net && account ? routes(net).find((r) => r.kind === "service" && r.account === account) : null;
+  if (!route) return null;
   const recipient = String(memo ?? "").trim();
   const sentLux = safeBigInt(amount ?? 0, 0n);
-  const feeLux = BigInt(service.feeLux);
   return {
-    chain: service.chain,
-    short: service.short,
-    network: preset.id,
+    chain: route.chain.name,
+    network: net.name,
     recipient,
     recipientOk: isEvmAddress(recipient),
-    running: service.running,
+    running: route.running,
     sentLux,
-    feeLux,
-    arrivesLux: sentLux > feeLux ? sentLux - feeLux : 0n,
+    feeLux: route.feeLux,
+    arrivesLux: sentLux > route.feeLux ? sentLux - route.feeLux : 0n,
   };
 }
 
@@ -491,13 +480,13 @@ export function bridgeServiceWarnings(service) {
     out.push({
       kind: "off",
       title: `Not running on ${service.network} right now`,
-      text: `The bridge isn't paying out on ${service.short} at the moment, so DUSK sent to it doesn't arrive there.`,
+      text: `The bridge isn't paying out on ${service.chain} at the moment, so DUSK sent to it doesn't arrive there.`,
     });
   }
   if (service.arrivesLux <= 0n) {
     out.push({
       kind: "fee",
-      title: `Nothing arrives on ${service.short}`,
+      title: `Nothing arrives on ${service.chain}`,
       text: `The bridge takes its ${formatDuskExact(service.feeLux)} DUSK fee from the amount, and this is no more than that.`,
     });
   }

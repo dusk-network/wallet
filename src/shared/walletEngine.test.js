@@ -5,6 +5,7 @@ import "fake-indexeddb/auto";
 import { bytesToHex, sha256Hex, toBytes } from "./bytes.js";
 import phoenix from "./fixtures/phoenix-testnet.json";
 import { aggregateReply, envelopeCalls } from "./fixtures/multicallCodec.js";
+import { networks } from "@dusk-network/networks";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -273,6 +274,13 @@ vi.mock("@dusk/w3sper", () => {
       this.dataDrivers = {
         register: vi.fn(),
       };
+      // The node's /on/node/info, as w3sper gives it.
+      this.node = {
+        get info() {
+          const info = globalThis.__W3SPER_NODE_INFO__;
+          return info ? Promise.resolve(info) : Promise.reject(new Error("No node info in this test"));
+        },
+      };
     }
 
     connect() {
@@ -456,6 +464,7 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_LAST_SEEDER__;
     delete globalThis.__W3SPER_PROFILE_GATE__;
     delete globalThis.__W3SPER_DRIVER_DELAYS__;
+    delete globalThis.__W3SPER_NODE_INFO__;
   });
 
   async function prepareReviewCache(tip = 10n) {
@@ -1111,6 +1120,16 @@ describe("walletEngine", () => {
     expect(tx.memoValue).toBe("hi");
   });
 
+  it("sends nothing to a recipient the network's file blocks, whichever screen or site asked", async () => {
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const { account } = networks.mainnet.display.blocklist.find((entry) => entry.reason === "compromised");
+
+    await expect(engine.sendTransaction({ kind: "transfer", privacy: "public", to: account, amount: "1" })).rejects.toThrow(
+      "Transfer restricted: this recipient address has been reported as compromised."
+    );
+    expect(globalThis.__W3SPER_LAST_EXEC_TX__).toBeNull();
+  });
+
   it("sendTransaction requires transfer privacy and validates recipient rail", async () => {
     engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
@@ -1412,6 +1431,29 @@ describe("walletEngine", () => {
       calls.map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)
     );
     delete globalThis.__W3SPER_DRIVER_GETS__;
+  });
+
+  it("reads the Sozu of the network a custom node says it's on, by its chain ID", async () => {
+    engine.configure({ nodeUrl: "https://my-node.example", accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+
+    globalThis.__W3SPER_NODE_INFO__ = { chainId: 2 };
+    const status = await engine.getSozuStatus();
+    expect(status).toMatchObject({ networkKey: "testnet", configured: true, source: "fallback" });
+    expect(status.contracts).toEqual({
+      hub: "bae85f8c24730a5a19fbe3d3bd58248ac8c302b62fe414a8c640d8c0ed286b9e",
+      pool: "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+      substrate: "0077ecbf88aa20d6d0a6afa20bd26300a2b562fdbac368bf1e3c1325e8555941",
+      "staked-dusk": "fdbf49102e76cf58224003451c6cb9e3403c54ff1d9042f8bc46ec25c6a4337c",
+    });
+  });
+
+  it("has no Sozu on a node whose network it can't tell, or one without it", async () => {
+    engine.configure({ nodeUrl: "https://testnet.example.com", accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    // Its name says testnet; the node can't say.
+    await expect(engine.getSozuStatus()).resolves.toMatchObject({ networkKey: "custom", configured: false });
   });
 
   it("returns owner-separated stake status for local owner profiles", async () => {

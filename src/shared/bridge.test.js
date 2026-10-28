@@ -1,7 +1,9 @@
+import { networks, routes } from "@dusk-network/networks";
 import { describe, expect, it } from "vitest";
 
-import { BRIDGE_CONTRACTS, BRIDGE_SERVICE_ACCOUNTS, bridgeTransfer } from "./bridge.js";
+import { BRIDGE_CONTRACTS, bridgeTransfer } from "./bridge.js";
 import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings } from "./bridgeCalls.js";
+import { noteChainId } from "./nodeNetwork.js";
 
 const TESTNET = "https://testnet.nodes.dusk.network";
 const MAINNET = "https://nodes.dusk.network";
@@ -25,19 +27,23 @@ describe("bridge transfers", () => {
 });
 
 describe("the bridge's accounts for DUSK leaving Dusk", () => {
-  const { mainnet, testnet } = BRIDGE_SERVICE_ACCOUNTS;
+  // The networks' service routes, as their files in @dusk-network/networks have them.
+  const service = (net) => routes(net).find((route) => route.kind === "service");
+  const mainnet = service(networks.mainnet);
+  const testnet = service(networks.testnet);
   const EVM = "0x" + "ab".repeat(20);
 
-  it("carry the bridge's own fee, 1 DUSK from the amount (its VITE_SERVICE_BRIDGE_FEE_LUX), and testnet's isn't running", () => {
-    expect([mainnet.feeLux, testnet.feeLux]).toEqual(["1000000000", "1000000000"]);
+  it("are the networks' service routes: the account, the 1 DUSK fee and the chain, and testnet's isn't running", () => {
+    expect([mainnet.feeLux, testnet.feeLux]).toEqual([1_000_000_000n, 1_000_000_000n]);
     expect([mainnet.running, testnet.running]).toEqual([true, false]);
+    expect([mainnet.chain.name, testnet.chain.name]).toEqual(["BNB Smart Chain", "Sepolia"]);
   });
 
   it("say what's sent, the fee and what arrives, in one line", () => {
-    const service = bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo: EVM, amount: "2000000000" });
-    expect(service).toMatchObject({ chain: "BNB Smart Chain", short: "BSC", network: "mainnet", recipientOk: true, running: true, sentLux: 2_000_000_000n, feeLux: 1_000_000_000n, arrivesLux: 1_000_000_000n });
-    expect(bridgeServiceLine(service)).toBe("2 DUSK sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain");
-    expect(bridgeServiceWarnings(service)).toEqual([]);
+    const paid = bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo: EVM, amount: "2000000000" });
+    expect(paid).toMatchObject({ chain: "BNB Smart Chain", network: "mainnet", recipientOk: true, running: true, sentLux: 2_000_000_000n, feeLux: 1_000_000_000n, arrivesLux: 1_000_000_000n });
+    expect(bridgeServiceLine(paid)).toBe("2 DUSK sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain");
+    expect(bridgeServiceWarnings(paid)).toEqual([]);
 
     // The fee takes all of 1 DUSK, and more than that of less.
     for (const amount of ["1000000000", "999999999", undefined]) {
@@ -58,16 +64,26 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
   });
 
   it("say testnet's route to Sepolia isn't running right now", () => {
-    const service = bridgeServiceTransfer({ nodeUrl: TESTNET, to: testnet.account, memo: EVM, amount: "5000000000" });
-    expect(bridgeServiceWarnings(service)).toEqual([
+    const paid = bridgeServiceTransfer({ nodeUrl: TESTNET, to: testnet.account, memo: EVM, amount: "5000000000" });
+    expect(bridgeServiceWarnings(paid)).toEqual([
       {
         kind: "off",
         title: "Not running on testnet right now",
         text: "The bridge isn't paying out on Sepolia at the moment, so DUSK sent to it doesn't arrive there.",
       },
     ]);
-    expect(bridgeServiceLine(service)).toBe("5 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Ethereum (Sepolia)");
+    expect(bridgeServiceLine(paid)).toBe("5 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Sepolia");
     // Another account, or another network's, is no bridge transfer.
     expect(bridgeServiceTransfer({ nodeUrl: TESTNET, to: mainnet.account, amount: "5000000000" })).toBeNull();
+  });
+
+  it("are the node's network's, by the chain ID it gave, whatever its address", () => {
+    const node = "https://rusk.example.org";
+    expect(bridgeServiceTransfer({ nodeUrl: node, to: mainnet.account, memo: EVM, amount: "2000000000" })).toBeNull();
+    noteChainId(node, 1);
+    expect(bridgeServiceTransfer({ nodeUrl: node, to: mainnet.account, memo: EVM, amount: "2000000000" })).toMatchObject({
+      chain: "BNB Smart Chain",
+      arrivesLux: 1_000_000_000n,
+    });
   });
 });

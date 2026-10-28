@@ -3,7 +3,7 @@ import path from "node:path";
 import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BRIDGE_SERVICE_ACCOUNTS } from "../shared/bridge.js";
+import { networks, routes } from "@dusk-network/networks";
 import { TX_KIND } from "../shared/constants.js";
 import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
@@ -95,6 +95,7 @@ const NAMES = {
   "carol.dusk": { ok: true, name: "carol.dusk", address: vary(ADDRESS, 4) },
   "dave.dusk": { ok: true, name: "dave.dusk", account: vary(ACCOUNT, 5) },
   "me.dusk": { ok: true, name: "me.dusk", ...OWN },
+  "listed.dusk": { ok: true, name: "listed.dusk", account: networks.testnet.display.blocklist[0].account },
 };
 
 // 177.9865 DUSK public, 25 DUSK shielded; the fee caps are 0.0025 and 0.05 DUSK.
@@ -572,6 +573,35 @@ describe("sending to yourself", () => {
   });
 });
 
+describe("a recipient the network's file blocks", () => {
+  it("says why under the field, as the web wallet does, and keeps Review off", async () => {
+    const form = mount(newState());
+    const banner = () => dom.document.body.querySelector(".send-blocked");
+    for (const { account, reason } of networks.testnet.display.blocklist) {
+      typeInto(form.to, account);
+      expect(isShown(banner())).toBe(true);
+      expect(visibleText(banner())).toBe(
+        `Blocked recipient address${
+          reason === "scam"
+            ? "Transfer restricted: this recipient address is associated with reported fraud/scam activity."
+            : "Transfer restricted: this recipient address has been reported as compromised."
+        }`
+      );
+      expect(form.review.disabled).toBe(true);
+    }
+
+    // Anyone else goes ahead.
+    typeInto(form.to, ALICE.account);
+    expect(isShown(banner())).toBe(false);
+    expect(form.review.disabled).toBe(false);
+
+    // A name pointing at one is blocked too.
+    typeInto(form.to, "listed.dusk");
+    await vi.waitFor(() => expect(isShown(banner())).toBe(true));
+    expect(form.review.disabled).toBe(true);
+  });
+});
+
 describe("review", () => {
   const review = (draft, ov, send) =>
     mount(
@@ -679,7 +709,7 @@ describe("review", () => {
 
 describe("a send to the bridge's account", () => {
   const MAINNET = overview({ nodeUrl: "https://nodes.dusk.network" });
-  const { mainnet, testnet } = BRIDGE_SERVICE_ACCOUNTS;
+  const [mainnet, testnet] = [networks.mainnet, networks.testnet].map((net) => routes(net).find((route) => route.kind === "service"));
   // A checksummed EVM address, as the bridge's own fixtures have it.
   const EVM = fixtures.calls.find((c) => c.name === "deposit-shoot").expected.to;
   const review = (draft, ov = MAINNET, send) =>
@@ -703,8 +733,8 @@ describe("a send to the bridge's account", () => {
     expect(view.kind()).toBe("Bridge to BNB Smart Chain");
     expect(text(".review-bridge-fee")).toBe("2 DUSK sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain");
     expect(view.reviewTo()).toBe(`The bridge's account for BNB Smart Chain${mainnet.account}`);
-    expect(view.visibleLine()).toBe("Visible to everyone: amount, the recipient on BSC, and your account.");
-    expect(body().querySelectorAll(".row > .group .kv").map(visibleText)).toContain(`Recipient on BSC${EVM}`);
+    expect(view.visibleLine()).toBe("Visible to everyone: amount, the recipient on BNB Smart Chain, and your account.");
+    expect(body().querySelectorAll(".row > .group .kv").map(visibleText)).toContain(`Recipient on BNB Smart Chain${EVM}`);
     expect(callouts()).toEqual([]);
     expect(confirm().disabled).toBe(false);
     // No name to look up for the bridge's account.
@@ -723,9 +753,9 @@ describe("a send to the bridge's account", () => {
   });
 
   it.each([
-    ["isn't an address on BSC", { memo: "Order 1042" }, MAINNET, "Nothing arrives without a BNB Smart Chain address in the memo."],
+    ["isn't an address on BNB Smart Chain", { memo: "Order 1042" }, MAINNET, "Nothing arrives without a BNB Smart Chain address in the memo."],
     ["is missing", { memo: "" }, MAINNET, "Nothing arrives without a BNB Smart Chain address in the memo."],
-    ["isn't an address on Sepolia", { to: testnet.account, memo: "Order 1042" }, overview(), "Nothing arrives without an Ethereum (Sepolia) address in the memo."],
+    ["isn't an address on Sepolia", { to: testnet.account, memo: "Order 1042" }, overview(), "Nothing arrives without a Sepolia address in the memo."],
   ])("keeps Confirm off when the memo %s, as nothing would arrive", async (_, draft, ov, reason) => {
     const view = review(draft, ov);
     await settle();
@@ -743,11 +773,11 @@ describe("a send to the bridge's account", () => {
     expect(body().querySelector(".callout.warn .muted").textContent).toBe(
       "The bridge isn't paying out on Sepolia at the moment, so DUSK sent to it doesn't arrive there."
     );
-    expect(text(".review-bridge-fee")).toBe("2 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Ethereum (Sepolia)");
+    expect(text(".review-bridge-fee")).toBe("2 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Sepolia");
 
     review({ memo: "Order 1042" });
     await settle();
-    expect(callouts()).toEqual(["The memo isn't an address on BSC"]);
+    expect(callouts()).toEqual(["The memo isn't an address on BNB Smart Chain"]);
     // Nothing arrives there without one: the line doesn't say it does.
     expect(text(".review-bridge-fee")).toBe("2 DUSK sent · 1 DUSK bridge fee · Nothing arrives without a BNB Smart Chain address in the memo");
   });
