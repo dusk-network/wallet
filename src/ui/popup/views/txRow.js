@@ -136,7 +136,7 @@ function tokenUnits(units, decimals) {
  *   word: string, note: string,
  *   amount: { sign: string, value: string, unit: string } | null,
  *   status: string, tone: "ok"|"bad"|"pending"|"neutral", statusWord: string|null,
- *   failed: boolean, unsent: boolean, fee: string|null,
+ *   failed: boolean, unsent: boolean, fee: string|null, arrival: string|null,
  * }}
  */
 export function describeTx(tx, { contactName, nodeUrl } = {}) {
@@ -309,6 +309,8 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   // Failed, or dropped before it ran: the amount stayed in the wallet.
   const unsent = failed || status === "removed";
   const amount = d.amount && unsent ? { ...d.amount, sign: "", muted: true } : d.amount;
+  // A deposit to DuskEVM that arrived there: its transaction there (bridgeArrival.js).
+  const arrival = d.evm && status === "executed" && /^0x[0-9a-fA-F]{64}$/.test(String(tx?.arrival?.hash ?? "")) ? String(tx.arrival.hash) : null;
   return {
     lead: "",
     alias: "",
@@ -322,10 +324,11 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     status,
     tone,
     amount,
-    statusWord: tone === "ok" ? null : txStatusWord(status, { final }),
+    statusWord: arrival ? "Arrived" : tone === "ok" ? null : txStatusWord(status, { final }),
     failed,
     unsent,
     fee: tx?.feePaid != null && tx.feePaid !== "" ? formatFee(tx.feePaid) : null,
+    arrival,
   };
 }
 

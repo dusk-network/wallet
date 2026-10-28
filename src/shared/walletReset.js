@@ -1,5 +1,6 @@
 // What a wallet reset clears besides the vault and the site permissions: the
-// wallet's transactions, its shielded notes, its history and its contacts.
+// wallet's transactions, its shielded notes, its history, its deposits' arrivals
+// on DuskEVM and its contacts.
 //
 // A reset is noted before the vault goes. If any of these can't be cleared,
 // the reset fails and stays noted, and no new wallet is made until another
@@ -12,6 +13,7 @@
 // the same wallet.
 
 import { clearActivityStore } from "./activityStore.js";
+import { clearArrivals } from "./bridgeArrival.js";
 import { clearContacts, keepOnlyContactsOf } from "./contactsStore.js";
 import { clearShieldedStore } from "./shieldedStore.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
@@ -34,7 +36,7 @@ export async function beginReset({ keepContactsOf } = {}) {
  */
 export async function clearWalletData({ keepContactsOf } = {}) {
   const contacts = keepContactsOf ? keepOnlyContactsOf(keepContactsOf) : clearContacts();
-  const results = await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore(), contacts]);
+  const results = await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore(), clearArrivals(), contacts]);
   if (results.some((r) => r.status === "rejected")) {
     throw new Error("The old wallet's data couldn't be cleared. Try again.");
   }

@@ -15,7 +15,8 @@ import { send as rawSend } from "../../wallet/bus.js";
 import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
-import { ensureActivity, refreshActivitySoon } from "./activity.js";
+import { activityRows, ensureActivity, refreshActivitySoon } from "./activity.js";
+import { arrivalCheckDelay, awaitingArrival, checkArrivals, loadArrivals } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
 
 import { homeView } from "./views/home.js";
@@ -453,6 +454,32 @@ function schedulePendingTxPoll(ov) {
   }
 }
 
+// --- Deposits to DuskEVM on their way ----------------------------------------
+// While Home, Activity or a transaction shows a deposit to DuskEVM that hasn't
+// arrived there, DuskEVM's explorer is asked for it, at once and then less
+// often the longer nothing changes (bridgeArrival.js). Nothing is asked
+// otherwise.
+const ARRIVAL_ROUTES = new Set(["home", "activity", "tx"]);
+let arrivalTimer = null;
+let arrivalLooks = 0;
+function scheduleArrivalCheck(ov) {
+  if (arrivalTimer || !ARRIVAL_ROUTES.has(state.route) || !ov?.isUnlocked) return;
+  if (!activityRows(ov, state).some((tx) => awaitingArrival(tx, ov?.nodeUrl))) {
+    arrivalLooks = 0;
+    return;
+  }
+  arrivalTimer = setTimeout(async () => {
+    const now = state.overview;
+    const found = ARRIVAL_ROUTES.has(state.route)
+      ? await checkArrivals(activityRows(now, state), { nodeUrl: now?.nodeUrl }).catch(() => 0)
+      : 0;
+    arrivalTimer = null;
+    arrivalLooks = found ? 0 : arrivalLooks + 1;
+    if (found) render().catch(() => {});
+    else scheduleArrivalCheck(state.overview);
+  }, arrivalLooks ? arrivalCheckDelay(arrivalLooks) : 0);
+}
+
 // --- Runtime pushes (from background) --------------------------------------
 let txStatusListenerInstalled = false;
 let lastShieldedStatusKey = "";
@@ -792,6 +819,8 @@ function keepContactsToTheirWallet(ov) {
 
 // --- Main render ----------------------------------------------------------
 export async function render({ forceRefresh = false } = {}) {
+  // Deposits to DuskEVM seen there before, for Activity's rows.
+  await loadArrivals();
   const overviewRefreshed = await refreshOverview(send, { force: forceRefresh });
   if (overviewRefreshed && state.staking) {
     state.staking.loaded = false;
@@ -819,6 +848,7 @@ export async function render({ forceRefresh = false } = {}) {
   // Keep shielded sync progress visible while on the dashboard.
   scheduleShieldedPoll(ov);
   schedulePendingTxPoll(ov);
+  scheduleArrivalCheck(ov);
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });
 

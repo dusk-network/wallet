@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Said Arrived on a deposit to DuskEVM once it's there, and linked its transaction on DuskEVM's explorer.
 - Linked Dusk's Terms of use and Privacy policy in Settings, under About.
 - Said about what each way of staking pays a year, beside the choice: native staking across the network lately, and Sozu after its fee.
 - Warned about a recipient listed as compromised or a scam, on Send and in a site's request, and sent it nothing.

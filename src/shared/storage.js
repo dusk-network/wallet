@@ -23,5 +23,6 @@ export const STORAGE_KEYS = {
   REWARD_RATES: "dusk_reward_rates_v1", // { [network]: { at, rate } }: native staking's estimate, read once a day (rewardRate.js)
   AUTO_LOCK_ACTIVITY: "dusk_auto_lock_activity_v1", // { lastActivityAt }
   VERIFIED_NAMES: "dusk_verified_names_v1", // { [network]: { [account]: { name: string|null, at } } }
+  BRIDGE_ARRIVALS: "dusk_bridge_arrivals_v1", // { [depositHash]: { hash, at } }: deposits to DuskEVM seen there (bridgeArrival.js)
   RESET_PENDING: "dusk_reset_pending_v1", // { at }: a wallet reset that hasn't cleared all the old wallet's data
 };

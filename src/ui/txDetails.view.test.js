@@ -137,6 +137,33 @@ describe("transaction details", () => {
     expect(old.rows.filter((r) => r.startsWith("DuskEVM recipient"))).toEqual([]);
   });
 
+  it("says a deposit to DuskEVM Arrived once it's there, and opens its transaction on DuskEVM's explorer", async () => {
+    const evm = "0x5A3d8e1B7c2f4A6b9e0D1C3f5A7b9C2D4e6F8a01";
+    const l2 = "0x029e2c6ebfe60452800c97eaa2ac36f40039812679c9cee414ea6a8b1877d61b";
+    const deposit = {
+      kind: TX_KIND.CONTRACT_CALL,
+      contractId: BRIDGE_CONTRACTS.testnet.bridge,
+      fnName: "depositETHToWithValue",
+      amount: "0",
+      deposit: "500000000",
+      bridgeTo: evm,
+      status: "executed",
+    };
+    const view = details({ ...deposit, arrival: { hash: l2, at: 1 } });
+    expect(view.status).toBe("Arrived");
+    expect(view.rows.at(-1)).toBe("DuskEVM transaction0x029e…d61bCopy");
+    dom.window.open = vi.fn(() => ({}));
+    view.body.querySelectorAll("button").find((b) => b.textContent === "0x029e…d61b").click();
+    await settle();
+    expect(dom.window.open).toHaveBeenCalledWith(`${networks.testnet.duskEvm.explorerUrl}/tx/${l2}`, "_blank", "noopener,noreferrer");
+    // Its contract keeps the network's name for it under Technical details.
+    expect(view.body.querySelectorAll(".tx-tech .kv").map(visibleText).find((r) => r.startsWith("Contract"))).toMatch(/^ContractDuskEVM bridge · /);
+
+    // On its way, it went through: nothing more.
+    const onItsWay = details(deposit);
+    expect([onItsWay.status, onItsWay.rows.some((r) => r.startsWith("DuskEVM transaction"))]).toEqual(["Completed", false]);
+  });
+
   it("leads with a saved contact's own name, its .dusk name beside the address", () => {
     const to = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
     const send = { kind: TX_KIND.TRANSFER, direction: "out", to, toName: "wallet-both.dusk", amount: "500000000", status: "executed" };
