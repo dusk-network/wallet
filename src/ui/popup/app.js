@@ -10,6 +10,7 @@ import { createHeaderRenderer } from "./header.js";
 import { send as rawSend } from "../../wallet/bus.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
+import { ensureActivity, refreshActivitySoon } from "./activity.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
@@ -525,6 +526,8 @@ function installTxStatusListener() {
             .then(() => render())
             .catch(() => {});
         }, 500);
+        // The archive has it once its block is final: ask once, a little later.
+        if (status === "executed" || status === "failed") refreshActivitySoon({ state, render });
       } catch {
         // ignore
       }
@@ -728,6 +731,8 @@ export async function render({ forceRefresh = false } = {}) {
   // Keep shielded sync progress visible while on the dashboard.
   scheduleShieldedPoll(ov);
   schedulePendingTxPoll(ov);
+  // The account's history: kept rows now, one sync per popup and account.
+  ensureActivity(ov, { state, render, send });
 
   // `refresh` is the dashboard's Refresh, next to the balance.
   const actions = { send, render, showToast, refresh: onRefresh };

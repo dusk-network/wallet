@@ -586,4 +586,63 @@ describe("background Phoenix tx lifecycle flow", () => {
     });
     expect(mocks.requestUserApproval).not.toHaveBeenCalled();
   });
+
+  describe("after a wallet reset", () => {
+    // The reset's clear: every record goes, and the store counts it.
+    async function reset() {
+      const { clearTxs } = await import("../shared/txStore.js");
+      await clearTxs();
+    }
+
+    it.each([
+      ["DUSK_TX_EXECUTED", { ok: true }],
+      ["DUSK_TX_UNKNOWN", { reason: "watcher_timeout" }],
+      ["DUSK_TX_REMOVED", { reason: "removed" }],
+    ])("keeps nothing of an old send's %s", async (type, extra) => {
+      const { getTxEpoch, listTxs } = await import("../shared/txStore.js");
+      const epoch = await getTxEpoch();
+      await seedTxMeta("0xold");
+      await reset();
+      mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: { id: "0xold" } });
+
+      await sendBackgroundMessage({ type, hash: "0xold", epoch, ...extra });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await expect(listTxs()).resolves.toEqual([]);
+    });
+
+    it("keeps nothing of a send that finished after it", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const { getTxEpoch, listTxs } = await import("../shared/txStore.js");
+      const epoch = await getTxEpoch();
+      const sent = Promise.withResolvers();
+      const started = Promise.withResolvers();
+      engineCall.mockImplementation(async (method) => {
+        if (method !== "dusk_sendTransaction") return true;
+        started.resolve();
+        return sent.promise;
+      });
+
+      const response = sendBackgroundMessage({
+        type: "DUSK_UI_SEND_TX",
+        params: { kind: "transfer", privacy: "public", to: "acct1", amount: "1" },
+      });
+      await started.promise;
+      // The engine is asked to send with the store's count, for its watcher's events.
+      expect(engineCall).toHaveBeenCalledWith("dusk_sendTransaction", expect.objectContaining({ txEpoch: epoch }));
+      await reset();
+      sent.resolve({ hash: "0xlate" });
+      await expect(response).resolves.toMatchObject({ ok: true });
+      await expect(listTxs()).resolves.toEqual([]);
+    });
+
+    it("rechecks nothing it no longer keeps", async () => {
+      const { listTxs } = await import("../shared/txStore.js");
+      await seedTxMeta("0xold");
+      await reset();
+      mocks.classifyTxPresence.mockResolvedValue({ state: "not_found" });
+
+      await sendBackgroundMessage({ type: "DUSK_UI_RECHECK_TX", hash: "0xold" });
+      await expect(listTxs()).resolves.toEqual([]);
+    });
+  });
 });

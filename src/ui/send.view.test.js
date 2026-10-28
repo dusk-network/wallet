@@ -493,6 +493,28 @@ describe("review", () => {
     expect(view.transferLine()).toBe("Private");
     expect(visibleText(dom.document.body.querySelector(".named-address"))).toBe(`alice.dusk${ALICE.address}`);
   });
+
+  it("sends the .dusk name the recipient was typed as, for Activity, and none for a pasted address", async () => {
+    const send = async (message) =>
+      message.type === "DUSK_UI_GET_CACHED_GAS_PRICE"
+        ? { min: "1", median: "1", max: "1" }
+        : { ok: true, result: { hash: "ab".repeat(32) } };
+    const confirm = async (draft) => {
+      const view = review(draft, overview(), send);
+      await settle();
+      dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+      await settle();
+      return view.actions.send.mock.calls.find(([m]) => m.type === "DUSK_UI_SEND_TX")[0];
+    };
+    const named = await confirm({
+      to: ALICE.account,
+      privacy: "public",
+      duskName: { name: "alice.dusk", nodeUrl: overview().nodeUrl, to: ALICE.account },
+    });
+    expect(named.toName).toBe("alice.dusk");
+    const pasted = await confirm({ to: ALICE.account, privacy: "public" });
+    expect(pasted.toName).toBeUndefined();
+  });
 });
 
 describe("a name and the recipient Contacts sets", () => {

@@ -46,6 +46,9 @@ const mocks = vi.hoisted(() => {
     clearVault: vi.fn(async () => {}),
     createVault: vi.fn(async () => true),
     clearPermissions: vi.fn(async () => {}),
+    beginReset: vi.fn(async () => {}),
+    finishReset: vi.fn(async () => {}),
+    finishPendingReset: vi.fn(async () => {}),
     cancelPendingApprovals: vi.fn(),
     engineCall: vi.fn(async (method) => {
       if (method === "engine_unlock") {
@@ -104,6 +107,12 @@ vi.mock("../shared/vault.js", () => ({
   createVault: mocks.createVault,
   loadVault: vi.fn(async () => mocks.vault),
   unlockVault: vi.fn(async () => "mnemonic"),
+}));
+
+vi.mock("../shared/walletReset.js", () => ({
+  beginReset: mocks.beginReset,
+  finishReset: mocks.finishReset,
+  finishPendingReset: mocks.finishPendingReset,
 }));
 
 vi.mock("../shared/permissions.js", () => ({
@@ -327,6 +336,31 @@ describe("background auto-lock activity", () => {
     expect(activityRecord()).toBeUndefined();
   });
 
+  it("resets the wallet with its transactions, shielded notes and history", async () => {
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET" });
+
+    expect(response).toEqual({ ok: true });
+    // Noted before the vault goes, ended once all is cleared.
+    const order = (fn) => fn.mock.invocationCallOrder[0];
+    expect(order(mocks.beginReset)).toBeLessThan(order(mocks.clearVault));
+    expect(order(mocks.clearVault)).toBeLessThan(order(mocks.finishReset));
+    expect(mocks.clearPermissions).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a reset that couldn't clear the old wallet's data, and makes no wallet until it can", async () => {
+    const failure = new Error("The old wallet's data couldn't be cleared. Try again.");
+    mocks.finishReset.mockRejectedValueOnce(failure);
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET" });
+    expect(response.error.message).toBe(failure.message);
+
+    mocks.vault = null;
+    mocks.engineUnlocked = false;
+    mocks.finishPendingReset.mockRejectedValueOnce(failure);
+    const create = await sendBackgroundMessage({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet B", password: "password123" });
+    expect(create.error.message).toBe(failure.message);
+    expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
   it("does not clear the vault when reset cannot lock the engine", async () => {
     mocks.engineCall.mockRejectedValueOnce(new Error("lock transport failed"));
 
@@ -335,6 +369,8 @@ describe("background auto-lock activity", () => {
     expect(response.error.message).toBe("lock transport failed");
     expect(mocks.clearVault).not.toHaveBeenCalled();
     expect(mocks.clearPermissions).not.toHaveBeenCalled();
+    expect(mocks.beginReset).not.toHaveBeenCalled();
+    expect(mocks.finishReset).not.toHaveBeenCalled();
     expect(mocks.cancelPendingApprovals).not.toHaveBeenCalled();
     expect(mocks.engineUnlocked).toBe(true);
   });

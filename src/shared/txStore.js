@@ -3,6 +3,17 @@ import { withStorageLock } from "./storageLock.js";
 
 const mutate = (fn) => withStorageLock(STORAGE_KEYS.TXS, fn);
 
+// How many times a wallet reset cleared the store. A send or watcher reads it
+// when its work begins (getTxEpoch) and passes it with its writes: after a
+// reset since, they are dropped, so nothing of the old wallet comes back.
+const readEpoch = async () => Number((await storage.get(STORAGE_KEYS.TXS_EPOCH))?.[STORAGE_KEYS.TXS_EPOCH]) || 0;
+const stale = async (epoch) => epoch !== undefined && (await readEpoch()) !== epoch;
+
+/** The store's reset count, for a writer to pass with its writes. */
+export async function getTxEpoch() {
+  return readEpoch();
+}
+
 /**
  * @typedef {Object} TxMeta
  * @property {string} origin
@@ -10,6 +21,7 @@ const mutate = (fn) => withStorageLock(STORAGE_KEYS.TXS, fn);
  * @property {string} kind
  * @property {number=} profileIndex
  * @property {string=} to
+ * @property {string=} toName The .dusk name the recipient was typed as, for Activity.
  * @property {string=} amount
  * @property {string=} deposit
  * @property {string=} contractId
@@ -36,6 +48,17 @@ const mutate = (fn) => withStorageLock(STORAGE_KEYS.TXS, fn);
  * @property {string=} blockTimestamp
  * @property {number=} finalizedAt
  */
+
+/**
+ * The .dusk name a send's recipient was typed as, kept with the send for
+ * Activity: a short name ending in .dusk, else undefined.
+ * @param {unknown} value
+ * @returns {string|undefined}
+ */
+export function typedRecipientName(value) {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name.length <= 64 && /^[^\s\u0000-\u001f\u007f]+\.dusk$/i.test(name) ? name : undefined;
+}
 
 async function getAll() {
   const items = await storage.get(STORAGE_KEYS.TXS);
@@ -65,10 +88,12 @@ function prune(store, protectedHash = "", limit = 50) {
  * Add submission metadata without overwriting an earlier lifecycle observation.
  * @param {string} hash
  * @param {TxMeta} meta
+ * @param {{ epoch?: number }} [opts] - `epoch`: getTxEpoch when the work began
  */
-export async function putTxMeta(hash, meta) {
+export async function putTxMeta(hash, meta, { epoch } = {}) {
   if (!hash) return;
   return mutate(async () => {
+    if (await stale(epoch)) return;
     const current = await getAll();
     const next = { ...meta, ...current[hash] };
     const terminal = next.status === "executed" || next.status === "failed";
@@ -87,10 +112,12 @@ export async function putTxMeta(hash, meta) {
  * Patch tx metadata.
  * @param {string} hash
  * @param {Partial<TxMeta>} patch
+ * @param {{ epoch?: number }} [opts] - `epoch`: getTxEpoch when the work began
  */
-export async function patchTxMeta(hash, patch) {
+export async function patchTxMeta(hash, patch, { epoch } = {}) {
   if (!hash) return;
   return mutate(async () => {
+    if (await stale(epoch)) return;
     const current = await getAll();
     const prev = current[hash] ?? {};
     const terminal = prev.status === "executed" || prev.status === "failed";
@@ -103,6 +130,14 @@ export async function patchTxMeta(hash, patch) {
       ? { ...prev, lastCheckedAt: patch.lastCheckedAt ?? prev.lastCheckedAt }
       : { ...prev, ...nextPatch };
     await setAll(prune(current, hash));
+  });
+}
+
+/** Forget every transaction's metadata, for a wallet reset, and count the reset. */
+export async function clearTxs() {
+  return mutate(async () => {
+    await storage.set({ [STORAGE_KEYS.TXS_EPOCH]: (await readEpoch()) + 1 });
+    await storage.remove(STORAGE_KEYS.TXS);
   });
 }
 

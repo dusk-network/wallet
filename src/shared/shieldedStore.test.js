@@ -285,4 +285,24 @@ describe("shieldedStore (IndexedDB)", () => {
 
     expect(await store.countNotes(networkKey, `${walletId}-other`, profileIndex)).toBe(1);
   });
+
+  it("clearShieldedStore forgets every owner's notes, cursors and reservations", async () => {
+    const a = nextOwner();
+    const b = nextOwner();
+    const n = new Uint8Array([0xcc]);
+    await store.ensureShieldedMeta(a.networkKey, a.walletId, a.profileIndex);
+    await store.putNotesMap(a.networkKey, a.walletId, a.profileIndex, new Map([[n, new Uint8Array([0x01])]]));
+    await store.putPendingNullifiers(a.networkKey, a.walletId, a.profileIndex, [new Uint8Array([0xdd])], "0x02");
+    await store.putNotesMap(b.networkKey, b.walletId, b.profileIndex, new Map([[n, new Uint8Array([0x02])]]));
+    await store.markNullifiersSpent(b.networkKey, b.walletId, b.profileIndex, [n]);
+
+    await store.clearShieldedStore();
+
+    for (const o of [a, b]) {
+      expect(await store.countNotes(o.networkKey, o.walletId, o.profileIndex)).toBe(0);
+      expect(await store.getSpentNullifiers(o.networkKey, o.walletId, o.profileIndex)).toEqual([]);
+      expect(await store.getShieldedMeta(o.networkKey, o.walletId, o.profileIndex)).toBeNull();
+    }
+    expect(await store.getPendingNullifiersForTx(a.networkKey, a.walletId, a.profileIndex, "0x02")).toEqual([]);
+  });
 });

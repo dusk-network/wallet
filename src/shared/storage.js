@@ -14,10 +14,12 @@ export const STORAGE_KEYS = {
   SETTINGS: "dusk_settings_v1",
   PERMISSIONS: "dusk_permissions_v1", // { [origin]: { accountIndex, connectedAt } }
   TXS: "dusk_txs_v1", // { [hash]: { origin, nodeUrl, kind, submittedAt, status, error? } }
+  TXS_EPOCH: "dusk_txs_epoch_v1", // number: how many times TXS was cleared for a wallet reset
   ACCOUNT_NAMES: "dusk_account_names_v1", // { [walletId]: { [profileIndex]: string } }
   ADDRESS_BOOK: "dusk_addressbook_v1", // { [id]: { id, name, address, type, createdAt, updatedAt } }
   ASSETS: "dusk_assets_v1", // { [walletId]: { [networkKey]: { [profileIndex]: { tokens: [], nfts: [] } } } }
   NETWORK_STATUS: "dusk_network_status_v1", // { nodeStatus, proverStatus, archiverStatus, lastChecked, errors }
   AUTO_LOCK_ACTIVITY: "dusk_auto_lock_activity_v1", // { lastActivityAt }
   VERIFIED_NAMES: "dusk_verified_names_v1", // { [network]: { [account]: { name: string|null, at } } }
+  RESET_PENDING: "dusk_reset_pending_v1", // { at }: a wallet reset that hasn't cleared all the old wallet's data
 };

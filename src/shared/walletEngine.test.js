@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 
 import { bytesToHex, sha256Hex, toBytes } from "./bytes.js";
+import phoenix from "./fixtures/phoenix-testnet.json";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -220,7 +221,7 @@ vi.mock("@dusk/w3sper", () => {
     }
     balance(identifier) {
       if (typeof globalThis.__W3SPER_BALANCE__ === "function") {
-        return globalThis.__W3SPER_BALANCE__(identifier);
+        return globalThis.__W3SPER_BALANCE__(identifier, this.treasury);
       }
       return Promise.resolve({ nonce: 0n, value: 0n });
     }
@@ -310,7 +311,7 @@ vi.mock("@dusk/w3sper", () => {
   }
 
   class AddressSyncer extends EventTarget {
-    constructor(_network) { super(); }
+    constructor(network) { super(); this.network = network; }
     async spent() { return []; }
     async notes() { return new ReadableStream({ start(controller) { controller.close(); } }); }
     get root() {
@@ -1137,6 +1138,30 @@ describe("walletEngine", () => {
     expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xsecond")).toEqual(["bb"]);
   });
 
+  it("keeps no reservation of a Phoenix send that a lock and a new unlock overtook", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const store = await import("./shieldedStore.js");
+    await store.clearNotes(NETWORK_KEY, WALLET_ID, 0);
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([[new Uint8Array([0xaa]), new Uint8Array([0x01])]]));
+
+    const started = Promise.withResolvers();
+    const executed = Promise.withResolvers();
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async () => {
+      started.resolve();
+      await executed.promise;
+      return { hash: "0xlate", nullifiers: [new Uint8Array([0xaa])] };
+    });
+    const send = engine.sendTransaction({ kind: "transfer", privacy: "shielded", to: "addr0", amount: "1" });
+    await started.promise;
+    // Reset meanwhile: locked, then unlocked again (here with the same accounts).
+    engine.lock();
+    await engine.unlockWithMnemonic(MNEMONIC);
+    executed.resolve();
+    await send.catch(() => {});
+    expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xlate")).toEqual([]);
+  });
+
   it("persists returned nullifiers for shielded contract calls", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
@@ -1377,5 +1402,326 @@ describe("walletEngine", () => {
     });
     expect(globalThis.__W3SPER_LAST_EXEC_TX__.paymentValue).toBe("address");
     expect(await store.getPendingNullifiersForTx(NETWORK_KEY, WALLET_ID, 0, "0xstake")).toEqual(["ee"]);
+  });
+
+  describe("shielded history", () => {
+    const bytes = (hex) => Uint8Array.from(hex.match(/../g), (b) => parseInt(b, 16));
+    const leaves = (hex) => Array.from({ length: hex.length / 1472 }, (_, i) => bytes(hex.slice(i * 1472, (i + 1) * 1472)));
+    const FIRST = leaves(phoenix.firstLeaves);
+    const [, L493, L494, L495] = leaves(phoenix.leaves492);
+    const event = phoenix.blocks.e3602438.json.find((e) => e.topic === "phoenix");
+    const NULLIFIERS = [bytes(event.data.slice(0, 64)), bytes(event.data.slice(64, 128))];
+
+    // A first scan of a 6-note tree (Testnet's first leaves), as w3sper's
+    // syncer reads it: one stream of leaves from the first. `hold` is awaited
+    // once the leaves are read.
+    async function scanTree(hold) {
+      await engine.unlockWithMnemonic(MNEMONIC);
+      const network = await engine.ensureNetwork();
+      network.blockHeight = 4_000_000n;
+      const leavesFromPos = vi.fn(async () => new Response(Uint8Array.from(FIRST.flatMap((l) => [...l]))));
+      network.contracts = { transferContract: { call: { num_notes: async () => 6n, leaves_from_pos: leavesFromPos } } };
+      const { AddressSyncer } = await import("@dusk/w3sper");
+      const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockImplementation(async function () {
+        const res = await this.network.contracts.transferContract.call.leaves_from_pos(new Uint8Array(8), {});
+        await res.arrayBuffer();
+        await hold?.();
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue([[new Map()], { bookmark: 5n, blockHeight: 234369n }]);
+            controller.close();
+          },
+        });
+      });
+      await engine.startShieldedSync();
+      await vi.waitFor(() => expect(engine.getShieldedStatus().state).toBe("done"));
+      notes.mockRestore();
+      return { leavesFromPos };
+    }
+
+    it("keeps the note tree's heights from a scan that starts at the first note", async () => {
+      const { leavesFromPos } = await scanTree();
+      expect(leavesFromPos).toHaveBeenCalledTimes(1);
+      const activity = await import("./activityStore.js");
+      await vi.waitFor(async () => expect(await activity.getNoteHeightPool("mainnet")).toMatchObject({ heights: [184423, 226951, 234329, 234369], notes: 6 }));
+    });
+
+    // The tree since the scan, grown to Testnet's leaves 492 to 495 (the
+    // unshield's outputs and the shield's note): leaves 6 to 491 made up, all
+    // at one height between.
+    const GROWN = 300_000;
+    // `distinct`: each made-up leaf at a height of its own, for a pool of hundreds.
+    async function growTree(leavesFromPos, { distinct = false } = {}) {
+      const made = [];
+      for (let pos = 6; pos < 492; pos++) {
+        const leaf = FIRST[5].slice();
+        const view = new DataView(leaf.buffer);
+        view.setBigUint64(648, BigInt(pos), true);
+        view.setBigUint64(728, BigInt(distinct ? GROWN + pos : GROWN), true);
+        made.push(leaf);
+      }
+      const grown = [...made, ...leaves(phoenix.leaves492)];
+      const network = await engine.ensureNetwork();
+      network.contracts.transferContract.call.num_notes = async () => 496n;
+      leavesFromPos.mockImplementation(async () => new Response(Uint8Array.from(grown.flatMap((l) => [...l]))));
+    }
+    const position = (bytes) => new DataView(bytes.buffer, bytes.byteOffset).getBigUint64(0, true);
+
+    // The first profile's notes as its sync keeps them: two the unshield
+    // spent, its two outputs, and the shield's note, with the values its
+    // keys give them, by position.
+    async function profileNotes() {
+      const store = await import("./shieldedStore.js");
+      await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([
+        [NULLIFIERS[0], FIRST[0]], [NULLIFIERS[1], FIRST[1]],
+        [bytes("aa".repeat(32)), L493], [bytes("bb".repeat(32)), L494], [bytes("cc".repeat(32)), L495],
+      ]));
+      await store.markNullifiersSpent(NETWORK_KEY, WALLET_ID, 0, NULLIFIERS);
+      const values = { 0: 10_000_000_000n, 1: 500_000_000n, 493: 1_000_000_000n, 494: 12_000_000n, 495: 2_000_000_000n };
+      globalThis.__W3SPER_BALANCE__ = async (_address, treasury) => {
+        const [[, leaf]] = [...(await treasury.address())];
+        const pos = new DataView(leaf.buffer, leaf.byteOffset).getBigUint64(648, true);
+        return { value: values[Number(pos)], spendable: 0n };
+      };
+    }
+
+    // The archive, with the recorded blocks; `hold` is awaited before each answer.
+    function archive(hold) {
+      const queries = [];
+      vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+        expect(String(url)).toBe("https://nodes.dusk.network/on/graphql/query");
+        const query = String(init.body);
+        queries.push(query);
+        await hold?.();
+        const data = {};
+        for (const [, h] of query.matchAll(/b(\d+): block\(/g)) {
+          data[`e${h}`] = phoenix.blocks[`e${h}`] ?? { json: [] };
+          data[`b${h}`] = phoenix.blocks[`b${h}`] ?? { header: { timestamp: 1 }, transactions: [] };
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify(data) };
+      }));
+      return queries;
+    }
+
+    it("asks for the profile's notes' blocks among the tree's other heights, once, and nothing for a profile without notes", async () => {
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      await growTree(leavesFromPos);
+      const queries = archive();
+
+      const first = await engine.getShieldedHistory();
+      expect(first.profileIndex).toBe(0);
+      expect(first.entries.map((e) => [e.blockHeight, e.kind, e.direction, e.amount, e.feePaid])).toEqual([
+        [3861643, "shield", "in", "2000000000", undefined],
+        [3602438, "unshield", "out", String(10_500_000_000n - 1_012_000_000n - 12_429_102n), "12429102"],
+      ]);
+      // The profile's heights went out among the tree's others, all in one request.
+      expect(queries).toHaveLength(1);
+      const asked = [...queries[0].matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h)).sort((a, b) => a - b);
+      // Leaf 492 (3577762) and the made-up ones are among them: the tree as it grew.
+      expect(asked).toEqual([184423, 226951, 234329, 234369, GROWN, 3577762, 3602438, 3861643]);
+      // The scan's heights served, and only the leaves added since it were read.
+      expect(leavesFromPos).toHaveBeenCalledTimes(2);
+      expect(position(leavesFromPos.mock.calls[1][0])).toBe(6n);
+      const activity = await import("./activityStore.js");
+      expect(await activity.getNoteHeightPool("mainnet")).toMatchObject({ notes: 496 });
+
+      // Kept: asking again asks the node nothing.
+      await expect(engine.getShieldedHistory()).resolves.toEqual(first);
+      expect(queries).toHaveLength(1);
+
+      // A profile without shielded notes reads nothing: pending until its
+      // own notes are synced, as there may be some.
+      await engine.selectAccountIndex({ index: 1 });
+      await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 1, entries: [], pending: true });
+      expect(queries).toHaveLength(1);
+    });
+
+    it.each(["lock", "profile", "network", "reset", "chain"])("keeps nothing of a build a %s change overtook", async (change) => {
+      const activity = await import("./activityStore.js");
+      // Nothing kept by an earlier test.
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      await growTree(leavesFromPos);
+      const asked = Promise.withResolvers();
+      const held = Promise.withResolvers();
+      archive(async () => {
+        asked.resolve();
+        await held.promise;
+      });
+
+      const build = engine.getShieldedHistory();
+      build.catch(() => {});
+      await asked.promise;
+      let scan = null;
+      if (change === "lock") engine.lock();
+      else if (change === "profile") await engine.selectAccountIndex({ index: 1 });
+      else if (change === "network") engine.configure({ nodeUrl: "https://testnet.nodes.dusk.network" });
+      else if (change === "reset") await activity.clearActivityStore();
+      else {
+        // The sync finds the chain it anchored to replaced.
+        const store = await import("./shieldedStore.js");
+        await store.putShieldedMeta(NETWORK_KEY, WALLET_ID, 0, { anchorBlock: "100", anchorHash: "old-chain" });
+        const { AddressSyncer } = await import("@dusk/w3sper");
+        scan = vi.spyOn(AddressSyncer.prototype, "notes").mockImplementation(() => new Promise(() => {}));
+        await engine.startShieldedSync({ force: true });
+        await vi.waitFor(async () => expect(await activity.getNoteHeightPool("mainnet")).toBeNull());
+      }
+      held.resolve();
+
+      await expect(build).rejects.toThrow();
+      scan?.mockRestore();
+      // Nothing it read is kept: at most the decoys it was to ask among, kept
+      // before it asked, for next time.
+      const record = await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`);
+      expect(record?.entries ?? []).toEqual([]);
+    });
+
+    it("asks nothing for a note at a height the tree it read doesn't have", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      // The scan's six leaves, and the tree said to have no more: the
+      // unshield's and the shield's heights would be the only ones not
+      // drawn from it.
+      await scanTree();
+      await profileNotes();
+      const queries = archive();
+      await expect(engine.getShieldedHistory()).resolves.toMatchObject({ profileIndex: 0, entries: [], pending: true });
+      expect(queries).toHaveLength(0);
+    });
+
+    it.each(["a block request", "keeping the history"])("asks among the same decoys again after %s failed", async (failing) => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      // Hundreds of heights to draw decoys from: two draws all but never match.
+      await growTree(leavesFromPos, { distinct: true });
+      const heightsOf = (query) => [...query.matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h));
+      let fail = failing === "a block request";
+      const queries = archive(async () => {
+        if (!fail) return;
+        fail = false;
+        throw new TypeError("fetch failed");
+      });
+      const keep = activity.putShieldedHistoryRecord;
+      const put = vi.spyOn(activity, "putShieldedHistoryRecord");
+      if (failing === "keeping the history") {
+        // The decoys are kept; the history after the lookups isn't.
+        put.mockImplementation(async (key, record, epoch) => {
+          if (record.entries.length) throw new DOMException("The store is full", "QuotaExceededError");
+          return keep(key, record, epoch);
+        });
+      }
+      const first = await engine.getShieldedHistory().catch((error) => error);
+      const askedFirst = new Set(queries.flatMap(heightsOf));
+      expect(askedFirst.size).toBeGreaterThan(0);
+      if (failing === "keeping the history") expect(first.entries.length).toBeGreaterThan(0);
+      else expect(first).toBeInstanceOf(TypeError);
+      put.mockRestore();
+
+      queries.length = 0;
+      await engine.getShieldedHistory();
+      const askedAgain = new Set(queries.flatMap(heightsOf));
+      // Everything asked the first time is asked again: the same decoys.
+      expect([...askedFirst].filter((h) => !askedAgain.has(h))).toEqual([]);
+    });
+
+    it("asks for no block when it can't keep the decoys first", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      await growTree(leavesFromPos, { distinct: true });
+      const queries = archive();
+      const put = vi.spyOn(activity, "putShieldedHistoryRecord").mockRejectedValue(new DOMException("The store is full", "QuotaExceededError"));
+      try {
+        await expect(engine.getShieldedHistory()).rejects.toThrow("The store is full");
+        expect(queries).toHaveLength(0);
+      } finally {
+        put.mockRestore();
+      }
+    });
+
+    it("asks nothing while the tree has no height but the profile's own", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      await scanTree();
+      // The profile owns every leaf of the six-note tree: no other height to hide among.
+      const store = await import("./shieldedStore.js");
+      await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map(FIRST.map((leaf, i) => [bytes(String(i + 1).padStart(2, "0").repeat(32)), leaf])));
+      globalThis.__W3SPER_BALANCE__ = async () => ({ value: 1n, spendable: 0n });
+      const queries = archive();
+      await expect(engine.getShieldedHistory()).resolves.toMatchObject({ profileIndex: 0, entries: [], pending: true });
+      expect(queries).toHaveLength(0);
+    });
+
+    it("gives what it kept as pending while the notes still sync", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      await growTree(leavesFromPos);
+      archive();
+      const first = await engine.getShieldedHistory();
+      expect(first.pending).toBeUndefined();
+      // Another scan begins: the notes kept may not be all of them.
+      const { AddressSyncer } = await import("@dusk/w3sper");
+      const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockImplementation(() => new Promise(() => {}));
+      try {
+        const network = await engine.ensureNetwork();
+        network.contracts.transferContract.call.num_notes = async () => 497n;
+        await engine.startShieldedSync({ force: true });
+        await vi.waitFor(() => expect(engine.getShieldedStatus().state).toBe("syncing"));
+        await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: first.entries, pending: true });
+      } finally {
+        notes.mockRestore();
+      }
+    });
+
+    it("forgets the tree's heights and the histories kept on a chain the sync finds replaced", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      await growTree(leavesFromPos);
+      archive();
+      await engine.getShieldedHistory();
+      expect(await activity.getNoteHeightPool("mainnet")).not.toBeNull();
+      expect(await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`)).not.toBeNull();
+      // The node's chain was rebuilt: the block the sync anchored to is another one.
+      const store = await import("./shieldedStore.js");
+      await store.putShieldedMeta(NETWORK_KEY, WALLET_ID, 0, { anchorBlock: "100", anchorHash: "old-chain" });
+      const { AddressSyncer } = await import("@dusk/w3sper");
+      const notes = vi.spyOn(AddressSyncer.prototype, "notes").mockImplementation(() => new Promise(() => {}));
+      try {
+        await engine.startShieldedSync({ force: true });
+        await vi.waitFor(async () => expect(await activity.getNoteHeightPool("mainnet")).toBeNull());
+        expect(await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`)).toBeNull();
+      } finally {
+        notes.mockRestore();
+      }
+    });
+
+    it("keeps no note heights a scan read before a reset", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const put = vi.spyOn(activity, "putNoteHeightPool");
+      const read = Promise.withResolvers();
+      const held = Promise.withResolvers();
+      const scan = scanTree(async () => {
+        read.resolve();
+        await held.promise;
+      });
+      await read.promise;
+      await activity.clearActivityStore();
+      held.resolve();
+      await scan;
+      await vi.waitFor(() => expect(put).toHaveBeenCalled());
+      await Promise.allSettled(put.mock.results.map((r) => r.value));
+      expect(await activity.getNoteHeightPool("mainnet")).toBeNull();
+      put.mockRestore();
+    });
   });
 });

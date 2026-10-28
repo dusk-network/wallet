@@ -143,7 +143,8 @@ vi.mock("./pending.js", () => ({
   requestUserApproval,
 }));
 vi.mock("./txNotify.js", () => ({ notifyTxSubmitted }));
-vi.mock("../shared/txStore.js", () => ({ putTxMeta }));
+// The transaction store's reset count when a send begins.
+vi.mock("../shared/txStore.js", () => ({ putTxMeta, getTxEpoch: async () => 7 }));
 vi.mock("../shared/assetsStore.js", () => ({
   normalizeContractId,
   watchToken,
@@ -886,6 +887,8 @@ describe("background rpc handler", () => {
     const call = engineCall.mock.calls.find(([m]) => m === "dusk_sendTransaction");
     expect(call).toBeTruthy();
     expect(call[1].profileIndex).toBe(0);
+    // Its watcher's events carry the store's reset count back.
+    expect(call[1].txEpoch).toBe(7);
 
     expect(putTxMeta).toHaveBeenCalledWith(
       "0xhash",
@@ -894,7 +897,8 @@ describe("background rpc handler", () => {
         kind: "transfer",
         to: PUBLIC_ACCOUNT,
         privacy: "public",
-      })
+      }),
+      { epoch: 7 }
     );
   });
 
@@ -933,7 +937,8 @@ describe("background rpc handler", () => {
         privacy: "shielded",
         pendingNullifiers: ["aa"],
         reservationStatus: "pending",
-      })
+      }),
+      { epoch: 7 }
     );
   });
 
@@ -1539,7 +1544,8 @@ describe("background rpc handler", () => {
         privacy: "shielded",
         pendingNullifiers: ["aa"],
         reservationStatus: "pending",
-      })
+      }),
+      { epoch: 7 }
     );
   });
 

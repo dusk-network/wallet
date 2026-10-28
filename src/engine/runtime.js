@@ -20,6 +20,7 @@ import {
   getStakeInfo,
   getStakeOwnerStatus,
   getShieldedBalance,
+  getShieldedHistory,
   getShieldedStatus,
   isUnlocked,
   lock,
@@ -109,7 +110,10 @@ setEngineDebugHook((payload) => {
   }
 });
 
-async function watchTxExecuted(hash) {
+// `epoch`: the wallet's transaction-store reset count when the send began,
+// passed back with each event so the background keeps nothing of it after a
+// reset (txStore.js).
+async function watchTxExecuted(hash, epoch) {
   if (!hash || typeof hash !== "string") return;
   if (activeTxWatches.has(hash)) return;
   activeTxWatches.add(hash);
@@ -130,6 +134,7 @@ async function watchTxExecuted(hash) {
         try {
           await runtimeSendMessage({
             type: "DUSK_TX_REMOVED",
+            epoch,
             hash,
             reason: executionEventError(removedEvent) || "removed",
           });
@@ -145,6 +150,7 @@ async function watchTxExecuted(hash) {
     try {
       await runtimeSendMessage({
         type: "DUSK_TX_EXECUTED",
+        epoch,
         hash,
         ok,
         error,
@@ -163,6 +169,7 @@ async function watchTxExecuted(hash) {
     try {
       await runtimeSendMessage({
         type: "DUSK_TX_UNKNOWN",
+        epoch,
         hash,
         reason: /timed out/i.test(String(e?.message ?? e))
           ? "watcher_timeout"
@@ -390,6 +397,11 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
           return;
         }
 
+        case "dusk_getShieldedHistory": {
+          sendResponse({ id, result: await getShieldedHistory() });
+          return;
+        }
+
         case "dusk_syncShielded": {
           const res = await startShieldedSync(params ?? {});
           sendResponse({ id, result: res });
@@ -418,7 +430,8 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
         }
 
         case "dusk_sendTransaction": {
-          const result = await sendTransaction(params ?? {});
+          const { txEpoch, ...sendParams } = params ?? {};
+          const result = await sendTransaction(sendParams);
 
           // Keep the provider response simple, always return the tx hash,
           // and only include a nonce when it exists (public tx).
@@ -435,7 +448,7 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
 
           // Fire-and-forget: wait for EXECUTED and notify background so it can
           // show a final notification + explorer link.
-          watchTxExecuted(result?.hash).catch(() => {});
+          watchTxExecuted(result?.hash, Number.isInteger(txEpoch) ? txEpoch : undefined).catch(() => {});
           return;
         }
 

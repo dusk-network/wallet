@@ -965,6 +965,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           memo: d.memo || undefined,
           gas: gas || undefined,
         },
+        // Activity names the recipient as typed.
+        toName: duskName?.name || undefined,
       });
 
       if (res?.error) throw new Error(res.error.message ?? "Transfer failed");

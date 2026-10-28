@@ -416,6 +416,35 @@ export async function getUnspentNullifiers(networkKey, walletId, profileIndex = 
 }
 
 /**
+ * The owner's spent notes, as getNotesMap gives the unspent ones: nullifier
+ * to the note tree leaf, for the shielded history.
+ * @returns {Promise<Map<Uint8Array, Uint8Array>>}
+ */
+export async function getSpentNotesMap(networkKey, walletId, profileIndex = 0) {
+  const db = await openDb();
+  const ok = ownerKey(networkKey, walletId, profileIndex);
+
+  const rows = await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_SPENT], "readonly");
+    const req = tx.objectStore(STORE_SPENT).index("byOwner").getAll(IDBKeyRange.only(ok));
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error || new Error("Failed to read spent"));
+  });
+
+  const out = new Map();
+  for (const r of rows) {
+    try {
+      if (!r.noteValue) continue;
+      const v = r.noteValue instanceof ArrayBuffer ? new Uint8Array(r.noteValue) : new Uint8Array(r.noteValue);
+      out.set(hexToBytes(r.nullifier ?? r.noteKey), v);
+    } catch {
+      // ignore bad rows
+    }
+  }
+  return out;
+}
+
+/**
  * List all cached spent nullifiers for this owner.
  * @returns {Promise<Uint8Array[]>}
  */
@@ -446,8 +475,10 @@ export async function getSpentNullifiers(networkKey, walletId, profileIndex = 0)
 /**
  * Store locally pending nullifiers for a submitted phoenix tx.
  * These are filtered out from spendable notes until they become spent on chain.
+ * `fence`, when given, is asked right before the write: false keeps nothing
+ * (the wallet that sent it was locked or reset meanwhile).
  */
-export async function putPendingNullifiers(networkKey, walletId, profileIndex, nullifiers, txHash) {
+export async function putPendingNullifiers(networkKey, walletId, profileIndex, nullifiers, txHash, { fence } = {}) {
   const db = await openDb();
   const ok = ownerKey(networkKey, walletId, profileIndex);
   const hash = String(txHash || "");
@@ -477,6 +508,8 @@ export async function putPendingNullifiers(networkKey, walletId, profileIndex, n
   }
 
   if (!rows.length) return 0;
+  // Asked with no wait before the write begins, so a reset's clear comes after it or refuses it.
+  if (fence && !fence()) return 0;
 
   await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_PENDING], "readwrite");
@@ -671,6 +704,17 @@ export async function unspendNullifiers(networkKey, walletId, profileIndex, null
   });
 
   return hexes.length;
+}
+
+/** Forget every owner's notes, cursors and reservations, for a wallet reset. */
+export async function clearShieldedStore() {
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_META, STORE_NOTES, STORE_SPENT, STORE_PENDING], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to clear the shielded cache"));
+    for (const name of [STORE_META, STORE_NOTES, STORE_SPENT, STORE_PENDING]) tx.objectStore(name).clear();
+  });
 }
 
 export async function countNotes(networkKey, walletId, profileIndex = 0) {

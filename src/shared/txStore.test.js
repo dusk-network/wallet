@@ -164,4 +164,28 @@ describe("txStore", () => {
     });
     expect(meta.removedAt).toBeUndefined();
   });
+
+  it("drops what work begun before a reset writes after it", async () => {
+    const { clearTxs, getTxEpoch, listTxs, patchTxMeta, putTxMeta } = await import("./txStore.js");
+    const before = await getTxEpoch();
+    await clearTxs();
+    // A send and its watcher from before the reset.
+    await putTxMeta("hash-old", { submittedAt: 1, status: "submitted" }, { epoch: before });
+    await patchTxMeta("hash-old", { status: "executed", executedAt: 2 }, { epoch: before });
+    await expect(listTxs()).resolves.toEqual([]);
+    // The new wallet's own, from after it.
+    const after = await getTxEpoch();
+    expect(after).toBe(before + 1);
+    await putTxMeta("hash-new", { submittedAt: 3, status: "submitted" }, { epoch: after });
+    await patchTxMeta("hash-new", { status: "executed" }, { epoch: after });
+    await expect(listTxs()).resolves.toMatchObject([{ hash: "hash-new", status: "executed" }]);
+  });
+
+  it("forgets every transaction when the wallet is reset", async () => {
+    const { clearTxs, listTxs, putTxMeta } = await import("./txStore.js");
+    await putTxMeta("hash-a", { status: "submitted", submittedAt: 1 });
+    await putTxMeta("hash-b", { status: "executed", submittedAt: 2 });
+    await clearTxs();
+    expect(await listTxs()).toEqual([]);
+  });
 });

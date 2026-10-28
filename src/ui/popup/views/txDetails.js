@@ -9,6 +9,7 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortHash, truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { txRecoveryReasonLabel, txStatusLabel, txStatusTone } from "./txDisplay.js";
+import { activityRows, loadActivityDetail } from "../activity.js";
 
 function fmtDate(ts) {
   const n = Number(ts || 0);
@@ -28,6 +29,7 @@ function statusLabel(status) {
 function statusHelp(tx) {
   const s = String(tx?.status ?? "").toLowerCase();
   if (s === "mempool") return "Still waiting to go through. Don't retry yet.";
+  if (s === "unknown" && (tx?.source === "archive" || tx?.source === "both")) return "It is final on chain. Its outcome is still being looked up.";
   if (s === "unknown") return "The wallet stopped waiting for a result. That doesn't mean it failed.";
   if (s === "removed") return "Shielded funds may still be reserved locally.";
   return "";
@@ -37,18 +39,26 @@ function describeTx(tx) {
   const kind = String(tx?.kind ?? "").toLowerCase();
 
   if (kind === TX_KIND.TRANSFER) {
-    const to = tx?.to ? String(tx.to) : "";
-    const toType = to ? ProfileGenerator.typeOf(to) : "unknown";
+    const incoming = tx?.direction === "in";
+    const other = String((incoming ? tx?.from : tx?.to) ?? "");
+    const otherType = other ? ProfileGenerator.typeOf(other) : "unknown";
     const transferType =
-      toType === "address" ? "Shielded transfer" : toType === "account" ? "Public transfer" : "Transfer";
+      tx?.privacy === "shielded" || otherType === "address"
+        ? "Shielded transfer"
+        : otherType === "account" || tx?.privacy === "public"
+        ? "Public transfer"
+        : "Transfer";
 
     const amountLux = tx?.amount;
     const amt = amountLux != null ? formatLuxShort(amountLux, UI_DISPLAY_DECIMALS) : "";
+    // The .dusk name typed when sending, else the verified name, else the address.
+    const name = String((incoming ? "" : tx?.toName) || tx?.counterpartyName || "").trim();
+    const shown = name || (other ? truncateMiddle(other, 12, 10) : "");
 
     return {
       kindLabel: transferType,
       title: amt ? `${amt} DUSK` : "—",
-      subtitle: to ? `To: ${truncateMiddle(to, 12, 10)}` : "",
+      subtitle: shown ? `${incoming ? "From" : "To"}: ${shown}` : "",
     };
   }
 
@@ -124,8 +134,12 @@ function describeTx(tx) {
 
 export function txDetailsView(ov, { state, actions } = {}) {
   const hash = String(state?.txDetailHash ?? "");
-  const txs = Array.isArray(ov?.txs) ? ov.txs : [];
-  const tx = txs.find((t) => String(t?.hash ?? "") === hash) || null;
+  const txs = activityRows(ov, state);
+  const tx = txs.find((t) => String(t?.hash ?? "") === hash.toLowerCase()) || null;
+  // A synced entry not looked up yet gets its time, outcome and fee now.
+  if ((tx?.source === "archive" || tx?.source === "both") && !tx.detailsAt) {
+    loadActivityDetail({ state, render: actions?.render }, tx.hash);
+  }
 
   const backRoute = state?.txDetailFrom || "home";
   const onBack = () => {
@@ -228,11 +242,13 @@ export function txDetailsView(ov, { state, actions } = {}) {
     accountLabel = null;
   }
 
+  const nameOf = (address, name) => (name ? `${name} · ${address}` : address);
   const detailsRows = [
     kvRow("Tx hash", hash, { mono: true }),
     tx?.origin ? kvRow("Origin", String(tx.origin), { mono: true }) : null,
     accountLabel ? kvRow("Profile", accountLabel) : null,
-    tx?.to ? kvRow("To", String(tx.to), { mono: true }) : null,
+    tx?.from ? kvRow("From", nameOf(String(tx.from), tx?.counterpartyName), { mono: true }) : null,
+    tx?.to ? kvRow("To", nameOf(String(tx.to), tx?.toName || tx?.counterpartyName), { mono: true }) : null,
     tx?.contractId ? kvRow("Contract", String(tx.contractId), { mono: true }) : null,
     tx?.fnName ? kvRow("Method", String(tx.fnName), { mono: true }) : null,
     tx?.deposit != null ? kvRow("Deposit", `${formatLuxShort(tx.deposit, UI_DISPLAY_DECIMALS)} DUSK`) : null,
@@ -249,7 +265,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
           { mono: true }
         )
       : null,
+    tx?.memo ? kvRow("Memo", String(tx.memo)) : null,
     tx?.submittedAt ? kvRow("Submitted", fmtDate(tx.submittedAt)) : null,
+    tx?.timestamp && !tx?.finalizedAt ? kvRow("Time", fmtDate(tx.timestamp)) : null,
     tx?.mempoolSeenAt ? kvRow("Mempool seen", fmtDate(tx.mempoolSeenAt)) : null,
     tx?.lastCheckedAt ? kvRow("Last checked", fmtDate(tx.lastCheckedAt)) : null,
     tx?.removedAt ? kvRow("Removed", fmtDate(tx.removedAt)) : null,
