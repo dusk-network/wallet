@@ -134,6 +134,8 @@ const ICON_PATHS = {
     '<path d="M7.5 9h5"/>',
     '<path d="M15 9.5h1.5a2 2 0 0 1 2 2V16a1.5 1.5 0 0 0 3 0V8.5L19 6"/>',
   ],
+  // A fee taken as a share: a percent sign.
+  percent: ['<path d="M18 6 6 18"/>', '<circle cx="7.5" cy="7.5" r="2"/>', '<circle cx="16.5" cy="16.5" r="2"/>'],
 };
 
 /**

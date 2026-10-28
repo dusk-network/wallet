@@ -23,6 +23,8 @@ export default defineConfig({
         "src/shared/explorer.js",
         "src/shared/network.js",
         "src/shared/networkPresets.js",
+        "src/shared/sozuAmounts.js",
+        "src/shared/sozuStatus.js",
         "src/shared/txDefaults.js",
         "src/shared/addressBook.js",
         "src/shared/contactsCrypto.js",

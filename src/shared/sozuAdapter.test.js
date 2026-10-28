@@ -16,7 +16,6 @@ import {
   getSozuConfig,
   getSozuHubBootstrap,
   hasSozuConfig,
-  resolveSozuConfig,
 } from "./sozuConfig.js";
 
 describe("Sozu liquid staking adapter", () => {
@@ -31,33 +30,14 @@ describe("Sozu liquid staking adapter", () => {
     expect(getSozuConfig("local")).toBe(null);
   });
 
-  it("resolves hub-discovered contracts over hardcoded fallback", () => {
-    const bootstrap = getSozuHubBootstrap("testnet");
-    const cfg = resolveSozuConfig({
-      bootstrap,
-      discoveredContracts: {
-        pool: "11".repeat(32),
-        relayer: "22".repeat(32),
-        substrate: "33".repeat(32),
-        "staked-dusk": "44".repeat(32),
-      },
-    });
-
-    expect(cfg.source).toBe("hub");
-    expect(cfg.contracts.hub).toBe(bootstrap.contracts.hub);
-    expect(cfg.contracts.pool).toBe("11".repeat(32));
-    expect(cfg.contracts["staked-dusk"]).toBe("44".repeat(32));
-  });
-
-  it("falls back to static pool config when hub discovery is incomplete", () => {
-    const cfg = resolveSozuConfig({
-      networkKey: "testnet",
-      discoveredContracts: { relayer: "22".repeat(32) },
-    });
-
-    expect(cfg.source).toBe("fallback");
-    expect(cfg.contracts.pool).toBe(getSozuConfig("testnet").contracts.pool);
-    expect(cfg.contracts.relayer).toBe("22".repeat(32));
+  it("starts from the hub, with the contracts it named when written to use until it answers", () => {
+    const testnet = getSozuHubBootstrap("testnet");
+    expect(testnet.contracts).toEqual({ hub: "bae85f8c24730a5a19fbe3d3bd58248ac8c302b62fe414a8c640d8c0ed286b9e" });
+    expect(testnet.fallbackContracts["staked-dusk"]).toBe("fdbf49102e76cf58224003451c6cb9e3403c54ff1d9042f8bc46ec25c6a4337c");
+    expect(getSozuHubBootstrap("1").fallbackContracts["staked-dusk"]).toBe(
+      "eb158fceeae76e59b28c1e6857eb50cf6a7a69532817fc455458096aab527980"
+    );
+    expect(getSozuHubBootstrap("devnet")).toBeNull();
   });
 
   it("encodes Sozu u64 args as little-endian bytes", () => {

@@ -101,6 +101,12 @@ async function installStakeHarness(page, { networkName = "Testnet" } = {}) {
                   poolBalanceLux: positionBalanceLux,
                   stDuskBalanceLux: "7944063151",
                 },
+                // Testnet's fees and switches, as Sozu's substrate gives them.
+                fees: {
+                  deposit: { numerator: "25", denominator: "10000" },
+                  reward: { numerator: "10", denominator: "100" },
+                },
+                features: { maintenance: false, synchronization: false },
                 publicBalance: { value: "5000000000000" },
               },
             };
@@ -213,12 +219,18 @@ test.describe("Sozu liquid staking", () => {
     await page.getByLabel("Stake amount").fill("5000");
     await expect(page.locator(".amount-field__error")).toHaveText("That's more than your public balance, with the network fee.");
     await expect(page.getByRole("button", { name: "Review stake" })).toBeDisabled();
-    // Max keeps the fee, and the fee to unstake later.
+    // Max keeps the fee, and the fee to unstake later: 0.005 and 0.01 DUSK.
     await page.getByRole("button", { name: "Max" }).click();
-    await expect(page.getByLabel("Stake amount")).toHaveValue("4999");
+    await expect(page.getByLabel("Stake amount")).toHaveValue("4999.985");
+
+    // Too little for any stDUSK after Sozu's fee says so; Review stays off.
+    await page.getByLabel("Stake amount").fill("0.000000001");
+    await expect(page.locator(".amount-field__error")).toHaveText("The minimum stake is 0.000000003 DUSK.");
+    await expect(page.getByRole("button", { name: "Review stake" })).toBeDisabled();
 
     await page.getByLabel("Stake amount").fill("5");
-    await expect(page.locator(".stake-estimate__main")).toHaveText(/^You get about [\d.,]+ stDUSK, worth 5 DUSK now\.$/);
+    await expect(page.locator(".sozu-terms")).toHaveText("Deposit fee 0.25% · 0.0125 DUSK");
+    await expect(page.locator(".stake-estimate__main")).toHaveText(/^You get about [\d.,]+ stDUSK, worth about 4\.9875 DUSK now\.$/);
     await page.getByRole("button", { name: "Review stake" }).click();
     let st = await state(page);
     expect(st.sozuDraft).toMatchObject({
@@ -257,6 +269,7 @@ test.describe("Sozu liquid staking", () => {
     await installStakeHarness(page, { networkName: "Testnet" });
     await page.getByRole("button", { name: /Liquid staking/ }).click();
     await page.getByRole("tab", { name: "Unstake" }).click();
+    await expect(page.locator(".sozu-terms")).toHaveText("The DUSK comes back in the same transaction. No fee, no waiting.");
     await page.getByLabel("Unstake amount").fill("13");
     await expect(page.locator(".amount-field__error")).toHaveText("That's more than you have staked with Sozu.");
     await page.getByRole("button", { name: "Max" }).click();

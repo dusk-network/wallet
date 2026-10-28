@@ -149,6 +149,28 @@ describe("getMinimumGas", () => {
   });
 });
 
+describe("Sozu's gas", () => {
+  it("gives the wallet's public calls of Sozu's pool their own limit and floor, not the contract call default", () => {
+    const stake = { privacy: "public", fnName: "sozu_stake" };
+    const unstake = { privacy: "public", fnName: "sozu_unstake" };
+    expect(getDefaultGas("contract_call", stake)).toEqual({ limit: "5000000", price: "1" });
+    expect(getMinimumGas("contract_call", stake)).toEqual({ limit: "2500000" });
+    expect(getDefaultGas("contract_call", unstake)).toEqual({ limit: "10000000", price: "1" });
+    expect(getMinimumGas("contract_call", unstake)).toEqual({ limit: "4000000" });
+    // At 1 LUX, a failed stake costs at most 0.005 DUSK, an unstake 0.01.
+    expect(BigInt(getDefaultGas("contract_call", stake).limit)).toBeLessThan(BigInt(DEFAULT_GAS_BY_KIND.contract_call.limit) / 50n);
+  });
+
+  it("leaves other calls, shielded ones and other kinds as they were", () => {
+    expect(getDefaultGas("contract_call", { privacy: "public", fnName: "transfer" })).toBe(DEFAULT_GAS_BY_KIND.contract_call);
+    expect(getMinimumGas("contract_call", { privacy: "public", fnName: "toString" })).toBeNull();
+    expect(getMinimumGas("contract_call", { privacy: "shielded", fnName: "sozu_stake" })).toEqual({ limit: "100000000" });
+    expect(getDefaultGas("transfer", { privacy: "public", fnName: "sozu_stake" })).toBe(DEFAULT_TRANSFER_GAS_BY_PRIVACY.public);
+    // A site's call, which names no function to these defaults, keeps the contract call default.
+    expect(applyTxDefaults({ kind: "contract_call", fnName: "sozu_stake" }).gas).toEqual(DEFAULT_GAS_BY_KIND.contract_call);
+  });
+});
+
 describe("applyGasDefaults", () => {
   it("fills missing limit and price", () => {
     const result = applyGasDefaults("transfer", {});

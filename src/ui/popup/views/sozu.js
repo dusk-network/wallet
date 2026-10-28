@@ -1,6 +1,7 @@
 import {
   UI_DISPLAY_DECIMALS,
   formatDusk,
+  formatDuskExact,
   formatFee,
   formatLuxShort,
   formatLuxToDusk,
@@ -9,15 +10,17 @@ import {
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
-import { TX_KIND } from "../../../shared/constants.js";
 import {
+  SOZU_FN,
   buildSozuDepositTx,
   buildSozuWithdrawTx,
   makeSozuStDuskToken,
   parseSozuPoolState,
   parseSozuPosition,
 } from "../../../shared/sozuAdapter.js";
+import { feePercent, leastSozuStake, parsePool, sozuStakeQuote, sozuUnstakeOk } from "../../../shared/sozuAmounts.js";
 import { getSozuConfig } from "../../../shared/sozuConfig.js";
+import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
@@ -56,21 +59,68 @@ export function publicStakeLine(what, name) {
   return `Visible to everyone: ${what} and ${name ? `your name ${name}` : "your account"}.`;
 }
 
-// Why a call to Sozu's contract may cost more than a transfer.
-const CONTRACT_FEE_NOTE = "Contract calls need more gas. You pay only what's used.";
+// What a call to Sozu's pool costs when it fails.
+const FAILED_CALL_NOTE = "You pay only the gas used. A call that fails is charged its whole limit.";
+
+/** How an unstake from Sozu comes back: its pool pays it out in the same call. */
+export const SOZU_UNSTAKE_LINE = "The DUSK comes back in the same transaction. No fee, no waiting.";
+
+// Sozu's switches, as its substrate reads them.
+const PAUSED_TITLE = "Sozu has paused deposits";
+const SYNC_TITLE = "Sozu is synchronizing its pool";
+const SYNC_TEXT = "A stake or unstake can fail until it's done, and a failed call is charged its whole gas limit.";
 
 /**
- * About how much stDUSK a deposit of `amountLux` gets: the pool mints
- * amount × supply / stake (before any fee Sozu takes), worth the amount at
- * the pool's rate (its total stake over the stDUSK supply).
- * @returns {string} e.g. "32.57", or "" without a pool rate
+ * About how much stDUSK a stake gets, as Review shows it: "32.47".
+ * @param {bigint|string} stDuskLux
  */
-export function stDuskEstimate(amountLux, pool) {
-  const stake = safeBigInt(pool?.totalStakeLux ?? 0, 0n);
-  const supply = safeBigInt(pool?.tokenTotalSupply ?? 0, 0n);
-  const amount = safeBigInt(amountLux ?? 0, 0n);
-  if (amount <= 0n || stake <= 0n || supply <= 0n) return "";
-  return groupThousands(formatLuxShort(((amount * supply) / stake).toString(), 2));
+export function stDuskText(stDuskLux) {
+  return groupThousands(formatLuxShort(String(stDuskLux), 2));
+}
+
+// A fee rate as the engine sends it, as bigints; null when it isn't one.
+function feeRateOf(rate) {
+  try {
+    const numerator = BigInt(rate?.numerator);
+    const denominator = BigInt(rate?.denominator);
+    return denominator > 0n && numerator >= 0n && numerator <= denominator ? { numerator, denominator } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sozu's fees as one fact: what it keeps of rewards, then what it takes of a
+ * deposit and that unstaking costs nothing, as its substrate gives them now.
+ * @param {{ deposit?: object, reward?: object } | null} fees - the engine's status.fees
+ * @returns {{ title: string, sub: string }}
+ */
+export function sozuFeeFact(fees) {
+  const deposit = feeRateOf(fees?.deposit);
+  const reward = feeRateOf(fees?.reward);
+  if (!deposit || !reward) return { title: "Sozu's fees", sub: "They couldn't be read just now." };
+  return {
+    title: `Sozu keeps ${feePercent(reward, "en")} of rewards`,
+    sub: `${feePercent(deposit, "en")} on deposits · No fee to unstake`,
+  };
+}
+
+/**
+ * What the status says Sozu takes for a stake: the pool's rate and the
+ * deposit fee, both as bigints, or null where they couldn't be read.
+ */
+function stakeTerms(status) {
+  const pool = status?.pool ? parseSozuPoolState(status.pool) : null;
+  return {
+    pool: pool ? parsePool({ numerator: pool.totalStakeLux, denominator: pool.tokenTotalSupply }) : null,
+    depositFee: feeRateOf(status?.fees?.deposit),
+  };
+}
+
+/** The deposit fee as its row shows it: "0.25%", then the fee of an amount. */
+function depositFeeText(rate, feeLux = null) {
+  const pct = feePercent(rate, "en");
+  return feeLux === null ? pct : `${pct} · ${formatDuskExact(feeLux.toString())} DUSK`;
 }
 
 function sozuState(state) {
@@ -100,17 +150,24 @@ function draftAmountLux(draft) {
   return safeBigInt(draft?.fnArgsAmountLux ?? 0, 0n);
 }
 
-// The fee Review starts from (startingGas), custom gas from Settings and a
-// draft's own gas included, so Max and the balance checks match it.
-function contractCallFeeLux(customGas = null, gas = null) {
-  return gasFeeLux(
-    startingGas({
-      defaultGas: getDefaultGas(TX_KIND.CONTRACT_CALL, { privacy: "public" }),
-      minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL, { privacy: "public" })?.limit,
-      customGas,
-      gas,
-    })
-  );
+/**
+ * The gas a call of Sozu's pool starts from (startingGas): its own limit at
+ * the wallet's price, custom gas from Settings and a draft's own included,
+ * so Max and the balance checks match what Review asks.
+ * @param {string} fnName - "sozu_stake" or "sozu_unstake"
+ */
+export function sozuStartingGas(fnName, customGas = null, gas = null) {
+  const opts = { privacy: "public", fnName };
+  return startingGas({
+    defaultGas: getDefaultGas(TX_KIND.CONTRACT_CALL, opts),
+    minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL, opts)?.limit,
+    customGas,
+    gas,
+  });
+}
+
+function sozuFeeLux(fnName, customGas = null, gas = null) {
+  return gasFeeLux(sozuStartingGas(fnName, customGas, gas));
 }
 
 function stDuskWatchKey(profileIndex, contractId) {
@@ -181,6 +238,15 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
   return st;
 }
 
+// Sozu's switches as the screens say them: deposits paused, or a pool being
+// synchronized, when calls can fail.
+function syncWarning() {
+  return h("div", { class: "callout warn sozu-sync", role: "note" }, [
+    h("div", { class: "callout-title", text: SYNC_TITLE }),
+    h("div", { class: "muted", text: SYNC_TEXT }),
+  ]);
+}
+
 /**
  * Liquid staking through Sozu, a third party: what Sozu holds for the
  * profile, then the amount to stake or unstake, checked as it is typed.
@@ -194,20 +260,27 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const cfg = liveStatus?.configured && liveStatus?.contracts?.pool
     ? { networkKey: liveStatus.networkKey, contracts: liveStatus.contracts }
     : staticCfg;
-  const pool = st.pool ? parseSozuPoolState(st.pool) : null;
   const position = st.position ? parseSozuPosition(st.position) : null;
+  const { pool, depositFee } = stakeTerms({ ...liveStatus, pool: st.pool });
+  const paused = liveStatus?.features?.maintenance === true;
+  const syncing = liveStatus?.features?.synchronization === true;
   const hidden = balancesHidden(ov);
   const publicBalanceLux = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const poolBalanceLux = safeBigInt(position?.poolBalanceLux ?? 0, 0n);
   const stDuskLux = safeBigInt(position?.stDuskBalanceLux ?? 0, 0n);
-  const publicFeeLux = contractCallFeeLux(ov?.customGas);
+  const stakeFeeLux = sozuFeeLux(SOZU_FN.STAKE, ov?.customGas);
+  const unstakeFeeLux = sozuFeeLux(SOZU_FN.UNSTAKE, ov?.customGas);
   // Max keeps this fee, and the one to unstake later.
-  const maxStakeLux = maxAmountLux(publicBalanceLux, 2n * publicFeeLux);
+  const maxStakeLux = maxAmountLux(publicBalanceLux, stakeFeeLux + unstakeFeeLux);
   const maxUnstakeLux = poolBalanceLux > 0n ? poolBalanceLux : 0n;
+  // The least a stake gets stDUSK for, at the rate and fee read now.
+  const leastLux = pool && depositFee ? leastSozuStake(pool, depositFee) : null;
   const disabledReason = cfg
     ? ""
     : liveStatus?.reason || "Sozu liquid staking is not configured for this network.";
   const isWithdraw = st.action === "withdraw";
+  // Deposits paused: the stake can't go ahead; an unstake can.
+  const stakeOff = !isWithdraw && paused;
   const maxActionLux = isWithdraw ? maxUnstakeLux : maxStakeLux;
 
   const back = () => {
@@ -223,12 +296,19 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const field = amountField({
     label: isWithdraw ? "Unstake amount" : "Stake amount",
     value: isWithdraw ? st.withdrawAmountDusk : st.depositAmountDusk,
-    disabled: !cfg,
+    disabled: !cfg || stakeOff,
     onInput: () => check(),
     onEnter: () => review(),
   });
 
   const estimate = h("div", { class: "stake-estimate", hidden: true });
+  // What Sozu takes of a stake, before and as it's typed; how an unstake comes back.
+  const feeLine = (feeLux = null) => (depositFee ? `Deposit fee ${depositFeeText(depositFee, feeLux)}` : "Deposit fee not read yet");
+  const termsNote = h("p", {
+    class: "amount-note sozu-terms",
+    hidden: stakeOff || !cfg,
+    text: isWithdraw ? SOZU_UNSTAKE_LINE : feeLine(),
+  });
   const reviewBtn = h("button", {
     class: "btn-primary",
     type: "button",
@@ -238,14 +318,20 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   });
 
   // The amount, checked as it is typed: the error under the field, Review
-  // only when it can go ahead, and for a stake, about what it gets.
+  // only when it can go ahead, and for a stake, Sozu's fee and what it gets.
   function check() {
     const raw = String(field.input.value ?? "").trim();
     if (isWithdraw) st.withdrawAmountDusk = raw;
     else st.depositAmountDusk = raw;
     estimate.hidden = true;
+    if (!isWithdraw) termsNote.textContent = feeLine();
     if (!cfg) {
       field.setError(disabledReason);
+      reviewBtn.disabled = true;
+      return null;
+    }
+    if (stakeOff) {
+      field.setError("");
       reviewBtn.disabled = true;
       return null;
     }
@@ -262,27 +348,45 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       reviewBtn.disabled = true;
       return null;
     }
-    if (isWithdraw && lux > maxUnstakeLux) {
-      field.setError("That's more than you have staked with Sozu.");
+    if (isWithdraw) {
+      if (!sozuUnstakeOk(lux, maxUnstakeLux)) {
+        field.setError("That's more than you have staked with Sozu.");
+        reviewBtn.disabled = true;
+        return null;
+      }
+      field.setError("");
+      reviewBtn.disabled = false;
+      return lux;
+    }
+    // A stake needs the pool's rate and Sozu's fee, read now.
+    const quote = sozuStakeQuote(lux, pool, depositFee);
+    if (!quote) {
+      field.setError(st.loading ? "" : "Sozu's rate and fees couldn't be read. Try again later.");
       reviewBtn.disabled = true;
       return null;
     }
-    if (!isWithdraw && lux > maxStakeLux) {
+    termsNote.textContent = feeLine(quote.fee);
+    if (!quote.ok) {
+      field.setError(`The minimum stake is ${formatDuskExact(leastLux.toString())} DUSK.`);
+      reviewBtn.disabled = true;
+      return null;
+    }
+    if (lux > maxStakeLux) {
       field.setError("That's more than your public balance, with the network fee.");
       reviewBtn.disabled = true;
       return null;
     }
     field.setError("");
     reviewBtn.disabled = false;
-    // What it gets, then what stDUSK is: worth what was staked, now.
-    const got = isWithdraw ? "" : stDuskEstimate(lux, pool);
-    if (got) {
-      estimate.replaceChildren(
-        h("div", { class: "stake-estimate__main", text: `You get about ${got} stDUSK, worth ${formatDusk(lux.toString())} DUSK now.` }),
-        h("div", { text: "stDUSK is Sozu's token for your share; its DUSK value grows as rewards come in." })
-      );
-      estimate.hidden = false;
-    }
+    // What it gets for what's left after the fee, then what stDUSK is.
+    estimate.replaceChildren(
+      h("div", {
+        class: "stake-estimate__main",
+        text: `You get about ${stDuskText(quote.stDusk)} stDUSK, worth about ${formatDusk(quote.worth.toString())} DUSK now.`,
+      }),
+      h("div", { text: "stDUSK is Sozu's token for your share. Its DUSK value follows Sozu's pool, its rewards and its fees." })
+    );
+    estimate.hidden = false;
     return lux;
   }
 
@@ -292,13 +396,21 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       field.input.focus();
       return;
     }
+    const quote = isWithdraw ? null : sozuStakeQuote(amountLux, pool, depositFee);
     state.sozuDraft = {
       ...(isWithdraw
         ? buildSozuWithdrawTx({ config: cfg, amountLux })
         : buildSozuDepositTx({ config: cfg, amountLux })),
       profileIndex: Number(ov?.selectedAccountIndex ?? 0) || 0,
       fnArgsAmountLux: amountLux.toString(),
-      stDuskEstimate: isWithdraw ? "" : stDuskEstimate(amountLux, pool),
+      quote: quote
+        ? {
+            fee: quote.fee.toString(),
+            worth: quote.worth.toString(),
+            stDusk: quote.stDusk.toString(),
+            feeRate: { numerator: depositFee.numerator.toString(), denominator: depositFee.denominator.toString() },
+          }
+        : null,
       label: isWithdraw ? "Unstake from Sozu" : "Liquid staking",
     };
     state.route = "sozu_confirm";
@@ -335,7 +447,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     type: "button",
     text: "Max",
     title: isWithdraw ? "All you have staked with Sozu" : "All of it, less the network fee and the fee to unstake later",
-    disabled: !cfg || maxActionLux <= 0n,
+    disabled: !cfg || stakeOff || maxActionLux <= 0n,
     onclick: () => {
       field.setValue(formatLuxToDusk(maxActionLux));
       check();
@@ -425,22 +537,18 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     },
   });
 
+  const fees = sozuFeeFact(liveStatus?.fees);
+  const fact = (iconName, title, sub, extra = null) =>
+    h("div", { class: "list-row" }, [
+      h("span", { class: "row-icon", html: iconSvg(iconName) }),
+      h("span", { class: "row-main" }, [h("span", { class: "row-title", text: title }), h("span", { class: "row-sub", text: sub })]),
+      extra,
+    ].filter(Boolean));
   const facts = h("div", { class: "group info" }, [
-    h("div", { class: "list-row" }, [
-      h("span", { class: "row-icon", html: iconSvg("drop") }),
-      h("span", { class: "row-main" }, [
-        h("span", { class: "row-title", text: "Any amount, no node needed" }),
-        h("span", { class: "row-sub", text: "You get stDUSK, a token for your share of Sozu's pool." }),
-      ]),
-      positionGroup ? null : stDuskAction,
-    ].filter(Boolean)),
-    h("div", { class: "list-row" }, [
-      h("span", { class: "row-icon", html: iconSvg("fee") }),
-      h("span", { class: "row-main" }, [
-        h("span", { class: "row-title", text: `Network fee up to ${formatFee(publicFeeLux, { max: true })} DUSK` }),
-        h("span", { class: "row-sub", text: CONTRACT_FEE_NOTE }),
-      ]),
-    ]),
+    fact("drop", "Any amount, no node needed", "You get stDUSK, a token for your share of Sozu's pool.", positionGroup ? null : stDuskAction),
+    // Sozu's own fees, read from its contract each time.
+    fact("percent", fees.title, fees.sub),
+    fact("fee", `Network fee up to ${formatFee(isWithdraw ? unstakeFeeLux : stakeFeeLux, { max: true })} DUSK`, FAILED_CALL_NOTE),
     poolContract
       ? h("div", { class: "list-row" }, [
           h("span", { class: "row-icon", html: iconSvg("server") }),
@@ -465,10 +573,17 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     st.loading && !st.loaded ? h("div", { class: "muted", text: "Loading Sozu…" }) : null,
     st.error ? h("div", { class: "err", text: st.error }) : null,
     cfg && liveStatus?.reason ? h("div", { class: "muted", text: liveStatus.reason }) : null,
+    syncing ? syncWarning() : null,
     positionGroup,
     assetError,
     actionTabs,
-    h("div", { class: "amount-entry" }, [field.el, field.error, available, estimate]),
+    stakeOff
+      ? h("div", { class: "callout sozu-paused", role: "note" }, [
+          h("div", { class: "callout-title", text: PAUSED_TITLE }),
+          h("div", { class: "muted", text: "Unstaking still works." }),
+        ])
+      : null,
+    h("div", { class: "amount-entry" }, [field.el, field.error, available, termsNote, estimate]),
     facts,
     h("div", { class: "stake-bottom" }, [reviewBtn]),
   ].filter(Boolean);
@@ -485,14 +600,21 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const liveStatus = st.status;
   const publicBalance = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const draftNeeds = draftAmountLux(draft);
-  const draftFeeLux = contractCallFeeLux(ov?.customGas, draft?.gas);
-  const isStake = draft.fnName === "sozu_stake";
+  const isStake = draft.fnName === SOZU_FN.STAKE;
+  const fnName = isStake ? SOZU_FN.STAKE : SOZU_FN.UNSTAKE;
+  const draftFeeLux = sozuFeeLux(fnName, ov?.customGas, draft?.gas);
   const stakeRequiredLux = isStake ? draftNeeds + draftFeeLux : draftFeeLux;
+  // Deposits paused since the form: the stake waits; an unstake goes ahead.
+  const paused = isStake && liveStatus?.features?.maintenance === true;
+  const syncing = liveStatus?.features?.synchronization === true;
   const submitDisabled =
     st.submitting ||
+    paused ||
     (isStake && stakeRequiredLux > publicBalance) ||
     publicBalance <= 0n;
-  const submitDisabledReason = publicBalance <= 0n
+  const submitDisabledReason = paused
+    ? `${PAUSED_TITLE}.`
+    : publicBalance <= 0n
     ? "The network fee is paid from the public balance, and it's empty."
     : isStake && stakeRequiredLux > publicBalance
     ? "That's more than your public balance, with the network fee."
@@ -509,25 +631,22 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     disabled: submitDisabled,
   });
 
-  const defaultGas = getDefaultGas(TX_KIND.CONTRACT_CALL, { privacy: draft.privacy || "public" });
-  const defaultLimit =
-    defaultGas?.limit !== undefined && defaultGas?.limit !== null ? String(defaultGas.limit) : "";
-  const fallbackPrice =
-    defaultGas?.price !== undefined && defaultGas?.price !== null ? String(defaultGas.price) : "";
+  // The call's own gas at the network's price; Custom fee for gas of your own.
+  const gasOpts = { privacy: "public", fnName };
+  const ownGas = getDefaultGas(TX_KIND.CONTRACT_CALL, gasOpts);
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
   gasEditor.amountLux = "0";
   gasEditor.extraLux = [String(draft.deposit ?? "0")];
   gasEditor.setGas(draft?.gas ?? null);
-  // The network's gas price by default; Custom fee for gas of your own.
   useNetworkGas({
     customGas: ov?.customGas,
     actions,
     gas: draft?.gas,
-    defaultLimit,
-    fallbackPrice,
+    defaultLimit: ownGas.limit,
+    fallbackPrice: ownGas.price,
     gasEditor,
-    minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL, { privacy: draft.privacy || "public" })?.limit,
+    minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL, gasOpts)?.limit,
   });
 
   const title = isStake ? "Liquid staking" : "Unstake from Sozu";
@@ -556,10 +675,12 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     }
     confirmError.hidden = true;
     confirmBtn.disabled = true;
+    // Fields left empty send the call's own gas at the network's price,
+    // never the wallet's default for any contract call.
+    const sentGas = gas ?? gasEditor.networkGas ?? { limit: ownGas.limit, price: ownGas.price };
     draft.gas = gas;
-    const { stDuskEstimate: _estimate, label: _label, ...txDraft } = draft;
-    const params = { ...txDraft, gas: gas || undefined };
-    const capGas = gas ?? defaultGas;
+    const { quote: _quote, label: _label, ...txDraft } = draft;
+    const params = { ...txDraft, gas: sentGas };
     await sendFromReview({
       state,
       actions,
@@ -573,7 +694,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         amountLux: draftNeeds.toString(),
         line,
         from: isStake ? "from your public balance" : "",
-        feeCapLux: (safeBigInt(capGas?.limit, 0n) * safeBigInt(capGas?.price, 0n)).toString(),
+        feeCapLux: (safeBigInt(sentGas.limit, 0n) * safeBigInt(sentGas.price, 0n)).toString(),
       },
       backRoute: "sozu_confirm",
       doneRoute: "stake",
@@ -595,6 +716,10 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
+  // What the stake gets, and Sozu's fee off it, as worked out on the form.
+  const quote = isStake ? draft.quote ?? null : null;
+  const quoteRate = feeRateOf(quote?.feeRate);
+
   return [
     subnav({ title: "Review", onBack: goBack }),
     h("div", { class: "row" }, [
@@ -604,22 +729,22 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "review-line", text: line }),
         visibleLine,
       ]),
+      syncing ? syncWarning() : null,
       h("div", { class: "group" }, [
-        isStake && draft.stDuskEstimate
-          ? kv("You get about", `${draft.stDuskEstimate} stDUSK, worth ${fmtLux(draftNeeds.toString())} DUSK now`)
+        quote
+          ? kv("You get about", `${stDuskText(quote.stDusk)} stDUSK, worth about ${fmtLux(quote.worth)} DUSK now`)
           : null,
+        quote && quoteRate ? kv("Deposit fee", depositFeeText(quoteRate, safeBigInt(quote.fee, 0n))) : null,
         kv(isStake ? "From" : "To", [h("span", {}, [profileName, h("span", { class: "kv-muted", text: " · Public" })])]),
       ].filter(Boolean)),
-      // Who holds the DUSK, and on whose terms it comes back.
+      // Who holds the DUSK, and how it comes back.
       h("p", {
         class: "stake-cap",
-        text: isStake
-          ? "Sozu, not Dusk, holds this DUSK and returns it under Sozu's own rules."
-          : "Sozu returns the DUSK under Sozu's own rules.",
+        text: isStake ? "Sozu, not Dusk, holds this DUSK and returns it under Sozu's own rules." : SOZU_UNSTAKE_LINE,
       }),
       submitDisabledReason ? h("div", { class: "field-error", role: "alert", text: submitDisabledReason }) : null,
       gasEditor,
-      h("p", { class: "stake-cap review-fee-note", text: CONTRACT_FEE_NOTE }),
+      h("p", { class: "stake-cap review-fee-note", text: FAILED_CALL_NOTE }),
       confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ].filter(Boolean)),

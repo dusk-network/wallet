@@ -19,15 +19,9 @@ import { detectPresetIdFromNodeUrl } from "./network.js";
 import { createContractReads } from "./contractReads.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
-import {
-  SOZU_HUB_CONTRACT_NAMES,
-  getSozuHubBootstrap,
-  resolveSozuConfig,
-} from "./sozuConfig.js";
-import {
-  parseSozuPoolState,
-  parseSozuPosition,
-} from "./sozuAdapter.js";
+import { getSozuHubBootstrap } from "./sozuConfig.js";
+import { parseSozuPoolState } from "./sozuAdapter.js";
+import { readSozuStatus } from "./sozuStatus.js";
 
 import {
   clearNotes,
@@ -625,7 +619,6 @@ async function persistPendingNullifiersForTx(result, profileIndex, session) {
 const DRIVER_KEYS = Object.freeze({
   DRC20: "drc20",
   DRC721: "drc721",
-  SOZU_HUB: "sozu_hub",
   SOZU_POOL: "sozu_pool",
   SOZU_STAKED_DUSK: "sozu_staked_dusk",
 });
@@ -706,7 +699,6 @@ function ensureDriverRegistry() {
   reg.register(DRIVER_KEYS.DRC20, assetUrl("drivers/drc20_data_driver.wasm"));
   reg.register(DRIVER_KEYS.DRC721, assetUrl("drivers/drc721_data_driver.wasm"));
   reg.register(STAKE, assetUrl("drivers/stake_data_driver.wasm"));
-  reg.register(DRIVER_KEYS.SOZU_HUB, assetUrl("drivers/sozu_hub_data_driver.wasm"));
   reg.register(DRIVER_KEYS.SOZU_POOL, assetUrl("drivers/sozu_pool_data_driver.wasm"));
   reg.register(DRIVER_KEYS.SOZU_STAKED_DUSK, assetUrl("drivers/sozu_staked_dusk_data_driver.wasm"));
 
@@ -1816,90 +1808,34 @@ export async function getDrc721TokenUri(params = {}) {
   return String(out ?? "");
 }
 
-// Sozu's contracts are read through Multicall for Dusk: the reads one status
-// makes together go as one query (contractReads.js). One batcher per node.
+// Sozu's contracts are read through Multicall for Dusk: one query a refresh
+// (sozuStatus.js), with one batcher per node.
 let sozuReads = null;
 
-function readSozu(contract, driver, fnName, args) {
+function readSozu(contractId, fnName, args) {
   const nodeUrl = String(engineConfig.nodeUrl || "");
   if (sozuReads?.nodeUrl !== nodeUrl) {
     sozuReads = { nodeUrl, read: createContractReads({ nodeUrl }) };
   }
-  return sozuReads.read(contract, driver, fnName, args);
+  return withTimeout(sozuReads.read(contractId, fnName, args), 8_000, "Timed out reading Sozu");
 }
 
-async function discoverSozuContracts(network, bootstrap) {
-  const driver = await getDriver(DRIVER_KEYS.SOZU_HUB);
-  const hub = new Contract({
-    contractId: toContractIdBytes(bootstrap.contracts.hub),
-    driver,
-    network,
-  });
-  const entries = await Promise.all(
-    SOZU_HUB_CONTRACT_NAMES.map(async (name) => {
-      try {
-        const value = await withTimeout(
-          readSozu(hub, driver, "contract", name),
-          8_000,
-          `Timed out resolving Sozu ${name} contract`
-        );
-        return [name, typeof value === "string" ? value : null];
-      } catch {
-        return [name, null];
-      }
-    })
-  );
-  return Object.fromEntries(entries.filter(([, value]) => value));
+// The account as Sozu's pool takes it in `balance_of`, encoded by the pool's
+// data driver. Its stDUSK token takes the same (dataDrivers.conformance.test.js).
+async function sozuAccountArgs(network, poolId, profile) {
+  const driver = await getDriver(DRIVER_KEYS.SOZU_POOL);
+  const pool = new Contract({ contractId: toContractIdBytes(poolId), driver, network });
+  return await pool.encode("balance_of", profile.account.toString());
 }
 
-// Sozu's pool and stDUSK token, with both drivers loaded first: the reads made
-// of them right after are then made in one task, and go as one query.
-async function sozuPoolContracts(network, config) {
-  const tokenId = config.contracts["staked-dusk"];
-  const [poolDriver, tokenDriver] = await Promise.all([
-    getDriver(DRIVER_KEYS.SOZU_POOL),
-    tokenId ? getDriver(DRIVER_KEYS.SOZU_STAKED_DUSK) : null,
-  ]);
-  const at = (id, driver) => ({
-    contract: new Contract({ contractId: toContractIdBytes(id), driver, network }),
-    driver,
-  });
-  return {
-    pool: at(config.contracts.pool, poolDriver),
-    token: tokenId ? at(tokenId, tokenDriver) : null,
-  };
-}
+const ratioJson = (rate) => ({ numerator: rate.numerator.toString(), denominator: rate.denominator.toString() });
 
-async function readSozuPoolState(pool) {
-  const exchangeRate = await withTimeout(
-    readSozu(pool.contract, pool.driver, "exchange_rate"),
-    8_000,
-    "Timed out reading Sozu pool exchange rate"
-  );
-  return parseSozuPoolState({ exchangeRate });
-}
-
-// The pool's and the stDUSK token's balances, read together.
-async function readSozuPosition(pool, token, profile) {
-  const account = profile.account.toString();
-  const [balance, stDuskBalance] = await Promise.all([
-    withTimeout(
-      readSozu(pool.contract, pool.driver, "balance_of", account),
-      8_000,
-      "Timed out reading Sozu position"
-    ),
-    token
-      ? withTimeout(
-          readSozu(token.contract, token.driver, "balance_of", account),
-          8_000,
-          "Timed out reading stDUSK balance"
-        )
-      : "0",
-  ]);
-
-  return parseSozuPosition({ balance, stDuskBalance });
-}
-
+/**
+ * What the profile has with Sozu, with what its staking screens need: the
+ * contracts the hub names, the pool's rate, the profile's balances there,
+ * Sozu's fees and its two switches, and the public balance that pays. Lux
+ * as strings; a figure that couldn't be read is null, and `reason` says why.
+ */
 export async function getSozuStatus(params = {}) {
   if (!state.unlocked) throw new Error("Wallet locked");
   const network = await ensureNetwork();
@@ -1917,60 +1853,41 @@ export async function getSozuStatus(params = {}) {
     });
   }
 
-  let discoveredContracts = {};
-  let discoveryError = "";
-  try {
-    discoveredContracts = await discoverSozuContracts(network, bootstrap);
-  } catch (e) {
-    discoveryError = e?.message ?? String(e);
-  }
-
-  const config = resolveSozuConfig({
-    networkKey,
-    bootstrap,
-    discoveredContracts,
-    allowFallback: true,
-  });
-
-  if (!config) {
-    return Object.freeze({
-      networkKey,
-      configured: false,
-      source: "unavailable",
-      contracts: { hub: bootstrap.contracts.hub },
-      discoveredContracts,
-      reason: discoveryError || "Sozu pool contract could not be resolved.",
-    });
-  }
-
-  let poolState = null;
-  let position = null;
-  let readError = "";
-  try {
-    const { pool, token } = await sozuPoolContracts(network, config);
-    [poolState, position] = await Promise.all([
-      readSozuPoolState(pool),
-      readSozuPosition(pool, token, profile),
-    ]);
-  } catch (e) {
-    readError = e?.message ?? String(e);
-  }
-
-  const balance = await withTimeout(
+  const balanceRead = withTimeout(
     state.bookkeeper.balance(profile.account),
     8_000,
     "Timed out reading Sozu funding balance"
   ).catch(() => null);
 
+  let read = null;
+  let reason = "";
+  try {
+    const account = await sozuAccountArgs(network, bootstrap.fallbackContracts.pool, profile);
+    read = await readSozuStatus({
+      read: readSozu,
+      nodeUrl: String(engineConfig.nodeUrl || ""),
+      contracts: bootstrap.fallbackContracts,
+      account,
+    });
+    reason = read.error;
+  } catch (e) {
+    reason = e?.message ?? String(e);
+  }
+  const balance = await balanceRead;
+  const { pool, position, fees, features } = read ?? {};
+
   return Object.freeze({
     networkKey,
     configured: true,
-    source: config.source,
-    contracts: config.contracts,
-    discoveredContracts: config.discoveredContracts,
-    reason: readError,
-    pool: poolState,
-    position,
+    source: read?.source ?? "fallback",
+    contracts: read?.contracts ?? { ...bootstrap.fallbackContracts },
+    reason,
+    pool: pool ? parseSozuPoolState({ totalStakeLux: pool.stake, tokenTotalSupply: pool.supply }) : null,
+    position: position
+      ? { poolBalanceLux: position.balance.toString(), stDuskBalanceLux: position.stDusk.toString() }
+      : null,
+    fees: fees ? { deposit: ratioJson(fees.deposit), reward: ratioJson(fees.reward) } : null,
+    features: features ?? null,
     profileIndex: idx,
     account: profile.account.toString(),
     publicBalance: balance

@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import { dataDrivers } from "@dusk/w3sper";
 
+import { decodeRatio, decodeU64 } from "./sozuStatus.js";
+
 async function loadDriverFromPublic(relPath) {
   const wasmPath = path.resolve(process.cwd(), "public", "drivers", relPath);
   const bytes = await readFile(wasmPath);
@@ -110,20 +112,24 @@ describe("Canonical data-drivers conformance (DRC20 / DRC721)", () => {
     }
   });
 
-  it("Sozu hub driver can encode contract lookups and decode optional contract IDs", async () => {
-    const driver = await loadDriverFromPublic("sozu_hub_data_driver.wasm");
-    const rkyv = driver.encodeInputFn("contract", JSON.stringify("pool"));
-    expect(rkyv).toBeInstanceOf(Uint8Array);
-    expect(rkyv.byteLength).toBeGreaterThan(0);
-    expect(driver.decodeInputFn("contract", rkyv)).toBe("pool");
+  it("Sozu's pool and stDUSK drivers take the account alike, and answer as the wallet reads them by hand", async () => {
+    // The wallet encodes the account once, with the pool's driver, for both
+    // balance_of reads, and decodes their replies itself (sozuStatus.js).
+    const pool = await loadDriverFromPublic("sozu_pool_data_driver.wasm");
+    const token = await loadDriverFromPublic("sozu_staked_dusk_data_driver.wasm");
+    const account = pool.encodeInputFn("balance_of", JSON.stringify(EXAMPLE_PK));
+    expect(account).toEqual(token.encodeInputFn("balance_of", JSON.stringify(EXAMPLE_PK)));
+    expect(account.byteLength).toBe(194);
+    expect(pool.encodeInputFn("exchange_rate", "null").byteLength).toBe(0);
 
-    const out = new Uint8Array([
-      1,
-      ...Array.from({ length: 32 }, (_, i) => i + 1),
-    ]);
-    expect(driver.decodeOutputFn("contract", out)).toBe(
-      "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
-    );
+    const rate = new Uint8Array(16);
+    new DataView(rate.buffer).setBigUint64(0, 42_969_128_319_245_900n, true);
+    new DataView(rate.buffer).setBigUint64(8, 33_347_850_501_719_821n, true);
+    expect(pool.decodeOutputFn("exchange_rate", rate)).toEqual({ numerator: "42969128319245900", denominator: "33347850501719821" });
+    expect(decodeRatio(rate)).toEqual({ numerator: 42_969_128_319_245_900n, denominator: 33_347_850_501_719_821n });
+    const balance = new Uint8Array([42, 0, 0, 0, 0, 0, 0, 0]);
+    expect([pool.decodeOutputFn("balance_of", balance), token.decodeOutputFn("balance_of", balance)]).toEqual(["42", "42"]);
+    expect(decodeU64(balance)).toBe(42n);
   });
 
   it("Sozu pool driver can encode deposit/withdraw args and decode reads", async () => {
