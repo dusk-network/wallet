@@ -6,6 +6,11 @@
 // nothing changes (as the web wallet's deposit tracking); kept once found,
 // until a wallet reset. A network without DuskEVM (Mainnet, for now) asks
 // nothing.
+//
+// What's kept is tagged with the transaction store's reset count it was found
+// under (txStore.js), and every page reads it again as it draws: after a
+// reset, in this page or another, no page shows the old wallet's arrivals,
+// and a check that began before it keeps nothing.
 
 import { bridgeTransfer } from "./bridge.js";
 import { fetchWithTimeout } from "./networkStatus.js";
@@ -25,22 +30,33 @@ const KEEP = 200;
 
 const EVM_TX = /^0x[0-9a-fA-F]{64}$/;
 
-/** @type {Map<string, { hash: string, at: number }>} by the deposit's hash */
+/** @type {Map<string, { hash: string, at: number }>} by the deposit's hash: this wallet's, as last read */
 let kept = new Map();
 let loading = null;
+// Bumped as this page keeps or clears arrivals: a read begun before is out of date.
+let version = 0;
 
 const validArrival = (a) => EVM_TX.test(String(a?.hash ?? "")) && Number.isFinite(a?.at);
 
-/** Reads the arrivals kept, once for this page. */
+// The arrivals kept under `epoch`, by the deposit's hash: none of another.
+async function readKept(epoch) {
+  const stored = (await storage.get(STORAGE_KEYS.BRIDGE_ARRIVALS))?.[STORAGE_KEYS.BRIDGE_ARRIVALS];
+  const items = stored?.epoch === epoch && stored.items && typeof stored.items === "object" ? stored.items : {};
+  return Object.entries(items).filter(([, arrival]) => validArrival(arrival));
+}
+
+/** Reads the arrivals kept for this wallet: again each time, so a reset anywhere drops them here too. */
 export function loadArrivals() {
-  loading ??= storage
-    .get(STORAGE_KEYS.BRIDGE_ARRIVALS)
-    .then((items) => {
-      for (const [hash, arrival] of Object.entries(items?.[STORAGE_KEYS.BRIDGE_ARRIVALS] ?? {})) {
-        if (validArrival(arrival) && !kept.has(hash)) kept.set(hash, arrival);
-      }
+  const begun = version;
+  loading ??= getTxEpoch()
+    .then(readKept)
+    .then((entries) => {
+      if (version === begun) kept = new Map(entries);
     })
-    .catch(() => {});
+    .catch(() => {})
+    .finally(() => {
+      loading = null;
+    });
   return loading;
 }
 
@@ -142,24 +158,30 @@ export async function checkArrivals(rows, { nodeUrl, now = Date.now() }) {
   return Object.keys(found).filter((hash) => kept.has(hash)).length;
 }
 
-// Keeps what arrived, unless a wallet reset came since the check began.
+// Keeps what arrived with the reset count the check began under, unless a
+// wallet reset came since: checked again right before the write, in the lock
+// a reset's clear takes too. One that comes between that check and the write
+// leaves arrivals under the old count, which nothing reads.
 async function keep(found, epoch) {
+  if (epoch === undefined) return;
   await withStorageLock(STORAGE_KEYS.BRIDGE_ARRIVALS, async () => {
-    if (epoch === undefined || (await getTxEpoch()) !== epoch) return;
-    for (const [hash, arrival] of Object.entries(found)) kept.set(hash, arrival);
-    const all = { ...((await storage.get(STORAGE_KEYS.BRIDGE_ARRIVALS))?.[STORAGE_KEYS.BRIDGE_ARRIVALS] ?? {}), ...found };
-    const newest = Object.entries(all)
-      .filter(([, a]) => validArrival(a))
+    const newest = Object.entries({ ...Object.fromEntries(await readKept(epoch)), ...found })
       .sort(([, a], [, b]) => b.at - a.at)
       .slice(0, KEEP);
-    await storage.set({ [STORAGE_KEYS.BRIDGE_ARRIVALS]: Object.fromEntries(newest) });
+    if ((await getTxEpoch()) !== epoch) return;
+    await storage.set({ [STORAGE_KEYS.BRIDGE_ARRIVALS]: { epoch, items: Object.fromEntries(newest) } });
+    version += 1;
+    for (const [hash, arrival] of Object.entries(found)) kept.set(hash, arrival);
   }).catch(() => {});
 }
 
-/** Forgets every arrival kept: a wallet reset. */
+/** Forgets every arrival kept: a wallet reset. In the lock a check's write takes. */
 export async function clearArrivals() {
-  kept = new Map();
-  await storage.remove(STORAGE_KEYS.BRIDGE_ARRIVALS);
+  await withStorageLock(STORAGE_KEYS.BRIDGE_ARRIVALS, async () => {
+    version += 1;
+    kept = new Map();
+    await storage.remove(STORAGE_KEYS.BRIDGE_ARRIVALS);
+  });
 }
 
 /**

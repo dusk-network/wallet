@@ -8,6 +8,11 @@ vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupPrimaryName: vi.fn(async () => null),
 }));
+// A look that found nothing is followed by another after 30 ms, not 5 seconds.
+vi.mock("../../shared/bridgeArrival.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  arrivalCheckDelay: () => 30,
+}));
 
 const ACCOUNT =
   "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
@@ -65,13 +70,17 @@ const flush = async () => {
   for (let i = 0; i < 8; i++) await settle();
 };
 
+// The popups opened, each its own app.js: one that draws again after its
+// test (its address book loading) is off Activity by then, as if closed.
+const opened = [];
 afterEach(() => {
+  for (const state of opened.splice(0)) state.route = "send";
   vi.unstubAllGlobals();
 });
 
 // The popup at `route` with `ov`, DuskEVM's explorer listing the L2 bridge's
-// payment of 0.5 DUSK to TO a minute ago; nothing else answers.
-async function popup(ov, route = "activity") {
+// payment of 0.5 DUSK to TO a minute ago (or nothing yet); nothing else answers.
+async function popup(ov, route = "activity", { arrived = true } = {}) {
   const dom = installFakeDom({ pathname: "/popup.html" });
   dom.document.body.innerHTML = "";
   for (const [tag, id, className] of [["button", "network-pill", "network-pill"], ["div", "header-actions", ""], ["div", "app", ""]]) {
@@ -84,7 +93,7 @@ async function popup(ov, route = "activity") {
   const explorer = vi.fn(async () =>
     new Response(
       JSON.stringify({
-        items: [
+        items: !arrived ? [] : [
           {
             transaction_hash: L2,
             from: { hash: duskEvm.predeploys.l2StandardBridge },
@@ -107,11 +116,15 @@ async function popup(ov, route = "activity") {
   send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? structuredClone(ov) : {}));
   const { state } = await import("./state.js");
   state.route = route;
+  opened.push(state);
   const { render } = await import("./app.js");
   await render();
   await flush();
   const status = () => dom.document.body.querySelectorAll(".tx-row .tx-status").map(visibleText);
-  return { dom, render, explorer, status };
+  // What the wallet tells this page, as the desktop app's does (and the extension's, with runtime messages).
+  const tell = (message) =>
+    dom.window._listeners.filter((l) => l.type === "dusk-wallet-message").forEach((l) => l.fn({ detail: message }));
+  return { dom, render, explorer, status, tell };
 }
 
 describe("a deposit to DuskEVM on its way, in the popup", () => {
@@ -122,6 +135,17 @@ describe("a deposit to DuskEVM on its way, in the popup", () => {
     await view.render({ forceRefresh: true });
     await flush();
     expect([view.explorer.mock.calls.length, view.status()]).toEqual([1, ["Arrived"]]);
+  });
+
+  it("stops looking once the wallet locks: a look due after it asks nothing, though the locked overview still lists the deposit", async () => {
+    const ov = overview();
+    const view = await popup(ov, "activity", { arrived: false });
+    expect(view.explorer).toHaveBeenCalledTimes(1);
+    ov.isUnlocked = false;
+    view.tell({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await flush();
+    expect(view.explorer).toHaveBeenCalledTimes(1);
   });
 
   it("asks nothing with no deposit on its way, on Mainnet, or away from Activity", async () => {

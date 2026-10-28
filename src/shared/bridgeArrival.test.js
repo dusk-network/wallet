@@ -1,14 +1,16 @@
 import { networks } from "@dusk-network/networks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// chrome.storage, as a map; the transaction store's reset count.
+// chrome.storage, as a map, a write held where a test says; the transaction store's reset count.
 const items = vi.hoisted(() => ({}));
+const hooks = vi.hoisted(() => ({ beforeSet: null }));
 const epoch = vi.hoisted(() => ({ now: 1 }));
 vi.mock("./storage.js", () => ({
   STORAGE_KEYS: { BRIDGE_ARRIVALS: "dusk_bridge_arrivals_v1", SETTINGS: "dusk_settings_v1", NETWORK_STATUS: "dusk_network_status_v1" },
   storage: {
     get: async (key) => ({ [key]: items[key] }),
     set: async (patch) => {
+      await hooks.beforeSet?.(patch);
       Object.assign(items, structuredClone(patch));
     },
     remove: async (key) => {
@@ -60,6 +62,7 @@ let arrivals;
 beforeEach(async () => {
   vi.resetModules();
   for (const key of Object.keys(items)) delete items[key];
+  hooks.beforeSet = null;
   epoch.now = 1;
   calls = [];
   fetch = vi.fn(async (url) => new Response(JSON.stringify({ items: calls, next_page_params: null })));
@@ -105,7 +108,8 @@ describe("a deposit to DuskEVM's arrival", () => {
     await expect(checkArrivals(rows, { nodeUrl: TESTNET, now: NOW })).resolves.toBe(1);
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([`${API}/addresses/${TO.toLowerCase()}/internal-transactions?filter=to`]);
     expect(arrivalOf(rows[0].hash)).toEqual({ hash: L2(2), at: NOW - 60_000 });
-    expect(items.dusk_bridge_arrivals_v1).toEqual({ [rows[0].hash]: { hash: L2(2), at: NOW - 60_000 } });
+    // Kept under the reset count the check began with.
+    expect(items.dusk_bridge_arrivals_v1).toEqual({ epoch: 1, items: { [rows[0].hash]: { hash: L2(2), at: NOW - 60_000 } } });
 
     // Kept: nothing is asked again, here or in another page.
     await checkArrivals(rows, { nodeUrl: TESTNET, now: NOW });
@@ -151,6 +155,51 @@ describe("a deposit to DuskEVM's arrival", () => {
     expect(arrivalOf(deposit("a").hash)).not.toBeNull();
     await clearArrivals();
     expect([arrivalOf(deposit("a").hash), items.dusk_bridge_arrivals_v1]).toEqual([null, undefined]);
+  });
+
+  it("is forgotten in every page once a wallet reset anywhere moves the reset count on", async () => {
+    const { arrivalOf, checkArrivals, loadArrivals } = arrivals;
+    calls = [call(L2(2))];
+    await checkArrivals([deposit("a")], { nodeUrl: TESTNET, now: NOW });
+    expect(arrivalOf(deposit("a").hash)?.hash).toBe(L2(2));
+
+    // Reset in the background: the count moves on, and the key goes there.
+    epoch.now = 2;
+    delete items.dusk_bridge_arrivals_v1;
+    // This page, open all along, draws again.
+    await loadArrivals();
+    expect(arrivalOf(deposit("a").hash)).toBeNull();
+    // The old wallet's arrivals, still in storage, aren't read either.
+    items.dusk_bridge_arrivals_v1 = { epoch: 1, items: { [deposit("a").hash]: { hash: L2(2), at: NOW } } };
+    await loadArrivals();
+    expect(arrivalOf(deposit("a").hash)).toBeNull();
+  });
+
+  it("keeps nothing of a check whose write a wallet reset's clear meets", async () => {
+    const { checkArrivals, clearArrivals } = arrivals;
+    calls = [call(L2(2))];
+    // The check's write, held once it passed its look at the reset count.
+    const writing = Promise.withResolvers();
+    const go = Promise.withResolvers();
+    hooks.beforeSet = async (patch) => {
+      if ("dusk_bridge_arrivals_v1" in patch) {
+        writing.resolve();
+        await go.promise;
+      }
+    };
+    const checking = checkArrivals([deposit("a")], { nodeUrl: TESTNET, now: NOW });
+    await writing.promise;
+    // A reset: the count moves on, and the arrivals are cleared.
+    epoch.now = 2;
+    const clearing = clearArrivals();
+    go.resolve();
+    await Promise.all([checking, clearing]);
+    expect(items.dusk_bridge_arrivals_v1).toBeUndefined();
+    // No page of the new wallet sees it.
+    vi.resetModules();
+    const fresh = await import("./bridgeArrival.js");
+    await fresh.loadArrivals();
+    expect(fresh.arrivalOf(deposit("a").hash)).toBeNull();
   });
 
   it("is looked for less often the longer nothing changes: 5 seconds, doubled every 6 looks, at most 5 minutes", () => {
