@@ -30,7 +30,7 @@ import {
 } from "../../components/RecipientBadge.js";
 
 import { listAddressBook } from "../../../shared/addressBook.js";
-import { closeDuskName } from "../../lib/nameSuggest.js";
+import { asDuskName, closeDuskName } from "../../lib/nameSuggest.js";
 import {
   duskNameErrorText,
   duskNameRecipient,
@@ -476,6 +476,19 @@ export function sendFormView(ov, { state, actions } = {}) {
     return sendable;
   };
 
+  // "Did you mean alice.dusk?", which puts the name in the field.
+  const suggestionButton = (name) =>
+    h("button", {
+      class: "text-btn text-btn--inline name-suggestion",
+      type: "button",
+      text: `Did you mean ${name}?`,
+      onclick: () => {
+        to.value = name;
+        onRecipientInput();
+        to.focus?.();
+      },
+    });
+
   // Shows a lookup result for `v` if the field still holds it; true when Review can go ahead.
   const applyNameResult = (v, result) => {
     if (String(to.value || "").trim() !== v) return false;
@@ -491,18 +504,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       const suggestion = failed.reason === "not_registered" ? closeDuskName(v, knownDuskNames()) : null;
       showNameBox([
         h("div", { class: "err", text: duskNameErrorText(failed) }),
-        suggestion
-          ? h("button", {
-              class: "text-btn text-btn--inline name-suggestion",
-              type: "button",
-              text: `Did you mean ${suggestion}?`,
-              onclick: () => {
-                to.value = suggestion;
-                onRecipientInput();
-                to.focus?.();
-              },
-            })
-          : null,
+        suggestion ? suggestionButton(suggestion) : null,
         failed.reason === "lookup_failed"
           ? h("div", { class: "btnrow" }, [
               h("button", {
@@ -637,6 +639,18 @@ export function sendFormView(ov, { state, actions } = {}) {
       updateContactMatch(v, t);
       showSelfNote(v);
       if (t === "account") showPrimaryName(v);
+      updateAmountHelpers();
+      return;
+    }
+
+    // A name typed without .dusk, or with a dot after it, where the network
+    // has names: the name it likely means (nameSuggest.js).
+    const bare = duskNamesNetwork(ov?.nodeUrl) ? asDuskName(v) : null;
+    if (bare) {
+      hideRecipientBadge(toTypePill);
+      showNameBox([suggestionButton(bare)]);
+      detectedRecipientType = null;
+      updateContactMatch("", null);
       updateAmountHelpers();
       return;
     }

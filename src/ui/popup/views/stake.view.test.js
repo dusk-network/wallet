@@ -430,7 +430,7 @@ describe("native staking", () => {
   it("states the node, timing, penalty and fee facts from Dusk's staking docs", () => {
     popup({ route: "stake", staking: staking(owner(), { screen: "native" }) });
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
-      "Needs your own Dusk nodeAn always-on computer running Dusk's node with Profile 1's consensus key. How native staking works",
+      "Needs your own Dusk nodeRun a node",
       "Rewards start in about 6 to 12 hoursUnstake any time, with no waiting period.",
       "If your node misses its turnPart of your stake gets locked. It's still yours, and unstaking returns it. If the node breaks the rules, part of the stake can be burned (lost).",
       "Network fee up to 0.05 DUSK",
@@ -450,6 +450,15 @@ describe("native staking", () => {
     button("Max").click();
     button("Review stake").click();
     expect(state.stakeDraft).toMatchObject({ kind: "stake", amountMode: "max", hasStake: true });
+  });
+
+  it("says only that native staking needs your own node, and Run a node opens Dusk's docs on running one", async () => {
+    dom.window.open = vi.fn(() => ({}));
+    popup({ route: "stake", staking: staking(owner(), { screen: "native" }) });
+    expect(visibleText(body)).not.toMatch(/consensus|always-on|recovery phrase/i);
+    button("Run a node").click();
+    await settle();
+    expect(dom.window.open).toHaveBeenCalledWith("https://docs.dusk.network/operator/provisioner/", "_blank", "noopener,noreferrer");
   });
 
   it("keeps the owner choice behind Advanced", () => {
@@ -534,7 +543,7 @@ describe("staking with little or nothing", () => {
 describe("staking reviews", () => {
   const named = () => ov({ accounts: [ACCOUNT, OTHER] });
 
-  it("name the profile as the header does, say the stake is public, and repeat the node warning", async () => {
+  it("name the profile as the header does, say the stake is public, and repeat that it needs your own node", async () => {
     lookupPrimaryName.mockImplementation(async (account) => (account === ACCOUNT ? "alice.dusk" : null));
     const state = { route: "stake", staking: staking(owner(), { screen: "native" }) };
     popup(state, named());
@@ -548,9 +557,7 @@ describe("staking reviews", () => {
       "Fromalice.dusk · Public",
       "Rewards startIn about 6 to 12 hours",
     ]);
-    expect(visibleText(body.querySelector(".row > .group.info"))).toBe(
-      "Your node must run with alice.dusk's consensus keyIf it misses its turn, part of the stake gets locked. It's still yours, and unstaking returns it. If it breaks the rules, part of the stake can be burned (lost)."
-    );
+    expect(visibleText(body.querySelector(".row > .group.info"))).toBe("Needs your own Dusk nodeRun a node");
     expect(visibleText(body)).not.toContain("Profile 1");
   });
 

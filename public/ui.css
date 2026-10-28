@@ -4877,7 +4877,7 @@ p.phrase-warning {
 
 /* -------------------------------------------------------
    The chain's blue: a text link that leads somewhere (See all, View in Dusk
-   explorer, the staking docs, sozu.fi) and a link to a chain object (a
+   explorer, Run a node, sozu.fi) and a link to a chain object (a
    transaction's ID, which opens the explorer). Buttons, rows, amounts and
    the text buttons that act rather than lead somewhere stay as they are.
    ------------------------------------------------------- */
@@ -4892,9 +4892,8 @@ button.chain-link:not(:disabled):hover {
   text-decoration-color: currentColor;
 }
 
-/* A link inside a sentence (How native staking works) keeps its underline
-   at rest: its blue alone doesn't set it apart from the muted text around
-   it. */
+/* A link in a row's text (Run a node) keeps its underline at rest: its blue
+   alone doesn't set it apart from the muted text around it. */
 button.chain-link.text-btn--inline:not(:disabled) {
   text-decoration-line: underline;
   text-decoration-color: color-mix(in oklab, currentColor 55%, transparent);
