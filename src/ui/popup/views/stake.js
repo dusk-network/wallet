@@ -41,8 +41,8 @@ export const SCREEN_OVERVIEW = "overview";
 export const SCREEN_NATIVE = "native";
 export const SCREEN_LIQUID = "liquid";
 
-// How native staking works: what a node is, and how the stake ties to it.
-const DOCS_STAKING_URL = "https://docs.dusk.network/learn/guides/staking-basics/";
+// Running a node, as native staking needs: Dusk's docs.
+const DOCS_NODE_URL = "https://docs.dusk.network/operator/provisioner/";
 
 function stakeKindLabel(kind, { hasStake = true } = {}) {
   const k = String(kind ?? "").toLowerCase();
@@ -386,6 +386,21 @@ function infoRow(icon, title, sub) {
       h("span", { class: "row-title" }, [].concat(title)),
       sub ? h("span", { class: "row-sub" }, [].concat(sub)) : null,
     ].filter(Boolean)),
+  ]);
+}
+
+// Native staking's node: the fact, and Run a node, which opens Dusk's docs on it.
+function nodeRow(actions) {
+  return infoRow("server", "Needs your own Dusk node", [
+    h("button", {
+      class: "text-btn text-btn--inline chain-link",
+      type: "button",
+      text: "Run a node",
+      onclick: async () => {
+        const ok = await openUrl(DOCS_NODE_URL);
+        if (!ok) actions?.showToast?.("Couldn't open the docs");
+      },
+    }),
   ]);
 }
 
@@ -741,25 +756,9 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     maxBtn,
   ].filter(Boolean));
 
-  const nodeLink = h("button", {
-    class: "text-btn text-btn--inline chain-link",
-    type: "button",
-    text: "How native staking works",
-    onclick: async () => {
-      const ok = await openUrl(DOCS_STAKING_URL);
-      if (!ok) actions?.showToast?.("Couldn't open the docs");
-    },
-  });
-
   // The facts from Dusk's staking docs, in a few lines.
   const facts = h("div", { class: "group info" }, [
-    // The stake is the stake account's: the node signs with its consensus key.
-    infoRow("server", "Needs your own Dusk node", [
-      "An always-on computer running Dusk's node with ",
-      profileName(ov, stakeProfileIndex),
-      "'s consensus key. ",
-      nodeLink,
-    ]),
+    nodeRow(actions),
     infoRow("clock", "Rewards start in about 6 to 12 hours", "Unstake any time, with no waiting period."),
     isNew
       ? null
@@ -940,7 +939,6 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   // The profile the stake is for, by its name as the header shows it: the
   // stake comes from its public balance, and an unstake or a claim goes back to it.
   const stakeName = profileNameEl(ov, { index: Number(stakeIndex) || 0, onName: showName });
-  const nodeName = profileName(ov, stakeIndex);
 
   return [
     subnav({ title: "Review", onBack: goBack }),
@@ -959,14 +957,8 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
         severalProfiles ? kvRow("Owner", profileName(ov, d.ownerProfileIndex)) : null,
         kind === TX_KIND.STAKE && !severalProfiles && !d.hasStake ? kvRow("Rewards start", "In about 6 to 12 hours") : null,
       ].filter(Boolean)),
-      // The node warning from the amount screen, once more before Confirm.
-      kind === TX_KIND.STAKE
-        ? h("div", { class: "group info" }, [
-            infoRow("alert", ["Your node must run with ", nodeName, "'s consensus key"], [
-              "If it misses its turn, part of the stake gets locked. It's still yours, and unstaking returns it. If it breaks the rules, part of the stake can be burned (lost).",
-            ]),
-          ])
-        : null,
+      // The node from the amount screen, once more before Confirm.
+      kind === TX_KIND.STAKE ? h("div", { class: "group info" }, [nodeRow(actions)]) : null,
       gasEditor,
       confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),

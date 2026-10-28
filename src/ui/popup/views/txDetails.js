@@ -1,6 +1,7 @@
 import { formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
+import { arrivalUrl } from "../../../shared/bridgeArrival.js";
 import { networkNameFromNodeUrl } from "../../../shared/network.js";
 import { labelForNode } from "../../../shared/nodeNetwork.js";
 import { openUrl } from "../../../platform/index.js";
@@ -12,7 +13,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
-import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, txIconSvg, txTime } from "./txRow.js";
+import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, shortEvmAddress, txIconSvg, txTime } from "./txRow.js";
 import { reasonText } from "./sent.js";
 import { activityRows, loadActivityDetail } from "../activity.js";
 
@@ -275,6 +276,35 @@ export function txDetailsView(ov, { state, actions } = {}) {
       )
     : null;
 
+  // Where a deposit to DuskEVM arrived: its transaction there, which opens DuskEVM's explorer.
+  const arrivalLink = desc.arrival ? arrivalUrl(nodeUrl, desc.arrival) : null;
+  const arrivalRow = desc.arrival
+    ? kv("DuskEVM transaction", [
+        h("button", {
+          class: "text-btn tx-id chain-link",
+          type: "button",
+          title: arrivalLink ? "Open in DuskEVM explorer" : desc.arrival,
+          "aria-label": arrivalLink ? `DuskEVM transaction ${shortEvmAddress(desc.arrival)}, open in DuskEVM explorer` : undefined,
+          disabled: !arrivalLink,
+          text: shortEvmAddress(desc.arrival),
+          onclick: async () => {
+            const ok = arrivalLink ? await openUrl(arrivalLink) : false;
+            if (!ok) showToast?.("Couldn't open the explorer");
+          },
+        }),
+        h("button", {
+          class: "mini-btn",
+          type: "button",
+          text: "Copy",
+          "aria-label": "Copy DuskEVM transaction ID",
+          onclick: async () => {
+            const ok = await copyToClipboard(desc.arrival);
+            showToast?.(ok ? "Transaction ID copied" : "Couldn't copy the transaction ID");
+          },
+        }),
+      ])
+    : null;
+
   const rows = h("div", { class: "group" }, [
     when ? kv("Date", dateText(when)) : null,
     evmRow,
@@ -283,6 +313,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     ...ownRows,
     site ? kv("Site", site) : null,
     kv("Transaction ID", [idButton, copyId]),
+    arrivalRow,
   ].filter(Boolean));
 
   // Technical details stay open across redraws (a sync can redraw this view).

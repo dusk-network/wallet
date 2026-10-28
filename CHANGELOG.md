@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Said Arrived on a deposit to DuskEVM once it's there, and linked its transaction on DuskEVM's explorer.
+- Offered alice.dusk for a recipient typed as alice or alice.dusk.
 - Linked Dusk's Terms of use and Privacy policy in Settings, under About.
 - Said about what each way of staking pays a year, beside the choice: native staking across the network lately, and Sozu after its fee.
 - Warned about a recipient listed as compromised or a scam, on Send and in a site's request, and sent it nothing.
@@ -53,6 +55,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said only that native staking needs your own Dusk node, with Run a node to Dusk's docs on running one.
 - Wrote dates and times as every Dusk app does: in English, on the language's clock, as "Mon 26 Oct 2026, 2:32 PM CET", in the export too.
 - Wrote Dusk contract IDs without 0x, and an ellipsis as one character.
 - Wrote fees under 0.01 DUSK to 2 significant digits, a maximum still rounded up.
@@ -90,7 +93,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed a transaction's exact fee under Technical details.
 - Said plainly that staking needs some public DUSK for the network fee, without an error before anything is typed.
 - Kept Max on Staking to 4 decimals, and left the fee to unstake later.
-- Said on both staking Reviews that a stake is public, named the profile by its `.dusk` name, and repeated the node warning before Confirm.
+- Said on both staking Reviews that a stake is public, named the profile by its `.dusk` name, and repeated before Confirm that it needs your own Dusk node.
 - Showed on Sozu's Review what the stDUSK is worth now, and said why a contract call's fee cap is higher.
 - Led Activity and a transaction's details with a saved contact's own name, its `.dusk` name beside it.
 - Named Dusk Domains calls in Activity by what they did, such as "Registered a .dusk name", and Sozu's as "Staked with Sozu".
@@ -152,7 +155,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Refused a stake with Sozu too small to get any stDUSK, and said the minimum.
 - Kept Confirm off on Send's Review when the bridge's 1 DUSK fee takes the whole amount.
-- Underlined links inside a sentence, such as How native staking works.
+- Underlined links in a row's text, such as Run a node.
 - Fixed links sitting higher than the section head beside them.
 - Hid controls that showed while hidden: Review's Use the network's price, Max on an empty Send, and Settings' custom gas fields when off.
 - Kept a profile label being typed when Settings redraws, and saved it when the field is left.

@@ -15,7 +15,8 @@ import { send as rawSend } from "../../wallet/bus.js";
 import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
-import { ensureActivity, refreshActivitySoon } from "./activity.js";
+import { activityRows, ensureActivity, refreshActivitySoon } from "./activity.js";
+import { arrivalCheckDelay, awaitingArrival, checkArrivals, loadArrivals } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
 
 import { homeView } from "./views/home.js";
@@ -79,6 +80,7 @@ function applyLockedOverviewPatch() {
   try {
     // Locked here or elsewhere: whatever began unlocked is for nothing now.
     switchContext(state, "lock");
+    stopArrivalChecks();
     state.overview = {
       ...(state.overview ?? {}),
       isUnlocked: false,
@@ -453,6 +455,46 @@ function schedulePendingTxPoll(ov) {
   }
 }
 
+// --- Deposits to DuskEVM on their way ----------------------------------------
+// While Home, Activity or a transaction shows a deposit to DuskEVM that hasn't
+// arrived there, DuskEVM's explorer is asked for it, at once and then less
+// often the longer nothing changes (bridgeArrival.js). Nothing is asked
+// otherwise: a lock, or a switch of network, profile or wallet (a reset
+// included), ends the looks begun before it.
+const ARRIVAL_ROUTES = new Set(["home", "activity", "tx"]);
+let arrivalTimer = null;
+let arrivalLooks = 0;
+let arrivalContext = null;
+
+function stopArrivalChecks() {
+  clearTimeout(arrivalTimer);
+  arrivalTimer = null;
+  arrivalLooks = 0;
+}
+
+function scheduleArrivalCheck(ov) {
+  if (arrivalTimer && arrivalContext !== state.context) stopArrivalChecks();
+  if (arrivalTimer || !ARRIVAL_ROUTES.has(state.route) || !ov?.isUnlocked) return;
+  if (!activityRows(ov, state).some((tx) => awaitingArrival(tx, ov?.nodeUrl))) {
+    arrivalLooks = 0;
+    return;
+  }
+  const context = (arrivalContext = state.context);
+  // Still the wallet, network and profile the look was for, unlocked, on a page that shows Activity.
+  const current = () => state.context === context && Boolean(state.overview?.isUnlocked) && ARRIVAL_ROUTES.has(state.route);
+  const timer = setTimeout(async () => {
+    const now = state.overview;
+    const found = current() ? await checkArrivals(activityRows(now, state), { nodeUrl: now?.nodeUrl }).catch(() => 0) : 0;
+    if (arrivalTimer !== timer) return;
+    arrivalTimer = null;
+    if (!current()) return;
+    arrivalLooks = found ? 0 : arrivalLooks + 1;
+    if (found) render().catch(() => {});
+    else scheduleArrivalCheck(state.overview);
+  }, arrivalLooks ? arrivalCheckDelay(arrivalLooks) : 0);
+  arrivalTimer = timer;
+}
+
 // --- Runtime pushes (from background) --------------------------------------
 let txStatusListenerInstalled = false;
 let lastShieldedStatusKey = "";
@@ -792,6 +834,8 @@ function keepContactsToTheirWallet(ov) {
 
 // --- Main render ----------------------------------------------------------
 export async function render({ forceRefresh = false } = {}) {
+  // Deposits to DuskEVM seen there before, for Activity's rows.
+  await loadArrivals();
   const overviewRefreshed = await refreshOverview(send, { force: forceRefresh });
   if (overviewRefreshed && state.staking) {
     state.staking.loaded = false;
@@ -819,6 +863,7 @@ export async function render({ forceRefresh = false } = {}) {
   // Keep shielded sync progress visible while on the dashboard.
   scheduleShieldedPoll(ov);
   schedulePendingTxPoll(ov);
+  scheduleArrivalCheck(ov);
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });
 

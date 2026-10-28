@@ -540,6 +540,33 @@ describe("a typed name that isn't registered", () => {
   });
 });
 
+describe("a name typed without .dusk", () => {
+  it("offers the .dusk name it likely means, for a bare name or one with a dot after it, and looks it up once taken", () => {
+    const state = newState();
+    const form = mount(state);
+    for (const typed of ["alice", "alice.dusk."]) {
+      typeInto(form.to, typed);
+      expect([visibleText(form.nameBox()), form.pill()]).toEqual(["Did you mean alice.dusk?", ""]);
+    }
+    expect(lookupDuskName).not.toHaveBeenCalled();
+
+    form.nameBox().querySelector("button.name-suggestion").click();
+    expect([form.to.value, state.draft.to]).toEqual(["alice.dusk", "alice.dusk"]);
+    expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["alice.dusk"]);
+    expect(visibleText(dom.document.body.querySelector(".name-points-to"))).toBe("alice.dusk points to");
+
+    // An address in the making, or anything else, is no name.
+    typeInto(form.to, "26FCH745");
+    expect([visibleText(form.nameBox()), form.pill()]).toEqual(["", "?Unknown"]);
+  });
+
+  it("offers none on a network without names", () => {
+    const form = mount(newState(), overview({ nodeUrl: "http://127.0.0.1:8080" }));
+    typeInto(form.to, "alice");
+    expect([visibleText(form.nameBox()), form.pill()]).toEqual(["", "?Unknown"]);
+  });
+});
+
 describe("sending to yourself", () => {
   const ACCOUNT_NOTE = "This is your own account. Sending to yourself only costs a fee.";
   const ADDRESS_NOTE = "This is your own address. Sending to yourself only costs a fee.";

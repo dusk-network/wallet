@@ -18,6 +18,7 @@ import {
   syncActivity,
 } from "../../shared/activityHistory.js";
 import { mergeActivity } from "../../shared/activityMerge.js";
+import { arrivalOf } from "../../shared/bridgeArrival.js";
 import {
   StaleActivityError,
   getActivityEpoch,
@@ -354,7 +355,7 @@ export function activityRows(ov, state) {
   const ours = a && key && a.key === key ? a : null;
   const { profileIndex } = selected(ov);
   const meta = ours?.meta;
-  return mergeActivity({
+  const rows = mergeActivity({
     local,
     history: ours?.entries ?? [],
     shielded: ours?.shielded ?? [],
@@ -366,5 +367,10 @@ export function activityRows(ov, state) {
     estimateTime: meta?.headAt
       ? (height) => meta.headAt - Math.max(0, Number(meta.finalized) - height) * 10_000
       : undefined,
+  });
+  // A deposit to DuskEVM that arrived there, with its transaction there (bridgeArrival.js).
+  return rows.map((row) => {
+    const arrival = arrivalOf(row?.hash);
+    return arrival ? { ...row, arrival } : row;
   });
 }

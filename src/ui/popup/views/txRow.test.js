@@ -220,4 +220,18 @@ describe("what a row says", () => {
       expect([plain.lead, plain.name, plain.evm, subText(plain, "06:51")]).toEqual(["Bridge", "To DuskEVM", false, "Bridge · 06:51"]);
     }
   });
+
+  it("says Arrived once a deposit to DuskEVM is there, with its transaction there, and nothing before", () => {
+    const BRIDGE = "2257e5f8ff49cf7c9704a14ca35acbf48eb7ade11a079d98d5cd5655eea1b31d";
+    const evm = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
+    const l2 = `0x${"29".repeat(32)}`;
+    const deposit = { kind: TX_KIND.CONTRACT_CALL, contractId: BRIDGE, fnName: "depositETHToWithValue", deposit: "500000000", bridgeTo: evm, status: "executed", nodeUrl: TESTNET };
+    const there = describeTx({ ...deposit, arrival: { hash: l2, at: 1 } });
+    expect([there.statusWord, there.tone, there.arrival, subText(there, "06:51")]).toEqual(["Arrived", "ok", l2, "Bridge to DuskEVM · 06:51"]);
+    // On its way: no word, as any transaction that went through.
+    expect([describeTx(deposit).statusWord, describeTx(deposit).arrival]).toEqual([null, null]);
+    // Only a deposit that went through to a DuskEVM address arrives.
+    expect(describeTx({ ...deposit, bridgeTo: undefined, arrival: { hash: l2, at: 1 } }).arrival).toBeNull();
+    expect(describeTx({ ...deposit, status: "failed", arrival: { hash: l2, at: 1 } }).statusWord).toBe("Failed");
+  });
 });
