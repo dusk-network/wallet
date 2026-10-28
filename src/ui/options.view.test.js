@@ -166,6 +166,36 @@ describe("settings", () => {
     expect(view.shownButtons(view.section("Reset"))).toEqual(["Reset wallet"]);
   });
 
+  it("starts each switch of profile, network or wallet before asking the wallet, so a check begun before it can tell", async () => {
+    const view = await settings();
+    // The popup's context each time the wallet is asked.
+    const asked = [];
+    view.actions.send.mockImplementation(async (message) => {
+      asked.push([message.type, view.state.context]);
+      return { ok: true };
+    });
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const buttonOf = (text) => dom.document.body.querySelectorAll("button").find((b) => b.textContent === text);
+
+    const profile = dom.document.body.querySelector("select#account");
+    profile.value = "1";
+    profile.dispatchEvent(fakeEvent("change"));
+    await settle();
+    typeInto(dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Node URL"), "https://nodes.dusk.network");
+    buttonOf("Save").click();
+    await settle();
+    buttonOf("Lock wallet").click();
+    await settle();
+    buttonOf("Reset wallet").click();
+    await settle();
+    expect(asked).toEqual([
+      ["DUSK_UI_SET_ACCOUNT_INDEX", 1],
+      ["DUSK_UI_SET_NODE_URL", 2],
+      ["DUSK_UI_LOCK", 3],
+      ["DUSK_UI_RESET_WALLET", 4],
+    ]);
+  });
+
   it("offers auto-lock after 5 or 15 minutes, or Off, and keeps a new choice through a redraw", async () => {
     const view = await settings({ autoLockTimeoutMinutes: 15 });
     const select = () => dom.document.body.querySelector("select#auto-lock");

@@ -8,6 +8,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
+import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, noBridgeRecipientText } from "../../../shared/bridgeCalls.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
@@ -876,12 +877,13 @@ export function chainMismatchText(reqChain, nodeUrl) {
 /**
  * What a public send shows everyone, for Review: "Visible to everyone:
  * amount, memo, and your name alice.dusk." Without a memo it leaves memo
- * out, and without a verified name it says "your account".
- * @param {{ memo?: string, name?: string|null }} parts
+ * out, and without a verified name it says "your account". `memoAs` names
+ * the memo by what it is, as the recipient on another chain a bridge pays.
+ * @param {{ memo?: string, name?: string|null, memoAs?: string }} parts
  * @returns {string}
  */
-export function publicSendLine({ memo, name } = {}) {
-  const items = ["amount", memo ? "memo" : "", name ? `your name ${name}` : "your account"].filter(Boolean);
+export function publicSendLine({ memo, name, memoAs = "memo" } = {}) {
+  const items = ["amount", memo ? memoAs : "", name ? `your name ${name}` : "your account"].filter(Boolean);
   const list = items.length > 2 ? `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}` : items.join(" and ");
   return `Visible to everyone: ${list}.`;
 }
@@ -900,6 +902,14 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // the draft's privacy was set.
   const privacy = recType === "address" ? "shielded" : "public";
   const toAddr = String(d.to || "").trim();
+  // To the bridge's account: it pays the memo's address on another chain
+  // what's left once it takes its fee. An amount the fee takes whole, or a
+  // memo that's no address there, stays here, as nothing would arrive.
+  const service = privacy === "public" ? bridgeServiceTransfer({ nodeUrl: ov?.nodeUrl, to: toAddr, memo: d.memo, amount: d.amountLux }) : null;
+  const serviceNotes = service ? bridgeServiceWarnings(service) : [];
+  const tooLittle = serviceNotes.some((n) => n.kind === "fee");
+  const noRecipient = Boolean(service && !service.recipientOk);
+  const nothingArrives = tooLittle || noRecipient;
 
   // The profile it's sent from, by its verified .dusk name as the header
   // shows it; what a public send shows everyone names it too.
@@ -907,11 +917,13 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const ownIdx = Number.isFinite(ownIdxRaw) && ownIdxRaw >= 0 ? Math.floor(ownIdxRaw) : 0;
   const ownAccount = String(ov?.accounts?.[ownIdx] ?? "");
   const ownAddress = String(ov?.addresses?.[ownIdx] ?? "");
-  const visibleLine = h("div", { class: "review-line review-visible", text: publicSendLine({ memo: d.memo, name: null }) });
+  // To the bridge, the memo is the recipient on the other chain.
+  const memoAs = service ? `the recipient on ${service.short}` : "memo";
+  const visibleLine = h("div", { class: "review-line review-visible", text: publicSendLine({ memo: d.memo, name: null, memoAs }) });
   const fromName = profileNameEl(ov, {
     index: ownIdx,
     onName: (name) => {
-      visibleLine.textContent = publicSendLine({ memo: d.memo, name });
+      visibleLine.textContent = publicSendLine({ memo: d.memo, name, memoAs });
     },
   });
 
@@ -927,7 +939,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
   const showToNames = () => {
-    const names = [contactName(), duskName?.name || verifiedName].filter(Boolean);
+    const names = service ? [`The bridge's account for ${service.chain}`] : [contactName(), duskName?.name || verifiedName].filter(Boolean);
     const unique = names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
     toNames.textContent = unique.join(" · ");
     toNames.hidden = !unique.length;
@@ -985,7 +997,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // The names this Review shows come from the lookups the form and the
   // header made, kept for a while: no new requests in the common case.
   if (duskNamesNetwork(ov?.nodeUrl)) {
-    if (!duskName && recType === "account" && !own) {
+    if (!duskName && recType === "account" && !own && !service) {
       lookupPrimaryName(toAddr, { nodeUrl: ov?.nodeUrl, stale: true })
         ?.then?.((name) => {
           if (!name) return;
@@ -997,7 +1009,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   }
 
   // Back returns to Send with the draft, so Review has no Cancel.
-  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
+  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm", disabled: nothingArrives });
 
   const defaultGas = getDefaultGas(TX_KIND.TRANSFER, { privacy });
   const defaultLimit =
@@ -1028,6 +1040,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
 
   confirmBtn.addEventListener("click", async () => {
+    if (nothingArrives) return;
     let gas;
     try {
       gas = gasEditor.readFinalGas();
@@ -1074,9 +1087,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         if (state.draft === d) state.draft = null;
       },
     });
-    confirmBtn.disabled = false;
+    confirmBtn.disabled = nothingArrives;
   });
-  submitOnGasEnter(gasEditor, confirmBtn);
+  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !nothingArrives });
 
   const kv = (label, value, className = "") =>
     h("div", { class: ["kv", className].filter(Boolean).join(" ") }, [
@@ -1094,11 +1107,16 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     }),
     h("div", { class: "row send-review" }, [
       h("div", { class: "review-head" }, [
-        h("div", { class: "review-kind", text: privacy === "shielded" ? "Shielded transfer" : "Public transfer" }),
+        h("div", {
+          class: "review-kind",
+          text: service ? `Bridge to ${service.chain}` : privacy === "shielded" ? "Shielded transfer" : "Public transfer",
+        }),
         h("div", { class: "balance-amount" }, [
           formatDuskExact(d.amountLux),
           h("span", { class: "balance-unit", text: " DUSK" }),
         ]),
+        // To the bridge: what arrives on the other chain, once it takes its fee.
+        service ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) }) : null,
         // What a public send shows everyone; a shielded one has no such line.
         privacy === "public" ? visibleLine : null,
       ].filter(Boolean)),
@@ -1109,8 +1127,21 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       h("div", { class: "group" }, [
         kv("To", h("span", { class: "review-to" }, [toNames, h("span", { class: "mono review-to__address", text: toAddr })]), "kv--wrap"),
         kv("From", h("span", {}, [fromName, h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
-        d.memo ? kv("Memo", d.memo, "kv--wrap") : null,
+        d.memo ? kv(service ? `Recipient on ${service.short}` : "Memo", d.memo, "kv--wrap") : null,
       ].filter(Boolean)),
+      ...serviceNotes
+        .filter((n) => n.kind !== "fee")
+        .map((n) => h("div", { class: "callout warn", role: "note" }, [h("div", { class: "callout-title", text: n.title }), h("div", { class: "muted", text: n.text })])),
+      service && !service.recipientOk
+        ? h("div", { class: "callout warn", role: "note" }, [
+            h("div", { class: "callout-title", text: `The memo isn't an address on ${service.short}` }),
+            h("div", { class: "muted", text: "The bridge pays out to the address in the memo. Go back and check it." }),
+          ])
+        : null,
+      tooLittle
+        ? h("div", { class: "field-error", role: "alert", text: `Send more than the ${formatDuskExact(service.feeLux)} DUSK bridge fee.` })
+        : null,
+      noRecipient ? h("div", { class: "field-error", role: "alert", text: `${noBridgeRecipientText(service.chain)}.` }) : null,
       saveContactBtn,
       gasEditor,
       confirmError,

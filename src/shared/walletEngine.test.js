@@ -380,6 +380,7 @@ vi.mock("@dusk/w3sper", () => {
     DataDriverRegistry: class {
       register() {}
       async get(key) {
+        globalThis.__W3SPER_DRIVER_GETS__?.push(key);
         // A driver that takes this long (ms) to load, as a cold one does.
         const ms = globalThis.__W3SPER_DRIVER_DELAYS__?.[key];
         if (ms) await new Promise((resolve) => setTimeout(resolve, ms));
@@ -1118,6 +1119,23 @@ describe("walletEngine", () => {
     expect(res.publicKeyHex).toMatch(/^0x[0-9a-f]{192}$/);
   });
 
+  it("sends a contract call, as a stake with Sozu, only on the wallet, profile and node its review was for", async () => {
+    engine.configure({ nodeUrl: NETWORK_KEY, accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const stake = { kind: "contract_call", privacy: "public", contractId: "72".repeat(32), fnName: "sozu_stake", fnArgs: [0, 232, 118, 72, 23, 0, 0, 0], amount: "0", deposit: "100000000000", profileIndex: 1 };
+    const reviewed = { walletId: WALLET_ID, profileIndex: 1, account: "acct1", nodeUrl: NETWORK_KEY };
+
+    for (const changed of [{ nodeUrl: "https://testnet.nodes.dusk.network" }, { profileIndex: 0, account: "acct0" }, { walletId: "acct9" }]) {
+      await expect(engine.sendTransaction({ ...stake, _approvalContext: { ...reviewed, ...changed } })).rejects.toThrow(
+        "Wallet changed while awaiting approval"
+      );
+    }
+    expect(globalThis.__W3SPER_LAST_EXEC_TX__).toBeNull();
+
+    await expect(engine.sendTransaction({ ...stake, _approvalContext: reviewed })).resolves.toEqual({ hash: "0xmockhash", nonce: 42 });
+    expect(globalThis.__W3SPER_LAST_EXEC_TX__.profile.account.toString()).toBe("acct1");
+  });
+
   it("signAuth returns the signed canonical login envelope", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
@@ -1402,56 +1420,80 @@ describe("walletEngine", () => {
 
   it.each([
     ["at hand", null],
-    ["loading at different times", { sozu_pool: 5, sozu_staked_dusk: 20 }],
-  ])("reads Sozu's hub names in one Multicall for Dusk query, then its pool and stDUSK in one, with drivers %s", async (_, delays) => {
+    ["loading slowly", { sozu_pool: 5 }],
+  ])("reads Sozu's hub names, pool, balances, fees and switches in one Multicall for Dusk query, with its pool driver %s", async (_, delays) => {
     globalThis.__W3SPER_DRIVER_DELAYS__ = delays;
+    globalThis.__W3SPER_DRIVER_GETS__ = [];
     await engine.unlockWithMnemonic(MNEMONIC);
     const MULTICALL = "93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4";
     const ids = {
       pool: "6fdfdc713a18fc6ca2ad20eb2b4a3305a935ef47d6a872d9a4df8bc9fd9d169e",
-      relayer: "1cc415d05b1cfbf2583bf2e8a0e39b2c768d263ef92d6a21a4787f76c6afa924",
       substrate: "bc6f50f7404d098cdd1117b15dddab6f6f3dad01c5ce3c5ce9b68a8b60bc4c1d",
-      "staked-dusk": "eb158fce".padEnd(64, "0"),
-      vault: "ab".repeat(32),
+      "staked-dusk": "eb158fceeae76e59b28c1e6857eb50cf6a7a69532817fc455458096aab527980",
     };
-    const answer = (contract, fnName, args) => {
-      if (fnName === "contract") return ids[args];
-      if (fnName === "exchange_rate") return { numerator: "3", denominator: "1" };
-      return contract === ids.pool ? "5" : "7";
+    const u64 = (...values) => {
+      const out = new Uint8Array(8 * values.length);
+      values.forEach((v, i) => new DataView(out.buffer).setBigUint64(8 * i, BigInt(v), true));
+      return out;
     };
-    const json = (value) => new TextEncoder().encode(JSON.stringify(value));
-    const node = vi.fn(async (input, init) => {
-      const url = String(input);
-      if (url.endsWith(`/on/contracts:${MULTICALL}/aggregate`)) {
-        const calls = envelopeCalls(init.body);
-        return new Response(aggregateReply(calls.map((c) => json(answer(c.contract, c.fnName, JSON.parse(c.args))))));
+    // Every reply in rkyv, as the contracts give it: no driver decodes them.
+    const answer = ({ contract, fnName, args }) => {
+      if (fnName === "contract") {
+        const name = Object.keys(ids).find((n) => args.includes(n));
+        return Uint8Array.of(1, ...ids[name].match(/../g).map((b) => parseInt(b, 16)));
       }
-      const read = url.match(/\/on\/contracts:([0-9a-f]{64})\/(\w+)$/);
-      if (read) return new Response(json(answer(read[1], read[2], JSON.parse(new TextDecoder().decode(init.body)))));
+      if (fnName === "exchange_rate") return u64(3, 1);
+      if (fnName === "balance_of") return contract === ids.pool ? u64(5) : u64(7);
+      if (fnName === "stake_fee_rate") return args === "\u0000" ? u64(1, 400) : u64(15, 100);
+      return Uint8Array.of(0);
+    };
+    const node = vi.fn(async (input, init) => {
+      if (String(input).endsWith(`/on/contracts:${MULTICALL}/aggregate`)) {
+        return new Response(aggregateReply(envelopeCalls(init.body).map(answer)));
+      }
       return new Response(new ArrayBuffer(8));
     });
     vi.stubGlobal("fetch", node);
 
     const status = await engine.getSozuStatus();
 
-    expect(status.configured).toBe(true);
-    expect(status.contracts.pool).toBe(ids.pool);
-    expect(status.pool.exchangeRate).toBe(3);
-    expect(status.position).toEqual({ poolBalanceLux: "5", stDuskBalanceLux: "7" });
-    const contractReads = node.mock.calls.map(([input]) => String(input)).filter((url) => url.includes("/on/contracts:"));
-    expect(contractReads).toEqual([
-      `${NETWORK_KEY}/on/contracts:${MULTICALL}/aggregate`,
-      `${NETWORK_KEY}/on/contracts:${MULTICALL}/aggregate`,
-    ]);
-    const [names, reads] = node.mock.calls.filter(([input]) => String(input).includes("/on/contracts:"));
-    expect(envelopeCalls(names[1].body).map((c) => c.args)).toEqual(
-      ["pool", "relayer", "substrate", "staked-dusk", "vault"].map((name) => JSON.stringify(name))
-    );
-    expect(envelopeCalls(reads[1].body).map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)).toEqual([
+    expect(status).toMatchObject({
+      configured: true,
+      source: "hub",
+      contracts: { hub: "b32c917e76abc6fcf2edbee0fa70231d8e19c405b18421794a11badfc66d2f26", ...ids },
+      pool: { totalStakeLux: "3", tokenTotalSupply: "1", exchangeRate: 3 },
+      position: { poolBalanceLux: "5", stDuskBalanceLux: "7" },
+      fees: { deposit: { numerator: "1", denominator: "400" }, reward: { numerator: "15", denominator: "100" } },
+      features: { maintenance: false, synchronization: false },
+      reason: "",
+    });
+    const queries = () => node.mock.calls.filter(([input]) => String(input).includes("/on/contracts:"));
+    expect(queries().map(([input]) => String(input))).toEqual([`${NETWORK_KEY}/on/contracts:${MULTICALL}/aggregate`]);
+    const calls = envelopeCalls(queries()[0][1].body);
+    expect(calls.map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)).toEqual([
+      "b32c917e.contract",
+      "b32c917e.contract",
+      "b32c917e.contract",
       "6fdfdc71.exchange_rate",
       "6fdfdc71.balance_of",
       "eb158fce.balance_of",
+      "bc6f50f7.stake_fee_rate",
+      "bc6f50f7.stake_fee_rate",
+      "bc6f50f7.is_feature_enabled",
+      "bc6f50f7.is_feature_enabled",
     ]);
+    // The account as the pool's driver encodes it, for both balances.
+    expect(calls[5].args).toBe(calls[4].args);
+    // Only the pool's driver is loaded; the hub has none.
+    expect([...new Set(globalThis.__W3SPER_DRIVER_GETS__)]).toEqual(["sozu_pool"]);
+
+    // The next refresh: one query again, the hub asked again in it, as it can name others.
+    await engine.getSozuStatus();
+    expect(queries()).toHaveLength(2);
+    expect(envelopeCalls(queries()[1][1].body).map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)).toEqual(
+      calls.map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)
+    );
+    delete globalThis.__W3SPER_DRIVER_GETS__;
   });
 
   it("returns owner-separated stake status for local owner profiles", async () => {

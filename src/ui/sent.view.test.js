@@ -244,6 +244,17 @@ describe("after Confirm", () => {
     expect(button("Confirm")).toBeTruthy();
   });
 
+  it.each(["Wallet changed while awaiting approval", "Wallet or network changed while transaction was queued"])(
+    "says nothing went out when the wallet refused it for another network, profile or wallet than its review's: %s",
+    async (error) => {
+      const app = popup(reviewState());
+      await settle();
+      (await app.confirm()).resolve({ error: { message: error } });
+      await settle();
+      expect(steps()[0]).toEqual(["failed", "Not sent", `${error}. No fee was charged.`]);
+    }
+  );
+
   it("leaves a newer review's draft alone when an earlier send finishes", async () => {
     const state = reviewState();
     const app = popup(state);

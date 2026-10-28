@@ -11,12 +11,6 @@ const TOKEN = "fdbf4910".padEnd(64, "0");
 const utf8 = new TextEncoder();
 const text = new TextDecoder();
 
-// A contract as w3sper's `Contract` gives it: its ID and its driver's encoding.
-const contract = (id) => ({ id, encode: async (fnName, args) => utf8.encode(`${fnName}:${JSON.stringify(args ?? null)}`) });
-
-// A driver that decodes an answer as JSON, and says which function it decoded for.
-const driver = { decodeOutputFn: (fnName, bytes) => ({ fnName, value: JSON.parse(text.decode(bytes)) }) };
-
 // The calls of an `aggregate` envelope (rkyv 0.7): contract, function, argument.
 function envelopeCalls(body) {
   const b = new Uint8Array(body);
@@ -77,46 +71,42 @@ function node() {
 }
 
 describe("createContractReads", () => {
-  it("sends the reads made together as one Multicall for Dusk query, each encoded and decoded by its driver", async () => {
+  it("sends the reads made together as one Multicall for Dusk query, each with its argument, and gives each its reply", async () => {
     const base = node();
     const read = createContractReads({ nodeUrl: `${NODE}/`, fetch: base });
 
     const answers = await Promise.all([
-      read(contract(POOL), driver, "exchange_rate"),
-      read(contract(POOL), driver, "balance_of", "acct0"),
-      read(contract(TOKEN), driver, "balance_of", "acct0"),
+      read(POOL, "exchange_rate", new Uint8Array(0)),
+      read(POOL, "balance_of", utf8.encode("acct0")),
+      read(TOKEN, "balance_of", utf8.encode("acct0")),
     ]);
 
     expect(base).toHaveBeenCalledTimes(1);
     expect(String(base.mock.calls[0][0])).toBe(AGGREGATE);
     expect(envelopeCalls(base.mock.calls[0][1].body)).toEqual([
-      { contract: POOL, fnName: "exchange_rate", args: "exchange_rate:null" },
-      { contract: POOL, fnName: "balance_of", args: 'balance_of:"acct0"' },
-      { contract: TOKEN, fnName: "balance_of", args: 'balance_of:"acct0"' },
+      { contract: POOL, fnName: "exchange_rate", args: "" },
+      { contract: POOL, fnName: "balance_of", args: "acct0" },
+      { contract: TOKEN, fnName: "balance_of", args: "acct0" },
     ]);
-    expect(answers).toEqual([
-      { fnName: "exchange_rate", value: "exchange_rate:null" },
-      { fnName: "balance_of", value: 'balance_of:"acct0"' },
-      { fnName: "balance_of", value: 'balance_of:"acct0"' },
-    ]);
+    expect(answers.map((bytes) => text.decode(bytes))).toEqual(['""', '"acct0"', '"acct0"']);
+    expect(answers.every((bytes) => bytes instanceof Uint8Array)).toBe(true);
   });
 
   it("sends a read alone in its task as it is", async () => {
     const base = node();
     const read = createContractReads({ nodeUrl: NODE, fetch: base });
 
-    await expect(read(contract(POOL), driver, "exchange_rate")).resolves.toEqual({
-      fnName: "exchange_rate",
-      value: "exchange_rate:null",
-    });
+    expect(text.decode(await read(POOL, "balance_of", utf8.encode("acct0")))).toBe('"acct0"');
     expect(base).toHaveBeenCalledTimes(1);
-    expect(String(base.mock.calls[0][0])).toBe(`${NODE}/on/contracts:${POOL}/exchange_rate`);
+    expect(String(base.mock.calls[0][0])).toBe(`${NODE}/on/contracts:${POOL}/balance_of`);
   });
 
   it("fails a read the node refused, with what it said", async () => {
     const base = vi.fn(async () => new Response("Contract does not exist", { status: 500 }));
     const read = createContractReads({ nodeUrl: NODE, fetch: base });
 
-    await expect(read(contract(POOL), driver, "exchange_rate")).rejects.toThrow("Contract does not exist");
+    await expect(read(POOL, "exchange_rate", new Uint8Array(0))).rejects.toThrow("Contract does not exist");
+    const silent = createContractReads({ nodeUrl: NODE, fetch: vi.fn(async () => new Response("", { status: 503 })) });
+    await expect(silent(POOL, "exchange_rate", new Uint8Array(0))).rejects.toThrow("HTTP 503");
   });
 });

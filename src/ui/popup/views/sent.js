@@ -22,8 +22,13 @@ const FINAL = new Set(["executed", "failed", "removed"]);
 // Errors that mean the wallet or the node refused the transaction before it
 // ran: nothing went out, so there is no fee. Anything else (a reply that got
 // lost, a timeout, a failure after the hand-over) may have reached the network.
+// "Wallet changed while …" is the engine finding another network, profile or
+// wallet than the one the transaction was reviewed on.
 const REFUSED =
-  /wallet locked|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed/i;
+  /wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed/i;
+
+// Why a send stopped before it went to the wallet: a switch started meanwhile.
+const SWITCHED = "The network or profile changed meanwhile.";
 
 /**
  * Whether a send's error says it was refused before it ran (true), rather
@@ -204,9 +209,12 @@ export function sentAnnouncement(sent, ov) {
  * @param {string} opts.backRoute - the review, for Back after a send the network didn't take
  * @param {string} [opts.doneRoute] - where Done goes
  * @param {(hash: string) => void} [opts.onSent] - once the network took it
+ * @param {() => boolean} [opts.unchanged] - asked just before the transaction
+ *   goes to the wallet: false when the network or profile changed since the
+ *   review, and then it isn't sent
  * @returns {Promise<object>} the Sent screen's state
  */
-export async function sendFromReview({ state, actions, message, summary, backRoute, doneRoute = "home", onSent }) {
+export async function sendFromReview({ state, actions, message, summary, backRoute, doneRoute = "home", onSent, unchanged }) {
   const sent = {
     id: ++sentSeq,
     ...summary,
@@ -232,14 +240,21 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     // The screen catches up on the next draw.
   }
 
+  // The Sent screen was drawn first: a switch begun meanwhile stops it here.
+  const switched = typeof unchanged === "function" && !unchanged();
   let res;
-  try {
-    res = await actions?.send?.(message);
-  } catch (e) {
-    res = { error: { message: e?.message ?? String(e) } };
+  if (!switched) {
+    try {
+      res = await actions?.send?.(message);
+    } catch (e) {
+      res = { error: { message: e?.message ?? String(e) } };
+    }
   }
 
-  if (res?.error || !res?.ok) {
+  if (switched) {
+    sent.error = SWITCHED;
+    sent.phase = "not_sent";
+  } else if (res?.error || !res?.ok) {
     sent.error = String(res?.error?.message ?? "");
     sent.phase = sendRefused(sent.error) ? "not_sent" : "unconfirmed";
   } else {

@@ -21,24 +21,12 @@ Configured networks:
 
 `devnet` and `local` do not have bundled contract IDs in the Sozu wallet config. The wallet must show a disabled state there unless the user/config layer provides IDs later.
 
-The Sozu hub data-driver is now available. The wallet should bootstrap from the
-network hub contract ID, then resolve these hub names:
-
-- `pool`
-- `relayer`
-- `substrate`
-- `staked-dusk`
-- `vault`
-
-On testnet, hub discovery currently matches the hardcoded pool/relayer/substrate
-config and additionally returns:
-
-- `staked-dusk`: `fdbf49102e76cf58224003451c6cb9e3403c54ff1d9042f8bc46ec25c6a4337c`
-- `vault`: `79635912e56834fa41aa01048cdb54f7b26756d97b3571345a64df7a0641dfce`
-
-Hardcoded pool/relayer/substrate values remain a fallback when hub discovery or
-the DD is unavailable. The UI labels this as fallback instead of pretending the
-state is hub-discovered.
+The wallet bootstraps from the network's hub contract ID and resolves `pool`,
+`substrate` and `staked-dusk` through the hub's `contract(name)`. The name goes
+as fixed rkyv bytes, so no hub data-driver is bundled (`src/shared/sozuStatus.js`).
+What the hub names is kept per node; until it answers, the contracts it named
+when the config was written stand in (`src/shared/sozuConfig.js`), and the
+status says `fallback`.
 
 ## Contract Calls
 
@@ -58,7 +46,12 @@ Useful pool reads from `sozu-wallet/src/rues/pool.rs` and `sozu-contracts-dd/poo
 - `balance_of(account)` returns the user's DUSK-denominated balance in the pool.
 - `exchange_rate()` returns `{ numerator, denominator }`, representing total active stake over token total supply.
 
-Hub discovery exists through the hub contract `contract(name)`, but v1 intentionally uses the Sozu wallet's hardcoded config. Hub/DD discovery should be a follow-up.
+The substrate gives Sozu's fees and switches:
+
+- `stake_fee_rate(kind)`, kind `0` deposit or `1` reward, returns the fee rate as two little-endian `u64`s.
+- `is_feature_enabled(kind)`, kind `0` maintenance or `1` synchronization, returns a bool.
+
+A refresh reads the hub's names (until kept), the pool's rate, the account's pool and stDUSK balances, both fees and both switches in one Multicall for Dusk query. Only the account argument needs a data-driver (the pool's).
 
 ## Data Drivers
 
@@ -68,10 +61,9 @@ The Sozu pool data-driver supports:
 - output decoding for `balance_of` and `exchange_rate`
 - events including `deposit`, `unstake`, and `reward`
 
-This branch includes only the Sozu hub and pool DD artifacts required by the
-wallet, plus the stDUSK token DD used for the secondary receipt-token balance:
+The wallet bundles the Sozu pool DD, which encodes the account for both
+`balance_of` reads, and the stDUSK token DD used for the token in Assets:
 
-- `public/drivers/sozu_hub_data_driver.wasm`
 - `public/drivers/sozu_pool_data_driver.wasm`
 - `public/drivers/sozu_staked_dusk_data_driver.wasm`
 

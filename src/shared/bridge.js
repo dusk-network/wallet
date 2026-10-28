@@ -14,19 +14,27 @@ export const BRIDGE_CONTRACTS = Object.freeze({
 
 // The bridge's account on Dusk for DUSK leaving Dusk for an EVM chain: a
 // transfer to it pays the bridge, and its memo names the EVM address the
-// bridge pays out to. As the bridge's own config names them (src/config.js).
+// bridge pays out to. As the bridge's own config names them (src/config.js),
+// with its fee (VITE_SERVICE_BRIDGE_FEE_LUX, 1 DUSK), which it takes from the
+// amount: what arrives is the amount less the fee. `running` says whether
+// the bridge pays out there now: testnet's to Sepolia hasn't since February
+// 2026. Set it back to true once it does.
 export const BRIDGE_SERVICE_ACCOUNTS = Object.freeze({
   mainnet: Object.freeze({
     account:
       "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x",
     chain: "BNB Smart Chain",
     short: "BSC",
+    feeLux: "1000000000",
+    running: true,
   }),
   testnet: Object.freeze({
     account:
       "25z9o6qCaVk1ReyHjmB4pyXcE3D1vRu4FVV1rR8ChYcosdTSktkANLDHq9GD6B4985Q1S2KrDZYBRrohWAjrNmACFUb3UMSRyYctJRzh3d28R1ZNC1ZyKm1HwXL4FF5Etftt",
     chain: "Ethereum (Sepolia)",
     short: "Sepolia",
+    feeLux: "1000000000",
+    running: false,
   }),
 });
 

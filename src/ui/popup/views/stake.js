@@ -412,10 +412,12 @@ function statusLine(st) {
 export function stakeFormView(ov, { state, actions } = {}) {
   const ctx = stakingContext(ov, { state, actions });
   const screen = ctx.st.screen ?? SCREEN_OVERVIEW;
-  if (screen === SCREEN_NATIVE && ctx.pos) return nativeStakeView(ov, ctx, { state, actions });
   if (screen === SCREEN_LIQUID) {
     return sozuLiquidStakingView(ov, { state, actions, onBack: () => setScreen(ctx.st, SCREEN_OVERVIEW, actions) });
   }
+  // Away from liquid staking, what it said about a Review it left is done with.
+  if (state.sozu?.notice) state.sozu.notice = "";
+  if (screen === SCREEN_NATIVE && ctx.pos) return nativeStakeView(ov, ctx, { state, actions });
   return stakingOverview(ov, ctx, { state, actions });
 }
 

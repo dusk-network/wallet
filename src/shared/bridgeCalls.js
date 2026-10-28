@@ -14,6 +14,7 @@
 
 import { keccak_256 } from "@noble/hashes/sha3";
 
+import { formatDuskExact, safeBigInt } from "./amount.js";
 import { BRIDGE_CONTRACTS, BRIDGE_SERVICE_ACCOUNTS } from "./bridge.js";
 import { toBytes } from "./bytes.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
@@ -422,18 +423,85 @@ export function isEvmAddress(value) {
 
 /**
  * A transfer to the bridge's account on Dusk (BRIDGE_SERVICE_ACCOUNTS),
- * which pays its memo's EVM address on another chain: that chain, and
- * whether the memo is an address there. Null for any other transfer, and
- * on a node that isn't its network's own.
- * @param {{ nodeUrl?: string, to?: string, memo?: string }} transfer
- * @returns {{ chain: string, short: string, recipient: string, recipientOk: boolean } | null}
+ * which pays its memo's EVM address on another chain: that chain, whether
+ * the memo is an address there, whether the bridge pays out there now, and
+ * what arrives of the amount once the bridge takes its fee. Null for any
+ * other transfer, and on a node that isn't its network's own.
+ * @param {{ nodeUrl?: string, to?: string, memo?: string, amount?: string|bigint }} transfer - `amount` in Lux
+ * @returns {{ chain: string, short: string, network: string, recipient: string, recipientOk: boolean,
+ *   running: boolean, sentLux: bigint, feeLux: bigint, arrivesLux: bigint } | null}
  */
-export function bridgeServiceTransfer({ nodeUrl, to, memo } = {}) {
+export function bridgeServiceTransfer({ nodeUrl, to, memo, amount } = {}) {
   const preset = presetOf(nodeUrl);
   const service = preset ? BRIDGE_SERVICE_ACCOUNTS[preset.id] : null;
   if (!service || String(to ?? "").trim() !== service.account) return null;
   const recipient = String(memo ?? "").trim();
-  return { chain: service.chain, short: service.short, recipient, recipientOk: isEvmAddress(recipient) };
+  const sentLux = safeBigInt(amount ?? 0, 0n);
+  const feeLux = BigInt(service.feeLux);
+  return {
+    chain: service.chain,
+    short: service.short,
+    network: preset.id,
+    recipient,
+    recipientOk: isEvmAddress(recipient),
+    running: service.running,
+    sentLux,
+    feeLux,
+    arrivesLux: sentLux > feeLux ? sentLux - feeLux : 0n,
+  };
+}
+
+/**
+ * What a transfer to the bridge's account comes to, in one line: "2 DUSK
+ * sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain", or
+ * "Nothing arrives" when the fee takes it all, the bridge doesn't pay out
+ * there now, or the memo is no address there to pay.
+ * @param {{ chain: string, running: boolean, recipientOk: boolean, sentLux: bigint, feeLux: bigint, arrivesLux: bigint }} service - bridgeServiceTransfer's
+ * @returns {string}
+ */
+export function bridgeServiceLine({ chain, running, recipientOk, sentLux, feeLux, arrivesLux }) {
+  const arrives = !running || arrivesLux <= 0n
+    ? `Nothing arrives on ${chain}`
+    : recipientOk
+      ? `${formatDuskExact(arrivesLux)} DUSK arrives on ${chain}`
+      : noBridgeRecipientText(chain);
+  return `${formatDuskExact(sentLux)} DUSK sent · ${formatDuskExact(feeLux)} DUSK bridge fee · ${arrives}`;
+}
+
+/**
+ * What arrives of a payment to the bridge's account whose memo is no address
+ * on its chain: "Nothing arrives without a BNB Smart Chain address in the memo".
+ * @param {string} chain - bridgeServiceTransfer's `chain`
+ * @returns {string}
+ */
+export function noBridgeRecipientText(chain) {
+  return `Nothing arrives without ${/^[aeiou]/i.test(chain) ? "an" : "a"} ${chain} address in the memo`;
+}
+
+/**
+ * What to warn of before paying the bridge's account, each as a title and
+ * a line: a route the bridge doesn't pay out on now ("off"), and an amount
+ * its fee takes whole ("fee").
+ * @param {ReturnType<typeof bridgeServiceTransfer>} service
+ * @returns {{ kind: "off" | "fee", title: string, text: string }[]}
+ */
+export function bridgeServiceWarnings(service) {
+  const out = [];
+  if (!service.running) {
+    out.push({
+      kind: "off",
+      title: `Not running on ${service.network} right now`,
+      text: `The bridge isn't paying out on ${service.short} at the moment, so DUSK sent to it doesn't arrive there.`,
+    });
+  }
+  if (service.arrivesLux <= 0n) {
+    out.push({
+      kind: "fee",
+      title: `Nothing arrives on ${service.short}`,
+      text: `The bridge takes its ${formatDuskExact(service.feeLux)} DUSK fee from the amount, and this is no more than that.`,
+    });
+  }
+  return out;
 }
 
 /**

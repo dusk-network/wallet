@@ -326,6 +326,8 @@ describe("hidden balances", () => {
         networkKey: "testnet",
         contracts: { pool, "staked-dusk": `0x${"02".repeat(32)}` },
         publicBalance: { value: "1482938300000" },
+        fees: { deposit: { numerator: "1", denominator: "400" }, reward: { numerator: "15", denominator: "100" } },
+        features: { maintenance: false, synchronization: false },
       },
       pool: { totalStakeLux: dusk(1050), tokenTotalSupply: dusk(1000) },
       position: { poolBalanceLux: dusk(7), stDuskBalanceLux: dusk(10) },
@@ -337,11 +339,12 @@ describe("hidden balances", () => {
       "stDUSK•••• stDUSKAdd to Assets",
     ]);
     button("Max").click();
-    expect(st.depositAmountDusk).toBe("1481.9383");
-    // What the typed amount gets isn't a balance: it shows.
+    expect(st.depositAmountDusk).toBe("1482.9233");
+    // What the typed amount gets, and Sozu's fee off it, aren't balances: they show.
     expect(visibleText(body.querySelector(".stake-estimate .stake-estimate__main"))).toBe(
-      "You get about 1,411.36 stDUSK, worth 1,481.9383 DUSK now."
+      "You get about 1,408.77 stDUSK, worth about 1,479.2159 DUSK now."
     );
+    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25% · 3.70730825 DUSK");
   });
 });
 
@@ -368,9 +371,16 @@ describe("still shown with balances hidden", () => {
     state = {
       route: "sozu_confirm",
       sozu: { loaded: true, profileIndex: 0, status: { publicBalance: { value: "1482938300000" } } },
-      sozuDraft: { fnName: "sozu_stake", deposit: dusk(10), profileIndex: 0, label: "Stake with Sozu" },
+      sozuDraft: {
+        fnName: "sozu_stake",
+        deposit: dusk(10),
+        profileIndex: 0,
+        label: "Stake with Sozu",
+        // Where it was drafted, as the form records it: this overview's.
+        reviewed: { context: 0, nodeUrl: NODE, networkKey: "testnet", walletId: ACCOUNT, profileIndex: 0, account: ACCOUNT },
+      },
     };
     await show(sozuConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect([amountOf(), ...fee()]).toEqual(["10 DUSK", "up to 0.5 DUSK", "up to 10.5 DUSK"]);
+    expect([amountOf(), ...fee()]).toEqual(["10 DUSK", "up to 0.005 DUSK", "up to 10.005 DUSK"]);
   });
 });

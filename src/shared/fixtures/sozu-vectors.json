@@ -1,0 +1,285 @@
+{
+  "about": "Sozu test vectors that both Dusk wallets run. Amounts are in lux, as decimal strings. Pools are pool.exchange_rate (numerator: DUSK staked, denominator: stDUSK supply); fees are substrate.stake_fee_rate bytes (numerator, then denominator, u64 little-endian), read on the dates in their names, or made up for the deposit fee their names give. A stake's fee is ceil(amount * n / d), its stDUSK floor((amount - fee) * supply / stake), 1:1 for an empty pool, and it goes ahead when amount > fee and stDUSK >= 1. The least stake is the smallest amount that goes ahead, or null when none does, as at a fee of 100%. An unstake goes ahead when 0 < amount <= pool.balance_of.",
+  "pools": {
+    "testnet-2026-10-26": {
+      "numerator": "8142876697294578",
+      "denominator": "2647997731233173"
+    },
+    "mainnet-2026-10-28": {
+      "numerator": "42969128319245900",
+      "denominator": "33347850501719821"
+    },
+    "empty": {
+      "numerator": "0",
+      "denominator": "0"
+    }
+  },
+  "fees": {
+    "mainnet-2026-10-27": {
+      "deposit": "01000000000000009001000000000000",
+      "reward": "0f000000000000006400000000000000"
+    },
+    "testnet-2026-10-27": {
+      "deposit": "19000000000000001027000000000000",
+      "reward": "0a000000000000006400000000000000"
+    },
+    "deposit-99.99%": {
+      "deposit": "0f270000000000001027000000000000",
+      "reward": "0a000000000000006400000000000000"
+    },
+    "deposit-100%": {
+      "deposit": "01000000000000000100000000000000",
+      "reward": "0a000000000000006400000000000000"
+    }
+  },
+  "feeRates": [
+    {
+      "fees": "mainnet-2026-10-27",
+      "kind": "deposit",
+      "bytes": "01000000000000009001000000000000",
+      "numerator": "1",
+      "denominator": "400",
+      "percent": "0.25%"
+    },
+    {
+      "fees": "mainnet-2026-10-27",
+      "kind": "reward",
+      "bytes": "0f000000000000006400000000000000",
+      "numerator": "15",
+      "denominator": "100",
+      "percent": "15%"
+    },
+    {
+      "fees": "testnet-2026-10-27",
+      "kind": "deposit",
+      "bytes": "19000000000000001027000000000000",
+      "numerator": "25",
+      "denominator": "10000",
+      "percent": "0.25%"
+    },
+    {
+      "fees": "testnet-2026-10-27",
+      "kind": "reward",
+      "bytes": "0a000000000000006400000000000000",
+      "numerator": "10",
+      "denominator": "100",
+      "percent": "10%"
+    }
+  ],
+  "duskPerStDusk": [
+    {
+      "pool": "testnet-2026-10-26",
+      "lux": "3075107127"
+    },
+    {
+      "pool": "mainnet-2026-10-28",
+      "lux": "1288512682"
+    },
+    {
+      "pool": "empty",
+      "lux": null
+    }
+  ],
+  "stakes": [
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "testnet-2026-10-27",
+      "amount": "100000000000",
+      "fee": "250000000",
+      "worth": "99750000000",
+      "stDusk": "32437894310",
+      "ok": true
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "mainnet-2026-10-27",
+      "amount": "1000000000",
+      "fee": "2500000",
+      "worth": "997500000",
+      "stDusk": "324378943",
+      "ok": true
+    },
+    {
+      "pool": "mainnet-2026-10-28",
+      "fees": "mainnet-2026-10-27",
+      "amount": "1000000000",
+      "fee": "2500000",
+      "worth": "997500000",
+      "stDusk": "774148375",
+      "ok": true
+    },
+    {
+      "pool": "mainnet-2026-10-28",
+      "fees": "mainnet-2026-10-27",
+      "amount": "1482938300000",
+      "fee": "3707345750",
+      "worth": "1479230954250",
+      "stDusk": "1148014275582",
+      "ok": true
+    },
+    {
+      "pool": "mainnet-2026-10-28",
+      "fees": "mainnet-2026-10-27",
+      "amount": "3",
+      "fee": "1",
+      "worth": "2",
+      "stDusk": "1",
+      "ok": true
+    },
+    {
+      "pool": "mainnet-2026-10-28",
+      "fees": "mainnet-2026-10-27",
+      "amount": "2",
+      "fee": "1",
+      "worth": "1",
+      "stDusk": "0",
+      "ok": false
+    },
+    {
+      "pool": "mainnet-2026-10-28",
+      "fees": "mainnet-2026-10-27",
+      "amount": "1",
+      "fee": "1",
+      "worth": "0",
+      "stDusk": "0",
+      "ok": false
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "mainnet-2026-10-27",
+      "amount": "5",
+      "fee": "1",
+      "worth": "4",
+      "stDusk": "1",
+      "ok": true
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "mainnet-2026-10-27",
+      "amount": "4",
+      "fee": "1",
+      "worth": "3",
+      "stDusk": "0",
+      "ok": false
+    },
+    {
+      "pool": "empty",
+      "fees": "mainnet-2026-10-27",
+      "amount": "2",
+      "fee": "1",
+      "worth": "1",
+      "stDusk": "1",
+      "ok": true
+    },
+    {
+      "pool": "empty",
+      "fees": "mainnet-2026-10-27",
+      "amount": "1",
+      "fee": "1",
+      "worth": "0",
+      "stDusk": "0",
+      "ok": false
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "deposit-99.99%",
+      "amount": "40000",
+      "fee": "39996",
+      "worth": "4",
+      "stDusk": "1",
+      "ok": true
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "deposit-99.99%",
+      "amount": "39999",
+      "fee": "39996",
+      "worth": "3",
+      "stDusk": "0",
+      "ok": false
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "deposit-100%",
+      "amount": "1000000000",
+      "fee": "1000000000",
+      "worth": "0",
+      "stDusk": "0",
+      "ok": false
+    }
+  ],
+  "minimums": [
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": null,
+      "least": "4"
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "mainnet-2026-10-27",
+      "least": "5"
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "testnet-2026-10-27",
+      "least": "5"
+    },
+    {
+      "pool": "mainnet-2026-10-28",
+      "fees": null,
+      "least": "2"
+    },
+    {
+      "pool": "mainnet-2026-10-28",
+      "fees": "mainnet-2026-10-27",
+      "least": "3"
+    },
+    {
+      "pool": "empty",
+      "fees": null,
+      "least": "1"
+    },
+    {
+      "pool": "empty",
+      "fees": "mainnet-2026-10-27",
+      "least": "2"
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "deposit-99.99%",
+      "least": "40000"
+    },
+    {
+      "pool": "testnet-2026-10-26",
+      "fees": "deposit-100%",
+      "least": null
+    }
+  ],
+  "unstakes": [
+    {
+      "balance": "12000000000",
+      "amount": "12000000000",
+      "ok": true
+    },
+    {
+      "balance": "12000000000",
+      "amount": "1",
+      "ok": true
+    },
+    {
+      "balance": "12000000000",
+      "amount": "12000000001",
+      "ok": false
+    },
+    {
+      "balance": "12000000000",
+      "amount": "0",
+      "ok": false
+    },
+    {
+      "balance": "0",
+      "amount": "1",
+      "ok": false
+    }
+  ]
+}

@@ -138,12 +138,36 @@ export const MIN_SHIELDED_STAKING_GAS = Object.freeze({
 });
 
 /**
+ * Gas for the wallet's own calls of Sozu's liquid staking pool, which are
+ * public. Under Rusk 1.7.1 a stake spends about 2.2M, and an unstake 2.8M to
+ * 3.7M on mainnet and testnet, about 6.3M at worst for one that reaches
+ * every provisioner of the mainnet pool. A failed call is charged its whole
+ * limit, so the limits stay close: 5M for a stake and 10M for an unstake,
+ * never under 2.5M and 4M. The web wallet uses the same numbers. A site's
+ * contract call keeps the contract call default.
+ */
+export const SOZU_GAS = Object.freeze({
+  sozu_stake: Object.freeze({ limit: "5000000", price: "1", minimum: "2500000" }),
+  sozu_unstake: Object.freeze({ limit: "10000000", price: "1", minimum: "4000000" }),
+});
+
+// Sozu's gas for one of the wallet's own public calls of its pool, by its function.
+function sozuGasFor(kind, opts = {}) {
+  const fnName = String(opts?.fnName ?? "");
+  if (kind !== TX_KIND.CONTRACT_CALL || privacyIsShielded(opts) || !Object.hasOwn(SOZU_GAS, fnName)) return null;
+  return SOZU_GAS[fnName];
+}
+
+/**
  * Return the default gas object for a given kind, or null.
  * @param {string} kind
- * @param {{privacy?: string}} [opts]
+ * @param {{privacy?: string, fnName?: string}} [opts] - `fnName` names a call
+ *   of Sozu's pool, sozu_stake or sozu_unstake, which has its own gas
  */
 export function getDefaultGas(kind, opts = {}) {
   const k = String(kind || "").toLowerCase();
+  const sozu = sozuGasFor(k, opts);
+  if (sozu) return Object.freeze({ limit: sozu.limit, price: sozu.price });
   if (k === TX_KIND.TRANSFER) {
     const privacy = String(opts?.privacy ?? "").trim().toLowerCase();
     if (privacy === "shielded") return DEFAULT_TRANSFER_GAS_BY_PRIVACY.shielded;
@@ -165,10 +189,12 @@ function privacyIsShielded(opts = {}) {
 /**
  * Return the client-side minimum gas floor for a given kind, or null.
  * @param {string} kind
- * @param {{privacy?: string}} [opts]
+ * @param {{privacy?: string, fnName?: string}} [opts] - `fnName` as getDefaultGas
  */
 export function getMinimumGas(kind, opts = {}) {
   const k = String(kind || "").toLowerCase();
+  const sozu = sozuGasFor(k, opts);
+  if (sozu) return Object.freeze({ limit: sozu.minimum });
   const privacy = String(opts?.privacy ?? "").trim().toLowerCase();
   if (k === TX_KIND.TRANSFER) {
     if (privacy === "shielded") return MIN_TRANSFER_GAS_BY_PRIVACY.shielded;

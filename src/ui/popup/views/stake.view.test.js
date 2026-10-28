@@ -7,8 +7,9 @@ import { accessibleName, installFakeDom, isShown, screenReaderText, settle, type
 import { lookupPrimaryName } from "../../../shared/duskNames.js";
 import { maxAmountLux } from "../../../shared/amount.js";
 import { stakeConfirmView, stakeFormView } from "./stake.js";
-import { sozuConfirmView, stDuskEstimate } from "./sozu.js";
+import { sozuConfirmView } from "./sozu.js";
 import { sentView } from "./sent.js";
+import { switchContext } from "../context.js";
 
 // The profile's verified name, as the header shows it: none unless a test gives one.
 vi.mock("../../../shared/duskNames.js", async (importOriginal) => ({
@@ -67,7 +68,7 @@ const staking = (ownerStatus = owner(), over = {}) => ({
   ...over,
 });
 // Sozu's pool: 3,071.932 DUSK staked for 1,000 stDUSK, so each stDUSK is worth
-// about 3.07 DUSK.
+// about 3.07 DUSK. Testnet's fees: 0.25% of a deposit and 10% of rewards.
 const sozu = (over = {}) => ({
   action: "deposit",
   depositAmountDusk: "",
@@ -81,6 +82,8 @@ const sozu = (over = {}) => ({
     networkKey: "testnet",
     contracts: { pool: POOL, "staked-dusk": ST_DUSK },
     publicBalance: { value: "1482938300000" },
+    fees: { deposit: { numerator: "25", denominator: "10000" }, reward: { numerator: "10", denominator: "100" } },
+    features: { maintenance: false, synchronization: false },
   },
   pool: { totalStakeLux: "3071932000000", tokenTotalSupply: dusk(1000) },
   position: { poolBalanceLux: "0", stDuskBalanceLux: "0" },
@@ -88,6 +91,9 @@ const sozu = (over = {}) => ({
 });
 
 const ov = (over = {}) => ({ selectedAccountIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network", networkName: "Testnet", ...over });
+// What Liquid staking says after leaving a stake's Review the popup moved away from.
+const SWITCHED = "The network or profile changed, so nothing was sent. Check the stake again.";
+const LOCKED = "The wallet locked, so nothing was sent. Check the stake again.";
 
 let dom;
 let body;
@@ -103,12 +109,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Draws Staking, its Review and Sent as app.js routes them, and redraws on render.
-function popup(state, overview = ov()) {
+// Draws Staking, its Review and Sent as app.js routes them, and redraws on
+// render. Sozu's status, read again before a stake is sent, is the one Staking
+// holds, unless `sozuStatus` gives what the node says by then.
+function popup(state, overview = ov(), { sozuStatus } = {}) {
   const actions = {
     send: vi.fn(async (message) => {
       if (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE") return { min: "1", median: "1", max: "1" };
       if (message.type === "DUSK_UI_SEND_TX") return { ok: true, result: { hash: "ab".repeat(32) } };
+      if (message.type === "DUSK_UI_GET_SOZU_STATUS") {
+        const st = state.sozu;
+        return { ok: true, result: sozuStatus ? await sozuStatus() : { ...st?.status, pool: st?.pool, position: st?.position } };
+      }
       return {};
     }),
     render: vi.fn(async () => draw()),
@@ -355,14 +367,15 @@ describe("native staking", () => {
     expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.15 DUSKTotalup to 1,482.7883 DUSK");
   });
 
-  it("sets aside Sozu's fee with custom gas from Settings: the custom price at the call's own limit", async () => {
+  it("sets aside Sozu's fees with custom gas from Settings: its price, and its limit where it clears the call's minimum", async () => {
+    // The stake takes the custom 2.5M, its minimum; the unstake Max keeps a fee for, its own 10M.
     const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
     popup(state, ov({ customGas: { limit: "2500000", price: "3" } }));
     button("Max").click();
-    expect(field("Stake amount").value).toBe("1479.9383");
+    expect(field("Stake amount").value).toBe("1482.9008");
     button("Review stake").click();
     await settle();
-    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 1.5 DUSKTotalup to 1,481.4383 DUSK");
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.0075 DUSKTotalup to 1,482.9083 DUSK");
     expect(button("Confirm").disabled).toBe(false);
   });
 
@@ -514,7 +527,7 @@ describe("staking reviews", () => {
     expect(body.querySelector(".review-visible").textContent).toBe(
       "Visible to everyone: the amount you stake with Sozu and your name alice.dusk."
     );
-    expect(body.querySelectorAll(".row > .group .kv").map(visibleText)[0]).toBe("You get about16.27 stDUSK, worth 50 DUSK now");
+    expect(body.querySelectorAll(".row > .group .kv").map(visibleText)[0]).toBe("You get about16.23 stDUSK, worth about 49.875 DUSK now");
 
     state.route = "stake";
     state.sozu.action = "withdraw";
@@ -523,32 +536,408 @@ describe("staking reviews", () => {
     button("Review unstake").click();
     await settle();
     expect(body.querySelectorAll(".row > .group .kv").map(visibleText)).toEqual(["Toalice.dusk · Public"]);
-    expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)[0]).toBe("Sozu returns the DUSK under Sozu's own rules.");
+    expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)[0]).toBe("The DUSK comes back in the same transaction. No fee, no waiting.");
   });
 });
 
 describe("liquid staking", () => {
-  it("says what a stake gets in stDUSK, and what that's worth now", () => {
-    // The rate is DUSK per stDUSK: the pool's total stake over the stDUSK supply.
-    const pool = { totalStakeLux: "3071932000000", tokenTotalSupply: dusk(1000) };
-    expect(stDuskEstimate(dusk(100), pool)).toBe("32.55");
-    expect(stDuskEstimate(dusk(100), { totalStakeLux: "0", tokenTotalSupply: "0" })).toBe("");
-
+  it("says Sozu's deposit fee before and as an amount is typed, and takes it off what the stake gets and is worth", () => {
     const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
     popup(state);
     expect(visibleText(body.querySelector(".stake-estimate"))).toBe("");
+    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25%");
     typeInto(field("Stake amount"), "100");
+    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25% · 0.25 DUSK");
     expect(body.querySelector(".stake-estimate").children.map(visibleText)).toEqual([
-      "You get about 32.55 stDUSK, worth 100 DUSK now.",
-      "stDUSK is Sozu's token for your share; its DUSK value grows as rewards come in.",
+      "You get about 32.47 stDUSK, worth about 99.75 DUSK now.",
+      "stDUSK is Sozu's token for your share. Its DUSK value follows Sozu's pool, its rewards and its fees.",
     ]);
-    // With nothing staked yet, stDUSK can still be added to Assets.
+    // Sozu's fees as read, the network fee and what a failed call costs, and the contract.
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
       "Any amount, no node neededYou get stDUSK, a token for your share of Sozu's pool.Add to Assets",
-      "Network fee up to 0.5 DUSKContract calls need more gas. You pay only what's used.",
+      "Sozu keeps 10% of rewards0.25% on deposits · No fee to unstake",
+      "Network fee up to 0.005 DUSKYou pay only the gas used. A call that fails is charged its whole limit.",
       `Sozu's contract${"72".repeat(3)}…${"72".repeat(3)}Copy`,
     ]);
     expect(body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Add stDUSK to Assets")).toBeTruthy();
+
+    // Mainnet's fees, as its substrate gives them.
+    state.sozu.status.fees = { deposit: { numerator: "1", denominator: "400" }, reward: { numerator: "15", denominator: "100" } };
+    popup(state);
+    expect(visibleText(body.querySelectorAll(".group.info .list-row")[1])).toBe("Sozu keeps 15% of rewards0.25% on deposits · No fee to unstake");
+  });
+
+  it("refuses a stake under the least that gets stDUSK at the rate now, after the fee", () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    popup(state);
+    // 1 lux: the fee takes all of it, and Sozu's pool would refuse it.
+    for (const tooLittle of ["0.000000001", "0.000000004"]) {
+      typeInto(field("Stake amount"), tooLittle);
+      expect(body.querySelector(".amount-field__error").textContent).toBe("The minimum stake is 0.000000005 DUSK.");
+      expect(button("Review stake").disabled).toBe(true);
+    }
+    typeInto(field("Stake amount"), "0.000000005");
+    expect(body.querySelector(".amount-field__error").hidden).toBe(true);
+    expect(visibleText(body.querySelector(".stake-estimate__main"))).toBe("You get about 0.000000001 stDUSK, worth about 0.000000004 DUSK now.");
+    expect(button("Review stake").disabled).toBe(false);
+  });
+
+  it("keeps a stake off until Sozu's fees are read, and says so", () => {
+    const status = { ...sozu().status, fees: null };
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ status }) };
+    popup(state);
+    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee not read yet");
+    expect(visibleText(body.querySelectorAll(".group.info .list-row")[1])).toBe("Sozu's feesThey couldn't be read just now.");
+    typeInto(field("Stake amount"), "5");
+    expect(body.querySelector(".amount-field__error").textContent).toBe("Sozu's rate and fees couldn't be read. Try again later.");
+    expect(button("Review stake").disabled).toBe(true);
+  });
+
+  it("turns staking off while Sozu has paused deposits, keeps unstaking, and warns while its pool is synchronizing", async () => {
+    const status = { ...sozu().status, features: { maintenance: true, synchronization: false } };
+    const state = {
+      route: "stake",
+      staking: staking(owner(), { screen: "liquid" }),
+      sozu: sozu({ status, position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }),
+    };
+    const app = popup(state);
+    expect(visibleText(body.querySelector(".sozu-paused"))).toBe("Sozu has paused depositsUnstaking still works.");
+    expect(field("Stake amount").disabled).toBe(true);
+    expect(button("Max").disabled).toBe(true);
+    expect(button("Review stake").disabled).toBe(true);
+    expect(body.querySelector(".sozu-sync")).toBeNull();
+
+    state.sozu.action = "withdraw";
+    app.draw();
+    expect(body.querySelector(".sozu-paused")).toBeNull();
+    typeInto(field("Unstake amount"), "5");
+    expect(button("Review unstake").disabled).toBe(false);
+
+    // Synchronizing: a call can fail, and a failed one costs its whole limit.
+    status.features = { maintenance: false, synchronization: true };
+    app.draw();
+    const sync = "Sozu is synchronizing its poolA stake or unstake can fail until it's done, and a failed call is charged its whole gas limit.";
+    expect(visibleText(body.querySelector(".sozu-sync"))).toBe(sync);
+    button("Review unstake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".sozu-sync"))).toBe(sync);
+    expect(button("Confirm").disabled).toBe(false);
+
+    // Paused after a stake was drafted: its Review says so, and Confirm stays off.
+    state.route = "stake";
+    state.sozu.action = "deposit";
+    app.draw();
+    typeInto(field("Stake amount"), "5");
+    button("Review stake").click();
+    await settle();
+    status.features = { maintenance: true, synchronization: false };
+    app.draw();
+    expect(body.querySelector(".row > .field-error").textContent).toBe("Sozu has paused deposits.");
+    expect(button("Confirm").disabled).toBe(true);
+  });
+
+  it("sends a stake with 5M gas and an unstake with 10M at the node's price, never under 2.5M and 4M, nor at the contract call default", async () => {
+    const liquid = (action) => ({
+      route: "stake",
+      staking: staking(owner(), { screen: "liquid" }),
+      sozu: sozu({ action, position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }),
+    });
+    const sentGas = (app) => app.actions.send.mock.calls.map(([m]) => m).find((m) => m.type === "DUSK_UI_SEND_TX")?.params.gas;
+
+    let app = popup(liquid("deposit"));
+    typeInto(field("Stake amount"), "5");
+    button("Review stake").click();
+    await settle();
+    let editor = body.querySelector("dusk-gas-editor");
+    expect(String(editor.minLimit)).toBe("2500000");
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.005 DUSKTotalup to 5.005 DUSK");
+    // Fields left empty send the stake's own gas.
+    editor.setGas(null);
+    button("Confirm").click();
+    await settle();
+    expect(sentGas(app)).toEqual({ limit: "5000000", price: "1" });
+
+    app = popup(liquid("withdraw"));
+    typeInto(field("Unstake amount"), "5");
+    button("Review unstake").click();
+    await settle();
+    editor = body.querySelector("dusk-gas-editor");
+    expect(String(editor.minLimit)).toBe("4000000");
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.01 DUSKTotalup to 0.01 DUSK");
+    button("Confirm").click();
+    await settle();
+    expect(sentGas(app)).toEqual({ limit: "10000000", price: "1" });
+  });
+
+  it("reads Sozu's terms again before sending a stake, and shows them for another Confirm when they changed", async () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    // What the node says when Confirm is pressed.
+    let now = { ...sozu().status, pool: sozu().pool, position: sozu().position };
+    const app = popup(state, ov(), { sozuStatus: () => now });
+    const sent = () => app.actions.send.mock.calls.map(([m]) => m).filter((m) => m.type === "DUSK_UI_SEND_TX");
+    const rows = () => body.querySelectorAll(".row > .group .kv").map(visibleText).slice(0, 2);
+    typeInto(field("Stake amount"), "100");
+    button("Review stake").click();
+    await settle();
+    expect(rows()).toEqual(["You get about32.47 stDUSK, worth about 99.75 DUSK now", "Deposit fee0.25% · 0.25 DUSK"]);
+
+    // Sozu's manager raises the deposit fee to 5% meanwhile: nothing is sent, and the new figures show.
+    now = { ...now, fees: { ...now.fees, deposit: { numerator: "5", denominator: "100" } } };
+    button("Confirm").click();
+    await settle();
+    expect(sent()).toEqual([]);
+    expect(visibleText(body.querySelector(".sozu-changed"))).toBe("Sozu's terms changedThese are the figures now. Check them, then confirm again.");
+    expect(rows()).toEqual(["You get about30.92 stDUSK, worth about 95 DUSK now", "Deposit fee5% · 5 DUSK"]);
+
+    // Confirmed again on those terms: sent, and only the call goes.
+    button("Confirm").click();
+    await settle();
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0].params).toMatchObject({ fnName: "sozu_stake", deposit: dusk(100), contractId: POOL });
+    expect(sent()[0].params).not.toHaveProperty("termsChanged");
+  });
+
+  it("doesn't send a stake when Sozu's terms can't be read again, or deposits were paused since its Review", async () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    let now = null;
+    const app = popup(state, ov(), { sozuStatus: () => now });
+    const sent = () => app.actions.send.mock.calls.map(([m]) => m).filter((m) => m.type === "DUSK_UI_SEND_TX");
+    const errors = () => body.querySelectorAll(".row > .field-error").filter(isShown).map((e) => e.textContent);
+    typeInto(field("Stake amount"), "100");
+    button("Review stake").click();
+    await settle();
+
+    button("Confirm").click();
+    await settle();
+    expect(sent()).toEqual([]);
+    expect(errors()).toEqual(["Couldn't check Sozu's terms just now, so nothing was sent. Try again."]);
+    expect(button("Confirm").disabled).toBe(false);
+
+    now = { ...sozu().status, pool: sozu().pool, features: { maintenance: true, synchronization: false } };
+    button("Confirm").click();
+    await settle();
+    expect(sent()).toEqual([]);
+    expect(errors()).toEqual(["Sozu has paused deposits."]);
+    expect(button("Confirm").disabled).toBe(true);
+  });
+
+  describe("a stake whose check of Sozu's terms answers late", () => {
+    // Review of a 100 DUSK stake, Confirm pressed, and Sozu's status held back
+    // until `answer` gives it: unchanged unless told otherwise.
+    async function lateCheck() {
+      const overview = ov();
+      const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu(), overview };
+      let release;
+      const held = new Promise((resolve) => (release = resolve));
+      const app = popup(state, overview, { sozuStatus: () => held });
+      typeInto(field("Stake amount"), "100");
+      button("Review stake").click();
+      await settle();
+      const draft = state.sozuDraft;
+      button("Confirm").click();
+      await settle();
+      const messages = (type) => app.actions.send.mock.calls.map(([m]) => m).filter((m) => m.type === type);
+      return {
+        state,
+        app,
+        draft,
+        reads: () => messages("DUSK_UI_GET_SOZU_STATUS").length,
+        sent: () => messages("DUSK_UI_SEND_TX"),
+        // Back on the stake's form, with the amount typed for the Review, and why.
+        backOnForm: (notice) => {
+          expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
+          expect(visibleText(body.querySelector(".sozu-notice"))).toBe(notice);
+          expect(field("Stake amount").value).toBe("100");
+        },
+        answer: async (over = {}) => {
+          release({ ...sozu().status, pool: sozu().pool, position: sozu().position, ...over });
+          await settle();
+        },
+      };
+    }
+
+    it("sends nothing when Review is left before the answer comes", async () => {
+      const t = await lateCheck();
+      expect(t.reads()).toBe(1);
+      body.querySelector(".subnav-back").click();
+      expect(t.state.route).toBe("stake");
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      expect(t.state.route).toBe("stake");
+    });
+
+    it("sends nothing for a stake whose Review another one took the place of meanwhile", async () => {
+      const t = await lateCheck();
+      body.querySelector(".subnav-back").click();
+      typeInto(field("Stake amount"), "50");
+      button("Review stake").click();
+      await settle();
+      expect(t.state.sozuDraft).not.toBe(t.draft);
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      // The new stake's own Review stays, its Confirm free to press.
+      expect(t.state.route).toBe("sozu_confirm");
+      expect(visibleText(body.querySelector(".review-head .balance-amount"))).toBe("50 DUSK");
+      expect(button("Confirm").disabled).toBe(false);
+    });
+
+    it.each([
+      ["the network changes", { nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }, SWITCHED],
+      ["the profile changes", { selectedAccountIndex: 1 }, SWITCHED],
+      ["the wallet locks", { isUnlocked: false }, LOCKED],
+    ])("sends nothing when %s before the answer comes, and goes back to the stake to say so", async (_, change, notice) => {
+      const t = await lateCheck();
+      t.state.overview = ov(change);
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      t.backOnForm(notice);
+    });
+
+    it("sends nothing when a switch starts before the answer comes, though the overview still names the Review's network", async () => {
+      const t = await lateCheck();
+      // The header's switch has begun: the wallet may be on the new network
+      // already, while the overview is still being read again.
+      switchContext(t.state);
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+    });
+
+    it("sends nothing when a switch starts as the Sent screen is drawn, and says so", async () => {
+      const t = await lateCheck();
+      const draw = t.app.actions.render.getMockImplementation();
+      t.app.actions.render.mockImplementation(async () => {
+        if (t.state.route === "sent") switchContext(t.state);
+        return draw();
+      });
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      const step = body.querySelector(".step");
+      expect([visibleText(step.querySelector(".step-title")), visibleText(step.querySelector(".step-sub"))]).toEqual([
+        "Not sent",
+        "The network or profile changed meanwhile. No fee was charged.",
+      ]);
+    });
+
+    it("leaves a Review drawn again after a switch at once, and its answer then does nothing", async () => {
+      const t = await lateCheck();
+      // The switch to Profile 2 is done first, and the popup draws again.
+      switchContext(t.state);
+      Object.assign(t.state.overview, { selectedAccountIndex: 1 });
+      t.app.draw();
+      t.backOnForm(SWITCHED);
+      expect(button("Confirm")).toBeUndefined();
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      t.backOnForm(SWITCHED);
+    });
+
+    it("goes back to the stake to say so when the answer comes from another network, as one another window switched to", async () => {
+      const t = await lateCheck();
+      await t.answer({ networkKey: "mainnet" });
+      expect(t.sent()).toEqual([]);
+      // Not a Confirm that does nothing: the stake's form, the overview read
+      // again, the amount kept and checked, and why.
+      t.backOnForm(SWITCHED);
+      expect(t.state.needsRefresh).toBe(true);
+      expect(button("Review stake").disabled).toBe(false);
+      // It says so until Staking shows another screen, or the stake is reviewed again.
+      body.querySelector(".subnav-back").click();
+      buttonStarting("Liquid staking").click();
+      expect(t.state.staking.screen).toBe("liquid");
+      expect(body.querySelector(".sozu-notice")).toBeNull();
+      t.state.sozu.notice = SWITCHED;
+      t.app.draw();
+      button("Review stake").click();
+      expect(t.state.sozu.notice).toBe("");
+    });
+
+    it("checks once and sends once however often Confirm is pressed, a redrawn Review's included", async () => {
+      const t = await lateCheck();
+      button("Confirm").click();
+      t.app.draw();
+      expect(button("Confirm").disabled).toBe(true);
+      button("Confirm").click();
+      await settle();
+      expect(t.reads()).toBe(1);
+      await t.answer();
+      expect(t.reads()).toBe(1);
+      expect(t.sent()).toHaveLength(1);
+      expect(t.sent()[0].params).toMatchObject({ fnName: "sozu_stake", deposit: dusk(100) });
+    });
+  });
+
+  describe("a stake's Review, drawn again after the popup moved away from where it was drafted", () => {
+    const THIRD =
+      "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+
+    it.each([
+      ["a switch to Profile 2", (state) => (switchContext(state), { selectedAccountIndex: 1 }), SWITCHED],
+      ["a switch to Mainnet", (state) => (switchContext(state), { nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }), SWITCHED],
+      ["a lock and an unlock", (state) => (switchContext(state, "lock"), {}), LOCKED],
+      ["another wallet unlocked in another window", () => ({ accounts: [THIRD] }), SWITCHED],
+    ])("offers no Confirm after %s, and goes back to the stake to say so", async (_, move, notice) => {
+      const overview = ov({ accounts: [ACCOUNT, OTHER] });
+      const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu(), overview };
+      const app = popup(state, overview);
+      typeInto(field("Stake amount"), "100");
+      button("Review stake").click();
+      await settle();
+      expect(button("Confirm").disabled).toBe(false);
+
+      // The Review, left idle, is drawn again once the popup moved on: it
+      // offers no Confirm, and the stake's form shows instead.
+      Object.assign(overview, move(state));
+      app.draw();
+      expect(button("Confirm")).toBeUndefined();
+      expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
+      expect(visibleText(body.querySelector(".sozu-notice"))).toBe(notice);
+      expect(field("Stake amount").value).toBe("100");
+      await settle();
+      expect(app.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);
+    });
+
+    it("leaves a stake drafted on a form drawn before a switch began, at once", async () => {
+      const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+      popup(state);
+      typeInto(field("Stake amount"), "100");
+      // The switch starts while the form shows, and Review stake is pressed
+      // before the form is drawn again: its figures are for the old network.
+      switchContext(state);
+      button("Review stake").click();
+      await settle();
+      expect(button("Confirm")).toBeUndefined();
+      expect([state.route, state.sozuDraft]).toEqual(["stake", null]);
+      expect(visibleText(body.querySelector(".sozu-notice"))).toBe(SWITCHED);
+    });
+  });
+
+  it("keeps staking off while it can't tell whether Sozu takes deposits, and says so", () => {
+    const status = { ...sozu().status, features: { maintenance: null, synchronization: false } };
+    const state = {
+      route: "stake",
+      staking: staking(owner(), { screen: "liquid" }),
+      sozu: sozu({ status, position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }),
+    };
+    const app = popup(state);
+    expect(visibleText(body.querySelector(".sozu-paused"))).toBe(
+      "Sozu's deposits couldn't be checkedStaking stays off until they can be. Unstaking still works."
+    );
+    expect(field("Stake amount").disabled).toBe(true);
+    expect(button("Review stake").disabled).toBe(true);
+    state.sozu.action = "withdraw";
+    app.draw();
+    typeInto(field("Unstake amount"), "5");
+    expect(button("Review unstake").disabled).toBe(false);
+  });
+
+  it("says no stake gets stDUSK when Sozu's deposit fee is 100%", () => {
+    const status = { ...sozu().status, fees: { ...sozu().status.fees, deposit: { numerator: "1", denominator: "1" } } };
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ status }) };
+    popup(state);
+    typeInto(field("Stake amount"), "100");
+    expect(body.querySelector(".amount-field__error").textContent).toBe("No stake gets stDUSK at Sozu's deposit fee now.");
+    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 100% · 100 DUSK");
+    expect(button("Review stake").disabled).toBe(true);
   });
 
   it("checks the amount as it is typed, and drafts the stake and the unstake", () => {
@@ -568,7 +957,7 @@ describe("liquid staking", () => {
     );
     expect(button("Review stake").disabled).toBe(true);
     button("Max").click();
-    expect(field("Stake amount").value).toBe("1481.9383");
+    expect(field("Stake amount").value).toBe("1482.9233");
     typeInto(field("Stake amount"), "5");
     button("Review stake").click();
     expect(state.sozuDraft).toMatchObject({ kind: "contract_call", fnName: "sozu_stake", amount: "0", deposit: dusk(5) });
@@ -577,6 +966,7 @@ describe("liquid staking", () => {
     state.route = "stake";
     state.sozu.action = "withdraw";
     app.draw();
+    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("The DUSK comes back in the same transaction. No fee, no waiting.");
     typeInto(field("Unstake amount"), "13");
     expect(body.querySelector(".amount-field__error").textContent).toBe("That's more than you have staked with Sozu.");
     button("Max").click();
@@ -595,13 +985,14 @@ describe("liquid staking", () => {
       "Liquid staking100 DUSKWith Sozu, a third partyVisible to everyone: the amount you stake with Sozu and your account."
     );
     expect(body.querySelectorAll(".row > .group .kv").map(visibleText)).toEqual([
-      "You get about32.55 stDUSK, worth 100 DUSK now",
+      "You get about32.47 stDUSK, worth about 99.75 DUSK now",
+      "Deposit fee0.25% · 0.25 DUSK",
       "FromProfile 1 · Public",
     ]);
-    // Who holds it, and why the fee cap is higher than a transfer's.
+    // Who holds it, and what a failed call costs.
     expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)).toEqual([
       "Sozu, not Dusk, holds this DUSK and returns it under Sozu's own rules.",
-      "Contract calls need more gas. You pay only what's used.",
+      "You pay only the gas used. A call that fails is charged its whole limit.",
     ]);
     button("Confirm").click();
     await settle();
@@ -610,9 +1001,35 @@ describe("liquid staking", () => {
       params: { kind: "contract_call", fnName: "sozu_stake", profileIndex: 0, deposit: dusk(100) },
       asset: { kind: "sozu", action: "sozu_stake" },
     });
-    expect(sentTx.params).not.toHaveProperty("stDuskEstimate");
+    expect(sentTx.params).not.toHaveProperty("quote");
+    expect(sentTx.params.gas).toEqual({ limit: "5000000", price: "1" });
     expect(state.route).toBe("sent");
     expect(visibleText(body.querySelector(".sent-head"))).toBe("Liquid staking100 DUSKWith Sozu, a third party");
+  });
+
+  it("asks the wallet to send a stake or an unstake only on the wallet, profile and network of its Review", async () => {
+    const overview = ov({ selectedAccountIndex: 1, accounts: [ACCOUNT, OTHER] });
+    for (const [action, amount, review] of [
+      ["deposit", "Stake amount", "Review stake"],
+      ["withdraw", "Unstake amount", "Review unstake"],
+    ]) {
+      const state = {
+        route: "stake",
+        staking: staking(owner(), { screen: "liquid", profileIndex: 1 }),
+        sozu: sozu({ action, profileIndex: 1, position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }),
+      };
+      const app = popup(state, overview);
+      typeInto(field(amount), "5");
+      button(review).click();
+      await settle();
+      button("Confirm").click();
+      await settle();
+      const sentTx = app.actions.send.mock.calls.map(([m]) => m).find((m) => m.type === "DUSK_UI_SEND_TX");
+      expect(sentTx.params).toMatchObject({
+        profileIndex: 1,
+        _approvalContext: { walletId: ACCOUNT, profileIndex: 1, account: OTHER, nodeUrl: "https://testnet.nodes.dusk.network" },
+      });
+    }
   });
 
   it("hides what Sozu holds with Hide balances, but not what a typed amount gets or the fee", () => {
@@ -628,8 +1045,8 @@ describe("liquid staking", () => {
     ]);
     expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available •••• DUSK from your public balance");
     typeInto(field("Stake amount"), "100");
-    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.55 stDUSK, worth 100 DUSK now.");
-    expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.5 DUSK");
+    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.47 stDUSK, worth about 99.75 DUSK now.");
+    expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.005 DUSK");
   });
 });
 
