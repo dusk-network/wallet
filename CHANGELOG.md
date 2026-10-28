@@ -10,6 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - Added Activity to the full view's sidebar.
+- Added Forgot your password? to the unlock screen: a restore from the recovery phrase that keeps the same wallet's contacts.
 - Showed Sozu's fees on Liquid staking as its contract has them: its share of rewards, the deposit fee and no fee to unstake.
 - Showed Sozu's deposit fee on each stake as it's typed and on Review, and took it off what the stake gets.
 - Turned staking with Sozu off while Sozu has paused deposits or they can't be checked, and warned while its pool is synchronizing.

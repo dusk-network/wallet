@@ -27,6 +27,17 @@ export function lockedView({ state, actions } = {}) {
   // The button says "Unlocking…" meanwhile.
   const busyCallout = h("p", { class: "auth-note", style: "display:none", text: "This can take a moment." });
 
+  // A forgotten password: the wallet restored from its recovery phrase.
+  const forgot = h("button", {
+    class: "text-btn auth-forgot",
+    type: "button",
+    text: "Forgot your password?",
+    onclick: () => {
+      state.route = "restore";
+      actions?.render?.()?.catch?.(() => {});
+    },
+  });
+
   let busy = false;
   const btn = h("button", {
     class: "btn-primary btn-full",
@@ -36,6 +47,7 @@ export function lockedView({ state, actions } = {}) {
       busy = true;
       btn.disabled = true;
       pwd.disabled = true;
+      forgot.disabled = true;
       btn.textContent = "Unlocking…";
       busyCallout.style.display = "block";
       showError("");
@@ -55,6 +67,7 @@ export function lockedView({ state, actions } = {}) {
         busy = false;
         btn.disabled = false;
         pwd.disabled = false;
+        forgot.disabled = false;
         btn.textContent = "Unlock";
         busyCallout.style.display = "none";
       }
@@ -66,6 +79,7 @@ export function lockedView({ state, actions } = {}) {
       h("div", { class: "row" }, [h("label", { for: "unlock-password", text: "Password" }), pwd, errLine]),
       btn,
       busyCallout,
+      forgot,
     ]),
   ];
 }

@@ -54,6 +54,7 @@ const mocks = vi.hoisted(() => {
       if (method === "engine_unlock") {
         return { accounts: ["acct0"] };
       }
+      if (method === "engine_walletId") return "acct0";
       if (method === "engine_lock") {
         mocks.engineUnlocked = false;
       }
@@ -360,6 +361,36 @@ describe("background auto-lock activity", () => {
     const create = await sendBackgroundMessage({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet B", password: "password123" });
     expect(create.error.message).toBe(failure.message);
     expect(mocks.createVault).not.toHaveBeenCalled();
+  });
+
+  it("restores a wallet in place of the one here once its phrase makes one: as Reset does, keeping its contacts", async () => {
+    mocks.engineUnlocked = false;
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" });
+    expect(response).toEqual({ ok: true, accounts: ["acct0"] });
+    const order = (fn) => fn.mock.invocationCallOrder[0];
+    const methods = mocks.engineCall.mock.calls.map(([method]) => method);
+    const named = mocks.engineCall.mock.invocationCallOrder[methods.indexOf("engine_walletId")];
+    expect(named).toBeLessThan(order(mocks.beginReset));
+    expect(order(mocks.beginReset)).toBeLessThan(order(mocks.clearPermissions));
+    expect(order(mocks.clearPermissions)).toBeLessThan(order(mocks.finishReset));
+    expect(order(mocks.finishReset)).toBeLessThan(order(mocks.clearVault));
+    expect(order(mocks.clearVault)).toBeLessThan(order(mocks.createVault));
+    expect(mocks.finishReset).toHaveBeenCalledWith({ keepContactsOf: "acct0" });
+    expect(mocks.createVault).toHaveBeenCalledWith("wallet A", "new password");
+    expect(methods.at(-1)).toBe("engine_unlock");
+  });
+
+  it("leaves the wallet here as it was when the phrase makes no wallet, or the wallet is unlocked", async () => {
+    mocks.engineUnlocked = false;
+    mocks.engineCall.mockRejectedValueOnce(new Error("That isn't a valid recovery phrase."));
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "not a phrase", password: "new password" });
+    expect(response.error.message).toBe("That isn't a valid recovery phrase.");
+    mocks.engineUnlocked = true;
+    const unlocked = await sendBackgroundMessage({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" });
+    expect(unlocked.error.message).toMatch(/lock the wallet first/i);
+    for (const fn of [mocks.beginReset, mocks.clearPermissions, mocks.finishReset, mocks.clearVault, mocks.createVault, mocks.cancelPendingApprovals]) {
+      expect(fn).not.toHaveBeenCalled();
+    }
   });
 
   it("does not clear the vault when reset cannot lock the engine", async () => {

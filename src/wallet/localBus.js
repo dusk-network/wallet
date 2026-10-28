@@ -51,6 +51,7 @@ import {
   setShieldedCheckpointNow,
   startShieldedSync,
   unlockWithMnemonic,
+  walletIdOf,
   waitTxExecuted,
   waitTxRemoved,
   getMinimumStake,
@@ -194,6 +195,28 @@ export async function localSend(message) {
         await finishPendingReset();
         // A new wallet starts with no contacts: any kept here are another's.
         await clearContacts();
+        await createVault(mnemonic, password);
+        await ensureEngineConfigured();
+        await unlockWithMnemonic(String(mnemonic));
+        return { ok: true, accounts: getAccounts() };
+      });
+    }
+
+    // A forgotten password: the wallet restored from its recovery phrase in
+    // place of the one here, as background/index.js does it.
+    if (message?.type === "DUSK_UI_RESTORE_WALLET") {
+      return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        const { mnemonic, password } = message;
+        if (!mnemonic || !password) {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "mnemonic and password required");
+        }
+        if (isUnlocked()) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock the wallet first");
+        const walletId = await walletIdOf(String(mnemonic));
+        lock();
+        await beginReset();
+        await clearPermissions();
+        await finishReset({ keepContactsOf: walletId });
+        await clearVault();
         await createVault(mnemonic, password);
         await ensureEngineConfigured();
         await unlockWithMnemonic(String(mnemonic));

@@ -4823,6 +4823,12 @@ p.auth-note {
   text-align: center;
 }
 
+/* "Forgot your password?" under Unlock: a quiet way to the restore */
+button.text-btn.auth-forgot {
+  align-self: center;
+  color: var(--text-muted);
+}
+
 .onboard-choices .row-icon svg {
   width: 18px;
   height: 18px;

@@ -6,8 +6,11 @@ import {
   onboardingCreatePasswordView,
   onboardingImportView,
   onboardingWelcomeView,
+  restoreWalletView,
 } from "./popup/views/onboarding.js";
 import { lockedView } from "./popup/views/locked.js";
+
+vi.mock("../wallet/bus.js", () => ({ send: vi.fn() }));
 
 const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
@@ -139,6 +142,52 @@ describe("setting up and unlocking", () => {
     // Shown while an unlock runs.
     const note = body.querySelector(".auth-note");
     expect([note.textContent, isShown(note)]).toEqual(["This can take a moment.", false]);
-    expect(visibleText(body)).toBe("Unlock your walletPasswordUnlock");
+    expect(visibleText(body)).toBe("Unlock your walletPasswordUnlockForgot your password?");
+  });
+
+  it("restores the wallet from its phrase and a new password, saying first what that does", async () => {
+    const state = { route: "restore" };
+    const acts = actions();
+    const body = show(restoreWalletView({ state, actions: acts }));
+    expect(body.querySelector("h1").textContent).toBe("Restore wallet");
+    expect(body.querySelector(".auth-lead").textContent).toBe(
+      "This removes the wallet from this browser and sets it up again with a new password. Contacts stay if it's the same wallet."
+    );
+    const group = body.querySelector("[role=group]");
+    typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
+    button(body, "Restore wallet").click();
+    await settle();
+    expect(errorOf(group)).toBe("That isn't a valid recovery phrase. Check each word.");
+
+    typeInto(field(body, "Word 1"), MNEMONIC);
+    typeInto(field(body, "New password"), "long enough");
+    typeInto(field(body, "Confirm password"), "long enough");
+    button(body, "Restore wallet").click();
+    await settle();
+    expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: MNEMONIC, password: "long enough" });
+    expect(state.route).toBe("home");
+    expect(JSON.stringify(state)).not.toContain("long enough");
+  });
+
+  it("goes from the unlock form to the restore and back, keeping what's typed while the popup redraws", async () => {
+    const make = (tag, props = {}) => Object.assign(dom.document.createElement(tag), props);
+    const pill = make("button", { id: "network-pill" });
+    pill.appendChild(make("span", { className: "network-pill__label" }));
+    const app = make("div", { id: "app" });
+    dom.document.body.append(pill, make("div", { id: "header-actions" }), app);
+    vi.resetModules();
+    const { send } = await import("../wallet/bus.js");
+    send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? { hasVault: true, isUnlocked: false, networkName: "Testnet" } : {}));
+    const { render } = await import("./popup/app.js");
+    await render();
+    button(app, "Forgot your password?").click();
+    await settle();
+    expect(app.querySelector("h1").textContent).toBe("Restore wallet");
+    typeInto(field(app, "Word 1"), "abandon");
+    await render({ forceRefresh: true });
+    expect(field(app, "Word 1").value).toBe("abandon");
+    button(app, "← Back").click();
+    await settle();
+    expect(app.querySelector("h1").textContent).toBe("Unlock your wallet");
   });
 });

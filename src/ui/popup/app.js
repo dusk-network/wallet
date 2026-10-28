@@ -40,6 +40,7 @@ import {
   onboardingCreatePhraseView,
   onboardingCreateConfirmView,
   onboardingImportView,
+  restoreWalletView,
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
 import { getRuntimeKind, isExtensionRuntime } from "../../platform/runtime.js";
@@ -186,8 +187,10 @@ function pulseViewAnimation() {
   }
 }
 
-// Retain the mounted unlock nodes, not a password copy in application state.
+// Retain the mounted unlock nodes, not a password copy in application state:
+// the unlock form's, or the restore's ("unlock" | "restore").
 let activeLockedView = null;
+let activeLockedScreen = "";
 // The screen last drawn, to start a new one at its top.
 let lastScreen = "";
 
@@ -858,13 +861,21 @@ export async function render({ forceRefresh = false } = {}) {
   }
 
   if (!ov.isUnlocked) {
-    const children = activeLockedView ?? lockedView({ state, actions });
+    const screen = state.route === "restore" ? "restore" : "unlock";
+    const children =
+      activeLockedView && activeLockedScreen === screen
+        ? activeLockedView
+        : screen === "restore"
+        ? restoreWalletView({ state, actions })
+        : lockedView({ state, actions });
     setApp(children);
     activeLockedView = children;
+    activeLockedScreen = screen;
     return;
   }
 
-  // Unlocked routes
+  // Unlocked routes. A restore that another window's unlock overtook goes home.
+  if (state.route === "restore") state.route = "home";
   // After Confirm: the transaction's steps. Without one (a new popup), home.
   if (state.route === "sent") {
     if (state.sent) {

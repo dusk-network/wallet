@@ -1,5 +1,5 @@
 import "./bufferGlobal.js";
-import { mnemonicToSeedSync } from "bip39";
+import { mnemonicToSeedSync, validateMnemonic } from "bip39";
 import {
   Bookkeeper,
   Bookmark,
@@ -843,6 +843,27 @@ export async function sealContactsRecord(text) {
   const record = await sealContacts(key, namespace, String(text ?? ""));
   assertContactsSession(generation, walletId);
   return { namespace, record };
+}
+
+/**
+ * The wallet a recovery phrase makes, without unlocking it: its ID, the
+ * first profile's public account, as unlockWithMnemonic gives it. A phrase
+ * that isn't a valid one is refused before anything is derived.
+ * @param {string} mnemonic
+ * @returns {Promise<string>}
+ */
+export async function walletIdOf(mnemonic) {
+  const phrase = String(mnemonic ?? "").trim().replace(/\s+/g, " ");
+  if (!validateMnemonic(phrase)) throw new Error("That isn't a valid recovery phrase.");
+  await withTimeout(ensureProtocolDriverLoaded(), 120_000, "Timed out loading protocol driver");
+  const seed = Uint8Array.from(mnemonicToSeedSync(phrase));
+  try {
+    const walletId = (await new ProfileGenerator(async () => seed.slice()).default)?.account?.toString?.() ?? "";
+    if (!walletId) throw new Error("Derived profile has no wallet ID");
+    return walletId;
+  } finally {
+    seed.fill(0);
+  }
 }
 
 /**

@@ -7,7 +7,7 @@
 // the old one's data.
 
 import { clearActivityStore } from "./activityStore.js";
-import { clearContacts } from "./contactsStore.js";
+import { clearContacts, keepOnlyContactsOf } from "./contactsStore.js";
 import { clearShieldedStore } from "./shieldedStore.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { clearTxs } from "./txStore.js";
@@ -19,10 +19,14 @@ export async function beginReset() {
 
 /**
  * Clear the old wallet's data, every store tried, then end the reset. Throws
- * when a store couldn't be cleared, and the reset stays pending.
+ * when a store couldn't be cleared, and the reset stays pending. A wallet
+ * restored in place of the old one (`keepContactsOf`, its ID) keeps its own
+ * contacts.
+ * @param {{ keepContactsOf?: string }} [opts]
  */
-export async function finishReset() {
-  const results = await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore(), clearContacts()]);
+export async function finishReset({ keepContactsOf } = {}) {
+  const contacts = keepContactsOf ? keepOnlyContactsOf(keepContactsOf) : clearContacts();
+  const results = await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore(), contacts]);
   if (results.some((r) => r.status === "rejected")) {
     throw new Error("The old wallet's data couldn't be cleared. Try again.");
   }

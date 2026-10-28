@@ -975,6 +975,42 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // A forgotten password: the wallet restored from its recovery phrase in
+      // place of the one here. Nothing goes until the phrase has made its
+      // wallet; then the vault, sites, history and notes are replaced as
+      // Reset does, and of the contacts only that wallet's stay.
+      if (message?.type === "DUSK_UI_RESTORE_WALLET") {
+        const accounts = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const { mnemonic, password } = message;
+          if (!mnemonic || !password) {
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "mnemonic and password required");
+          }
+          if ((await getEngineStatusStrict())?.isUnlocked) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock the wallet first");
+          }
+          await ensureEngineConfigured();
+          const walletId = await engineCall("engine_walletId", { mnemonic: String(mnemonic) }, { timeoutMs: 120_000 });
+
+          await lockWallet("restore");
+          await beginReset();
+          await clearPermissions();
+          await finishReset({ keepContactsOf: walletId });
+          await clearVault();
+          await createVault(mnemonic, password);
+          const result = await unlockEngine(String(mnemonic));
+          await updateActivity();
+          setupAutoLockAlarm().catch(console.error);
+          broadcastProfilesChangedAll().catch(() => {});
+          emitUiLockState(true, "restore").catch(() => {});
+          return Array.isArray(result?.accounts)
+            ? result.accounts
+            : (await getEngineStatusStrict()).accounts;
+        });
+
+        sendResponse({ ok: true, accounts });
+        return;
+      }
+
       // UI checks status
       if (message?.type === "DUSK_UI_STATUS") {
         const vault = await loadVault();

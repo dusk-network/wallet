@@ -59,6 +59,19 @@ describe("walletReset", () => {
     expect(await pending()).toBe(false);
   });
 
+  it("keeps the contacts of a wallet restored in place of the old one, and only those", async () => {
+    const { storage, STORAGE_KEYS } = await import("./storage.js");
+    const { contactsNamespace } = await import("./contactsCrypto.js");
+    const [mine, theirs] = await Promise.all([contactsNamespace("acct-restored"), contactsNamespace("acct-other")]);
+    await storage.set({ [STORAGE_KEYS.CONTACTS]: { [mine]: { v: 1 }, [theirs]: { v: 1 } } });
+    await reset.beginReset();
+    await reset.finishReset({ keepContactsOf: "acct-restored" });
+    expect((await storage.get(STORAGE_KEYS.CONTACTS))[STORAGE_KEYS.CONTACTS]).toEqual({ [mine]: { v: 1 } });
+    // A plain reset keeps none.
+    await reset.finishReset();
+    expect(await storage.get(STORAGE_KEYS.CONTACTS)).toEqual({});
+  });
+
   it("tries every store when one can't be cleared, fails, and stays pending until it can", async () => {
     const owner = activity.activityOwnerKey("testnet", "acct");
     await txs.putTxMeta("aa".repeat(32), { status: "executed", submittedAt: 1 });
