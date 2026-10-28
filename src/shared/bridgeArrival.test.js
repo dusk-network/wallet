@@ -30,7 +30,7 @@ const TO = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
 const L2 = (n) => `0x${String(n).repeat(64).slice(0, 64)}`;
 const NOW = Date.parse("2026-10-28T12:00:00Z");
 
-// A deposit of `lux` to TO, executed `ago` ms before NOW.
+// A deposit of `lux` to TO, in a Dusk block `ago` ms before NOW.
 const deposit = (hash, { lux = "500000000", ago = 180_000, ...over } = {}) => ({
   hash: hash.repeat(64).slice(0, 64),
   kind: "contract_call",
@@ -40,7 +40,7 @@ const deposit = (hash, { lux = "500000000", ago = 180_000, ...over } = {}) => ({
   deposit: lux,
   bridgeTo: TO,
   status: "executed",
-  executedAt: NOW - ago,
+  finalizedAt: NOW - ago,
   nodeUrl: TESTNET,
   ...over,
 });
@@ -58,6 +58,8 @@ const call = (hash, { wei = "500000000000000000", ago = 60_000, from = L2_BRIDGE
 let calls;
 let fetch;
 let arrivals;
+// Blockscout's pages of TO's incoming calls, newest first: `calls` as one, else these, in order.
+let pages;
 
 beforeEach(async () => {
   vi.resetModules();
@@ -65,7 +67,13 @@ beforeEach(async () => {
   hooks.beforeSet = null;
   epoch.now = 1;
   calls = [];
-  fetch = vi.fn(async (url) => new Response(JSON.stringify({ items: calls, next_page_params: null })));
+  pages = null;
+  fetch = vi.fn(async (url) => {
+    if (!pages) return new Response(JSON.stringify({ items: calls, next_page_params: null }));
+    const at = Number(new URL(url).searchParams.get("page") ?? 0);
+    const next = at + 1 < pages.length ? { page: at + 1, items_count: 50 } : null;
+    return new Response(JSON.stringify({ items: pages[at], next_page_params: next }));
+  });
   vi.stubGlobal("fetch", fetch);
   arrivals = await import("./bridgeArrival.js");
 });
@@ -155,6 +163,51 @@ describe("a deposit to DuskEVM's arrival", () => {
     expect(arrivalOf(deposit("a").hash)).not.toBeNull();
     await clearArrivals();
     expect([arrivalOf(deposit("a").hash), items.dusk_bridge_arrivals_v1]).toEqual([null, undefined]);
+  });
+
+  it("reads the recipient's calls page after page back to its oldest deposit, so same-amount deposits each get their own", async () => {
+    const { arrivalOf, checkArrivals } = arrivals;
+    const older = deposit("a", { ago: 3_600_000 });
+    const newer = deposit("b", { ago: 300_000 });
+    // The newer's payment on the first page, the older's on the second; the third goes back past both, the fourth isn't read.
+    pages = [
+      [call(L2(2), { ago: 240_000 })],
+      [call(L2(1), { ago: 3_540_000 })],
+      [call(L2(3), { ago: 7_200_000 })],
+      [call(L2(4), { ago: 9_000_000 })],
+    ];
+    await expect(checkArrivals([newer, older], { nodeUrl: TESTNET, now: NOW })).resolves.toBe(2);
+    expect([arrivalOf(older.hash)?.hash, arrivalOf(newer.hash)?.hash]).toEqual([L2(1), L2(2)]);
+    expect(fetch.mock.calls.map(([url]) => new URL(url).search)).toEqual([
+      "?filter=to",
+      "?filter=to&page=1&items_count=50",
+      "?filter=to&page=2&items_count=50",
+    ]);
+  });
+
+  it("matches nothing for a recipient whose calls run past five pages before its oldest deposit", async () => {
+    const { arrivalOf, checkArrivals } = arrivals;
+    const old = deposit("a", { ago: 3_600_000 });
+    // Five pages of later calls, one a payment of the same amount for another deposit; the deposit's own beyond them.
+    pages = [
+      ...Array.from({ length: 5 }, (_, i) => [call(L2(i + 2), { ago: 60_000 * (i + 1), ...(i === 2 ? {} : { wei: "1" }) })]),
+      [call(L2(1), { ago: 3_540_000 })],
+    ];
+    await expect(checkArrivals([old], { nodeUrl: TESTNET, now: NOW })).resolves.toBe(0);
+    expect([fetch.mock.calls.length, arrivalOf(old.hash)]).toEqual([5, null]);
+  });
+
+  it("takes a deposit's time from its Dusk block, never the wallet's clock: nothing is asked until the block's time is known", async () => {
+    const { arrivalOf, awaitingArrival, checkArrivals } = arrivals;
+    // The wallet's clock half an hour behind; an older deposit's payment of the same amount 20 minutes before this one's block.
+    const sent = { ...deposit("a"), finalizedAt: undefined, executedAt: NOW - 180_000 - 1_800_000, submittedAt: NOW - 190_000 - 1_800_000 };
+    calls = [call(L2(2), { ago: 60_000 }), call(L2(1), { ago: 1_380_000 })];
+    expect(awaitingArrival(sent, TESTNET, NOW)).toBe(false);
+    await expect(checkArrivals([sent], { nodeUrl: TESTNET, now: NOW })).resolves.toBe(0);
+    expect([fetch.mock.calls.length, arrivalOf(sent.hash)]).toEqual([0, null]);
+    // Its block's time, from the node: its own payment, after it.
+    await expect(checkArrivals([{ ...sent, finalizedAt: NOW - 180_000 }], { nodeUrl: TESTNET, now: NOW })).resolves.toBe(1);
+    expect(arrivalOf(sent.hash)?.hash).toBe(L2(2));
   });
 
   it("is forgotten in every page once a wallet reset anywhere moves the reset count on", async () => {

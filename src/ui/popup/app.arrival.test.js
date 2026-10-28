@@ -34,6 +34,8 @@ const deposit = (over = {}) => ({
   status: "executed",
   submittedAt: Date.now() - 190_000,
   executedAt: Date.now() - 180_000,
+  // Its block's time, as the node gave it.
+  finalizedAt: Date.now() - 185_000,
   profileIndex: 0,
   nodeUrl: TESTNET,
   ...over,

@@ -27,6 +27,8 @@ const CLOCK_SLACK_MS = 2 * 60_000;
 const WEI_PER_LUX = 10n ** 9n;
 // Arrivals kept: the newest.
 const KEEP = 200;
+// Pages of a recipient's incoming calls read at most, back to its oldest deposit on its way.
+const MAX_PAGES = 5;
 
 const EVM_TX = /^0x[0-9a-fA-F]{64}$/;
 
@@ -81,13 +83,14 @@ export function arrivalUrl(nodeUrl, evmHash) {
 // What a deposit paid, in lux, as Activity shows it.
 const depositLux = (tx) => [tx?.deposit, tx?.amount].map((v) => String(v ?? "")).find((v) => /^\d+$/.test(v) && BigInt(v) > 0n) ?? null;
 
-// When a deposit went through: its block's time, else the wallet's.
-const depositTime = (tx) => Number(tx?.timestamp ?? tx?.finalizedAt ?? tx?.executedAt ?? tx?.submittedAt) || 0;
+// When a deposit went through: its Dusk block's time, as the archive or the
+// node gave it; 0 until one did. Never the wallet's clock, which may be off.
+const depositTime = (tx) => Number(tx?.timestamp ?? tx?.finalizedAt) || 0;
 
 /**
  * Whether an Activity row is a deposit to DuskEVM on its way: gone through on
- * Dusk this week, to a DuskEVM address, on a network with DuskEVM, and not
- * seen there yet.
+ * Dusk this week, its block's time known, to a DuskEVM address, on a network
+ * with DuskEVM, and not seen there yet.
  * @param {object} tx - an Activity row (activity.js activityRows)
  * @param {string} nodeUrl - the overview's network
  * @param {number} [now]
@@ -101,23 +104,36 @@ export function awaitingArrival(tx, nodeUrl, now = Date.now()) {
   return at > 0 && now - at < ARRIVAL_WINDOW_MS;
 }
 
-// The recipient's incoming calls on DuskEVM, newest first.
-async function incomingCalls(duskEvm, recipient) {
-  const url = `${duskEvm.blockscoutApiUrl.replace(/\/+$/, "")}/addresses/${recipient}/internal-transactions?filter=to`;
-  const res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } }, 8_000);
-  if (!res.ok) throw new Error(`DuskEVM's explorer answered ${res.status}`);
-  const body = await res.json();
-  return Array.isArray(body?.items) ? body.items : [];
-}
-
 // A Blockscout time ("2026-10-27T05:52:13.000000Z") in milliseconds.
 const timeOf = (text) => Date.parse(String(text ?? "").replace(/(\.\d{3})\d+/, "$1"));
 
+// The recipient's incoming calls on DuskEVM, newest first, a page at a time
+// (Blockscout's next_page_params) back to `since`, at most MAX_PAGES:
+// `complete` when they reach it, or there are no more.
+async function incomingCalls(duskEvm, recipient, since) {
+  const base = `${duskEvm.blockscoutApiUrl.replace(/\/+$/, "")}/addresses/${recipient}/internal-transactions`;
+  const items = [];
+  let next = null;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const query = new URLSearchParams([["filter", "to"], ...Object.entries(next ?? {}).map(([key, value]) => [key, String(value)])]);
+    const res = await fetchWithTimeout(`${base}?${query}`, { headers: { Accept: "application/json" } }, 8_000);
+    if (!res.ok) throw new Error(`DuskEVM's explorer answered ${res.status}`);
+    const body = await res.json();
+    const calls = Array.isArray(body?.items) ? body.items : [];
+    items.push(...calls);
+    next = body?.next_page_params && typeof body.next_page_params === "object" ? body.next_page_params : null;
+    const oldest = Math.min(...calls.map((c) => timeOf(c?.timestamp)).filter(Number.isFinite));
+    if (!next || !calls.length || oldest < since) return { items, complete: true };
+  }
+  return { items, complete: false };
+}
+
 /**
- * Looks on DuskEVM for the deposits in `rows` on their way, one request a
- * recipient, and keeps those that arrived: each takes the L2 bridge's first
- * payment of its amount to its recipient from after it, in order, one
- * payment for one deposit.
+ * Looks on DuskEVM for the deposits in `rows` on their way, a recipient's
+ * incoming calls back to its oldest, and keeps those that arrived: each
+ * takes the L2 bridge's first payment of its amount to its recipient from
+ * after its block, in order, one payment for one deposit. A recipient whose
+ * calls go further back than MAX_PAGES has none matched.
  * @param {object[]} rows - Activity rows on the overview's network
  * @param {{ nodeUrl: string, now?: number }} opts
  * @returns {Promise<number>} how many arrived
@@ -138,8 +154,10 @@ export async function checkArrivals(rows, { nodeUrl, now = Date.now() }) {
 
   const found = {};
   for (const [recipient, deposits] of byRecipient) {
-    const calls = await incomingCalls(duskEvm, recipient).catch(() => null);
-    if (!calls) continue;
+    const since = Math.min(...deposits.map(depositTime)) - CLOCK_SLACK_MS;
+    const { items: calls, complete } = await incomingCalls(duskEvm, recipient, since).catch(() => ({}));
+    // Not back to its oldest deposit: a payment of an older one may be a newer one's, so none is matched.
+    if (!calls || !complete) continue;
     const payments = calls
       .filter((c) => c?.success !== false && String(c?.from?.hash ?? "").toLowerCase() === bridge && EVM_TX.test(String(c?.transaction_hash ?? "")))
       .map((c) => ({ hash: String(c.transaction_hash), value: String(c.value ?? ""), at: timeOf(c.timestamp) }))
