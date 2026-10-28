@@ -1,3 +1,6 @@
+import { sozuRateEstimate } from "@dusk-network/networks/rates";
+import { feePercent } from "@dusk-network/networks/sozu";
+
 import {
   UI_DISPLAY_DECIMALS,
   formatDusk,
@@ -12,7 +15,7 @@ import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
-import { shortAddress } from "../../lib/strings.js";
+import { ratePercent, shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -421,6 +424,40 @@ export function stakeFormView(ov, { state, actions } = {}) {
   return stakingOverview(ov, ctx, { state, actions });
 }
 
+// What each way of staking pays a year, beside the choice: native staking's
+// estimate across the network (one read of the node a day, rewardRate.js)
+// and Sozu's after its fee on rewards, as its status reads it. Asked once a
+// popup and network, and drawn again when the answers come.
+function rewardRates(ov, { state, actions }) {
+  const key = String(ov?.nodeUrl ?? "");
+  if (state.rewardRates?.key !== key) {
+    const rates = (state.rewardRates = { key, native: null, sozuFee: null });
+    const result = (res) => (res?.error ? null : res?.result ?? null);
+    const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
+    const held = state.sozu?.status?.fees?.reward ?? null;
+    Promise.all([
+      Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_REWARD_RATE" })).then(result, () => null),
+      held ??
+        Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: idx })).then(
+          (res) => result(res)?.fees?.reward ?? null,
+          () => null
+        ),
+    ]).then(([native, sozuFee]) => {
+      if (state.rewardRates !== rates) return;
+      Object.assign(rates, { native: typeof native === "number" ? native : null, sozuFee });
+      if (rates.native !== null) actions?.render?.().catch(() => {});
+    });
+  }
+  // Sozu's fee as Liquid staking read it last, else as asked here.
+  const sozuFee = state.sozu?.status?.fees?.reward ?? state.rewardRates.sozuFee;
+  const native = state.rewardRates.native;
+  const sozu = native !== null && sozuFee ? sozuRateEstimate(native, sozuFee) : null;
+  return {
+    native: native !== null ? `About ${ratePercent(native)} a year lately, across the network. Not promised.` : null,
+    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year after Sozu's ${feePercent(sozuFee, "en")}` : null,
+  };
+}
+
 function stakingOverview(ov, ctx, { state, actions }) {
   const { st, minLux, positions, pos, hidden, feeGas } = ctx;
   const onBack = () => {
@@ -480,20 +517,23 @@ function stakingOverview(ov, ctx, { state, actions }) {
     ...reasons.map((reason) => h("div", { class: "stake-cap", text: reason })),
   ].filter(Boolean));
 
-  // Two equal choices; neither is picked for you.
+  // Two equal choices; neither is picked for you. Each says about what it
+  // pays a year, once that's read.
+  const rates = rewardRates(ov, { state, actions });
   const choices = h("div", { class: "group stake-choices" }, [
     listRow({
       icon: "server",
       title: "Native staking",
-      subs: pos.hasStake
-        ? ["Add to your stake", "Needs your own Dusk node"]
-        : [`Minimum ${fmtLux(minLux)} DUSK`, "Needs your own Dusk node"],
+      subs: [
+        ...(pos.hasStake ? ["Add to your stake", "Needs your own Dusk node"] : [`Minimum ${fmtLux(minLux)} DUSK`, "Needs your own Dusk node"]),
+        rates.native,
+      ],
       onClick: () => setScreen(st, SCREEN_NATIVE, actions),
     }),
     listRow({
       icon: "drop",
       title: ["Liquid staking", h("span", { class: "tag", text: "Sozu · third party" })],
-      subs: ["Any amount · No node needed", "You get stDUSK for your share"],
+      subs: ["Any amount · No node needed", "You get stDUSK for your share", rates.sozu],
       onClick: () => setScreen(st, SCREEN_LIQUID, actions),
     }),
   ]);

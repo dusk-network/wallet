@@ -6,7 +6,7 @@ import { labelForNode } from "../../../shared/nodeNetwork.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { shortAddress, siteName } from "../../lib/strings.js";
+import { contractIdText, shortAddress, siteName } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
@@ -105,9 +105,10 @@ function technicalRows(tx, ov, nodeUrl, showToast) {
 
 // A call's contract: what the network's file calls it, where it does, then
 // its short ID and Copy.
-function contractValue(id, nodeUrl, showToast) {
-  const label = labelForNode(String(nodeUrl ?? ""), id);
-  return [label ? `${label} · ` : null, mono(id, shortAddress(id)), copyContract(id, showToast)];
+function contractValue(raw, nodeUrl, showToast) {
+  const label = labelForNode(String(nodeUrl ?? ""), raw);
+  const id = contractIdText(raw);
+  return [label ? `${label} · ` : null, mono(id, contractIdText(raw, { short: true })), copyContract(id, showToast)];
 }
 
 // Copy beside a call's contract, as an icon.

@@ -75,12 +75,13 @@ describe("transaction details", () => {
     expect(view.name).toBe("Call transfer");
     expect(view.body.querySelector(".tx-hero-addr")).toBeNull();
     const contract = view.body.querySelectorAll(".tx-tech .kv").find((row) => row.querySelector(".kv-label").textContent === "Contract");
-    expect(visibleText(contract)).toBe("Contract0xcdcd…cdcdcd");
+    // As every Dusk app writes a contract ID: without 0x.
+    expect(visibleText(contract)).toBe("Contractcdcdcd…cdcdcd");
     const copy = contract.querySelector("button");
     expect(copy.getAttribute("aria-label")).toBe("Copy contract ID");
     copy.click();
     await settle();
-    expect(dom.clipboard.writeText).toHaveBeenCalledWith(`0x${contractId}`);
+    expect(dom.clipboard.writeText).toHaveBeenCalledWith(contractId);
     expect(view.body.querySelector(".tx-assets")).toBeNull();
     expect(view.body.querySelectorAll("button").map((b) => b.textContent)).not.toEqual(expect.arrayContaining(["Add token"]));
     expect(view.body.querySelectorAll("button").map((b) => b.textContent)).not.toEqual(expect.arrayContaining(["Import NFT"]));

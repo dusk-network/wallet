@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Said about what each way of staking pays a year, beside the choice: native staking across the network lately, and Sozu after its fee.
 - Warned about a recipient listed as compromised or a scam, on Send and in a site's request, and sent it nothing.
 - Added Activity to the full view's sidebar.
 - Added Forgot your password? to the unlock screen: a restore from the recovery phrase that keeps the same wallet's contacts.
@@ -51,6 +52,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Wrote dates and times as every Dusk app does: in English, on the language's clock, as "Mon 26 Oct 2026, 2:32 PM CET", in the export too.
+- Wrote Dusk contract IDs without 0x, and an ellipsis as one character.
+- Wrote fees under 0.01 DUSK to 2 significant digits, a maximum still rounded up.
+- Said "no fee" on a failed row that paid none, not "fee 0 DUSK paid".
 - Found the network by the chain ID its node gives, not its address: a custom node gets its network's names, Sozu, bridge, explorer and history, and one that hasn't said is Custom, not Mainnet.
 - Named the contracts and accounts the network's file names, in Activity and Technical details.
 - Named the bridge's chains as the network's routes do: BNB Smart Chain, and Sepolia on Testnet.

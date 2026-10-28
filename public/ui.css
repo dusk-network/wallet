@@ -4363,11 +4363,12 @@ p.gas-note {
   line-height: 1.4;
 }
 
-/* What the limit and price come to, under them */
+/* What the limit and price come to, exactly, under them: text to copy */
 .gas-custom .gas-max {
   font-size: 13.5px;
   font-variant-numeric: tabular-nums;
   color: var(--text);
+  user-select: text;
 }
 
 .gas-custom .advanced-body .muted.gas-help {

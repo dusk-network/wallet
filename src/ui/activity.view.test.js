@@ -170,8 +170,10 @@ describe("Activity's rows", () => {
     setup({ local: [failed], hidden: true });
     expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee •••• DUSK paid•••• DUSK`);
     expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe(`${short(FAUCET)}, Failed · nothing sent · fee hidden, amount hidden`);
-    // Without a fee charged, it says so.
+    // Without a fee charged, it says so, a fee of 0 included.
     setup({ local: [{ ...failed, feePaid: undefined }] });
+    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);
+    setup({ local: [{ ...failed, feePaid: "0" }] });
     expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);
   });
 
@@ -241,8 +243,8 @@ describe("the Activity view", () => {
     const filters = () => body().querySelectorAll(".filter-chip").map((b) => [visibleText(b), b.getAttribute("aria-pressed")]);
     const days = () => body().querySelectorAll(".tx-day-label").map(visibleText);
     expect(filters()).toEqual([["All", "true"], ["Sent", "false"], ["Received", "false"], ["Staking", "false"]]);
-    expect(days().slice(0, 4)).toEqual(["Yesterday", "Wed, 21 Oct", "Fri, 18 Sep", "Fri, 17 Jul"]);
-    expect(days()).toContain("Sun, 16 Nov 2025");
+    expect(days().slice(0, 4)).toEqual(["Yesterday", "Wed 21 Oct", "Fri 18 Sep", "Fri 17 Jul"]);
+    expect(days()).toContain("Sun 16 Nov 2025");
 
     button("Staking").click();
     expect(state.activityFilter).toBe("staking");
@@ -255,7 +257,7 @@ describe("the Activity view", () => {
       "Staked with SozuStaking · 14:00−1,000 DUSK",
       "Claim rewardsStaking · 13:35+1,609,142.7584 DUSK",
     ]);
-    expect(days()).toEqual(["Wed, 21 Oct", "Fri, 18 Sep", "Wed, 17 Jun", "Sun, 31 May"]);
+    expect(days()).toEqual(["Wed 21 Oct", "Fri 18 Sep", "Wed 17 Jun", "Sun 31 May"]);
 
     button("Received").click();
     expect(rows().every((text) => /Received · /.test(text))).toBe(true);
@@ -308,7 +310,7 @@ describe("a transaction's details", () => {
     await settle();
     expect(visibleText(body().querySelector(".tx-hero"))).toBe("Sent tofaucet.dusk" + `${short(FAUCET)}−25 DUSKCompleted`);
     expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText)).toEqual([
-      "Date22 Oct 2026, 14:32 UTC",
+      "DateThu 22 Oct 2026, 14:32 UTC",
       "MemoOrder 1042",
       "Network fee0.0037 DUSK",
       "Fromalice.dusk · Public",
@@ -335,7 +337,7 @@ describe("a transaction's details", () => {
       "Gas used3,700,000 of 10,000,000",
       "Gas price1 LUX",
       "Exact fee0.0037 DUSK",
-      "Submitted22 Oct 2026, 14:32 UTC",
+      "SubmittedThu 22 Oct 2026, 14:32 UTC",
     ]);
     button("View in Dusk explorer").click();
     await settle();
@@ -543,6 +545,22 @@ describe("the labels of balances and stakes", () => {
     expect(rule(sheet, "h2.tx-day-label")).not.toContain("text-transform");
     setup({ route: "activity" });
     expect(body().querySelectorAll("h2.tx-day-label").map((day) => day.textContent)[0]).toBe("Yesterday");
+  });
+});
+
+describe("an ellipsis", () => {
+  it("is one character in everything the wallet writes, as every Dusk app writes it", async () => {
+    const { readdir } = await import("node:fs/promises");
+    const files = (await readdir(path.resolve(process.cwd(), "src"), { recursive: true })).filter(
+      (file) => file.endsWith(".js") && !file.endsWith(".test.js") && !file.includes("vendor")
+    );
+    const dots = [];
+    for (const file of files) {
+      const source = await readFile(path.resolve(process.cwd(), "src", file), "utf8");
+      // Three dots after a word, closing a string: "Saving...".
+      for (const [found] of source.matchAll(/\w\.\.\.["'`]/g)) dots.push(`${file}: ${found}`);
+    }
+    expect(dots).toEqual([]);
   });
 });
 

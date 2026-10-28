@@ -86,7 +86,7 @@ export function createHeaderRenderer({
         offline: ov?.networkStatus?.nodeError
           ? `Network offline: ${ov.networkStatus.nodeError}`
           : "Network offline",
-        checking: "Checking network...",
+        checking: "Checking network…",
         unknown: "Network status unknown",
       };
       statusDot.title = statusTitles[nodeStatus] ?? statusTitles.unknown;

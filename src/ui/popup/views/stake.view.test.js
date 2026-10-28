@@ -112,10 +112,11 @@ afterEach(() => {
 // Draws Staking, its Review and Sent as app.js routes them, and redraws on
 // render. Sozu's status, read again before a stake is sent, is the one Staking
 // holds, unless `sozuStatus` gives what the node says by then.
-function popup(state, overview = ov(), { sozuStatus } = {}) {
+function popup(state, overview = ov(), { sozuStatus, rewardRate = null } = {}) {
   const actions = {
     send: vi.fn(async (message) => {
       if (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE") return { min: "1", median: "1", max: "1" };
+      if (message.type === "DUSK_UI_GET_REWARD_RATE") return { ok: true, result: rewardRate };
       if (message.type === "DUSK_UI_SEND_TX") return { ok: true, result: { hash: "ab".repeat(32) } };
       if (message.type === "DUSK_UI_GET_SOZU_STATUS") {
         const st = state.sozu;
@@ -149,6 +150,26 @@ const buttonStarting = (text) => body.querySelectorAll("button").find((b) => isS
 const field = (name) => body.querySelectorAll("input").find((i) => accessibleName(i) === name);
 
 describe("staking overview", () => {
+  it("says about what each choice pays a year, once read: native across the network lately, Sozu after its fee", async () => {
+    const fifteen = sozu();
+    fifteen.status = { ...fifteen.status, fees: { ...fifteen.status.fees, reward: { numerator: "15", denominator: "100" } } };
+    const state = { route: "stake", staking: staking(), sozu: fifteen };
+    // Mainnet's estimate lately (rewardRate.test.js).
+    const { actions } = popup(state, ov(), { rewardRate: 0.23498725582204427 });
+    const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
+    expect(subs()).toEqual([[], []]);
+    await vi.waitFor(() =>
+      expect(subs()).toEqual([["About 23% a year lately, across the network. Not promised."], ["About 20% a year after Sozu's 15%"]])
+    );
+    // Asked once for this network, whatever is drawn again.
+    actions.render();
+    await settle();
+    expect(actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_GET_REWARD_RATE")).toHaveLength(1);
+    // Sozu's fee as Liquid staking read it, without reading Sozu again.
+    expect(actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_GET_SOZU_STATUS")).toHaveLength(0);
+    expect(body.textContent).not.toMatch(/\bEarn\b/);
+  });
+
   it("offers native and liquid staking as two equal choices, neither picked", () => {
     const state = { route: "stake", staking: staking() };
     popup(state);

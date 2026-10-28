@@ -281,7 +281,7 @@ describe("sign approvals", () => {
     process.env.TZ = "Europe/Amsterdam";
     try {
       await render("sign_auth", { chainId: "dusk:2", nonce: "n-1", expiresAt: "2026-10-26T12:22:00Z" });
-      expect(visibleText(row("Expires"))).toBe("26 Oct 2026, 13:22 CET");
+      expect(visibleText(row("Expires"))).toBe("Mon 26 Oct 2026, 13:22 CET");
     } finally {
       if (zone === undefined) delete process.env.TZ;
       else process.env.TZ = zone;
@@ -670,7 +670,9 @@ describe("contract calls", () => {
     });
     expect(visibleText(head())).toBe("Contract call10 DUSK");
     expect(visibleText(row("From"))).toBe("alice.dusk · Public");
-    expect(row("Contract").querySelector(".mono").title).toBe(`0x${"11".repeat(32)}`);
+    // As every Dusk app writes a contract ID, though the site sent it with 0x.
+    expect(row("Contract").querySelector(".mono").title).toBe("11".repeat(32));
+    expect(visibleText(row("Contract ID"))).toBe("11".repeat(32));
     expect(folded(row("Contract"))).toBe(false);
     expect(app.querySelector(".ap-opaque").textContent).toBe("The wallet can't read this call's arguments. Check them on the site before you approve.");
     expect(app.textContent).not.toContain("Known DuskEVM bridge call");

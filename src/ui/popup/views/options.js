@@ -304,7 +304,7 @@ export function optionsView(ov, { state, actions } = {}) {
       const prevText = saveBtn.textContent;
       try {
         saveBtn.disabled = true;
-        saveBtn.textContent = "Saving...";
+        saveBtn.textContent = "Saving…";
         showNetworkError("");
         const v = nodeUrlInput.value.trim();
         const pv = proverUrlInput.value.trim();

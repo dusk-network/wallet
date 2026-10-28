@@ -18,7 +18,7 @@ import { duskNamesNetwork } from "../../shared/verifiedNames.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
 import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
-import { shortAddress } from "../lib/strings.js";
+import { contractIdText, shortAddress } from "../lib/strings.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
 import "../components/GasEditor.js";
@@ -932,7 +932,7 @@ export async function renderNotification() {
         requestHead({ title: requestSummary("watch_asset", params).title, sub: label || undefined }),
         group([
           kv("Standard", type || "(missing)"),
-          kv("Contract", contractId ? shortMono(contractId) : "(missing)"),
+          kv("Contract", contractId ? shortMono(contractIdText(contractId)) : "(missing)"),
           nft ? kv("Token ID", mono(tokenId || "(missing)")) : null,
           kv("Account", profileValue()),
         ]),
@@ -1098,6 +1098,9 @@ export async function renderNotification() {
       contractIdHex = String(contractIdRaw ?? "");
     }
 
+    // As every Dusk app writes a contract ID: without 0x.
+    const contractShown = contractIdText(contractIdHex);
+
     const fnName = String(params?.fnName ?? "");
     const fnNameTrim = fnName.trim();
     const fnNameLower = fnNameTrim.toLowerCase();
@@ -1116,7 +1119,7 @@ export async function renderNotification() {
     const callRows = ({ from = false } = {}) =>
       group([
         from ? kv("From", payerLine(rail)) : null,
-        kv("Contract", shortMono(contractIdHex)),
+        kv("Contract", shortMono(contractShown)),
         safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${formatDuskExact(amountLux)} DUSK`) : null,
         safeBigInt(amountLux, 0n) > 0n && amountTo ? kv("Amount to", h("code", { class: "ap-address", text: amountTo }), { stack: true }) : null,
         safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${formatDuskExact(depositLux)} DUSK`) : null,
@@ -1128,7 +1131,7 @@ export async function renderNotification() {
         group(
           [
             ...networkRows(),
-            kv("Contract ID", mono(contractIdHex), { stack: true }),
+            kv("Contract ID", mono(contractShown), { stack: true }),
             kv("Function", mono(fnName || "(none)")),
             kv("Call data", mono(callData), { stack: true }),
           ],
@@ -1298,7 +1301,7 @@ export async function renderNotification() {
             isTransfer || isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
             isApprove ? kv("Spender", h("code", { class: "ap-address", text: spenderStr || "(missing)" }), { stack: true }) : null,
             isTransferFrom ? kv("Owner", h("code", { class: "ap-address", text: ownerStr || "(missing)" }), { stack: true }) : null,
-            kv("Token", h("span", {}, [h("span", { text: `${name} (${sym}) ` }), shortMono(contractIdHex, 6, 6)])),
+            kv("Token", h("span", {}, [h("span", { text: `${name} (${sym}) ` }), shortMono(contractShown, 6, 6)])),
             valueUnitsStr ? kv("Units", mono(valueUnitsStr)) : null,
           ]),
           isMax
@@ -1352,7 +1355,7 @@ export async function renderNotification() {
             isSetApprovalForAll ? kv("Approved for all", approvedBool ? "Yes" : "No") : null,
             isTransferFrom ? kv("Owner", h("code", { class: "ap-address", text: fromStr || "(missing)" }), { stack: true }) : null,
             isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
-            kv("Collection", shortMono(contractIdHex, 6, 6)),
+            kv("Collection", shortMono(contractShown, 6, 6)),
           ]),
           isSetApprovalForAll && approvedBool
             ? warning("High risk", "This lets the operator move all of your NFTs in this collection.")

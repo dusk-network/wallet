@@ -38,8 +38,8 @@ export const ACTIVITY_FILTERS = Object.freeze([
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// "14:32", and a transaction's Date row in full with its time zone, "26 Oct
-// 2026, 14:32 CET".
+// "14:32", and a transaction's Date row in full with its time zone, "Mon 26
+// Oct 2026, 14:32 CET".
 export { clockText, dateText };
 
 const startOfDay = (ms) => {
@@ -48,14 +48,17 @@ const startOfDay = (ms) => {
   return d.getTime();
 };
 
-/** A day group's title: "Today", "Yesterday", "Fri, 24 Oct", or with its year when it isn't this one. */
+/**
+ * A day group's title: "Today", "Yesterday", "Fri 24 Oct", or with its year
+ * when it isn't this one, in the words a full date has (dateText).
+ */
 export function dayLabel(ms, now = Date.now()) {
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / DAY_MS);
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
   const d = new Date(ms);
   const year = d.getFullYear() === new Date(now).getFullYear() ? "" : ` ${d.getFullYear()}`;
-  return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}${year}`;
+  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}${year}`;
 }
 
 /** When, on Home's short list: "Just now", "5 min ago", "14:32", "Yesterday", "24 Oct". */
@@ -376,7 +379,7 @@ export function subText(desc, when, opts) {
 }
 
 function unsentParts(desc, { hidden = false, spoken = false } = {}) {
-  const paid = desc.failed && desc.fee && !/^0\.0+$/.test(desc.fee);
+  const paid = desc.failed && desc.fee && desc.fee !== "0";
   const fee = !paid ? "no fee" : !hidden ? `fee ${desc.fee} DUSK paid` : spoken ? "fee hidden" : `fee ${HIDDEN_BALANCE} DUSK paid`;
   return ["nothing sent", fee];
 }

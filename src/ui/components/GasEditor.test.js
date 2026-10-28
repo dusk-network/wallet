@@ -72,6 +72,9 @@ describe("fee editor", () => {
     // Nothing to add up without both.
     typeInto(field("Gas price (LUX)"), "");
     expect(isShown(max())).toBe(false);
+    // The Review's fee rounds it up; this is the exact one, beside the limit and price, to copy.
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    expect(css).toMatch(/\.gas-custom \.gas-max \{[^}]*user-select: text;/);
   });
 
   it("refuses a price of 0, and shows no fee or total for gas that won't do", async () => {

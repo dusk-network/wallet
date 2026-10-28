@@ -1,6 +1,7 @@
 import { getSettings, normalizeCustomGas, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeStakeInfo } from "../shared/transport.js";
+import { nativeRewardRate } from "../shared/rewardRate.js";
 import { clearContacts, contactsStore } from "../shared/contactsStore.js";
 import {
   getWatchedAssets,
@@ -100,6 +101,11 @@ export async function handleUiCommand(
   if (type === "DUSK_UI_SET_CUSTOM_GAS") {
     const next = await setSettings({ customGas: normalizeCustomGas(message.customGas) });
     return { ok: true, customGas: next.customGas ?? null };
+  }
+
+  // About what native staking pays a year lately: from the node, at most once a day.
+  if (type === "DUSK_UI_GET_REWARD_RATE") {
+    return { ok: true, result: await nativeRewardRate((await getSettings()).nodeUrl) };
   }
 
   if (type === "DUSK_UI_GET_CACHED_GAS_PRICE") {

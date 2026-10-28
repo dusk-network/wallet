@@ -2,7 +2,7 @@ import { UI_DISPLAY_DECIMALS, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { reviewGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
-import { shortAddress } from "../../lib/strings.js";
+import { contractIdText, shortAddress } from "../../lib/strings.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -19,7 +19,7 @@ function normalizeContractIdInput(s) {
   if (!raw) throw new Error("Enter a contract ID.");
   if (/^0x[0-9a-f]{64}$/i.test(raw)) return raw.toLowerCase();
   if (/^[0-9a-f]{64}$/i.test(raw)) return `0x${raw.toLowerCase()}`;
-  throw new Error("That isn't a contract ID: it has 64 hex characters, after 0x.");
+  throw new Error("That isn't a contract ID: it has 64 hex characters.");
 }
 
 function contractIdsEqual(a, b) {
@@ -231,10 +231,11 @@ const kv = (label, value, className = "") =>
     h("span", { class: "kv-value" }, [].concat(value)),
   ]);
 
-// A contract ID, short, with Copy beside it.
+// A contract ID, short and without 0x, with Copy beside it.
 function contractValue(cid, actions) {
+  const id = contractIdText(cid);
   return [
-    h("span", { class: "mono", title: cid, text: shortAddress(cid) }),
+    h("span", { class: "mono", title: id, text: contractIdText(cid, { short: true }) }),
     h("button", {
       class: "copy-ico",
       type: "button",
@@ -242,7 +243,7 @@ function contractValue(cid, actions) {
       "aria-label": "Copy contract ID",
       html: iconSvg("copy"),
       onclick: async () => {
-        const ok = await copyToClipboard(cid);
+        const ok = await copyToClipboard(id);
         actions?.showToast?.(ok ? "Contract ID copied" : "Couldn't copy the contract ID");
       },
     }),
@@ -355,7 +356,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
   });
 
   const input = textInput({
-    placeholder: "0x…",
+    placeholder: "64 hex characters",
     value: String(st.contractId ?? ""),
     onEnter: () => lookupBtn.click(),
     oninput: (e) => {
@@ -453,7 +454,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
   });
 
   const contractInput = textInput({
-    placeholder: "0x…",
+    placeholder: "64 hex characters",
     value: String(st.contractId ?? ""),
     onEnter: () => tokenIdInput.focus(),
     oninput: (e) => {

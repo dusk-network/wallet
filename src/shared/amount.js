@@ -1,3 +1,5 @@
+import { formatDusk as formatDuskShared } from "@dusk-network/networks/format";
+
 // Shared amount helpers.
 //
 // The Dusk protocol uses Lux as the atomic unit:
@@ -126,10 +128,11 @@ export function formatDuskExact(luxStr) {
 export const FEE_DECIMALS = UI_DISPLAY_DECIMALS;
 
 /**
- * A fee in DUSK, in the one number format: exact up to 4 decimals. Past
- * that, a maximum (`max`, shown as "up to") rounds up, so it never reads
- * lower than it can be, and a fee paid rounds to the nearest (half up). A
- * fee paid too small to show at that precision shows in full, not as zero.
+ * A fee in DUSK as every Dusk app writes one (@dusk-network/networks): at
+ * most 4 decimals, but 2 significant digits under 0.01, and never 0 for a
+ * fee that isn't. A maximum (`max`, shown as "up to") rounds up, so it never
+ * reads lower than it can be; a fee paid rounds to the nearest. In the
+ * wallet's separators: "1,500.0001".
  * @param {string|bigint|number} luxStr
  * @param {{ max?: boolean }} [opts]
  * @returns {string}
@@ -137,12 +140,7 @@ export const FEE_DECIMALS = UI_DISPLAY_DECIMALS;
 export function formatFee(luxStr, { max = false } = {}) {
   const lux = safeBigInt(luxStr, 0n);
   if (lux <= 0n) return "0";
-  const step = 10n ** BigInt(LUX_DECIMALS - FEE_DECIMALS);
-  const units = max ? (lux + step - 1n) / step : (lux + step / 2n) / step;
-  if (units === 0n) return formatLuxToDusk(lux);
-  const scale = 10n ** BigInt(FEE_DECIMALS);
-  const frac = (units % scale).toString().padStart(FEE_DECIMALS, "0");
-  return groupThousands(trimZeros(`${(units / scale).toString()}.${frac}`));
+  return formatDuskShared(lux, { round: max ? "up" : "nearest", locale: "en-US" }).text;
 }
 
 /**

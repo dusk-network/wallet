@@ -237,6 +237,9 @@ describe("hidden balances", () => {
 
     await show(assetTokenView(overview(), { state, actions: actions() }));
     expect(body.querySelector(".asset-token-balance-value").textContent).toBe("123.45 TKN");
+    // Its contract as every Dusk app writes one, without the 0x the wallet keeps it with.
+    const contract = body.querySelectorAll(".kv").find((row) => row.querySelector(".kv-label")?.textContent === "Contract");
+    expect([visibleText(contract), contract.querySelector(".mono").title]).toEqual(["Contractcdcdcd…cdcdcd", "cd".repeat(32)]);
   });
 
   it("hide Stake's balance, staked amounts and rewards, while Max and the balance check use the real ones", async () => {

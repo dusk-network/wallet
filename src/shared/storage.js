@@ -21,6 +21,7 @@ export const STORAGE_KEYS = {
   ASSETS: "dusk_assets_v1", // { [walletId]: { [networkKey]: { [profileIndex]: { tokens: [], nfts: [] } } } }
   NETWORK_STATUS: "dusk_network_status_v1", // { nodeStatus, proverStatus, archiverStatus, lastChecked, errors }
   NODE_CHAINS: "dusk_node_chains_v1", // { [nodeOrigin]: chainId }: the chain ID each node gave last (nodeNetwork.js)
+  REWARD_RATES: "dusk_reward_rates_v1", // { [network]: { at, rate } }: native staking's estimate, read once a day (rewardRate.js)
   AUTO_LOCK_ACTIVITY: "dusk_auto_lock_activity_v1", // { lastActivityAt }
   VERIFIED_NAMES: "dusk_verified_names_v1", // { [network]: { [account]: { name: string|null, at } } }
   RESET_PENDING: "dusk_reset_pending_v1", // { at }: a wallet reset that hasn't cleared all the old wallet's data

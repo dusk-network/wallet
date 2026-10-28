@@ -27,19 +27,19 @@ describe("when a row says it happened", () => {
   it("titles the Activity view's day groups, and dates the details", () => {
     expect(dayLabel(at("2026-10-26T00:00:00Z"), NOW)).toBe("Today");
     expect(dayLabel(at("2026-10-25T12:00:00Z"), NOW)).toBe("Yesterday");
-    expect(dayLabel(at("2026-10-24T12:00:00Z"), NOW)).toBe("Sat, 24 Oct");
-    expect(dayLabel(at("2025-11-16T23:03:38Z"), NOW)).toBe("Sun, 16 Nov 2025");
+    expect(dayLabel(at("2026-10-24T12:00:00Z"), NOW)).toBe("Sat 24 Oct");
+    expect(dayLabel(at("2025-11-16T23:03:38Z"), NOW)).toBe("Sun 16 Nov 2025");
     // In full, with the time zone it shows in.
-    expect(dateText(at("2026-10-26T14:32:59Z"))).toBe("26 Oct 2026, 14:32 UTC");
+    expect(dateText(at("2026-10-26T14:32:59Z"))).toBe("Mon 26 Oct 2026, 14:32 UTC");
   });
 
   it("names the time zone by its short name, else by its offset", () => {
     // TZ is read when a date is formatted, so each zone's own name shows.
     const cases = [
-      ["Europe/Amsterdam", "2026-10-26T12:22:00Z", "26 Oct 2026, 13:22 CET"],
-      ["Europe/Amsterdam", "2026-07-01T12:22:00Z", "1 Jul 2026, 14:22 CEST"],
-      ["America/New_York", "2026-10-26T12:22:00Z", "26 Oct 2026, 08:22 EDT"],
-      ["Asia/Kolkata", "2026-10-26T12:22:00Z", "26 Oct 2026, 17:52 GMT+5:30"],
+      ["Europe/Amsterdam", "2026-10-26T12:22:00Z", "Mon 26 Oct 2026, 13:22 CET"],
+      ["Europe/Amsterdam", "2026-07-01T12:22:00Z", "Wed 1 Jul 2026, 14:22 CEST"],
+      ["America/New_York", "2026-10-26T12:22:00Z", "Mon 26 Oct 2026, 08:22 EDT"],
+      ["Asia/Kolkata", "2026-10-26T12:22:00Z", "Mon 26 Oct 2026, 17:52 GMT+5:30"],
     ];
     try {
       for (const [zone, iso, text] of cases) {
