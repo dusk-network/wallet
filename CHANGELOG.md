@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added a Sent screen after Confirm that follows the transaction: Sending, Sent to the network, then Completed or Failed with the reason and the fee charged, with its ID, Copy and the Dusk explorer link.
 - Showed the profile's full public history in Activity, including received transfers.
 - Showed the profile's shielded history in Activity.
 - Named Activity's counterparties by their verified `.dusk` names.
@@ -26,6 +27,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Gave the popup a calmer look: lists on one surface, pill buttons, round home actions and plain section titles, in each system's own fonts.
+- Reworked Staking into an overview with native and liquid staking as two equal choices, an amount screen that checks the 1,000 DUSK minimum as you type, and the owner and stake account under Advanced.
+- Named Sozu as a third party wherever liquid staking shows, and said how much stDUSK a stake gets and what each is worth.
+- Showed toasts at the bottom of the popup, outside the page that scrolls, long enough to reach their action, and announced to screen readers.
+- Showed errors under their field instead of only in a toast.
+- Hid amounts in toasts and on the Sent screen while balances are hidden.
+- Showed fees with four decimals everywhere.
+- Opened account history on the Dusk explorer instead of DuskScan.
 - Cleared the wallet's transactions, shielded notes and history on reset.
 - Moved Review's gas price line and presets behind the fee's Edit, and removed Review's Cancel. ([#126])
 - Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])

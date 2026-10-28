@@ -3,7 +3,9 @@ import { isPopupView, isFullView } from "./env.js";
 import { state, ONBOARD_ROUTES } from "./state.js";
 import { refreshOverview, getActiveOrigin } from "./overview.js";
 import { h, setChildren } from "../lib/dom.js";
-import { toastView } from "../components/Toast.js";
+import { createToaster } from "../components/Toast.js";
+import { balancesHidden } from "../components/Balance.js";
+import { txStatusToast } from "./txToast.js";
 import { createNetworkMenuController } from "../components/NetworkMenu.js";
 import { createAccountMenuController } from "../components/AccountMenu.js";
 import { createHeaderRenderer } from "./header.js";
@@ -18,6 +20,7 @@ import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { sozuConfirmView } from "./views/sozu.js";
+import { noteTxStatus, sentAnnouncement, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -56,6 +59,8 @@ try {
 
 const app = document.getElementById("app");
 const headerActionsHost = document.getElementById("header-actions");
+// Toasts live outside #app, which scrolls and is redrawn.
+const toaster = createToaster();
 const fullNav = document.querySelector(".full-nav");
 const ext = getExtensionApi();
 
@@ -178,6 +183,8 @@ function pulseViewAnimation() {
 
 // Retain the mounted unlock nodes, not a password copy in application state.
 let activeLockedView = null;
+// The screen last drawn, to start a new one at its top.
+let lastScreen = "";
 
 function setApp(children) {
   if (!app) return;
@@ -200,7 +207,26 @@ function setApp(children) {
     // ignore
   }
 
+  // A new screen opens at its top, not where the last one was scrolled to.
+  let sameScreen = false;
+  try {
+    const screen = `${state?.route ?? ""}|${state?.route === "stake" ? state?.staking?.screen ?? "" : ""}`;
+    sameScreen = screen === lastScreen;
+    if (!sameScreen) {
+      lastScreen = screen;
+      const scroller = app.closest?.(".panel-content");
+      if (scroller) scroller.scrollTop = 0;
+      // The full view scrolls the page itself.
+      if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+    }
+  } catch {
+    // ignore
+  }
+
   if (children !== activeLockedView) {
+    // Redrawn in place (a watcher event, a refresh), the screen keeps the
+    // focus on the same button.
+    const focused = sameScreen ? focusedButton() : null;
     const password = app.querySelector("#unlock-password");
     if (password) password.value = "";
     activeLockedView = null;
@@ -208,11 +234,31 @@ function setApp(children) {
     const siteBar = activeSiteBar(state.overview);
     if (siteBar) app.appendChild(siteBar);
     for (const child of children) app.appendChild(child);
+    if (focused) refocusButton(focused);
   }
-  // Refresh notices without detaching the live form (which would lose focus).
-  app.querySelector(":scope > .toast")?.remove();
-  const toast = toastView(state.toast);
-  if (toast) app.prepend(toast);
+}
+
+// The focused button in #app, by its words and its place among buttons with
+// the same words.
+function focusedButton() {
+  try {
+    const el = document.activeElement;
+    if (!el || el.tagName !== "BUTTON" || !app.contains(el)) return null;
+    const key = (b) => `${b.textContent}\n${b.getAttribute("aria-label") ?? ""}`;
+    const same = [...app.querySelectorAll("button")].filter((b) => key(b) === key(el));
+    return { key: key(el), index: same.indexOf(el), keyOf: key };
+  } catch {
+    return null;
+  }
+}
+
+function refocusButton({ key, index, keyOf }) {
+  try {
+    const match = [...app.querySelectorAll("button")].filter((b) => keyOf(b) === key)[index];
+    match?.focus?.();
+  } catch {
+    // ignore
+  }
 }
 
 function showError(err) {
@@ -228,6 +274,8 @@ function updateFullNav() {
         ? "convert"
         : rawRoute === "activity"
         ? "home"
+        : rawRoute === "sent"
+        ? state?.sent?.doneRoute || "home"
         : rawRoute;
     for (const item of fullNav.querySelectorAll("[data-route]")) {
       const itemRoute = item.getAttribute("data-route");
@@ -250,6 +298,8 @@ if (fullNav) {
     netMenu.close();
     acctMenu.close();
     state.route = route;
+    // Staking opens on its overview.
+    if (route === "stake" && state.staking) state.staking.screen = "overview";
     state.needsRefresh = true;
     if (route !== "home") state.highlightTx = null;
     await render({ forceRefresh: true });
@@ -257,16 +307,10 @@ if (fullNav) {
 }
 
 // --- Toast ---------------------------------------------------------------
-let toastTimer = null;
-function showToast(text, ms = 1200) {
-  state.toast = String(text || "");
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    state.toast = null;
-    toastTimer = null;
-    render().catch(() => {});
-  }, ms);
-  render().catch(() => {});
+// A line of text or a toast spec (see Toast.js). It stays at least a few
+// seconds, longer with an action, and while the pointer or focus is on it.
+function showToast(spec, ms) {
+  toaster.show(spec, ms);
 }
 
 function activeSiteInfo(ov) {
@@ -371,7 +415,7 @@ function schedulePendingTxPoll(ov) {
 
     if (isExtensionRuntime()) return;
     if (!ov?.isUnlocked) return;
-    if (state.route !== "home" && state.route !== "activity") return;
+    if (!["home", "activity", "sent"].includes(state.route)) return;
 
     const txs = Array.isArray(ov?.txs) ? ov.txs : [];
     const hasPending = txs.some((tx) => {
@@ -382,7 +426,7 @@ function schedulePendingTxPoll(ov) {
 
     pendingTxPollTimer = setTimeout(() => {
       try {
-        if (state.route !== "home" && state.route !== "activity") return;
+        if (!["home", "activity", "sent"].includes(state.route)) return;
         render({ forceRefresh: true }).catch(() => {});
       } catch {
         // ignore
@@ -412,6 +456,27 @@ function shieldedStatusKey(status) {
   } catch {
     return String(status);
   }
+}
+
+// The toast for a status the watcher reports: what the transaction did, its
+// amount hidden with Hide balances, and View to open it.
+function txStatusToastFor(hash, status) {
+  const ov = state.overview;
+  const tx = hash && Array.isArray(ov?.txs) ? ov.txs.find((t) => String(t?.hash ?? "") === hash) : null;
+  const contacts = state.addressBook?.loaded && Array.isArray(state.addressBook.items) ? state.addressBook.items : [];
+  const contactName = (addr) => {
+    const key = String(addr ?? "").toLowerCase();
+    return String(contacts.find((c) => String(c?.address ?? "").toLowerCase() === key)?.name ?? "").trim();
+  };
+  const onView = hash
+    ? () => {
+        state.txDetailHash = hash;
+        state.txDetailFrom = state.route === "activity" ? "activity" : "home";
+        state.route = "tx";
+        render().catch(() => {});
+      }
+    : null;
+  return txStatusToast(tx, status, { hidden: balancesHidden(ov), contactName, onView });
 }
 
 function installTxStatusListener() {
@@ -470,21 +535,15 @@ function installTxStatusListener() {
         const status = String(
           msg.status ?? (msg.ok === false ? "failed" : msg.ok === true ? "executed" : "unknown")
         ).toLowerCase();
-        const sh =
-          hash && hash.length > 18
-            ? `${hash.slice(0, 10)}…${hash.slice(-8)}`
-            : hash;
 
-        if (status === "executed") {
-          showToast(sh ? `Transaction executed: ${sh}` : "Transaction executed", 2500);
-        } else if (status === "failed") {
-          showToast(sh ? `Transaction failed during execution: ${sh}` : "Transaction failed during execution", 3000);
-        } else if (status === "removed") {
-          showToast(sh ? `Transaction removed from mempool: ${sh}` : "Transaction removed from mempool", 3000);
-        } else if (status === "mempool") {
-          showToast(sh ? `Transaction is in mempool: ${sh}` : "Transaction is in mempool", 2500);
-        } else if (status === "unknown") {
-          showToast(sh ? `Transaction status unknown: ${sh}` : "Transaction status unknown", 3000);
+        // The Sent screen shows its own transaction's steps; a toast would
+        // repeat them. It reads what the watcher reports from state.sent.
+        const forSent = noteTxStatus(state.sent, { ...msg, hash, status });
+        if (forSent && state.route === "sent") {
+          toaster.announce(sentAnnouncement(state.sent, state.overview));
+          render().catch(() => {});
+        } else if (["executed", "failed", "removed", "mempool", "unknown"].includes(status)) {
+          showToast(txStatusToastFor(hash, status));
         }
 
         // Best-effort immediate UI update so the Activity row can transition
@@ -735,7 +794,7 @@ export async function render({ forceRefresh = false } = {}) {
   ensureActivity(ov, { state, render, send });
 
   // `refresh` is the dashboard's Refresh, next to the balance.
-  const actions = { send, render, showToast, refresh: onRefresh };
+  const actions = { send, render, showToast, refresh: onRefresh, announce: (text) => toaster.announce(text) };
 
   // Settings should be accessible even when the wallet is locked or not yet imported.
   // TODO: Reconsider?
@@ -790,6 +849,14 @@ export async function render({ forceRefresh = false } = {}) {
   }
 
   // Unlocked routes
+  // After Confirm: the transaction's steps. Without one (a new popup), home.
+  if (state.route === "sent") {
+    if (state.sent) {
+      setApp(sentView(ov, { state, actions }));
+      return;
+    }
+    state.route = "home";
+  }
   if (state.route === "send") {
     setApp(sendFormView(ov, { state, actions }));
     return;

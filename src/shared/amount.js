@@ -83,6 +83,50 @@ export function formatLuxShort(luxStr, maxDecimals = 6) {
 }
 
 /**
+ * A number as shown to people, its whole part grouped in thousands:
+ * "1484.9235" becomes "1,484.9235". Inputs keep the plain form; anything that
+ * isn't a plain decimal comes back as it is.
+ * @param {string|number} numStr
+ * @returns {string}
+ */
+export function groupThousands(numStr) {
+  const s = String(numStr ?? "");
+  const m = /^(-?)(\d+)(\.\d+)?$/.exec(s);
+  if (!m) return s;
+  return `${m[1]}${m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${m[3] ?? ""}`;
+}
+
+/**
+ * Lux as DUSK for display: at most `maxDecimals` decimals, thousands grouped.
+ * @param {string|bigint|number} luxStr
+ * @param {number} [maxDecimals]
+ * @returns {string}
+ */
+export function formatDusk(luxStr, maxDecimals = UI_DISPLAY_DECIMALS) {
+  return groupThousands(formatLuxShort(luxStr, maxDecimals));
+}
+
+/** Fees show with this many decimals everywhere, so 0.0500 and 0.0025 read alike. */
+export const FEE_DECIMALS = 4;
+
+/**
+ * A fee in DUSK with exactly FEE_DECIMALS decimals, rounded half up. A fee
+ * too small to show at that precision is shown in full rather than as zero.
+ * @param {string|bigint|number} luxStr
+ * @returns {string}
+ */
+export function formatFee(luxStr) {
+  const lux = safeBigInt(luxStr, 0n);
+  if (lux <= 0n) return `0.${"0".repeat(FEE_DECIMALS)}`;
+  const step = 10n ** BigInt(LUX_DECIMALS - FEE_DECIMALS);
+  const units = (lux + step / 2n) / step;
+  if (units === 0n) return formatLuxToDusk(lux);
+  const scale = 10n ** BigInt(FEE_DECIMALS);
+  const frac = (units % scale).toString().padStart(FEE_DECIMALS, "0");
+  return `${groupThousands((units / scale).toString())}.${frac}`;
+}
+
+/**
  * Parse a user-entered DUSK decimal string into Lux (atomic units) string.
  * @param {string} duskStr
  */

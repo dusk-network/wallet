@@ -1,6 +1,7 @@
 import {
   UI_DISPLAY_DECIMALS,
-  formatLuxShort,
+  formatDusk,
+  formatFee,
   formatLuxToDusk,
   parseDuskToLux,
   safeBigInt,
@@ -9,6 +10,7 @@ import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas } from "../../../shared/txDefaults.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
+import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { subnav } from "../../components/Subnav.js";
@@ -34,6 +36,7 @@ import {
 } from "../../../shared/duskNames.js";
 
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
+import { sendFromReview } from "./sent.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
 
@@ -185,26 +188,26 @@ export function sendFormView(ov, { state, actions } = {}) {
       const feeLux = feeLuxForRecipientType("address");
       amountMetaMain.replaceChildren(
         "Spendable (shielded): ",
-        balance(hidden, formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)),
+        balance(hidden, formatDusk(maxLux)),
         " DUSK"
       );
 
       const parts = [];
       if (shSpendLux != null && shValueLux > shSpendLux) {
-        parts.push(["Total shielded: ", balance(hidden, formatLuxShort(shValueLux, UI_DISPLAY_DECIMALS)), " DUSK"]);
+        parts.push(["Total shielded: ", balance(hidden, formatDusk(shValueLux)), " DUSK"]);
       }
       if (feeLux > 0n) {
-        parts.push([`Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK`]);
+        parts.push([`Fee cap: ${formatFee(feeLux)} DUSK`]);
       }
       amountMetaSub.replaceChildren(...parts.flatMap((part, i) => (i ? [" · ", ...part] : part)));
     } else {
       const feeLux = feeLuxForRecipientType("account");
       amountMetaMain.replaceChildren(
         "Available (public): ",
-        balance(hidden, formatLuxShort(maxLux, UI_DISPLAY_DECIMALS)),
+        balance(hidden, formatDusk(maxLux)),
         " DUSK"
       );
-      amountMetaSub.textContent = feeLux > 0n ? `Fee cap: ${formatLuxShort(feeLux, UI_DISPLAY_DECIMALS)} DUSK` : "";
+      amountMetaSub.textContent = feeLux > 0n ? `Fee cap: ${formatFee(feeLux)} DUSK` : "";
     }
 
     // Keep slider aligned with whatever is in the input.
@@ -213,12 +216,17 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   const currentChain = normalizeChainId(chainIdFromNodeUrl(ov?.nodeUrl ?? ""));
 
+  // A request for another network says so under the recipient, and stays
+  // until the recipient changes: Review doesn't clear it.
+  const chainNote = h("div", { class: "field-error", role: "alert", hidden: true });
   const warnChainMismatch = (reqChain) => {
     const want = normalizeChainId(reqChain);
-    if (!want || !currentChain || want === currentChain) return;
-    const wantLabel = chainLabel(want) || `Chain ${want}`;
-    const curLabel = chainLabel(currentChain) || `Chain ${currentChain}`;
-    actions?.showToast?.(`Request is for ${wantLabel}. You are on ${curLabel}.`, 4000);
+    const mismatch = Boolean(want && currentChain && want !== currentChain);
+    // Labelled from the full chain ids ("dusk:1"): the bare references don't name a network.
+    const wantLabel = chainLabel(reqChain) || `Chain ${want}`;
+    const curLabel = chainLabel(chainIdFromNodeUrl(ov?.nodeUrl ?? "")) || `Chain ${currentChain}`;
+    chainNote.textContent = mismatch ? `This request is for ${wantLabel}. You are on ${curLabel}.` : "";
+    chainNote.hidden = !mismatch;
   };
 
   const applyRequest = (req, { source = "request" } = {}) => {
@@ -595,6 +603,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   to.addEventListener("input", () => {
+    chainNote.textContent = "";
+    chainNote.hidden = true;
     updateToType();
     syncDraft();
   });
@@ -635,9 +645,9 @@ export function sendFormView(ov, { state, actions } = {}) {
         });
         if (!payload) return;
         const ok = maybeDecodeRequest(payload, { source: "qr" });
-        if (!ok) actions?.showToast?.("Unrecognized QR code", 2500);
+        if (!ok) setErr("This QR code isn't a Dusk account, address or request.");
       } catch (e) {
-        actions?.showToast?.(e?.message ?? String(e), 3000);
+        setErr(e?.message ?? String(e));
       }
     },
   });
@@ -770,6 +780,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       fieldLabel(to, "To"),
       toRow,
       toTypePill,
+      chainNote,
       nameBox,
       selfNote,
       fieldLabel(amount, "Amount"),
@@ -945,17 +956,30 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     gasEditor,
   });
 
+  // Gas that won't do says so above Confirm; nothing is sent.
+  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
+
   confirmBtn.addEventListener("click", async () => {
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Sending…";
-
+    let gas;
     try {
-      const gas = gasEditor.readFinalGas();
+      gas = gasEditor.readFinalGas();
+    } catch (e) {
+      confirmError.textContent = e?.message ?? String(e);
+      confirmError.hidden = false;
+      return;
+    }
+    confirmError.hidden = true;
+    confirmBtn.disabled = true;
 
-      // Persist edits so Back/forward keeps them.
-      if (state.draft) state.draft.gas = gas;
+    // Persist edits so Back/forward keeps them, on this review's own draft.
+    d.gas = gas;
 
-      const res = await actions?.send?.({
+    const capGas = gas ?? defaultGas;
+    const contactName = findContactName(state.addressBook?.items);
+    await sendFromReview({
+      state,
+      actions,
+      message: {
         type: "DUSK_UI_SEND_TX",
         params: {
           kind: TX_KIND.TRANSFER,
@@ -967,31 +991,23 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         },
         // Activity names the recipient as typed.
         toName: duskName?.name || undefined,
-      });
-
-      if (res?.error) throw new Error(res.error.message ?? "Transfer failed");
-      if (!res?.ok) throw new Error("Transfer failed");
-
-      const hash = res.result?.hash ?? "";
-      try {
-        const shortHash = hash && hash.length > 18 ? `${hash.slice(0, 10)}…${hash.slice(-8)}` : hash;
-        actions?.showToast?.(shortHash ? `Transaction submitted: ${shortHash}` : "Transaction submitted", 2500);
-      } catch {
-        // ignore
-      }
-      state.route = "home";
-      state.draft = null;
-      state.needsRefresh = true;
-      await actions?.render?.({ forceRefresh: true });
-    } catch (e) {
-      try {
-        actions?.showToast?.(e?.message ?? String(e), 3000);
-      } catch {
-        // ignore
-      }
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "Confirm";
-    }
+      },
+      summary: {
+        title: "Send",
+        amountLux: d.amountLux,
+        to: { name: duskName?.name || contactName || "", address: d.to, short: shortAddress(d.to) },
+        from: privacy === "shielded" ? "from your shielded balance" : "from your public balance",
+        memo: d.memo || "",
+        feeCapLux: (safeBigInt(capGas?.limit, 0n) * safeBigInt(capGas?.price, 0n)).toString(),
+      },
+      backRoute: "confirm",
+      doneRoute: "home",
+      onSent: () => {
+        // Done with, unless a newer draft took its place meanwhile.
+        if (state.draft === d) state.draft = null;
+      },
+    });
+    confirmBtn.disabled = false;
   });
   submitOnGasEnter(gasEditor, confirmBtn);
 
@@ -1029,6 +1045,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           ])
         : h("div"),
       gasEditor,
+      confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ]),
   ].filter(Boolean);

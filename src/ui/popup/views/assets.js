@@ -9,6 +9,7 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { fieldLabel, integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
+import { sendFromReview } from "./sent.js";
 
 const MAX_U64 = 18446744073709551615n;
 
@@ -209,6 +210,18 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
   return st;
 }
 
+// An action's error, said under it rather than in a toast that goes.
+function inlineError() {
+  const el = h("div", { class: "field-error", role: "alert", hidden: true });
+  return {
+    el,
+    show(text) {
+      el.textContent = text || "";
+      el.hidden = !text;
+    },
+  };
+}
+
 export function assetsSectionsView(ov, { state, actions } = {}) {
   const st = ensureTokenBalancesLoaded(ov, { state, actions });
   const hidden = balancesHidden(ov);
@@ -385,10 +398,11 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
         state.route = "home";
         actions?.render?.({ forceRefresh: true }).catch(() => {});
       } catch (e) {
-        actions?.showToast?.(e?.message ?? String(e), 2500);
+        addError.show(e?.message ?? String(e));
       }
     },
   });
+  const addError = inlineError();
   const metaBox = st.meta
     ? h("div", { class: "box" }, [
         h("div", { class: "hrow" }, [h("div", { class: "muted", text: "Name" }), h("code", { text: String(st.meta?.name ?? "—") })]),
@@ -403,6 +417,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
       fieldLabel(input, "Contract ID"),
       input,
       h("div", { class: "btnrow" }, [lookupBtn, addBtn]),
+      addError.el,
       st.error ? h("div", { class: "err", text: String(st.error) }) : null,
       metaBox,
     ].filter(Boolean)),
@@ -511,10 +526,11 @@ export function assetAddNftView(ov, { state, actions } = {}) {
         state.route = "home";
         actions?.render?.({ forceRefresh: true }).catch(() => {});
       } catch (e) {
-        actions?.showToast?.(e?.message ?? String(e), 2800);
+        importError.show(e?.message ?? String(e));
       }
     },
   });
+  const importError = inlineError();
   const infoBox = st.info
     ? (() => {
         const me = String(ov?.accounts?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "").trim();
@@ -541,6 +557,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
       fieldLabel(tokenIdInput, "Token ID"),
       tokenIdInput,
       h("div", { class: "btnrow" }, [lookupBtn, importBtn]),
+      importError.el,
       st.error ? h("div", { class: "err", text: String(st.error) }) : null,
       infoBox,
     ].filter(Boolean)),
@@ -644,9 +661,10 @@ export function assetTokenView(ov, { state, actions } = {}) {
       state.route = "asset_token_confirm";
       actions?.render?.().catch(() => {});
     } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 2800);
+      transferError.show(e?.message ?? String(e));
     }
   };
+  const transferError = inlineError();
 
   const reviewApprove = async ({ max = false } = {}) => {
     try {
@@ -689,9 +707,10 @@ export function assetTokenView(ov, { state, actions } = {}) {
       state.route = "asset_token_confirm";
       actions?.render?.().catch(() => {});
     } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 2800);
+      approveError.show(e?.message ?? String(e));
     }
   };
+  const approveError = inlineError();
 
   const tokenHero = h("div", { class: "box asset-token-hero" }, [
     h("div", { class: "asset-token-head" }, [
@@ -749,6 +768,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     transferToInput,
     fieldLabel(transferAmountInput, "Amount"),
     transferAmountInput,
+    transferError.el,
     reviewTransferBtn,
   ]);
 
@@ -796,6 +816,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
       approveAmountInput,
       approveMaxBtn,
     ]),
+    approveError.el,
     reviewApproveBtn,
     h("div", {
       class: "asset-action-note",
@@ -901,40 +922,54 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   // Back returns to the token, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
-  confirmBtn.addEventListener("click", async () => {
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Sending…";
-    try {
-      const gas = gasEditor.readFinalGas();
-      state.assetTxDraft.gas = gas;
+  // Gas that won't do says so above Confirm; nothing is sent.
+  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
 
-      const res = await actions?.send?.({
+  confirmBtn.addEventListener("click", async () => {
+    let gas;
+    try {
+      gas = gasEditor.readFinalGas();
+    } catch (e) {
+      confirmError.textContent = e?.message ?? String(e);
+      confirmError.hidden = false;
+      return;
+    }
+    confirmError.hidden = true;
+    confirmBtn.disabled = true;
+    d.gas = gas;
+
+    const capGas = gas ?? defaultGas;
+    const counterparty = String(op === "approve" ? d?.asset?.spender ?? "" : d?.asset?.to ?? "");
+    await sendFromReview({
+      state,
+      actions,
+      message: {
         type: "DUSK_UI_SEND_TX",
         params: { ...params, gas: gas || undefined },
         asset: d?.asset && typeof d.asset === "object" ? d.asset : undefined,
-      });
-      if (res?.error) throw new Error(res.error.message ?? "Transaction failed");
-      if (!res?.ok) throw new Error("Transaction failed");
-
-      const hash = res.result?.hash ?? "";
-      actions?.showToast?.(hash ? `Transaction submitted: ${truncateMiddle(hash, 10, 8)}` : "Transaction submitted", 2500);
-
-      // Invalidate balance cache for this token.
-      try {
-        const cid = String(token?.contractId ?? "");
-        if (state.assets?.balancesAt && cid) state.assets.balancesAt[cid] = 0;
-      } catch {}
-
-      state.assetTxDraft = null;
-      state.highlightTx = hash || null;
-      state.route = "home";
-      state.needsRefresh = true;
-      await actions?.render?.({ forceRefresh: true });
-    } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 3000);
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "Confirm";
-    }
+      },
+      summary: {
+        title: op === "transfer" ? `Send ${sym}` : op === "approve" ? `Approve ${sym}` : "Contract call",
+        amountDisplay: op === "approve" && d?.asset?.isMax ? "" : valueHuman,
+        amountText: op === "approve" && d?.asset?.isMax ? "Unlimited" : "",
+        unit: sym,
+        to: counterparty ? { name: "", address: counterparty, short: truncateMiddle(counterparty, 6, 6) } : null,
+        from: "from your public balance",
+        feeCapLux: (safeBigInt(capGas?.limit, 0n) * safeBigInt(capGas?.price, 0n)).toString(),
+      },
+      backRoute: "asset_token_confirm",
+      doneRoute: "asset_token",
+      onSent: () => {
+        // Invalidate balance cache for this token.
+        try {
+          const cid = String(token?.contractId ?? "");
+          if (state.assets?.balancesAt && cid) state.assets.balancesAt[cid] = 0;
+        } catch {}
+        // Done with, unless a newer draft took its place meanwhile.
+        if (state.assetTxDraft === d) state.assetTxDraft = null;
+      },
+    });
+    confirmBtn.disabled = false;
   });
   submitOnGasEnter(gasEditor, confirmBtn);
 
@@ -949,6 +984,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       warn,
       gasEditor,
+      confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ].filter(Boolean)),
   ];

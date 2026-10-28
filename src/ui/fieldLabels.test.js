@@ -201,11 +201,13 @@ describe("field labels", () => {
         },
       },
     };
+    // Native staking: the amount, then the owner under Advanced.
+    state.staking.screen = "native";
     const body = await show(stakeFormView({ selectedAccountIndex: 0 }, { state, actions: actions() }));
-    expect(fieldNames(body)).toEqual(["Stake owner", "Stake amount"]);
+    expect(fieldNames(body)).toEqual(["Stake amount", "Owner"]);
 
     // Liquid staking names its amount the same way.
-    state.staking.mode = "sozu";
+    state.staking.screen = "liquid";
     await show(stakeFormView({ selectedAccountIndex: 0, networkName: "Testnet" }, { state, actions: actions() }));
     expect(fieldNames(dom.document.body)).toEqual(["Stake amount"]);
   });

@@ -168,32 +168,20 @@ async function state(page) {
   }));
 }
 
-test.describe("Sozu liquid staking panel", () => {
-  test("renders separately from native staking and creates stake/unstake drafts", async ({ page }) => {
+test.describe("Sozu liquid staking", () => {
+  test("is a choice of its own, says who holds the DUSK, and creates stake/unstake drafts", async ({ page }) => {
     await installStakeHarness(page, { networkName: "Testnet" });
 
-    await expect(page.getByText("Stake positions")).toBeVisible();
-    await page.getByRole("button", { name: "Liquid staking" }).click();
-    await expect(page.locator(".sozu-kicker")).toHaveCount(0);
-    await expect(page.getByText("Sozu", { exact: true })).toBeVisible();
-    await expect(page.getByText("Stake DUSK through Sozu.")).toBeVisible();
-    await expect(page.getByText("Third-party", { exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "sozu.fi" })).toHaveAttribute("href", "https://sozu.fi/");
+    // Native and liquid staking are two equal rows; nothing is picked.
+    await expect(page.getByRole("button", { name: /Native staking/ })).toBeVisible();
+    await page.getByRole("button", { name: /Liquid staking/ }).click();
+    await expect(page.locator(".subnav-title")).toHaveText("Liquid staking");
+    await expect(page.locator(".liquid-intro")).toContainText("Sozu, not Dusk, holds the DUSK you stake here");
+    await expect(page.locator(".liquid-intro .tag")).toHaveText("third party");
     await expect(page.getByText("Hub discovered")).toHaveCount(0);
     await expect(page.getByText("testnet")).toHaveCount(0);
-    await expect(page.getByText("Pool balance")).toBeVisible();
-    await expect(page.getByText("Available", { exact: true })).toBeVisible();
-    await expect(page.getByText("stDUSK", { exact: true })).toBeVisible();
-    await expect(page.getByText("Rate")).toBeVisible();
-    await expect(page.locator(".sozu-stats .hrow .muted")).toHaveText([
-      "Pool balance",
-      "Available",
-      "stDUSK",
-      "Rate",
-    ]);
-    await expect(page.getByText("stDUSK is available in Assets.")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Review Sozu stake" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Review unstake" })).not.toBeVisible();
+    await expect(page.locator(".kv .kv-label")).toHaveText(["Staked with Sozu", "stDUSK"]);
+    await expect(page.getByRole("button", { name: "Review stake" })).toBeVisible();
 
     await expect.poll(async () => {
       const messages = await page.evaluate(() => window.__stakeMessages);
@@ -220,25 +208,29 @@ test.describe("Sozu liquid staking panel", () => {
     await expect(page.getByText("7.944", { exact: true })).toBeVisible();
 
     await installStakeHarness(page, { networkName: "Testnet" });
-    await page.getByRole("button", { name: "Liquid staking" }).click();
+    await page.getByRole("button", { name: /Liquid staking/ }).click();
+    // Too much says so under the field, not in a toast.
     await page.getByLabel("Stake amount").fill("5000");
-    await page.getByRole("button", { name: "Review Sozu stake" }).click();
-    await expect.poll(async () => (await state(page)).toasts.at(-1)).toBe("Stake amount exceeds public balance after gas.");
+    await expect(page.locator(".amount-field__error")).toHaveText("That's more than your public balance, with the network fee.");
+    await expect(page.getByRole("button", { name: "Review stake" })).toBeDisabled();
     await page.getByRole("button", { name: "Max" }).click();
     await expect(page.getByLabel("Stake amount")).toHaveValue("4999.5");
 
     await page.getByLabel("Stake amount").fill("5");
-    await page.getByRole("button", { name: "Review Sozu stake" }).click();
+    await expect(page.locator(".stake-estimate")).toHaveText(
+      /^You get about [\d.,]+ stDUSK\. Each stDUSK is worth 1\.51 DUSK and grows as rewards come in\.$/
+    );
+    await page.getByRole("button", { name: "Review stake" }).click();
     let st = await state(page);
     expect(st.sozuDraft).toMatchObject({
       kind: "contract_call",
       fnName: "sozu_stake",
       amount: "0",
       deposit: dusk(5),
-      label: "Stake with Sozu",
     });
-    await expect(page.getByText("Stake with Sozu")).toBeVisible();
-    await expect(page.getByText("Gas: Profile 1 public balance")).toBeVisible();
+    await expect(page.locator(".review-head")).toContainText("Liquid staking");
+    await expect(page.locator(".review-head")).toContainText("With Sozu, a third party");
+    await expect(page.getByText("Fee paid from")).toBeVisible();
     await expect(page.getByText("Total (max)")).toBeVisible();
     // The gas presets open with the fee's Edit.
     await expect(page.getByRole("button", { name: "Recommended" })).toBeHidden();
@@ -263,30 +255,29 @@ test.describe("Sozu liquid staking panel", () => {
     });
 
     await installStakeHarness(page, { networkName: "Testnet" });
-    await page.getByRole("button", { name: "Liquid staking" }).click();
-    await page.getByRole("button", { name: "Unstake" }).last().click();
+    await page.getByRole("button", { name: /Liquid staking/ }).click();
+    await page.getByRole("tab", { name: "Unstake" }).click();
     await page.getByLabel("Unstake amount").fill("13");
-    await page.getByRole("button", { name: "Review Sozu unstake" }).click();
-    await expect.poll(async () => (await state(page)).toasts.at(-1)).toBe("Unstake amount exceeds pool balance.");
+    await expect(page.locator(".amount-field__error")).toHaveText("That's more than you have staked with Sozu.");
     await page.getByRole("button", { name: "Max" }).click();
     await expect(page.getByLabel("Unstake amount")).toHaveValue("12");
-    await page.getByRole("button", { name: "Review Sozu unstake" }).click();
+    await page.getByRole("button", { name: "Review unstake" }).click();
     st = await state(page);
     expect(st.sozuDraft).toMatchObject({
       kind: "contract_call",
       fnName: "sozu_unstake",
       amount: "0",
       deposit: "0",
-      label: "Unstake from Sozu",
     });
+    expect(st.toasts).toEqual([]);
   });
 
   test("shows a safe disabled state when Sozu config is missing", async ({ page }) => {
     await installStakeHarness(page, { networkName: "Local" });
 
-    await page.getByRole("button", { name: "Liquid staking" }).click();
-    await expect(page.getByText("Sozu", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /Liquid staking/ }).click();
+    await expect(page.locator(".liquid-intro")).toContainText("Sozu");
     await expect(page.getByText("Sozu liquid staking is not configured for this network.").first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "Review Sozu stake" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Review stake" })).toBeDisabled();
   });
 });

@@ -1,7 +1,11 @@
 import {
+  LUX_SCALE,
   UI_DISPLAY_DECIMALS,
+  formatDusk,
+  formatFee,
   formatLuxShort,
   formatLuxToDusk,
+  groupThousands,
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
@@ -15,12 +19,18 @@ import {
 } from "../../../shared/sozuAdapter.js";
 import { getSozuConfig } from "../../../shared/sozuConfig.js";
 import { getDefaultGas } from "../../../shared/txDefaults.js";
+import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { copyToClipboard } from "../../lib/clipboard.js";
+import { truncateMiddle } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
+import { iconSvg } from "../../components/ActionIcon.js";
+import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
-import { decimalInput, fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
+import { submitOnGasEnter } from "../../components/FormControls.js";
 import { createGasQuickControls } from "../../components/GasQuickControls.js";
+import { sendFromReview } from "./sent.js";
 
 function networkKey(ov) {
   const name = String(ov?.networkName ?? "").trim().toLowerCase();
@@ -30,7 +40,33 @@ function networkKey(ov) {
 }
 
 function fmtLux(value) {
-  return formatLuxShort(value ?? "0", UI_DISPLAY_DECIMALS);
+  return formatDusk(value ?? "0", UI_DISPLAY_DECIMALS);
+}
+
+// Sozu's site, for its own rules.
+const SOZU_URL = "https://sozu.fi/";
+
+// "3.07": DUSK per stDUSK, as the pool's exchange_rate gives it (its total
+// stake over the stDUSK supply), to two decimals.
+function rateText(pool) {
+  const stake = safeBigInt(pool?.totalStakeLux ?? 0, 0n);
+  const supply = safeBigInt(pool?.tokenTotalSupply ?? 0, 0n);
+  if (stake <= 0n || supply <= 0n) return "";
+  return formatLuxShort(((stake * LUX_SCALE) / supply).toString(), 2);
+}
+
+/**
+ * About how much stDUSK a deposit of `amountLux` gets: the pool mints
+ * amount × supply / stake (before any fee Sozu takes), so each stDUSK is
+ * worth the rate in DUSK.
+ * @returns {string} e.g. "32.57", or "" without a pool rate
+ */
+export function stDuskEstimate(amountLux, pool) {
+  const stake = safeBigInt(pool?.totalStakeLux ?? 0, 0n);
+  const supply = safeBigInt(pool?.tokenTotalSupply ?? 0, 0n);
+  const amount = safeBigInt(amountLux ?? 0, 0n);
+  if (amount <= 0n || stake <= 0n || supply <= 0n) return "";
+  return groupThousands(formatLuxShort(((amount * supply) / stake).toString(), 2));
 }
 
 function sozuState(state) {
@@ -133,7 +169,13 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
   return st;
 }
 
-export function sozuLiquidStakingView(ov, { state, actions } = {}) {
+/**
+ * Liquid staking through Sozu, a third party: what Sozu holds for the
+ * profile, then the amount to stake or unstake, checked as it is typed.
+ * @param {object} ov
+ * @param {{ state: object, actions: object, onBack?: Function }} ctx
+ */
+export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const st = ensureSozuLoaded(ov, { state, actions });
   const staticCfg = getSozuConfig(networkKey(ov));
   const liveStatus = st.status;
@@ -145,215 +187,274 @@ export function sozuLiquidStakingView(ov, { state, actions } = {}) {
   const hidden = balancesHidden(ov);
   const publicBalanceLux = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const poolBalanceLux = safeBigInt(position?.poolBalanceLux ?? 0, 0n);
+  const stDuskLux = safeBigInt(position?.stDuskBalanceLux ?? 0, 0n);
   const publicFeeLux = defaultContractCallFeeLux();
   const maxStakeLux = publicBalanceLux > publicFeeLux ? publicBalanceLux - publicFeeLux : 0n;
   const maxUnstakeLux = poolBalanceLux > 0n ? poolBalanceLux : 0n;
   const disabledReason = cfg
     ? ""
     : liveStatus?.reason || "Sozu liquid staking is not configured for this network.";
-  const makeDraft = (kind) => {
-    try {
-      if (!cfg) throw new Error(disabledReason);
-      const amountLux = parseAmountLux(
-        kind === "withdraw" ? st.withdrawAmountDusk : st.depositAmountDusk
-      );
-      if (kind === "withdraw" && amountLux > maxUnstakeLux) {
-        throw new Error("Unstake amount exceeds pool balance.");
-      }
-      if (kind !== "withdraw" && amountLux > maxStakeLux) {
-        throw new Error("Stake amount exceeds public balance after gas.");
-      }
-      state.sozuDraft = {
-        ...(kind === "withdraw"
-          ? buildSozuWithdrawTx({ config: cfg, amountLux })
-          : buildSozuDepositTx({ config: cfg, amountLux })),
-        profileIndex: Number(ov?.selectedAccountIndex ?? 0) || 0,
-        fnArgsAmountLux: amountLux.toString(),
-        label: kind === "withdraw" ? "Unstake from Sozu" : "Stake with Sozu",
-      };
-      state.route = "sozu_confirm";
+  const isWithdraw = st.action === "withdraw";
+  const maxActionLux = isWithdraw ? maxUnstakeLux : maxStakeLux;
+  const rate = pool ? rateText(pool) : "";
+
+  const back = () => {
+    if (onBack) onBack();
+    else {
+      // Back to Staking's overview, not to this screen again.
+      if (state.staking) state.staking.screen = "overview";
+      state.route = "stake";
       actions?.render?.().catch(() => {});
-    } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 3000);
     }
   };
 
-  const addStDuskToken = async () => {
+  const field = amountField({
+    label: isWithdraw ? "Unstake amount" : "Stake amount",
+    value: isWithdraw ? st.withdrawAmountDusk : st.depositAmountDusk,
+    disabled: !cfg,
+    onInput: () => check(),
+    onEnter: () => review(),
+  });
+
+  const estimate = h("div", { class: "stake-estimate", hidden: true });
+  const reviewBtn = h("button", {
+    class: "btn-primary",
+    type: "button",
+    text: isWithdraw ? "Review unstake" : "Review stake",
+    disabled: true,
+    onclick: () => review(),
+  });
+
+  // The amount, checked as it is typed: the error under the field, Review
+  // only when it can go ahead, and for a stake, about what it gets.
+  function check() {
+    const raw = String(field.input.value ?? "").trim();
+    if (isWithdraw) st.withdrawAmountDusk = raw;
+    else st.depositAmountDusk = raw;
+    estimate.hidden = true;
+    if (!cfg) {
+      field.setError(disabledReason);
+      reviewBtn.disabled = true;
+      return null;
+    }
+    if (!raw) {
+      field.setError("");
+      reviewBtn.disabled = true;
+      return null;
+    }
+    let lux;
     try {
-      const contractId = cfg?.contracts?.["staked-dusk"];
-      if (!contractId) throw new Error("stDUSK token contract is not available from Sozu discovery.");
-      const resp = await actions?.send?.({
-        type: "DUSK_UI_ASSETS_WATCH_TOKEN",
-        profileIndex: Number(ov?.selectedAccountIndex ?? 0) || 0,
-        token: makeSozuStDuskToken(contractId),
-      });
-      if (resp?.error) throw new Error(resp.error.message ?? "Failed to add stDUSK");
-      st.autoStDuskWatchKey = stDuskWatchKey(Number(ov?.selectedAccountIndex ?? 0) || 0, contractId);
-      if (state.assets) state.assets.loaded = false;
-      actions?.showToast?.("stDUSK added to Assets.", 2200);
-      actions?.render?.({ forceRefresh: true }).catch(() => {});
+      lux = safeBigInt(parseAmountLux(raw), 0n);
     } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 3000);
+      field.setError(/greater than 0/.test(String(e?.message)) ? "Enter an amount greater than 0." : "Enter an amount such as 10 or 10.5.");
+      reviewBtn.disabled = true;
+      return null;
     }
-  };
+    if (isWithdraw && lux > maxUnstakeLux) {
+      field.setError("That's more than you have staked with Sozu.");
+      reviewBtn.disabled = true;
+      return null;
+    }
+    if (!isWithdraw && lux > maxStakeLux) {
+      field.setError("That's more than your public balance, with the network fee.");
+      reviewBtn.disabled = true;
+      return null;
+    }
+    field.setError("");
+    reviewBtn.disabled = false;
+    const got = isWithdraw ? "" : stDuskEstimate(lux, pool);
+    if (got) {
+      estimate.textContent = `You get about ${got} stDUSK. Each stDUSK is worth ${rate} DUSK and grows as rewards come in.`;
+      estimate.hidden = false;
+    }
+    return lux;
+  }
 
+  function review() {
+    const amountLux = check();
+    if (amountLux == null) {
+      field.input.focus();
+      return;
+    }
+    state.sozuDraft = {
+      ...(isWithdraw
+        ? buildSozuWithdrawTx({ config: cfg, amountLux })
+        : buildSozuDepositTx({ config: cfg, amountLux })),
+      profileIndex: Number(ov?.selectedAccountIndex ?? 0) || 0,
+      fnArgsAmountLux: amountLux.toString(),
+      stDuskEstimate: isWithdraw ? "" : stDuskEstimate(amountLux, pool),
+      label: isWithdraw ? "Unstake from Sozu" : "Liquid staking",
+    };
+    state.route = "sozu_confirm";
+    actions?.render?.().catch(() => {});
+  }
+
+  const setAction = (next) => {
+    st.action = next;
+    actions?.render?.().catch(() => {});
+  };
   const actionTabs = h("div", {
-    class: "tabs tabs--mini sozu-action-tabs",
-    style: `--seg-index: ${st.action === "deposit" ? 0 : 1};`,
+    class: "tabs sozu-action-tabs",
+    role: "tablist",
+    style: `--seg-index: ${isWithdraw ? 1 : 0};`,
   }, [
     h("button", {
-      class: st.action === "deposit" ? "tab is-active" : "tab",
+      class: isWithdraw ? "tab" : "tab is-active",
+      role: "tab",
+      "aria-selected": String(!isWithdraw),
       disabled: !cfg,
-      onclick: () => {
-        st.action = "deposit";
-        actions?.render?.().catch(() => {});
-      },
+      onclick: () => setAction("deposit"),
     }, [h("span", { text: "Stake" })]),
     h("button", {
-      class: st.action === "withdraw" ? "tab is-active" : "tab",
+      class: isWithdraw ? "tab is-active" : "tab",
+      role: "tab",
+      "aria-selected": String(isWithdraw),
       disabled: !cfg,
-      onclick: () => {
-        st.action = "withdraw";
-        actions?.render?.().catch(() => {});
-      },
+      onclick: () => setAction("withdraw"),
     }, [h("span", { text: "Unstake" })]),
   ]);
 
-  const isWithdraw = st.action === "withdraw";
-  const maxActionLux = isWithdraw ? maxUnstakeLux : maxStakeLux;
-  const setMaxAmount = () => {
-    if (maxActionLux <= 0n) {
-      actions?.showToast?.(
-        isWithdraw
-          ? "No pool balance available to unstake."
-          : "No public balance remains after the estimated gas fee.",
-        3000
-      );
-      return;
-    }
-    if (isWithdraw) st.withdrawAmountDusk = formatLuxToDusk(maxActionLux);
-    else st.depositAmountDusk = formatLuxToDusk(maxActionLux);
-    actions?.render?.().catch(() => {});
-  };
-  const amountInput = decimalInput({
-    name: "sozuActionAmount",
-    placeholder: `${isWithdraw ? "Unstake" : "Stake"} amount (DUSK)`,
-    value: isWithdraw ? st.withdrawAmountDusk : st.depositAmountDusk,
-    disabled: !cfg,
-    onEnter: () => reviewBtn.click(),
-    oninput: (e) => {
-      if (isWithdraw) st.withdrawAmountDusk = String(e?.target?.value ?? "");
-      else st.depositAmountDusk = String(e?.target?.value ?? "");
+  const maxBtn = h("button", {
+    class: "mini-btn",
+    type: "button",
+    text: "Max",
+    title: isWithdraw ? "All you have staked with Sozu" : "All of it, less the network fee",
+    disabled: !cfg || maxActionLux <= 0n,
+    onclick: () => {
+      field.setValue(formatLuxToDusk(maxActionLux));
+      check();
+      field.input.focus();
     },
   });
+  const available = h("div", { class: "amount-avail" }, [
+    h(
+      "span",
+      {},
+      isWithdraw
+        ? ["Staked with Sozu ", balance(hidden, fmtLux(poolBalanceLux)), " DUSK"]
+        : ["Available ", balance(hidden, fmtLux(publicBalanceLux)), " DUSK from your public balance"]
+    ),
+    maxBtn,
+  ]);
+
+  // stDUSK in Assets: open it once added, else add it.
   const stDuskContractId = cfg?.contracts?.["staked-dusk"];
-  const hasStDusk = safeBigInt(position?.stDuskBalanceLux ?? 0, 0n) > 0n;
   const currentProfileIndex = Number(ov?.selectedAccountIndex ?? 0) || 0;
-  const currentStDuskWatchKey = stDuskContractId
-    ? stDuskWatchKey(currentProfileIndex, stDuskContractId)
-    : "";
-  const stDuskPending = hasStDusk && currentStDuskWatchKey && st.autoStDuskWatchPending === currentStDuskWatchKey;
-  const stDuskAutoAdded =
-    hasStDusk &&
-    currentStDuskWatchKey &&
-    st.autoStDuskWatchKey === currentStDuskWatchKey;
+  const currentStDuskWatchKey = stDuskContractId ? stDuskWatchKey(currentProfileIndex, stDuskContractId) : "";
+  const stDuskPending = stDuskLux > 0n && currentStDuskWatchKey && st.autoStDuskWatchPending === currentStDuskWatchKey;
+  const stDuskAutoAdded = stDuskLux > 0n && currentStDuskWatchKey && st.autoStDuskWatchKey === currentStDuskWatchKey;
+  const assetError = h("div", { class: "field-error", role: "alert", hidden: true });
+  const addStDuskToken = async () => {
+    try {
+      if (!stDuskContractId) throw new Error("The stDUSK contract isn't known yet.");
+      const resp = await actions?.send?.({
+        type: "DUSK_UI_ASSETS_WATCH_TOKEN",
+        profileIndex: currentProfileIndex,
+        token: makeSozuStDuskToken(stDuskContractId),
+      });
+      if (resp?.error) throw new Error(resp.error.message ?? "Couldn't add stDUSK");
+      st.autoStDuskWatchKey = stDuskWatchKey(currentProfileIndex, stDuskContractId);
+      if (state.assets) state.assets.loaded = false;
+      actions?.showToast?.("stDUSK added to Assets.");
+      actions?.render?.({ forceRefresh: true }).catch(() => {});
+    } catch (e) {
+      assetError.textContent = e?.message ?? String(e);
+      assetError.hidden = false;
+    }
+  };
   const openStDuskAsset = () => {
-    if (!stDuskContractId || !stDuskAutoAdded) return;
     state.assetTokenContractId = canonicalContractId(stDuskContractId);
     state.route = "asset_token";
     actions?.render?.().catch(() => {});
   };
+  const stDuskAction = !stDuskContractId
+    ? null
+    : stDuskAutoAdded
+      ? h("button", { class: "mini-btn", type: "button", text: "Open", "aria-label": "Open stDUSK in Assets", onclick: openStDuskAsset })
+      : stDuskPending
+        ? h("span", { class: "muted", text: "Adding…" })
+        : h("button", { class: "mini-btn", type: "button", text: "Add to Assets", "aria-label": "Add stDUSK to Assets", onclick: addStDuskToken });
 
-  const reviewBtn = h("button", {
-    class: "btn-primary",
-    text: isWithdraw ? "Review Sozu unstake" : "Review Sozu stake",
-    disabled: !cfg,
-    onclick: () => makeDraft(isWithdraw ? "withdraw" : "deposit"),
+  const kv = (label, value) =>
+    h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
+
+  const positionGroup = position && (poolBalanceLux > 0n || stDuskLux > 0n)
+    ? h("div", { class: "group" }, [
+        kv("Staked with Sozu", [balance(hidden, fmtLux(poolBalanceLux)), " DUSK"]),
+        kv("stDUSK", [balance(hidden, fmtLux(stDuskLux)), " stDUSK", stDuskAction].filter(Boolean)),
+      ])
+    : null;
+
+  const poolContract = cfg?.contracts?.pool ? String(cfg.contracts.pool) : "";
+  const copyContract = poolContract
+    ? h("button", {
+        class: "mini-btn",
+        type: "button",
+        text: "Copy",
+        "aria-label": "Copy Sozu's contract ID",
+        onclick: async () => {
+          const ok = await copyToClipboard(poolContract);
+          actions?.showToast?.(ok ? "Contract ID copied" : "Couldn't copy the contract ID");
+        },
+      })
+    : null;
+
+  const sozuLink = h("button", {
+    class: "text-btn text-btn--inline",
+    type: "button",
+    text: "sozu.fi",
+    onclick: async () => {
+      const ok = await openUrl(SOZU_URL);
+      if (!ok) actions?.showToast?.("Couldn't open sozu.fi");
+    },
   });
-  return h("div", { class: "box sozu-panel" }, [
-    h("div", { class: "sozu-hero" }, [
-      h("div", { class: "sozu-brand-row" }, [
-        h("div", { class: "sozu-title", text: "Sozu" }),
-        h("span", { class: "stake-badge stake-badge--third-party", text: "Third-party" }),
+
+  const facts = h("div", { class: "group info" }, [
+    h("div", { class: "list-row" }, [
+      h("span", { class: "row-icon", html: iconSvg("drop") }),
+      h("span", { class: "row-main" }, [
+        h("span", { class: "row-title", text: "Any amount, no node needed" }),
+        h("span", { class: "row-sub", text: "You get stDUSK, a token for your share of Sozu's pool." }),
       ]),
-      h("div", { class: "sozu-subtitle" }, [
-        h("span", { text: "Stake DUSK through Sozu." }),
-        h("a", {
-          class: "sozu-link",
-          href: "https://sozu.fi/",
-          target: "_blank",
-          rel: "noreferrer",
-          text: "sozu.fi",
-          title: "Open Sozu website",
-        }),
+      positionGroup ? null : stDuskAction,
+    ].filter(Boolean)),
+    h("div", { class: "list-row" }, [
+      h("span", { class: "row-icon", html: iconSvg("fee") }),
+      h("span", { class: "row-main" }, [
+        h("span", { class: "row-title", text: `Network fee up to ${formatFee(publicFeeLux)} DUSK` }),
       ]),
     ]),
-    cfg ? null : h("div", { class: "err", text: disabledReason }),
-    st.loading ? h("div", { class: "muted", text: "Loading Sozu pool and position…" }) : null,
+    poolContract
+      ? h("div", { class: "list-row" }, [
+          h("span", { class: "row-icon", html: iconSvg("server") }),
+          h("span", { class: "row-main" }, [
+            h("span", { class: "row-title", text: "Sozu's contract" }),
+            h("span", { class: "row-sub" }, [h("span", { class: "mono", title: poolContract, text: truncateMiddle(poolContract, 8, 8) })]),
+          ]),
+          copyContract,
+        ].filter(Boolean))
+      : null,
+  ].filter(Boolean));
+
+  // Brought back from Review, the amount says how it stands at once.
+  if ((isWithdraw ? st.withdrawAmountDusk : st.depositAmountDusk) || !cfg) check();
+
+  return [
+    subnav({ title: "Liquid staking", onBack: back }),
+    h("div", { class: "liquid-intro" }, [
+      h("div", { class: "liquid-who" }, ["Sozu", h("span", { class: "tag", text: "third party" })]),
+      h("p", {}, ["Sozu, not Dusk, holds the DUSK you stake here and returns it under Sozu's own rules: ", sozuLink, "."]),
+    ]),
+    st.loading && !st.loaded ? h("div", { class: "muted", text: "Loading Sozu…" }) : null,
     st.error ? h("div", { class: "err", text: st.error }) : null,
     cfg && liveStatus?.reason ? h("div", { class: "muted", text: liveStatus.reason }) : null,
-    h("div", { class: "stake-metrics sozu-stats" }, [
-      position
-        ? h("div", { class: "hrow" }, [
-            h("div", { class: "muted", text: "Pool balance" }),
-            h("code", {}, [balance(hidden, fmtLux(position.poolBalanceLux)), " DUSK"]),
-          ])
-        : h("div", { class: "muted", text: "No Sozu pool balance loaded." }),
-      liveStatus?.publicBalance
-        ? h("div", { class: "hrow" }, [
-            h("div", { class: "muted", text: "Available" }),
-            h("code", {}, [balance(hidden, fmtLux(liveStatus.publicBalance.value)), " DUSK"]),
-          ])
-        : null,
-      position
-        ? h(stDuskAutoAdded ? "button" : "div", {
-            class: stDuskAutoAdded ? "hrow sozu-stat-link" : "hrow",
-            type: stDuskAutoAdded ? "button" : undefined,
-            "aria-label": stDuskAutoAdded ? "Open stDUSK in Assets" : undefined,
-            title: stDuskAutoAdded ? "Open stDUSK in Assets" : undefined,
-            onclick: stDuskAutoAdded ? openStDuskAsset : undefined,
-          }, [
-            h("div", { class: "muted", text: "stDUSK" }),
-            h("code", {}, [balance(hidden, fmtLux(position.stDuskBalanceLux)), " stDUSK"]),
-          ])
-        : null,
-      pool
-        ? h("div", { class: "hrow" }, [
-            h("div", { class: "muted", text: "Rate" }),
-            h("code", { text: pool.exchangeRate == null ? "Unavailable" : String(pool.exchangeRate) }),
-          ])
-        : h("div", { class: "muted", text: "Pool data loads from Sozu contracts after connection." }),
-    ].filter(Boolean)),
-    stDuskContractId
-      ? stDuskAutoAdded
-        ? null
-        : stDuskPending
-        ? h("div", { class: "muted", text: "Adding stDUSK to Assets…" })
-        : h("button", {
-            class: "btn-outline",
-            text: "Add stDUSK to Assets",
-            onclick: addStDuskToken,
-          })
-      : null,
-    h("div", { class: "sozu-action-card" }, [
-      actionTabs,
-      fieldLabel(amountInput, isWithdraw ? "Unstake amount" : "Stake amount"),
-      h("div", { class: "sozu-amount-row" }, [
-        amountInput,
-        h("button", {
-          class: "btn-outline",
-          type: "button",
-          text: "Max",
-          disabled: !cfg || maxActionLux <= 0n,
-          title: isWithdraw
-            ? "Use the full pool balance."
-            : "Use public balance minus the estimated gas fee.",
-          onclick: setMaxAmount,
-        }),
-      ]),
-      reviewBtn,
-    ]),
-  ].filter(Boolean));
+    positionGroup,
+    assetError,
+    actionTabs,
+    h("div", { class: "amount-entry" }, [field.el, field.error, available, estimate]),
+    facts,
+    h("div", { class: "stake-bottom" }, [reviewBtn]),
+  ].filter(Boolean);
 }
 
 export function sozuConfirmView(ov, { state, actions } = {}) {
@@ -368,16 +469,16 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const publicBalance = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const draftNeeds = draftAmountLux(draft);
   const draftFeeLux = defaultContractCallFeeLux();
-  const fundingProfileLabel = `Profile ${Number(draft.profileIndex ?? 0) + 1}`;
-  const stakeRequiredLux = draft.fnName === "sozu_stake" ? draftNeeds + draftFeeLux : draftFeeLux;
+  const isStake = draft.fnName === "sozu_stake";
+  const stakeRequiredLux = isStake ? draftNeeds + draftFeeLux : draftFeeLux;
   const submitDisabled =
     st.submitting ||
-    (draft.fnName === "sozu_stake" && stakeRequiredLux > publicBalance) ||
+    (isStake && stakeRequiredLux > publicBalance) ||
     publicBalance <= 0n;
   const submitDisabledReason = publicBalance <= 0n
-    ? "Public DUSK is required for gas."
-    : draft.fnName === "sozu_stake" && stakeRequiredLux > publicBalance
-    ? "Stake amount exceeds public balance after gas."
+    ? "The network fee is paid from the public balance, and it's empty."
+    : isStake && stakeRequiredLux > publicBalance
+    ? "That's more than your public balance, with the network fee."
     : "";
 
   // Back returns to Staking, so Review has no Cancel.
@@ -387,7 +488,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   };
   const confirmBtn = h("button", {
     class: "btn-primary",
-    text: st.submitting ? "Sending…" : "Confirm",
+    text: "Confirm",
     disabled: submitDisabled,
   });
 
@@ -410,52 +511,78 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     gasEditor,
   });
 
+  const title = isStake ? "Liquid staking" : "Unstake from Sozu";
+  const line = isStake ? "With Sozu, a third party" : "From Sozu, back to your public balance";
+
+  // Gas that won't do says so above Confirm; nothing is sent.
+  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
+
   confirmBtn.addEventListener("click", async () => {
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Sending…";
+    let gas;
     try {
-      const gas = gasEditor.readFinalGas();
-      state.sozuDraft.gas = gas;
-      const params = { ...state.sozuDraft, gas: gas || undefined };
-      const resp = await actions?.send?.({
+      gas = gasEditor.readFinalGas();
+    } catch (e) {
+      confirmError.textContent = e?.message ?? String(e);
+      confirmError.hidden = false;
+      return;
+    }
+    confirmError.hidden = true;
+    confirmBtn.disabled = true;
+    draft.gas = gas;
+    const { stDuskEstimate: _estimate, label: _label, ...txDraft } = draft;
+    const params = { ...txDraft, gas: gas || undefined };
+    const capGas = gas ?? defaultGas;
+    await sendFromReview({
+      state,
+      actions,
+      message: {
         type: "DUSK_UI_SEND_TX",
         params,
         asset: { kind: "sozu", action: params.fnName, pool: params.contractId },
-      });
-      if (resp?.error) throw new Error(resp.error.message ?? "Sozu transaction failed");
-      if (!resp?.ok) throw new Error("Sozu transaction failed");
-
-      const hash = resp.result?.hash ?? "";
-      const shortHash = hash && hash.length > 18 ? `${hash.slice(0, 10)}…${hash.slice(-8)}` : hash;
-      actions?.showToast?.(shortHash ? `Transaction submitted: ${shortHash}` : "Transaction submitted", 2500);
-      state.sozuDraft = null;
-      st.loaded = false;
-      st.loading = false;
-      state.highlightTx = hash || null;
-      state.route = "home";
-      state.needsRefresh = true;
-      await actions?.render?.({ forceRefresh: true });
-    } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 3500);
-      confirmBtn.disabled = submitDisabled;
-      confirmBtn.textContent = "Confirm";
-    } finally {
-      st.submitting = false;
-    }
+      },
+      summary: {
+        title,
+        amountLux: draftNeeds.toString(),
+        line,
+        from: isStake ? "from your public balance" : "",
+        feeCapLux: (safeBigInt(capGas?.limit, 0n) * safeBigInt(capGas?.price, 0n)).toString(),
+      },
+      backRoute: "sozu_confirm",
+      doneRoute: "stake",
+      onSent: () => {
+        st.loaded = false;
+        st.loading = false;
+        // Done with, unless a newer Sozu draft took its place meanwhile.
+        if (state.sozuDraft !== draft) return;
+        state.sozuDraft = null;
+        if (isStake) st.depositAmountDusk = "";
+        else st.withdrawAmountDusk = "";
+        if (state.staking) state.staking.screen = "overview";
+      },
+    });
+    confirmBtn.disabled = submitDisabled;
   });
   submitOnGasEnter(gasEditor, confirmBtn);
+
+  const kv = (label, value) =>
+    h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
   return [
     subnav({ title: "Review", onBack: goBack }),
     h("div", { class: "row" }, [
-      h("div", { class: "box tx-summary" }, [
-        h("div", { class: "muted", text: draft.label ?? "Sozu transaction" }),
+      h("div", { class: "review-head" }, [
+        h("div", { class: "review-kind", text: title }),
         h("div", { class: "balance-amount", text: `${fmtLux(draftNeeds.toString())} DUSK` }),
-        h("div", { class: "muted", text: `Gas: ${fundingProfileLabel} public balance` }),
+        h("div", { class: "review-line", text: line }),
+      ]),
+      h("div", { class: "group" }, [
+        isStake && draft.stDuskEstimate ? kv("You get about", `${draft.stDuskEstimate} stDUSK`) : null,
+        kv("Fee paid from", `Profile ${Number(draft.profileIndex ?? 0) + 1} public balance`),
       ].filter(Boolean)),
-      submitDisabledReason ? h("div", { class: "err", text: submitDisabledReason }) : null,
+      submitDisabledReason ? h("div", { class: "field-error", role: "alert", text: submitDisabledReason }) : null,
       gasEditor,
+      confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
-    ]),
+    ].filter(Boolean)),
   ];
 }

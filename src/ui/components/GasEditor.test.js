@@ -38,7 +38,7 @@ describe("fee editor", () => {
     expect(send).toHaveBeenCalledWith({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
 
     // The recommended (median) price is set, and only the fee and the total show.
-    expect(visibleText(editor)).toBe("Network fee (max)0.004 DUSKEditTotal (max)1.004 DUSK");
+    expect(visibleText(editor)).toBe("Network fee (max)0.0040 DUSKEditTotal (max)1.004 DUSK");
     expect(shownButtons()).toEqual(["Edit"]);
     expect(isShown(panel)).toBe(false);
 
@@ -64,11 +64,11 @@ describe("fee editor", () => {
     const fee = () => editor.querySelector(".box code").textContent;
 
     button("Low").click();
-    expect([editor.getGasInputs(), fee()]).toEqual([{ limit: "2000000", price: "1" }, "0.002 DUSK"]);
+    expect([editor.getGasInputs(), fee()]).toEqual([{ limit: "2000000", price: "1" }, "0.0020 DUSK"]);
     button("High").click();
-    expect([editor.readFinalGas(), fee()]).toEqual([{ limit: "2000000", price: "5" }, "0.01 DUSK"]);
+    expect([editor.readFinalGas(), fee()]).toEqual([{ limit: "2000000", price: "5" }, "0.0100 DUSK"]);
     button("Recommended").click();
-    expect(fee()).toBe("0.004 DUSK");
+    expect(fee()).toBe("0.0040 DUSK");
 
     // Auto leaves the gas to the wallet's defaults.
     button("Auto").click();

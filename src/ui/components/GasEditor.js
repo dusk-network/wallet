@@ -1,4 +1,4 @@
-import { UI_DISPLAY_DECIMALS, formatLuxShort, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, formatFee, formatLuxShort, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { h, setChildren } from "../lib/dom.js";
 import { fieldLabel, integerInput } from "./FormControls.js";
 
@@ -216,14 +216,15 @@ export class DuskGasEditor extends HTMLElement {
       return;
     }
 
-    const feeDusk = `${formatLuxShort(feeLux.toString(), this.#maxDecimals)} DUSK`;
+    // Fees read alike everywhere: four decimals.
+    const feeDusk = `${formatFee(feeLux)} DUSK`;
     this.#feeCode.textContent = feeDusk;
     this.#feeCode.title = `Gas limit: ${limit} · Gas price: ${price}`;
 
     let totalLux = this.#amountLux + feeLux;
     for (const x of this.#extraLux) totalLux += x;
 
-    this.#totalCode.textContent = `${formatLuxShort(totalLux.toString(), this.#maxDecimals)} DUSK`;
+    this.#totalCode.textContent = `${groupThousands(formatLuxShort(totalLux.toString(), this.#maxDecimals))} DUSK`;
     // Keep tooltip minimal (deposit/extra amounts can be shown elsewhere)
     this.#totalCode.title = `Amount: ${this.#amountLux.toString()} Lux · Max fee: ${feeLux.toString()} Lux`;
   }

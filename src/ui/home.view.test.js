@@ -87,7 +87,7 @@ describe("home balance", () => {
     vi.unstubAllGlobals();
   });
 
-  it("puts Hide balances and Refresh next to the balance title, inside its brackets, and refreshes the wallet", async () => {
+  it("puts Hide balances and Refresh next to the balance title, and refreshes the wallet", async () => {
     const { document } = installFakeDom();
     const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
     const state = { route: "home", addressBook: { loaded: true, items: [] } };
@@ -101,14 +101,11 @@ describe("home balance", () => {
     document.body.replaceChildren(...homeView(ov, { state, actions }));
 
     const title = document.body.querySelector(".home-hero .balance-label");
-    expect(title.children.map((el) => el.className)).toEqual([
-      "bracket-title__bracket",
-      "bracket-title__text",
-      "balance-eye",
-      "balance-refresh",
-      "bracket-title__bracket",
-    ]);
-    expect(title.textContent).toBe("[Total balance]");
+    expect(title.children.map((el) => el.className)).toEqual(["balance-label__text", "balance-eye", "balance-refresh"]);
+    // A plain title: no [ brackets ] for screen readers to spell out.
+    expect(title.textContent).toBe("Total balance");
+    // The amount, grouped, with its unit after it.
+    expect(document.body.querySelector(".home-hero .balance-amount").textContent).toBe("177.9865 DUSK");
 
     // An SVG icon, not the ⟳ glyph, which many systems have no font for.
     const refresh = title.querySelector("button.balance-refresh");
@@ -147,7 +144,7 @@ describe("home balance", () => {
 
   it("refreshes through the header's old Refresh action", async () => {
     const app = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "app.js"), "utf8");
-    expect(app).toContain("const actions = { send, render, showToast, refresh: onRefresh };");
+    expect(app).toMatch(/const actions = \{ send, render, showToast, refresh: onRefresh[,}]/);
     const onRefresh = app.match(/async function onRefresh\(\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
     expect(onRefresh).toContain("acctMenu.close();");
     expect(onRefresh).toContain("state.needsRefresh = true;");
