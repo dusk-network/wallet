@@ -124,4 +124,6 @@ export const state = {
   contactsWallet: "",
   needsRefresh: true,
   lastOrigin: null,
+  // Goes up when a switch of network, profile or wallet starts (context.js).
+  context: 0,
 };

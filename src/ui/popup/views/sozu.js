@@ -34,6 +34,7 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { profileNameEl } from "../../components/ProfileName.js";
+import { contextOf } from "../context.js";
 import { sendFromReview } from "./sent.js";
 
 function networkKey(ov) {
@@ -202,6 +203,22 @@ function applyStakeTerms({ st, draft, terms }) {
 // Drafted stakes whose Confirm is reading Sozu's terms again: one check at a
 // time for each, a redrawn Review's Confirm included.
 const rechecking = new WeakSet();
+
+/**
+ * The wallet, profile and network a Review was drawn on, as the wallet's
+ * engine checks them just before it sends: on any other, it refuses the call.
+ * @param {object} ov - the overview the Review was drawn with
+ * @param {number} profileIndex - the profile the call is sent from
+ */
+function reviewedContext(ov, profileIndex) {
+  const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
+  return {
+    walletId: String(accounts[0] ?? ""),
+    profileIndex,
+    account: String(accounts[profileIndex] ?? ""),
+    nodeUrl: String(ov?.nodeUrl ?? ""),
+  };
+}
 
 function sozuState(state) {
   return (state.sozu ??= {
@@ -749,15 +766,20 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const confirmError = h("div", { class: "field-error", role: "alert", hidden: !draft.checkError, text: draft.checkError ?? "" });
 
   // This Review: its route and its draft, on the network and profile it was
-  // drawn on. A check that answers after it was left does nothing at all.
+  // drawn on. `state.context` moves the moment a switch of either starts,
+  // before the overview names the new one. A check that answers after that,
+  // or after the Review was left, does nothing at all.
+  const reviewContext = contextOf(state);
+  const sameContext = () => contextOf(state) === reviewContext;
   const reviewNode = String(ov?.nodeUrl ?? "");
   const reviewProfile = Number(ov?.selectedAccountIndex ?? 0) || 0;
   const reviewNetwork = String(liveStatus?.networkKey ?? "");
+  const onThisReview = () => state.route === "sozu_confirm" && state.sozuDraft === draft;
   const stillHere = (terms) => {
     const now = state.overview ?? ov;
     return (
-      state.route === "sozu_confirm" &&
-      state.sozuDraft === draft &&
+      sameContext() &&
+      onThisReview() &&
       now?.isUnlocked !== false &&
       String(now?.nodeUrl ?? "") === reviewNode &&
       (Number(now?.selectedAccountIndex ?? 0) || 0) === reviewProfile &&
@@ -795,8 +817,16 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         rechecking.delete(draft);
       }
       // Left meanwhile, another stake drafted, or another network or profile:
-      // the answer is for nothing now.
-      if (!stillHere(terms)) return;
+      // the answer is for nothing now. This stake's Review, if it still
+      // shows, is drawn again, from the overview read again: its Confirm was
+      // off for the check, a Review a switch redrew meanwhile included.
+      if (!stillHere(terms)) {
+        if (onThisReview()) {
+          state.needsRefresh = true;
+          actions?.render?.().catch(() => {});
+        }
+        return;
+      }
       if (!terms) {
         // Staking reads Sozu again on the way back.
         st.loaded = false;
@@ -810,7 +840,13 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       }
     }
     const { quote: _quote, label: _label, termsChanged: _changed, checkError: _error, ...txDraft } = draft;
-    const params = { ...txDraft, gas: sentGas };
+    // The engine sends it only on the wallet, profile and network of this
+    // Review, whichever window switched them meanwhile.
+    const params = {
+      ...txDraft,
+      gas: sentGas,
+      _approvalContext: reviewedContext(ov, Number(draft.profileIndex ?? 0) || 0),
+    };
     await sendFromReview({
       state,
       actions,
@@ -828,6 +864,8 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       },
       backRoute: "sozu_confirm",
       doneRoute: "stake",
+      // A switch begun while the Sent screen was drawn keeps it from going.
+      unchanged: sameContext,
       onSent: () => {
         st.loaded = false;
         st.loading = false;

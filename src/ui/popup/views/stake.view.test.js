@@ -9,6 +9,7 @@ import { maxAmountLux } from "../../../shared/amount.js";
 import { stakeConfirmView, stakeFormView } from "./stake.js";
 import { sozuConfirmView } from "./sozu.js";
 import { sentView } from "./sent.js";
+import { switchContext } from "../context.js";
 
 // The profile's verified name, as the header shows it: none unless a test gives one.
 vi.mock("../../../shared/duskNames.js", async (importOriginal) => ({
@@ -783,10 +784,51 @@ describe("liquid staking", () => {
       expect(t.state.route).toBe("sozu_confirm");
     });
 
+    it("sends nothing when a switch starts before the answer comes, though the overview still names the Review's network", async () => {
+      const t = await lateCheck();
+      // The header's switch has begun: the wallet may be on the new network
+      // already, while the overview is still being read again.
+      switchContext(t.state);
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+    });
+
+    it("sends nothing when a switch starts as the Sent screen is drawn, and says so", async () => {
+      const t = await lateCheck();
+      const draw = t.app.actions.render.getMockImplementation();
+      t.app.actions.render.mockImplementation(async () => {
+        if (t.state.route === "sent") switchContext(t.state);
+        return draw();
+      });
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      const step = body.querySelector(".step");
+      expect([visibleText(step.querySelector(".step-title")), visibleText(step.querySelector(".step-sub"))]).toEqual([
+        "Not sent",
+        "The network or profile changed meanwhile. No fee was charged.",
+      ]);
+    });
+
+    it("lets a Review that a switch redrew during the check be confirmed once the answer is set aside", async () => {
+      const t = await lateCheck();
+      // The switch to Profile 2 is done first: this Review is drawn again for
+      // it, its Confirm off while the check is out.
+      switchContext(t.state);
+      Object.assign(t.state.overview, { selectedAccountIndex: 1 });
+      t.app.draw();
+      expect(button("Confirm").disabled).toBe(true);
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      expect(t.state.route).toBe("sozu_confirm");
+      expect(button("Confirm").disabled).toBe(false);
+    });
+
     it("sends nothing when the answer comes from another network than the Review's", async () => {
       const t = await lateCheck();
       await t.answer({ networkKey: "mainnet" });
       expect(t.sent()).toEqual([]);
+      // Drawn again, its Confirm can be pressed.
+      expect(button("Confirm").disabled).toBe(false);
     });
 
     it("checks once and sends once however often Confirm is pressed, a redrawn Review's included", async () => {
@@ -898,6 +940,31 @@ describe("liquid staking", () => {
     expect(sentTx.params.gas).toEqual({ limit: "5000000", price: "1" });
     expect(state.route).toBe("sent");
     expect(visibleText(body.querySelector(".sent-head"))).toBe("Liquid staking100 DUSKWith Sozu, a third party");
+  });
+
+  it("asks the wallet to send a stake or an unstake only on the wallet, profile and network of its Review", async () => {
+    const overview = ov({ selectedAccountIndex: 1, accounts: [ACCOUNT, OTHER] });
+    for (const [action, amount, review] of [
+      ["deposit", "Stake amount", "Review stake"],
+      ["withdraw", "Unstake amount", "Review unstake"],
+    ]) {
+      const state = {
+        route: "stake",
+        staking: staking(owner(), { screen: "liquid", profileIndex: 1 }),
+        sozu: sozu({ action, profileIndex: 1, position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }),
+      };
+      const app = popup(state, overview);
+      typeInto(field(amount), "5");
+      button(review).click();
+      await settle();
+      button("Confirm").click();
+      await settle();
+      const sentTx = app.actions.send.mock.calls.map(([m]) => m).find((m) => m.type === "DUSK_UI_SEND_TX");
+      expect(sentTx.params).toMatchObject({
+        profileIndex: 1,
+        _approvalContext: { walletId: ACCOUNT, profileIndex: 1, account: OTHER, nodeUrl: "https://testnet.nodes.dusk.network" },
+      });
+    }
   });
 
   it("hides what Sozu holds with Hide balances, but not what a typed amount gets or the fee", () => {

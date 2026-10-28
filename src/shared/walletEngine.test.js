@@ -1119,6 +1119,23 @@ describe("walletEngine", () => {
     expect(res.publicKeyHex).toMatch(/^0x[0-9a-f]{192}$/);
   });
 
+  it("sends a contract call, as a stake with Sozu, only on the wallet, profile and node its review was for", async () => {
+    engine.configure({ nodeUrl: NETWORK_KEY, accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const stake = { kind: "contract_call", privacy: "public", contractId: "72".repeat(32), fnName: "sozu_stake", fnArgs: [0, 232, 118, 72, 23, 0, 0, 0], amount: "0", deposit: "100000000000", profileIndex: 1 };
+    const reviewed = { walletId: WALLET_ID, profileIndex: 1, account: "acct1", nodeUrl: NETWORK_KEY };
+
+    for (const changed of [{ nodeUrl: "https://testnet.nodes.dusk.network" }, { profileIndex: 0, account: "acct0" }, { walletId: "acct9" }]) {
+      await expect(engine.sendTransaction({ ...stake, _approvalContext: { ...reviewed, ...changed } })).rejects.toThrow(
+        "Wallet changed while awaiting approval"
+      );
+    }
+    expect(globalThis.__W3SPER_LAST_EXEC_TX__).toBeNull();
+
+    await expect(engine.sendTransaction({ ...stake, _approvalContext: reviewed })).resolves.toEqual({ hash: "0xmockhash", nonce: 42 });
+    expect(globalThis.__W3SPER_LAST_EXEC_TX__.profile.account.toString()).toBe("acct1");
+  });
+
   it("signAuth returns the signed canonical login envelope", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);

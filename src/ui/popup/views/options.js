@@ -15,6 +15,7 @@ import { bracketTitle } from "../../components/BracketTitle.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { fieldLabel, integerInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
+import { switchContext } from "../context.js";
 
 // Settings: the profile, security, connected sites, contacts and the network,
 // then Advanced (custom gas, Delete all contacts), and Reset wallet on its
@@ -37,6 +38,7 @@ export function optionsView(ov, { state, actions } = {}) {
         type: "button",
         text: "Lock wallet",
         onclick: async () => {
+          switchContext(state);
           await actions?.send?.({ type: "DUSK_UI_LOCK" });
           state.route = "home";
           state.needsRefresh = true;
@@ -85,6 +87,7 @@ export function optionsView(ov, { state, actions } = {}) {
   accountSelect.value = String(Math.max(0, Math.min(selectedAccountIndex, displayAccounts.length - 1)));
   accountSelect.addEventListener("change", async () => {
     try {
+      switchContext(state);
       await actions?.send?.({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index: Number(accountSelect.value) });
       actions?.showToast?.("Profile selected.");
       state.needsRefresh = true;
@@ -323,6 +326,7 @@ export function optionsView(ov, { state, actions } = {}) {
         if (pv && !valid(pv)) throw new Error("Invalid prover URL format");
         if (av && !valid(av)) throw new Error("Invalid archiver URL format");
 
+        switchContext(state);
         const resp = await actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: v, proverUrl: pv, archiverUrl: av });
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to save settings");
         actions?.showToast?.("Settings saved.");
@@ -482,6 +486,7 @@ export function optionsView(ov, { state, actions } = {}) {
     onclick: async () => {
       if (!confirm("This will remove the encrypted recovery phrase from this browser profile. Continue?")) return;
       try {
+        switchContext(state);
         const res = await actions?.send?.({ type: "DUSK_UI_RESET_WALLET" });
         if (res?.error) throw new Error(res.error.message ?? "Wallet reset failed");
         actions?.showToast?.("Wallet reset. Import again to continue.", 2500);

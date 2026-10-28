@@ -1,6 +1,7 @@
 // Popup/Full/Options UI entry.
 import { isPopupView, isFullView } from "./env.js";
 import { emptyAddressBook, state, ONBOARD_ROUTES } from "./state.js";
+import { switchContext } from "./context.js";
 import { refreshOverview, getActiveOrigin } from "./overview.js";
 import { h, setChildren } from "../lib/dom.js";
 import { createToaster } from "../components/Toast.js";
@@ -73,6 +74,8 @@ function isWalletLockedResponse(value) {
 
 function applyLockedOverviewPatch() {
   try {
+    // Locked here or elsewhere: whatever began unlocked is for nothing now.
+    switchContext(state);
     state.overview = {
       ...(state.overview ?? {}),
       isUnlocked: false,
@@ -642,6 +645,8 @@ const netMenu = createNetworkMenuController({
         return;
       }
 
+      // From now on, before the wallet answers or the overview is read again.
+      switchContext(state);
       const resp = await send({
         type: "DUSK_UI_SET_NODE_URL",
         nodeUrl: preset.nodeUrl,
@@ -667,6 +672,7 @@ const acctMenu = createAccountMenuController({
   onSelectAccountIndex: async (index) => {
     try {
       acctMenu.close();
+      switchContext(state);
       const resp = await send({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index });
       if (isWalletLockedResponse(resp)) {
         applyLockedOverviewPatch();
