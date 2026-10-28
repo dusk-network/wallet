@@ -48,6 +48,16 @@ describe("settings", () => {
     await expect(getSettings()).resolves.toMatchObject({ chainId: 1 });
   });
 
+  it("forgets a node's network when it's chosen again and can't say this time", async () => {
+    const { setSettings } = await import("./settings.js");
+    const { networkForNode } = await import("./nodeNetwork.js");
+    await setSettings({ nodeUrl: "https://my-node.example", chainId: 2 });
+    await setSettings({ nodeUrl: "https://nodes.dusk.network" });
+    expect(networkForNode("https://my-node.example")?.name).toBe("testnet");
+    await setSettings({ nodeUrl: "https://my-node.example", chainId: null });
+    expect(networkForNode("https://my-node.example")).toBeNull();
+  });
+
   it("names the node's network for anything in this context that loads the settings, a worker just woken included", async () => {
     value = { nodeUrl: "https://my-node.example", chainId: 2 };
     const { getSettings } = await import("./settings.js");

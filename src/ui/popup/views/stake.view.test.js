@@ -170,6 +170,32 @@ describe("staking overview", () => {
     expect(body.textContent).not.toMatch(/\bEarn\b/);
   });
 
+  it("estimates with the Sozu of the node's own network: asked again once a custom node's chain ID is read, never another network's fee", async () => {
+    const rates = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
+    const statusReads = (actions) => actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_GET_SOZU_STATUS").length;
+    const testnet = sozu().status;
+    const unread = { configured: false, networkKey: "custom" };
+    // A custom node chosen while it couldn't say its network: no Sozu there
+    // yet, even from an engine already told it's Testnet's.
+    const state = { route: "stake", staking: staking(), sozu: sozu({ status: unread }) };
+    const custom = ov({ nodeUrl: "https://my-node.example", networkName: "Custom", chainId: null });
+    popup(state, custom, { rewardRate: 0.2, sozuStatus: async () => testnet });
+    await vi.waitFor(() => expect(rates()[0]).toHaveLength(1));
+    expect(rates()[1]).toEqual([]);
+
+    // Read since: Testnet, whose Sozu is asked for, past the status held of before.
+    const later = popup(state, { ...custom, chainId: 2 }, { rewardRate: 0.2, sozuStatus: async () => testnet });
+    await vi.waitFor(() => expect(rates()[1]).toEqual(["About 18% a year after Sozu's 10%"]));
+    expect(statusReads(later.actions)).toBe(1);
+
+    // Mainnet's Sozu, held from before a switch, isn't Testnet's.
+    const mainnet = { ...testnet, networkKey: "mainnet", fees: { ...testnet.fees, reward: { numerator: "15", denominator: "100" } } };
+    const switched = { route: "stake", staking: staking(), sozu: sozu({ status: mainnet }) };
+    const next = popup(switched, ov(), { rewardRate: 0.2, sozuStatus: async () => testnet });
+    await vi.waitFor(() => expect(rates()[1]).toEqual(["About 18% a year after Sozu's 10%"]));
+    expect(statusReads(next.actions)).toBe(1);
+  });
+
   it("offers native and liquid staking as two equal choices, neither picked", () => {
     const state = { route: "stake", staking: staking() };
     popup(state);

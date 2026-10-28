@@ -27,12 +27,13 @@ export function detectPresetIdFromNodeUrl(nodeUrl) {
  * the node gave (nodeNetwork.js), "Local" for a node on this machine, else
  * "Custom"; "Unknown" for an address that isn't one.
  * @param {string} nodeUrl
+ * @param {number | null} [chainId] - the node's, where it's kept with what's named
  */
-export function networkNameFromNodeUrl(nodeUrl) {
+export function networkNameFromNodeUrl(nodeUrl, chainId) {
   try {
     new URL(nodeUrl);
   } catch {
     return "Unknown";
   }
-  return networkLabelOf(chainIdForNode(nodeUrl), nodeUrl);
+  return networkLabelOf(Number.isInteger(chainId) ? chainId : chainIdForNode(nodeUrl), nodeUrl);
 }

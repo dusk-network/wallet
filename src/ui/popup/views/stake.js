@@ -12,6 +12,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
+import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
@@ -427,19 +428,24 @@ export function stakeFormView(ov, { state, actions } = {}) {
 // What each way of staking pays a year, beside the choice: native staking's
 // estimate across the network (one read of the node a day, rewardRate.js)
 // and Sozu's after its fee on rewards, as its status reads it. Asked once a
-// popup and network, and drawn again when the answers come.
+// popup, node and network (a custom node's once its chain ID is read too),
+// and drawn again when the answers come.
 function rewardRates(ov, { state, actions }) {
-  const key = String(ov?.nodeUrl ?? "");
+  const nodeUrl = String(ov?.nodeUrl ?? "");
+  const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
+  const ofNetwork = (status) => (status?.networkKey === networkKey ? status : null);
+  // Sozu's status as Liquid staking read it last, while it's this network's.
+  const held = ofNetwork(state.sozu?.status)?.fees?.reward ?? null;
+  const key = `${networkKey} ${nodeUrl}`;
   if (state.rewardRates?.key !== key) {
     const rates = (state.rewardRates = { key, native: null, sozuFee: null });
     const result = (res) => (res?.error ? null : res?.result ?? null);
     const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
-    const held = state.sozu?.status?.fees?.reward ?? null;
     Promise.all([
       Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_REWARD_RATE" })).then(result, () => null),
       held ??
         Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: idx })).then(
-          (res) => result(res)?.fees?.reward ?? null,
+          (res) => ofNetwork(result(res))?.fees?.reward ?? null,
           () => null
         ),
     ]).then(([native, sozuFee]) => {
@@ -449,7 +455,7 @@ function rewardRates(ov, { state, actions }) {
     });
   }
   // Sozu's fee as Liquid staking read it last, else as asked here.
-  const sozuFee = state.sozu?.status?.fees?.reward ?? state.rewardRates.sozuFee;
+  const sozuFee = held ?? state.rewardRates.sozuFee;
   const native = state.rewardRates.native;
   const sozu = native !== null && sozuFee ? sozuRateEstimate(native, sozuFee) : null;
   return {

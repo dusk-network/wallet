@@ -1548,6 +1548,33 @@ describe("background rpc handler", () => {
     expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
   });
 
+  it("dusk_sendTransaction passes on and records the kind it checked, however the site spelled it", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+
+    const call = { privacy: "public", contractId: `0x${"ab".repeat(32)}`, fnName: "transfer", fnArgs: "0x1234", amount: "0", deposit: "0" };
+    await handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params: { ...call, kind: "CONTRACT_CALL" } });
+    await handleRpc("https://dapp.example", {
+      method: "dusk_sendTransaction",
+      params: { kind: "Transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1" },
+    });
+
+    const sent = engineCall.mock.calls.filter(([m]) => m === "dusk_sendTransaction").map(([, p]) => p.kind);
+    const asked = requestUserApproval.mock.calls.filter(([type]) => type === "send_tx").map(([, , p]) => p.kind);
+    const kept = putTxMeta.mock.calls.map(([, meta]) => meta);
+    expect([sent, asked, kept.map((m) => m.kind)]).toEqual([
+      ["contract_call", "transfer"],
+      ["contract_call", "transfer"],
+      ["contract_call", "transfer"],
+    ]);
+    // What Activity shows of the call.
+    expect(kept[0]).toMatchObject({ contractId: expect.stringMatching(/ab/), fnName: "transfer" });
+  });
+
   it("dusk_sendTransaction strips shielded contract-call nullifiers from provider response", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

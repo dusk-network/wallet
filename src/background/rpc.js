@@ -660,10 +660,12 @@ export async function handleRpc(origin, request) {
         );
       }
 
-      let normalizedParams = params;
+      // The kind as checked, from here on: the approval, the engine and the
+      // transaction's record all read this one spelling (txRecord.js).
+      let normalizedParams = { ...params, kind };
       if (kind === TX_KIND.TRANSFER) {
         normalizedParams = {
-          ...params,
+          ...normalizedParams,
           privacy: validateTransferPrivacy(params),
           amount: validateU64(params.amount, "amount", { required: true, allowZero: false }),
           memo: validateMemo(params.memo),

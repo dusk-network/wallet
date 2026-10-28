@@ -26,3 +26,10 @@ export const TX_KIND = Object.freeze({
  * to support broader account discovery.
  */
 export const MAX_ACCOUNT_COUNT = 2;
+
+/**
+ * What the desktop app's wallet (wallet/localBus.js) tells the page it runs
+ * in, as the extension's background tells its pages with runtime messages:
+ * an event of this type on the page, the message its detail.
+ */
+export const WALLET_MESSAGE_EVENT = "dusk-wallet-message";

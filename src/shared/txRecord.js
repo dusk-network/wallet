@@ -1,11 +1,12 @@
 // A sent transaction's first record, as Activity and the watchers start from
-// it (txStore.js): who asked and on which node, the profile that paid, what
+// it (txStore.js): who asked, on which node and network, the profile that paid, what
 // it sends and to whom, its gas, and the shielded notes it reserves. The
 // wallet's own sends add the stake's owner, how they were paid, the token and
 // the .dusk name typed for the recipient; a site's add what its call says.
 
 import { normalizeNullifiers } from "./bytes.js";
 import { TX_KIND } from "./constants.js";
+import { chainIdForNode } from "./nodeNetwork.js";
 
 const text = (value) => (value !== undefined && value !== null ? String(value) : undefined);
 
@@ -33,6 +34,9 @@ export function submittedTxMeta(params, { origin, nodeUrl, profileIndex, nullifi
   return {
     origin,
     nodeUrl,
+    // The network it was sent on, as the settings the sender just loaded name
+    // the node's (nodeNetwork.js): its notices keep it after a switch.
+    chainId: chainIdForNode(nodeUrl),
     kind,
     privacy: params?.privacy ? String(params.privacy) : undefined,
     profileIndex,

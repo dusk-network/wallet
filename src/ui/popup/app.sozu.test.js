@@ -239,4 +239,27 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     const { networkForNode } = await import("../../shared/nodeNetwork.js");
     expect(networkForNode("https://my-node.example")?.name).toBe("testnet");
   });
+
+  it("draws again, too, when the desktop app's wallet in this page says it read that chain ID", async () => {
+    const { dom } = popupPage();
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    send.mockReset();
+    const custom = { ...TESTNET, nodeUrl: "https://my-node.example", networkName: "Custom", chainId: null };
+    send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? custom : {}));
+    const { state } = await import("./state.js");
+    const { render } = await import("./app.js");
+    await render();
+    await flush();
+    const overviews = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_OVERVIEW").length;
+    const before = overviews();
+
+    custom.chainId = 2;
+    const told = dom.window._listeners.filter((l) => l.type === "dusk-wallet-message");
+    expect(told).toHaveLength(1);
+    told[0].fn({ type: "dusk-wallet-message", detail: { type: "DUSK_UI_NETWORK_CHANGED" } });
+    await flush();
+    expect(overviews()).toBe(before + 1);
+    expect(state.overview.chainId).toBe(2);
+  });
 });

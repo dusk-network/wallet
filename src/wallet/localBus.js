@@ -12,6 +12,7 @@ import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { readChainId } from "../shared/networkStatus.js";
+import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
 import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
@@ -65,9 +66,17 @@ import {
 // A node's chain ID being asked for again: the app has no status checks, so
 // a node whose chain ID couldn't be read when it was chosen is asked as the
 // wallet draws, once at a time and at most every 30 seconds, as the
-// extension's checks do.
+// extension's checks do. Once read, the page draws again (popup/app.js).
 let askingChain = null;
 let chainAskedAt = -Infinity;
+
+function tellPage(message) {
+  try {
+    globalThis.window?.dispatchEvent(new CustomEvent(WALLET_MESSAGE_EVENT, { detail: message }));
+  } catch {
+    // no page to tell
+  }
+}
 
 async function ensureEngineConfigured() {
   const settings = await getSettings();
@@ -83,6 +92,9 @@ async function ensureEngineConfigured() {
     chainAskedAt = Date.now();
     askingChain = readChainId(settings.nodeUrl)
       .then((chainId) => rememberNodeChain(settings.nodeUrl, chainId))
+      .then((changed) => {
+        if (changed) tellPage({ type: "DUSK_UI_NETWORK_CHANGED" });
+      })
       .catch(() => false)
       .finally(() => {
         askingChain = null;

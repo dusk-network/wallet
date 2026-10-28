@@ -4,6 +4,7 @@
 import { getSettings } from "../shared/settings.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { explorerTxUrl } from "../shared/explorer.js";
+import { chainIdForNode } from "../shared/nodeNetwork.js";
 import { getTxMeta } from "../shared/txStore.js";
 import { shortHash } from "../ui/lib/strings.js";
 import {
@@ -17,6 +18,17 @@ const ICON_PATH = "icons/dusk-128.png";
 
 let handlersInstalled = false;
 const ext = getExtensionApi();
+
+// The node and network a transaction was sent on, as its record keeps them
+// (txRecord.js), for its notice and explorer link after a switch and a
+// worker restart too; else the wallet's node, as its settings name it.
+async function sentOn(hash, nodeUrl) {
+  // The settings first, always: they name the wallet's node's network, in a worker just woken too.
+  const settings = await getSettings();
+  const meta = hash ? await getTxMeta(hash).catch(() => null) : null;
+  const url = String(nodeUrl || meta?.nodeUrl || settings?.nodeUrl || "");
+  return { nodeUrl: url, chainId: Number.isInteger(meta?.chainId) ? meta.chainId : chainIdForNode(url) };
+}
 
 export function registerTxNotificationHandlers() {
   if (handlersInstalled) return;
@@ -38,11 +50,8 @@ export function registerTxNotificationHandlers() {
         const status = parts?.[3] ?? "";
 
         if (hash && (status === "executed" || status === "failed")) {
-          const meta = await getTxMeta(hash);
-          // The settings first, always: they name the node's network, in a worker just woken too.
-          const settings = await getSettings();
-          const nodeUrl = meta?.nodeUrl ?? settings?.nodeUrl ?? "";
-          const url = explorerTxUrl(nodeUrl, hash);
+          const { nodeUrl, chainId } = await sentOn(hash);
+          const url = explorerTxUrl(nodeUrl, hash, chainId);
           if (url) {
             tabsCreate({ url }).catch(() => {});
             return;
@@ -70,13 +79,10 @@ export function registerTxNotificationHandlers() {
           const hash = parts?.[2] ?? "";
           const status = parts?.[3] ?? "";
 
-          const meta = await getTxMeta(hash);
-          // The settings first, always: they name the node's network, in a worker just woken too.
-          const settings = await getSettings();
-          const nodeUrl = meta?.nodeUrl ?? settings?.nodeUrl ?? "";
+          const { nodeUrl, chainId } = await sentOn(hash);
 
           if (buttonIndex === 0 && (status === "executed" || status === "failed")) {
-            const url = explorerTxUrl(nodeUrl, hash);
+            const url = explorerTxUrl(nodeUrl, hash, chainId);
             if (url) {
               tabsCreate({ url }).catch(() => {});
               return;
@@ -107,11 +113,8 @@ export async function notifyTxSubmitted({ hash, origin, title, nodeUrl } = {}) {
   try {
     if (!ext?.notifications) return;
 
-    // The settings first, always: they name the node's network, in a worker just woken too.
-    const settings = await getSettings();
-    const resolvedNodeUrl = nodeUrl ?? settings?.nodeUrl ?? "";
-
-    const networkName = networkNameFromNodeUrl(resolvedNodeUrl);
+    const sent = await sentOn(hash, nodeUrl);
+    const networkName = networkNameFromNodeUrl(sent.nodeUrl, sent.chainId);
 
     const msgLines = [];
     const sh = shortHash(hash);
@@ -156,12 +159,9 @@ export async function notifyTxExecuted({
     if (!ext?.notifications) return;
     if (!hash) return;
 
-    // The settings first, always: they name the node's network, in a worker just woken too.
-    const settings = await getSettings();
-    const resolvedNodeUrl = nodeUrl ?? settings?.nodeUrl ?? "";
-
-    const networkName = networkNameFromNodeUrl(resolvedNodeUrl);
-    const explorerUrl = explorerTxUrl(resolvedNodeUrl, hash);
+    const sent = await sentOn(hash, nodeUrl);
+    const networkName = networkNameFromNodeUrl(sent.nodeUrl, sent.chainId);
+    const explorerUrl = explorerTxUrl(sent.nodeUrl, hash, sent.chainId);
 
     const msgLines = [];
     const sh = shortHash(hash);

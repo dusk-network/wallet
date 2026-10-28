@@ -1,9 +1,9 @@
-import { networkForNode } from "./nodeNetwork.js";
+import { chainIdForNode, networkOf } from "./nodeNetwork.js";
 
 // The Dusk explorer of the node's network, from its file in
 // @dusk-network/networks; none on a local or unknown network.
-function explorerBase(nodeUrl) {
-  return networkForNode(String(nodeUrl ?? ""))?.apps.explorer ?? null;
+function explorerBase(nodeUrl, chainId) {
+  return networkOf(Number.isInteger(chainId) ? chainId : chainIdForNode(String(nodeUrl ?? "")))?.apps.explorer ?? null;
 }
 
 /**
@@ -14,12 +14,13 @@ function explorerBase(nodeUrl) {
  *
  * @param {string} nodeUrl
  * @param {string} hash
+ * @param {number | null} [chainId] - the network it was sent on, where it's kept
  * @returns {string|null}
  */
-export function explorerTxUrl(nodeUrl, hash) {
+export function explorerTxUrl(nodeUrl, hash, chainId) {
   if (!hash || typeof hash !== "string") return null;
 
-  const base = explorerBase(nodeUrl);
+  const base = explorerBase(nodeUrl, chainId);
   if (!base) return null;
   return `${base}/transactions/transaction/?id=${encodeURIComponent(hash)}`;
 }

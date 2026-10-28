@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The extension's notifications, recorded; nothing is shown.
-const ext = vi.hoisted(() => ({ clicked: null, created: [], tabs: [] }));
+// The extension's notifications, recorded; nothing is shown. `meta` is the
+// transaction's record (txStore.js).
+const ext = vi.hoisted(() => ({ clicked: null, created: [], tabs: [], meta: null }));
 vi.mock("../platform/extensionApi.js", () => ({
   getExtensionApi: () => ({
     notifications: {
@@ -13,8 +14,7 @@ vi.mock("../platform/extensionApi.js", () => ({
   runtimeGetURL: (path) => `chrome-extension://wallet/${path}`,
   tabsCreate: vi.fn(async ({ url }) => ext.tabs.push(url)),
 }));
-// The transaction was sent on the custom node.
-vi.mock("../shared/txStore.js", () => ({ getTxMeta: vi.fn(async () => ({ nodeUrl: "https://my-node.example" })) }));
+vi.mock("../shared/txStore.js", () => ({ getTxMeta: vi.fn(async () => ext.meta) }));
 
 function memoryStorage() {
   const store = new Map();
@@ -35,7 +35,8 @@ const EXPLORER = `https://apps.testnet.dusk.network/explorer/transactions/transa
 
 beforeEach(() => {
   vi.resetModules();
-  Object.assign(ext, { clicked: null, created: [], tabs: [] });
+  // The transaction was sent on the custom node, before the network was kept with it.
+  Object.assign(ext, { clicked: null, created: [], tabs: [], meta: { nodeUrl: "https://my-node.example" } });
   // A custom node of Testnet's, as Settings saved it with the chain ID it gave.
   vi.stubGlobal("localStorage", memoryStorage());
   localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://my-node.example", chainId: 2 }));
@@ -56,6 +57,18 @@ describe("a transaction's notification, in a worker just woken", () => {
 
   it("opens the transaction on its network's explorer when clicked", async () => {
     const { registerTxNotificationHandlers } = await import("./txNotify.js");
+    registerTxNotificationHandlers();
+    await ext.clicked(`dusk_tx_${HASH}_executed_1`);
+    expect(ext.tabs).toEqual([EXPLORER]);
+  });
+
+  it("names the network a transaction was sent on, by the chain ID its record keeps, after a switch to another node", async () => {
+    ext.meta = { nodeUrl: "https://my-node.example", chainId: 2 };
+    localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://nodes.dusk.network" }));
+    const { notifyTxExecuted, registerTxNotificationHandlers } = await import("./txNotify.js");
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
+    expect(ext.created[0].opts.message).toContain("Network: Testnet");
+    expect(ext.created[0].opts.buttons.map((b) => b.title)).toEqual(["View in Explorer", "Open Wallet"]);
     registerTxNotificationHandlers();
     await ext.clicked(`dusk_tx_${HASH}_executed_1`);
     expect(ext.tabs).toEqual([EXPLORER]);

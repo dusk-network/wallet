@@ -57,13 +57,16 @@ const noted = new Map();
 
 /**
  * Notes the chain ID a node gave, as the settings this context loaded or was
- * handed keep it.
+ * handed keep it: none (a node chosen again that couldn't say) forgets what
+ * was noted of it before.
  * @param {string} nodeUrl
  * @param {unknown} chainId
  */
 export function noteChainId(nodeUrl, chainId) {
   const origin = originOf(nodeUrl);
-  if (origin && Number.isInteger(chainId)) noted.set(origin, chainId);
+  if (!origin) return;
+  if (Number.isInteger(chainId)) noted.set(origin, chainId);
+  else noted.delete(origin);
 }
 
 /**

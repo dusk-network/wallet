@@ -106,6 +106,15 @@ describe("local sends", () => {
     await expect(getTxMeta("cc".repeat(32))).resolves.toMatchObject({ kind: "stake", profileIndex: 1 });
   });
 
+  it("keep the network they were sent on, by the chain ID the node's settings keep", async () => {
+    localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://my-node.example", chainId: 2 }));
+    const { localSend } = await import("./localBus.js");
+    const { getTxMeta } = await import("../shared/txStore.js");
+    engine.sendTransaction.mockResolvedValueOnce({ hash: "ee".repeat(32), nonce: 1n });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1" } });
+    await expect(getTxMeta("ee".repeat(32))).resolves.toMatchObject({ nodeUrl: "https://my-node.example", chainId: 2 });
+  });
+
   it("keep nothing of a send that finished after a wallet reset", async () => {
     const { localSend } = await import("./localBus.js");
     const { clearTxs, listTxs } = await import("../shared/txStore.js");
@@ -338,12 +347,16 @@ describe("a custom node's chain ID, on the desktop app", () => {
     vi.stubGlobal("fetch", fetch);
     const { localSend } = await import("./localBus.js");
     const stored = () => JSON.parse(localStorage.getItem("dusk_settings_v1")).chainId;
+    // The page the wallet runs in, which draws again when told (popup/app.js).
+    const told = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent: told });
 
     await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ chainId: null });
     // Asked, and once more after a short wait.
     await vi.advanceTimersByTimeAsync(1_000);
     expect(infoReads(fetch)).toBe(2);
     expect(stored()).toBeNull();
+    expect(told).not.toHaveBeenCalled();
 
     // The node can say now: drawing again soon asks nothing yet...
     fetch.mockImplementation(async () => new Response('{"chain_id":2}'));
@@ -353,6 +366,9 @@ describe("a custom node's chain ID, on the desktop app", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     await localSend({ type: "DUSK_UI_OVERVIEW" });
     await vi.waitFor(() => expect(stored()).toBe(2));
+    // The page is told, as the extension's background tells its pages.
+    await vi.waitFor(() => expect(told).toHaveBeenCalledTimes(1));
+    expect([told.mock.calls[0][0].type, told.mock.calls[0][0].detail]).toEqual(["dusk-wallet-message", { type: "DUSK_UI_NETWORK_CHANGED" }]);
     await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ chainId: 2 });
     expect(infoReads(fetch)).toBe(3);
   });

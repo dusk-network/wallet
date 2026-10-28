@@ -30,6 +30,11 @@ describe("a node's network", () => {
     expect(chainIdForNode("https://my-node.example")).toBe(2);
     expect(networkForNode("https://my-node.example")?.name).toBe("testnet");
     expect(networkKeyOf(2, "https://my-node.example")).toBe("testnet");
+
+    // Chosen again and unread, the node is Custom, not the network it was on.
+    noteChainId("https://my-node.example", null);
+    expect(chainIdForNode("https://my-node.example")).toBeNull();
+    expect(networkForNode("https://my-node.example")).toBeNull();
   });
 
   it("is a network's own node's without asking, and nothing for a name that only looks like one", () => {
