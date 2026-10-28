@@ -1,8 +1,7 @@
 // Sozu's amounts, as its contracts count them: the web wallet's
-// src/lib/sozu/amounts.js, ported, with the stake and unstake rules both
-// wallets follow. Both run the same test vectors (fixtures/sozu-vectors.json).
-// Here the least stake is worked out at once, and is null when no stake can
-// go ahead, as at a fee of 100%. Amounts are lux, as bigints.
+// src/lib/sozu/amounts.js, ported as it is, with the stake and unstake rules
+// both wallets follow. Both run the same test vectors
+// (fixtures/sozu-vectors.json). Amounts are lux, as bigints.
 
 /** Lux in one DUSK, and in one stDUSK. */
 const ONE = 1_000_000_000n;

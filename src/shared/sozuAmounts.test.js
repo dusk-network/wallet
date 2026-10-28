@@ -40,8 +40,9 @@ describe("Sozu's amounts, from the shared vectors", () => {
 
   it.each(vectors.minimums)("finds the least stake on the $pool pool with the $fees fee: $least lux", (v) => {
     const least = leastSozuStake(pool(v.pool), deposit(v.fees));
-    expect(least).toBe(BigInt(v.least));
-    if (v.fees) {
+    // Null: no stake goes ahead, as at a fee of 100%.
+    expect(least).toBe(v.least === null ? null : BigInt(v.least));
+    if (v.fees && least !== null) {
       // The least that goes ahead, and nothing under it does.
       expect(sozuStakeQuote(least, pool(v.pool), deposit(v.fees)).ok).toBe(true);
       expect(sozuStakeQuote(least - 1n, pool(v.pool), deposit(v.fees)).ok).toBe(false);
@@ -81,24 +82,13 @@ describe("Sozu's amounts, as the web wallet's", () => {
   });
 });
 
-// Here only: the web wallet still counts up to the least stake, and at a fee
-// of 100% gives a least no stake reaches. These join the shared vectors once
-// it works the least out at once, as below.
+// What the shared vectors don't hold: the 99.99% and 100% fees are there.
 describe("Sozu's least stake at fees near 100%", () => {
   const testnet = pool("testnet-2026-10-26");
   const U64_MAX = 2n ** 64n - 1n;
 
-  it("works out the least at 99.99%, what's left after the fee rounded down", () => {
-    const fee = { numerator: 9_999n, denominator: 10_000n };
-    expect(leastSozuStake(testnet, fee)).toBe(40_000n);
-    expect(sozuStakeQuote(40_000n, testnet, fee)).toEqual({ fee: 39_996n, worth: 4n, stDusk: 1n, ok: true });
-    expect(sozuStakeQuote(39_999n, testnet, fee).ok).toBe(false);
-  });
-
-  it("has no least when no stake can go ahead: a fee of 100% or more, or a least past any u64 amount", () => {
-    expect(leastSozuStake(testnet, { numerator: 1n, denominator: 1n })).toBeNull();
+  it("has no least when no stake can go ahead: a fee over 100%, or a least past any u64 amount", () => {
     expect(leastSozuStake(testnet, { numerator: 3n, denominator: 2n })).toBeNull();
-    expect(sozuStakeQuote(1_000_000_000n, testnet, { numerator: 1n, denominator: 1n }).ok).toBe(false);
     // A pool whose stDUSK is worth a u64's whole, and a fee of 1 lux in u64::MAX.
     expect(leastSozuStake({ stake: U64_MAX, supply: 1n }, { numerator: 1n, denominator: U64_MAX })).toBeNull();
   });
