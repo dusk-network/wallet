@@ -45,9 +45,16 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
       expect(all.arrivesLux).toBe(0n);
       expect(bridgeServiceWarnings(all).map((w) => w.kind)).toEqual(["fee"]);
     }
-    expect(bridgeServiceLine(bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, amount: "1000000001" }))).toBe(
+    expect(bridgeServiceLine(bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo: EVM, amount: "1000000001" }))).toBe(
       "1.000000001 DUSK sent · 1 DUSK bridge fee · 0.000000001 DUSK arrives on BNB Smart Chain"
     );
+
+    // Without an address there in the memo, nothing arrives, whatever the amount.
+    for (const memo of [undefined, "", "Order 1042", EVM.replace(/[a-f]/, (c) => c.toUpperCase())]) {
+      expect(bridgeServiceLine(bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo, amount: "2000000000" }))).toBe(
+        "2 DUSK sent · 1 DUSK bridge fee · Nothing arrives without a BNB Smart Chain address in the memo"
+      );
+    }
   });
 
   it("say testnet's route to Sepolia isn't running right now", () => {

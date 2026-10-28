@@ -8,7 +8,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings } from "../../../shared/bridgeCalls.js";
+import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, noBridgeRecipientText } from "../../../shared/bridgeCalls.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
@@ -903,11 +903,13 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const privacy = recType === "address" ? "shielded" : "public";
   const toAddr = String(d.to || "").trim();
   // To the bridge's account: it pays the memo's address on another chain
-  // what's left once it takes its fee. An amount the fee takes whole stays
-  // here, as nothing would arrive.
+  // what's left once it takes its fee. An amount the fee takes whole, or a
+  // memo that's no address there, stays here, as nothing would arrive.
   const service = privacy === "public" ? bridgeServiceTransfer({ nodeUrl: ov?.nodeUrl, to: toAddr, memo: d.memo, amount: d.amountLux }) : null;
   const serviceNotes = service ? bridgeServiceWarnings(service) : [];
   const tooLittle = serviceNotes.some((n) => n.kind === "fee");
+  const noRecipient = Boolean(service && !service.recipientOk);
+  const nothingArrives = tooLittle || noRecipient;
 
   // The profile it's sent from, by its verified .dusk name as the header
   // shows it; what a public send shows everyone names it too.
@@ -1007,7 +1009,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   }
 
   // Back returns to Send with the draft, so Review has no Cancel.
-  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm", disabled: tooLittle });
+  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm", disabled: nothingArrives });
 
   const defaultGas = getDefaultGas(TX_KIND.TRANSFER, { privacy });
   const defaultLimit =
@@ -1038,7 +1040,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
 
   confirmBtn.addEventListener("click", async () => {
-    if (tooLittle) return;
+    if (nothingArrives) return;
     let gas;
     try {
       gas = gasEditor.readFinalGas();
@@ -1085,9 +1087,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         if (state.draft === d) state.draft = null;
       },
     });
-    confirmBtn.disabled = tooLittle;
+    confirmBtn.disabled = nothingArrives;
   });
-  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !tooLittle });
+  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !nothingArrives });
 
   const kv = (label, value, className = "") =>
     h("div", { class: ["kv", className].filter(Boolean).join(" ") }, [
@@ -1139,6 +1141,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       tooLittle
         ? h("div", { class: "field-error", role: "alert", text: `Send more than the ${formatDuskExact(service.feeLux)} DUSK bridge fee.` })
         : null,
+      noRecipient ? h("div", { class: "field-error", role: "alert", text: `${noBridgeRecipientText(service.chain)}.` }) : null,
       saveContactBtn,
       gasEditor,
       confirmError,

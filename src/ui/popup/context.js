@@ -7,9 +7,12 @@
 /**
  * A switch of network, profile or wallet, as it starts.
  * @param {object} state - the popup's state
+ * @param {"switch" | "lock"} [reason] - "lock" for the wallet locking, so
+ *   what it ends can say so
  */
-export function switchContext(state) {
+export function switchContext(state, reason = "switch") {
   state.context = contextOf(state) + 1;
+  state.contextReason = reason;
 }
 
 /**

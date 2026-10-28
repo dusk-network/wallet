@@ -91,6 +91,9 @@ const sozu = (over = {}) => ({
 });
 
 const ov = (over = {}) => ({ selectedAccountIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network", networkName: "Testnet", ...over });
+// What Liquid staking says after leaving a stake's Review the popup moved away from.
+const SWITCHED = "The network or profile changed, so nothing was sent. Check the stake again.";
+const LOCKED = "The wallet locked, so nothing was sent. Check the stake again.";
 
 let dom;
 let body;
@@ -719,7 +722,6 @@ describe("liquid staking", () => {
   });
 
   describe("a stake whose check of Sozu's terms answers late", () => {
-    const SWITCHED = "The network or profile changed, so nothing was sent. Check the stake again.";
     // Review of a 100 DUSK stake, Confirm pressed, and Sozu's status held back
     // until `answer` gives it: unchanged unless told otherwise.
     async function lateCheck() {
@@ -782,7 +784,7 @@ describe("liquid staking", () => {
     it.each([
       ["the network changes", { nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }, SWITCHED],
       ["the profile changes", { selectedAccountIndex: 1 }, SWITCHED],
-      ["the wallet locks", { isUnlocked: false }, "The wallet locked, so nothing was sent. Check the stake again."],
+      ["the wallet locks", { isUnlocked: false }, LOCKED],
     ])("sends nothing when %s before the answer comes, and goes back to the stake to say so", async (_, change, notice) => {
       const t = await lateCheck();
       t.state.overview = ov(change);
@@ -816,14 +818,14 @@ describe("liquid staking", () => {
       ]);
     });
 
-    it("leaves a Review that a switch redrew during the check, its Confirm off, once the answer is set aside", async () => {
+    it("leaves a Review drawn again after a switch at once, and its answer then does nothing", async () => {
       const t = await lateCheck();
-      // The switch to Profile 2 is done first: this Review is drawn again for
-      // it, its Confirm off while the check is out.
+      // The switch to Profile 2 is done first, and the popup draws again.
       switchContext(t.state);
       Object.assign(t.state.overview, { selectedAccountIndex: 1 });
       t.app.draw();
-      expect(button("Confirm").disabled).toBe(true);
+      t.backOnForm(SWITCHED);
+      expect(button("Confirm")).toBeUndefined();
       await t.answer();
       expect(t.sent()).toEqual([]);
       t.backOnForm(SWITCHED);
@@ -861,6 +863,51 @@ describe("liquid staking", () => {
       expect(t.reads()).toBe(1);
       expect(t.sent()).toHaveLength(1);
       expect(t.sent()[0].params).toMatchObject({ fnName: "sozu_stake", deposit: dusk(100) });
+    });
+  });
+
+  describe("a stake's Review, drawn again after the popup moved away from where it was drafted", () => {
+    const THIRD =
+      "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+
+    it.each([
+      ["a switch to Profile 2", (state) => (switchContext(state), { selectedAccountIndex: 1 }), SWITCHED],
+      ["a switch to Mainnet", (state) => (switchContext(state), { nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }), SWITCHED],
+      ["a lock and an unlock", (state) => (switchContext(state, "lock"), {}), LOCKED],
+      ["another wallet unlocked in another window", () => ({ accounts: [THIRD] }), SWITCHED],
+    ])("offers no Confirm after %s, and goes back to the stake to say so", async (_, move, notice) => {
+      const overview = ov({ accounts: [ACCOUNT, OTHER] });
+      const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu(), overview };
+      const app = popup(state, overview);
+      typeInto(field("Stake amount"), "100");
+      button("Review stake").click();
+      await settle();
+      expect(button("Confirm").disabled).toBe(false);
+
+      // The Review, left idle, is drawn again once the popup moved on: it
+      // offers no Confirm, and the stake's form shows instead.
+      Object.assign(overview, move(state));
+      app.draw();
+      expect(button("Confirm")).toBeUndefined();
+      expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
+      expect(visibleText(body.querySelector(".sozu-notice"))).toBe(notice);
+      expect(field("Stake amount").value).toBe("100");
+      await settle();
+      expect(app.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);
+    });
+
+    it("leaves a stake drafted on a form drawn before a switch began, at once", async () => {
+      const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+      popup(state);
+      typeInto(field("Stake amount"), "100");
+      // The switch starts while the form shows, and Review stake is pressed
+      // before the form is drawn again: its figures are for the old network.
+      switchContext(state);
+      button("Review stake").click();
+      await settle();
+      expect(button("Confirm")).toBeUndefined();
+      expect([state.route, state.sozuDraft]).toEqual(["stake", null]);
+      expect(visibleText(body.querySelector(".sozu-notice"))).toBe(SWITCHED);
     });
   });
 

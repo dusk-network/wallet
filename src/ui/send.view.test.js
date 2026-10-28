@@ -722,6 +722,20 @@ describe("a send to the bridge's account", () => {
     expect(view.actions.send.mock.calls.some(([m]) => m.type === "DUSK_UI_SEND_TX")).toBe(false);
   });
 
+  it.each([
+    ["isn't an address on BSC", { memo: "Order 1042" }, MAINNET, "Nothing arrives without a BNB Smart Chain address in the memo."],
+    ["is missing", { memo: "" }, MAINNET, "Nothing arrives without a BNB Smart Chain address in the memo."],
+    ["isn't an address on Sepolia", { to: testnet.account, memo: "Order 1042" }, overview(), "Nothing arrives without an Ethereum (Sepolia) address in the memo."],
+  ])("keeps Confirm off when the memo %s, as nothing would arrive", async (_, draft, ov, reason) => {
+    const view = review(draft, ov);
+    await settle();
+    expect(body().querySelectorAll(".row > .field-error").filter(isShown).map((e) => e.textContent)).toEqual([reason]);
+    expect(confirm().disabled).toBe(true);
+    confirm().click();
+    await settle();
+    expect(view.actions.send.mock.calls.some(([m]) => m.type === "DUSK_UI_SEND_TX")).toBe(false);
+  });
+
   it("says the testnet bridge to Sepolia isn't running right now, and checks the memo is an address there", async () => {
     review({ to: testnet.account }, overview());
     await settle();
@@ -734,6 +748,8 @@ describe("a send to the bridge's account", () => {
     review({ memo: "Order 1042" });
     await settle();
     expect(callouts()).toEqual(["The memo isn't an address on BSC"]);
+    // Nothing arrives there without one: the line doesn't say it does.
+    expect(text(".review-bridge-fee")).toBe("2 DUSK sent · 1 DUSK bridge fee · Nothing arrives without a BNB Smart Chain address in the memo");
   });
 
   it("is a plain transfer to another network's bridge account", async () => {

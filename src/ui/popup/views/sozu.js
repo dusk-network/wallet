@@ -210,19 +210,59 @@ function applyStakeTerms({ st, draft, terms }) {
 const rechecking = new WeakSet();
 
 /**
- * The wallet, profile and network a Review was drawn on, as the wallet's
- * engine checks them just before it sends: on any other, it refuses the call.
- * @param {object} ov - the overview the Review was drawn with
+ * Where a drafted call to Sozu belongs, recorded as it enters Review: the
+ * popup's context, and the node, network, wallet, profile and account, as
+ * the form it was drafted on was drawn. Its Review compares the popup with
+ * this record, never with what the Review was last drawn with, and the
+ * wallet's engine checks the same just before it sends.
+ * @param {object} ov - the overview the form was drawn with
  * @param {number} profileIndex - the profile the call is sent from
+ * @param {number} context - the popup's context as the form was drawn
+ * @param {string} [networkKey] - the network Sozu's terms were read on
  */
-function reviewedContext(ov, profileIndex) {
+function reviewRecord(ov, profileIndex, context, networkKey) {
   const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
-  return {
+  return Object.freeze({
+    context,
+    nodeUrl: String(ov?.nodeUrl ?? ""),
+    networkKey: String(networkKey ?? ""),
     walletId: String(accounts[0] ?? ""),
     profileIndex,
     account: String(accounts[profileIndex] ?? ""),
-    nodeUrl: String(ov?.nodeUrl ?? ""),
-  };
+  });
+}
+
+/**
+ * Whether the popup is still where a drafted call to Sozu belongs: the
+ * context, node, wallet and profile its record holds, and unlocked.
+ * @param {object | null} record - reviewRecord's
+ */
+function stillFor(record, state, ov) {
+  const now = state.overview ?? ov;
+  const accounts = Array.isArray(now?.accounts) ? now.accounts : [];
+  return (
+    Boolean(record) &&
+    contextOf(state) === record.context &&
+    now?.isUnlocked !== false &&
+    String(now?.nodeUrl ?? "") === record.nodeUrl &&
+    (Number(now?.selectedAccountIndex ?? 0) || 0) === record.profileIndex &&
+    String(accounts[0] ?? "") === record.walletId
+  );
+}
+
+/**
+ * Leaves a stake's Review that doesn't belong where the popup is now, for
+ * the stake's form: the amount as typed, checked again there, and one line
+ * on why nothing was sent.
+ */
+function leaveReview(state, st, record, ov) {
+  const now = state.overview ?? ov;
+  const locked = now?.isUnlocked === false || (contextOf(state) !== record?.context && state.contextReason === "lock");
+  st.notice = locked ? LOCKED_NOTICE : SWITCHED_NOTICE;
+  st.loaded = false;
+  state.sozuDraft = null;
+  if (state.staking) state.staking.screen = "liquid";
+  state.route = "stake";
 }
 
 function sozuState(state) {
@@ -358,6 +398,8 @@ function syncWarning() {
  * @param {{ state: object, actions: object, onBack?: Function }} ctx
  */
 export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
+  // The popup's context as this form is drawn: what its figures are for.
+  const formContext = contextOf(state);
   const st = ensureSozuLoaded(ov, { state, actions });
   const staticCfg = getSozuConfig(networkKey(ov));
   const liveStatus = st.status;
@@ -503,15 +545,18 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       return;
     }
     const quote = isWithdraw ? null : sozuStakeQuote(amountLux, pool, depositFee);
+    const profileIndex = Number(ov?.selectedAccountIndex ?? 0) || 0;
     st.notice = "";
     state.sozuDraft = {
       ...(isWithdraw
         ? buildSozuWithdrawTx({ config: cfg, amountLux })
         : buildSozuDepositTx({ config: cfg, amountLux })),
-      profileIndex: Number(ov?.selectedAccountIndex ?? 0) || 0,
+      profileIndex,
       fnArgsAmountLux: amountLux.toString(),
       quote: quote ? quoteJson(quote, depositFee) : null,
       label: isWithdraw ? "Unstake from Sozu" : "Liquid staking",
+      // Where it belongs, as this form was drawn: its Review checks the popup is still there.
+      reviewed: reviewRecord(ov, profileIndex, formContext, liveStatus?.networkKey),
     };
     state.route = "sozu_confirm";
     actions?.render?.().catch(() => {});
@@ -698,6 +743,14 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   }
 
   const st = sozuState(state);
+  // Where this stake belongs, recorded as it entered Review. Drawn anywhere
+  // else, after a switch of network, profile or wallet, or a lock, it offers
+  // no Confirm: back to the stake's form, with why.
+  const record = draft.reviewed ?? null;
+  if (!stillFor(record, state, ov)) {
+    leaveReview(state, st, record, ov);
+    return sozuLiquidStakingView(ov, { state, actions });
+  }
   const liveStatus = st.status;
   const publicBalance = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const draftNeeds = draftAmountLux(draft);
@@ -774,31 +827,32 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   // Gas that won't do, or terms that couldn't be checked, say so above Confirm; nothing is sent.
   const confirmError = h("div", { class: "field-error", role: "alert", hidden: !draft.checkError, text: draft.checkError ?? "" });
 
-  // This Review: its route and its draft, on the network and profile it was
-  // drawn on. `state.context` moves the moment a switch of either starts,
-  // before the overview names the new one. A check that answers after that,
-  // or after the Review was left, does nothing at all.
-  const reviewContext = contextOf(state);
-  const sameContext = () => contextOf(state) === reviewContext;
-  const reviewNode = String(ov?.nodeUrl ?? "");
-  const reviewProfile = Number(ov?.selectedAccountIndex ?? 0) || 0;
-  const reviewNetwork = String(liveStatus?.networkKey ?? "");
+  // This Review, with the popup still where its stake belongs: compared with
+  // the record, never with what the Review was drawn with. `state.context`
+  // moves the moment a switch starts, before the overview names the new
+  // network or profile. A check that answers after that, from another
+  // network, or after the Review was left, does nothing at all.
   const onThisReview = () => state.route === "sozu_confirm" && state.sozuDraft === draft;
-  const stillHere = (terms) => {
-    const now = state.overview ?? ov;
-    return (
-      sameContext() &&
-      onThisReview() &&
-      now?.isUnlocked !== false &&
-      String(now?.nodeUrl ?? "") === reviewNode &&
-      (Number(now?.selectedAccountIndex ?? 0) || 0) === reviewProfile &&
-      (!terms || !reviewNetwork || String(terms.status?.networkKey ?? "") === reviewNetwork)
-    );
+  const belongs = () => stillFor(record, state, ov);
+  const stillHere = (terms) =>
+    onThisReview() &&
+    belongs() &&
+    (!terms || !record.networkKey || String(terms.status?.networkKey ?? "") === record.networkKey);
+  // Not where it belongs any more: back to the stake's form, with why.
+  const leave = ({ refresh = false } = {}) => {
+    leaveReview(state, st, record, ov);
+    if (refresh) state.needsRefresh = true;
+    actions?.render?.().catch(() => {});
   };
 
   confirmBtn.addEventListener("click", async () => {
     // One check at a time for this stake, whichever Confirm is pressed.
     if (rechecking.has(draft)) return;
+    // The popup moved on since this Review was drawn.
+    if (!stillHere(null)) {
+      if (onThisReview()) leave();
+      return;
+    }
     let gas;
     try {
       gas = gasEditor.readFinalGas();
@@ -826,19 +880,11 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         rechecking.delete(draft);
       }
       // Left meanwhile, another stake drafted, or another network or profile:
-      // the answer is for nothing now. Still on this Review, its network,
-      // profile or wallet is gone: back to the stake's form, the amount as
-      // typed, checked again there, with why nothing was sent.
+      // the answer is for nothing now. Still on this Review, it's back to the
+      // stake's form, from the overview read again: another window may have
+      // switched.
       if (!stillHere(terms)) {
-        if (onThisReview()) {
-          st.notice = (state.overview ?? ov)?.isUnlocked === false ? LOCKED_NOTICE : SWITCHED_NOTICE;
-          st.loaded = false;
-          state.sozuDraft = null;
-          if (state.staking) state.staking.screen = "liquid";
-          state.route = "stake";
-          state.needsRefresh = true;
-          actions?.render?.().catch(() => {});
-        }
+        if (onThisReview()) leave({ refresh: true });
         return;
       }
       if (!terms) {
@@ -853,14 +899,11 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         return;
       }
     }
-    const { quote: _quote, label: _label, termsChanged: _changed, checkError: _error, ...txDraft } = draft;
-    // The engine sends it only on the wallet, profile and network of this
-    // Review, whichever window switched them meanwhile.
-    const params = {
-      ...txDraft,
-      gas: sentGas,
-      _approvalContext: reviewedContext(ov, Number(draft.profileIndex ?? 0) || 0),
-    };
+    const { quote: _quote, label: _label, termsChanged: _changed, checkError: _error, reviewed: _reviewed, ...txDraft } = draft;
+    // The engine sends it only on the wallet, profile, account and node the
+    // stake was drafted on, whichever window switched them meanwhile.
+    const { walletId, profileIndex, account, nodeUrl } = record;
+    const params = { ...txDraft, gas: sentGas, _approvalContext: { walletId, profileIndex, account, nodeUrl } };
     await sendFromReview({
       state,
       actions,
@@ -879,7 +922,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       backRoute: "sozu_confirm",
       doneRoute: "stake",
       // A switch begun while the Sent screen was drawn keeps it from going.
-      unchanged: sameContext,
+      unchanged: belongs,
       onSent: () => {
         st.loaded = false;
         st.loading = false;

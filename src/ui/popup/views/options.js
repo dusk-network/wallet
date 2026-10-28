@@ -38,7 +38,7 @@ export function optionsView(ov, { state, actions } = {}) {
         type: "button",
         text: "Lock wallet",
         onclick: async () => {
-          switchContext(state);
+          switchContext(state, "lock");
           await actions?.send?.({ type: "DUSK_UI_LOCK" });
           state.route = "home";
           state.needsRefresh = true;

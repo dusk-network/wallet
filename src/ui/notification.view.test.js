@@ -418,6 +418,13 @@ describe("a site's request to pay the bridge's account", () => {
     await render("send_tx", transfer(mainnet.account, { amount: "200001000000000", memo: EVM, ...onMainnet }));
     expect(visibleText(head().querySelector(".ap-sub"))).toBe("200,001 DUSK sent · 1 DUSK bridge fee · 200,000 DUSK arrives on BNB Smart Chain");
 
+    // A memo that's no address there: nothing arrives, as its warning says why.
+    await render("send_tx", transfer(mainnet.account, { amount: "2000000000", memo: "Order 1042", ...onMainnet }));
+    expect(visibleText(head().querySelector(".ap-sub"))).toBe(
+      "2 DUSK sent · 1 DUSK bridge fee · Nothing arrives without a BNB Smart Chain address in the memo"
+    );
+    expect(warns()).toEqual(["The memo isn't an address on BSC"]);
+
     await render("send_tx", transfer(mainnet.account, { amount: "1000000000", memo: EVM, ...onMainnet }));
     expect(visibleText(head().querySelector(".ap-sub"))).toBe("1 DUSK sent · 1 DUSK bridge fee · Nothing arrives on BNB Smart Chain");
     expect(warns()).toEqual(["Nothing arrives on BSC"]);

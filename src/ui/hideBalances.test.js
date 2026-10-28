@@ -371,7 +371,14 @@ describe("still shown with balances hidden", () => {
     state = {
       route: "sozu_confirm",
       sozu: { loaded: true, profileIndex: 0, status: { publicBalance: { value: "1482938300000" } } },
-      sozuDraft: { fnName: "sozu_stake", deposit: dusk(10), profileIndex: 0, label: "Stake with Sozu" },
+      sozuDraft: {
+        fnName: "sozu_stake",
+        deposit: dusk(10),
+        profileIndex: 0,
+        label: "Stake with Sozu",
+        // Where it was drafted, as the form records it: this overview's.
+        reviewed: { context: 0, nodeUrl: NODE, networkKey: "testnet", walletId: ACCOUNT, profileIndex: 0, account: ACCOUNT },
+      },
     };
     await show(sozuConfirmView(overview(HIDDEN), { state, actions: actions() }));
     expect([amountOf(), ...fee()]).toEqual(["10 DUSK", "up to 0.005 DUSK", "up to 10.005 DUSK"]);

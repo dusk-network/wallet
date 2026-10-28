@@ -75,7 +75,7 @@ function isWalletLockedResponse(value) {
 function applyLockedOverviewPatch() {
   try {
     // Locked here or elsewhere: whatever began unlocked is for nothing now.
-    switchContext(state);
+    switchContext(state, "lock");
     state.overview = {
       ...(state.overview ?? {}),
       isUnlocked: false,

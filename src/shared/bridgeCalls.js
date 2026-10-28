@@ -454,14 +454,28 @@ export function bridgeServiceTransfer({ nodeUrl, to, memo, amount } = {}) {
 /**
  * What a transfer to the bridge's account comes to, in one line: "2 DUSK
  * sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain", or
- * "Nothing arrives" when the fee takes it all or the bridge doesn't pay out
- * there now.
- * @param {{ chain: string, running: boolean, sentLux: bigint, feeLux: bigint, arrivesLux: bigint }} service - bridgeServiceTransfer's
+ * "Nothing arrives" when the fee takes it all, the bridge doesn't pay out
+ * there now, or the memo is no address there to pay.
+ * @param {{ chain: string, running: boolean, recipientOk: boolean, sentLux: bigint, feeLux: bigint, arrivesLux: bigint }} service - bridgeServiceTransfer's
  * @returns {string}
  */
-export function bridgeServiceLine({ chain, running, sentLux, feeLux, arrivesLux }) {
-  const arrives = running && arrivesLux > 0n ? `${formatDuskExact(arrivesLux)} DUSK arrives on ${chain}` : `Nothing arrives on ${chain}`;
+export function bridgeServiceLine({ chain, running, recipientOk, sentLux, feeLux, arrivesLux }) {
+  const arrives = !running || arrivesLux <= 0n
+    ? `Nothing arrives on ${chain}`
+    : recipientOk
+      ? `${formatDuskExact(arrivesLux)} DUSK arrives on ${chain}`
+      : noBridgeRecipientText(chain);
   return `${formatDuskExact(sentLux)} DUSK sent · ${formatDuskExact(feeLux)} DUSK bridge fee · ${arrives}`;
+}
+
+/**
+ * What arrives of a payment to the bridge's account whose memo is no address
+ * on its chain: "Nothing arrives without a BNB Smart Chain address in the memo".
+ * @param {string} chain - bridgeServiceTransfer's `chain`
+ * @returns {string}
+ */
+export function noBridgeRecipientText(chain) {
+  return `Nothing arrives without ${/^[aeiou]/i.test(chain) ? "an" : "a"} ${chain} address in the memo`;
 }
 
 /**

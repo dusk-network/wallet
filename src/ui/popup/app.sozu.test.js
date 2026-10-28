@@ -65,38 +65,61 @@ const menuItem = (dom, menu, text) =>
     .querySelectorAll(`${menu} [role=menuitemradio]`)
     .find((el) => el.querySelector(".net-menu-item-label").textContent === text);
 
+const SWITCHED = "The network or profile changed, so nothing was sent. Check the stake again.";
+
+// The popup on Testnet at the Review of a 100 DUSK stake, drafted on
+// Staking's Sozu screen, with the wallet answering as `answer` says.
+async function stakeReview(answer) {
+  const { dom, pill, app } = popupPage();
+  vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+  vi.resetModules();
+  const { send } = await import("../../wallet/bus.js");
+  const { state } = await import("./state.js");
+  send.mockReset();
+  send.mockImplementation(answer);
+  const { sozuLiquidStakingView } = await import("./views/sozu.js");
+  state.staking = { screen: "liquid" };
+  state.sozu = { action: "deposit", depositAmountDusk: "", loaded: true, loading: false, profileIndex: 0, status: SOZU, pool: SOZU.pool, position: SOZU.position };
+  app.replaceChildren(...sozuLiquidStakingView(TESTNET, { state, actions: { send, render: async () => {} } }));
+  const amount = () => app.querySelectorAll("input").find((i) => accessibleName(i) === "Stake amount");
+  typeInto(amount(), "100");
+  app.querySelectorAll("button").find((b) => b.textContent === "Review stake").click();
+  expect(state.route).toBe("sozu_confirm");
+  const { render } = await import("./app.js");
+  await render();
+  await flush();
+  return {
+    dom,
+    pill,
+    app,
+    send,
+    state,
+    amount,
+    sent: () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX"),
+    confirm: () => app.querySelectorAll("button").find((b) => b.textContent === "Confirm"),
+  };
+}
+
+// The header's switches, as a person makes them.
+const switchToMainnet = (dom, pill) => {
+  pill.click();
+  menuItem(dom, ".net-menu", "Mainnet").click();
+};
+const switchToProfile2 = (dom) => {
+  dom.document.body.querySelector(".account-chip").click();
+  menuItem(dom, ".acct-menu", "Profile 2").click();
+};
+
 describe("a stake with Sozu whose terms are read again as the header switches", () => {
   it.each([
-    [
-      "network",
-      "DUSK_UI_SET_NODE_URL",
-      { networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" },
-      (dom, pill) => {
-        pill.click();
-        menuItem(dom, ".net-menu", "Mainnet").click();
-      },
-    ],
-    [
-      "profile",
-      "DUSK_UI_SET_ACCOUNT_INDEX",
-      { selectedAccountIndex: 1 },
-      (dom) => {
-        dom.document.body.querySelector(".account-chip").click();
-        menuItem(dom, ".acct-menu", "Profile 2").click();
-      },
-    ],
+    ["network", "DUSK_UI_SET_NODE_URL", { networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" }, switchToMainnet],
+    ["profile", "DUSK_UI_SET_ACCOUNT_INDEX", { selectedAccountIndex: 1 }, switchToProfile2],
   ])("sends nothing once the %s switch has started, though the overview still names the old one", async (_, switchType, after, startSwitch) => {
-    const { dom, pill, app } = popupPage();
-    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
-    vi.resetModules();
-    const { send } = await import("../../wallet/bus.js");
-    const { state } = await import("./state.js");
-    send.mockReset();
     const terms = Promise.withResolvers();
     const switched = Promise.withResolvers();
     // Overviews read since the switch was asked for: the switch's own is slow.
     let sinceSwitch = null;
-    send.mockImplementation(async (message) => {
+    const { dom, pill, app, send, state, amount, sent, confirm } = await stakeReview(async (message) => {
       switch (message.type) {
         case "DUSK_UI_OVERVIEW":
           if (sinceSwitch === null) return TESTNET;
@@ -114,20 +137,6 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
           return {};
       }
     });
-    const sent = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX");
-    const confirm = () => app.querySelectorAll("button").find((b) => b.textContent === "Confirm");
-
-    // Staking's Sozu screen drafts a 100 DUSK stake at Sozu's terms and opens its Review.
-    const { sozuLiquidStakingView } = await import("./views/sozu.js");
-    state.staking = { screen: "liquid" };
-    state.sozu = { action: "deposit", depositAmountDusk: "", loaded: true, loading: false, profileIndex: 0, status: SOZU, pool: SOZU.pool, position: SOZU.position };
-    app.replaceChildren(...sozuLiquidStakingView(TESTNET, { state, actions: { send, render: async () => {} } }));
-    typeInto(app.querySelectorAll("input").find((i) => accessibleName(i) === "Stake amount"), "100");
-    app.querySelectorAll("button").find((b) => b.textContent === "Review stake").click();
-    expect(state.route).toBe("sozu_confirm");
-    const { render } = await import("./app.js");
-    await render();
-    await flush();
 
     // Confirm reads Sozu's terms again; the switch starts while they're read.
     confirm().click();
@@ -145,11 +154,44 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     switched.resolve({ ...TESTNET, ...after });
     await flush();
     expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
-    expect(app.querySelector(".sozu-notice")?.textContent).toBe(
-      "The network or profile changed, so nothing was sent. Check the stake again."
-    );
-    expect(app.querySelectorAll("input").find((i) => accessibleName(i) === "Stake amount").value).toBe("100");
+    expect(app.querySelector(".sozu-notice")?.textContent).toBe(SWITCHED);
+    expect(amount().value).toBe("100");
     expect(sent()).toEqual([]);
+  });
+
+  it("offers no Confirm on a Review left idle while the header switches to Profile 2, and sends nothing from Profile 1", async () => {
+    let profile = 0;
+    const { dom, app, send, state, amount, sent, confirm } = await stakeReview(async (message) => {
+      switch (message.type) {
+        case "DUSK_UI_OVERVIEW":
+          return { ...TESTNET, selectedAccountIndex: profile };
+        case "DUSK_UI_SET_ACCOUNT_INDEX":
+          profile = message.index;
+          return { ok: true, result: true };
+        case "DUSK_UI_GET_SOZU_STATUS":
+          return { ok: true, result: SOZU };
+        case "DUSK_UI_GET_CACHED_GAS_PRICE":
+          return { min: "1", median: "1", max: "1" };
+        case "DUSK_UI_SEND_TX":
+          return { ok: true, result: { hash: "ab".repeat(32) } };
+        default:
+          return {};
+      }
+    });
+    expect(confirm().disabled).toBe(false);
+
+    // The switch is done and the popup draws again: still on this Review, with
+    // the stake drafted for Profile 1.
+    switchToProfile2(dom);
+    await flush();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index: 1 }));
+    confirm()?.click();
+    await flush();
+    expect(sent()).toEqual([]);
+    expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
+    expect(confirm()).toBeUndefined();
+    expect(app.querySelector(".sozu-notice")?.textContent).toBe(SWITCHED);
+    expect(amount().value).toBe("100");
   });
 
   it("ends whatever began unlocked the moment the wallet says it locked", async () => {
