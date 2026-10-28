@@ -514,6 +514,14 @@ function installTxStatusListener() {
           return;
         }
 
+        // The node's chain ID, read after the popup drew: its network's names,
+        // explorer and bridge, from a fresh overview.
+        if (msg?.type === "DUSK_UI_NETWORK_CHANGED") {
+          state.needsRefresh = true;
+          render({ forceRefresh: true }).catch(() => {});
+          return;
+        }
+
         if (msg?.type === "DUSK_UI_SHIELDED_STATUS") {
           const nextKey = shieldedStatusKey(msg.status);
           if (nextKey && nextKey === lastShieldedStatusKey) return;

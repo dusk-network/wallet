@@ -5,13 +5,13 @@
 // which is how we reuse it in Tauri desktop/mobile.
 
 import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault.js";
-import { getSettings, setSettings } from "../shared/settings.js";
+import { getSettings, rememberNodeChain, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
-import { knownChainId } from "../shared/nodeNetwork.js";
+import { readChainId } from "../shared/networkStatus.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
 import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
@@ -62,15 +62,32 @@ import {
   getSozuStatus,
 } from "../shared/walletEngine.js";
 
+// A node's chain ID being asked for again: the app has no status checks, so
+// a node whose chain ID couldn't be read when it was chosen is asked as the
+// wallet draws, once at a time and at most every 30 seconds, as the
+// extension's checks do.
+let askingChain = null;
+let chainAskedAt = -Infinity;
+
 async function ensureEngineConfigured() {
   const settings = await getSettings();
   configure({
     nodeUrl: settings.nodeUrl,
     proverUrl: settings.proverUrl,
     archiverUrl: settings.archiverUrl,
+    chainId: settings.chainId,
     accountCount: settings.accountCount,
     selectedAccountIndex: settings.selectedAccountIndex,
   });
+  if (settings.chainId === null && !askingChain && Date.now() - chainAskedAt >= 30_000) {
+    chainAskedAt = Date.now();
+    askingChain = readChainId(settings.nodeUrl)
+      .then((chainId) => rememberNodeChain(settings.nodeUrl, chainId))
+      .catch(() => false)
+      .finally(() => {
+        askingChain = null;
+      });
+  }
   return settings;
 }
 
@@ -254,8 +271,12 @@ export async function localSend(message) {
         }
       }
 
+      // The node's chain ID, which names its network, kept with it, as the
+      // background keeps it.
+      const chainId = await readChainId(nodeUrl);
       const nextSettings = await setSettings({
         nodeUrl,
+        chainId,
         ...(proverUrl ? { proverUrl } : {}),
         ...(archiverUrl ? { archiverUrl } : {}),
       });
@@ -264,6 +285,7 @@ export async function localSend(message) {
         nodeUrl: nextSettings.nodeUrl,
         proverUrl: nextSettings.proverUrl,
         archiverUrl: nextSettings.archiverUrl,
+        chainId: nextSettings.chainId,
       });
 
       return {
@@ -373,7 +395,7 @@ export async function localSend(message) {
         ipfsGateway: settings.ipfsGateway ?? "",
         hideBalances: settings.hideBalances === true,
         customGas: settings.customGas ?? null,
-        chainId: await knownChainId(settings.nodeUrl),
+        chainId: settings.chainId,
         networkName: networkNameFromNodeUrl(settings.nodeUrl),
         activeOrigin,
         activeConnected,

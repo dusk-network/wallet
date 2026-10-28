@@ -1,17 +1,14 @@
 // The network a node is on: the file @dusk-network/networks has for the
 // chain ID the node gives in /on/node/info, never a guess from its address,
 // so a custom node gets its network's contracts, labels and routes. The
-// background keeps the chain ID each node gave last, by its origin
-// (networkStatus.js reads it with each check of the node), and hands it to
-// the popup with the overview and to an approval window with its request;
-// the engine reads its own node's. Each of them notes what it learns here,
-// so code that knows only a node's URL finds its network at once
-// (networkForNode). Until a node has answered once, a network's own node,
-// as its file lists it, stands for that network.
+// chain ID is read when a node is chosen and kept with the node in the
+// wallet's settings (settings.js); every context that loads its settings,
+// or is handed them (the popup's overview, an approval's request, the
+// engine's config), notes it here, so code that knows only a node's URL
+// finds its network at once (networkForNode). A network's own node, as its
+// file lists it, is known without asking.
 
 import { labelFor, networkFor, networks } from "@dusk-network/networks";
-
-import { storage, STORAGE_KEYS } from "./storage.js";
 
 const originOf = (url) => {
   try {
@@ -55,12 +52,12 @@ export function listedChainId(nodeUrl) {
   return net ? net.chainId : null;
 }
 
-// The chain ID each node origin gave, as this context learned it.
+// The chain ID of each node origin this context had settings for.
 const noted = new Map();
 
 /**
- * Notes the chain ID a node gave, as the overview, an approval's request or
- * the node itself says it.
+ * Notes the chain ID a node gave, as the settings this context loaded or was
+ * handed keep it.
  * @param {string} nodeUrl
  * @param {unknown} chainId
  */
@@ -86,63 +83,6 @@ export function chainIdForNode(nodeUrl) {
  */
 export function networkForNode(nodeUrl) {
   return networkOf(chainIdForNode(nodeUrl));
-}
-
-async function kept() {
-  try {
-    const items = await storage.get(STORAGE_KEYS.NODE_CHAINS);
-    const all = items?.[STORAGE_KEYS.NODE_CHAINS];
-    return all && typeof all === "object" ? all : {};
-  } catch {
-    return {};
-  }
-}
-
-let loading = null;
-
-/**
- * Notes every chain ID kept, once for this context: what a background that
- * just started knows of each node before its next check.
- * @returns {Promise<void>}
- */
-export function loadKnownChains() {
-  loading ??= kept().then((all) => {
-    for (const [origin, id] of Object.entries(all)) {
-      if (Number.isInteger(id) && !noted.has(origin)) noted.set(origin, id);
-    }
-  });
-  return loading;
-}
-
-/**
- * The chain ID a node gave last, else the one of the network whose own node
- * it is; null for a node that hasn't answered and isn't one.
- * @param {string} nodeUrl
- * @returns {Promise<number | null>}
- */
-export async function knownChainId(nodeUrl) {
-  const origin = originOf(nodeUrl);
-  if (!origin) return null;
-  const id = (await kept())[origin];
-  if (Number.isInteger(id)) {
-    noted.set(origin, id);
-    return id;
-  }
-  return chainIdForNode(nodeUrl);
-}
-
-/**
- * Keeps the chain ID a node gave, for its origin.
- * @param {string} nodeUrl
- * @param {number | null} chainId
- */
-export async function rememberChainId(nodeUrl, chainId) {
-  const origin = originOf(nodeUrl);
-  if (!origin || !Number.isInteger(chainId)) return;
-  noted.set(origin, chainId);
-  const all = await kept();
-  if (all[origin] === chainId) return;
-  await storage.set({ [STORAGE_KEYS.NODE_CHAINS]: { ...all, [origin]: chainId } });
 }
 
 /**

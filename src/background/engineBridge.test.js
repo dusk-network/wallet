@@ -44,6 +44,19 @@ describe("engine bridge", () => {
     });
   });
 
+  it("hands the engine the node's chain ID, and again once a status check reads one it couldn't before", async () => {
+    mocks.runtimeSendMessage.mockResolvedValue({ result: true });
+    const bridge = createEngineBridge({ ensureHost: async () => 1, noResponseMessage: "No engine" });
+    mocks.settings = { ...mocks.settings, nodeUrl: "https://my-node.example", chainId: null };
+
+    await bridge.ensureEngineConfigured();
+    mocks.settings = { ...mocks.settings, chainId: 2 };
+    await bridge.ensureEngineConfigured();
+    await bridge.ensureEngineConfigured();
+
+    expect(mocks.runtimeSendMessage.mock.calls.map(([message]) => message.params.chainId)).toEqual([null, 2]);
+  });
+
   it("retries configuration after a failed delivery", async () => {
     const ensureHost = vi.fn(async () => 1);
     const bridge = createEngineBridge({ ensureHost, noResponseMessage: "No engine" });

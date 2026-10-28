@@ -39,7 +39,9 @@ export function registerTxNotificationHandlers() {
 
         if (hash && (status === "executed" || status === "failed")) {
           const meta = await getTxMeta(hash);
-          const nodeUrl = meta?.nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
+          // The settings first, always: they name the node's network, in a worker just woken too.
+          const settings = await getSettings();
+          const nodeUrl = meta?.nodeUrl ?? settings?.nodeUrl ?? "";
           const url = explorerTxUrl(nodeUrl, hash);
           if (url) {
             tabsCreate({ url }).catch(() => {});
@@ -69,7 +71,9 @@ export function registerTxNotificationHandlers() {
           const status = parts?.[3] ?? "";
 
           const meta = await getTxMeta(hash);
-          const nodeUrl = meta?.nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
+          // The settings first, always: they name the node's network, in a worker just woken too.
+          const settings = await getSettings();
+          const nodeUrl = meta?.nodeUrl ?? settings?.nodeUrl ?? "";
 
           if (buttonIndex === 0 && (status === "executed" || status === "failed")) {
             const url = explorerTxUrl(nodeUrl, hash);
@@ -103,8 +107,9 @@ export async function notifyTxSubmitted({ hash, origin, title, nodeUrl } = {}) {
   try {
     if (!ext?.notifications) return;
 
-    const resolvedNodeUrl =
-      nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
+    // The settings first, always: they name the node's network, in a worker just woken too.
+    const settings = await getSettings();
+    const resolvedNodeUrl = nodeUrl ?? settings?.nodeUrl ?? "";
 
     const networkName = networkNameFromNodeUrl(resolvedNodeUrl);
 
@@ -151,8 +156,9 @@ export async function notifyTxExecuted({
     if (!ext?.notifications) return;
     if (!hash) return;
 
-    const resolvedNodeUrl =
-      nodeUrl ?? (await getSettings())?.nodeUrl ?? "";
+    // The settings first, always: they name the node's network, in a worker just woken too.
+    const settings = await getSettings();
+    const resolvedNodeUrl = nodeUrl ?? settings?.nodeUrl ?? "";
 
     const networkName = networkNameFromNodeUrl(resolvedNodeUrl);
     const explorerUrl = explorerTxUrl(resolvedNodeUrl, hash);

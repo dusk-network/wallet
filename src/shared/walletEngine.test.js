@@ -274,13 +274,6 @@ vi.mock("@dusk/w3sper", () => {
       this.dataDrivers = {
         register: vi.fn(),
       };
-      // The node's /on/node/info, as w3sper gives it.
-      this.node = {
-        get info() {
-          const info = globalThis.__W3SPER_NODE_INFO__;
-          return info ? Promise.resolve(info) : Promise.reject(new Error("No node info in this test"));
-        },
-      };
     }
 
     connect() {
@@ -464,7 +457,6 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_LAST_SEEDER__;
     delete globalThis.__W3SPER_PROFILE_GATE__;
     delete globalThis.__W3SPER_DRIVER_DELAYS__;
-    delete globalThis.__W3SPER_NODE_INFO__;
   });
 
   async function prepareReviewCache(tip = 10n) {
@@ -1433,12 +1425,11 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_DRIVER_GETS__;
   });
 
-  it("reads the Sozu of the network a custom node says it's on, by its chain ID", async () => {
-    engine.configure({ nodeUrl: "https://my-node.example", accountCount: 1, selectedAccountIndex: 0 });
+  it("reads the Sozu of the network a custom node says it's on, by the chain ID its settings keep", async () => {
+    engine.configure({ nodeUrl: "https://my-node.example", chainId: 2, accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
 
-    globalThis.__W3SPER_NODE_INFO__ = { chainId: 2 };
     const status = await engine.getSozuStatus();
     expect(status).toMatchObject({ networkKey: "testnet", configured: true, source: "fallback" });
     expect(status.contracts).toEqual({
@@ -1449,10 +1440,17 @@ describe("walletEngine", () => {
     });
   });
 
-  it("has no Sozu on a node whose network it can't tell, or one without it", async () => {
-    engine.configure({ nodeUrl: "https://testnet.example.com", accountCount: 1, selectedAccountIndex: 0 });
+  it("has no Sozu on a node whose network isn't known yet, and its network's once the chain ID comes", async () => {
+    engine.configure({ nodeUrl: "https://testnet.example.com", chainId: null, accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
-    // Its name says testnet; the node can't say.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+    // Its name says testnet; the node didn't say when it was chosen.
+    await expect(engine.getSozuStatus()).resolves.toMatchObject({ networkKey: "custom", configured: false });
+    // A status check read it since: it comes with the next config, never given up on.
+    engine.configure({ nodeUrl: "https://testnet.example.com", chainId: 2 });
+    await expect(engine.getSozuStatus()).resolves.toMatchObject({ networkKey: "testnet", configured: true });
+    // Another node starts without it.
+    engine.configure({ nodeUrl: "https://other.example.com" });
     await expect(engine.getSozuStatus()).resolves.toMatchObject({ networkKey: "custom", configured: false });
   });
 

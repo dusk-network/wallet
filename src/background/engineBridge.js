@@ -72,6 +72,8 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
       nodeUrl: settings.nodeUrl,
       proverUrl: settings.proverUrl,
       archiverUrl: settings.archiverUrl,
+      // The node's network, as its settings keep it (settings.js).
+      chainId: settings.chainId ?? null,
       accountCount: settings.accountCount,
       selectedAccountIndex: settings.selectedAccountIndex,
     };

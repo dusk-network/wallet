@@ -121,7 +121,7 @@ describe("verified names", () => {
     expect(names.duskNamesNetwork(custom)).toBeNull();
     (await import("./nodeNetwork.js")).noteChainId(custom, 2);
     expect(names.duskNamesNetwork(`${custom}/rusk`)).toBe("testnet");
-    expect([names.duskNamesNetwork(MAINNET), names.duskNamesNetwork(TESTNET), ...NAMES_OFF.map(names.duskNamesNetwork)]).toEqual([
+    expect([names.duskNamesNetwork(MAINNET), names.duskNamesNetwork(TESTNET), ...NAMES_OFF.map((url) => names.duskNamesNetwork(url))]).toEqual([
       "mainnet",
       "testnet",
       null,

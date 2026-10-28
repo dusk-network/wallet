@@ -781,5 +781,30 @@ describe("dappEvents", () => {
       await ev.handleSettingsDiff({ nodeUrl: "https://devnet.nodes.dusk.network" }, settings);
       expect(profileEvents(port)).toEqual([]);
     });
+
+    it("gives sites a custom node's network's names by the chain ID its settings keep, read when chosen or later", async () => {
+      permissions = { "https://dapp.example": connected(0) };
+      verifiedNames = { testnet: { acct0: check("alice.dusk") } };
+      const ev = await import("./dappEvents.js");
+      const port = await openPort(ev);
+      port.messages = [];
+
+      // Chosen while it couldn't say: no names there yet.
+      settings = { nodeUrl: "https://my-node.example", chainId: null };
+      await ev.handleSettingsDiff({ nodeUrl: "https://nodes.dusk.network" }, settings);
+      expect(profileEvents(port).at(-1)?.data).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
+
+      // A status check read it since: the same node, now on Testnet, so sites get its profiles again.
+      port.messages = [];
+      settings = { nodeUrl: "https://my-node.example", chainId: 2 };
+      await ev.handleSettingsDiff({ nodeUrl: "https://my-node.example", chainId: null }, settings);
+      expect(profileEvents(port)).toHaveLength(1);
+
+      // Testnet's own node, from a custom one of Testnet's: the same names, nothing to resend.
+      port.messages = [];
+      settings = { nodeUrl: "https://testnet.nodes.dusk.network" };
+      await ev.handleSettingsDiff({ nodeUrl: "https://my-node.example", chainId: 2 }, settings);
+      expect(profileEvents(port)).toEqual([]);
+    });
   });
 });

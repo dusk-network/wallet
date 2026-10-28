@@ -29,6 +29,45 @@ describe("settings", () => {
     });
   });
 
+  it("keeps a node's chain ID with it: a network's own node's without asking, none for another node until it's read", async () => {
+    const { getSettings, setSettings } = await import("./settings.js");
+    // Mainnet by default, and settings kept before chain IDs were: a network's own node needs none.
+    await expect(getSettings()).resolves.toMatchObject({ nodeUrl: "https://nodes.dusk.network", chainId: 1 });
+    value = { nodeUrl: "https://testnet.nodes.dusk.network" };
+    await expect(getSettings()).resolves.toMatchObject({ chainId: 2 });
+
+    // A custom node, as Settings or a site's switch saves it with what it said.
+    await setSettings({ nodeUrl: "https://my-node.example", chainId: 2 });
+    await expect(getSettings()).resolves.toMatchObject({ nodeUrl: "https://my-node.example", chainId: 2 });
+    // Other settings keep it; another node doesn't inherit it.
+    await setSettings({ autoLockTimeoutMinutes: 5 });
+    await expect(getSettings()).resolves.toMatchObject({ chainId: 2 });
+    await setSettings({ nodeUrl: "https://other-node.example" });
+    await expect(getSettings()).resolves.toMatchObject({ nodeUrl: "https://other-node.example", chainId: null });
+    await setSettings({ nodeUrl: "https://nodes.dusk.network" });
+    await expect(getSettings()).resolves.toMatchObject({ chainId: 1 });
+  });
+
+  it("names the node's network for anything in this context that loads the settings, a worker just woken included", async () => {
+    value = { nodeUrl: "https://my-node.example", chainId: 2 };
+    const { getSettings } = await import("./settings.js");
+    const { networkForNode } = await import("./nodeNetwork.js");
+    expect(networkForNode("https://my-node.example")).toBeNull();
+    await getSettings();
+    expect(networkForNode("https://my-node.example")?.name).toBe("testnet");
+  });
+
+  it("keeps a chain ID read later only while the settings still name that node", async () => {
+    const { getSettings, rememberNodeChain, setSettings } = await import("./settings.js");
+    await setSettings({ nodeUrl: "https://my-node.example" });
+    await expect(rememberNodeChain("https://my-node.example/", 2)).resolves.toBe(true);
+    await expect(rememberNodeChain("https://my-node.example", 2)).resolves.toBe(false);
+    await expect(rememberNodeChain("https://my-node.example", "2")).resolves.toBe(false);
+    // A read that finished after a switch, even at once, leaves the switch's node alone.
+    await Promise.all([setSettings({ nodeUrl: "https://other-node.example", chainId: 1 }), rememberNodeChain("https://my-node.example", 3)]);
+    await expect(getSettings()).resolves.toMatchObject({ nodeUrl: "https://other-node.example", chainId: 1 });
+  });
+
   it("auto-locks after 15 minutes by default, and offers 5, 15 and Off only", async () => {
     const { AUTO_LOCK_OPTIONS, getSettings, setSettings } = await import("./settings.js");
     expect(AUTO_LOCK_OPTIONS.map((o) => [o.value, o.label])).toEqual([

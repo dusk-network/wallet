@@ -13,7 +13,6 @@ import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
-import { knownChainId, loadKnownChains } from "../shared/nodeNetwork.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -57,6 +56,7 @@ import { engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
 import {
   getNetworkStatus,
   checkAllEndpoints,
+  readChainId,
   resetNetworkStatus,
   isStatusStale,
 } from "../shared/networkStatus.js";
@@ -532,8 +532,6 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
   (async () => {
     try {
-      // What this worker knows of each node's chain, kept from before it started.
-      await loadKnownChains().catch(() => {});
       const common = await handleUiCommand(message, {
         engineCall,
         ensureEngineConfigured,
@@ -748,7 +746,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           params: entry.params,
           // The wallet's network, for the approval's header, by the chain ID its node gave.
           nodeUrl: String(settings?.nodeUrl ?? ""),
-          chainId: await knownChainId(String(settings?.nodeUrl ?? "")),
+          chainId: settings?.chainId ?? null,
           networkName: networkNameFromNodeUrl(String(settings?.nodeUrl ?? "")),
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
@@ -1057,6 +1055,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
+        // The node's chain ID, which names its network, kept with it (null
+        // while it can't be read: the next status check asks again).
+        const chainId = await readChainId(nodeUrl);
+
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           cancelPendingApprovals(null, "Network changed");
           // Reset network status when endpoints change (will be checked in background)
@@ -1066,6 +1068,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           // when omitted).
           const nextSettings = await setSettings({
             nodeUrl,
+            chainId,
             ...(proverUrl ? { proverUrl } : {}),
             ...(archiverUrl ? { archiverUrl } : {}),
           });
@@ -1178,18 +1181,26 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           accountNames = {};
         }
 
-        // The node's network, by the chain ID it gave (nodeNetwork.js).
-        const chainId = await knownChainId(settings.nodeUrl);
+        // The node's network, by the chain ID kept with it (settings.js).
+        const { chainId } = settings;
 
         // Get network status and check if we need to refresh it
         let networkStatus = await getNetworkStatus();
         if (isStatusStale(networkStatus, 30000)) {
-          // Kick off a background check (don't await)
+          // Kick off a background check (don't await). A node whose chain ID
+          // wasn't read yet gets it there: the popup is told to draw again.
           checkAllEndpoints({
             nodeUrl: settings.nodeUrl,
             proverUrl: settings.proverUrl,
             archiverUrl: settings.archiverUrl,
-          }).catch(() => {});
+          })
+            .then(async () => {
+              const now = await getSettings();
+              if (now.nodeUrl === settings.nodeUrl && now.chainId !== chainId) {
+                await runtimeSendMessage({ type: "DUSK_UI_NETWORK_CHANGED" }).catch(() => {});
+              }
+            })
+            .catch(() => {});
         }
 
         if (status.isUnlocked) {

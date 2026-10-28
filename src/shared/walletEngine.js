@@ -22,7 +22,7 @@ import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
 import { blockedRecipient } from "./recipientBlocklist.js";
-import { chainIdForNode, chainIdOfInfo, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
+import { chainIdForNode, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
 
 import {
   clearNotes,
@@ -269,6 +269,7 @@ let engineConfig = {
   nodeUrl: networks.mainnet.urls.node,
   proverUrl: networks.mainnet.urls.prover,
   archiverUrl: networks.mainnet.urls.archive,
+  chainId: null,
   accountCount: 2,
   selectedAccountIndex: 0,
 };
@@ -366,6 +367,15 @@ export function configure(patch = {}) {
     changedArchiver = next !== engineConfig.archiverUrl;
     engineConfig.archiverUrl = next;
   }
+
+  // The node's chain ID, as the wallet's settings keep it (settings.js), for
+  // what the engine finds by the node: its network's Sozu, history and lists.
+  if ("chainId" in patch) {
+    engineConfig.chainId = Number.isInteger(patch.chainId) ? patch.chainId : null;
+  } else if (changedNode) {
+    engineConfig.chainId = null;
+  }
+  noteChainId(engineConfig.nodeUrl, engineConfig.chainId);
 
   // Account derivation config (persisted in settings). This is used on unlock
   // to restore the same derived accounts.
@@ -1283,13 +1293,6 @@ export async function ensureNetwork() {
   state.bookkeeper = state.bookkeeper ?? new Bookkeeper(state.treasury);
   state.bookkeeperAll = state.bookkeeperAll ?? new Bookkeeper(state.treasuryAll);
 
-  // The node's chain ID, once for this connection, so what the engine keys by
-  // the node, such as its history, finds the node's network.
-  if (!state.network.__duskChainAsked) {
-    state.network.__duskChainAsked = true;
-    await nodeChainId(state.network);
-  }
-
   return state.network;
 }
 
@@ -1819,21 +1822,9 @@ export async function getDrc721TokenUri(params = {}) {
   return String(out ?? "");
 }
 
-// The node's chain ID, which names its network (nodeNetwork.js): from its
-// /on/node/info, which w3sper keeps once read; until the node can say, the
-// network whose own node it is.
-async function nodeChainId(network) {
-  try {
-    const id = chainIdOfInfo(await withTimeout(Promise.resolve(network.node.info), 5_000, "Timed out reading the node"));
-    if (id !== null) {
-      noteChainId(engineConfig.nodeUrl, id);
-      return id;
-    }
-  } catch {
-    // what's known of the node, below
-  }
-  return chainIdForNode(engineConfig.nodeUrl);
-}
+// The node's chain ID, which names its network: as the wallet's settings keep
+// it, handed over with the engine's config; a network's own node's otherwise.
+const nodeChainId = () => chainIdForNode(engineConfig.nodeUrl);
 
 // Sozu's contracts are read through Multicall for Dusk: one query a refresh
 // (readSozuStatus), with one batcher per node.
@@ -1868,7 +1859,7 @@ export async function getSozuStatus(params = {}) {
   const network = await ensureNetwork();
   const idx = resolveProfileIndex(params?.profileIndex);
   const profile = await ensureProfileIndex(idx);
-  const chainId = await nodeChainId(network);
+  const chainId = nodeChainId();
   const networkKey = networkKeyOf(chainId, engineConfig.nodeUrl);
   const sozu = networkOf(chainId)?.sozu ?? null;
 
@@ -2903,7 +2894,7 @@ async function sendTransactionUnlocked(params) {
   if (kind === TX_KIND.TRANSFER) {
     // A recipient the network's file blocks gets nothing, whichever screen
     // or site asked: the forms say why first (recipientBlocklist.js).
-    const blocked = blockedRecipient(String(params.to ?? ""), await nodeChainId(network));
+    const blocked = blockedRecipient(String(params.to ?? ""), nodeChainId());
     if (blocked) throw new Error(blocked);
     // Reuse existing transfer logic for now.
     return await transfer(params);

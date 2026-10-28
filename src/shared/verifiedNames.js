@@ -6,7 +6,7 @@
 // its check.
 
 import { isExtensionRuntime } from "../platform/runtime.js";
-import { networkForNode } from "./nodeNetwork.js";
+import { chainIdForNode, networkOf } from "./nodeNetwork.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
 
@@ -21,10 +21,11 @@ const RECHECK_MS = 60_000;
  * (nodeNetwork.js), or null where names are off: a network without Dusk
  * Domains, or one that isn't known.
  * @param {string} nodeUrl
+ * @param {number | null} [chainId] - the node's, where the caller has it
  * @returns {"mainnet"|"testnet"|null}
  */
-export function duskNamesNetwork(nodeUrl) {
-  const net = networkForNode(String(nodeUrl ?? ""));
+export function duskNamesNetwork(nodeUrl, chainId = chainIdForNode(String(nodeUrl ?? ""))) {
+  const net = networkOf(chainId);
   return net?.duskDomains && (net.name === "mainnet" || net.name === "testnet") ? net.name : null;
 }
 

@@ -133,6 +133,9 @@ vi.mock("../shared/permissions.js", async (importOriginal) => ({
   revokeOrigin,
 }));
 vi.mock("../shared/settings.js", () => ({ getSettings, setSettings }));
+// A custom node's chain ID, as networkStatus.js reads it: Testnet's here, and nothing asked of the network.
+const readChainId = vi.fn(async () => 2);
+vi.mock("../shared/networkStatus.js", async (importOriginal) => ({ ...(await importOriginal()), readChainId }));
 vi.mock("./engineHost.js", () => ({
   engineCall,
   ensureEngineConfigured,
@@ -1699,7 +1702,25 @@ describe("background rpc handler", () => {
         to: expect.objectContaining({ nodeUrl }),
       })
     );
-    expect(setSettings).toHaveBeenCalledWith({ nodeUrl });
+    // Saved with the chain ID the node gave, asked only once the user agreed.
+    expect(setSettings).toHaveBeenCalledWith({ nodeUrl, chainId: 2 });
+    expect(readChainId).toHaveBeenCalledWith(nodeUrl);
+    expect(readChainId.mock.invocationCallOrder.at(-1)).toBeGreaterThan(requestUserApproval.mock.invocationCallOrder.at(-1));
+  });
+
+  it("dusk_switchNetwork asks a site's node nothing when the user declines the switch", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    requestUserApproval.mockRejectedValueOnce(Object.assign(new Error("User rejected"), { code: 4001 }));
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_switchNetwork", params: { nodeUrl: "https://node.example" } })
+    ).rejects.toThrow("User rejected");
+    expect(readChainId).not.toHaveBeenCalled();
+    expect(setSettings).not.toHaveBeenCalled();
   });
 
   it("dusk_switchNetwork returns null without approval when target preset URL matches current settings", async () => {

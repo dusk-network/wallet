@@ -40,6 +40,10 @@ const mocks = vi.hoisted(() => {
     settingsError: null,
     now: 1_000_000,
     sentMessages: [],
+    // A node's chain ID, as networkStatus.js reads it: Mainnet's own node's here.
+    readChainId: vi.fn(async () => 1),
+    checkAllEndpoints: vi.fn(async () => ({ ok: true })),
+    isStatusStale: vi.fn(() => false),
     alarmsClear: vi.fn(async () => true),
     alarmsCreate: vi.fn(() => {}),
     vault: { v: 1 },
@@ -180,9 +184,10 @@ vi.mock("../shared/assetsStore.js", () => ({
 
 vi.mock("../shared/networkStatus.js", () => ({
   getNetworkStatus: vi.fn(async () => ({ checkedAt: 0 })),
-  checkAllEndpoints: vi.fn(async () => ({ ok: true })),
+  checkAllEndpoints: mocks.checkAllEndpoints,
+  readChainId: mocks.readChainId,
   resetNetworkStatus: vi.fn(async () => {}),
-  isStatusStale: vi.fn(() => false),
+  isStatusStale: mocks.isStatusStale,
 }));
 
 vi.mock("../platform/extensionApi.js", () => ({
@@ -581,6 +586,30 @@ describe("background auto-lock activity", () => {
         message: "storage unavailable",
       },
     });
+  });
+
+  it("saves a custom node with the chain ID it gives, read before it's saved", async () => {
+    mocks.readChainId.mockResolvedValueOnce(2);
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: "https://my-node.example" });
+    expect(response).toMatchObject({ ok: true, nodeUrl: "https://my-node.example" });
+    expect(mocks.readChainId).toHaveBeenCalledWith("https://my-node.example");
+    expect(mocks.settings).toMatchObject({ nodeUrl: "https://my-node.example", chainId: 2 });
+    // The overview carries it, as every page that draws the network reads it.
+    const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+    expect(overview.chainId).toBe(2);
+  });
+
+  it("tells the popup to draw again when a status check reads the chain ID a node didn't give when it was chosen", async () => {
+    mocks.settings = { ...mocks.settings, nodeUrl: "https://my-node.example", chainId: null };
+    mocks.isStatusStale.mockReturnValue(true);
+    mocks.checkAllEndpoints.mockImplementationOnce(async () => {
+      mocks.settings = { ...mocks.settings, chainId: 2 };
+      return { ok: true };
+    });
+    const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+    expect(overview.chainId).toBeNull();
+    await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_NETWORK_CHANGED" }));
+    mocks.isStatusStale.mockReturnValue(false);
   });
 
   it("changing auto-lock setting restarts the alarm and keeps sane unlocked activity", async () => {

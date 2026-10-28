@@ -12,6 +12,7 @@ import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { readChainId } from "../shared/networkStatus.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
 import {
   isAllowedDappEndpoint,
@@ -597,10 +598,13 @@ export async function handleRpc(origin, request) {
 
       // Ask user approval.
       await requestUserApproval("switch_network", origin, { from, to });
+      // Then the node's chain ID, kept with it as Settings keeps a chosen
+      // node's: a site's node is asked nothing before the user agreed.
+      const chainId = await readChainId(targetNodeUrl);
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         await assertApprovalContext(approvalContext);
         cancelPendingApprovals(null, "Network changed");
-        await setSettings({ nodeUrl: targetNodeUrl });
+        await setSettings({ nodeUrl: targetNodeUrl, chainId });
         invalidateEngineConfig();
         await ensureEngineConfigured();
         broadcastChainChangedAll().catch(() => {});
