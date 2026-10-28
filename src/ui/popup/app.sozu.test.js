@@ -117,8 +117,9 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     const sent = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX");
     const confirm = () => app.querySelectorAll("button").find((b) => b.textContent === "Confirm");
 
-    // Staking drafts a 100 DUSK stake at Sozu's terms and opens its Review.
+    // Staking's Sozu screen drafts a 100 DUSK stake at Sozu's terms and opens its Review.
     const { sozuLiquidStakingView } = await import("./views/sozu.js");
+    state.staking = { screen: "liquid" };
     state.sozu = { action: "deposit", depositAmountDusk: "", loaded: true, loading: false, profileIndex: 0, status: SOZU, pool: SOZU.pool, position: SOZU.position };
     app.replaceChildren(...sozuLiquidStakingView(TESTNET, { state, actions: { send, render: async () => {} } }));
     typeInto(app.querySelectorAll("input").find((i) => accessibleName(i) === "Stake amount"), "100");
@@ -136,16 +137,18 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: switchType }));
     expect(state.overview).toBe(TESTNET);
 
-    // The terms come back unchanged, as the old network or profile has them.
+    // The terms come back unchanged, as the old network or profile has them:
+    // nothing is sent, and the stake's own screen says why.
     terms.resolve({ ok: true, result: SOZU });
     await flush();
     expect(sent()).toEqual([]);
-
-    // The switch's overview lands: the Review, drawn again, can be confirmed.
     switched.resolve({ ...TESTNET, ...after });
     await flush();
-    expect(state.route).toBe("sozu_confirm");
-    expect(confirm().disabled).toBe(false);
+    expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
+    expect(app.querySelector(".sozu-notice")?.textContent).toBe(
+      "The network or profile changed, so nothing was sent. Check the stake again."
+    );
+    expect(app.querySelectorAll("input").find((i) => accessibleName(i) === "Stake amount").value).toBe("100");
     expect(sent()).toEqual([]);
   });
 

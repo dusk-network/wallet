@@ -79,6 +79,11 @@ const NO_STAKE_TEXT = "No stake gets stDUSK at Sozu's deposit fee now.";
 const CHANGED_TITLE = "Sozu's terms changed";
 const CHANGED_TEXT = "These are the figures now. Check them, then confirm again.";
 
+// A stake's Review left because the network, profile or lock changed while
+// its terms were read again: the stake's form says so.
+const SWITCHED_NOTICE = "The network or profile changed, so nothing was sent. Check the stake again.";
+const LOCKED_NOTICE = "The wallet locked, so nothing was sent. Check the stake again.";
+
 /**
  * About how much stDUSK a stake gets, as Review shows it: "32.47".
  * @param {bigint|string} stDuskLux
@@ -228,6 +233,8 @@ function sozuState(state) {
     loaded: false,
     loading: false,
     error: null,
+    // Why the form shows, not the Review it left: SWITCHED_NOTICE or LOCKED_NOTICE.
+    notice: "",
     profileIndex: null,
     status: null,
     pool: null,
@@ -496,6 +503,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       return;
     }
     const quote = isWithdraw ? null : sozuStakeQuote(amountLux, pool, depositFee);
+    st.notice = "";
     state.sozuDraft = {
       ...(isWithdraw
         ? buildSozuWithdrawTx({ config: cfg, amountLux })
@@ -662,6 +670,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       h("div", { class: "liquid-who" }, ["Sozu", h("span", { class: "tag", text: "third party" })]),
       h("p", {}, ["Sozu, not Dusk, holds the DUSK you stake here and returns it under Sozu's own rules: ", sozuLink, "."]),
     ]),
+    st.notice ? h("div", { class: "muted sozu-notice", role: "status", text: st.notice }) : null,
     st.loading && !st.loaded ? h("div", { class: "muted", text: "Loading Sozu…" }) : null,
     st.error ? h("div", { class: "err", text: st.error }) : null,
     cfg && liveStatus?.reason ? h("div", { class: "muted", text: liveStatus.reason }) : null,
@@ -817,11 +826,16 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         rechecking.delete(draft);
       }
       // Left meanwhile, another stake drafted, or another network or profile:
-      // the answer is for nothing now. This stake's Review, if it still
-      // shows, is drawn again, from the overview read again: its Confirm was
-      // off for the check, a Review a switch redrew meanwhile included.
+      // the answer is for nothing now. Still on this Review, its network,
+      // profile or wallet is gone: back to the stake's form, the amount as
+      // typed, checked again there, with why nothing was sent.
       if (!stillHere(terms)) {
         if (onThisReview()) {
+          st.notice = (state.overview ?? ov)?.isUnlocked === false ? LOCKED_NOTICE : SWITCHED_NOTICE;
+          st.loaded = false;
+          state.sozuDraft = null;
+          if (state.staking) state.staking.screen = "liquid";
+          state.route = "stake";
           state.needsRefresh = true;
           actions?.render?.().catch(() => {});
         }

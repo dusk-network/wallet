@@ -719,6 +719,7 @@ describe("liquid staking", () => {
   });
 
   describe("a stake whose check of Sozu's terms answers late", () => {
+    const SWITCHED = "The network or profile changed, so nothing was sent. Check the stake again.";
     // Review of a 100 DUSK stake, Confirm pressed, and Sozu's status held back
     // until `answer` gives it: unchanged unless told otherwise.
     async function lateCheck() {
@@ -740,6 +741,12 @@ describe("liquid staking", () => {
         draft,
         reads: () => messages("DUSK_UI_GET_SOZU_STATUS").length,
         sent: () => messages("DUSK_UI_SEND_TX"),
+        // Back on the stake's form, with the amount typed for the Review, and why.
+        backOnForm: (notice) => {
+          expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
+          expect(visibleText(body.querySelector(".sozu-notice"))).toBe(notice);
+          expect(field("Stake amount").value).toBe("100");
+        },
         answer: async (over = {}) => {
           release({ ...sozu().status, pool: sozu().pool, position: sozu().position, ...over });
           await settle();
@@ -773,15 +780,15 @@ describe("liquid staking", () => {
     });
 
     it.each([
-      ["the network changes", { nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }],
-      ["the profile changes", { selectedAccountIndex: 1 }],
-      ["the wallet locks", { isUnlocked: false }],
-    ])("sends nothing when %s before the answer comes", async (_, change) => {
+      ["the network changes", { nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }, SWITCHED],
+      ["the profile changes", { selectedAccountIndex: 1 }, SWITCHED],
+      ["the wallet locks", { isUnlocked: false }, "The wallet locked, so nothing was sent. Check the stake again."],
+    ])("sends nothing when %s before the answer comes, and goes back to the stake to say so", async (_, change, notice) => {
       const t = await lateCheck();
       t.state.overview = ov(change);
       await t.answer();
       expect(t.sent()).toEqual([]);
-      expect(t.state.route).toBe("sozu_confirm");
+      t.backOnForm(notice);
     });
 
     it("sends nothing when a switch starts before the answer comes, though the overview still names the Review's network", async () => {
@@ -809,7 +816,7 @@ describe("liquid staking", () => {
       ]);
     });
 
-    it("lets a Review that a switch redrew during the check be confirmed once the answer is set aside", async () => {
+    it("leaves a Review that a switch redrew during the check, its Confirm off, once the answer is set aside", async () => {
       const t = await lateCheck();
       // The switch to Profile 2 is done first: this Review is drawn again for
       // it, its Confirm off while the check is out.
@@ -819,16 +826,27 @@ describe("liquid staking", () => {
       expect(button("Confirm").disabled).toBe(true);
       await t.answer();
       expect(t.sent()).toEqual([]);
-      expect(t.state.route).toBe("sozu_confirm");
-      expect(button("Confirm").disabled).toBe(false);
+      t.backOnForm(SWITCHED);
     });
 
-    it("sends nothing when the answer comes from another network than the Review's", async () => {
+    it("goes back to the stake to say so when the answer comes from another network, as one another window switched to", async () => {
       const t = await lateCheck();
       await t.answer({ networkKey: "mainnet" });
       expect(t.sent()).toEqual([]);
-      // Drawn again, its Confirm can be pressed.
-      expect(button("Confirm").disabled).toBe(false);
+      // Not a Confirm that does nothing: the stake's form, the overview read
+      // again, the amount kept and checked, and why.
+      t.backOnForm(SWITCHED);
+      expect(t.state.needsRefresh).toBe(true);
+      expect(button("Review stake").disabled).toBe(false);
+      // It says so until Staking shows another screen, or the stake is reviewed again.
+      body.querySelector(".subnav-back").click();
+      buttonStarting("Liquid staking").click();
+      expect(t.state.staking.screen).toBe("liquid");
+      expect(body.querySelector(".sozu-notice")).toBeNull();
+      t.state.sozu.notice = SWITCHED;
+      t.app.draw();
+      button("Review stake").click();
+      expect(t.state.sozu.notice).toBe("");
     });
 
     it("checks once and sends once however often Confirm is pressed, a redrawn Review's included", async () => {
