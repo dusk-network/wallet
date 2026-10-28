@@ -1,14 +1,22 @@
 // Times as the wallet writes them: "14:32" within a day, and in full with
-// the time zone they show in, "26 Oct 2026, 14:32 CET".
+// the time zone they show in, "26 Oct 2026, 14:32 CET". The time of day
+// follows the browser's language, as the web wallet's does: "14:32" in
+// Dutch or British English, "02:32 PM" in American English.
 
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const two = (n) => String(n).padStart(2, "0");
+// The web wallet's options for a time of day, with no hour cycle forced.
+const CLOCK = { hour: "2-digit", minute: "2-digit" };
 
-/** "14:32", in the page's time zone. */
+/** "14:32" or "02:32 PM", in the page's time zone and the browser's language. */
 export function clockText(ms) {
-  const d = new Date(ms);
-  return `${two(d.getHours())}:${two(d.getMinutes())}`;
+  const language = globalThis.navigator?.language || undefined;
+  try {
+    return new Intl.DateTimeFormat(language, CLOCK).format(new Date(ms));
+  } catch {
+    // A language Intl doesn't know: its default's clock.
+    return new Intl.DateTimeFormat(undefined, CLOCK).format(new Date(ms));
+  }
 }
 
 /**

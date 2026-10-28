@@ -82,7 +82,7 @@ function technicalRows(tx, ov, nodeUrl) {
   const finalKnown = ["archive", "both", "shielded"].includes(String(tx?.source ?? ""));
   return [
     kv("Network", nodeUrl ? networkNameFromNodeUrl(nodeUrl) : String(ov?.networkName ?? "Unknown")),
-    num(tx?.blockHeight) ? kv("Block", num(tx.blockHeight)) : null,
+    num(tx?.blockHeight) ? kv("Block", mono(num(tx.blockHeight))) : null,
     used || limit ? kv("Gas used", used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
     // The fee to the last LUX: the summary rounds it to 4 decimals.
@@ -224,7 +224,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   const when = txTime(tx);
   const idButton = h("button", {
-    class: "text-btn tx-id",
+    class: "text-btn tx-id chain-link",
     type: "button",
     title: explorerUrl ? "Open in Dusk explorer" : hash,
     "aria-label": explorerUrl ? `Transaction ${shortAddress(hash)}, open in Dusk explorer` : undefined,

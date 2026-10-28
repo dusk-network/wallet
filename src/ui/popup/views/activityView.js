@@ -56,7 +56,7 @@ export function recentActivitySection(ov, { state, actions } = {}) {
     ? h(
         "button",
         {
-          class: "see-all",
+          class: "see-all chain-link",
           type: "button",
           onclick: () => {
             state.route = "activity";
@@ -154,7 +154,7 @@ export function activityView(ov, { state, actions } = {}) {
     ? h(
         "button",
         {
-          class: "text-btn tx-explorer",
+          class: "text-btn tx-explorer chain-link",
           type: "button",
           onclick: async () => {
             const ok = await openUrl(explorerUrl);

@@ -160,20 +160,37 @@ describe("unlock", () => {
 });
 
 describe("fonts", () => {
-  it("draw addresses in each system's code font, not Söhne Mono, whose m reads as a gap", async () => {
+  it("draw addresses and labels in Söhne Mono, from the extension's own two files, the system's code font behind it", async () => {
     const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-    const mono = css.match(/--font-mono:([^;]+);/)?.[1] ?? "";
-    expect(mono).not.toMatch(/Sohne/i);
+    // Söhne Mono first, each system's code font after it.
+    const mono = (css.match(/--font-mono:([^;]+);/)?.[1] ?? "").trim();
+    expect(mono.startsWith('"Soehne Mono", ui-monospace,')).toBe(true);
     for (const family of ['"SF Mono"', "Consolas", '"Ubuntu Sans Mono"', '"DejaVu Sans Mono"', "monospace"]) {
       expect(mono).toContain(family);
     }
     expect(css).toMatch(/code,\s*\.mono\s*\{\s*font-family: var\(--font-mono\);/);
+
+    // Its two faces and no other web font, each from a file the extension ships.
+    const faces = [...css.matchAll(/@font-face \{([^}]*)\}/g)].map(([, body]) => ({
+      family: body.match(/font-family: ([^;]+);/)?.[1],
+      weight: body.match(/font-weight: ([^;]+);/)?.[1],
+      src: body.match(/src: ([^;]+);/)?.[1],
+    }));
+    expect(faces).toEqual([
+      { family: '"Soehne Mono"', weight: "400", src: 'url("fonts/soehne-mono-buch.woff2") format("woff2")' },
+      { family: '"Soehne Mono"', weight: "500", src: 'url("fonts/soehne-mono-kraftig.woff2") format("woff2")' },
+    ]);
+    for (const file of ["soehne-mono-buch.woff2", "soehne-mono-kraftig.woff2"]) {
+      const bytes = await readFile(path.resolve(process.cwd(), "public", "fonts", file));
+      expect(bytes.subarray(0, 4).toString("latin1"), file).toBe("wOF2");
+    }
+
     // Text in each system's interface font, buttons and fields included.
     const sans = css.match(/--font-sans:([^;]+);/)?.[1] ?? "";
+    expect(sans).not.toMatch(/Soehne/i);
     for (const family of ["-apple-system", '"Segoe UI"', '"Ubuntu Sans"', "Cantarell", '"Noto Sans"', "sans-serif"]) {
       expect(sans).toContain(family);
     }
     expect(css).toMatch(/button, input, select, textarea \{\s*font-family: inherit;/);
-    expect(css).not.toContain("@font-face");
   });
 });

@@ -417,7 +417,7 @@ export function addressBookView(ov, { state, actions } = {}) {
       ? h(
           "button",
           {
-            class: "text-btn tx-explorer",
+            class: "text-btn tx-explorer chain-link",
             type: "button",
             onclick: async () => {
               const ok = await openUrl(explorerUrl);

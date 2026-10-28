@@ -1,3 +1,21 @@
+/* Söhne Mono, as the web wallet and the explorer ship it (the same files):
+   addresses, IDs, heights and the ledger's labels. */
+@font-face {
+  font-family: "Soehne Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("fonts/soehne-mono-buch.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Soehne Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("fonts/soehne-mono-kraftig.woff2") format("woff2");
+}
+
 :root {
   --dusk-smoky-black: #101010;
   --dusk-black-beauty: #27272A;
@@ -39,16 +57,24 @@
   --radius-lg: 16px;
   --radius-pill: 999px;
 
-  /* No web font ships with the extension. Each system's own interface font
-     reads close to Söhne: SF on macOS, Segoe UI on Windows, Ubuntu, Cantarell
-     or Noto on Linux. */
+  /* The text in each system's own interface font, which reads close to
+     Söhne: SF on macOS, Segoe UI on Windows, Ubuntu, Cantarell or Noto on
+     Linux. */
   --font-sans: "Sohne", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
     "Ubuntu Sans", Ubuntu, Cantarell, "Noto Sans", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
-  /* Addresses and hashes, in each system's code font, evenly spaced. Söhne
-     Mono stays out: its narrow m leaves what reads as a space ("Rprm eo"). */
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas,
+  /* Addresses, hashes and the ledger's labels in Söhne Mono, evenly spaced,
+     with each system's code font while it loads or where it can't. */
+  --font-mono: "Soehne Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas,
     "Ubuntu Sans Mono", "Ubuntu Mono", "Roboto Mono", "Noto Sans Mono", "Liberation Mono",
     "DejaVu Sans Mono", monospace;
+  /* The ledger's type, as the explorer and the web wallet set it: section
+     heads and the labels of balances in small capitals of Söhne Mono, a
+     little apart. */
+  --ledger-size: 11px;
+  --ledger-tracking: 0.08em;
+  /* The chain's blue: a text link that leads somewhere, a link to a chain
+     object, and the focus ring. 8.5:1 on the page. */
+  --chain-blue: var(--dusk-cornflower);
 
   --radius: 8px;
 
@@ -1299,7 +1325,9 @@ body.page--popup .site-bar-action {
   gap: var(--section-gap);
 }
 
-/* Section titles: sentence case, in the text font */
+/* Section heads in the ledger's type, as [ ACTIVITY ]: small tracked
+   capitals, between brackets in the muted text colour. A sub-page's title
+   stays in the text font. */
 .bracket-title {
   margin: 0;
   min-width: 0;
@@ -1307,15 +1335,31 @@ body.page--popup .site-bar-action {
   align-items: center;
   gap: 4px;
   color: var(--text);
-  font-size: 15px;
+  font-family: var(--font-mono);
+  font-size: 13px;
   font-weight: 500;
-  line-height: 1.25;
-  letter-spacing: 0;
+  line-height: 1.2;
+  letter-spacing: var(--ledger-tracking);
+  text-transform: uppercase;
 }
 
 .bracket-title__text {
   min-width: 0;
   color: inherit;
+}
+
+.bracket-title__bracket {
+  color: var(--text-muted);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.bracket-title__bracket:first-child {
+  margin-right: 0.6em;
+}
+
+.bracket-title__bracket:last-child {
+  margin-left: 0.6em;
 }
 
 .dashboard-section-label {
@@ -1585,8 +1629,13 @@ body.page--popup .site-bar-action {
   font-weight: 400;
 }
 
+/* The balance's label in the ledger's type, as TOTAL BALANCE. */
 .balance-label__text {
-  margin-right: 2px;
+  margin-right: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--ledger-size);
+  letter-spacing: var(--ledger-tracking);
+  text-transform: uppercase;
 }
 
 /* Hide balances and Refresh, next to the balance title */
@@ -1634,8 +1683,11 @@ button.balance-refresh:hover {
 .balance-split-label {
   min-width: 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: var(--ledger-size);
   font-weight: 400;
+  letter-spacing: var(--ledger-tracking);
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -2696,9 +2748,13 @@ body.page--popup .brand-mark {
   gap: 12px;
 }
 
+/* A stake's labels in the ledger's type, as STAKED and REWARDS. */
 .stake-lbl {
-  font-size: 12.5px;
   color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--ledger-size);
+  letter-spacing: var(--ledger-tracking);
+  text-transform: uppercase;
 }
 
 .stake-big {
@@ -3389,10 +3445,10 @@ body[data-runtime="tauri"] .qrscan-overlay {
    pills, the large amount field, the stepper. Built on the tokens in :root.
    ------------------------------------------------------- */
 
-/* A section's title with an action on its right */
+/* A section's head with an action on its right, the two on one baseline */
 .section-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
   margin-top: 6px;
@@ -4749,4 +4805,21 @@ p.phrase-warning {
   display: flex;
   gap: 8px;
   justify-content: center;
+}
+
+/* -------------------------------------------------------
+   The chain's blue: a text link that leads somewhere (See all, View in Dusk
+   explorer, the staking docs, sozu.fi) and a link to a chain object (a
+   transaction's ID, which opens the explorer). Buttons, rows, amounts and
+   the text buttons that act rather than lead somewhere stay as they are.
+   ------------------------------------------------------- */
+button.chain-link:not(:disabled),
+button.chain-link:not(:disabled):hover {
+  color: var(--chain-blue);
+  text-decoration-line: none;
+}
+
+button.chain-link:not(:disabled):hover {
+  text-decoration-line: underline;
+  text-decoration-color: currentColor;
 }
