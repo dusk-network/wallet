@@ -166,7 +166,7 @@ describe("staking overview", () => {
     popup({ route: "stake", staking: staking(owner({ relatedStakes: [related({ publicBalance: { value: "0" } })] })) });
     expect([button("Unstake").disabled, button("Claim rewards").disabled]).toEqual([true, true]);
     expect(body.querySelectorAll(".stake-sum .stake-cap").map(visibleText)).toEqual([
-      "Locked: 10 DUSK. It stays yours; unstaking returns it.",
+      "Locked: 10 DUSK. It's still yours, and unstaking returns it.",
       "Add gas funds to Profile 2 before managing this stake. Profile 1 owns this stake. Gas still comes from Profile 2.",
     ]);
 
@@ -325,9 +325,9 @@ describe("native staking", () => {
   it("states the node, timing, penalty and fee facts from Dusk's staking docs", () => {
     popup({ route: "stake", staking: staking(owner(), { screen: "native" }) });
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
-      "Needs your own Dusk nodeA computer that runs Dusk's node software and stays online. What's a node?",
+      "Needs your own Dusk nodeA computer that runs Dusk's node software and stays online, with Profile 1's consensus key from this recovery phrase. How native staking works",
       "Rewards start in about 6 to 12 hoursUnstake any time, with no waiting period.",
-      "If your node misses its turnPart of the stake is moved to locked. It stays yours, and unstaking returns it. Misbehaving can burn part of it.",
+      "If your node misses its turnPart of your stake gets locked. It's still yours, and unstaking returns it. If the node breaks the rules, part of the stake can be burned (lost).",
       "Network fee up to 0.0500 DUSK",
     ]);
 
@@ -401,7 +401,7 @@ describe("native staking", () => {
 });
 
 describe("liquid staking", () => {
-  it("says what a stake gets in stDUSK, worth the pool's rate each", () => {
+  it("says what a stake gets in stDUSK, and what that's worth now", () => {
     // The rate is DUSK per stDUSK: the pool's total stake over the stDUSK supply.
     const pool = { totalStakeLux: "3071932000000", tokenTotalSupply: dusk(1000) };
     expect(stDuskEstimate(dusk(100), pool)).toBe("32.55");
@@ -411,9 +411,10 @@ describe("liquid staking", () => {
     popup(state);
     expect(visibleText(body.querySelector(".stake-estimate"))).toBe("");
     typeInto(field("Stake amount"), "100");
-    expect(visibleText(body.querySelector(".stake-estimate"))).toBe(
-      "You get about 32.55 stDUSK. Each stDUSK is worth 3.07 DUSK and grows as rewards come in."
-    );
+    expect(body.querySelector(".stake-estimate").children.map(visibleText)).toEqual([
+      "You get about 32.55 stDUSK, worth 100 DUSK now.",
+      "stDUSK is Sozu's token for your share; its DUSK value grows as rewards come in.",
+    ]);
     // With nothing staked yet, stDUSK can still be added to Assets.
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
       "Any amount, no node neededYou get stDUSK, a token for your share of Sozu's pool.Add to Assets",
@@ -480,7 +481,7 @@ describe("liquid staking", () => {
     expect(visibleText(body.querySelector(".sent-head"))).toBe("Liquid staking100 DUSKWith Sozu, a third party");
   });
 
-  it("hides what Sozu holds with Hide balances, but not the rate or the fee", () => {
+  it("hides what Sozu holds with Hide balances, but not what a typed amount gets or the fee", () => {
     const state = {
       route: "stake",
       staking: staking(owner(), { screen: "liquid" }),
@@ -493,7 +494,7 @@ describe("liquid staking", () => {
     ]);
     expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available •••• DUSK from your public balance");
     typeInto(field("Stake amount"), "100");
-    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("Each stDUSK is worth 3.07 DUSK");
+    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.55 stDUSK, worth 100 DUSK now.");
     expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.5000 DUSK");
   });
 });

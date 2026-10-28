@@ -101,6 +101,16 @@ const ICON_PATHS = {
     '<path d="M12 16.2h.01"/>',
   ],
   "chev-r": ['<path d="M9.5 6l6 6-6 6"/>'],
+  // Activity's direction icons: sent, received, a bridge transfer, a contract call.
+  "arr-out": ['<path d="M7 17 17 7"/>', '<path d="M9 7h8v8"/>'],
+  "arr-in": ['<path d="M17 7 7 17"/>', '<path d="M15 17H7V9"/>'],
+  bridge: [
+    '<path d="M3 9.5h18"/>',
+    '<path d="M5 9.5v10"/>',
+    '<path d="M19 9.5v10"/>',
+    '<path d="M8 19.5V16a4 4 0 0 1 8 0v3.5"/>',
+  ],
+  call: ['<path d="m8.5 7.5-4.5 4.5 4.5 4.5"/>', '<path d="m15.5 7.5 4.5 4.5-4.5 4.5"/>'],
   // Opens a page outside the wallet.
   ext: ['<path d="M8 6h10v10"/>', '<path d="M18 6 6 18"/>'],
   // A node: two stacked server units.

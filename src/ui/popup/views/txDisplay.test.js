@@ -1,23 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  transferRailLabel,
-  txActivityStatusLabel,
-  txRecoveryReasonLabel,
-  txStatusLabel,
-  txStatusTone,
-} from "./txDisplay.js";
+import { txErrorText, txRecoveryReasonLabel, txStatusTone, txStatusWord } from "./txDisplay.js";
 
 describe("tx display helpers", () => {
-  it("labels shielded transfer activity as Phoenix", () => {
-    expect(transferRailLabel({ kind: "transfer", privacy: "shielded" })).toBe("Shielded (Phoenix)");
-    expect(transferRailLabel({ kind: "transfer", privacy: "public" })).toBe("Public (Moonlight)");
+  it("says each status in one plain word", () => {
+    expect(txStatusWord("submitted")).toBe("Pending");
+    expect(txStatusWord("mempool")).toBe("Pending");
+    expect(txStatusWord("executed")).toBe("Completed");
+    expect(txStatusWord("failed")).toBe("Failed");
+    expect(txStatusWord("removed")).toBe("Dropped");
+    expect(txStatusWord("unknown")).toBe("Not confirmed");
+    expect(txStatusWord(undefined)).toBe("Pending");
   });
 
-  it("uses non-redundant unknown status labels", () => {
-    expect(txStatusLabel("unknown")).toBe("Unknown");
-    expect(txActivityStatusLabel("unknown")).toBe("Unknown");
-    expect(txActivityStatusLabel("executed")).toBe("Finalized");
+  it("puts known chain errors in plain words, and leaves others alone", () => {
+    expect(txErrorText("Panic: phoenix is not enabled in the VM")).toBe("Shielded transactions are paused on the network.");
+    expect(txErrorText("OutOfGas")).toBe("It ran out of gas. A higher gas limit lets it finish.");
+    expect(txErrorText("Out of gas")).toBe("It ran out of gas. A higher gas limit lets it finish.");
+    expect(txErrorText("Contract does not exist")).toBe("The contract it called isn't on this network.");
+    expect(txErrorText("Panic: DRC20Phoenix: paused")).toBe("");
+    expect(txErrorText(undefined)).toBe("");
   });
 
   it("does not visually tone unknown or removed as failed", () => {

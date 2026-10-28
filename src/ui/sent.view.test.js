@@ -189,7 +189,7 @@ describe("after Confirm", () => {
     app.draw();
     expect(steps().slice(1)).toEqual([
       ["done", "Sent to the network", ""],
-      ["failed", "Failed", "Out of gas. Fee charged: 0.0025 DUSK."],
+      ["failed", "Failed", "It ran out of gas. A higher gas limit lets it finish. Fee charged: 0.0025 DUSK."],
     ]);
     expect(rows().at(-1)).toBe("Fee charged0.0025 DUSK");
 

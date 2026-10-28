@@ -400,6 +400,30 @@ describe("send to a .dusk name with one address", () => {
   });
 });
 
+describe("a typed name that isn't registered", () => {
+  it("offers the closest name from contacts and past transfers, from this device alone", () => {
+    const state = newState();
+    state.addressBook.items = [{ name: "alice.dusk", address: ALICE.account }];
+    state.activity = { names: new Map([[BOB.account, "bob.dusk"]]) };
+    const form = mount(state);
+    typeInto(form.to, "alcie.dusk");
+    expect(visibleText(form.nameBox())).toBe("alcie.dusk isn't registered.Did you mean alice.dusk?");
+    // Only the typed name was looked up.
+    expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["alcie.dusk"]);
+
+    form.nameBox().querySelector("button.name-suggestion").click();
+    expect(form.to.value).toBe("alice.dusk");
+    expect(state.draft.to).toBe("alice.dusk");
+    expect(visibleText(dom.document.body.querySelector(".name-points-to"))).toBe("alice.dusk points to");
+
+    // A recent counterparty's name, and nothing when no known name is close.
+    typeInto(form.to, "bbo.dusk");
+    expect(visibleText(form.nameBox())).toBe("bbo.dusk isn't registered.Did you mean bob.dusk?");
+    typeInto(form.to, "zed.dusk");
+    expect(visibleText(form.nameBox())).toBe("zed.dusk isn't registered.");
+  });
+});
+
 describe("sending to yourself", () => {
   const ACCOUNT_NOTE = "This is your own account. Sending to yourself only costs a fee.";
   const ADDRESS_NOTE = "This is your own address. Sending to yourself only costs a fee.";

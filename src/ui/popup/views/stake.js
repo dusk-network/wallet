@@ -35,8 +35,8 @@ export const SCREEN_OVERVIEW = "overview";
 export const SCREEN_NATIVE = "native";
 export const SCREEN_LIQUID = "liquid";
 
-// What a node is, for "Needs your own Dusk node".
-const DOCS_NODE_URL = "https://docs.dusk.network/operator/provisioner/";
+// How native staking works: what a node is, and how the stake ties to it.
+const DOCS_STAKING_URL = "https://docs.dusk.network/learn/guides/staking-basics/";
 
 function stakeKindLabel(kind, { hasStake = true } = {}) {
   const k = String(kind ?? "").toLowerCase();
@@ -448,7 +448,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
       ? h("div", { class: "stake-cap" }, [
           "Locked: ",
           ...amountParts(hidden, lockedLux),
-          ". It stays yours; unstaking returns it.",
+          ". It's still yours, and unstaking returns it.",
         ])
       : null,
     h("div", { class: "stake-pair" }, [
@@ -671,17 +671,18 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   const nodeLink = h("button", {
     class: "text-btn text-btn--inline",
     type: "button",
-    text: "What's a node?",
+    text: "How native staking works",
     onclick: async () => {
-      const ok = await openUrl(DOCS_NODE_URL);
+      const ok = await openUrl(DOCS_STAKING_URL);
       if (!ok) actions?.showToast?.("Couldn't open the docs");
     },
   });
 
   // The facts from Dusk's staking docs, in a few lines.
   const facts = h("div", { class: "group info" }, [
+    // The stake is the stake account's: the node signs with its consensus key.
     infoRow("server", "Needs your own Dusk node", [
-      "A computer that runs Dusk's node software and stays online. ",
+      `A computer that runs Dusk's node software and stays online, with ${profileLabel(stakeProfileIndex)}'s consensus key from this recovery phrase. `,
       nodeLink,
     ]),
     infoRow("clock", "Rewards start in about 6 to 12 hours", "Unstake any time, with no waiting period."),
@@ -690,12 +691,12 @@ function nativeStakeView(ov, ctx, { state, actions }) {
       : infoRow(
           "lock",
           "10% of what you add is locked",
-          "When your stake is already active. It stays yours, and unstaking returns it."
+          "When your stake is already active. It's still yours, and unstaking returns it."
         ),
     infoRow(
       "alert",
       "If your node misses its turn",
-      "Part of the stake is moved to locked. It stays yours, and unstaking returns it. Misbehaving can burn part of it."
+      "Part of your stake gets locked. It's still yours, and unstaking returns it. If the node breaks the rules, part of the stake can be burned (lost)."
     ),
     infoRow("fee", `Network fee up to ${formatFee(feeLux)} DUSK`, null),
   ].filter(Boolean));

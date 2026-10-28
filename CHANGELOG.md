@@ -13,6 +13,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed the profile's full public history in Activity, including received transfers.
 - Showed the profile's shielded history in Activity.
 - Named Activity's counterparties by their verified `.dusk` names.
+- Added day groups and All, Sent, Received and Staking filters to Activity's full list.
+- Labelled DuskEVM bridge transfers in Activity.
+- Suggested a close `.dusk` name from contacts and past transfers when a typed one isn't registered.
 - Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
 - Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
 - Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
@@ -29,12 +32,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Gave the popup a calmer look: lists on one surface, pill buttons, round home actions and plain section titles, in each system's own fonts.
 - Reworked Staking into an overview with native and liquid staking as two equal choices, an amount screen that checks the 1,000 DUSK minimum as you type, and the owner and stake account under Advanced.
-- Named Sozu as a third party wherever liquid staking shows, and said how much stDUSK a stake gets and what each is worth.
+- Named Sozu as a third party wherever liquid staking shows, and said how much stDUSK a stake gets and what it's worth now.
 - Showed toasts at the bottom of the popup, outside the page that scrolls, long enough to reach their action, and announced to screen readers.
 - Showed errors under their field instead of only in a toast.
 - Hid amounts in toasts and on the Sent screen while balances are hidden.
 - Showed fees with four decimals everywhere.
-- Opened account history on the Dusk explorer instead of DuskScan.
+- Showed Activity's rows with a direction icon and the other side's name first; a failed one says nothing was sent and the fee paid.
+- Reworked a transaction's details into a summary of who, how much and its status, then its date, memo, fee, profile and ID, with block and gas under Technical details.
+- Hid Activity's amounts and a transaction's amount while balances are hidden; fees stay visible.
+- Said known chain errors in plain words, with the chain's own under Technical details.
+- Moved the account's explorer link from Home's History ↗ to the end of Activity, on the Dusk explorer instead of DuskScan.
 - Cleared the wallet's transactions, shielded notes and history on reset.
 - Moved Review's gas price line and presets behind the fee's Edit, and removed Review's Cancel. ([#126])
 - Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])

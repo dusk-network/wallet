@@ -1,5 +1,4 @@
 import {
-  LUX_SCALE,
   UI_DISPLAY_DECIMALS,
   formatDusk,
   formatFee,
@@ -46,19 +45,10 @@ function fmtLux(value) {
 // Sozu's site, for its own rules.
 const SOZU_URL = "https://sozu.fi/";
 
-// "3.07": DUSK per stDUSK, as the pool's exchange_rate gives it (its total
-// stake over the stDUSK supply), to two decimals.
-function rateText(pool) {
-  const stake = safeBigInt(pool?.totalStakeLux ?? 0, 0n);
-  const supply = safeBigInt(pool?.tokenTotalSupply ?? 0, 0n);
-  if (stake <= 0n || supply <= 0n) return "";
-  return formatLuxShort(((stake * LUX_SCALE) / supply).toString(), 2);
-}
-
 /**
  * About how much stDUSK a deposit of `amountLux` gets: the pool mints
- * amount × supply / stake (before any fee Sozu takes), so each stDUSK is
- * worth the rate in DUSK.
+ * amount × supply / stake (before any fee Sozu takes), worth the amount at
+ * the pool's rate (its total stake over the stDUSK supply).
  * @returns {string} e.g. "32.57", or "" without a pool rate
  */
 export function stDuskEstimate(amountLux, pool) {
@@ -196,7 +186,6 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     : liveStatus?.reason || "Sozu liquid staking is not configured for this network.";
   const isWithdraw = st.action === "withdraw";
   const maxActionLux = isWithdraw ? maxUnstakeLux : maxStakeLux;
-  const rate = pool ? rateText(pool) : "";
 
   const back = () => {
     if (onBack) onBack();
@@ -262,9 +251,13 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     }
     field.setError("");
     reviewBtn.disabled = false;
+    // What it gets, then what stDUSK is: worth what was staked, now.
     const got = isWithdraw ? "" : stDuskEstimate(lux, pool);
     if (got) {
-      estimate.textContent = `You get about ${got} stDUSK. Each stDUSK is worth ${rate} DUSK and grows as rewards come in.`;
+      estimate.replaceChildren(
+        h("div", { class: "stake-estimate__main", text: `You get about ${got} stDUSK, worth ${formatDusk(lux.toString())} DUSK now.` }),
+        h("div", { text: "stDUSK is Sozu's token for your share; its DUSK value grows as rewards come in." })
+      );
       estimate.hidden = false;
     }
     return lux;

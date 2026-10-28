@@ -5,6 +5,7 @@ import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { truncateMiddle } from "../../lib/strings.js";
+import { txErrorText } from "./txDisplay.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 
@@ -40,7 +41,8 @@ function clock(ts) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function reasonText(error) {
+/** An error as a short sentence: one line, at most 140 characters, ending in a full stop. */
+export function reasonText(error) {
   const text = String(error ?? "").trim().replace(/\s+/g, " ");
   if (!text) return "";
   const short = text.length > 140 ? `${text.slice(0, 139)}…` : text;
@@ -122,7 +124,11 @@ export function sentSteps(sent, ov) {
     return [
       sending,
       { label: "Sent to the network", state: "done", sub: "" },
-      { label: "Failed", state: "failed", sub: [reasonText(error) || "It didn't go through.", charged].filter(Boolean).join(" ") },
+      {
+        label: "Failed",
+        state: "failed",
+        sub: [txErrorText(error) || reasonText(error) || "It didn't go through.", charged].filter(Boolean).join(" "),
+      },
     ];
   }
   if (status === "removed") {
