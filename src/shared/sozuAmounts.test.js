@@ -66,8 +66,6 @@ describe("Sozu's amounts, as the web wallet's", () => {
     expect(stDuskFor(1n, parsePool({}))).toBeNull();
     expect(duskPerStDusk(null)).toBeNull();
     expect(leastSozuStake(null)).toBe(1n);
-    // A fee of the whole amount or more leaves the least as it is.
-    expect(leastSozuStake(testnet, { numerator: 1n, denominator: 1n })).toBe(4n);
   });
 
   it("refuses fee bytes of another size, and reads a missing or negative amount as 0", () => {
@@ -80,5 +78,51 @@ describe("Sozu's amounts, as the web wallet's", () => {
   it("has no quote without the pool's rate or the deposit fee", () => {
     expect(sozuStakeQuote(5n, null, deposit("mainnet-2026-10-27"))).toBeNull();
     expect(sozuStakeQuote(5n, pool("mainnet-2026-10-28"), null)).toBeNull();
+  });
+});
+
+// Here only: the web wallet still counts up to the least stake, and at a fee
+// of 100% gives a least no stake reaches. These join the shared vectors once
+// it works the least out at once, as below.
+describe("Sozu's least stake at fees near 100%", () => {
+  const testnet = pool("testnet-2026-10-26");
+  const U64_MAX = 2n ** 64n - 1n;
+
+  it("works out the least at 99.99%, what's left after the fee rounded down", () => {
+    const fee = { numerator: 9_999n, denominator: 10_000n };
+    expect(leastSozuStake(testnet, fee)).toBe(40_000n);
+    expect(sozuStakeQuote(40_000n, testnet, fee)).toEqual({ fee: 39_996n, worth: 4n, stDusk: 1n, ok: true });
+    expect(sozuStakeQuote(39_999n, testnet, fee).ok).toBe(false);
+  });
+
+  it("has no least when no stake can go ahead: a fee of 100% or more, or a least past any u64 amount", () => {
+    expect(leastSozuStake(testnet, { numerator: 1n, denominator: 1n })).toBeNull();
+    expect(leastSozuStake(testnet, { numerator: 3n, denominator: 2n })).toBeNull();
+    expect(sozuStakeQuote(1_000_000_000n, testnet, { numerator: 1n, denominator: 1n }).ok).toBe(false);
+    // A pool whose stDUSK is worth a u64's whole, and a fee of 1 lux in u64::MAX.
+    expect(leastSozuStake({ stake: U64_MAX, supply: 1n }, { numerator: 1n, denominator: U64_MAX })).toBeNull();
+  });
+
+  it("doesn't count its way there: a fee a hair under 100% takes no time", () => {
+    const fee = { numerator: 9_999_999n, denominator: 10_000_000n };
+    const started = performance.now();
+    expect(leastSozuStake(testnet, fee)).toBe(40_000_000n);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+
+  it("gives what counting up gives, for small pools and fees", () => {
+    for (let stake = 1n; stake <= 40n; stake += 3n) {
+      for (let supply = 1n; supply <= 40n; supply += 7n) {
+        for (let d = 1n; d <= 12n; d++) {
+          for (let n = 0n; n < d; n++) {
+            const fee = { numerator: n, denominator: d };
+            const least = (stake + supply - 1n) / supply;
+            let counted = least;
+            while (counted - sozuFee(counted, fee) < least) counted += 1n;
+            expect(leastSozuStake({ stake, supply }, fee), `${stake}/${supply} at ${n}/${d}`).toBe(counted);
+          }
+        }
+      }
+    }
   });
 });

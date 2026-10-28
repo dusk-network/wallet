@@ -4,9 +4,10 @@
 // fixed bytes and every reply is plain rkyv, so none of these reads needs a
 // data driver; the caller encodes the account, as the pool's driver does.
 //
-// The hub's names are kept for the node and hub once read. Until then, the
-// figures are read from the contracts known before, in the same query as the
-// names; only when the hub names others are they read again from those.
+// The hub can name other contracts at any time, so each refresh asks it
+// again, in the same query as the figures. Those are read from the contracts
+// it named last (at first, the ones known before), and read again from the
+// new ones only when it names others.
 
 import { parsePool } from "./sozuAmounts.js";
 
@@ -74,7 +75,7 @@ export function decodeBool(bytes) {
   return bytes[0] === 1;
 }
 
-/** What each hub named, by node and hub, kept while the wallet runs. */
+/** What each hub named last, by node and hub: where a refresh reads the figures from. */
 const kept = new Map();
 
 /**
@@ -106,16 +107,16 @@ function readFigures(read, ids, account) {
       pool: rate ? parsePool(rate) : null,
       position: both(balance, stDusk) ? { balance, stDusk } : null,
       fees: both(deposit, reward) ? { deposit, reward } : null,
-      features: both(maintenance, synchronization) ? { maintenance, synchronization } : null,
+      // Each switch on its own: one that couldn't be read is null, not off.
+      features: { maintenance: maintenance ?? null, synchronization: synchronization ?? null },
       error: failed ? failed.reason?.message ?? String(failed.reason) : "",
     };
   });
 }
 
 /**
- * Reads what an account has with Sozu, in one query: the hub's names unless
- * they're kept, and from the pool and the substrate, every figure the
- * staking screens need.
+ * Reads what an account has with Sozu, in one query: the hub's names, and
+ * from the pool and the substrate, every figure the staking screens need.
  *
  * @param {{
  *   read: SozuRead,
@@ -125,14 +126,14 @@ function readFigures(read, ids, account) {
  *   names?: Map<string, SozuNamed>,
  * }} opts - `contracts` are the hub and the contracts known before it
  *   answers; `account` is `balance_of`'s argument, as the pool's driver
- *   encodes the account; `names` keeps what each hub named.
+ *   encodes the account; `names` keeps what each hub named last.
  * @returns {Promise<{
  *   contracts: { hub: string } & SozuContracts,
  *   source: "hub" | "fallback",
  *   pool: { stake: bigint, supply: bigint } | null,
  *   position: { balance: bigint, stDusk: bigint } | null,
  *   fees: { deposit: { numerator: bigint, denominator: bigint }, reward: { numerator: bigint, denominator: bigint } } | null,
- *   features: { maintenance: boolean, synchronization: boolean } | null,
+ *   features: { maintenance: boolean | null, synchronization: boolean | null },
  *   error: string,
  * }>} each figure null when it couldn't be read, and `error` says why
  */
@@ -140,25 +141,21 @@ export async function readSozuStatus({ read, nodeUrl, contracts, account, names 
   const key = `${nodeUrl}\n${contracts.hub}`;
   const known = Object.fromEntries(SOZU_NAMES.map((name) => [name, contracts[name] ?? null]));
   const held = names.get(key);
-  // One task: the hub's names, unless kept, with the figures.
-  const asked = held
-    ? null
-    : Promise.all(SOZU_NAMES.map((name) => read(contracts.hub, "contract", fromHex(HUB_NAME_ARGS[name])).then(decodeContractId)));
+  // One task: the hub's names with the figures, these from what it named last.
+  const asked = Promise.all(SOZU_NAMES.map((name) => read(contracts.hub, "contract", fromHex(HUB_NAME_ARGS[name])).then(decodeContractId)));
   let ids = held?.ids ?? known;
   let source = held?.source ?? "fallback";
   let figures = readFigures(read, ids, account);
 
-  if (asked) {
-    const named = await asked.catch(() => null);
-    if (named) {
-      // A name the hub doesn't have keeps the contract known before.
-      const hub = Object.fromEntries(SOZU_NAMES.map((name, i) => [name, named[i] ?? known[name]]));
-      source = named.every(Boolean) ? "hub" : "fallback";
-      names.set(key, { ids: hub, source });
-      if (SOZU_NAMES.some((name) => hub[name] !== ids[name])) {
-        ids = hub;
-        figures = readFigures(read, ids, account);
-      }
+  const named = await asked.catch(() => null);
+  if (named) {
+    // A name the hub doesn't have keeps the contract known before.
+    const hub = Object.fromEntries(SOZU_NAMES.map((name, i) => [name, named[i] ?? known[name]]));
+    source = named.every(Boolean) ? "hub" : "fallback";
+    names.set(key, { ids: hub, source });
+    if (SOZU_NAMES.some((name) => hub[name] !== ids[name])) {
+      ids = hub;
+      figures = readFigures(read, ids, account);
     }
   }
 

@@ -79,13 +79,14 @@ function aggregateReply(results) {
   return out;
 }
 
-// A node with Sozu's contracts: the hub names `named`, and every contract
-// answers its reads. `fail` names reads that panic, as "<fn>/<args hex>".
-function sozuNode({ named = KNOWN, fail = [], nodeUrl = NODE } = {}) {
+// A node with Sozu's contracts: the hub names `named`, as it does at the
+// time, and every contract answers its reads; the switches are `switches`.
+// `fail` names reads that panic, as "<fn>/<args hex>".
+function sozuNode({ named = KNOWN, fail = [], nodeUrl = NODE, switches = { "00": Uint8Array.of(0), "01": Uint8Array.of(1) } } = {}) {
   const figures = {
     exchange_rate: u64(8_142_876_697_294_578n, 2_647_997_731_233_173n),
     stake_fee_rate: { "00": u64(25, 10_000), "01": u64(10, 100) },
-    is_feature_enabled: { "00": Uint8Array.of(0), "01": Uint8Array.of(1) },
+    is_feature_enabled: switches,
   };
   const answer = ({ contract, fnName, args }) => {
     if (fail.includes(`${fnName}/${args}`)) return null;
@@ -106,7 +107,7 @@ function sozuNode({ named = KNOWN, fail = [], nodeUrl = NODE } = {}) {
 const queries = (node) => node.mock.calls.map(([, init]) => envelopeCalls(init.body).map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`));
 
 describe("readSozuStatus", () => {
-  it("reads the hub's names with every figure in one Multicall for Dusk query, then keeps the names for the node", async () => {
+  it("reads the hub's names with every figure in one Multicall for Dusk query, and again on each refresh", async () => {
     const node = sozuNode();
     const read = createContractReads({ nodeUrl: NODE, fetch: node });
     const names = new Map();
@@ -140,10 +141,25 @@ describe("readSozuStatus", () => {
     expect(sent.slice(0, 3).map((c) => c.args)).toEqual(["pool", "substrate", "staked-dusk"].map((n) => hex(rkyvString(n))));
     expect(sent.slice(3).map((c) => c.args)).toEqual(["", "01020304", "01020304", "00", "01", "00", "01"]);
 
-    // The next refresh asks the hub nothing: one query, the figures only.
+    // The next refresh asks the hub again, in the same one query: it can name others at any time.
     await readSozuStatus({ read, nodeUrl: NODE, contracts: KNOWN, account: ACCOUNT, names });
-    expect(queries(node)[1]).toHaveLength(7);
-    expect(queries(node)[1].some((c) => c.endsWith(".contract"))).toBe(false);
+    expect(queries(node)).toEqual([queries(node)[0], queries(node)[0]]);
+  });
+
+  it("follows the hub when it names another pool later in the session", async () => {
+    const named = { ...KNOWN };
+    const node = sozuNode({ named });
+    const read = createContractReads({ nodeUrl: NODE, fetch: node });
+    const names = new Map();
+    await readSozuStatus({ read, nodeUrl: NODE, contracts: KNOWN, account: ACCOUNT, names });
+
+    // An upgrade: the hub names a new pool. The next refresh reads it there.
+    named.pool = "ee".repeat(32);
+    const status = await readSozuStatus({ read, nodeUrl: NODE, contracts: KNOWN, account: ACCOUNT, names });
+    expect(status.contracts.pool).toBe("ee".repeat(32));
+    expect(status.position.balance).toBe(1_500_000_000_000n);
+    expect(queries(node).map((q) => q.length)).toEqual([10, 10, 7]);
+    expect(queries(node)[2][0]).toBe("eeeeeeee.exchange_rate");
   });
 
   it("reads the figures again from the contracts the hub names when they're others, and keeps those", async () => {
@@ -158,8 +174,10 @@ describe("readSozuStatus", () => {
     expect(queries(node).map((q) => q.length)).toEqual([10, 7]);
     expect(queries(node)[1].slice(0, 2)).toEqual(["eeeeeeee.exchange_rate", "eeeeeeee.balance_of"]);
 
+    // The next refresh starts from them, with the hub asked again in the same query.
     await readSozuStatus({ read, nodeUrl: NODE, contracts: KNOWN, account: ACCOUNT, names });
-    expect(queries(node)[2][0]).toBe("eeeeeeee.exchange_rate");
+    expect(queries(node).map((q) => q.length)).toEqual([10, 7, 10]);
+    expect(queries(node)[2].slice(3, 5)).toEqual(["eeeeeeee.exchange_rate", "eeeeeeee.balance_of"]);
     // Another node asks its own hub.
     const OTHER = "https://other.example";
     const other = sozuNode({ nodeUrl: OTHER });
@@ -205,7 +223,20 @@ describe("readSozuStatus", () => {
 
     // No pool known at all: no figures, and why.
     const none = await readSozuStatus({ read: vi.fn(async () => NONE), nodeUrl: NODE, contracts: { hub: KNOWN.hub }, account: ACCOUNT, names: new Map() });
-    expect(none).toMatchObject({ pool: null, position: null, fees: null, features: null, error: "Sozu's contracts aren't known" });
+    expect(none).toMatchObject({
+      pool: null,
+      position: null,
+      fees: null,
+      features: { maintenance: null, synchronization: null },
+      error: "Sozu's contracts aren't known",
+    });
+  });
+
+  it("keeps each switch on its own: deposits paused stay paused when synchronization can't be read", async () => {
+    const node = sozuNode({ switches: { "00": Uint8Array.of(1) }, fail: ["is_feature_enabled/01"] });
+    const status = await readSozuStatus({ read: createContractReads({ nodeUrl: NODE, fetch: node }), nodeUrl: NODE, contracts: KNOWN, account: ACCOUNT, names: new Map() });
+    expect(status.features).toEqual({ maintenance: true, synchronization: null });
+    expect(status.fees).not.toBeNull();
   });
 });
 

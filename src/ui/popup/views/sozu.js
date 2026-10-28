@@ -65,10 +65,18 @@ const FAILED_CALL_NOTE = "You pay only the gas used. A call that fails is charge
 /** How an unstake from Sozu comes back: its pool pays it out in the same call. */
 export const SOZU_UNSTAKE_LINE = "The DUSK comes back in the same transaction. No fee, no waiting.";
 
-// Sozu's switches, as its substrate reads them.
+// Sozu's switches, as its substrate reads them: deposits paused, or not known.
 const PAUSED_TITLE = "Sozu has paused deposits";
+const UNCHECKED_TITLE = "Sozu's deposits couldn't be checked";
 const SYNC_TITLE = "Sozu is synchronizing its pool";
 const SYNC_TEXT = "A stake or unstake can fail until it's done, and a failed call is charged its whole gas limit.";
+
+// A fee so high that no stake gets stDUSK: 100%, or so near it that the least is past any amount.
+const NO_STAKE_TEXT = "No stake gets stDUSK at Sozu's deposit fee now.";
+
+// Sozu's terms read again before a stake is sent, and found changed.
+const CHANGED_TITLE = "Sozu's terms changed";
+const CHANGED_TEXT = "These are the figures now. Check them, then confirm again.";
 
 /**
  * About how much stDUSK a stake gets, as Review shows it: "32.47".
@@ -121,6 +129,68 @@ function stakeTerms(status) {
 function depositFeeText(rate, feeLux = null) {
   const pct = feePercent(rate, "en");
   return feeLux === null ? pct : `${pct} · ${formatDuskExact(feeLux.toString())} DUSK`;
+}
+
+// A stake's quote as a draft keeps it, in strings: the fee and its rate,
+// what's left, the stDUSK it gets, and whether it goes ahead.
+function quoteJson(quote, rate) {
+  return {
+    fee: quote.fee.toString(),
+    worth: quote.worth.toString(),
+    stDusk: quote.stDusk.toString(),
+    ok: quote.ok,
+    feeRate: { numerator: rate.numerator.toString(), denominator: rate.denominator.toString() },
+  };
+}
+
+// What a stake's Review shows of Sozu's terms: the fee's rate and what it
+// takes, and about how much stDUSK the stake gets.
+function shownTerms(quote) {
+  const rate = feeRateOf(quote?.feeRate);
+  return rate ? `${depositFeeText(rate, safeBigInt(quote.fee, 0n))} | ${stDuskText(quote.stDusk)} | ${quote.ok}` : "";
+}
+
+const hexId = (id) => String(id ?? "").trim().toLowerCase().replace(/^0x/, "");
+
+/**
+ * Sozu's terms for a drafted stake as they are now, read again just before
+ * it's sent: its pool takes the fee of that moment, and Sozu's manager can
+ * change it, or pause deposits, at any time. The draft and the status the
+ * Review shows are brought up to date.
+ * @returns {Promise<"same" | "changed" | "unread">} "changed" when anything
+ *   the Review shows changed, or deposits aren't open now
+ */
+async function recheckStake({ st, actions, draft }) {
+  let status = null;
+  try {
+    const resp = await actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: Number(draft.profileIndex ?? 0) || 0 });
+    if (!resp?.error) status = resp?.result ?? resp ?? null;
+  } catch {
+    // Not read: nothing is sent.
+  }
+  const { pool, depositFee } = stakeTerms(status);
+  const quote = sozuStakeQuote(draftAmountLux(draft), pool, depositFee);
+  const poolId = hexId(status?.contracts?.pool);
+  if (!quote || !/^[0-9a-f]{64}$/.test(poolId)) {
+    // Staking reads Sozu again on the way back.
+    st.loaded = false;
+    return "unread";
+  }
+  const wasSyncing = st.status?.features?.synchronization === true;
+  st.status = status;
+  st.pool = status.pool ?? null;
+  st.position = status.position ?? null;
+  const next = quoteJson(quote, depositFee);
+  const changed =
+    shownTerms(draft.quote) !== shownTerms(next) ||
+    poolId !== hexId(draft.contractId) ||
+    status.features?.maintenance !== false ||
+    (!wasSyncing && status.features?.synchronization === true);
+  draft.quote = next;
+  if (!changed) return "same";
+  draft.contractId = poolId;
+  draft.termsChanged = true;
+  return "changed";
 }
 
 function sozuState(state) {
@@ -262,7 +332,9 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     : staticCfg;
   const position = st.position ? parseSozuPosition(st.position) : null;
   const { pool, depositFee } = stakeTerms({ ...liveStatus, pool: st.pool });
-  const paused = liveStatus?.features?.maintenance === true;
+  // Deposits are open only when Sozu says so: paused, or not known, keeps a stake off.
+  const maintenance = liveStatus?.features?.maintenance;
+  const paused = maintenance === true;
   const syncing = liveStatus?.features?.synchronization === true;
   const hidden = balancesHidden(ov);
   const publicBalanceLux = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
@@ -279,8 +351,8 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     ? ""
     : liveStatus?.reason || "Sozu liquid staking is not configured for this network.";
   const isWithdraw = st.action === "withdraw";
-  // Deposits paused: the stake can't go ahead; an unstake can.
-  const stakeOff = !isWithdraw && paused;
+  // Deposits paused or not known: the stake can't go ahead; an unstake can.
+  const stakeOff = !isWithdraw && Boolean(cfg && liveStatus) && maintenance !== false;
   const maxActionLux = isWithdraw ? maxUnstakeLux : maxStakeLux;
 
   const back = () => {
@@ -367,7 +439,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     }
     termsNote.textContent = feeLine(quote.fee);
     if (!quote.ok) {
-      field.setError(`The minimum stake is ${formatDuskExact(leastLux.toString())} DUSK.`);
+      field.setError(leastLux === null ? NO_STAKE_TEXT : `The minimum stake is ${formatDuskExact(leastLux.toString())} DUSK.`);
       reviewBtn.disabled = true;
       return null;
     }
@@ -403,14 +475,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
         : buildSozuDepositTx({ config: cfg, amountLux })),
       profileIndex: Number(ov?.selectedAccountIndex ?? 0) || 0,
       fnArgsAmountLux: amountLux.toString(),
-      quote: quote
-        ? {
-            fee: quote.fee.toString(),
-            worth: quote.worth.toString(),
-            stDusk: quote.stDusk.toString(),
-            feeRate: { numerator: depositFee.numerator.toString(), denominator: depositFee.denominator.toString() },
-          }
-        : null,
+      quote: quote ? quoteJson(quote, depositFee) : null,
       label: isWithdraw ? "Unstake from Sozu" : "Liquid staking",
     };
     state.route = "sozu_confirm";
@@ -579,8 +644,8 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     actionTabs,
     stakeOff
       ? h("div", { class: "callout sozu-paused", role: "note" }, [
-          h("div", { class: "callout-title", text: PAUSED_TITLE }),
-          h("div", { class: "muted", text: "Unstaking still works." }),
+          h("div", { class: "callout-title", text: paused ? PAUSED_TITLE : UNCHECKED_TITLE }),
+          h("div", { class: "muted", text: paused ? "Unstaking still works." : "Staking stays off until they can be. Unstaking still works." }),
         ])
       : null,
     h("div", { class: "amount-entry" }, [field.el, field.error, available, termsNote, estimate]),
@@ -604,16 +669,25 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const fnName = isStake ? SOZU_FN.STAKE : SOZU_FN.UNSTAKE;
   const draftFeeLux = sozuFeeLux(fnName, ov?.customGas, draft?.gas);
   const stakeRequiredLux = isStake ? draftNeeds + draftFeeLux : draftFeeLux;
-  // Deposits paused since the form: the stake waits; an unstake goes ahead.
-  const paused = isStake && liveStatus?.features?.maintenance === true;
+  // Deposits paused or not known since the form: the stake waits; an unstake goes ahead.
+  const maintenance = liveStatus?.features?.maintenance;
+  const paused = isStake && maintenance !== false;
   const syncing = liveStatus?.features?.synchronization === true;
+  // What the stake gets, and Sozu's fee off it: as worked out on the form, or
+  // as read again before it was sent.
+  const quote = isStake ? draft.quote ?? null : null;
+  const quoteRate = feeRateOf(quote?.feeRate);
+  const getsNothing = quote?.ok === false;
   const submitDisabled =
     st.submitting ||
     paused ||
+    getsNothing ||
     (isStake && stakeRequiredLux > publicBalance) ||
     publicBalance <= 0n;
   const submitDisabledReason = paused
-    ? `${PAUSED_TITLE}.`
+    ? `${maintenance === true ? PAUSED_TITLE : UNCHECKED_TITLE}.`
+    : getsNothing
+    ? "At Sozu's deposit fee now, this stake gets no stDUSK."
     : publicBalance <= 0n
     ? "The network fee is paid from the public balance, and it's empty."
     : isStake && stakeRequiredLux > publicBalance
@@ -679,7 +753,23 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     // never the wallet's default for any contract call.
     const sentGas = gas ?? gasEditor.networkGas ?? { limit: ownGas.limit, price: ownGas.price };
     draft.gas = gas;
-    const { quote: _quote, label: _label, ...txDraft } = draft;
+    // A stake goes ahead on Sozu's terms as they are when it's sent: read
+    // them again first, and if anything this Review shows changed, show the
+    // new figures for another Confirm instead of sending.
+    if (isStake) {
+      const terms = await recheckStake({ st, actions, draft });
+      if (terms === "unread") {
+        confirmError.textContent = "Couldn't check Sozu's terms just now, so nothing was sent. Try again.";
+        confirmError.hidden = false;
+        confirmBtn.disabled = submitDisabled;
+        return;
+      }
+      if (terms === "changed") {
+        actions?.render?.().catch(() => {});
+        return;
+      }
+    }
+    const { quote: _quote, label: _label, termsChanged: _changed, ...txDraft } = draft;
     const params = { ...txDraft, gas: sentGas };
     await sendFromReview({
       state,
@@ -716,10 +806,6 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
-  // What the stake gets, and Sozu's fee off it, as worked out on the form.
-  const quote = isStake ? draft.quote ?? null : null;
-  const quoteRate = feeRateOf(quote?.feeRate);
-
   return [
     subnav({ title: "Review", onBack: goBack }),
     h("div", { class: "row" }, [
@@ -729,6 +815,12 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "review-line", text: line }),
         visibleLine,
       ]),
+      draft.termsChanged
+        ? h("div", { class: "callout warn sozu-changed", role: "alert" }, [
+            h("div", { class: "callout-title", text: CHANGED_TITLE }),
+            h("div", { class: "muted", text: CHANGED_TEXT }),
+          ])
+        : null,
       syncing ? syncWarning() : null,
       h("div", { class: "group" }, [
         quote

@@ -327,6 +327,7 @@ describe("hidden balances", () => {
         contracts: { pool, "staked-dusk": `0x${"02".repeat(32)}` },
         publicBalance: { value: "1482938300000" },
         fees: { deposit: { numerator: "1", denominator: "400" }, reward: { numerator: "15", denominator: "100" } },
+        features: { maintenance: false, synchronization: false },
       },
       pool: { totalStakeLux: dusk(1050), tokenTotalSupply: dusk(1000) },
       position: { poolBalanceLux: dusk(7), stDuskBalanceLux: dusk(10) },

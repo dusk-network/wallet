@@ -105,12 +105,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Draws Staking, its Review and Sent as app.js routes them, and redraws on render.
-function popup(state, overview = ov()) {
+// Draws Staking, its Review and Sent as app.js routes them, and redraws on
+// render. Sozu's status, read again before a stake is sent, is the one Staking
+// holds, unless `sozuStatus` gives what the node says by then.
+function popup(state, overview = ov(), { sozuStatus } = {}) {
   const actions = {
     send: vi.fn(async (message) => {
       if (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE") return { min: "1", median: "1", max: "1" };
       if (message.type === "DUSK_UI_SEND_TX") return { ok: true, result: { hash: "ab".repeat(32) } };
+      if (message.type === "DUSK_UI_GET_SOZU_STATUS") {
+        const st = state.sozu;
+        return { ok: true, result: sozuStatus ? sozuStatus() : { ...st?.status, pool: st?.pool, position: st?.position } };
+      }
       return {};
     }),
     render: vi.fn(async () => draw()),
@@ -657,6 +663,87 @@ describe("liquid staking", () => {
     button("Confirm").click();
     await settle();
     expect(sentGas(app)).toEqual({ limit: "10000000", price: "1" });
+  });
+
+  it("reads Sozu's terms again before sending a stake, and shows them for another Confirm when they changed", async () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    // What the node says when Confirm is pressed.
+    let now = { ...sozu().status, pool: sozu().pool, position: sozu().position };
+    const app = popup(state, ov(), { sozuStatus: () => now });
+    const sent = () => app.actions.send.mock.calls.map(([m]) => m).filter((m) => m.type === "DUSK_UI_SEND_TX");
+    const rows = () => body.querySelectorAll(".row > .group .kv").map(visibleText).slice(0, 2);
+    typeInto(field("Stake amount"), "100");
+    button("Review stake").click();
+    await settle();
+    expect(rows()).toEqual(["You get about32.47 stDUSK, worth about 99.75 DUSK now", "Deposit fee0.25% · 0.25 DUSK"]);
+
+    // Sozu's manager raises the deposit fee to 5% meanwhile: nothing is sent, and the new figures show.
+    now = { ...now, fees: { ...now.fees, deposit: { numerator: "5", denominator: "100" } } };
+    button("Confirm").click();
+    await settle();
+    expect(sent()).toEqual([]);
+    expect(visibleText(body.querySelector(".sozu-changed"))).toBe("Sozu's terms changedThese are the figures now. Check them, then confirm again.");
+    expect(rows()).toEqual(["You get about30.92 stDUSK, worth about 95 DUSK now", "Deposit fee5% · 5 DUSK"]);
+
+    // Confirmed again on those terms: sent, and only the call goes.
+    button("Confirm").click();
+    await settle();
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0].params).toMatchObject({ fnName: "sozu_stake", deposit: dusk(100), contractId: POOL });
+    expect(sent()[0].params).not.toHaveProperty("termsChanged");
+  });
+
+  it("doesn't send a stake when Sozu's terms can't be read again, or deposits were paused since its Review", async () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    let now = null;
+    const app = popup(state, ov(), { sozuStatus: () => now });
+    const sent = () => app.actions.send.mock.calls.map(([m]) => m).filter((m) => m.type === "DUSK_UI_SEND_TX");
+    const errors = () => body.querySelectorAll(".row > .field-error").filter(isShown).map((e) => e.textContent);
+    typeInto(field("Stake amount"), "100");
+    button("Review stake").click();
+    await settle();
+
+    button("Confirm").click();
+    await settle();
+    expect(sent()).toEqual([]);
+    expect(errors()).toEqual(["Couldn't check Sozu's terms just now, so nothing was sent. Try again."]);
+    expect(button("Confirm").disabled).toBe(false);
+
+    now = { ...sozu().status, pool: sozu().pool, features: { maintenance: true, synchronization: false } };
+    button("Confirm").click();
+    await settle();
+    expect(sent()).toEqual([]);
+    expect(errors()).toEqual(["Sozu has paused deposits."]);
+    expect(button("Confirm").disabled).toBe(true);
+  });
+
+  it("keeps staking off while it can't tell whether Sozu takes deposits, and says so", () => {
+    const status = { ...sozu().status, features: { maintenance: null, synchronization: false } };
+    const state = {
+      route: "stake",
+      staking: staking(owner(), { screen: "liquid" }),
+      sozu: sozu({ status, position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }),
+    };
+    const app = popup(state);
+    expect(visibleText(body.querySelector(".sozu-paused"))).toBe(
+      "Sozu's deposits couldn't be checkedStaking stays off until they can be. Unstaking still works."
+    );
+    expect(field("Stake amount").disabled).toBe(true);
+    expect(button("Review stake").disabled).toBe(true);
+    state.sozu.action = "withdraw";
+    app.draw();
+    typeInto(field("Unstake amount"), "5");
+    expect(button("Review unstake").disabled).toBe(false);
+  });
+
+  it("says no stake gets stDUSK when Sozu's deposit fee is 100%", () => {
+    const status = { ...sozu().status, fees: { ...sozu().status.fees, deposit: { numerator: "1", denominator: "1" } } };
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ status }) };
+    popup(state);
+    typeInto(field("Stake amount"), "100");
+    expect(body.querySelector(".amount-field__error").textContent).toBe("No stake gets stDUSK at Sozu's deposit fee now.");
+    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 100% · 100 DUSK");
+    expect(button("Review stake").disabled).toBe(true);
   });
 
   it("checks the amount as it is typed, and drafts the stake and the unstake", () => {

@@ -11,7 +11,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Showed Sozu's fees on Liquid staking as its contract has them: its share of rewards, the deposit fee and no fee to unstake.
 - Showed Sozu's deposit fee on each stake as it's typed and on Review, and took it off what the stake gets.
-- Turned staking with Sozu off while Sozu has paused deposits, and warned while its pool is synchronizing.
+- Turned staking with Sozu off while Sozu has paused deposits or they can't be checked, and warned while its pool is synchronizing.
+- Read Sozu's terms again before sending a stake, and showed them for another Confirm when they changed.
 - Showed the 1 DUSK bridge fee and what arrives on BNB Smart Chain when paying the bridge's account, in its approval and on Send's Review.
 - Said that the testnet bridge to Sepolia isn't running right now, in its approval and on Send's Review.
 - Added Export to Activity: the rows listed as a CSV file with the web wallet's columns, your contact names only when asked.

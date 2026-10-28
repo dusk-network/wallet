@@ -1470,10 +1470,12 @@ describe("walletEngine", () => {
     // Only the pool's driver is loaded; the hub has none.
     expect([...new Set(globalThis.__W3SPER_DRIVER_GETS__)]).toEqual(["sozu_pool"]);
 
-    // The next refresh: one query again, without the hub's names.
+    // The next refresh: one query again, the hub asked again in it, as it can name others.
     await engine.getSozuStatus();
     expect(queries()).toHaveLength(2);
-    expect(envelopeCalls(queries()[1][1].body)).toHaveLength(7);
+    expect(envelopeCalls(queries()[1][1].body).map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)).toEqual(
+      calls.map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)
+    );
     delete globalThis.__W3SPER_DRIVER_GETS__;
   });
 
