@@ -17,18 +17,18 @@ import {
   parseSozuPosition,
 } from "../../../shared/sozuAdapter.js";
 import { getSozuConfig } from "../../../shared/sozuConfig.js";
-import { getDefaultGas } from "../../../shared/txDefaults.js";
+import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { submitOnGasEnter } from "../../components/FormControls.js";
-import { createGasQuickControls } from "../../components/GasQuickControls.js";
+import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { sendFromReview } from "./sent.js";
 
 function networkKey(ov) {
@@ -86,9 +86,17 @@ function draftAmountLux(draft) {
   return safeBigInt(draft?.fnArgsAmountLux ?? 0, 0n);
 }
 
-function defaultContractCallFeeLux() {
-  const gas = getDefaultGas(TX_KIND.CONTRACT_CALL, { privacy: "public" });
-  return safeBigInt(gas?.limit, 0n) * safeBigInt(gas?.price, 1n);
+// The fee Review starts from (startingGas), custom gas from Settings and a
+// draft's own gas included, so Max and the balance checks match it.
+function contractCallFeeLux(customGas = null, gas = null) {
+  return gasFeeLux(
+    startingGas({
+      defaultGas: getDefaultGas(TX_KIND.CONTRACT_CALL, { privacy: "public" }),
+      minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL, { privacy: "public" })?.limit,
+      customGas,
+      gas,
+    })
+  );
 }
 
 function stDuskWatchKey(profileIndex, contractId) {
@@ -178,7 +186,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const publicBalanceLux = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const poolBalanceLux = safeBigInt(position?.poolBalanceLux ?? 0, 0n);
   const stDuskLux = safeBigInt(position?.stDuskBalanceLux ?? 0, 0n);
-  const publicFeeLux = defaultContractCallFeeLux();
+  const publicFeeLux = contractCallFeeLux(ov?.customGas);
   const maxStakeLux = publicBalanceLux > publicFeeLux ? publicBalanceLux - publicFeeLux : 0n;
   const maxUnstakeLux = poolBalanceLux > 0n ? poolBalanceLux : 0n;
   const disabledReason = cfg
@@ -414,7 +422,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     h("div", { class: "list-row" }, [
       h("span", { class: "row-icon", html: iconSvg("fee") }),
       h("span", { class: "row-main" }, [
-        h("span", { class: "row-title", text: `Network fee up to ${formatFee(publicFeeLux)} DUSK` }),
+        h("span", { class: "row-title", text: `Network fee up to ${formatFee(publicFeeLux, { max: true })} DUSK` }),
       ]),
     ]),
     poolContract
@@ -422,7 +430,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
           h("span", { class: "row-icon", html: iconSvg("server") }),
           h("span", { class: "row-main" }, [
             h("span", { class: "row-title", text: "Sozu's contract" }),
-            h("span", { class: "row-sub" }, [h("span", { class: "mono", title: poolContract, text: truncateMiddle(poolContract, 8, 8) })]),
+            h("span", { class: "row-sub" }, [h("span", { class: "mono", title: poolContract, text: shortAddress(poolContract) })]),
           ]),
           copyContract,
         ].filter(Boolean))
@@ -461,7 +469,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const liveStatus = st.status;
   const publicBalance = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const draftNeeds = draftAmountLux(draft);
-  const draftFeeLux = defaultContractCallFeeLux();
+  const draftFeeLux = contractCallFeeLux(ov?.customGas, draft?.gas);
   const isStake = draft.fnName === "sozu_stake";
   const stakeRequiredLux = isStake ? draftNeeds + draftFeeLux : draftFeeLux;
   const submitDisabled =
@@ -495,13 +503,15 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   gasEditor.amountLux = "0";
   gasEditor.extraLux = [String(draft.deposit ?? "0")];
   gasEditor.setGas(draft?.gas ?? null);
-  // The gas price line and the presets open with the fee's Edit.
-  createGasQuickControls({
+  // The network's gas price by default; Custom fee for gas of your own.
+  useNetworkGas({
+    customGas: ov?.customGas,
     actions,
     gas: draft?.gas,
     defaultLimit,
     fallbackPrice,
     gasEditor,
+    minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL, { privacy: draft.privacy || "public" })?.limit,
   });
 
   const title = isStake ? "Liquid staking" : "Unstake from Sozu";

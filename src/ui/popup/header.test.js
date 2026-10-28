@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fakeEvent, installFakeDom, settle, visibleText } from "../testing/fakeDom.js";
+import { fakeEvent, installFakeDom, screenReaderText, settle, visibleText } from "../testing/fakeDom.js";
 import { iconSvg } from "../components/ActionIcon.js";
 
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
@@ -96,13 +96,22 @@ describe("header", () => {
     ]);
   });
 
-  it("shows the short account without a name and the verified name once there is one", async () => {
+  it("shows the profile's label without a name, the account only in the tooltip, and the verified name once there is one", async () => {
     const { names, renderHeader, chip } = await setup("popup");
     renderHeader(overview);
     await settle();
-    expect(visibleText(chip().querySelector(".chip-text"))).toBe("26FCH7…Tck927");
-    expect(visibleText(chip())).toBe("26FCH7…Tck927▾");
+    expect(visibleText(chip())).toBe("Profile 1▾");
+    expect(chip().title).toBe(`Profile 1\n${ACCOUNT}`);
+    expect(screenReaderText(chip())).not.toContain(ACCOUNT.slice(0, 6));
     expect(names.lookupPrimaryName).toHaveBeenCalledWith(ACCOUNT, { nodeUrl: overview.nodeUrl, stale: true });
+
+    // A label set on this device takes its place; another profile shows its own.
+    renderHeader({ ...overview, accountNames: { 0: "Savings" } });
+    await settle();
+    expect(visibleText(chip())).toBe("Savings▾");
+    renderHeader({ ...overview, selectedAccountIndex: 1 });
+    await settle();
+    expect([visibleText(chip()), chip().title]).toEqual(["Profile 2▾", `Profile 2\n${SECOND}`]);
 
     names.lookupPrimaryName.mockResolvedValue("alice.dusk");
     renderHeader(overview);
@@ -148,6 +157,39 @@ describe("header", () => {
     expect(chip()).not.toBe(opened);
   });
 
+  it("names the network it moves to on the pill while it switches", async () => {
+    const { dom, renderHeader } = await setup("popup");
+    // The pill, as popup.html has it.
+    const pill = dom.document.createElement("button");
+    pill.id = "network-pill";
+    pill.className = "network-pill";
+    const label = dom.document.createElement("span");
+    label.className = "network-pill__label";
+    pill.appendChild(label);
+    dom.document.body.appendChild(pill);
+    renderHeader(overview);
+    expect(label.textContent).toBe("Testnet");
+
+    const { setNetworkSwitching } = await import("../components/NetworkMenu.js");
+    setNetworkSwitching(pill, "Mainnet");
+    // A render meanwhile, from a toast or a poll, still has the old network.
+    renderHeader(overview);
+    expect(label.textContent).toBe("Mainnet");
+    setNetworkSwitching(pill, null);
+    renderHeader({ ...overview, networkName: "Mainnet" });
+    expect([label.textContent, pill.className]).toEqual(["Mainnet", "network-pill"]);
+  });
+
+  it("keeps the keyboard on the chip when another profile redraws it", async () => {
+    const { dom, renderHeader, chip } = await setup("popup");
+    renderHeader(overview);
+    const first = chip();
+    first.focus();
+    renderHeader({ ...overview, selectedAccountIndex: 1 });
+    expect(chip()).not.toBe(first);
+    expect(dom.document.activeElement).toBe(chip());
+  });
+
   it("leaves the chip out while the wallet is locked", async () => {
     const { host, renderHeader, chip } = await setup("popup");
     renderHeader({ ...overview, isUnlocked: false });
@@ -166,9 +208,11 @@ describe("header", () => {
     expect(rule(".header-actions > *")).toContain("flex: 0 0 auto;");
     expect(rule(".header-actions > .account-chip")).toContain("flex: 0 1 auto;");
     expect(rule(".account-chip")).toContain("min-width: 0;");
-    expect(rule(".account-chip .chip-text")).toContain("min-width: 0;");
-    expect(rule(".account-chip .chip-text__head")).toContain("text-overflow: ellipsis;");
-    expect(rule(".account-chip .chip-text__tail")).toContain("flex: 0 0 auto;");
+    // One line that ends in one "…" when it has to shrink, whatever it holds.
+    for (const declaration of ["min-width: 0;", "overflow: hidden;", "text-overflow: ellipsis;", "white-space: nowrap;"]) {
+      expect(rule(".account-chip .chip-text")).toContain(declaration);
+    }
+    expect(css).not.toContain("chip-text__");
     expect(rule(".account-chip .chip-chev")).toContain("flex: 0 0 auto;");
     // The chip shows its line in the popup too, and stays on narrow screens.
     expect(css).not.toMatch(/body\.page--popup \.account-chip \.chip-text\s*\{[^}]*display: none/);

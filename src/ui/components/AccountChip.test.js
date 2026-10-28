@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installFakeDom, screenReaderText, settle, visibleText } from "../testing/fakeDom.js";
@@ -20,43 +22,48 @@ const parts = (chip) => chip.children.map((child) => child.className);
 const line = (chip) => chip.querySelector(".chip-text");
 
 describe("account chip", () => {
-  it("shows the short account on one line, then a ▾", () => {
-    const chip = accountChipEl(ACCOUNT);
+  it("shows the profile's label on one line, then a ▾, with the account only in the tooltip", () => {
+    const chip = accountChipEl(ACCOUNT, { label: "Profile 2" });
     expect(parts(chip)).toEqual(["identicon", "chip-text", "chip-chev"]);
-    expect(visibleText(line(chip))).toBe("26FCH7…Tck927");
-    // The account gives way before its "…" and keeps its last six characters;
-    // screen readers get all of it.
-    expect(line(chip).children.map((part) => [part.className, part.textContent])).toEqual([
-      ["chip-text__head", "26FCH7…"],
-      ["chip-text__tail", "Tck927"],
-      ["sr-only", ACCOUNT],
-    ]);
-    expect(screenReaderText(line(chip))).toBe(ACCOUNT);
+    // One piece of text, no address in it, for screen readers either.
+    expect([line(chip).textContent, line(chip).children.length]).toEqual(["Profile 2", 0]);
+    expect(screenReaderText(chip)).not.toContain(ACCOUNT.slice(0, 6));
     expect(chip.querySelector(".chip-chev").textContent).toBe("▾");
     expect(chip.querySelector(".chip-chev").getAttribute("aria-hidden")).toBe("true");
-    expect(chip.title).toBe(ACCOUNT);
+    expect(chip.title).toBe(`Profile 2\n${ACCOUNT}`);
+
+    // A label set on this device, as it was typed.
+    expect(visibleText(line(accountChipEl(ACCOUNT, { label: "Savings for the trip" })))).toBe("Savings for the trip");
   });
 
-  it("shows the verified name in place of the short account, with both in the tooltip", async () => {
-    const chip = accountChipEl(ACCOUNT, { name: Promise.resolve("a-rather-long-name.dusk") });
+  it("shows the verified name in place of the label, with the name and account in the tooltip", async () => {
+    const chip = accountChipEl(ACCOUNT, { label: "Profile 1", name: Promise.resolve("verylongname-shop.dusk") });
     await settle();
     expect(parts(chip)).toEqual(["identicon", "chip-text", "chip-chev"]);
-    expect(line(chip).textContent).toBe("a-rather-long-name.dusk");
-    // One part, which ends in "…" when it has to shrink.
-    expect(line(chip).children.map((part) => part.className)).toEqual(["chip-text__head"]);
-    expect(chip.title).toBe(`a-rather-long-name.dusk\n${ACCOUNT}`);
+    expect([line(chip).textContent, line(chip).children.length]).toEqual(["verylongname-shop.dusk", 0]);
+    expect(chip.title).toBe(`verylongname-shop.dusk\n${ACCOUNT}`);
   });
 
-  it("keeps the short account when there is no name", async () => {
-    const chip = accountChipEl(ACCOUNT, { name: Promise.resolve(null) });
+  it("keeps the label when there is no name", async () => {
+    const chip = accountChipEl(ACCOUNT, { label: "Profile 2", name: Promise.resolve(null) });
     await settle();
-    expect(visibleText(line(chip))).toBe("26FCH7…Tck927");
-    expect(chip.title).toBe(ACCOUNT);
+    expect(visibleText(line(chip))).toBe("Profile 2");
+    expect(chip.title).toBe(`Profile 2\n${ACCOUNT}`);
+  });
+
+  it("ends a long name or label in one ellipsis when the chip has to shrink", async () => {
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    const rule = css.split("\n}").find((block) => `\n${block}`.includes("\n.account-chip .chip-text {")) ?? "";
+    for (const declaration of ["display: block;", "min-width: 0;", "overflow: hidden;", "text-overflow: ellipsis;", "white-space: nowrap;"]) {
+      expect(rule).toContain(declaration);
+    }
+    // Nothing else on the line cuts it, so there is no second "…".
+    expect(css).not.toContain("chip-text__");
   });
 
   it("opens through onClick and no longer copies the account", () => {
     const onClick = vi.fn();
-    const chip = accountChipEl(ACCOUNT, { onClick });
+    const chip = accountChipEl(ACCOUNT, { onClick, label: "Profile 1" });
     expect(chip.getAttribute("aria-haspopup")).toBe("menu");
     expect(chip.getAttribute("aria-expanded")).toBe("false");
 
@@ -70,6 +77,7 @@ describe("account chip", () => {
     const chip = accountChipEl(ACCOUNT, {
       host: "app.example",
       connected: true,
+      label: "Profile 1",
       name: Promise.resolve("alice.dusk"),
     });
     await settle();
@@ -77,8 +85,8 @@ describe("account chip", () => {
     expect(chip.querySelector(".identicon-badge--on")).not.toBeNull();
     expect(chip.title).toBe(`alice.dusk\n${ACCOUNT}\nConnected: app.example`);
 
-    const site = accountChipEl(ACCOUNT, { host: "app.example", connected: false });
+    const site = accountChipEl(ACCOUNT, { host: "app.example", connected: false, label: "Profile 1" });
     expect(site.querySelector(".identicon-badge--off")).not.toBeNull();
-    expect(site.title).toBe(`${ACCOUNT}\nSite: app.example`);
+    expect(site.title).toBe(`Profile 1\n${ACCOUNT}\nSite: app.example`);
   });
 });

@@ -9,6 +9,7 @@ import {
   parseDuskToLux,
   groupThousands,
   formatDusk,
+  formatDuskExact,
   formatFee,
 } from "./amount.js";
 
@@ -167,16 +168,43 @@ describe("display formatting", () => {
     expect(formatDusk("1000000000000")).toBe("1,000");
   });
 
-  it("shows fees with four decimals, so they read alike everywhere", () => {
-    expect(formatFee("50000000")).toBe("0.0500");
+  it("shows amounts in one format: at most 4 decimals, no trailing zeros, thousands grouped", () => {
+    expect(formatDusk("1100020000")).toBe("1.1");
+    expect(formatDusk("2000010000")).toBe("2");
+    expect(formatDusk("100000000")).toBe("0.1");
+    expect(formatDusk("1234567890123")).toBe("1,234.5678");
+    // Too small to show at 4 decimals: in full, never as zero.
+    expect(formatDusk("40000")).toBe("0.00004");
+    expect(formatDusk("0")).toBe("0");
+  });
+
+  it("shows an amount under review exactly, every decimal of it", () => {
+    expect(formatDuskExact("1234567891234")).toBe("1,234.567891234");
+    expect(formatDuskExact("100000000")).toBe("0.1");
+  });
+
+  it("shows a fee exactly up to 4 decimals, rounding a maximum up and a fee paid to the nearest", () => {
+    // Up to 4 decimals, exact either way.
+    expect([formatFee("2500000"), formatFee("2500000", { max: true })]).toEqual(["0.0025", "0.0025"]);
+    // Past them: a fee paid to the nearest, a maximum up, so it never reads lower than it can be.
+    expect([formatFee("1840001"), formatFee("1840001", { max: true })]).toEqual(["0.0018", "0.0019"]);
+    expect([formatFee("1853542"), formatFee("1853542", { max: true })]).toEqual(["0.0019", "0.0019"]);
+    expect([formatFee("1849999"), formatFee("1850000")]).toEqual(["0.0018", "0.0019"]);
+    // Too small for 4 decimals: paid, in full; a maximum, up to the smallest step.
+    expect([formatFee("40000"), formatFee("40000", { max: true })]).toEqual(["0.00004", "0.0001"]);
+    expect(formatFee("0", { max: true })).toBe("0");
+  });
+
+  it("shows fees in the same format, rounded half up so a fee never reads lower", () => {
+    expect(formatFee("50000000")).toBe("0.05");
     expect(formatFee("2500000")).toBe("0.0025");
-    expect(formatFee("500000000")).toBe("0.5000");
-    // Rounded half up at the fourth decimal.
+    expect(formatFee("500000000")).toBe("0.5");
     expect(formatFee("1234567")).toBe("0.0012");
     expect(formatFee("1250000")).toBe("0.0013");
-    expect(formatFee("1500000000000")).toBe("1,500.0000");
+    expect(formatFee("1853542")).toBe("0.0019");
+    expect(formatFee("1500000000000")).toBe("1,500");
     // Too small to show at that precision: in full, never as zero.
     expect(formatFee("40000")).toBe("0.00004");
-    expect(formatFee("0")).toBe("0.0000");
+    expect(formatFee("0")).toBe("0");
   });
 });

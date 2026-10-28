@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { TX_KIND } from "../../../shared/constants.js";
-import { amountText, dateText, dayLabel, describeTx, inFilter, recentText, subText } from "./txRow.js";
+import { amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
 
 process.env.TZ = "UTC";
 const NOW = Date.parse("2026-10-26T15:00:00Z");
@@ -23,6 +23,23 @@ describe("when a row says it happened", () => {
     expect(dayLabel(at("2026-10-24T12:00:00Z"), NOW)).toBe("Sat, 24 Oct");
     expect(dayLabel(at("2025-11-16T23:03:38Z"), NOW)).toBe("Sun, 16 Nov 2025");
     expect(dateText(at("2026-10-26T14:32:59Z"))).toBe("26 Oct 2026, 14:32");
+  });
+});
+
+describe("a row's time", () => {
+  const format = (ms) => `t${ms}`;
+  it("is its own, else its block's from another row, else Syncing… for a synced row not looked up yet", () => {
+    const rows = [
+      { hash: "a", source: "archive", blockHeight: 7, timestamp: 7000, detailsAt: 1 },
+      { hash: "b", source: "archive", blockHeight: 7 },
+      { hash: "c", source: "archive", blockHeight: 8 },
+      { hash: "d", status: "submitted" },
+    ];
+    const times = blockTimes(rows);
+    expect(times).toEqual(new Map([[7, 7000]]));
+    expect(rows.map((tx) => whenText(tx, { times, format }))).toEqual(["t7000", "t7000", "Syncing…", ""]);
+    // Looked up without a time, it doesn't say it's syncing.
+    expect(whenText({ source: "archive", blockHeight: 9, detailsAt: 1 }, { times, format })).toBe("");
   });
 });
 

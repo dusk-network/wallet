@@ -4,7 +4,7 @@ import { openUrl } from "../../../platform/index.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { shortAddress } from "../../lib/strings.js";
 import { txErrorText } from "./txDisplay.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
@@ -81,7 +81,7 @@ export function sentSteps(sent, ov) {
   const { phase, status, error, feePaid, blockHeight } = sentStatus(sent, ov);
   const sentLine = [clock(sent?.sentAt || sent?.startedAt), sent?.from].filter(Boolean).join(" · ");
   const capLux = safeBigInt(sent?.feeCapLux ?? 0, 0n);
-  const charged = feePaid != null ? `Fee charged: ${formatFee(feePaid)} DUSK.` : capLux > 0n ? `Fee charged: up to ${formatFee(capLux)} DUSK.` : "";
+  const charged = feePaid != null ? `Fee charged: ${formatFee(feePaid)} DUSK.` : capLux > 0n ? `Fee charged: up to ${formatFee(capLux, { max: true })} DUSK.` : "";
 
   if (phase === "not_sent") {
     return [
@@ -326,7 +326,7 @@ export function sentView(ov, { state, actions } = {}) {
         "to ",
         to.name ? h("b", { text: to.name }) : null,
         to.name ? " " : null,
-        h("span", { class: "mono", title: to.address, text: to.short || truncateMiddle(String(to.address ?? ""), 6, 6) }),
+        h("span", { class: "mono", title: to.address, text: to.short || shortAddress(String(to.address ?? "")) }),
       ].filter(Boolean))
     : sent.line
       ? h("div", { class: "sent-line", text: sent.line })
@@ -367,9 +367,9 @@ export function sentView(ov, { state, actions } = {}) {
 
   const feeRow = (() => {
     if (phase === "not_sent" || status === "removed") return ["Network fee", "None charged"];
-    if (phase === "unconfirmed") return capLux > 0n ? ["Network fee", `Up to ${formatFee(capLux)} DUSK, if it went out`] : null;
+    if (phase === "unconfirmed") return capLux > 0n ? ["Network fee", `Up to ${formatFee(capLux, { max: true })} DUSK, if it went out`] : null;
     if (feePaid != null) return [status === "failed" ? "Fee charged" : "Network fee", `${formatFee(feePaid)} DUSK`];
-    if (capLux > 0n) return ["Network fee", `Up to ${formatFee(capLux)} DUSK`];
+    if (capLux > 0n) return ["Network fee", `Up to ${formatFee(capLux, { max: true })} DUSK`];
     return null;
   })();
 
@@ -378,7 +378,7 @@ export function sentView(ov, { state, actions } = {}) {
 
   const details = h("div", { class: "group" }, [
     sent.hash
-      ? kv("Transaction ID", [h("span", { class: "mono", title: sent.hash, text: truncateMiddle(sent.hash, 8, 8) }), copyBtn])
+      ? kv("Transaction ID", [h("span", { class: "mono", title: sent.hash, text: shortAddress(sent.hash) }), copyBtn])
       : null,
     sent.memo ? kv("Memo", sent.memo) : null,
     feeRow ? kv(feeRow[0], feeRow[1]) : null,

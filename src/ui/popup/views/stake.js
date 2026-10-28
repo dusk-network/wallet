@@ -8,7 +8,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { getDefaultGas } from "../../../shared/txDefaults.js";
+import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
@@ -19,7 +19,7 @@ import { amountField } from "../../components/AmountField.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
-import { createGasQuickControls } from "../../components/GasQuickControls.js";
+import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { sozuLiquidStakingView } from "./sozu.js";
 import { sendFromReview } from "./sent.js";
 
@@ -70,11 +70,13 @@ function positionKey(pos) {
   return `stake:${Number(pos?.stakeProfileIndex ?? pos?.profileIndex ?? 0)}`;
 }
 
-function defaultFeeLux(kind, payment = FUNDING_PUBLIC) {
-  const gas = getDefaultGas(kind, {
-    privacy: payment === FUNDING_SHIELDED ? "shielded" : "public",
-  });
-  return safeBigInt(gas?.limit, 0n) * safeBigInt(gas?.price, 1n);
+// The fee Review starts from (startingGas): the draft's gas or custom gas
+// from Settings (`feeGas`) included, so Max and the balance checks match it.
+function reviewFeeLux(kind, payment = FUNDING_PUBLIC, { customGas = null, gas = null } = {}) {
+  const privacy = payment === FUNDING_SHIELDED ? "shielded" : "public";
+  return gasFeeLux(
+    startingGas({ defaultGas: getDefaultGas(kind, { privacy }), minLimit: getMinimumGas(kind, { privacy })?.limit, customGas, gas })
+  );
 }
 
 // "1,000 DUSK", hidden with Hide balances.
@@ -230,10 +232,10 @@ function fundingOptionsForPosition(pos) {
 
 // Whether an action can go ahead on this position, and if not, why, in the
 // words the screens show.
-function actionState(pos, actionKind, amountLux, minLux, { hidden = false } = {}) {
+function actionState(pos, actionKind, amountLux, minLux, { hidden = false, feeGas } = {}) {
   const kind = actionToKind(actionKind);
   const { publicLux } = fundingOptionsForPosition(pos);
-  const feeLux = defaultFeeLux(kind, FUNDING_PUBLIC);
+  const feeLux = reviewFeeLux(kind, FUNDING_PUBLIC, feeGas);
   const needsAmount = actionKind === ACTION_TOPUP;
   const spendLux = needsAmount ? safeBigInt(amountLux ?? 0, 0n) : 0n;
   const requiredLux = spendLux + feeLux;
@@ -306,7 +308,9 @@ function stakingContext(ov, { state, actions } = {}) {
     );
   }
   const pos = positions.find((p) => positionKey(p) === st.activePositionKey) ?? positions[0] ?? null;
-  return { st, selectedIndex, minLux, positions, pos, hidden: balancesHidden(ov) };
+  // The gas Review starts from, for the fee the screens set aside.
+  const feeGas = { customGas: ov?.customGas ?? null, gas: state?.stakeDraft?.gas ?? null };
+  return { st, selectedIndex, minLux, positions, pos, hidden: balancesHidden(ov), feeGas };
 }
 
 // Where Review's draft comes from: the action, its amount and the profiles.
@@ -413,7 +417,7 @@ export function stakeFormView(ov, { state, actions } = {}) {
 }
 
 function stakingOverview(ov, ctx, { state, actions }) {
-  const { st, minLux, positions, pos, hidden } = ctx;
+  const { st, minLux, positions, pos, hidden, feeGas } = ctx;
   const onBack = () => {
     state.route = "home";
     actions?.render?.().catch(() => {});
@@ -425,8 +429,8 @@ function stakingOverview(ov, ctx, { state, actions }) {
   const stakedLux = safeBigInt(pos.info?.amount?.total ?? 0, 0n);
   const lockedLux = safeBigInt(pos.info?.amount?.locked ?? 0, 0n);
   const rewardLux = safeBigInt(pos.info?.reward ?? 0, 0n);
-  const unstakeState = actionState(pos, ACTION_UNSTAKE, null, minLux);
-  const claimState = actionState(pos, ACTION_CLAIM, null, minLux);
+  const unstakeState = actionState(pos, ACTION_UNSTAKE, null, minLux, { feeGas });
+  const claimState = actionState(pos, ACTION_CLAIM, null, minLux, { feeGas });
   const { publicLux } = fundingOptionsForPosition(pos);
   const several = positions.length > 1;
 
@@ -558,10 +562,10 @@ function stakingOverview(ov, ctx, { state, actions }) {
 }
 
 function nativeStakeView(ov, ctx, { state, actions }) {
-  const { st, minLux, pos, hidden } = ctx;
+  const { st, minLux, pos, hidden, feeGas } = ctx;
   const back = () => setScreen(st, SCREEN_OVERVIEW, actions);
   const kind = TX_KIND.STAKE;
-  const feeLux = defaultFeeLux(kind, FUNDING_PUBLIC);
+  const feeLux = reviewFeeLux(kind, FUNDING_PUBLIC, feeGas);
   const { publicLux } = fundingOptionsForPosition(pos);
   const maxTopupLux = publicLux > feeLux ? publicLux - feeLux : 0n;
   const isNew = !pos.hasStake;
@@ -571,7 +575,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     : Number(st.ownerProfileIndex ?? stakeProfileIndex) || 0;
 
   // What stops any amount: no gas, a stake this wallet can't manage.
-  const blocked = actionState(pos, ACTION_TOPUP, null, minLux);
+  const blocked = actionState(pos, ACTION_TOPUP, null, minLux, { feeGas });
 
   const field = amountField({
     label: isNew ? "Stake amount" : "Amount to add",
@@ -615,7 +619,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
       reviewBtn.disabled = true;
       return null;
     }
-    const result = actionState(pos, ACTION_TOPUP, lux, minLux, { hidden });
+    const result = actionState(pos, ACTION_TOPUP, lux, minLux, { hidden, feeGas });
     field.setError(result.ok ? "" : result.reason);
     reviewBtn.disabled = !result.ok;
     return result.ok ? lux : null;
@@ -698,7 +702,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
       "If your node misses its turn",
       "Part of your stake gets locked. It's still yours, and unstaking returns it. If the node breaks the rules, part of the stake can be burned (lost)."
     ),
-    infoRow("fee", `Network fee up to ${formatFee(feeLux)} DUSK`, null),
+    infoRow("fee", `Network fee up to ${formatFee(feeLux, { max: true })} DUSK`, null),
   ].filter(Boolean));
 
   // Who owns a new stake, and which account it is for: most people leave it.
@@ -781,9 +785,8 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
 
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
-  const defaultGas = getDefaultGas(kind, {
-    privacy: d.payment === FUNDING_SHIELDED ? "shielded" : "public",
-  });
+  const gasPrivacy = d.payment === FUNDING_SHIELDED ? "shielded" : "public";
+  const defaultGas = getDefaultGas(kind, { privacy: gasPrivacy });
   const defaultLimit =
     defaultGas?.limit !== undefined && defaultGas?.limit !== null ? String(defaultGas.limit) : "";
   const fallbackPrice =
@@ -794,13 +797,15 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   gasEditor.amountLux = kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0";
   gasEditor.setGas(d?.gas ?? null);
 
-  // The gas price line and the presets open with the fee's Edit.
-  createGasQuickControls({
+  // The network's gas price by default; Custom fee for gas of your own.
+  useNetworkGas({
+    customGas: ov?.customGas,
     actions,
     defaultLimit,
     fallbackPrice,
     gas: d?.gas,
     gasEditor,
+    minLimit: getMinimumGas(kind, { privacy: gasPrivacy })?.limit,
   });
 
   // What moves: the amount staked, or all of the stake or the rewards. The

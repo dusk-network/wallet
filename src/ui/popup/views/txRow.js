@@ -12,7 +12,7 @@ import { listAddressBook } from "../../../shared/addressBook.js";
 import { SOZU_FN } from "../../../shared/sozuAdapter.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
@@ -79,6 +79,40 @@ export function txTime(tx) {
   return Number(tx?.timestamp ?? tx?.finalizedAt ?? tx?.executedAt ?? tx?.submittedAt) || 0;
 }
 
+/**
+ * The block times Activity knows, by height, from the rows that have theirs:
+ * the rows of one block share its time.
+ * @param {object[]} rows
+ * @returns {Map<number, number>}
+ */
+export function blockTimes(rows) {
+  const times = new Map();
+  for (const row of rows ?? []) {
+    const height = Number(row?.blockHeight);
+    const t = Number(row?.timestamp) || 0;
+    if (Number.isFinite(height) && t > 0 && !times.has(height)) times.set(height, t);
+  }
+  return times;
+}
+
+/** What a synced row says in place of its time until its outcome comes. */
+export const SYNCING = "Syncing…";
+
+/**
+ * When a row happened, for the line under its name, through `format`: its
+ * own time, else its block's when another row of that block has it. A synced
+ * row whose outcome isn't looked up yet gets its time with it: "Syncing…"
+ * meanwhile.
+ * @param {object} tx
+ * @param {{ times?: Map<number, number>, format: (ms: number) => string }} opts
+ * @returns {string}
+ */
+export function whenText(tx, { times, format }) {
+  const t = txTime(tx) || times?.get(Number(tx?.blockHeight)) || 0;
+  if (t) return format(t);
+  return tx?.source === "archive" && !tx?.detailsAt ? SYNCING : "";
+}
+
 const positive = (lux) => /^\d+$/.test(String(lux ?? "")) && safeBigInt(lux, 0n) > 0n;
 
 function tokenUnits(units, decimals) {
@@ -119,7 +153,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
       .map((s) => String(s ?? "").trim())
       .find(Boolean);
     if (name) return { name, address: addr || null, isAddress: false };
-    if (addr) return { name: truncateMiddle(addr, 6, 6), address: addr, isAddress: true };
+    if (addr) return { name: shortAddress(addr), address: addr, isAddress: true };
     return null;
   };
   const dusk = (lux, sign) => (positive(lux) ? { sign, value: formatDusk(lux), unit: "DUSK" } : null);
@@ -369,7 +403,8 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
   const open = () => {
     if (!state || !hash) return;
     state.txDetailHash = hash;
-    state.txDetailFrom = state.route === "activity" ? "activity" : "home";
+    // Back from the details returns here: Activity, a contact's page, or Home.
+    state.txDetailFrom = ["activity", "contacts"].includes(state.route) ? state.route : "home";
     state.route = "tx";
     actions?.render?.()?.catch?.(() => {});
   };

@@ -4,6 +4,7 @@ import { lookupPrimaryName } from "../../shared/duskNames.js";
 import { iconSvg } from "./ActionIcon.js";
 import { duskNameEl } from "./DuskName.js";
 import { shortAddressEl } from "./ShortAddress.js";
+import { menuKeys } from "./MenuKeys.js";
 
 /**
  * Small controller that renders the profile selection menu under an anchor.
@@ -67,18 +68,20 @@ export function createAccountMenuController({
         hint,
       ]);
 
-      const check = active
-        ? h("div", { class: "net-menu-check", text: "✓" })
-        : h("div", { class: "net-menu-check", text: "" });
+      const check = h("span", { class: "net-menu-check", "aria-hidden": "true", html: active ? iconSvg("check") : "" });
 
       const select = h(
         "button",
         {
           class: `net-menu-item ${active ? "net-menu-item--active" : ""}`,
           type: "button",
+          role: "menuitemradio",
+          "aria-checked": String(active),
           onclick: async () => {
             try {
+              const from = anchor;
               close();
+              from?.focus();
               await onSelectAccountIndex?.(i, { ov });
             } catch (e) {
               alert(e?.message ?? String(e));
@@ -93,18 +96,21 @@ export function createAccountMenuController({
         ? h("button", {
             class: "acct-menu-copy",
             type: "button",
+            role: "menuitem",
             html: iconSvg("copy"),
             title: "Copy public account",
-            "aria-label": "Copy public account",
+            "aria-label": `Copy ${label}'s public account`,
             onclick: async () => {
               const ok = await copyToClipboard(String(acct));
+              const from = anchor;
               close();
+              from?.focus();
               onCopy?.(ok ? "Copied account" : "Copy failed");
             },
           })
         : null;
 
-      return h("div", { class: "acct-menu-row" }, [select, copy]);
+      return h("div", { class: "acct-menu-row", role: "none" }, [select, copy]);
     });
 
     const manageAccountsBtn =
@@ -113,6 +119,7 @@ export function createAccountMenuController({
         : h("button", {
             class: "net-menu-item",
             type: "button",
+            role: "menuitem",
             onclick: async () => {
               try {
                 close();
@@ -126,15 +133,17 @@ export function createAccountMenuController({
               h("div", { class: "net-menu-item-label", text: "Manage profiles" }),
               h("div", { class: "net-menu-item-hint", text: "Settings" }),
             ]),
-            h("div", { class: "net-menu-check", text: "›" }),
+            h("span", { class: "net-menu-check", "aria-hidden": "true", html: iconSvg("chev-r") }),
           ]);
 
-    const menu = h("div", { class: "net-menu acct-menu", role: "menu" }, [
-      h("div", { class: "net-menu-title", text: "Select profile" }),
-      ...items,
-      manageAccountsBtn ? h("div", { class: "divider" }) : null,
-      manageAccountsBtn,
-    ].filter(Boolean));
+    const menu = h("div", { class: "net-menu acct-menu" }, [
+      h("div", { class: "net-menu-title", id: "acct-menu-title", text: "Select profile" }),
+      h("div", { class: "net-menu-items", role: "menu", "aria-labelledby": "acct-menu-title" }, [
+        ...items,
+        manageAccountsBtn ? h("div", { class: "divider", role: "separator" }) : null,
+        manageAccountsBtn,
+      ].filter(Boolean)),
+    ]);
 
     document.body.appendChild(menu);
     menuEl = menu;
@@ -175,6 +184,7 @@ export function createAccountMenuController({
 
     anchor = anchorEl;
     anchor.setAttribute("aria-expanded", "true");
+    menuKeys(menu.querySelector("[role=menu]"), { anchor: anchorEl, close });
   }
 
   return { open, close, get isOpen() { return Boolean(menuEl); } };

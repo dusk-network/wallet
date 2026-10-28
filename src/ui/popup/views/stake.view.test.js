@@ -322,13 +322,40 @@ describe("native staking", () => {
     });
   });
 
+  it("sets aside the fee Review starts from, with custom gas from Settings", async () => {
+    // Price 3 and staking's own 50M limit, as the custom 2.5M is under its minimum.
+    const state = { route: "stake", staking: staking(owner(), { screen: "native" }) };
+    popup(state, ov({ customGas: { limit: "2500000", price: "3" } }));
+    expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toContain("Network fee up to 0.15 DUSK");
+    typeInto(field("Stake amount"), "1482.8");
+    expect(body.querySelector(".amount-field__error").textContent).toBe(
+      "That's 0.0117 DUSK more than the public balance, with the network fee."
+    );
+    button("Max").click();
+    expect(field("Stake amount").value).toBe("1482.7883");
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.15 DUSKTotalup to 1,482.9383 DUSK");
+  });
+
+  it("sets aside Sozu's fee with custom gas from Settings: the custom price at the call's own limit", async () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    popup(state, ov({ customGas: { limit: "2500000", price: "3" } }));
+    button("Max").click();
+    expect(field("Stake amount").value).toBe("1481.4383");
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 1.5 DUSKTotalup to 1,482.9383 DUSK");
+    expect(button("Confirm").disabled).toBe(false);
+  });
+
   it("states the node, timing, penalty and fee facts from Dusk's staking docs", () => {
     popup({ route: "stake", staking: staking(owner(), { screen: "native" }) });
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
       "Needs your own Dusk nodeA computer that runs Dusk's node software and stays online, with Profile 1's consensus key from this recovery phrase. How native staking works",
       "Rewards start in about 6 to 12 hoursUnstake any time, with no waiting period.",
       "If your node misses its turnPart of your stake gets locked. It's still yours, and unstaking returns it. If the node breaks the rules, part of the stake can be burned (lost).",
-      "Network fee up to 0.0500 DUSK",
+      "Network fee up to 0.05 DUSK",
     ]);
 
     // Adding to a stake says what a top-up locks, and has no minimum.
@@ -382,7 +409,8 @@ describe("native staking", () => {
     button("Review stake").click();
     await settle();
     expect(visibleText(body.querySelector(".review-head"))).toBe("Stake1,000 DUSKNative staking");
-    expect(body.querySelectorAll(".kv").map(visibleText)).toEqual([
+    // The review's rows; the fee's own come after them.
+    expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual([
       "Stake accountProfile 1",
       "OwnerProfile 1",
       "Fee paid fromProfile 1 public balance",
@@ -418,8 +446,8 @@ describe("liquid staking", () => {
     // With nothing staked yet, stDUSK can still be added to Assets.
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
       "Any amount, no node neededYou get stDUSK, a token for your share of Sozu's pool.Add to Assets",
-      "Network fee up to 0.5000 DUSK",
-      `Sozu's contract${"72".repeat(4)}…${"72".repeat(4)}Copy`,
+      "Network fee up to 0.5 DUSK",
+      `Sozu's contract${"72".repeat(3)}…${"72".repeat(3)}Copy`,
     ]);
     expect(body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Add stDUSK to Assets")).toBeTruthy();
   });
@@ -495,7 +523,7 @@ describe("liquid staking", () => {
     expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available •••• DUSK from your public balance");
     typeInto(field("Stake amount"), "100");
     expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.55 stDUSK, worth 100 DUSK now.");
-    expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.5000 DUSK");
+    expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.5 DUSK");
   });
 });
 

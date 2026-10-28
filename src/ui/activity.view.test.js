@@ -162,6 +162,28 @@ describe("Activity's rows", () => {
     expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);
   });
 
+  it("show a fee paid as its details do, rounded to the nearest, not up", () => {
+    const failed = {
+      hash: "bc".repeat(32),
+      kind: TX_KIND.TRANSFER,
+      privacy: "public",
+      to: FAUCET,
+      amount: dusk(1),
+      status: "failed",
+      // 0.001840001 DUSK: 0.0018 to the nearest, 0.0019 rounded up.
+      feePaid: "1840001",
+      gasLimit: "2500000",
+      gasPrice: "1",
+      submittedAt: NOW.getTime() - 3_600_000,
+      profileIndex: 0,
+    };
+    const view = setup({ local: [failed] });
+    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee 0.0018 DUSK paid1 DUSK`);
+    Object.assign(view.state, { route: "tx", txDetailHash: failed.hash, txDetailFrom: "home" });
+    view.draw();
+    expect(visibleText(body())).toContain("Fee charged0.0018 DUSK");
+  });
+
   it("hide their amounts with Hide balances, on Home and in the full list", () => {
     const { state, draw } = setup({ hidden: true });
     const amounts = () => body().querySelectorAll(".tx-amount, .activity-amount").map((el) => [visibleText(el), screenReaderText(el)]);
@@ -277,11 +299,11 @@ describe("a transaction's details", () => {
       "MemoOrder 1042",
       "Network fee0.0037 DUSK",
       "Fromalice.dusk · Public",
-      "Transaction ID3e6a0ec6…7eae84baCopy",
+      "Transaction ID3e6a0e…ae84baCopy",
     ]);
     // The ID opens Dusk's explorer; Copy and the address's copy say what they copy.
     const explorerUrl = `https://apps.testnet.dusk.network/explorer/transactions/transaction/?id=${sent.hash}`;
-    button(`Transaction 3e6a0ec6…7eae84ba, open in Dusk explorer`).click();
+    button(`Transaction 3e6a0e…ae84ba, open in Dusk explorer`).click();
     await settle();
     expect(openUrl).toHaveBeenLastCalledWith(explorerUrl);
     button("Copy transaction ID").click();
@@ -360,7 +382,7 @@ describe("a transaction's details", () => {
     open({ local: [pending] }, pending.hash);
     expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Pending");
     expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("Still waiting to go through. Don't retry yet.");
-    expect(visibleText(body())).toContain("Network feeUp to 0.0100 DUSK");
+    expect(visibleText(body())).toContain("Network feeUp to 0.01 DUSK");
 
     const dropped = { ...pending, status: "removed" };
     open({ local: [dropped] }, dropped.hash);
@@ -379,6 +401,24 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     Object.assign(entry, { success: null, timestamp: null, detailsAt: undefined });
     return entry;
   };
+
+  it("says Syncing… where its time goes, or its block's time once another row of that block has it", () => {
+    const view = setup();
+    const entry = unfetched(view);
+    const line = () =>
+      visibleText(body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Call register")).querySelector(".tx-sub"));
+    view.draw();
+    expect(line()).toBe("Contract · Syncing…");
+    view.state.route = "activity";
+    view.draw();
+    expect(line()).toBe("Contract · Syncing…");
+
+    // Another entry of the same block has come with its time.
+    const other = view.state.activity.entries.find((e) => e !== entry && e.timestamp);
+    entry.blockHeight = other.blockHeight;
+    view.draw();
+    expect(line()).toBe(`Contract · ${new Date(other.timestamp).toISOString().slice(11, 16)}`);
+  });
 
   it("says Unknown, muted, not Completed or Pending", () => {
     const view = setup();

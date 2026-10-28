@@ -4,10 +4,10 @@ import { bytesToHex } from "../../../shared/bytes.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
-import { checkboxInput, fieldLabel, groupLabel, passwordInput } from "../../components/FormControls.js";
+import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
-import { actionIcon } from "../../components/ActionIcon.js";
+import { iconSvg } from "../../components/ActionIcon.js";
 
 function generateMnemonic12() {
   const entropy = new Uint8Array(16);
@@ -44,128 +44,151 @@ function srpGridEl(mnemonic, { blurred = false } = {}) {
   return h("div", { class: "box srp-box" }, [grid]);
 }
 
-export function onboardingWelcomeView({ state, actions } = {}) {
-  const createBtn = h(
-    "button",
-    {
-      class: "action-card",
-      onclick: () => {
-        state.onboard.mode = "create";
-        state.onboard.mnemonic = null;
-        state.onboard.password = "";
-        state.onboard.reveal = false;
-        state.route = "onboard_create_password";
-        actions?.render?.().catch(() => {});
-      },
-    },
-    [
-      actionIcon("create", { className: "action-icon" }),
-      h("div", { class: "action-title", text: "Create wallet" }),
-    ]
-  );
-
-  const importBtn = h(
-    "button",
-    {
-      class: "action-card",
-      onclick: () => {
-        state.onboard.mode = "import";
-        state.onboard.mnemonic = null;
-        state.onboard.password = "";
-        state.onboard.reveal = false;
-        state.route = "onboard_import";
-        actions?.render?.().catch(() => {});
-      },
-    },
-    [
-      actionIcon("import", { className: "action-icon" }),
-      h("div", { class: "action-title", text: "Import wallet" }),
-    ]
-  );
-
-  return [
-    h("div", { class: "row" }, [
-      h("div", { class: "hero-title", text: "Set up your Dusk Wallet" }),
-      h("div", {
-        class: "muted",
-        text: "Your recovery phrase is the only way to restore your wallet. Keep it safe.",
-      }),
-    ]),
-    h("div", { class: "actions" }, [createBtn, importBtn]),
-  ].filter(Boolean);
-}
-
-export function onboardingCreatePasswordView({ state, actions } = {}) {
+// A new password and its repeat, each with its error under it.
+function newPasswordFields({ onDone }) {
   const pwd = passwordInput({
-    placeholder: "Create password (min 8 chars)",
+    placeholder: "At least 8 characters",
+    autocomplete: "new-password",
     onEnter: () => pwd2.focus(),
   });
   const pwd2 = passwordInput({
-    placeholder: "Confirm password",
-    onEnter: () => (agree.checked ? next.click() : agree.focus()),
+    placeholder: "The same password again",
+    autocomplete: "new-password",
+    onEnter: () => onDone?.(),
   });
-  const agree = checkboxInput({ onEnter: () => next.click() });
-
-  const err = h("div", { class: "err", style: "display:none" });
-  const setErr = (txt) => {
-    if (!txt) {
-      err.style.display = "none";
-      err.textContent = "";
-    } else {
-      err.style.display = "block";
-      err.textContent = txt;
-    }
+  const pwdError = fieldError(pwd);
+  const pwd2Error = fieldError(pwd2);
+  pwd.addEventListener("input", () => pwdError.show(""));
+  pwd2.addEventListener("input", () => pwd2Error.show(""));
+  return {
+    pwd,
+    pwd2,
+    els: [fieldLabel(pwd, "Password"), pwd, pwdError.el, fieldLabel(pwd2, "Confirm password"), pwd2, pwd2Error.el],
+    // The password, or null after saying what's wrong with it.
+    read() {
+      pwdError.show("");
+      pwd2Error.show("");
+      if ((pwd.value || "").length < 8) {
+        pwdError.show("Use at least 8 characters.");
+        pwd.focus();
+        return null;
+      }
+      if (pwd.value !== pwd2.value) {
+        pwd2Error.show("The passwords don't match.");
+        pwd2.focus();
+        return null;
+      }
+      return pwd.value;
+    },
   };
+}
+
+// An error for the whole form, above its button.
+function formError() {
+  const el = h("div", { class: "field-error", role: "alert", hidden: true });
+  return {
+    el,
+    show(text) {
+      el.textContent = text || "";
+      el.hidden = !text;
+    },
+  };
+}
+
+export function onboardingWelcomeView({ state, actions } = {}) {
+  const choice = (icon, title, sub, route, mode) =>
+    h(
+      "button",
+      {
+        class: "list-row onboard-choice",
+        type: "button",
+        onclick: () => {
+          state.onboard.mode = mode;
+          state.onboard.mnemonic = null;
+          state.onboard.password = "";
+          state.onboard.reveal = false;
+          state.route = route;
+          actions?.render?.().catch(() => {});
+        },
+      },
+      [
+        h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg(icon) }),
+        h("span", { class: "row-main" }, [
+          h("span", { class: "row-title", text: title }),
+          h("span", { class: "row-sub", text: sub }),
+        ]),
+        h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
+      ]
+    );
+
+  return [
+    h("div", { class: "auth-page" }, [
+      h("h1", { class: "auth-title", text: "Set up your Dusk Wallet" }),
+      h("p", {
+        class: "auth-lead",
+        text: "Your recovery phrase is the only way to restore your wallet. Keep it safe.",
+      }),
+      h("div", { class: "group onboard-choices" }, [
+        choice("create", "Create wallet", "Get a new recovery phrase", "onboard_create_password", "create"),
+        choice("import", "Import wallet", "Use a recovery phrase you have", "onboard_import", "import"),
+      ]),
+    ]),
+  ];
+}
+
+export function onboardingCreatePasswordView({ state, actions } = {}) {
+  const fields = newPasswordFields({ onDone: () => (agree.checked ? next.click() : agree.focus()) });
+  const agree = checkboxInput({ onEnter: () => next.click() });
+  const agreeError = fieldError(agree);
+  agree.addEventListener("change", () => agreeError.show(""));
+  const err = formError();
 
   const next = h("button", {
     class: "btn-primary btn-full",
+    type: "button",
     text: "Continue",
     onclick: async () => {
       try {
-        setErr("");
-        if ((pwd.value || "").length < 8) throw new Error("Password must be at least 8 characters");
-        if (pwd.value !== pwd2.value) throw new Error("Passwords do not match");
-        if (!agree.checked)
-          throw new Error("Please confirm you understand the recovery phrase is required");
+        err.show("");
+        agreeError.show("");
+        const password = fields.read();
+        if (password == null) return;
+        if (!agree.checked) {
+          agreeError.show("Tick this to go on.");
+          agree.focus();
+          return;
+        }
 
-        state.onboard.password = pwd.value;
+        state.onboard.password = password;
         state.onboard.mnemonic = generateMnemonic12();
         state.onboard.reveal = false;
         state.route = "onboard_create_phrase";
         await actions?.render?.();
       } catch (e) {
-        setErr(e?.message ?? String(e));
+        err.show(e?.message ?? String(e));
       }
     },
   });
   return [
     subnav({
-      title: "Create",
+      title: "Create wallet",
       onBack: () => {
         state.route = "onboard_welcome";
         actions?.render?.().catch(() => {});
       },
     }),
-    h("div", { class: "row" }, [
-      h("div", {
-        class: "muted",
-        text: "Create a password to encrypt your wallet on this device.",
-      }),
-      fieldLabel(pwd, "Password"),
-      pwd,
-      fieldLabel(pwd2, "Confirm password"),
-      pwd2,
+    h("div", { class: "row onboard-form" }, [
+      h("p", { class: "auth-lead", text: "The password unlocks your wallet on this device." }),
+      ...fields.els,
       h("label", { class: "checkline" }, [
         agree,
-        h("span", {
-          class: "muted",
-          text: "I understand that my recovery phrase is the only way to restore this wallet.",
-        }),
+        h("span", { text: "I understand that my recovery phrase is the only way to restore this wallet." }),
       ]),
-      err,
-      h("div", { class: "btnrow" }, [next]),
+      agreeError.el,
+      err.el,
+      next,
     ]),
-  ].filter(Boolean);
+  ];
 }
 
 export function onboardingCreatePhraseView({ state, actions } = {}) {
@@ -176,7 +199,8 @@ export function onboardingCreatePhraseView({ state, actions } = {}) {
   }
 
   const toggle = h("button", {
-    class: "btn-outline",
+    class: "mini-btn",
+    type: "button",
     text: state.onboard.reveal ? "Hide" : "Reveal",
     onclick: () => {
       state.onboard.reveal = !state.onboard.reveal;
@@ -186,7 +210,8 @@ export function onboardingCreatePhraseView({ state, actions } = {}) {
 
   // Copy waits for Reveal: it can't be pressed before.
   const copyBtn = h("button", {
-    class: "btn-outline",
+    class: "mini-btn",
+    type: "button",
     text: "Copy",
     disabled: !state.onboard.reveal,
     title: state.onboard.reveal ? undefined : "Reveal the phrase first",
@@ -198,7 +223,8 @@ export function onboardingCreatePhraseView({ state, actions } = {}) {
   });
 
   const next = h("button", {
-    class: "btn-primary",
+    class: "btn-primary btn-full",
+    type: "button",
     text: "I wrote it down",
     onclick: () => {
       state.route = "onboard_create_confirm";
@@ -208,25 +234,20 @@ export function onboardingCreatePhraseView({ state, actions } = {}) {
 
   return [
     subnav({
-      title: "Secret phrase",
+      title: "Recovery phrase",
       onBack: () => {
         state.route = "onboard_create_password";
         actions?.render?.().catch(() => {});
       },
     }),
-    h("div", { class: "row" }, [
-      h("div", {
-        class: "muted",
-        text: "Write down these 12 words in order and keep them somewhere safe.",
-      }),
-      h("div", { class: "callout warn" }, [
-        h("div", { class: "callout-title", text: "Never share your recovery phrase" }),
-        h("div", { class: "muted", text: "Anyone with this phrase can take your funds." }),
-      ]),
+    h("div", { class: "row onboard-form" }, [
+      h("p", { class: "auth-lead", text: "Write down these 12 words in order and keep them somewhere safe." }),
+      h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
       srpGridEl(mnemonic, { blurred: !state.onboard.reveal }),
-      h("div", { class: "btnrow" }, [toggle, copyBtn, next]),
+      h("div", { class: "phrase-tools" }, [toggle, copyBtn]),
+      next,
     ]),
-  ].filter(Boolean);
+  ];
 }
 
 export function onboardingCreateConfirmView({ state, actions } = {}) {
@@ -243,24 +264,11 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
     allowWordCountToggle: false,
     onComplete: () => createBtn?.click(),
   });
+  const phraseError = fieldError(confirmInput.el, { markInvalid: false });
+  const err = formError();
 
-  const err = h("div", { class: "err", style: "display:none" });
-  const setErr = (txt) => {
-    if (!txt) {
-      err.style.display = "none";
-      err.textContent = "";
-    } else {
-      err.style.display = "block";
-      err.textContent = txt;
-    }
-  };
-
-  const busyTitle = h("div", { class: "callout-title", text: "Securing your wallet…" });
-  const busyBody = h("div", {
-    class: "muted",
-    text: "Encrypting your wallet. Keep this window open.",
-  });
-  const busyCallout = h("div", { class: "callout", style: "display:none" }, [busyTitle, busyBody]);
+  // While the wallet is made: one line that says what happens.
+  const busyBody = h("p", { class: "auth-note", style: "display:none", text: "Encrypting your wallet. Keep this window open." });
 
   const nav = subnav({
     title: "Confirm",
@@ -286,27 +294,30 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
       createBtn.disabled = busy;
       createBtn.textContent = busy ? "Creating…" : "Create wallet";
     }
-    busyCallout.style.display = busy ? "block" : "none";
+    busyBody.style.display = busy ? "block" : "none";
   };
 
   createBtn = h("button", {
     class: "btn-primary btn-full",
+    type: "button",
     text: "Create wallet",
     onclick: async () => {
       try {
         if (busy) return;
-        setErr("");
-
-        setBusy(true);
+        err.show("");
+        phraseError.show("");
 
         const typed = confirmInput.getMnemonic();
         const expected = normalizeMnemonic(mnemonic);
-        if (typed !== expected) throw new Error("Recovery phrase does not match");
+        if (typed !== expected) {
+          phraseError.show(typed ? "The words don't match your recovery phrase." : "Enter your recovery phrase.");
+          return;
+        }
 
         const password = state.onboard.password;
-        if (!password) throw new Error("Missing password");
+        if (!password) throw new Error("Go back and set your password again.");
 
-        busyBody.textContent = "Securing and unlocking wallet…";
+        setBusy(true, "Encrypting your wallet. Keep this window open.");
         const res = await actions?.send?.({
           type: "DUSK_UI_CREATE_WALLET",
           mnemonic: expected,
@@ -317,20 +328,18 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
         // Fresh wallet: set a shielded checkpoint to "now" so we don't have to
         // sync shielded notes from genesis. This is best-effort.
         try {
-          busyBody.textContent = "Setting shielded checkpoint…";
           await actions?.send?.({ type: "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW" });
         } catch {
           // ignore
         }
 
-        busyBody.textContent = "Finalizing…";
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
         state.route = "home";
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
         if (await showPersistedVault(state, actions)) return;
-        setErr(e?.message ?? String(e));
+        err.show(e?.message ?? String(e));
         setBusy(false);
       }
     },
@@ -338,55 +347,32 @@ export function onboardingCreateConfirmView({ state, actions } = {}) {
 
   return [
     nav,
-    h("div", { class: "row" }, [
-      h("div", {
-        class: "muted",
-        text: "Enter the words you wrote down.",
-      }),
+    h("div", { class: "row onboard-form" }, [
+      h("p", { class: "auth-lead", text: "Enter the words you wrote down." }),
       groupLabel(confirmInput.el, "Recovery phrase"),
       confirmInput.el,
-      busyCallout,
-      err,
-      h("div", { class: "btnrow" }, [createBtn]),
+      phraseError.el,
+      err.el,
+      createBtn,
+      busyBody,
     ]),
-  ].filter(Boolean);
+  ];
 }
 
 export function onboardingImportView({ state, actions } = {}) {
   const mnemonicInput = createMnemonicInput({
     wordCount: 12,
     allowWordCountToggle: true,
-    onComplete: () => pwd.focus(),
+    onComplete: () => fields.pwd.focus(),
   });
-  const pwd = passwordInput({
-    placeholder: "Create password (min 8 chars)",
-    onEnter: () => pwd2.focus(),
-  });
-  const pwd2 = passwordInput({
-    placeholder: "Confirm password",
-    onEnter: () => btn.click(),
-  });
+  const phraseError = fieldError(mnemonicInput.el, { markInvalid: false });
+  const fields = newPasswordFields({ onDone: () => btn.click() });
+  const err = formError();
 
-  const err = h("div", { class: "err", style: "display:none" });
-  const setErr = (txt) => {
-    if (!txt) {
-      err.style.display = "none";
-      err.textContent = "";
-    } else {
-      err.style.display = "block";
-      err.textContent = txt;
-    }
-  };
-
-  const busyTitle = h("div", { class: "callout-title", text: "Securing your wallet…" });
-  const busyBody = h("div", {
-    class: "muted",
-    text: "Encrypting your wallet. Keep this window open.",
-  });
-  const busyCallout = h("div", { class: "callout", style: "display:none" }, [busyTitle, busyBody]);
+  const busyBody = h("p", { class: "auth-note", style: "display:none", text: "Encrypting your wallet. Keep this window open." });
 
   const nav = subnav({
-    title: "Import",
+    title: "Import wallet",
     onBack: () => {
       state.route = "onboard_welcome";
       actions?.render?.().catch(() => {});
@@ -396,71 +382,80 @@ export function onboardingImportView({ state, actions } = {}) {
 
   let busy = false;
   let btn;
-  const setBusy = (isBusy, msg) => {
+  const setBusy = (isBusy) => {
     busy = Boolean(isBusy);
-    if (msg) busyBody.textContent = String(msg);
     mnemonicInput.setDisabled(busy);
-    pwd.disabled = busy;
-    pwd2.disabled = busy;
+    fields.pwd.disabled = busy;
+    fields.pwd2.disabled = busy;
     if (backBtn) backBtn.disabled = busy;
     if (btn) {
       btn.disabled = busy;
       btn.textContent = busy ? "Importing…" : "Import wallet";
     }
-    busyCallout.style.display = busy ? "block" : "none";
+    busyBody.style.display = busy ? "block" : "none";
+  };
+
+  // The phrase, or null after saying what's wrong with it.
+  const readPhrase = () => {
+    phraseError.show("");
+    const m = mnemonicInput.getMnemonic();
+    const words = m.split(" ").filter(Boolean);
+    const problem = !m || words.length === 0
+      ? "Enter your recovery phrase."
+      : words.length !== 12 && words.length !== 24
+      ? "A recovery phrase has 12 or 24 words."
+      : !validateMnemonic(m)
+      ? "That isn't a valid recovery phrase. Check each word."
+      : "";
+    if (problem) {
+      phraseError.show(problem);
+      return null;
+    }
+    return m;
   };
 
   btn = h("button", {
     class: "btn-primary btn-full",
+    type: "button",
     text: "Import wallet",
     onclick: async () => {
       try {
         if (busy) return;
-        setErr("");
+        err.show("");
+        const m = readPhrase();
+        if (m == null) return;
+        const password = fields.read();
+        if (password == null) return;
 
         setBusy(true);
-
-        const m = mnemonicInput.getMnemonic();
-        const words = m.split(" ").filter(Boolean);
-        if (!m || words.length === 0) throw new Error("Recovery phrase is required");
-        if (words.length !== 12 && words.length !== 24)
-          throw new Error("Recovery phrase must be 12 or 24 words");
-        if (!validateMnemonic(m)) throw new Error("Invalid recovery phrase");
-        if ((pwd.value || "").length < 8) throw new Error("Password must be at least 8 characters");
-        if (pwd.value !== pwd2.value) throw new Error("Passwords do not match");
-
-        busyBody.textContent = "Securing and unlocking wallet…";
         const res = await actions?.send?.({
           type: "DUSK_UI_CREATE_WALLET",
           mnemonic: m,
-          password: pwd.value,
+          password,
         });
         if (res?.error) throw new Error(res.error.message ?? "Failed to import wallet");
 
-        busyBody.textContent = "Finalizing…";
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
         state.route = "home";
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
       } catch (e) {
         if (await showPersistedVault(state, actions)) return;
-        setErr(e?.message ?? String(e));
+        err.show(e?.message ?? String(e));
         setBusy(false);
       }
     },
   });
   return [
     nav,
-    h("div", { class: "row" }, [
+    h("div", { class: "row onboard-form" }, [
       groupLabel(mnemonicInput.el, "Recovery phrase"),
       mnemonicInput.el,
-      fieldLabel(pwd, "Password"),
-      pwd,
-      fieldLabel(pwd2, "Confirm password"),
-      pwd2,
-      busyCallout,
-      err,
-      h("div", { class: "btnrow" }, [btn]),
+      phraseError.el,
+      ...fields.els,
+      err.el,
+      btn,
+      busyBody,
     ]),
-  ].filter(Boolean);
+  ];
 }

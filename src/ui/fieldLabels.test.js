@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
-import { accessibleName, fieldNames, installFakeDom, settle, typeInto } from "./testing/fakeDom.js";
+import { accessibleName, fieldNames, installFakeDom, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { addressBookView } from "./popup/views/addressbook.js";
 import { assetAddNftView, assetAddTokenView, assetTokenView } from "./popup/views/assets.js";
 import { convertFormView } from "./popup/views/convert.js";
@@ -77,22 +77,20 @@ describe("field labels", () => {
     let body = await show(sendFormView(ov, { state, actions: actions() }));
     expect(fieldNames(body)).toEqual(["To", "Amount", "Memo"]);
 
-    // A recipient brings the slider, read out as the share it shows.
     typeInto(body.querySelector(".to-input-wrap input"), ACCOUNT);
-    expect(fieldNames(body)).toEqual(["To", "Amount", "Share of max", "Memo"]);
-    expect(body.querySelector("input.amount-range").getAttribute("aria-valuetext")).toBe("0%");
+    expect(fieldNames(body)).toEqual(["To", "Amount", "Memo"]);
 
+    // Review's gas fields wait under Custom fee, closed.
     state.route = "confirm";
     state.draft = { to: ACCOUNT, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" };
     body = await show(sendConfirmView(ov, { state, actions: actions() }));
-    expect(fieldNames(body)).toEqual([]);
-    body.querySelectorAll("button").find((b) => b.textContent === "Edit").click();
-    expect(fieldNames(body)).toEqual(["Gas limit", "Gas price"]);
+    expect(body.querySelector("details.gas-custom").open).toBe(false);
+    expect(fieldNames(body.querySelector("details.gas-custom"))).toEqual(["Gas limit", "Gas price (LUX)"]);
   });
 
   it("name Shield's and Receive's fields", async () => {
     let body = await show(convertFormView(ov, { state: { route: "convert", draft: { kind: TX_KIND.SHIELD } }, actions: actions() }));
-    expect(fieldNames(body)).toEqual(["Amount", "Share of max"]);
+    expect(fieldNames(body)).toEqual(["Amount"]);
 
     const state = { receive: { tab: "public", requestOpen: true, amountDusk: "", memo: "" } };
     body = await show(receiveView(ov, { state, actions: actions() }));
@@ -139,18 +137,17 @@ describe("field labels", () => {
     const body = await show(optionsView(ov, { state: { route: "options" }, actions: actions() }));
     expect(fieldNames(body)).toEqual([
       "Active profile",
-      "Profile 1 name",
-      "Profile 2 name",
+      "Profile 1 label",
+      "Profile 2 label",
       "Auto-lock",
       "Network",
       "Node URL",
       "Prover URL",
       "Archiver URL",
+      "Custom gas",
     ]);
-    // The Contacts row's button, beside its label.
-    expect(accessibleName(body.querySelectorAll("button").find((b) => b.textContent === "Manage"))).toBe(
-      "Manage contacts"
-    );
+    // Contacts is a row of its own.
+    expect(visibleText(body.querySelector(".settings-row"))).toBe("Contacts");
   });
 
   it("name the setup fields, and the recovery phrase's words as one group", async () => {

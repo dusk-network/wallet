@@ -82,7 +82,7 @@ describe("transaction details", () => {
     const state = { route: "tx", txDetailHash: "ef".repeat(32), txDetailFrom: "home" };
     dom.document.body.replaceChildren(...txDetailsView({ nodeUrl: NODE, txs: [] }, { state, actions: {} }));
     expect(visibleText(dom.document.body)).toBe(
-      "← BackTransactionThis transaction isn't in your activity.Transaction IDefefefef…efefefefView in Dusk explorer"
+      "← BackTransactionThis transaction isn't in your activity.Transaction IDefefef…efefefView in Dusk explorer"
     );
   });
 });

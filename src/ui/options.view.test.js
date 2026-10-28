@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { installFakeDom, isShown, visibleText } from "./testing/fakeDom.js";
+import { setAccountName } from "../shared/accountNames.js";
+import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 vi.mock("../shared/accountNames.js", () => ({ setAccountName: vi.fn(async () => {}) }));
+// The first profile has a verified .dusk name, as the header shows it.
+vi.mock("../shared/duskNames.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  lookupPrimaryName: vi.fn(async (account) => (account.startsWith("26FCH7") ? "alice.dusk" : null)),
+}));
 
 const ACCOUNTS = [
   "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927",
@@ -35,22 +41,70 @@ async function settings(over = {}) {
     permissions: [],
     ...over,
   };
-  const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn() };
-  dom.document.body.replaceChildren(...optionsView(ov, { state: { route: "options" }, actions }));
+  const state = { route: "options", overview: ov };
+  const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn(), renderHeader: vi.fn() };
+  const draw = () => dom.document.body.replaceChildren(...optionsView(ov, { state, actions }));
+  draw();
+  await settle();
   const section = (title) =>
     dom.document.body
       .querySelectorAll(".settings-section")
-      .find((s) => s.querySelector(".bracket-title__text").textContent === title);
+      .find((s) => s.querySelector(".bracket-title__text")?.textContent === title);
   const shownButtons = (el) => el.querySelectorAll("button").filter(isShown).map((b) => b.textContent);
-  return { section, shownButtons };
+  return { ov, state, actions, draw, section, shownButtons };
 }
 
+describe("profile labels", () => {
+  const label = (n) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === `Profile ${n} label`);
+
+  it("keep a label being typed through a redraw, and save it when the field is left", async () => {
+    setAccountName.mockClear();
+    const view = await settings();
+    typeInto(label(2), "Spending");
+    // A redraw meanwhile, as a sync's status or another label's save brings.
+    view.draw();
+    expect(label(2).value).toBe("Spending");
+
+    label(2).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(setAccountName).toHaveBeenCalledTimes(1);
+    expect(setAccountName).toHaveBeenCalledWith(ACCOUNTS[0], 1, "Spending");
+    // Saved, it shows in the header's pill at once; Settings doesn't redraw for it.
+    expect(view.ov.accountNames).toEqual({ 1: "Spending" });
+    expect(view.actions.renderHeader).toHaveBeenCalledTimes(1);
+    expect(view.actions.render).not.toHaveBeenCalled();
+    expect(view.actions.showToast).toHaveBeenCalledWith("Label saved.");
+    view.draw();
+    expect(label(2).value).toBe("Spending");
+  });
+
+  it("save once when the field is left with both a change and a blur, and not when nothing changed", async () => {
+    setAccountName.mockClear();
+    await settings({ accountNames: { 0: "Main" } });
+    typeInto(label(1), "Main ");
+    label(1).dispatchEvent(fakeEvent("change"));
+    label(1).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(setAccountName).not.toHaveBeenCalled();
+
+    typeInto(label(1), "Savings");
+    label(1).dispatchEvent(fakeEvent("change"));
+    label(1).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(setAccountName.mock.calls).toEqual([[ACCOUNTS[0], 0, "Savings"]]);
+  });
+});
+
 describe("settings", () => {
-  it("lets the section title name the network, and shows a preset's hint only where it adds to the name", async () => {
+  it("lets the section title name the network, with its node addresses behind a disclosure", async () => {
     let view = await settings();
     const network = view.section("Network");
     expect(network.querySelectorAll("label").map((l) => l.textContent)).toEqual(["Node URL", "Prover URL", "Archiver URL"]);
     expect(network.querySelector("select#network").getAttribute("aria-label")).toBe("Network");
+    expect([visibleText(network.querySelector("details summary")), network.querySelector("details").open]).toEqual([
+      "Node addresses",
+      false,
+    ]);
     // Testnet says it all.
     expect(network.querySelectorAll(".muted").filter(isShown)).toEqual([]);
 
@@ -60,26 +114,82 @@ describe("settings", () => {
     ]);
   });
 
-  it("names each profile once, above its name field", async () => {
+  it("names each profile by its verified name, as the header does, with labels for this device", async () => {
     const view = await settings();
-    const inputs = view.section("Profile").querySelectorAll("input");
+    const profile = view.section("Profile");
+    expect(profile.querySelectorAll("#account option").map((o) => o.textContent)).toEqual([
+      "alice.dusk · 26FCH7…Tck927",
+      "Profile 2 · 21n5nc…fMMLNz",
+    ]);
+    expect(visibleText(profile.querySelector(".settings-subtitle"))).toBe("Labels on this device");
+    expect(profile.querySelectorAll(".settings-profile-line").map(visibleText)).toEqual([
+      "alice.dusk · 26FCH7…Tck927",
+      "Profile 2 · 21n5nc…fMMLNz",
+    ]);
+    const inputs = profile.querySelectorAll("input");
     expect(inputs.map((i) => [i.getAttribute("aria-label"), i.getAttribute("placeholder")])).toEqual([
-      ["Profile 1 name", "Label, only on this device"],
-      ["Profile 2 name", "Label, only on this device"],
+      ["Profile 1 label", "Label, only on this device"],
+      ["Profile 2 label", "Label, only on this device"],
     ]);
   });
 
-  it("lists connected sites above Clear connected sites, which shows only with sites", async () => {
+  it("disconnects one site, or all of them after asking, away from Reset wallet", async () => {
     let view = await settings();
-    let data = view.section("Data");
-    expect(visibleText(data)).toContain("ContactsManage");
-    expect(visibleText(data)).toContain("Connected sitesNone");
-    expect(view.shownButtons(data)).toEqual(["Manage", "Reset wallet"]);
+    expect(visibleText(view.section("Connected sites"))).toBe("Connected sitesNo sites are connected.");
 
-    view = await settings({ permissions: [{ origin: "https://app.example", accountIndex: 1 }] });
-    data = view.section("Data");
-    expect(visibleText(data)).toContain("Connected siteshttps://app.example");
-    expect(data.querySelector('select[aria-label="Profile for https://app.example"]').value).toBe("1");
-    expect(view.shownButtons(data)).toEqual(["Manage", "Clear connected sites", "Reset wallet"]);
+    const permissions = [
+      { origin: "https://app.example", accountIndex: 1 },
+      { origin: "https://shop.example", accountIndex: 0 },
+    ];
+    view = await settings({ permissions });
+    const sites = view.section("Connected sites");
+    expect(sites.querySelectorAll(".settings-site__host").map(visibleText)).toEqual(["app.example", "shop.example"]);
+    expect(sites.querySelector('select[aria-label="Profile for app.example"]').value).toBe("1");
+    const disconnect = sites.querySelectorAll("button").find((b) => accessibleName(b) === "Disconnect app.example");
+    disconnect.click();
+    await settle();
+    expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin: "https://app.example" });
+
+    // All of them only after a yes.
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    sites.querySelectorAll("button").find((b) => b.textContent === "Disconnect all sites").click();
+    expect(confirm).toHaveBeenCalledWith("Disconnect all 2 sites? They'll ask to connect again.");
+    expect(view.actions.send).not.toHaveBeenCalledWith({ type: "DUSK_UI_CLEAR_PERMISSIONS" });
+    // Reset wallet is in a section of its own.
+    expect(view.shownButtons(sites)).not.toContain("Reset wallet");
+    expect(view.shownButtons(view.section("Reset"))).toEqual(["Reset wallet"]);
+  });
+
+  it("offers auto-lock after 5 or 15 minutes, or Off, and keeps a new choice through a redraw", async () => {
+    const view = await settings({ autoLockTimeoutMinutes: 15 });
+    const select = () => dom.document.body.querySelector("select#auto-lock");
+    expect(select().querySelectorAll("option").map((o) => o.textContent)).toEqual(["5 minutes", "15 minutes", "Off"]);
+    expect(select().value).toBe("15");
+    select().value = "5";
+    select().dispatchEvent({ type: "change", bubbles: true, target: select(), preventDefault() {}, stopPropagation() {} });
+    await settle();
+    expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_AUTO_LOCK", autoLockTimeoutMinutes: 5 });
+    // A redraw before the overview is read again still shows 5.
+    view.draw();
+    expect(select().value).toBe("5");
+  });
+
+  it("keeps custom gas under Advanced, off until it's turned on, as the web wallet does", async () => {
+    const view = await settings();
+    const advanced = dom.document.body.querySelector("details.settings-advanced");
+    expect(visibleText(advanced.querySelector("summary"))).toBe("Advanced");
+    const toggle = advanced.querySelector("#custom-gas");
+    expect(toggle.checked).toBe(false);
+    expect(visibleText(advanced.querySelector(".settings-note"))).toBe(
+      "The wallet uses the network's gas price, and a gas limit that suits each transaction."
+    );
+    toggle.checked = true;
+    toggle.dispatchEvent({ type: "change", bubbles: true, target: toggle, preventDefault() {}, stopPropagation() {} });
+    await settle();
+    expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_CUSTOM_GAS", customGas: { limit: "2500000", price: "1" } });
+    expect(visibleText(advanced.querySelector(".settings-note"))).toBe(
+      "Each transaction costs at most 0.0025 DUSK. One that needs more gas than this limit keeps its own."
+    );
   });
 });

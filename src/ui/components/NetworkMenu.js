@@ -1,10 +1,34 @@
 import { NETWORK_PRESETS } from "../../shared/networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "../../shared/network.js";
 import { h } from "../lib/dom.js";
+import { iconSvg } from "./ActionIcon.js";
+import { menuKeys } from "./MenuKeys.js";
+
+/**
+ * Marks the network pill busy while the wallet moves to `label`'s network,
+ * with a spinner in place of its status dot, or clears it with null.
+ * @param {HTMLElement} pill
+ * @param {string|null} label
+ */
+export function setNetworkSwitching(pill, label) {
+  if (!pill) return;
+  pill.classList.toggle("is-switching", Boolean(label));
+  if (label) {
+    pill.setAttribute("aria-busy", "true");
+    pill.setAttribute("aria-label", `Switching to ${label}`);
+    const text = pill.querySelector(".network-pill__label");
+    if (text) text.textContent = label;
+  } else {
+    pill.removeAttribute("aria-busy");
+    pill.removeAttribute("aria-label");
+  }
+}
 
 /**
  * Small controller that renders the network selection menu under an anchor.
  * This intentionally keeps the original markup/classes so ui.css keeps working.
+ * `onSelectPreset(preset, { ov })` resolves false, or rejects, when the
+ * wallet stays on its network; the pill then names that network again.
  */
 export function createNetworkMenuController({
   onSelectPreset,
@@ -27,7 +51,8 @@ export function createNetworkMenuController({
 
   function open(anchorEl, ov) {
     close();
-    if (!anchorEl) return;
+    // One switch at a time.
+    if (!anchorEl || anchorEl.classList.contains("is-switching")) return;
 
     const currentPresetId = detectPresetIdFromNodeUrl(ov?.nodeUrl);
 
@@ -41,22 +66,36 @@ export function createNetworkMenuController({
           : h("div"),
       ]);
 
-      const check = active
-        ? h("div", { class: "net-menu-check", text: "✓" })
-        : h("div", { class: "net-menu-check", text: "" });
+      const check = h("span", { class: "net-menu-check", "aria-hidden": "true", html: active ? iconSvg("check") : "" });
 
       return h(
         "button",
         {
           class: `net-menu-item ${active ? "net-menu-item--active" : ""}`,
           type: "button",
+          role: "menuitemradio",
+          "aria-checked": String(active),
           onclick: async () => {
+            close();
+            anchorEl.focus();
+            // The pill spins until the wallet is on the new network, and
+            // names the one it's on again if it doesn't get there.
+            const switching = p.id !== "custom" && !active;
+            const label = anchorEl.querySelector(".network-pill__label");
+            const current = label?.textContent ?? "";
+            if (switching) setNetworkSwitching(anchorEl, p.label);
+            let failed = false;
             try {
-              close();
-              await onSelectPreset?.(p, { ov });
+              failed = (await onSelectPreset?.(p, { ov })) === false;
             } catch (e) {
+              failed = true;
               // Let caller decide how to surface errors, fall back to alert.
               alert(e?.message ?? String(e));
+            } finally {
+              if (switching) {
+                setNetworkSwitching(anchorEl, null);
+                if (failed && label) label.textContent = current;
+              }
             }
           },
         },
@@ -64,9 +103,9 @@ export function createNetworkMenuController({
       );
     });
 
-    const menu = h("div", { class: "net-menu", role: "menu" }, [
-      h("div", { class: "net-menu-title", text: "Select network" }),
-      ...items,
+    const menu = h("div", { class: "net-menu" }, [
+      h("div", { class: "net-menu-title", id: "net-menu-title", text: "Select network" }),
+      h("div", { class: "net-menu-items", role: "menu", "aria-labelledby": "net-menu-title" }, items),
     ]);
 
     document.body.appendChild(menu);
@@ -108,6 +147,7 @@ export function createNetworkMenuController({
     };
 
     anchorEl.setAttribute("aria-expanded", "true");
+    menuKeys(menu.querySelector("[role=menu]"), { anchor: anchorEl, close });
   }
 
   return { open, close, get isOpen() { return Boolean(menuEl); } };

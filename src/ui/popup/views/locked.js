@@ -25,9 +25,7 @@ export function lockedView({ state, actions } = {}) {
   pwd.addEventListener("input", () => showError(""));
 
   // The button says "Unlocking…" meanwhile.
-  const busyCallout = h("div", { class: "callout", style: "display:none" }, [
-    h("div", { class: "muted", text: "This can take a moment." }),
-  ]);
+  const busyCallout = h("p", { class: "auth-note", style: "display:none", text: "This can take a moment." });
 
   let busy = false;
   const btn = h("button", {
@@ -63,9 +61,11 @@ export function lockedView({ state, actions } = {}) {
     },
   });
   return [
-    h("div", { class: "muted", text: "Wallet is locked." }),
-    h("div", { class: "row" }, [h("label", { for: "unlock-password", text: "Password" }), pwd, errLine]),
-    busyCallout,
-    h("div", { class: "btnrow" }, [btn]),
-  ].filter(Boolean);
+    h("div", { class: "auth-page" }, [
+      h("h1", { class: "auth-title", text: "Unlock your wallet" }),
+      h("div", { class: "row" }, [h("label", { for: "unlock-password", text: "Password" }), pwd, errLine]),
+      btn,
+      busyCallout,
+    ]),
+  ];
 }

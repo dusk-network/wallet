@@ -1,25 +1,13 @@
-import { h, setChildren } from "../lib/dom.js";
-import { shortAddress } from "../lib/strings.js";
+import { h } from "../lib/dom.js";
 import { identiconEl } from "./Identicon.js";
-
-// The chip's one line: the name, cut at its end when it has to shrink, or the
-// short account (6…6), which then gives up characters before the "…" and
-// keeps its last six. Screen readers get the full account in its place.
-function chipLabel(text, account = "") {
-  const cut = account ? text.indexOf("…") : -1;
-  if (cut < 0) return [h("span", { class: "chip-text__head", text })];
-  return [
-    h("span", { class: "chip-text__head", "aria-hidden": "true", text: text.slice(0, cut + 1) }),
-    h("span", { class: "chip-text__tail", "aria-hidden": "true", text: text.slice(cut + 1) }),
-    h("span", { class: "sr-only", text: account }),
-  ];
-}
 
 /**
  * The header's account chip: one line with the profile's verified .dusk name
- * once `name` gives one, else its short account, and a ▾. A click calls
- * `onClick` with the chip, which the header uses to open the profile switcher.
- * The tooltip has the full name and account.
+ * once `name` gives one, else its label (the one set on this device, or
+ * "Profile N"), and a ▾. The line ends in one "…" when it has to shrink. The
+ * account itself is in the tooltip and the profile switcher, not on the chip.
+ * A click calls `onClick` with the chip, which the header uses to open the
+ * profile switcher.
  *
  * @param {string} account
  * @param {object} [opts]
@@ -27,12 +15,13 @@ function chipLabel(text, account = "") {
  * @param {boolean} [opts.connected] - whether the active site is connected
  * @param {string|null} [opts.host] - the active site, marked on the identicon
  * @param {Promise<string|null>} [opts.name] - a lookup of the account's .dusk name
+ * @param {string} [opts.label] - the profile's label, shown until a name is known
  * @param {boolean} [opts.expanded] - whether the profile switcher is open
  * @returns {HTMLElement}
  */
-export function accountChipEl(account, { onClick, connected, host, name, expanded = false } = {}) {
-  const short = account ? shortAddress(account) : "—";
-  const label = h("span", { class: "chip-text" }, chipLabel(short, short === account ? "" : account));
+export function accountChipEl(account, { onClick, connected, host, name, label: profileLabel = "", expanded = false } = {}) {
+  const shown = String(profileLabel ?? "").trim() || "Profile";
+  const label = h("span", { class: "chip-text", text: shown });
 
   const icon = identiconEl(account || "dusk");
   if (host) {
@@ -48,7 +37,7 @@ export function accountChipEl(account, { onClick, connected, host, name, expande
   }
 
   const site = host ? `${connected ? "Connected" : "Site"}: ${host}` : "";
-  const tooltip = (verified) => [verified, account, site].filter(Boolean).join("\n");
+  const tooltip = (verified) => [verified || shown, account, site].filter(Boolean).join("\n");
 
   const chip = h(
     "button",
@@ -65,7 +54,7 @@ export function accountChipEl(account, { onClick, connected, host, name, expande
 
   name?.then((verified) => {
     if (!verified) return;
-    setChildren(label, chipLabel(verified));
+    label.textContent = verified;
     chip.title = tooltip(verified);
   });
 

@@ -205,7 +205,7 @@ test.describe("Sozu liquid staking", () => {
       contractId: ST_DUSK_CONTRACT_ID_CANONICAL,
     });
     await expect(page.getByText("Staked DUSK")).toBeVisible();
-    await expect(page.getByText("7.944", { exact: true })).toBeVisible();
+    await expect(page.locator(".asset-token-balance-value")).toHaveText("7.944 stDUSK");
 
     await installStakeHarness(page, { networkName: "Testnet" });
     await page.getByRole("button", { name: /Liquid staking/ }).click();
@@ -229,11 +229,12 @@ test.describe("Sozu liquid staking", () => {
     await expect(page.locator(".review-head")).toContainText("Liquid staking");
     await expect(page.locator(".review-head")).toContainText("With Sozu, a third party");
     await expect(page.getByText("Fee paid from")).toBeVisible();
-    await expect(page.getByText("Total (max)")).toBeVisible();
-    // The gas presets open with the fee's Edit.
-    await expect(page.getByRole("button", { name: "Recommended" })).toBeHidden();
-    await page.getByRole("button", { name: "Edit" }).click();
-    await expect(page.getByRole("button", { name: "Recommended" })).toBeVisible();
+    await expect(page.locator(".gas-fee")).toContainText("Network fee");
+    // The network's gas price, with one Custom fee, closed, and no presets.
+    await expect(page.getByRole("button", { name: "Recommended" })).toHaveCount(0);
+    await expect(page.getByLabel("Gas limit")).toBeHidden();
+    await page.locator("details.gas-custom summary").click();
+    await expect(page.getByLabel("Gas limit")).toBeVisible();
 
     await page.getByRole("button", { name: "Confirm" }).click();
     const submitted = await page.evaluate(() =>

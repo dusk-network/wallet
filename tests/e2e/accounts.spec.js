@@ -34,8 +34,8 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
 
   // Paste full phrase into first slot (MnemonicInput distributes it).
   await page.getByLabel("Word 1", { exact: true }).fill(MNEMONIC_12);
-  await page.getByPlaceholder("Create password (min 8 chars)").fill(PASSWORD);
-  await page.getByPlaceholder("Confirm password").fill(PASSWORD);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await page.getByLabel("Confirm password", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Import wallet" }).click();
 
   // Home view
@@ -46,29 +46,33 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await expect(page.getByText("Settings")).toBeVisible();
   await expect(page.locator("select#account option")).toHaveCount(2);
 
-  // Set per-profile names (saved on change/blur).
-  const name1 = page.getByLabel("Profile 1 name");
+  // Set per-profile labels (saved on change/blur).
+  const name1 = page.getByLabel("Profile 1 label");
   await name1.fill("Main");
   await name1.press("Tab");
-  await expect(page.getByLabel("Profile 1 name")).toHaveValue("Main");
+  await expect(page.getByLabel("Profile 1 label")).toHaveValue("Main");
 
-  const name2 = page.getByLabel("Profile 2 name");
+  const name2 = page.getByLabel("Profile 2 label");
   await name2.fill("Spending");
   await name2.press("Tab");
-  await expect(page.getByLabel("Profile 2 name")).toHaveValue("Spending");
+  await expect(page.getByLabel("Profile 2 label")).toHaveValue("Spending");
 
   // Back to home so the header switcher is visible
   await page.getByRole("button", { name: "← Back" }).click();
   await expect(page.locator("#app").getByRole("button", { name: "Send" })).toBeVisible();
 
+  // Without a .dusk name, the chip shows the profile's label, not its account.
+  await expect(page.locator("#header-actions .account-chip .chip-text")).toHaveText("Main");
+
   // Open the profile switcher from the account chip and switch
   await page.locator("#header-actions .account-chip").click();
   await expect(page.getByText("Select profile")).toBeVisible();
-  await expect(page.getByText("Main")).toBeVisible();
-  await expect(page.getByText("Spending")).toBeVisible();
+  const menu = page.locator(".acct-menu");
+  await expect(menu.getByText("Main")).toBeVisible();
+  await expect(menu.getByText("Spending")).toBeVisible();
 
-  // The row, not its copy button ("Copy public account").
-  await page.getByRole("button", { name: /^Spending/ }).click();
+  // The row, not its copy button ("Copy Spending's public account").
+  await page.getByRole("menuitemradio", { name: /^Spending/ }).click();
 
   // Verify switch persisted (Settings selector now points to profile 2)
   await page.getByTitle("Settings").click();

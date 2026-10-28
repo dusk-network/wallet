@@ -96,34 +96,53 @@ export function groupThousands(numStr) {
   return `${m[1]}${m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${m[3] ?? ""}`;
 }
 
+// "1.1000" becomes "1.1", and "2.0000" becomes "2".
+const trimZeros = (numStr) => String(numStr).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+
 /**
- * Lux as DUSK for display: at most `maxDecimals` decimals, thousands grouped.
+ * DUSK as the wallet shows it, the one number format for amounts and fees
+ * alike: at most `maxDecimals` (4) decimals, trailing zeros trimmed,
+ * thousands grouped. An amount that would show as zero at that precision
+ * shows in full.
  * @param {string|bigint|number} luxStr
  * @param {number} [maxDecimals]
  * @returns {string}
  */
 export function formatDusk(luxStr, maxDecimals = UI_DISPLAY_DECIMALS) {
-  return groupThousands(formatLuxShort(luxStr, maxDecimals));
+  return groupThousands(trimZeros(formatLuxShort(luxStr, maxDecimals)));
 }
 
-/** Fees show with this many decimals everywhere, so 0.0500 and 0.0025 read alike. */
-export const FEE_DECIMALS = 4;
-
 /**
- * A fee in DUSK with exactly FEE_DECIMALS decimals, rounded half up. A fee
- * too small to show at that precision is shown in full rather than as zero.
+ * An amount on a Review, exactly as it will be sent: every decimal it has,
+ * thousands grouped.
  * @param {string|bigint|number} luxStr
  * @returns {string}
  */
-export function formatFee(luxStr) {
+export function formatDuskExact(luxStr) {
+  return groupThousands(formatLuxToDusk(luxStr));
+}
+
+/** Decimals a fee rounds to: the same 4 as every other amount. */
+export const FEE_DECIMALS = UI_DISPLAY_DECIMALS;
+
+/**
+ * A fee in DUSK, in the one number format: exact up to 4 decimals. Past
+ * that, a maximum (`max`, shown as "up to") rounds up, so it never reads
+ * lower than it can be, and a fee paid rounds to the nearest (half up). A
+ * fee paid too small to show at that precision shows in full, not as zero.
+ * @param {string|bigint|number} luxStr
+ * @param {{ max?: boolean }} [opts]
+ * @returns {string}
+ */
+export function formatFee(luxStr, { max = false } = {}) {
   const lux = safeBigInt(luxStr, 0n);
-  if (lux <= 0n) return `0.${"0".repeat(FEE_DECIMALS)}`;
+  if (lux <= 0n) return "0";
   const step = 10n ** BigInt(LUX_DECIMALS - FEE_DECIMALS);
-  const units = (lux + step / 2n) / step;
+  const units = max ? (lux + step - 1n) / step : (lux + step / 2n) / step;
   if (units === 0n) return formatLuxToDusk(lux);
   const scale = 10n ** BigInt(FEE_DECIMALS);
   const frac = (units % scale).toString().padStart(FEE_DECIMALS, "0");
-  return `${groupThousands((units / scale).toString())}.${frac}`;
+  return groupThousands(trimZeros(`${(units / scale).toString()}.${frac}`));
 }
 
 /**

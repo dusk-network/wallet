@@ -35,6 +35,33 @@ export function groupLabel(group, text) {
   return label;
 }
 
+/**
+ * An error line under `field`, hidden until `show` gives it words; the field
+ * is described by it, and marked invalid, while it shows. A group of fields
+ * (`markInvalid: false`) is only described by it: ARIA has no invalid group.
+ * @param {HTMLElement} field
+ * @param {{ markInvalid?: boolean }} [opts]
+ * @returns {{ el: HTMLElement, show: (text?: string) => void }}
+ */
+export function fieldError(field, { markInvalid = true } = {}) {
+  const el = h("div", { class: "field-error", role: "alert", hidden: true });
+  const id = uniqueId(el);
+  return {
+    el,
+    show(text) {
+      el.textContent = text || "";
+      el.hidden = !text;
+      if (text) {
+        if (markInvalid) field.setAttribute("aria-invalid", "true");
+        field.setAttribute("aria-describedby", id);
+      } else {
+        field.removeAttribute("aria-invalid");
+        field.removeAttribute("aria-describedby");
+      }
+    },
+  };
+}
+
 export function textInput({ numericMode, onEnter, ...attrs } = {}) {
   const input = h("input", attrs);
   if (numericMode) installNumericInputGuard(input, { mode: numericMode });

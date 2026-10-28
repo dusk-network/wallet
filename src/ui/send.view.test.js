@@ -4,7 +4,7 @@ import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
-import { lookupDuskName } from "../shared/duskNames.js";
+import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import { shortAddress } from "./lib/strings.js";
 import { fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
@@ -19,25 +19,10 @@ vi.mock("../shared/addressBook.js", () => ({ listAddressBook: vi.fn(async () => 
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupDuskName: vi.fn(),
+  lookupPrimaryName: vi.fn(async () => null),
 }));
 
 describe("send view", () => {
-  it("keeps the amount input visually separate from the slider helper", async () => {
-    const component = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "components", "AmountSliderCard.js"),
-      "utf8"
-    );
-    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-
-    expect(component).toContain('class: "input-row amount-input-row"');
-    expect(component).toContain('class: "amount-range-wrap amount-slider-helper"');
-    expect(css).toContain(".amount-input-row");
-    expect(css).toContain(".amount-card .amount-range-wrap");
-    expect(css).not.toMatch(
-      /\.amount-card \.amount-input\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s
-    );
-  });
-
   it("passes explicit privacy for wallet-initiated transfers", async () => {
     const source = await readFile(
       path.resolve(process.cwd(), "src", "ui", "popup", "views", "send.js"),
@@ -127,6 +112,8 @@ let dom;
 
 beforeEach(() => {
   dom = installFakeDom();
+  lookupPrimaryName.mockReset();
+  lookupPrimaryName.mockImplementation(async () => null);
   lookupDuskName.mockReset();
   lookupDuskName.mockImplementation((input) => {
     const key = String(input).trim().toLowerCase();
@@ -158,7 +145,7 @@ function mount(state, ov = overview(), send = async () => ({})) {
   return {
     actions,
     to: $(".to-input-wrap input"),
-    amount: $("input.amount-input"),
+    amount: $("input.amount-field__input"),
     review: $("button.btn-primary"),
     radios,
     picked: () => radios().map((r) => r.getAttribute("aria-checked")),
@@ -167,13 +154,21 @@ function mount(state, ov = overview(), send = async () => ({})) {
       return isShown(pill) ? pill.textContent : "";
     },
     nameBox: () => $(".name-box"),
-    balanceLine: () => $(".amount-meta__main").textContent,
+    balanceLine: () => visibleText($(".amount-avail__text")),
+    amountError: () => {
+      const error = $(".amount-field__error");
+      return isShown(error) ? error.textContent : "";
+    },
+    feeNote: () => $(".amount-fee-note").textContent,
     shortfall: () => $(".name-box .name-shortfall"),
     selfNote: () => {
       const note = $(".send-self-note");
       return isShown(note) ? note.textContent : "";
     },
-    transferLine: () => $(".transfer-line")?.textContent,
+    // Review: the kind of transfer, and what a public one shows everyone.
+    kind: () => $(".review-kind")?.textContent,
+    visibleLine: () => $(".review-visible")?.textContent ?? null,
+    reviewTo: () => visibleText($(".review-to")),
   };
 }
 
@@ -187,11 +182,11 @@ describe("send form", () => {
       ["Scan QR", iconSvg("qr"), ""],
       ["Contacts", iconSvg("contacts"), ""],
     ]);
-    expect(body.querySelector(".amount-input-row button").textContent).toBe("Max");
+    expect(body.querySelector(".amount-avail button").textContent).toBe("Max");
     expect(body.querySelectorAll("label").map((l) => l.textContent)).toEqual(["To", "Amount", "Memo"]);
     expect([form.to, form.amount, body.querySelector(".row > input")].map((i) => i.getAttribute("placeholder"))).toEqual([
       "Account, shielded address or .dusk name",
-      "e.g. 1.25 DUSK",
+      "0",
       "Optional",
     ]);
 
@@ -219,7 +214,7 @@ describe("send to a .dusk name with both addresses", () => {
       `alice.dusk points toPublic account${shortAddress(ALICE.account)}Visible on chain` +
         `Shielded address${shortAddress(ALICE.address)}Private`
     );
-    expect(form.balanceLine()).toBe("Available (public): 177.984 DUSK");
+    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
     expect(form.review.disabled).toBe(false);
     // The old Public account | Shielded address switch is gone.
     expect(dom.document.body.querySelector(".name-address-toggle")).toBeNull();
@@ -233,12 +228,12 @@ describe("send to a .dusk name with both addresses", () => {
 
     expect(form.picked()).toEqual(["false", "true"]);
     expect(form.pill()).toBe("");
-    expect(form.balanceLine()).toBe("Spendable (shielded): 24.95 DUSK");
+    expect(form.balanceLine()).toBe("Available after fees 24.95 DUSK");
     expect(state.draft.nameChoices).toEqual({ "alice.dusk": true });
 
     form.radios()[0].click();
     expect(form.picked()).toEqual(["true", "false"]);
-    expect(form.balanceLine()).toBe("Available (public): 177.984 DUSK");
+    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
   });
 
   it("shows the pill for a pasted account or address, where it is the only sign of the transfer type", () => {
@@ -264,11 +259,11 @@ describe("send to a .dusk name with both addresses", () => {
     // The same name, as resolved.
     typeInto(form.to, " Alice.DUSK");
     expect(form.picked()).toEqual(["false", "true"]);
-    expect(form.balanceLine()).toBe("Spendable (shielded): 24.95 DUSK");
+    expect(form.balanceLine()).toBe("Available after fees 24.95 DUSK");
 
     typeInto(form.to, "bob.dusk");
     expect(form.picked()).toEqual(["true", "false"]);
-    expect(form.balanceLine()).toBe("Available (public): 177.984 DUSK");
+    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
 
     // A pick for bob.dusk doesn't take alice.dusk's place.
     form.radios()[1].click();
@@ -310,14 +305,15 @@ describe("send to a .dusk name with both addresses", () => {
     });
 
     const review = mount(state);
-    expect(review.transferLine()).toBe("Private");
+    // A shielded send shows no one anything: no line says what's visible.
+    expect([review.kind(), review.visibleLine()]).toEqual(["Shielded transfer", null]);
     dom.document.body.querySelector(".subnav-back").click();
     expect(state.route).toBe("send");
 
     form = mount(state);
     expect(form.to.value).toBe("alice.dusk");
     expect(form.picked()).toEqual(["false", "true"]);
-    expect(form.balanceLine()).toBe("Spendable (shielded): 24.95 DUSK");
+    expect(form.balanceLine()).toBe("Available after fees 24.95 DUSK");
   });
 
   it.each([
@@ -372,7 +368,7 @@ describe("send to a .dusk name with one address", () => {
     const funded = mount(newState());
     typeInto(funded.to, "carol.dusk");
     expect(visibleText(funded.nameBox())).toBe(`carol.dusk points toShielded address${shortAddress(carol)}Private`);
-    expect(funded.balanceLine()).toBe("Spendable (shielded): 24.95 DUSK");
+    expect(funded.balanceLine()).toBe("Available after fees 24.95 DUSK");
     expect(funded.review.disabled).toBe(false);
   });
 
@@ -395,21 +391,138 @@ describe("send to a .dusk name with one address", () => {
     await settle();
     expect(state.draft).toMatchObject({ to: dave, privacy: "public", duskName: { name: "dave.dusk" } });
     const review = mount(state, ov);
-    expect(review.transferLine()).toBe("Visible on chain");
-    expect(visibleText(dom.document.body.querySelector(".named-address"))).toBe(`dave.dusk${dave}`);
+    expect(review.visibleLine()).toBe("Visible to everyone: amount and your account.");
+    expect(review.reviewTo()).toBe(`dave.dusk${dave}`);
+  });
+});
+
+describe("send's amount", () => {
+  it("says what's available after fees, fills Max, and says under the field what's wrong", () => {
+    const state = newState();
+    const form = mount(state);
+    // No recipient yet: nothing to measure against.
+    expect(isShown(dom.document.body.querySelector(".amount-avail"))).toBe(false);
+    typeInto(form.to, ALICE.account);
+    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK");
+
+    dom.document.body.querySelector(".amount-avail button").click();
+    expect(form.amount.value).toBe("177.984");
+    expect(form.amountError()).toBe("");
+
+    typeInto(form.amount, "500");
+    expect(form.amountError()).toBe("That's more than you have, with the network fee.");
+    expect(form.amount.getAttribute("aria-invalid")).toBe("true");
+    typeInto(form.amount, "0");
+    expect(form.amountError()).toBe("Enter an amount greater than 0.");
+
+    // Review asks for an amount instead of going on without one.
+    typeInto(form.amount, "");
+    form.review.click();
+    expect(form.amountError()).toBe("Enter an amount.");
+    expect(state.route).toBe("send");
+  });
+
+  it("sets aside the fee Review starts from, with custom gas from Settings", async () => {
+    // Price 3: a public transfer keeps the custom 2.5M limit; a shielded one
+    // its own 50M, as 2.5M is under its minimum.
+    const ov = overview({ customGas: { limit: "2500000", price: "3" } });
+    const state = newState();
+    const form = mount(state, ov);
+    typeInto(form.to, "alice.dusk");
+    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 177.979 DUSK", "Network fee up to 0.0075 DUSK"]);
+    form.radios()[1].click();
+    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 24.85 DUSK", "Network fee up to 0.15 DUSK"]);
+    form.radios()[0].click();
+    typeInto(form.amount, "177.98");
+    expect(form.amountError()).toBe("That's more than you have, with the network fee.");
+    dom.document.body.querySelector(".amount-avail button").click();
+    expect(form.amount.value).toBe("177.979");
+
+    // Review asks that fee: Max and the fee make up the whole balance.
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
+    mount(state, ov);
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".gas-fee"))).toBe("Network feeup to 0.0075 DUSKTotalup to 177.9865 DUSK");
+  });
+
+  it("hides what's available with Hide balances, while Max still fills in the real amount", () => {
+    const form = mount(newState(), overview({ hideBalances: true }));
+    typeInto(form.to, ALICE.account);
+    expect(form.balanceLine()).toBe("Available after fees •••• DUSK");
+    // The fee isn't a balance.
+    expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK");
+    dom.document.body.querySelector(".amount-avail button").click();
+    expect(form.amount.value).toBe("177.984");
+  });
+});
+
+describe("names on Send and Review", () => {
+  it("shows a pasted public account's verified .dusk name", async () => {
+    lookupPrimaryName.mockImplementation(async (account) => (account === BOB.account ? "bob.dusk" : null));
+    const form = mount(newState());
+    typeInto(form.to, BOB.account);
+    await settle();
+    expect(visibleText(form.nameBox())).toBe("bob.dusk · its verified .dusk name");
+
+    // Not for one without a name, nor once the field holds something else.
+    typeInto(form.to, ALICE.account);
+    await settle();
+    expect(isShown(form.nameBox())).toBe(false);
+  });
+
+  it("names the profile that pays, and a contact by its label and its verified name both", async () => {
+    lookupPrimaryName.mockImplementation(async (account) => ({ [OWN.account]: "me.dusk", [BOB.account]: "bob.dusk" })[account] ?? null);
+    const state = {
+      route: "confirm",
+      addressBook: { loaded: true, items: [{ name: "Bobby", address: BOB.account }] },
+      draft: { to: BOB.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+    };
+    const view = mount(state);
+    await settle();
+    const rows = () => dom.document.body.querySelectorAll(".send-review > .group > .kv").map(visibleText);
+    expect(rows()).toEqual([`ToBobby · bob.dusk${BOB.account}`, "Fromme.dusk · Public"]);
+    expect(view.visibleLine()).toBe("Visible to everyone: amount and your name me.dusk.");
+    // Saved already: no Save to Contacts.
+    expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
+  });
+
+  it("offers no Save to Contacts for this wallet's own account or address", () => {
+    for (const to of [OWN.account, OWN.address]) {
+      mount({
+        route: "confirm",
+        addressBook: { loaded: true, items: [] },
+        draft: { to, privacy: to === OWN.address ? "shielded" : "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+      });
+      expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
+    }
+    mount({
+      route: "confirm",
+      addressBook: { loaded: true, items: [] },
+      draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+    });
+    expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(true);
   });
 });
 
 describe("a typed name that isn't registered", () => {
   it("offers the closest name from contacts and past transfers, from this device alone", () => {
     const state = newState();
-    state.addressBook.items = [{ name: "alice.dusk", address: ALICE.account }];
+    state.addressBook.items = [
+      { name: "alice.dusk", address: ALICE.account },
+      // Saved from dave.dusk, under a name of its own.
+      { name: "Dave's shop", address: vary(ACCOUNT, 5), duskName: "dave.dusk" },
+    ];
     state.activity = { names: new Map([[BOB.account, "bob.dusk"]]) };
     const form = mount(state);
+    typeInto(form.to, "dav.dusk");
+    expect(visibleText(form.nameBox())).toBe("dav.dusk isn't registered.Did you mean dave.dusk?");
     typeInto(form.to, "alcie.dusk");
     expect(visibleText(form.nameBox())).toBe("alcie.dusk isn't registered.Did you mean alice.dusk?");
-    // Only the typed name was looked up.
-    expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["alcie.dusk"]);
+    // Only the typed names were looked up.
+    expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["dav.dusk", "alcie.dusk"]);
 
     form.nameBox().querySelector("button.name-suggestion").click();
     expect(form.to.value).toBe("alice.dusk");
@@ -469,8 +582,8 @@ describe("review", () => {
       send
     );
 
-  it("shows the fee and the total with Back and Confirm, and puts the gas price line and presets behind Edit", async () => {
-    // The node's gas prices are 1, 2 and 5 LUX; a transfer returns its hash.
+  it("shows the fee at the network's price and the total with Back and Confirm, and Custom fee for gas of your own", async () => {
+    // The node asks 2 LUX; a transfer returns its hash.
     const send = async (message) =>
       message.type === "DUSK_UI_GET_CACHED_GAS_PRICE"
         ? { min: "1", median: "2", max: "5" }
@@ -480,20 +593,15 @@ describe("review", () => {
     const body = dom.document.body;
     const shownButtons = () => body.querySelectorAll("button").filter(isShown).map((b) => b.textContent);
 
-    // Back is the way back to Send, so there is no Cancel.
-    expect(shownButtons()).toEqual(["← Back", "Save to Contacts", "Edit", "Confirm"]);
-    expect(visibleText(body.querySelector("dusk-gas-editor"))).toBe(
-      "Network fee (max)0.0050 DUSKEditTotal (max)1.005 DUSK"
-    );
-    expect(visibleText(body)).not.toContain("Gas price");
+    // Back is the way back to Send, so there is no Cancel; no presets either.
+    expect(shownButtons()).toEqual(["← Back", "Save to Contacts", "Confirm"]);
+    expect(visibleText(body.querySelector("dusk-gas-editor .gas-fee"))).toBe("Network feeup to 0.005 DUSKTotalup to 1.005 DUSK");
+    expect(visibleText(body.querySelector("details.gas-custom summary"))).toBe("Custom fee");
 
+    // A gas price of your own, under Custom fee, is what Confirm sends.
+    const price = body.querySelectorAll("dusk-gas-editor input")[1];
+    typeInto(price, "1");
     const button = (text) => body.querySelectorAll("button").find((b) => b.textContent === text);
-    button("Edit").click();
-    expect(shownButtons()).toEqual(["← Back", "Save to Contacts", "Hide", "Auto", "Low", "Recommended", "High", "Confirm"]);
-    expect(visibleText(body)).toContain("Gas price (LUX): min 1 · median 2 · max 5");
-
-    // A preset picked under Edit is what Confirm sends.
-    button("Low").click();
     button("Confirm").click();
     await settle();
     expect(view.actions.send).toHaveBeenLastCalledWith({
@@ -502,14 +610,38 @@ describe("review", () => {
     });
   });
 
-  it("says under the pill whether the transfer is visible on chain", () => {
-    let view = review({ to: ALICE.account, privacy: "public" });
-    expect(view.transferLine()).toBe("Visible on chain");
-    expect(dom.document.body.querySelector(".recipient-type-badge").textContent).toBe("Public");
+  it("hides Use the network's price while the fee is the network's, custom gas from Settings that equals it too", async () => {
+    // The node asks 2 LUX.
+    const send = async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {});
+    const reset = () => dom.document.body.querySelector("button.gas-reset");
+    review({ to: ALICE.account, privacy: "public" }, overview({ customGas: { limit: "2500000", price: "2" } }), send);
+    await settle();
+    expect([reset().textContent, reset().hidden]).toEqual(["Use the network's price", true]);
+    // Hidden is hidden in the popup: no class's display shows it anyway.
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    expect(css).toMatch(/\n\[hidden\] \{\s*display: none !important;\s*\}/);
 
-    view = review({ to: ALICE.address, privacy: "shielded" });
-    expect(view.transferLine()).toBe("Private");
-    expect(dom.document.body.querySelector(".recipient-type-badge").textContent).toBe("Shielded");
+    // Gas of your own shows it, and the network's price typed back hides it again.
+    review({ to: ALICE.account, privacy: "public" }, overview({ customGas: { limit: "2500000", price: "3" } }), send);
+    await settle();
+    expect(reset().hidden).toBe(false);
+    typeInto(dom.document.body.querySelectorAll("dusk-gas-editor input")[1], "2");
+    expect(reset().hidden).toBe(true);
+  });
+
+  it("says what a public send shows everyone, with only the parts that apply, and nothing for a shielded one", async () => {
+    let view = review({ to: ALICE.account, privacy: "public" });
+    expect([view.kind(), view.visibleLine()]).toEqual(["Public transfer", "Visible to everyone: amount and your account."]);
+
+    // With a memo, and the profile's verified name.
+    lookupPrimaryName.mockImplementation(async (account) => (account === OWN.account ? "me.dusk" : null));
+    view = review({ to: ALICE.account, privacy: "public", memo: "Lunch" });
+    await settle();
+    expect(view.visibleLine()).toBe("Visible to everyone: amount, memo, and your name me.dusk.");
+
+    view = review({ to: ALICE.address, privacy: "shielded", memo: "Lunch" });
+    await settle();
+    expect([view.kind(), view.visibleLine()]).toEqual(["Shielded transfer", null]);
 
     // A name shows over the full address it resolved to.
     view = review({
@@ -517,8 +649,7 @@ describe("review", () => {
       privacy: "shielded",
       duskName: { name: "alice.dusk", nodeUrl: overview().nodeUrl, to: ALICE.address },
     });
-    expect(view.transferLine()).toBe("Private");
-    expect(visibleText(dom.document.body.querySelector(".named-address"))).toBe(`alice.dusk${ALICE.address}`);
+    expect(view.reviewTo()).toBe(`alice.dusk${ALICE.address}`);
   });
 
   it("sends the .dusk name the recipient was typed as, for Activity, and none for a pasted address", async () => {
@@ -550,8 +681,7 @@ describe("a name and the recipient Contacts sets", () => {
     state.draft = { ...state.draft, to: address };
     state.route = "confirm";
   };
-  const toBox = (address) =>
-    dom.document.body.querySelectorAll(".box code").find((code) => code.textContent === address).parentNode;
+  const reviewTo = () => visibleText(dom.document.body.querySelector(".review-to"));
 
   it.each([
     ["picking another contact", BOB.account],
@@ -565,12 +695,12 @@ describe("a name and the recipient Contacts sets", () => {
     await settle();
     expect(state.draft.duskName).toEqual({ name: "alice.dusk", nodeUrl: overview().nodeUrl, to: ALICE.account });
     mount(state);
-    expect(toBox(ALICE.account).textContent).toBe(`alice.dusk${ALICE.account}`);
-    expect(toBox(ALICE.account).querySelector(".dusk-name").textContent).toBe("alice.dusk");
+    expect(reviewTo()).toBe(`alice.dusk${ALICE.account}`);
+    expect(dom.document.body.querySelector(".review-to__names").textContent).toBe("alice.dusk");
 
     setFromContacts(state, address);
     mount(state);
-    expect(toBox(address).textContent).toBe(address);
+    expect(reviewTo()).toBe(address);
 
     // Back from Review shows the contact's address, not the name.
     dom.document.body.querySelector(".subnav-back").click();
@@ -592,7 +722,7 @@ describe("a name and the recipient Contacts sets", () => {
     // Save to Contacts, with the address edited to a public account.
     setFromContacts(state, BOB.account);
     const review = mount(state);
-    expect([review.pill(), review.transferLine()]).toEqual(["Public", "Visible on chain"]);
+    expect([review.kind(), review.visibleLine()]).toEqual(["Public transfer", "Visible to everyone: amount and your account."]);
 
     dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
     await settle();

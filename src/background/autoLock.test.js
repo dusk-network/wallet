@@ -93,7 +93,8 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("../shared/settings.js", () => ({
+vi.mock("../shared/settings.js", async (importOriginal) => ({
+  normalizeAutoLock: (await importOriginal()).normalizeAutoLock,
   getSettings: vi.fn(async () => mocks.settings),
   setSettings: vi.fn(async (patch) => {
     if (mocks.settingsError) throw mocks.settingsError;
@@ -537,6 +538,34 @@ describe("background auto-lock activity", () => {
       periodInMinutes: 1,
     });
     expect(activityRecord()).toEqual({ lastActivityAt: 2_000_000 });
+  });
+
+  it.each([
+    [1, 5],
+    [5, 5],
+    [60, 15],
+    [0, 0],
+  ])("stores an auto-lock of %s minutes as %s: never 1 minute, never over 15", async (asked, stored) => {
+    await expect(
+      sendBackgroundMessage({ type: "DUSK_UI_SET_AUTO_LOCK", autoLockTimeoutMinutes: asked })
+    ).resolves.toEqual({ ok: true, autoLockTimeoutMinutes: stored });
+    expect(mocks.settings.autoLockTimeoutMinutes).toBe(stored);
+  });
+
+  it("locks an idle wallet once a lowered timer runs out, and not before", async () => {
+    await sendBackgroundMessage({ type: "DUSK_UI_UNLOCK", password: "pw" });
+    mocks.engineCall.mockClear();
+    // A test lowers the timer to 6 seconds; Settings can't.
+    mocks.settings = { ...mocks.settings, autoLockTimeoutMinutes: 0.1 };
+    const start = mocks.now;
+
+    mocks.now = start + 5_000;
+    await fireAutoLockAlarm();
+    expect(mocks.engineCall).not.toHaveBeenCalledWith("engine_lock");
+
+    mocks.now = start + 6_001;
+    await fireAutoLockAlarm();
+    expect(mocks.engineCall).toHaveBeenCalledWith("engine_lock");
   });
 
   it.each([

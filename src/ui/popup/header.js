@@ -5,6 +5,7 @@ import { isFullView, isPopupView } from "./env.js";
 import { isExtensionRuntime } from "../../platform/runtime.js";
 import { platform } from "../../platform/index.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
+import { profileLabelOf } from "../components/ProfileName.js";
 
 /**
  * Get a CSS class for network status indicator.
@@ -36,6 +37,7 @@ export function createHeaderRenderer({
   let chip = null;
   let chipFor = "";
   let latest = null;
+  let refocusChip = false;
 
   return function renderHeader(ov) {
     latest = ov;
@@ -49,7 +51,8 @@ export function createHeaderRenderer({
     // Update network pill label in header
     const networkPill = document.getElementById("network-pill");
     const networkLabel = networkPill?.querySelector(".network-pill__label");
-    if (networkLabel) {
+    // While a switch runs, the pill names the network it goes to.
+    if (networkLabel && !networkPill.classList.contains("is-switching")) {
       networkLabel.textContent = ov?.networkName ?? "Network";
     }
 
@@ -144,14 +147,19 @@ export function createHeaderRenderer({
 
       // The switcher's rows copy each account.
       const canOpenProfiles = Boolean(walletReady && acctMenu);
-      const key = [account, host, connected, ov?.nodeUrl, canOpenProfiles].join("\n");
+      // Without a verified name, the chip shows the profile's label.
+      const label = profileLabelOf(ov, idx);
+      const key = [account, label, host, connected, ov?.nodeUrl, canOpenProfiles].join("\n");
       if (!chip || chipFor !== key || !acctMenu?.isOpen) {
+        // A redrawn chip keeps the keyboard where it was.
+        refocusChip = Boolean(chip) && document.activeElement === chip;
         chipFor = key;
         chip = accountChipEl(account, {
           connected,
           host,
           // The chip only shows the name, so it keeps the last one while it is looked up again.
           name: lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true }),
+          label,
           expanded: canOpenProfiles && acctMenu.isOpen,
           onClick: canOpenProfiles
             ? (el) => {
@@ -173,5 +181,9 @@ export function createHeaderRenderer({
     actions.push(optionsBtn);
 
     setChildren(headerActionsHost, actions);
+    if (refocusChip) {
+      refocusChip = false;
+      chip?.focus();
+    }
   };
 }

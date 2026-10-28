@@ -1,13 +1,14 @@
 import {
   UI_DISPLAY_DECIMALS,
   formatDusk,
+  formatDuskExact,
   formatFee,
   formatLuxToDusk,
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { getDefaultGas } from "../../../shared/txDefaults.js";
+import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
@@ -15,9 +16,10 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
-import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
+import { amountField } from "../../components/AmountField.js";
+import { profileNameEl } from "../../components/ProfileName.js";
 import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
-import { createGasQuickControls } from "../../components/GasQuickControls.js";
+import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import {
   hideRecipientBadge,
@@ -34,27 +36,13 @@ import {
   duskNamesNetwork,
   isDuskName,
   lookupDuskName,
+  lookupPrimaryName,
 } from "../../../shared/duskNames.js";
 
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { sendFromReview } from "./sent.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
-
-// Review's .dusk name over the full address it resolved to: the name leads,
-// and the address follows smaller and muted.
-const namedAddressBox = (name, addressEl) =>
-  h("div", { class: "box named-address" }, [h("div", { class: "dusk-name", text: name, title: name }), addressEl]);
-
-/**
- * The line Review shows under the transfer's Public/Shielded pill: what the
- * chain shows.
- * @param {"public"|"shielded"} privacy
- * @returns {string}
- */
-export function transferLine(privacy) {
-  return privacy === "shielded" ? "Private" : "Visible on chain";
-}
 
 /**
  * The .dusk name the draft's recipient was resolved from, while the recipient
@@ -99,19 +87,18 @@ export function sendFormView(ov, { state, actions } = {}) {
   // ------------------------------------------------------------
   // Amount helpers (MAX + slider)
   // ------------------------------------------------------------
-  // The send screen doesn't expose gas settings yet. We base MAX calculations
-  // on the wallet's safe defaults for transfers.
-  function defaultGasForRecipientType(type) {
-    return getDefaultGas(TX_KIND.TRANSFER, {
-      privacy: type === "address" ? "shielded" : "public",
-    });
-  }
-
+  // Max and the balance check reserve the fee Review starts from: the
+  // draft's own gas, custom gas from Settings, or the transfer's default.
   function feeLuxForRecipientType(type) {
-    const defaultGas = defaultGasForRecipientType(type);
-    return defaultGas && defaultGas.limit != null && defaultGas.price != null
-      ? safeBigInt(defaultGas.limit, 0n) * safeBigInt(defaultGas.price, 0n)
-      : 0n;
+    const privacy = type === "address" ? "shielded" : "public";
+    return gasFeeLux(
+      startingGas({
+        defaultGas: getDefaultGas(TX_KIND.TRANSFER, { privacy }),
+        minLimit: getMinimumGas(TX_KIND.TRANSFER, { privacy })?.limit,
+        customGas: ov?.customGas,
+        gas: draft?.gas,
+      })
+    );
   }
 
   // Balances from overview.
@@ -135,27 +122,18 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   let detectedRecipientType = null; // "account" | "address" | null
 
-  const amountMetaMain = h("div", { class: "amount-meta__main", text: "" });
-  const amountMetaSub = h("div", { class: "amount-meta__sub", text: "" });
-  const amountMeta = h(
-    "div",
-    { class: "amount-meta", style: "display:none" },
-    [h("div", { class: "amount-meta__stack" }, [amountMetaMain, amountMetaSub])]
-  );
-
-  const amountCtl = createAmountSliderCard({
-    initialAmountDusk: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
-    actions,
-    onAmountInput: () => syncDraft(),
-    onAmountChange: () => syncDraft(),
+  // The amount: one large field with its error under it, then what's
+  // available after fees with Max, and the fee that leaves room for.
+  const field = amountField({
+    label: "Amount",
+    value: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
+    onInput: () => {
+      checkAmount();
+      syncDraft();
+    },
     onEnter: () => nextBtn.click(),
-    children: [amountMeta],
-    maxUnavailableToast: "Enter a valid recipient to calculate max",
-    hidden,
   });
-
-  const amount = amountCtl.amountInput;
-  const amountCard = amountCtl.el;
+  const amount = field.input;
 
   const clamp0 = (v) => (v > 0n ? v : 0n);
 
@@ -165,54 +143,85 @@ export function sendFormView(ov, { state, actions } = {}) {
       return clamp0(shSpendLux - feeLuxForRecipientType("address"));
     }
     if (detectedRecipientType === "account") {
-      // Public transfers are limited by the Moonlight account balance.
+      // Public transfers are limited by the public balance.
       if (ov?.balance?.value == null) return null;
       return clamp0(pubBalLux - feeLuxForRecipientType("account"));
     }
     return null;
   }
 
+  const availText = h("span", { class: "amount-avail__text" });
+  const maxBtn = h("button", {
+    class: "mini-btn",
+    type: "button",
+    text: "Max",
+    title: "All of it, less the network fee",
+    disabled: true,
+    onclick: () => {
+      const maxLux = getMaxAmountLux();
+      if (maxLux == null || maxLux <= 0n) return;
+      // The real amount, with balances hidden too: it's what gets sent.
+      field.setValue(formatLuxToDusk(maxLux));
+      checkAmount();
+      syncDraft();
+      amount.focus();
+    },
+  });
+  const available = h("div", { class: "amount-avail", hidden: true }, [availText, maxBtn]);
+  const feeNote = h("div", { class: "amount-fee-note", hidden: true });
+
+  // The amount as typed, checked as it is typed: an error under the field,
+  // and the amount in Lux when it can be sent.
+  function checkAmount({ required = false } = {}) {
+    const raw = String(amount.value ?? "").trim();
+    if (!raw) {
+      field.setError(required ? "Enter an amount." : "");
+      return null;
+    }
+    let lux;
+    try {
+      lux = safeBigInt(parseDuskToLux(raw), 0n);
+    } catch {
+      field.setError("Enter an amount such as 1 or 0.5.");
+      return null;
+    }
+    if (lux <= 0n) {
+      field.setError("Enter an amount greater than 0.");
+      return null;
+    }
+    const maxLux = getMaxAmountLux();
+    if (maxLux != null && lux > maxLux) {
+      field.setError("That's more than you have, with the network fee.");
+      return null;
+    }
+    field.setError("");
+    return lux;
+  }
+
   function updateAmountHelpers() {
     const maxLux = getMaxAmountLux();
-
-    // Enable/disable the slider and MAX button.
-    amountCtl.setMaxLux(maxLux);
-
+    maxBtn.disabled = maxLux == null || maxLux <= 0n;
     if (maxLux == null) {
-      amountMeta.style.display = "none";
+      available.hidden = true;
+      feeNote.hidden = true;
+      checkAmount();
       return;
     }
-
-    amountMeta.style.display = "flex";
-
-    if (detectedRecipientType === "address") {
-      const feeLux = feeLuxForRecipientType("address");
-      amountMetaMain.replaceChildren(
-        "Spendable (shielded): ",
-        balance(hidden, formatDusk(maxLux)),
-        " DUSK"
-      );
-
-      const parts = [];
-      if (shSpendLux != null && shValueLux > shSpendLux) {
-        parts.push(["Total shielded: ", balance(hidden, formatDusk(shValueLux)), " DUSK"]);
-      }
-      if (feeLux > 0n) {
-        parts.push([`Fee cap: ${formatFee(feeLux)} DUSK`]);
-      }
-      amountMetaSub.replaceChildren(...parts.flatMap((part, i) => (i ? [" · ", ...part] : part)));
-    } else {
-      const feeLux = feeLuxForRecipientType("account");
-      amountMetaMain.replaceChildren(
-        "Available (public): ",
-        balance(hidden, formatDusk(maxLux)),
-        " DUSK"
-      );
-      amountMetaSub.textContent = feeLux > 0n ? `Fee cap: ${formatFee(feeLux)} DUSK` : "";
+    const feeLux = feeLuxForRecipientType(detectedRecipientType);
+    availText.replaceChildren(
+      feeLux > 0n ? "Available after fees " : "Available ",
+      balance(hidden, formatDusk(maxLux)),
+      " DUSK"
+    );
+    available.hidden = false;
+    const notes = [];
+    if (feeLux > 0n) notes.push(`Network fee up to ${formatFee(feeLux, { max: true })} DUSK`);
+    if (detectedRecipientType === "address" && shSpendLux != null && shValueLux > shSpendLux) {
+      notes.push("Part of your shielded DUSK waits on a pending transaction");
     }
-
-    // Keep slider aligned with whatever is in the input.
-    // (amountCtl.setMaxLux already syncs when maxLux is usable)
+    feeNote.textContent = notes.join(" · ");
+    feeNote.hidden = !notes.length;
+    checkAmount();
   }
 
   const currentChain = normalizeChainId(chainIdFromNodeUrl(ov?.nodeUrl ?? ""));
@@ -240,11 +249,11 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     if (isDuskReq) {
       // A full dusk: request link should define the form values.
-      amount.value = req.amountDusk || "";
+      field.setValue(req.amountDusk || "");
       memo.value = req.memo || "";
     } else {
       // A raw recipient QR should not clobber what the user already typed.
-      if (req.amountDusk) amount.value = req.amountDusk;
+      if (req.amountDusk) field.setValue(req.amountDusk);
       if (req.memo) memo.value = req.memo;
     }
 
@@ -433,11 +442,11 @@ export function sendFormView(ov, { state, actions } = {}) {
   // the address it sends to, never the name.
   let shownName = null;
 
-  // The .dusk names this wallet knows: contacts saved under one, the names
-  // typed for past sends, and past transfers' verified names.
+  // The .dusk names this wallet knows: contacts saved from one or named as
+  // one, the names typed for past sends, and past transfers' verified names.
   const knownDuskNames = () => {
     const names = [
-      ...(state.addressBook?.items ?? []).map((c) => c?.name),
+      ...(state.addressBook?.items ?? []).flatMap((c) => [c?.duskName, c?.name]),
       ...(Array.isArray(ov?.txs) ? ov.txs : []).map((tx) => tx?.toName),
       ...(state.activity?.names instanceof Map ? state.activity.names.values() : []),
     ];
@@ -533,6 +542,26 @@ export function sendFormView(ov, { state, actions } = {}) {
     return { lookup: lookupDuskName(v, { nodeUrl: ov?.nodeUrl }), latest: () => n === lookupCount };
   };
 
+  // A pasted public account with a verified .dusk name shows it, as the
+  // explorer does; only the latest lookup's answer counts.
+  let primaryCount = 0;
+  const showPrimaryName = (account) => {
+    const n = ++primaryCount;
+    if (!duskNamesNetwork(ov?.nodeUrl) || account === ownAccount) return;
+    lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true })
+      ?.then?.((name) => {
+        if (!name || n !== primaryCount || String(to.value || "").trim() !== account) return;
+        showNameBox([
+          h("div", { class: "name-verified" }, [
+            h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("check") }),
+            h("span", { class: "name-verified__name", text: name }),
+            h("span", { class: "name-verified__note", text: " · its verified .dusk name" }),
+          ]),
+        ]);
+      })
+      ?.catch?.(() => {});
+  };
+
   const showDuskName = (v) => {
     const { lookup, latest } = startLookup(v);
     if (lookup.result) {
@@ -553,6 +582,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     const v = String(to.value || "").trim();
     showSelfNote("");
     shownName = null;
+    primaryCount += 1;
     if (!isDuskName(v)) {
       showNameBox([]);
       nextBtn.disabled = false;
@@ -596,6 +626,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       detectedRecipientType = t;
       updateContactMatch(v, t);
       showSelfNote(v);
+      if (t === "account") showPrimaryName(v);
       updateAmountHelpers();
       return;
     }
@@ -635,7 +666,6 @@ export function sendFormView(ov, { state, actions } = {}) {
     syncDraft();
   }
   to.addEventListener("input", onRecipientInput);
-  // Amount input is managed by the shared amount slider component.
   memo.addEventListener("input", syncDraft);
   to.addEventListener("paste", (e) => {
     try {
@@ -767,7 +797,13 @@ export function sendFormView(ov, { state, actions } = {}) {
         }
         const privacy = recType === "address" ? "shielded" : "public";
 
-        const amtLux = parseDuskToLux(amount.value);
+        // The amount says what's wrong under it; Review waits until it's right.
+        const amtLuxBig = checkAmount({ required: true });
+        if (amtLuxBig == null) {
+          amount.focus();
+          return;
+        }
+        const amtLux = amtLuxBig.toString();
         const memoVal = memo.value.trim();
 
         // Keep any previously edited gas settings if the user goes back and forth.
@@ -803,7 +839,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    h("div", { class: "row" }, [
+    h("div", { class: "row send-form" }, [
       fieldLabel(to, "To"),
       toRow,
       toTypePill,
@@ -811,13 +847,26 @@ export function sendFormView(ov, { state, actions } = {}) {
       nameBox,
       selfNote,
       fieldLabel(amount, "Amount"),
-      amountCard,
+      h("div", { class: "amount-entry send-amount" }, [field.el, field.error, available, feeNote]),
       fieldLabel(memo, "Memo"),
       memo,
       errBox,
       h("div", { class: "btnrow" }, [nextBtn]),
     ]),
   ].filter(Boolean);
+}
+
+/**
+ * What a public send shows everyone, for Review: "Visible to everyone:
+ * amount, memo, and your name alice.dusk." Without a memo it leaves memo
+ * out, and without a verified name it says "your account".
+ * @param {{ memo?: string, name?: string|null }} parts
+ * @returns {string}
+ */
+export function publicSendLine({ memo, name } = {}) {
+  const items = ["amount", memo ? "memo" : "", name ? `your name ${name}` : "your account"].filter(Boolean);
+  const list = items.length > 2 ? `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}` : items.join(" and ");
+  return `Visible to everyone: ${list}.`;
 }
 
 export function sendConfirmView(ov, { state, actions } = {}) {
@@ -830,35 +879,50 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   }
 
   const recType = ProfileGenerator.typeOf(String(d.to || "").trim());
-  // Public or shielded follows the recipient, as the pill does: Contacts can
-  // replace it after the draft's privacy was set.
+  // Public or shielded follows the recipient: Contacts can replace it after
+  // the draft's privacy was set.
   const privacy = recType === "address" ? "shielded" : "public";
-  const txTypeLabel = recType === "address" ? "Shielded transfer" : "Public transfer";
-  const txTypeBadge = recipientBadge({
-    ...(recipientTypeBadgeOptions(recType) || {
-      kind: "unknown",
-      icon: "?",
-      label: "Unknown",
-      title: "Unknown transfer",
-    }),
-    className: "recipient-type-badge",
-    title: txTypeLabel,
-  });
-
-  // ------------------------------------------------------------
-  // Contacts helper
-  // ------------------------------------------------------------
   const toAddr = String(d.to || "").trim();
 
-  const contactPill = recipientBadge({
-    kind: "contact",
-    className: "confirm-contact-badge",
-    hidden: true,
+  // The profile it's sent from, by its verified .dusk name as the header
+  // shows it; what a public send shows everyone names it too.
+  const ownIdxRaw = Number(ov?.selectedAccountIndex ?? 0);
+  const ownIdx = Number.isFinite(ownIdxRaw) && ownIdxRaw >= 0 ? Math.floor(ownIdxRaw) : 0;
+  const ownAccount = String(ov?.accounts?.[ownIdx] ?? "");
+  const ownAddress = String(ov?.addresses?.[ownIdx] ?? "");
+  const visibleLine = h("div", { class: "review-line review-visible", text: publicSendLine({ memo: d.memo, name: null }) });
+  const fromName = profileNameEl(ov, {
+    index: ownIdx,
+    onName: (name) => {
+      visibleLine.textContent = publicSendLine({ memo: d.memo, name });
+    },
   });
+
+  // Who it goes to: a saved contact's label and the recipient's .dusk name,
+  // both when there are both, over the full address.
+  const contactName = () => {
+    const key = toAddr.toLowerCase();
+    const hit = (Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).find(
+      (e) => String(e?.address ?? "").trim().toLowerCase() === key
+    );
+    return String(hit?.name ?? "").trim();
+  };
+  let verifiedName = "";
+  const toNames = h("div", { class: "review-to__names" });
+  const showToNames = () => {
+    const names = [contactName(), duskName?.name || verifiedName].filter(Boolean);
+    const unique = names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
+    toNames.textContent = unique.join(" · ");
+    toNames.hidden = !unique.length;
+  };
+
+  // Save to Contacts, unless it's saved already or it's this wallet's own.
+  const own = toAddr === ownAccount || toAddr === ownAddress;
   const saveContactBtn = h("button", {
-    class: "btn-outline",
+    class: "text-btn text-btn--inline review-save-contact",
     type: "button",
     text: "Save to Contacts",
+    hidden: true,
     onclick: async () => {
       try {
         // Open Contacts in a flow that returns back to this review screen.
@@ -868,6 +932,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           fromRoute: "confirm",
           pickReturnRoute: "confirm",
           prefillAddress: toAddr,
+          prefillName: duskName?.name || verifiedName || "",
           view: "edit",
           query: "",
           // keep any cached items so we can detect instantly on return
@@ -886,76 +951,37 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       }
     },
   });
-
-  const contactLine = h(
-    "div",
-    {
-      style:
-        "display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px;",
-    },
-    [contactPill, saveContactBtn]
-  );
-
-  const findContactName = (items) => {
-    const arr = Array.isArray(items) ? items : [];
-    const key = toAddr.toLowerCase();
-    for (const e of arr) {
-      const addr = String(e?.address ?? "").trim().toLowerCase();
-      if (addr && addr === key) return String(e?.name ?? "").trim();
-    }
-    return "";
+  const refreshContactUI = () => {
+    showToNames();
+    saveContactBtn.hidden = own || Boolean(contactName());
   };
+  refreshContactUI();
+  if (!state.addressBook?.loaded && toAddr) {
+    listAddressBook()
+      .then((items) => {
+        state.addressBook = { ...(state.addressBook || {}), loaded: true, loading: false, error: null, items };
+        refreshContactUI();
+      })
+      .catch(() => {});
+  }
 
-  const refreshContactUI = (items) => {
-    const name = findContactName(items);
-    if (name) {
-      setRecipientBadge(contactPill, {
-        kind: "contact",
-        label: name,
-        seed: toAddr,
-        title: `Saved contact: ${name}`,
-        className: "confirm-contact-badge",
-      });
-      saveContactBtn.style.display = "none";
-    } else {
-      hideRecipientBadge(contactPill);
-      saveContactBtn.style.display = "inline-flex";
-    }
-  };
-
-  // Initial best-effort check from cached state.
-  refreshContactUI(state.addressBook?.items);
-
-  // If not loaded yet, load once and patch the UI without forcing a re-render.
-  try {
-    if (!state.addressBook?.loaded && toAddr) {
-      listAddressBook()
-        .then((items) => {
-          try {
-            state.addressBook = {
-              ...(state.addressBook || {}),
-              loaded: true,
-              loading: false,
-              error: null,
-              items,
-            };
-          } catch {
-            // ignore
-          }
-          refreshContactUI(items);
+  // The names this Review shows come from the lookups the form and the
+  // header made, kept for a while: no new requests in the common case.
+  if (duskNamesNetwork(ov?.nodeUrl)) {
+    if (!duskName && recType === "account" && !own) {
+      lookupPrimaryName(toAddr, { nodeUrl: ov?.nodeUrl, stale: true })
+        ?.then?.((name) => {
+          if (!name) return;
+          verifiedName = name;
+          showToNames();
         })
-        .catch(() => {
-          // ignore
-        });
+        ?.catch?.(() => {});
     }
-  } catch {
-    // ignore
   }
 
   // Back returns to Send with the draft, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
-  // Gas editor (collapsed by default)
   const defaultGas = getDefaultGas(TX_KIND.TRANSFER, { privacy });
   const defaultLimit =
     defaultGas?.limit !== undefined && defaultGas?.limit !== null
@@ -970,17 +996,15 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   gasEditor.amountLux = d.amountLux;
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
 
-  // Prefer persisted draft gas. Otherwise we'll fetch the node's current gas
-  // price stats and set a recommended default (median).
-  gasEditor.setGas(d?.gas ?? null);
-
-  // The gas price line and the presets open with the fee's Edit.
-  createGasQuickControls({
+  // The network's gas price by default; Custom fee for gas of your own.
+  useNetworkGas({
+    customGas: ov?.customGas,
     actions,
     defaultLimit,
     fallbackPrice,
     gas: d?.gas,
     gasEditor,
+    minLimit: getMinimumGas(TX_KIND.TRANSFER, { privacy })?.limit,
   });
 
   // Gas that won't do says so above Confirm; nothing is sent.
@@ -1002,7 +1026,6 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     d.gas = gas;
 
     const capGas = gas ?? defaultGas;
-    const contactName = findContactName(state.addressBook?.items);
     await sendFromReview({
       state,
       actions,
@@ -1022,7 +1045,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       summary: {
         title: "Send",
         amountLux: d.amountLux,
-        to: { name: duskName?.name || contactName || "", address: d.to, short: shortAddress(d.to) },
+        to: { name: duskName?.name || contactName() || verifiedName || "", address: d.to, short: shortAddress(d.to) },
         from: privacy === "shielded" ? "from your shielded balance" : "from your public balance",
         memo: d.memo || "",
         feeCapLux: (safeBigInt(capGas?.limit, 0n) * safeBigInt(capGas?.price, 0n)).toString(),
@@ -1038,6 +1061,12 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   });
   submitOnGasEnter(gasEditor, confirmBtn);
 
+  const kv = (label, value, className = "") =>
+    h("div", { class: ["kv", className].filter(Boolean).join(" ") }, [
+      h("span", { class: "kv-label", text: label }),
+      h("span", { class: "kv-value" }, [].concat(value)),
+    ]);
+
   return [
     subnav({
       title: "Review",
@@ -1046,34 +1075,25 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    h("div", { class: "row" }, [
-      txTypeBadge,
-      // What the chain shows.
-      h("div", {
-        class: "muted transfer-line",
-        text: transferLine(privacy),
-      }),
-      h("div", { class: "home-balance" }, [
-        h("div", {
-          class: "balance-amount",
-          text: d.amountDusk || formatLuxToDusk(d.amountLux),
-        }),
-        h("div", { class: "balance-sub", text: "DUSK" }),
-      ]),
-      h("div", { class: "muted", text: "To" }),
-      duskName
-        ? namedAddressBox(duskName.name, h("code", { text: d.to }))
-        : h("div", { class: "box" }, [h("code", { text: d.to })]),
-      contactLine,
-      d.memo
-        ? h("div", { class: "row" }, [
-            h("div", { class: "muted", text: "Memo" }),
-            h("div", { class: "box" }, [h("code", { text: d.memo })]),
-          ])
-        : h("div"),
+    h("div", { class: "row send-review" }, [
+      h("div", { class: "review-head" }, [
+        h("div", { class: "review-kind", text: privacy === "shielded" ? "Shielded transfer" : "Public transfer" }),
+        h("div", { class: "balance-amount" }, [
+          formatDuskExact(d.amountLux),
+          h("span", { class: "balance-unit", text: " DUSK" }),
+        ]),
+        // What a public send shows everyone; a shielded one has no such line.
+        privacy === "public" ? visibleLine : null,
+      ].filter(Boolean)),
+      h("div", { class: "group" }, [
+        kv("To", h("span", { class: "review-to" }, [toNames, h("span", { class: "mono review-to__address", text: toAddr })]), "kv--wrap"),
+        kv("From", h("span", {}, [fromName, h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
+        d.memo ? kv("Memo", d.memo, "kv--wrap") : null,
+      ].filter(Boolean)),
+      saveContactBtn,
       gasEditor,
       confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ]),
-  ].filter(Boolean);
+  ];
 }

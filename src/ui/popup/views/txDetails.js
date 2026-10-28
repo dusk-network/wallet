@@ -1,16 +1,16 @@
 import { STAKE_CONTRACT, TRANSFER_CONTRACT } from "../../../shared/activityHistory.js";
 import { formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { lookupPrimaryName } from "../../../shared/duskNames.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { networkNameFromNodeUrl } from "../../../shared/network.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { truncateMiddle } from "../../lib/strings.js";
+import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
+import { profileNameEl } from "../../components/ProfileName.js";
 import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
 import { amountEl, contactNames, copyButton, dateText, describeTx, txIconSvg, txTime } from "./txRow.js";
 import { reasonText } from "./sent.js";
@@ -57,22 +57,10 @@ const kv = (label, value, { className = "" } = {}) =>
 
 const mono = (value, shown = value) => h("span", { class: "mono", title: value, text: shown });
 
-// The profile a transaction left or reached: its name, or its verified .dusk
-// name once looked up, and the balance: "alice.dusk · Public".
+// The profile a transaction left or reached, by its name as the header shows
+// it, and the balance: "alice.dusk · Public".
 function profileValue(ov, tx, rail) {
-  const raw = Number(tx?.profileIndex ?? ov?.selectedAccountIndex ?? 0);
-  const idx = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
-  const own = String(ov?.accountNames?.[String(idx)] ?? "").trim();
-  const nameEl = h("span", { text: own || `Profile ${idx + 1}` });
-  const account = String(ov?.accounts?.[idx] ?? "");
-  if (!own && account) {
-    lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true })
-      ?.then?.((name) => {
-        if (name) nameEl.textContent = name;
-      })
-      ?.catch?.(() => {});
-  }
-  return h("span", {}, [nameEl, h("span", { class: "kv-muted", text: ` · ${rail}` })]);
+  return h("span", {}, [profileNameEl(ov, { index: tx?.profileIndex }), h("span", { class: "kv-muted", text: ` · ${rail}` })]);
 }
 
 function feeRow(tx, desc) {
@@ -81,7 +69,7 @@ function feeRow(tx, desc) {
   const limit = safeBigInt(tx?.gasLimit, 0n);
   const price = safeBigInt(tx?.gasPrice, 0n);
   if (desc.tone === "pending" && tx?.source !== "archive" && limit > 0n && price > 0n) {
-    return kv("Network fee", `Up to ${formatFee(limit * price)} DUSK`);
+    return kv("Network fee", `Up to ${formatFee(limit * price, { max: true })} DUSK`);
   }
   return null;
 }
@@ -99,9 +87,9 @@ function technicalRows(tx, ov, nodeUrl) {
     used || limit ? kv("Gas used", used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
     finalKnown && ["executed", "failed"].includes(String(tx?.status ?? "")) ? kv("Finality", "Final") : null,
-    kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", mono(String(tx.contractId), truncateMiddle(String(tx.contractId), 8, 8))) : null,
+    kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", mono(String(tx.contractId), shortAddress(String(tx.contractId)))) : null,
     tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,
-    tx?.blockHash ? kv("Block hash", mono(String(tx.blockHash), truncateMiddle(String(tx.blockHash), 8, 8))) : null,
+    tx?.blockHash ? kv("Block hash", mono(String(tx.blockHash), shortAddress(String(tx.blockHash)))) : null,
     at("Submitted", tx?.submittedAt),
     at("Seen in mempool", tx?.mempoolSeenAt),
     at("Last checked", tx?.lastCheckedAt),
@@ -159,7 +147,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
       nav,
       h("div", { class: "tx-detail" }, [
         h("p", { class: "tx-missing", text: "This transaction isn't in your activity." }),
-        h("div", { class: "group" }, [kv("Transaction ID", mono(hash, truncateMiddle(hash, 8, 8)))]),
+        h("div", { class: "group" }, [kv("Transaction ID", mono(hash, shortAddress(hash)))]),
         explorerButton(explorerUrl, actions),
       ].filter(Boolean)),
     ];
@@ -188,7 +176,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
       desc.isAddress ? copyButton(desc.address, { showToast }) : null,
     ].filter(Boolean)),
     other
-      ? h("div", { class: "tx-hero-addr" }, [mono(other, truncateMiddle(other, 6, 6)), copyButton(other, { label: otherLabel, showToast })])
+      ? h("div", { class: "tx-hero-addr" }, [mono(other, shortAddress(other)), copyButton(other, { label: otherLabel, showToast })])
       : null,
     amountEl(desc.amount, hidden, "tx-hero-amount"),
     h("div", { class: `tx-hero-status is-${desc.tone}` }, [
@@ -224,9 +212,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
     class: "text-btn tx-id",
     type: "button",
     title: explorerUrl ? "Open in Dusk explorer" : hash,
-    "aria-label": explorerUrl ? `Transaction ${truncateMiddle(hash, 8, 8)}, open in Dusk explorer` : undefined,
+    "aria-label": explorerUrl ? `Transaction ${shortAddress(hash)}, open in Dusk explorer` : undefined,
     disabled: !explorerUrl,
-    text: truncateMiddle(hash, 8, 8),
+    text: shortAddress(hash),
     onclick: async () => {
       const ok = explorerUrl ? await openUrl(explorerUrl) : false;
       if (!ok) showToast?.("Couldn't open the explorer");

@@ -1,32 +1,14 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
-import { installFakeDom, isShown, settle } from "./testing/fakeDom.js";
+import { accessibleName, installFakeDom, isShown, press, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { convertConfirmView, convertFormView } from "./popup/views/convert.js";
 
-describe("convert view", () => {
-  it("uses shared recipient badges for shield and unshield flow indicators", async () => {
-    const source = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "popup", "views", "convert.js"),
-      "utf8"
-    );
-    const badgeComponent = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "components", "RecipientBadge.js"),
-      "utf8"
-    );
-
-    expect(source).toContain("RecipientBadge.js");
-    expect(source).toContain("privacyFlowBadgeOptions");
-    expect(source).toContain("recipientBadge");
-    expect(source).not.toContain('class: "meta-pill", text: `${fromLabel} → ${toLabel}`');
-
-    expect(badgeComponent).toContain("privacyFlowBadgeOptions");
-    expect(badgeComponent).toContain("`${fromLabel} -> ${toLabel}`");
-  });
-});
+vi.mock("../shared/duskNames.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  lookupPrimaryName: vi.fn(async () => "alice.dusk"),
+}));
 
 describe("shield and unshield", () => {
   let dom;
@@ -39,36 +21,104 @@ describe("shield and unshield", () => {
     vi.unstubAllGlobals();
   });
 
-  // 1482.9383 DUSK public and 25 DUSK shielded; either way the fee cap is 0.05 DUSK.
-  const ov = { balance: { value: "1482938300000" }, shieldedBalance: { value: "25000000000", spendable: "25000000000" } };
-  const actions = () => ({ send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn() });
+  // 1482.9383 DUSK public and 25 DUSK shielded; either way the fee is at most 0.05 DUSK.
+  const ov = {
+    nodeUrl: "https://testnet.nodes.dusk.network",
+    accounts: ["acct"],
+    selectedAccountIndex: 0,
+    balance: { value: "1482938300000" },
+    shieldedBalance: { value: "25000000000", spendable: "25000000000" },
+  };
+  const actions = (state) => ({
+    send: vi.fn(async () => ({})),
+    render: vi.fn(async () => draw(state)),
+    showToast: vi.fn(),
+  });
+  const draw = (state) =>
+    dom.document.body.replaceChildren(
+      ...(state.route === "convert_confirm" ? convertConfirmView : convertFormView)(ov, { state, actions: actions(state) })
+    );
+  const body = () => dom.document.body;
+  const button = (text) => body().querySelectorAll("button").find((b) => b.textContent === text);
 
-  it("words the balance as Send does, with the fee cap on its own line", () => {
-    const lines = (kind) => {
-      dom.document.body.replaceChildren(...convertFormView(ov, { state: { route: "convert", draft: { kind } }, actions: actions() }));
-      return dom.document.body.querySelectorAll(".row > .box > .muted").map((line) => line.textContent);
-    };
-    expect(lines(TX_KIND.SHIELD)).toEqual(["Available (public): 1,482.8883 DUSK", "Fee cap: 0.0500 DUSK"]);
-    expect(lines(TX_KIND.UNSHIELD)).toEqual(["Spendable (shielded): 24.95 DUSK", "Fee cap: 0.0500 DUSK"]);
-    expect(dom.document.body.querySelector("input.amount-input").getAttribute("placeholder")).toBe("e.g. 1.25 DUSK");
+  it("says which way it goes, and what's available after fees, as Send does", () => {
+    const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
+    draw(state);
+    const read = () => [
+      visibleText(body().querySelector(".convert-flow")),
+      visibleText(body().querySelector(".amount-avail__text")),
+      visibleText(body().querySelector(".amount-fee-note")),
+    ];
+    expect(read()).toEqual([
+      "From your public balance to your shielded balance.",
+      "Available after fees 1,482.8883 DUSK",
+      "Network fee up to 0.05 DUSK",
+    ]);
+    // The switch says which is picked, and the arrow keys move it.
+    const tabs = body().querySelector("[role=tablist]");
+    expect(accessibleName(tabs)).toBe("Direction");
+    expect(tabs.querySelectorAll("[role=tab]").map((t) => [t.textContent, t.getAttribute("aria-selected")])).toEqual([
+      ["Shield", "true"],
+      ["Unshield", "false"],
+    ]);
+    press(tabs.querySelector("[aria-selected=true]"), "ArrowRight");
+    expect(state.draft.kind).toBe(TX_KIND.UNSHIELD);
+    expect(read()).toEqual([
+      "From your shielded balance to your public balance.",
+      "Available after fees 24.95 DUSK",
+      "Network fee up to 0.05 DUSK",
+    ]);
   });
 
-  it("names the whole-balance button Max, in the type other buttons use, as Stake and Sozu do", async () => {
-    for (const kind of [TX_KIND.SHIELD, TX_KIND.UNSHIELD]) {
-      dom.document.body.replaceChildren(...convertFormView(ov, { state: { route: "convert", draft: { kind } }, actions: actions() }));
-      expect(dom.document.body.querySelector(".amount-input-row button").textContent).toBe("Max");
-    }
-    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-    expect(css).not.toContain(".max-btn");
+  it("fills Max with the real amount, and says under the field what's wrong", () => {
+    const state = { route: "convert", draft: { kind: TX_KIND.UNSHIELD } };
+    draw(state);
+    const input = body().querySelector("input.amount-field__input");
+    const error = () => (isShown(body().querySelector(".amount-field__error")) ? body().querySelector(".amount-field__error").textContent : "");
+    button("Max").click();
+    expect(input.value).toBe("24.95");
+    typeInto(input, "30");
+    expect(error()).toBe("That's more than your shielded balance, with the network fee.");
+    typeInto(input, "");
+    button("Review").click();
+    expect([error(), state.route]).toEqual(["Enter an amount.", "convert"]);
+    typeInto(input, "2");
+    button("Review").click();
+    expect(state).toMatchObject({ route: "convert_confirm", draft: { kind: TX_KIND.UNSHIELD, amountLux: "2000000000" } });
   });
 
-  it("reviews with Back and Confirm, the gas presets behind the fee's Edit", async () => {
-    const state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountLux: "1000000000", amountDusk: "1" } };
-    dom.document.body.replaceChildren(...convertConfirmView(ov, { state, actions: actions() }));
+  it("sets aside the fee Review starts from, with custom gas from Settings", async () => {
+    // Price 3 and the shield's own 50M limit, as the custom 2.5M is under its minimum.
+    const custom = { ...ov, customGas: { limit: "2500000", price: "3" } };
+    const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
+    const show = () =>
+      dom.document.body.replaceChildren(
+        ...(state.route === "convert_confirm" ? convertConfirmView : convertFormView)(custom, {
+          state,
+          actions: { send: vi.fn(async () => ({})), render: vi.fn(async () => show()), showToast: vi.fn() },
+        })
+      );
+    show();
+    expect(visibleText(body().querySelector(".amount-avail__text"))).toBe("Available after fees 1,482.7883 DUSK");
+    expect(visibleText(body().querySelector(".amount-fee-note"))).toBe("Network fee up to 0.15 DUSK");
+    button("Max").click();
+    expect(body().querySelector("input.amount-field__input").value).toBe("1482.7883");
+    button("Review").click();
     await settle();
-    const shown = () => dom.document.body.querySelectorAll("button").filter(isShown).map((b) => b.textContent);
-    expect(shown()).toEqual(["← Back", "Edit", "Confirm"]);
-    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Edit").click();
-    expect(shown()).toEqual(["← Back", "Hide", "Auto", "Low", "Recommended", "High", "Confirm"]);
+    expect(visibleText(body().querySelector(".gas-fee"))).toBe("Network feeup to 0.15 DUSKTotalup to 1,482.9383 DUSK");
+  });
+
+  it("reviews the amount, the profile it moves within, and the fee, with Back and Confirm", async () => {
+    const state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountLux: "1000000000", amountDusk: "1" } };
+    draw(state);
+    await settle();
+    expect(visibleText(body().querySelector(".review-head"))).toBe("Shield1 DUSKFrom your public balance to your shielded balance");
+    expect(body().querySelectorAll(".convert-review > .group > .kv").map(visibleText)).toEqual([
+      "Fromalice.dusk · Public",
+      "Toalice.dusk · Shielded",
+    ]);
+    const shown = () => body().querySelectorAll("button").filter(isShown).map((b) => b.textContent);
+    expect(shown()).toEqual(["← Back", "Confirm"]);
+    expect(visibleText(body().querySelector("details.gas-custom summary"))).toBe("Custom fee");
   });
 });

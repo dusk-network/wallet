@@ -1,168 +1,160 @@
 import {
   UI_DISPLAY_DECIMALS,
   formatDusk,
+  formatDuskExact,
   formatFee,
   formatLuxToDusk,
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { getDefaultGas } from "../../../shared/txDefaults.js";
+import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
-import { createAmountSliderCard } from "../../components/AmountSliderCard.js";
+import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
-import { createGasQuickControls } from "../../components/GasQuickControls.js";
-import {
-  privacyFlowBadgeOptions,
-  recipientBadge,
-} from "../../components/RecipientBadge.js";
+import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
+import { profileNameEl } from "../../components/ProfileName.js";
+import { segmented } from "../../components/Segmented.js";
 import { sendFromReview } from "./sent.js";
 
-function fmtAvail(lux) {
-  try {
-    return formatDusk(lux, UI_DISPLAY_DECIMALS);
-  } catch {
-    return "—";
-  }
-}
+// Shield moves DUSK from the profile's public balance to its shielded one,
+// Unshield back: one large amount field, what's available after the fee with
+// Max, then Review.
+
+const flowLine = (kind) =>
+  kind === TX_KIND.SHIELD
+    ? "From your public balance to your shielded balance"
+    : "From your shielded balance to your public balance";
 
 export function convertFormView(ov, { state, actions } = {}) {
   const draft = state.draft || {};
   const kind = draft.kind === TX_KIND.UNSHIELD ? TX_KIND.UNSHIELD : TX_KIND.SHIELD;
   const hidden = balancesHidden(ov);
 
-  const defaultGas = getDefaultGas(kind);
-  const feeLux =
-    defaultGas && defaultGas.limit != null && defaultGas.price != null
-      ? safeBigInt(defaultGas.limit, 0n) * safeBigInt(defaultGas.price, 0n)
-      : 0n;
+  // The fee Review starts from, so Max matches what Review asks.
+  const feeLux = gasFeeLux(
+    startingGas({ defaultGas: getDefaultGas(kind), minLimit: getMinimumGas(kind)?.limit, customGas: ov?.customGas, gas: draft.gas })
+  );
 
-  // Assigned later (we want to pass it into components as a live closure).
-  let syncDraft = () => {};
-
-  const amountCtl = createAmountSliderCard({
-    initialAmountDusk: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
-    actions,
-    onAmountInput: () => syncDraft(),
-    onAmountChange: () => syncDraft(),
-    onEnter: () => nextBtn.click(),
-    hidden,
-  });
-
-  const amount = amountCtl.amountInput;
-  const amountCard = amountCtl.el;
-
-  syncDraft = () => {
-    state.draft = {
-      ...(state.draft || {}),
-      kind,
-      amountDusk: String(amount.value || ""),
-      gas: state.draft?.gas,
-    };
-  };
-
-  const errBox = h("div", { class: "err", style: "display:none" });
-  const setErr = (txt) => {
-    if (!txt) {
-      errBox.style.display = "none";
-      errBox.textContent = "";
-      return;
-    }
-    errBox.style.display = "block";
-    errBox.textContent = txt;
-  };
-
-  const setKind = (next) => {
-    state.draft = {
-      ...(state.draft || {}),
-      kind: next,
-    };
-    actions?.render?.().catch(() => {});
-  };
-
-  // Basic availability hints
+  // What it can move: the public balance, or the shielded one that can be
+  // spent now, less the fee.
   const pubLux = safeBigInt(ov?.balance?.value, 0n);
   const shSpendLux =
     ov?.shieldedBalance?.spendable != null
       ? safeBigInt(ov.shieldedBalance.spendable, 0n)
       : safeBigInt(ov?.shieldedBalance?.value, 0n);
-  const fromLabel = kind === TX_KIND.SHIELD ? "Public" : "Shielded";
-  const toLabel = kind === TX_KIND.SHIELD ? "Shielded" : "Public";
-
   const availRaw = kind === TX_KIND.SHIELD ? pubLux : shSpendLux;
   const avail = availRaw > feeLux ? availRaw - feeLux : 0n;
 
-  // Wire the shared MAX + slider component against the calculated maximum.
-  amountCtl.setMaxLux(avail);
+  const syncDraft = () => {
+    state.draft = {
+      ...(state.draft || {}),
+      kind,
+      amountDusk: String(field.input.value || ""),
+      gas: state.draft?.gas,
+    };
+  };
 
-  // Worded as Send words them, the fee cap on a line of its own.
-  const availLabel = kind === TX_KIND.SHIELD ? "Available (public)" : "Spendable (shielded)";
-  const info = h("div", { class: "box" }, [
-    recipientBadge({
-      ...privacyFlowBadgeOptions({ from: fromLabel, to: toLabel }),
-      className: "recipient-type-badge",
-    }),
-    h("div", { class: "muted", style: "margin-top:6px" }, [
-      `${availLabel}: `,
-      balance(hidden, fmtAvail(avail)),
+  const field = amountField({
+    label: "Amount",
+    value: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
+    onInput: () => {
+      check();
+      syncDraft();
+    },
+    onEnter: () => nextBtn.click(),
+  });
+
+  // The amount as typed, checked as it is typed: an error under the field.
+  function check({ required = false } = {}) {
+    const raw = String(field.input.value ?? "").trim();
+    if (!raw) {
+      field.setError(required ? "Enter an amount." : "");
+      return null;
+    }
+    let lux;
+    try {
+      lux = safeBigInt(parseDuskToLux(raw), 0n);
+    } catch {
+      field.setError("Enter an amount such as 1 or 0.5.");
+      return null;
+    }
+    if (lux <= 0n) {
+      field.setError("Enter an amount greater than 0.");
+      return null;
+    }
+    if (lux > avail) {
+      field.setError(
+        kind === TX_KIND.SHIELD
+          ? "That's more than your public balance, with the network fee."
+          : "That's more than your shielded balance, with the network fee."
+      );
+      return null;
+    }
+    field.setError("");
+    return lux;
+  }
+
+  const maxBtn = h("button", {
+    class: "mini-btn",
+    type: "button",
+    text: "Max",
+    title: "All of it, less the network fee",
+    disabled: avail <= 0n,
+    onclick: () => {
+      // The real amount, with balances hidden too: it's what gets moved.
+      field.setValue(formatLuxToDusk(avail));
+      check();
+      syncDraft();
+      field.input.focus();
+    },
+  });
+  const available = h("div", { class: "amount-avail" }, [
+    h("span", { class: "amount-avail__text" }, [
+      feeLux > 0n ? "Available after fees " : "Available ",
+      balance(hidden, formatDusk(avail)),
       " DUSK",
     ]),
-    feeLux > 0n
-      ? h("div", { class: "muted", text: `Fee cap: ${formatFee(feeLux)} DUSK` })
-      : null,
+    maxBtn,
   ]);
+  const feeNote = feeLux > 0n ? h("div", { class: "amount-fee-note", text: `Network fee up to ${formatFee(feeLux, { max: true })} DUSK` }) : null;
 
   const nextBtn = h("button", {
     class: "btn-primary",
     text: "Review",
     onclick: async () => {
-      try {
-        setErr("");
-        const amtLuxStr = parseDuskToLux(amount.value);
-        const amtLux = BigInt(amtLuxStr);
-        if (amtLux <= 0n) throw new Error("Amount must be > 0");
-
-        // Friendly local pre-check (server will enforce anyway)
-        if (amtLux > avail) {
-          throw new Error(`Insufficient ${fromLabel.toLowerCase()} balance`);
-        }
-
-        const prevGas = draft?.gas;
-
-        state.draft = {
-          kind,
-          amountLux: amtLuxStr,
-          amountDusk: amount.value.trim(),
-          gas: prevGas,
-        };
-        state.route = "convert_confirm";
-        await actions?.render?.();
-      } catch (e) {
-        setErr(e?.message ?? String(e));
+      const lux = check({ required: true });
+      if (lux == null) {
+        field.input.focus();
+        return;
       }
+      state.draft = {
+        kind,
+        amountLux: lux.toString(),
+        amountDusk: String(field.input.value ?? "").trim(),
+        gas: draft?.gas,
+      };
+      state.route = "convert_confirm";
+      await actions?.render?.();
     },
   });
-  const modeTabs = h("div", { class: "tabs", style: `--seg-index: ${kind === TX_KIND.SHIELD ? 0 : 1};` }, [
-    h(
-      "button",
-      {
-        class: kind === TX_KIND.SHIELD ? "tab is-active" : "tab",
-        onclick: () => setKind(TX_KIND.SHIELD),
-      },
-      [h("span", { text: "Shield" })]
-    ),
-    h(
-      "button",
-      {
-        class: kind === TX_KIND.UNSHIELD ? "tab is-active" : "tab",
-        onclick: () => setKind(TX_KIND.UNSHIELD),
-      },
-      [h("span", { text: "Unshield" })]
-    ),
-  ]);
+
+  // Shield or Unshield: the same screen, the other way.
+  const modeTabs = segmented({
+    label: "Direction",
+    items: [
+      { id: TX_KIND.SHIELD, text: "Shield" },
+      { id: TX_KIND.UNSHIELD, text: "Unshield" },
+    ],
+    selected: kind,
+    onSelect: (next) => {
+      state.draft = { ...(state.draft || {}), kind: next };
+      actions?.render?.().catch(() => {});
+    },
+  });
 
   return [
     subnav({
@@ -173,15 +165,14 @@ export function convertFormView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    h("div", { class: "row" }, [
+    h("div", { class: "row convert-form" }, [
       modeTabs,
-      info,
-      fieldLabel(amount, "Amount"),
-      amountCard,
-      errBox,
+      h("p", { class: "convert-flow", text: `${flowLine(kind)}.` }),
+      fieldLabel(field.input, "Amount"),
+      h("div", { class: "amount-entry send-amount" }, [field.el, field.error, available, feeNote].filter(Boolean)),
       h("div", { class: "btnrow" }, [nextBtn]),
     ]),
-  ].filter(Boolean);
+  ];
 }
 
 export function convertConfirmView(ov, { state, actions } = {}) {
@@ -192,8 +183,8 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   }
 
   const kind = d.kind === TX_KIND.UNSHIELD ? TX_KIND.UNSHIELD : TX_KIND.SHIELD;
-  const fromLabel = kind === TX_KIND.SHIELD ? "Public" : "Shielded";
-  const toLabel = kind === TX_KIND.SHIELD ? "Shielded" : "Public";
+  const fromRail = kind === TX_KIND.SHIELD ? "Public" : "Shielded";
+  const toRail = kind === TX_KIND.SHIELD ? "Shielded" : "Public";
 
   // Back returns to Shield with the draft, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
@@ -211,16 +202,16 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.amountLux = d.amountLux;
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-  gasEditor.setGas(d?.gas ?? null);
 
-  // The gas price line and the presets open with the fee's Edit.
-  createGasQuickControls({
+  // The network's gas price by default; Custom fee for gas of your own.
+  useNetworkGas({
+    customGas: ov?.customGas,
     actions,
     defaultLimit,
     fallbackPrice,
     gas: d?.gas,
     gasEditor,
-    overrideHint: "Gas override set.",
+    minLimit: getMinimumGas(kind)?.limit,
   });
 
   // Gas that won't do says so above Confirm; nothing is sent.
@@ -254,7 +245,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       summary: {
         title: kind === TX_KIND.SHIELD ? "Shield" : "Unshield",
         amountLux: d.amountLux,
-        line: `${fromLabel} → ${toLabel}`,
+        line: `${fromRail} → ${toRail}`,
         from: kind === TX_KIND.SHIELD ? "from your public balance" : "from your shielded balance",
         feeCapLux: (safeBigInt(capGas?.limit, 0n) * safeBigInt(capGas?.price, 0n)).toString(),
       },
@@ -269,6 +260,12 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   });
   submitOnGasEnter(gasEditor, confirmBtn);
 
+  const kv = (label, rail) =>
+    h("div", { class: "kv" }, [
+      h("span", { class: "kv-label", text: label }),
+      h("span", { class: "kv-value" }, [h("span", {}, [profileNameEl(ov), h("span", { class: "kv-muted", text: ` · ${rail}` })])]),
+    ]);
+
   return [
     subnav({
       title: "Review",
@@ -277,21 +274,16 @@ export function convertConfirmView(ov, { state, actions } = {}) {
         actions?.render?.().catch(() => {});
       },
     }),
-    h("div", { class: "row" }, [
-      recipientBadge({
-        ...privacyFlowBadgeOptions({ from: fromLabel, to: toLabel }),
-        className: "recipient-type-badge",
-      }),
-      h("div", { class: "home-balance" }, [
-        h("div", {
-          class: "balance-amount",
-          text: d.amountDusk || formatLuxToDusk(d.amountLux),
-        }),
-        h("div", { class: "balance-sub", text: "DUSK" }),
+    h("div", { class: "row convert-review" }, [
+      h("div", { class: "review-head" }, [
+        h("div", { class: "review-kind", text: kind === TX_KIND.SHIELD ? "Shield" : "Unshield" }),
+        h("div", { class: "balance-amount" }, [formatDuskExact(d.amountLux), h("span", { class: "balance-unit", text: " DUSK" })]),
+        h("div", { class: "review-line", text: flowLine(kind) }),
       ]),
+      h("div", { class: "group" }, [kv("From", fromRail), kv("To", toRail)]),
       gasEditor,
       confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ]),
-  ].filter(Boolean);
+  ];
 }

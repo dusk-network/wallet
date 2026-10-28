@@ -1,4 +1,4 @@
-import { getSettings, setSettings } from "../shared/settings.js";
+import { getSettings, normalizeCustomGas, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import {
   getWatchedAssets,
@@ -87,6 +87,12 @@ export async function handleUiCommand(
   if (type === "DUSK_UI_SET_HIDE_BALANCES") {
     const next = await setSettings({ hideBalances: message.hideBalances === true });
     return { ok: true, hideBalances: next.hideBalances === true };
+  }
+
+  // Custom gas from Settings, or null for the network's price.
+  if (type === "DUSK_UI_SET_CUSTOM_GAS") {
+    const next = await setSettings({ customGas: normalizeCustomGas(message.customGas) });
+    return { ok: true, customGas: next.customGas ?? null };
   }
 
   if (type === "DUSK_UI_GET_CACHED_GAS_PRICE") {
