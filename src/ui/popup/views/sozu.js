@@ -155,12 +155,11 @@ const hexId = (id) => String(id ?? "").trim().toLowerCase().replace(/^0x/, "");
 /**
  * Sozu's terms for a drafted stake as they are now, read again just before
  * it's sent: its pool takes the fee of that moment, and Sozu's manager can
- * change it, or pause deposits, at any time. The draft and the status the
- * Review shows are brought up to date.
- * @returns {Promise<"same" | "changed" | "unread">} "changed" when anything
- *   the Review shows changed, or deposits aren't open now
+ * change it, or pause deposits, at any time. Changes nothing itself.
+ * @returns {Promise<{ status: object, quote: object, depositFee: object, poolId: string } | null>}
+ *   null when they couldn't be read
  */
-async function recheckStake({ st, actions, draft }) {
+async function readStakeTerms(actions, draft) {
   let status = null;
   try {
     const resp = await actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: Number(draft.profileIndex ?? 0) || 0 });
@@ -171,11 +170,17 @@ async function recheckStake({ st, actions, draft }) {
   const { pool, depositFee } = stakeTerms(status);
   const quote = sozuStakeQuote(draftAmountLux(draft), pool, depositFee);
   const poolId = hexId(status?.contracts?.pool);
-  if (!quote || !/^[0-9a-f]{64}$/.test(poolId)) {
-    // Staking reads Sozu again on the way back.
-    st.loaded = false;
-    return "unread";
-  }
+  return quote && /^[0-9a-f]{64}$/.test(poolId) ? { status, quote, depositFee, poolId } : null;
+}
+
+/**
+ * Brings a drafted stake, and the status its Review shows, up to the terms
+ * just read.
+ * @returns {boolean} whether anything the Review shows changed, or deposits
+ *   aren't open now
+ */
+function applyStakeTerms({ st, draft, terms }) {
+  const { status, quote, depositFee, poolId } = terms;
   const wasSyncing = st.status?.features?.synchronization === true;
   st.status = status;
   st.pool = status.pool ?? null;
@@ -187,11 +192,16 @@ async function recheckStake({ st, actions, draft }) {
     status.features?.maintenance !== false ||
     (!wasSyncing && status.features?.synchronization === true);
   draft.quote = next;
-  if (!changed) return "same";
-  draft.contractId = poolId;
-  draft.termsChanged = true;
-  return "changed";
+  if (changed) {
+    draft.contractId = poolId;
+    draft.termsChanged = true;
+  }
+  return changed;
 }
+
+// Drafted stakes whose Confirm is reading Sozu's terms again: one check at a
+// time for each, a redrawn Review's Confirm included.
+const rechecking = new WeakSet();
 
 function sozuState(state) {
   return (state.sozu ??= {
@@ -702,7 +712,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const confirmBtn = h("button", {
     class: "btn-primary",
     text: "Confirm",
-    disabled: submitDisabled,
+    disabled: submitDisabled || rechecking.has(draft),
   });
 
   // The call's own gas at the network's price; Custom fee for gas of your own.
@@ -735,10 +745,29 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     },
   });
 
-  // Gas that won't do says so above Confirm; nothing is sent.
-  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
+  // Gas that won't do, or terms that couldn't be checked, say so above Confirm; nothing is sent.
+  const confirmError = h("div", { class: "field-error", role: "alert", hidden: !draft.checkError, text: draft.checkError ?? "" });
+
+  // This Review: its route and its draft, on the network and profile it was
+  // drawn on. A check that answers after it was left does nothing at all.
+  const reviewNode = String(ov?.nodeUrl ?? "");
+  const reviewProfile = Number(ov?.selectedAccountIndex ?? 0) || 0;
+  const reviewNetwork = String(liveStatus?.networkKey ?? "");
+  const stillHere = (terms) => {
+    const now = state.overview ?? ov;
+    return (
+      state.route === "sozu_confirm" &&
+      state.sozuDraft === draft &&
+      now?.isUnlocked !== false &&
+      String(now?.nodeUrl ?? "") === reviewNode &&
+      (Number(now?.selectedAccountIndex ?? 0) || 0) === reviewProfile &&
+      (!terms || !reviewNetwork || String(terms.status?.networkKey ?? "") === reviewNetwork)
+    );
+  };
 
   confirmBtn.addEventListener("click", async () => {
+    // One check at a time for this stake, whichever Confirm is pressed.
+    if (rechecking.has(draft)) return;
     let gas;
     try {
       gas = gasEditor.readFinalGas();
@@ -747,6 +776,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       confirmError.hidden = false;
       return;
     }
+    draft.checkError = "";
     confirmError.hidden = true;
     confirmBtn.disabled = true;
     // Fields left empty send the call's own gas at the network's price,
@@ -757,19 +787,29 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     // them again first, and if anything this Review shows changed, show the
     // new figures for another Confirm instead of sending.
     if (isStake) {
-      const terms = await recheckStake({ st, actions, draft });
-      if (terms === "unread") {
-        confirmError.textContent = "Couldn't check Sozu's terms just now, so nothing was sent. Try again.";
-        confirmError.hidden = false;
-        confirmBtn.disabled = submitDisabled;
+      rechecking.add(draft);
+      let terms = null;
+      try {
+        terms = await readStakeTerms(actions, draft);
+      } finally {
+        rechecking.delete(draft);
+      }
+      // Left meanwhile, another stake drafted, or another network or profile:
+      // the answer is for nothing now.
+      if (!stillHere(terms)) return;
+      if (!terms) {
+        // Staking reads Sozu again on the way back.
+        st.loaded = false;
+        draft.checkError = "Couldn't check Sozu's terms just now, so nothing was sent. Try again.";
+        actions?.render?.().catch(() => {});
         return;
       }
-      if (terms === "changed") {
+      if (applyStakeTerms({ st, draft, terms })) {
         actions?.render?.().catch(() => {});
         return;
       }
     }
-    const { quote: _quote, label: _label, termsChanged: _changed, ...txDraft } = draft;
+    const { quote: _quote, label: _label, termsChanged: _changed, checkError: _error, ...txDraft } = draft;
     const params = { ...txDraft, gas: sentGas };
     await sendFromReview({
       state,
@@ -801,7 +841,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     });
     confirmBtn.disabled = submitDisabled;
   });
-  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !submitDisabled });
+  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !submitDisabled && !rechecking.has(draft) });
 
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);

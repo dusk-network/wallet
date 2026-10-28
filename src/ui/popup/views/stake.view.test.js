@@ -115,7 +115,7 @@ function popup(state, overview = ov(), { sozuStatus } = {}) {
       if (message.type === "DUSK_UI_SEND_TX") return { ok: true, result: { hash: "ab".repeat(32) } };
       if (message.type === "DUSK_UI_GET_SOZU_STATUS") {
         const st = state.sozu;
-        return { ok: true, result: sozuStatus ? sozuStatus() : { ...st?.status, pool: st?.pool, position: st?.position } };
+        return { ok: true, result: sozuStatus ? await sozuStatus() : { ...st?.status, pool: st?.pool, position: st?.position } };
       }
       return {};
     }),
@@ -715,6 +715,93 @@ describe("liquid staking", () => {
     expect(sent()).toEqual([]);
     expect(errors()).toEqual(["Sozu has paused deposits."]);
     expect(button("Confirm").disabled).toBe(true);
+  });
+
+  describe("a stake whose check of Sozu's terms answers late", () => {
+    // Review of a 100 DUSK stake, Confirm pressed, and Sozu's status held back
+    // until `answer` gives it: unchanged unless told otherwise.
+    async function lateCheck() {
+      const overview = ov();
+      const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu(), overview };
+      let release;
+      const held = new Promise((resolve) => (release = resolve));
+      const app = popup(state, overview, { sozuStatus: () => held });
+      typeInto(field("Stake amount"), "100");
+      button("Review stake").click();
+      await settle();
+      const draft = state.sozuDraft;
+      button("Confirm").click();
+      await settle();
+      const messages = (type) => app.actions.send.mock.calls.map(([m]) => m).filter((m) => m.type === type);
+      return {
+        state,
+        app,
+        draft,
+        reads: () => messages("DUSK_UI_GET_SOZU_STATUS").length,
+        sent: () => messages("DUSK_UI_SEND_TX"),
+        answer: async (over = {}) => {
+          release({ ...sozu().status, pool: sozu().pool, position: sozu().position, ...over });
+          await settle();
+        },
+      };
+    }
+
+    it("sends nothing when Review is left before the answer comes", async () => {
+      const t = await lateCheck();
+      expect(t.reads()).toBe(1);
+      body.querySelector(".subnav-back").click();
+      expect(t.state.route).toBe("stake");
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      expect(t.state.route).toBe("stake");
+    });
+
+    it("sends nothing for a stake whose Review another one took the place of meanwhile", async () => {
+      const t = await lateCheck();
+      body.querySelector(".subnav-back").click();
+      typeInto(field("Stake amount"), "50");
+      button("Review stake").click();
+      await settle();
+      expect(t.state.sozuDraft).not.toBe(t.draft);
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      // The new stake's own Review stays, its Confirm free to press.
+      expect(t.state.route).toBe("sozu_confirm");
+      expect(visibleText(body.querySelector(".review-head .balance-amount"))).toBe("50 DUSK");
+      expect(button("Confirm").disabled).toBe(false);
+    });
+
+    it.each([
+      ["the network changes", { nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }],
+      ["the profile changes", { selectedAccountIndex: 1 }],
+      ["the wallet locks", { isUnlocked: false }],
+    ])("sends nothing when %s before the answer comes", async (_, change) => {
+      const t = await lateCheck();
+      t.state.overview = ov(change);
+      await t.answer();
+      expect(t.sent()).toEqual([]);
+      expect(t.state.route).toBe("sozu_confirm");
+    });
+
+    it("sends nothing when the answer comes from another network than the Review's", async () => {
+      const t = await lateCheck();
+      await t.answer({ networkKey: "mainnet" });
+      expect(t.sent()).toEqual([]);
+    });
+
+    it("checks once and sends once however often Confirm is pressed, a redrawn Review's included", async () => {
+      const t = await lateCheck();
+      button("Confirm").click();
+      t.app.draw();
+      expect(button("Confirm").disabled).toBe(true);
+      button("Confirm").click();
+      await settle();
+      expect(t.reads()).toBe(1);
+      await t.answer();
+      expect(t.reads()).toBe(1);
+      expect(t.sent()).toHaveLength(1);
+      expect(t.sent()[0].params).toMatchObject({ fnName: "sozu_stake", deposit: dusk(100) });
+    });
   });
 
   it("keeps staking off while it can't tell whether Sozu takes deposits, and says so", () => {
