@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Linked Dusk's Terms of use and Privacy policy in Settings, under About.
 - Said about what each way of staking pays a year, beside the choice: native staking across the network lately, and Sozu after its fee.
 - Warned about a recipient listed as compromised or a scam, on Send and in a site's request, and sent it nothing.
 - Added Activity to the full view's sidebar.
@@ -90,7 +91,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said plainly that staking needs some public DUSK for the network fee, without an error before anything is typed.
 - Kept Max on Staking to 4 decimals, and left the fee to unstake later.
 - Said on both staking Reviews that a stake is public, named the profile by its `.dusk` name, and repeated the node warning before Confirm.
-- Showed on Sozu's Review what the stDUSK is worth now and who holds the DUSK, and said why a contract call's fee cap is higher.
+- Showed on Sozu's Review what the stDUSK is worth now, and said why a contract call's fee cap is higher.
 - Led Activity and a transaction's details with a saved contact's own name, its `.dusk` name beside it.
 - Named Dusk Domains calls in Activity by what they did, such as "Registered a .dusk name", and Sozu's as "Staked with Sozu".
 - Kept a deposit to DuskEVM's recipient with the transaction and showed it in its details.
@@ -151,7 +152,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Refused a stake with Sozu too small to get any stDUSK, and said the minimum.
 - Kept Confirm off on Send's Review when the bridge's 1 DUSK fee takes the whole amount.
-- Underlined links inside a sentence, such as sozu.fi and How native staking works.
+- Underlined links inside a sentence, such as How native staking works.
 - Fixed links sitting higher than the section head beside them.
 - Hid controls that showed while hidden: Review's Use the network's price, Max on an empty Send, and Settings' custom gas fields when off.
 - Kept a profile label being typed when Settings redraws, and saved it when the field is left.

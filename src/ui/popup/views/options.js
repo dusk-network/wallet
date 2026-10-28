@@ -8,7 +8,8 @@ import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { setAccountName } from "../../../shared/accountNames.js";
 import { clearAddressBook } from "../../../shared/addressBook.js";
 import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
-import { platform } from "../../../platform/index.js";
+import { networkForNode } from "../../../shared/nodeNetwork.js";
+import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress, siteName } from "../../lib/strings.js";
@@ -20,8 +21,8 @@ import { profileLabelOf } from "../../components/ProfileName.js";
 import { switchContext } from "../context.js";
 
 // Settings: the profile, security, connected sites, contacts and the network,
-// then Advanced (custom gas, Delete all contacts), and Reset wallet on its
-// own at the end.
+// then Advanced (custom gas, Delete all contacts), Reset wallet on its own,
+// and About: the version, and the terms of use and privacy policy.
 
 const autoLockLabel = (minutes) =>
   AUTO_LOCK_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} minutes`;
@@ -495,6 +496,20 @@ export function optionsView(ov, { state, actions } = {}) {
     },
   });
 
+  // Dusk's terms of use and privacy policy, as the network's file names its
+  // operator's (Mainnet's on a node of no listed network).
+  const operator = (networkForNode(currentNodeUrl) ?? networks.mainnet).operator;
+  const legalLink = (text, url) =>
+    h("button", {
+      class: "text-btn chain-link",
+      type: "button",
+      text,
+      onclick: async () => {
+        const ok = await openUrl(url);
+        if (!ok) actions?.showToast?.(`Couldn't open the ${text.toLowerCase()}`);
+      },
+    });
+
   const section = (title, children = [], className = "") =>
     h("section", { class: ["settings-section", className].filter(Boolean).join(" ") }, [
       bracketTitle({ class: "settings-section-title", text: title }),
@@ -522,6 +537,13 @@ export function optionsView(ov, { state, actions } = {}) {
       h("p", { class: "settings-note", text: "Removes this wallet from this browser. You need the recovery phrase to use it again." }),
       resetBtn,
     ], "settings-section--danger"),
-    installedVersion ? section("About", [h("p", { class: "settings-note", text: `Dusk Wallet v${installedVersion}` })]) : null,
+    section("About", [
+      installedVersion ? h("p", { class: "settings-note", text: `Dusk Wallet v${installedVersion}` }) : null,
+      h("p", { class: "settings-note settings-legal" }, [
+        legalLink("Terms of use", operator.termsUrl),
+        h("span", { class: "sep", "aria-hidden": "true", text: "·" }),
+        legalLink("Privacy policy", operator.privacyUrl),
+      ]),
+    ]),
   ].filter(Boolean);
 }

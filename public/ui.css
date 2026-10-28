@@ -3140,7 +3140,7 @@ button.choice.is-picked .choice-dot {
   font-size: inherit;
 }
 
-/* Liquid staking: who holds the DUSK, said first */
+/* Liquid staking: who it's with, said first, and their site at the end */
 .liquid-intro {
   display: flex;
   flex-direction: column;
@@ -3148,15 +3148,16 @@ button.choice.is-picked .choice-dot {
 }
 
 .liquid-who {
+  display: flex;
+  align-items: center;
   font-size: 15px;
   font-weight: 500;
 }
 
-.liquid-intro p {
-  margin: 0;
+.liquid-who button.sozu-site {
+  margin-left: auto;
+  padding: 0;
   font-size: 13px;
-  line-height: 1.45;
-  color: var(--text-muted);
 }
 
 .sozu-action-tabs {
@@ -4619,6 +4620,18 @@ p.settings-empty {
   line-height: 1.4;
 }
 
+/* About's two links: Terms of use · Privacy policy */
+p.settings-legal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+p.settings-legal button.text-btn {
+  padding: 0;
+  font-size: inherit;
+}
+
 .group.settings-sites {
   padding: 0;
 }
@@ -4879,9 +4892,9 @@ button.chain-link:not(:disabled):hover {
   text-decoration-color: currentColor;
 }
 
-/* A link inside a sentence (sozu.fi, How native staking works) keeps its
-   underline at rest: its blue alone doesn't set it apart from the muted text
-   around it. */
+/* A link inside a sentence (How native staking works) keeps its underline
+   at rest: its blue alone doesn't set it apart from the muted text around
+   it. */
 button.chain-link.text-btn--inline:not(:disabled) {
   text-decoration-line: underline;
   text-decoration-color: color-mix(in oklab, currentColor 55%, transparent);

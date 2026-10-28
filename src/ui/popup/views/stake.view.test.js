@@ -475,9 +475,9 @@ describe("native staking", () => {
     expect(link.textContent).toBe("Less than 1,000 DUSK? Use liquid staking (Sozu, third party)");
     link.click();
     expect(state.staking.screen).toBe("liquid");
-    expect(visibleText(body.querySelector(".liquid-intro"))).toBe(
-      "Sozuthird partySozu, not Dusk, holds the DUSK you stake here and returns it under Sozu's own rules: sozu.fi."
-    );
+    // Sozu, named a third party, with its site; no more about who holds what.
+    expect(visibleText(body.querySelector(".liquid-intro"))).toBe("Sozuthird partysozu.fi");
+    expect(body.querySelector(".liquid-who button.chain-link").textContent).toBe("sozu.fi");
   });
 
   it("goes to the Sent screen after Confirm, and Done goes back to Staking", async () => {
@@ -1037,9 +1037,8 @@ describe("liquid staking", () => {
       "Deposit fee0.25% · 0.25 DUSK",
       "FromProfile 1 · Public",
     ]);
-    // Who holds it, and what a failed call costs.
+    // What a failed call costs; Sozu is named a third party above.
     expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)).toEqual([
-      "Sozu, not Dusk, holds this DUSK and returns it under Sozu's own rules.",
       "You pay only the gas used. A call that fails is charged its whole limit.",
     ]);
     button("Confirm").click();

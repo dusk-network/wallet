@@ -175,15 +175,16 @@ async function state(page) {
 }
 
 test.describe("Sozu liquid staking", () => {
-  test("is a choice of its own, says who holds the DUSK, and creates stake/unstake drafts", async ({ page }) => {
+  test("is a choice of its own, names Sozu a third party with its site, and creates stake/unstake drafts", async ({ page }) => {
     await installStakeHarness(page, { networkName: "Testnet" });
 
     // Native and liquid staking are two equal rows; nothing is picked.
     await expect(page.getByRole("button", { name: /Native staking/ })).toBeVisible();
     await page.getByRole("button", { name: /Liquid staking/ }).click();
     await expect(page.locator(".subnav-title")).toHaveText("Liquid staking");
-    await expect(page.locator(".liquid-intro")).toContainText("Sozu, not Dusk, holds the DUSK you stake here");
+    await expect(page.locator(".liquid-intro")).toHaveText(/^Sozu\s*third party\s*sozu\.fi$/);
     await expect(page.locator(".liquid-intro .tag")).toHaveText("third party");
+    await expect(page.locator(".liquid-intro").getByRole("button", { name: "sozu.fi" })).toBeVisible();
     await expect(page.getByText("Hub discovered")).toHaveCount(0);
     await expect(page.getByText("testnet")).toHaveCount(0);
     await expect(page.locator(".kv .kv-label")).toHaveText(["Staked with Sozu", "stDUSK"]);
