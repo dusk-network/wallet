@@ -43,6 +43,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 
 - Showed a deposit to DuskEVM as To its DuskEVM address in Activity and its details, with Copy, and listed bridge transfers under Sent and Received.
+- Put the test network strip across the top of the full view, and kept it and the sidebar in place as the page scrolls.
 - Asked to unlock before showing Contacts.
 - Set section heads and balance labels in small capitals, the heads between grey brackets.
 - Showed links and a transaction's ID in blue.
@@ -121,6 +122,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Underlined links inside a sentence, such as sozu.fi and How native staking works.
 - Fixed links sitting higher than the section head beside them.
 - Hid controls that showed while hidden: Review's Use the network's price, Max on an empty Send, and Settings' custom gas fields when off.
 - Kept a profile label being typed when Settings redraws, and saved it when the field is left.

@@ -179,6 +179,15 @@ describe("the chain's blue", () => {
     expect(openUrl).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps an underline at rest on a link inside a sentence, sozu.fi and the staking docs: its blue alone isn't enough", async () => {
+    const sheet = await css();
+    const inline = rule(sheet, "button.chain-link.text-btn--inline:not(:disabled)");
+    expect(inline).toContain("text-decoration-line: underline;");
+    expect(inline).not.toContain("--chain-blue");
+    // Other links still show theirs only under the pointer.
+    expect(sheet).toMatch(/button\.chain-link:not\(:disabled\),\nbutton\.chain-link:not\(:disabled\):hover \{\n  color: var\(--chain-blue\);\n  text-decoration-line: none;/);
+  });
+
   it("is set only through .chain-link, on buttons that aren't disabled", async () => {
     const sheet = await css();
     const blocks = sheet.split("\n}").filter((block) => block.includes("var(--chain-blue)"));

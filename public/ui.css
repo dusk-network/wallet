@@ -175,9 +175,15 @@ body.page--options {
 body.page--full {
   --panel-padding: 28px;
   --section-gap: 14px;
+  /* The test network strip's height, which the sidebar sits under. */
+  --strip-height: 0px;
 
   width: auto;
   min-height: 100vh;
+}
+
+body.page--full:has(.panel > .testnet-strip) {
+  --strip-height: 35px;
 }
 
 .full-wrap {
@@ -187,7 +193,9 @@ body.page--full {
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  overflow: hidden;
+  /* Clips as hidden would, without becoming a scroll box: the sidebar and a
+     test network's strip stick to the window as the page scrolls. */
+  overflow: clip;
   background: var(--background);
 }
 
@@ -1379,15 +1387,28 @@ body.page--popup .site-bar-action {
     min-height: 100vh;
     display: grid;
     grid-template-columns: 260px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     align-items: stretch;
+  }
+
+  /* A test network's strip spans the top, over the sidebar and the page, and
+     stays there as the page scrolls, as in the popup. The sidebar sits under
+     it, its height less the strip's. */
+  body.page--full .panel > .testnet-strip {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    height: var(--strip-height);
   }
 
   body.page--full .panel-header {
     position: sticky;
-    top: 0;
+    top: var(--strip-height);
     grid-column: 1;
-    grid-row: 1;
-    height: 100vh;
+    grid-row: 2;
+    height: calc(100vh - var(--strip-height));
     padding: 28px 18px;
     border-right: 1px solid var(--border);
     border-bottom: 0;
@@ -1483,7 +1504,7 @@ body.page--popup .site-bar-action {
 
   body.page--full .panel-content {
     grid-column: 2;
-    grid-row: 1;
+    grid-row: 2;
     min-width: 0;
     align-items: stretch;
     padding: 40px 48px;
@@ -4847,5 +4868,17 @@ button.chain-link:not(:disabled):hover {
 
 button.chain-link:not(:disabled):hover {
   text-decoration-line: underline;
+  text-decoration-color: currentColor;
+}
+
+/* A link inside a sentence (sozu.fi, How native staking works) keeps its
+   underline at rest: its blue alone doesn't set it apart from the muted text
+   around it. */
+button.chain-link.text-btn--inline:not(:disabled) {
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in oklab, currentColor 55%, transparent);
+}
+
+button.chain-link.text-btn--inline:not(:disabled):hover {
   text-decoration-color: currentColor;
 }
