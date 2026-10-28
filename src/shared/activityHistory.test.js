@@ -335,9 +335,13 @@ describe("a node without the archive", () => {
     // The head, then the first window it refused.
     expect(node.log).toHaveLength(2);
     await expect(sync(A)).rejects.toBeInstanceOf(history.NoArchiveError);
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    await expect(history.fetchRecentActivity({ archiverUrl: NODE, account: A })).resolves.toEqual([]);
     expect(node.log).toHaveLength(2);
+    // Nothing kept to show, and the console told once.
+    expect((await history.readActivity({ nodeUrl: NODE, account: A })).entries).toEqual([]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    history.noteActivityUnavailable(new history.NoArchiveError(NODE));
+    history.noteActivityUnavailable(new history.NoArchiveError(NODE));
+    expect(warn).toHaveBeenCalledTimes(1);
 
     // An hour on, it is asked again: now with the archive.
     now.mockReturnValue(1_000_000_000 + history.NO_ARCHIVE_RETRY_MS);
@@ -350,38 +354,6 @@ describe("a node without the archive", () => {
     await store.putArchiveRefusal("https://testnet.nodes.dusk.network", Date.now());
     await expect(history.assertArchive("https://testnet.nodes.dusk.network")).rejects.toBeInstanceOf(history.NoArchiveError);
     await expect(history.assertArchive("https://my.archive.example")).resolves.toBeUndefined();
-  });
-});
-
-describe("fetchRecentActivity", () => {
-  it("gives the newest entries with their time and outcome", async () => {
-    fakeArchive();
-    const entries = await history.fetchRecentActivity({ archiverUrl: NODE, account: B, limit: 3 });
-    expect(entries).toHaveLength(3);
-    for (const e of entries) {
-      expect(Object.keys(e)).toEqual(expect.arrayContaining(["hash", "blockHeight", "timestamp", "direction", "counterparty", "value", "memo", "success"]));
-      expect(typeof e.value).toBe("bigint");
-    }
-    expect(entries[0].blockHeight).toBeGreaterThanOrEqual(entries[1].blockHeight);
-  });
-
-  it("keeps giving what it has when the archive is unreachable, and says so once", async () => {
-    const node = fakeArchive();
-    await sync(A);
-    node.down = true;
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const first = await history.fetchRecentActivity({ archiverUrl: NODE, account: A });
-    const second = await history.fetchRecentActivity({ archiverUrl: NODE, account: A });
-    expect(first.map((e) => e.blockHeight)).toEqual([4658012, 4658000, 4657992, 4655845]);
-    expect(second).toEqual(first);
-    expect(warn).toHaveBeenCalledTimes(1);
-  });
-
-  it("gives nothing, without throwing, before any sync worked", async () => {
-    const node = fakeArchive();
-    node.down = true;
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    await expect(history.fetchRecentActivity({ archiverUrl: NODE, account: A })).resolves.toEqual([]);
   });
 });
 

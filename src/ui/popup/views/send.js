@@ -1,5 +1,4 @@
 import {
-  UI_DISPLAY_DECIMALS,
   formatDusk,
   formatDuskExact,
   formatFee,
@@ -20,7 +19,7 @@ import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
-import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import {
   hideRecipientBadge,
@@ -1011,45 +1010,20 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // Back returns to Send with the draft, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm", disabled: nothingArrives });
 
-  const defaultGas = getDefaultGas(TX_KIND.TRANSFER, { privacy });
-  const defaultLimit =
-    defaultGas?.limit !== undefined && defaultGas?.limit !== null
-      ? String(defaultGas.limit)
-      : "";
-  const fallbackPrice =
-    defaultGas?.price !== undefined && defaultGas?.price !== null
-      ? String(defaultGas.price)
-      : "";
-
-  const gasEditor = document.createElement("dusk-gas-editor");
-  gasEditor.amountLux = d.amountLux;
-  gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-
   // The network's gas price by default; Custom fee for gas of your own.
-  useNetworkGas({
-    customGas: ov?.customGas,
+  const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
+    kind: TX_KIND.TRANSFER,
+    gasOpts: { privacy },
+    amountLux: d.amountLux,
+    ov,
     actions,
-    defaultLimit,
-    fallbackPrice,
     gas: d?.gas,
-    gasEditor,
-    minLimit: getMinimumGas(TX_KIND.TRANSFER, { privacy })?.limit,
   });
-
-  // Gas that won't do says so above Confirm; nothing is sent.
-  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
 
   confirmBtn.addEventListener("click", async () => {
     if (nothingArrives) return;
-    let gas;
-    try {
-      gas = gasEditor.readFinalGas();
-    } catch (e) {
-      confirmError.textContent = e?.message ?? String(e);
-      confirmError.hidden = false;
-      return;
-    }
-    confirmError.hidden = true;
+    const gas = readGas();
+    if (gas === false) return;
     confirmBtn.disabled = true;
 
     // Persist edits so Back/forward keeps them, on this review's own draft.

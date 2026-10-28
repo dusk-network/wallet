@@ -34,7 +34,6 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { profileNameEl } from "../../components/ProfileName.js";
-import { contextOf } from "../context.js";
 import { sendFromReview } from "./sent.js";
 
 function networkKey(ov) {
@@ -213,11 +212,15 @@ const rechecking = new WeakSet();
  * Where a drafted call to Sozu belongs, recorded as it enters Review: the
  * popup's context, and the node, network, wallet, profile and account, as
  * the form it was drafted on was drawn. Its Review compares the popup with
- * this record, never with what the Review was last drawn with, and the
- * wallet's engine checks the same just before it sends.
+ * this record, never with what the Review was last drawn with: the context
+ * is replaced the moment a switch starts (context.js), before the overview
+ * names the new network or profile. Drawn after a switch or a lock, the
+ * Review offers no Confirm; a check that answers after one, from another
+ * network, or after the Review was left, does nothing at all. The wallet's
+ * engine checks the same just before it sends.
  * @param {object} ov - the overview the form was drawn with
  * @param {number} profileIndex - the profile the call is sent from
- * @param {number} context - the popup's context as the form was drawn
+ * @param {object | null} context - the popup's context as the form was drawn
  * @param {string} [networkKey] - the network Sozu's terms were read on
  */
 function reviewRecord(ov, profileIndex, context, networkKey) {
@@ -242,7 +245,7 @@ function stillFor(record, state, ov) {
   const accounts = Array.isArray(now?.accounts) ? now.accounts : [];
   return (
     Boolean(record) &&
-    contextOf(state) === record.context &&
+    state.context === record.context &&
     now?.isUnlocked !== false &&
     String(now?.nodeUrl ?? "") === record.nodeUrl &&
     (Number(now?.selectedAccountIndex ?? 0) || 0) === record.profileIndex &&
@@ -257,7 +260,7 @@ function stillFor(record, state, ov) {
  */
 function leaveReview(state, st, record, ov) {
   const now = state.overview ?? ov;
-  const locked = now?.isUnlocked === false || (contextOf(state) !== record?.context && state.contextReason === "lock");
+  const locked = now?.isUnlocked === false || (state.context !== record?.context && state.context?.reason === "lock");
   st.notice = locked ? LOCKED_NOTICE : SWITCHED_NOTICE;
   st.loaded = false;
   state.sozuDraft = null;
@@ -399,7 +402,7 @@ function syncWarning() {
  */
 export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   // The popup's context as this form is drawn: what its figures are for.
-  const formContext = contextOf(state);
+  const formContext = state.context;
   const st = ensureSozuLoaded(ov, { state, actions });
   const staticCfg = getSozuConfig(networkKey(ov));
   const liveStatus = st.status;
@@ -743,9 +746,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   }
 
   const st = sozuState(state);
-  // Where this stake belongs, recorded as it entered Review. Drawn anywhere
-  // else, after a switch of network, profile or wallet, or a lock, it offers
-  // no Confirm: back to the stake's form, with why.
+  // Where this stake belongs (reviewRecord); anywhere else, back to the stake's form, with why.
   const record = draft.reviewed ?? null;
   if (!stillFor(record, state, ov)) {
     leaveReview(state, st, record, ov);
@@ -768,7 +769,6 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const quoteRate = feeRateOf(quote?.feeRate);
   const getsNothing = quote?.ok === false;
   const submitDisabled =
-    st.submitting ||
     paused ||
     getsNothing ||
     (isStake && stakeRequiredLux > publicBalance) ||
@@ -827,11 +827,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   // Gas that won't do, or terms that couldn't be checked, say so above Confirm; nothing is sent.
   const confirmError = h("div", { class: "field-error", role: "alert", hidden: !draft.checkError, text: draft.checkError ?? "" });
 
-  // This Review, with the popup still where its stake belongs: compared with
-  // the record, never with what the Review was drawn with. `state.context`
-  // moves the moment a switch starts, before the overview names the new
-  // network or profile. A check that answers after that, from another
-  // network, or after the Review was left, does nothing at all.
+  // This Review, with the popup still where its stake belongs (reviewRecord).
   const onThisReview = () => state.route === "sozu_confirm" && state.sozuDraft === draft;
   const belongs = () => stillFor(record, state, ov);
   const stillHere = (terms) =>

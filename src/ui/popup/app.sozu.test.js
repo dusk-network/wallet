@@ -208,7 +208,8 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     await import("./app.js");
     const before = state.context;
     onMessage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
-    expect([state.context, state.overview?.isUnlocked]).toEqual([before + 1, false]);
+    expect(state.context).not.toBe(before);
+    expect([state.context.reason, state.overview?.isUnlocked]).toEqual(["lock", false]);
     await flush();
   });
 });

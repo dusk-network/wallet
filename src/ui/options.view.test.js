@@ -172,6 +172,7 @@ describe("settings", () => {
   it("starts each switch of profile, network or wallet before asking the wallet, so a check begun before it can tell", async () => {
     const view = await settings();
     // The popup's context each time the wallet is asked.
+    const before = view.state.context;
     const asked = [];
     view.actions.send.mockImplementation(async (message) => {
       asked.push([message.type, view.state.context]);
@@ -191,12 +192,14 @@ describe("settings", () => {
     await settle();
     buttonOf("Reset wallet").click();
     await settle();
-    expect(asked).toEqual([
-      ["DUSK_UI_SET_ACCOUNT_INDEX", 1],
-      ["DUSK_UI_SET_NODE_URL", 2],
-      ["DUSK_UI_LOCK", 3],
-      ["DUSK_UI_RESET_WALLET", 4],
+    expect(asked.map(([type, context]) => [type, context?.reason])).toEqual([
+      ["DUSK_UI_SET_ACCOUNT_INDEX", "switch"],
+      ["DUSK_UI_SET_NODE_URL", "switch"],
+      ["DUSK_UI_LOCK", "lock"],
+      ["DUSK_UI_RESET_WALLET", "switch"],
     ]);
+    // Each asked in a context of its own, replaced as its switch started.
+    expect(new Set([before, ...asked.map(([, context]) => context)]).size).toBe(5);
   });
 
   it("offers auto-lock after 5 or 15 minutes, or Off, and keeps a new choice through a redraw", async () => {

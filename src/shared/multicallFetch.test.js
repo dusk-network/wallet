@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import recorded from "./fixtures/multicall-testnet.json";
 import { decodeAggregate, encodeAggregate } from "../vendor/duskdomains-multicall.js";
 import { MAX_BATCH, MULTICALL_CONTRACT_ID, createMulticallFetch } from "./multicallFetch.js";
+import { aggregateReply as reply } from "./fixtures/multicallCodec.js";
 
 const NODE = "https://testnet.nodes.dusk.network";
 const AGGREGATE = `${NODE}/on/contracts:${MULTICALL_CONTRACT_ID}/aggregate`;
@@ -12,34 +13,6 @@ const hex = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, "0")).join(
 // The lens reader's gas for a reverse read inside a multicall, as duskNames.js gives it.
 const gasFor = (id, fn) => (id === LENS && fn === "reverse" ? 842_000_000n : 0n);
 const read = (fn, body = [1, 2, 3]) => [`${NODE}/on/contracts:${LENS}/${fn}`, { method: "POST", body: new Uint8Array(body) }];
-
-// An `aggregate` reply as the contract writes it (rkyv 0.7): each Ok result's
-// bytes, then one 16-byte slot per result, then the root.
-function reply(results, height = 7n) {
-  const align = (n, to) => Math.ceil(n / to) * to;
-  const data = results.filter((r) => "Ok" in r).reduce((n, r) => n + r.Ok.length, 0);
-  const slots = align(data, 4);
-  const root = align(slots + 16 * results.length, 8);
-  const out = new Uint8Array(root + 16);
-  const view = new DataView(out.buffer);
-  let at = 0;
-  results.forEach((r, i) => {
-    const slot = slots + 16 * i;
-    if ("Ok" in r) {
-      out.set(r.Ok, at);
-      view.setInt32(slot + 4, at - (slot + 4), true);
-      view.setUint32(slot + 8, r.Ok.length, true);
-      at += r.Ok.length;
-    } else {
-      out[slot] = 1;
-      out[slot + 4] = 1; // OutOfGas
-    }
-  });
-  view.setBigUint64(root, height, true);
-  view.setInt32(root + 8, slots - (root + 8), true);
-  view.setUint32(root + 12, results.length, true);
-  return out;
-}
 
 function node(answer) {
   return vi.fn(async (input, init) => answer(String(input), init));

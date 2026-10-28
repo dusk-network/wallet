@@ -781,26 +781,5 @@ export async function readActivity({ nodeUrl, account, limit = 200, before, stor
   return { entries, meta, coveredTo: downTo, complete: downTo === 0 };
 }
 
-/**
- * The newest `limit` entries of `account`'s public history, newest first:
- * from this device, after a sync run asks the archive for what is new (and
- * carries on an older sync). When the archive is unreachable, the kept
- * entries, and a warning in the console once.
- *
- * @param {{ nodeUrl: string, archiverUrl?: string, account: string, limit?: number, before?: number }} opts
- * @returns {Promise<object[]>} `{ hash, blockHeight, timestamp, direction, counterparty, value, memo, success, … }`
- */
-export async function fetchRecentActivity({ nodeUrl, archiverUrl, account, limit = 20, before, store = defaultStore } = {}) {
-  try {
-    await syncActivity({ nodeUrl: nodeUrl ?? archiverUrl, archiverUrl, account, store });
-  } catch (error) {
-    warnUnavailable(error);
-  }
-  try {
-    return (await readActivity({ nodeUrl: nodeUrl ?? archiverUrl, account, limit, before, store })).entries;
-  } catch {
-    return [];
-  }
-}
-
+/** Says once in the console that the history is unavailable. */
 export { warnUnavailable as noteActivityUnavailable };

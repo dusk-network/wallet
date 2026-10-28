@@ -377,7 +377,7 @@ describe("still shown with balances hidden", () => {
         profileIndex: 0,
         label: "Stake with Sozu",
         // Where it was drafted, as the form records it: this overview's.
-        reviewed: { context: 0, nodeUrl: NODE, networkKey: "testnet", walletId: ACCOUNT, profileIndex: 0, account: ACCOUNT },
+        reviewed: { context: undefined, nodeUrl: NODE, networkKey: "testnet", walletId: ACCOUNT, profileIndex: 0, account: ACCOUNT },
       },
     };
     await show(sozuConfirmView(overview(HIDDEN), { state, actions: actions() }));

@@ -42,7 +42,8 @@ import {
 } from "../shared/walletEngine.js";
 
 import { ERROR_CODES } from "../shared/errors.js";
-import { bytesToHex, bytesToTransportHex } from "../shared/bytes.js";
+import { serializeError, serializeStakeInfo } from "../shared/transport.js";
+import { bytesToTransportHex, normalizeNullifiers } from "../shared/bytes.js";
 import { keepPrimaryNamesWith, lookupPrimaryName, lookupRecipientName } from "../shared/duskNames.js";
 import {
   executionEventError,
@@ -50,33 +51,6 @@ import {
   waitForTxExecution,
 } from "../shared/txExecution.js";
 import { getExtensionApi, runtimeSendMessage } from "../platform/extensionApi.js";
-
-function serializeError(err) {
-  return {
-    code: err?.code ?? ERROR_CODES.INTERNAL,
-    message: err?.message ?? String(err),
-    data: err?.data,
-  };
-}
-
-function nullifierHexes(value) {
-  const out = [];
-  for (const n of Array.isArray(value) ? value : []) {
-    try {
-      if (typeof n === "string") {
-        const hex = n.trim();
-        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
-        continue;
-      }
-      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
-      const hex = bytesToHex(u8);
-      if (hex) out.push(hex);
-    } catch {
-      // ignore invalid nullifier shapes
-    }
-  }
-  return out;
-}
 
 // ---------------------------------------------------------------------------
 // Tx tracking (MetaMask-style)
@@ -311,24 +285,8 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
         }
 
         case "dusk_getStakeInfo": {
-          const info = await getStakeInfo(params ?? {});
           // Serialize bigints for structured clone stability.
-          sendResponse({
-            id,
-            result: {
-              amount: info?.amount
-                ? {
-                    value: info.amount.value?.toString?.() ?? String(info.amount.value),
-                    locked: info.amount.locked?.toString?.() ?? String(info.amount.locked),
-                    eligibility: info.amount.eligibility?.toString?.() ?? String(info.amount.eligibility),
-                    total: info.amount.total?.toString?.() ?? String(info.amount.total),
-                  }
-                : null,
-              reward: info?.reward?.toString?.() ?? String(info?.reward ?? 0),
-              faults: Number(info?.faults ?? 0) || 0,
-              hardFaults: Number(info?.hardFaults ?? 0) || 0,
-            },
-          });
+          sendResponse({ id, result: serializeStakeInfo(await getStakeInfo(params ?? {})) });
           return;
         }
 
@@ -454,7 +412,7 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
           // Keep the provider response simple, always return the tx hash,
           // and only include a nonce when it exists (public tx).
           const resp = { hash: result.hash };
-          const pendingNullifiers = nullifierHexes(result?.nullifiers);
+          const pendingNullifiers = normalizeNullifiers(result?.nullifiers);
           if (pendingNullifiers.length) resp.nullifiers = pendingNullifiers;
           if (result.nonce !== undefined && result.nonce !== null) {
             resp.nonce = result.nonce?.toString?.() ?? String(result.nonce);

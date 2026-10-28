@@ -12,9 +12,10 @@ import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta, typedRecipientName } from "../shared/txStore.js";
+import { serializeError } from "../shared/transport.js";
+import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
+import { submittedTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
-import { bytesToHex } from "../shared/bytes.js";
 import {
   executionEventError,
   executionEventOk,
@@ -59,33 +60,6 @@ import {
   getStakeOwnerStatus,
   getSozuStatus,
 } from "../shared/walletEngine.js";
-
-function nullifierHexes(value) {
-  const out = [];
-  for (const n of Array.isArray(value) ? value : []) {
-    try {
-      if (typeof n === "string") {
-        const hex = n.trim();
-        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
-        continue;
-      }
-      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
-      const hex = bytesToHex(u8);
-      if (hex) out.push(hex);
-    } catch {
-      // ignore invalid nullifier shapes
-    }
-  }
-  return out;
-}
-
-function serializeError(err) {
-  return {
-    code: err?.code ?? ERROR_CODES.INTERNAL,
-    message: err?.message ?? String(err),
-    data: err?.data,
-  };
-}
 
 async function ensureEngineConfigured() {
   const settings = await getSettings();
@@ -430,58 +404,19 @@ export async function localSend(message) {
 
       // Persist metadata (see background/index.js comments).
       const hash = result?.hash ?? "";
-      const kind = String(baseParams?.kind ?? "");
       try {
         const nodeUrl = (await getSettings())?.nodeUrl ?? "";
 
         if (hash) {
-          const pendingNullifiers = nullifierHexes(result?.nullifiers);
-          await putTxMeta(hash, {
-            origin: "Wallet",
-            nodeUrl,
-            kind,
-            privacy: baseParams?.privacy ? String(baseParams.privacy) : undefined,
-            // The profile that paid, as the extension keeps it: a stake's own
-            // profile may not be the one selected.
-            profileIndex:
-              baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
-                ? Number(baseParams.profileIndex) || 0
-                : Number(status.selectedAccountIndex ?? 0) || 0,
-            ownerProfileIndex:
-              baseParams?.ownerProfileIndex !== undefined && baseParams?.ownerProfileIndex !== null
-                ? Number(baseParams.ownerProfileIndex) || 0
-                : undefined,
-            payment: baseParams?.payment ? String(baseParams.payment) : undefined,
-            asset:
-              message?.asset && typeof message.asset === "object"
-                ? message.asset
-                : undefined,
-            to: baseParams?.to ? String(baseParams.to) : undefined,
-            toName: typedRecipientName(message?.toName),
-            amount:
-              baseParams?.amount !== undefined && baseParams?.amount !== null
-                ? String(baseParams.amount)
-                : undefined,
-            deposit:
-              baseParams?.deposit !== undefined && baseParams?.deposit !== null
-                ? String(baseParams.deposit)
-                : undefined,
-            contractId:
-              kind === "contract_call" && baseParams?.contractId
-                ? String(baseParams.contractId)
-                : undefined,
-            fnName:
-              kind === "contract_call" && baseParams?.fnName
-                ? String(baseParams.fnName)
-                : undefined,
-            gasLimit: baseParams?.gas?.limit != null ? String(baseParams.gas.limit) : undefined,
-            gasPrice: baseParams?.gas?.price != null ? String(baseParams.gas.price) : undefined,
-            pendingNullifiers,
-            reservationStatus: pendingNullifiers.length ? "pending" : undefined,
-            reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
-            submittedAt: Date.now(),
-            status: "submitted",
-          }, { epoch: txEpoch });
+          // The profile that paid, as the extension keeps it: a stake's own
+          // profile may not be the one selected.
+          const profileIndex =
+            baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
+              ? Number(baseParams.profileIndex) || 0
+              : Number(status.selectedAccountIndex ?? 0) || 0;
+          const record = submittedTxMeta(baseParams, { origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message));
+          const { pendingNullifiers } = record;
+          await putTxMeta(hash, record, { epoch: txEpoch });
 
           // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
           (async () => {

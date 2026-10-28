@@ -20,7 +20,7 @@ import { amountField } from "../../components/AmountField.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
-import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { publicStakeLine, sozuLiquidStakingView } from "./sozu.js";
 import { sendFromReview } from "./sent.js";
@@ -814,26 +814,14 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
   const gasPrivacy = d.payment === FUNDING_SHIELDED ? "shielded" : "public";
-  const defaultGas = getDefaultGas(kind, { privacy: gasPrivacy });
-  const defaultLimit =
-    defaultGas?.limit !== undefined && defaultGas?.limit !== null ? String(defaultGas.limit) : "";
-  const fallbackPrice =
-    defaultGas?.price !== undefined && defaultGas?.price !== null ? String(defaultGas.price) : "";
-
-  const gasEditor = document.createElement("dusk-gas-editor");
-  gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-  gasEditor.amountLux = kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0";
-  gasEditor.setGas(d?.gas ?? null);
-
   // The network's gas price by default; Custom fee for gas of your own.
-  useNetworkGas({
-    customGas: ov?.customGas,
+  const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
+    kind,
+    gasOpts: { privacy: gasPrivacy },
+    amountLux: kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0",
+    ov,
     actions,
-    defaultLimit,
-    fallbackPrice,
     gas: d?.gas,
-    gasEditor,
-    minLimit: getMinimumGas(kind, { privacy: gasPrivacy })?.limit,
   });
 
   // What moves: the amount staked, or all of the stake or the rewards. The
@@ -848,19 +836,9 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   const line =
     kind === TX_KIND.STAKE ? "Native staking" : kind === TX_KIND.UNSTAKE ? "Back to your public balance" : "To your public balance";
 
-  // Gas that won't do says so above Confirm; nothing is sent.
-  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
-
   confirmBtn.addEventListener("click", async () => {
-    let gas;
-    try {
-      gas = gasEditor.readFinalGas();
-    } catch (e) {
-      confirmError.textContent = e?.message ?? String(e);
-      confirmError.hidden = false;
-      return;
-    }
-    confirmError.hidden = true;
+    const gas = readGas();
+    if (gas === false) return;
     confirmBtn.disabled = true;
     d.gas = gas;
     const params = {

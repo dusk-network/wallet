@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The fake DOM goes first: it defines HTMLElement for the gas editor to extend.
 import { accessibleName, installFakeDom, isShown, settle, typeInto, visibleText } from "../testing/fakeDom.js";
 import "./GasEditor.js";
-import { gasFeeLux, startingGas, useNetworkGas } from "./NetworkGas.js";
+import { gasFeeLux, reviewGas, startingGas, useNetworkGas } from "./NetworkGas.js";
 
 let dom;
 
@@ -242,11 +242,29 @@ describe("fee editor", () => {
     expect(css).toMatch(/\.gas-edit-extra:empty \{\s*display: none;\s*\}/);
   });
 
+  it("sets a Review up for its transaction, and says above Confirm when its gas won't do", async () => {
+    const send = vi.fn(async () => ({ median: "2" }));
+    const review = reviewGas({ kind: "transfer", gasOpts: { privacy: "public" }, amountLux: "1000000000", ov: {}, actions: { send } });
+    expect(review.defaultGas).toEqual({ limit: "2500000", price: "1" });
+    dom.document.body.append(review.editor, review.error);
+    await settle();
+    expect(review.editor.minLimit).toBe(2_000_000n);
+    expect([review.readGas(), review.error.hidden]).toEqual([{ limit: "2500000", price: "2" }, true]);
+
+    const limit = review.editor.querySelectorAll("input").find((i) => accessibleName(i) === "Gas limit");
+    typeInto(limit, "");
+    expect(review.readGas()).toBe(false);
+    expect([review.error.textContent, review.error.hidden]).toEqual(["Enter both the gas limit and the gas price, or clear both.", false]);
+    typeInto(limit, "2500000");
+    expect([review.readGas(), review.error.hidden]).toEqual([{ limit: "2500000", price: "2" }, true]);
+  });
+
   it("is used by every transaction review view, which has no presets and no Cancel", async () => {
     for (const name of ["send", "stake", "convert", "sozu", "assets"]) {
       const view = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "views", `${name}.js`), "utf8");
-      expect(view).toMatch(/import \{[^}]*\buseNetworkGas\b[^}]*\} from "\.\.\/\.\.\/components\/NetworkGas\.js";/);
-      expect(view).toContain("minLimit: getMinimumGas(");
+      // reviewGas passes the transaction's minimum itself.
+      expect(view).toMatch(/import \{[^}]*\b(useNetworkGas|reviewGas)\b[^}]*\} from "\.\.\/\.\.\/components\/NetworkGas\.js";/);
+      expect(view).toMatch(/minLimit: getMinimumGas\(|reviewGas\(\{/);
       expect(view).not.toMatch(/"Recommended"|"Low"|"High"|gasHint/);
       expect(view).not.toContain('text: "Cancel"');
     }

@@ -1,5 +1,6 @@
 import { getSettings, normalizeCustomGas, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
+import { serializeStakeInfo } from "../shared/transport.js";
 import { clearContacts, contactsStore } from "../shared/contactsStore.js";
 import {
   getWatchedAssets,
@@ -64,22 +65,6 @@ function profileIndex(message, status) {
   return Number.isFinite(value) && value >= 0
     ? Math.floor(value)
     : Number(status.selectedAccountIndex ?? 0) || 0;
-}
-
-function serializeStakeInfo(info) {
-  return {
-    amount: info?.amount
-      ? {
-          value: info.amount.value?.toString?.() ?? String(info.amount.value),
-          locked: info.amount.locked?.toString?.() ?? String(info.amount.locked),
-          eligibility: info.amount.eligibility?.toString?.() ?? String(info.amount.eligibility),
-          total: info.amount.total?.toString?.() ?? String(info.amount.total),
-        }
-      : null,
-    reward: info?.reward?.toString?.() ?? String(info?.reward ?? 0),
-    faults: Number(info?.faults ?? 0) || 0,
-    hardFaults: Number(info?.hardFaults ?? 0) || 0,
-  };
 }
 
 function serializeResult(type, result) {

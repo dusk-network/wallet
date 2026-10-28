@@ -41,6 +41,7 @@ import {
   putShieldedMeta,
 } from "./shieldedStore.js";
 import { contactsNamespace, deriveContactsKey, openContacts, sealContacts } from "./contactsCrypto.js";
+import { serializeStakeInfo } from "./transport.js";
 import { activityNetworkKey, assertArchive, historyArchiverUrl } from "./activityHistory.js";
 import {
   StaleActivityError,
@@ -1488,25 +1489,6 @@ export async function getStakeInfo({ profileIndex } = {}) {
     12_000,
     "Stake request timed out"
   );
-}
-
-function serializeStakeAmount(amount) {
-  if (!amount) return null;
-  return {
-    value: amount.value?.toString?.() ?? String(amount.value),
-    locked: amount.locked?.toString?.() ?? String(amount.locked),
-    eligibility: amount.eligibility?.toString?.() ?? String(amount.eligibility),
-    total: amount.total?.toString?.() ?? String(amount.total),
-  };
-}
-
-function serializeStakeInfo(info) {
-  return {
-    amount: serializeStakeAmount(info?.amount),
-    reward: info?.reward?.toString?.() ?? String(info?.reward ?? 0),
-    faults: Number(info?.faults ?? 0) || 0,
-    hardFaults: Number(info?.hardFaults ?? 0) || 0,
-  };
 }
 
 function accountOwnerString(owner) {

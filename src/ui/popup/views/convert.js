@@ -1,5 +1,4 @@
 import {
-  UI_DISPLAY_DECIMALS,
   formatDusk,
   formatDuskExact,
   formatFee,
@@ -15,7 +14,7 @@ import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
-import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { segmented } from "../../components/Segmented.js";
 import { sendFromReview } from "./sent.js";
@@ -189,44 +188,12 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   // Back returns to Shield with the draft, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
-  const defaultGas = getDefaultGas(kind);
-  const defaultLimit =
-    defaultGas?.limit !== undefined && defaultGas?.limit !== null
-      ? String(defaultGas.limit)
-      : "";
-  const fallbackPrice =
-    defaultGas?.price !== undefined && defaultGas?.price !== null
-      ? String(defaultGas.price)
-      : "";
-
-  const gasEditor = document.createElement("dusk-gas-editor");
-  gasEditor.amountLux = d.amountLux;
-  gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-
   // The network's gas price by default; Custom fee for gas of your own.
-  useNetworkGas({
-    customGas: ov?.customGas,
-    actions,
-    defaultLimit,
-    fallbackPrice,
-    gas: d?.gas,
-    gasEditor,
-    minLimit: getMinimumGas(kind)?.limit,
-  });
-
-  // Gas that won't do says so above Confirm; nothing is sent.
-  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
+  const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({ kind, amountLux: d.amountLux, ov, actions, gas: d?.gas });
 
   confirmBtn.addEventListener("click", async () => {
-    let gas;
-    try {
-      gas = gasEditor.readFinalGas();
-    } catch (e) {
-      confirmError.textContent = e?.message ?? String(e);
-      confirmError.hidden = false;
-      return;
-    }
-    confirmError.hidden = true;
+    const gas = readGas();
+    if (gas === false) return;
     confirmBtn.disabled = true;
     d.gas = gas;
 
