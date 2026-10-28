@@ -162,6 +162,43 @@ describe("readSozuStatus", () => {
     expect(queries(node)[2][0]).toBe("eeeeeeee.exchange_rate");
   });
 
+  it("keeps what the hub named last for a name it can't answer or names none for, and follows it for the others", async () => {
+    const named = { ...KNOWN };
+    const fail = [];
+    const node = sozuNode({ named, fail });
+    const read = createContractReads({ nodeUrl: NODE, fetch: node });
+    const names = new Map();
+    await readSozuStatus({ read, nodeUrl: NODE, contracts: KNOWN, account: ACCOUNT, names });
+
+    // An upgrade names a new pool, in a refresh where the stDUSK name panics.
+    named.pool = "ee".repeat(32);
+    named["staked-dusk"] = "dd".repeat(32);
+    fail.push(`contract/${HUB_NAME_ARGS["staked-dusk"]}`);
+    const status = await readSozuStatus({ read, nodeUrl: NODE, contracts: KNOWN, account: ACCOUNT, names });
+    expect(status).toMatchObject({
+      contracts: { pool: "ee".repeat(32), substrate: KNOWN.substrate, "staked-dusk": KNOWN["staked-dusk"] },
+      source: "hub",
+      position: { balance: 1_500_000_000_000n },
+    });
+    expect(queries(node).map((q) => q.length)).toEqual([10, 10, 7]);
+    expect(queries(node)[2][0]).toBe("eeeeeeee.exchange_rate");
+
+    // Later the hub answers, but names no pool: the new one stays, not the
+    // one known before the upgrade.
+    fail.length = 0;
+    Object.assign(named, { pool: null, "staked-dusk": KNOWN["staked-dusk"] });
+    const unnamed = await readSozuStatus({ read, nodeUrl: NODE, contracts: KNOWN, account: ACCOUNT, names });
+    expect(unnamed).toMatchObject({ contracts: { pool: "ee".repeat(32), "staked-dusk": KNOWN["staked-dusk"] }, source: "fallback" });
+    expect(queries(node).map((q) => q.length)).toEqual([10, 10, 7, 10]);
+    expect(queries(node)[3][3]).toBe("eeeeeeee.exchange_rate");
+
+    // With nothing named for this node yet, both are the ones known before.
+    named["staked-dusk"] = "dd".repeat(32);
+    fail.push(`contract/${HUB_NAME_ARGS["staked-dusk"]}`);
+    const fresh = await readSozuStatus({ read, nodeUrl: NODE, contracts: KNOWN, account: ACCOUNT, names: new Map() });
+    expect(fresh).toMatchObject({ contracts: { pool: KNOWN.pool, "staked-dusk": KNOWN["staked-dusk"] }, source: "fallback" });
+  });
+
   it("reads the figures again from the contracts the hub names when they're others, and keeps those", async () => {
     const moved = { pool: "ee".repeat(32), substrate: "cc".repeat(32), "staked-dusk": KNOWN["staked-dusk"] };
     const node = sozuNode({ named: moved });

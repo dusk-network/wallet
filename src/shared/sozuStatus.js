@@ -7,7 +7,8 @@
 // The hub can name other contracts at any time, so each refresh asks it
 // again, in the same query as the figures. Those are read from the contracts
 // it named last (at first, the ones known before), and read again from the
-// new ones only when it names others.
+// new ones only when it names others. A name it can't answer, or names no
+// contract for, keeps the one it named last; the others still follow it.
 
 import { parsePool } from "./sozuAmounts.js";
 
@@ -142,16 +143,26 @@ export async function readSozuStatus({ read, nodeUrl, contracts, account, names 
   const known = Object.fromEntries(SOZU_NAMES.map((name) => [name, contracts[name] ?? null]));
   const held = names.get(key);
   // One task: the hub's names with the figures, these from what it named last.
-  const asked = Promise.all(SOZU_NAMES.map((name) => read(contracts.hub, "contract", fromHex(HUB_NAME_ARGS[name])).then(decodeContractId)));
+  // Each name is asked on its own, so one the hub can't answer loses no other.
+  const asked = Promise.allSettled(
+    SOZU_NAMES.map((name) => read(contracts.hub, "contract", fromHex(HUB_NAME_ARGS[name])).then(decodeContractId))
+  );
   let ids = held?.ids ?? known;
   let source = held?.source ?? "fallback";
   let figures = readFigures(read, ids, account);
 
-  const named = await asked.catch(() => null);
-  if (named) {
-    // A name the hub doesn't have keeps the contract known before.
-    const hub = Object.fromEntries(SOZU_NAMES.map((name, i) => [name, named[i] ?? known[name]]));
-    source = named.every(Boolean) ? "hub" : "fallback";
+  const answers = await asked;
+  if (answers.some((a) => a.status === "fulfilled")) {
+    // A name the hub names no contract for, or can't answer now, keeps the
+    // one it named last; the one known before only when it named none yet.
+    const hub = Object.fromEntries(
+      SOZU_NAMES.map((name, i) => {
+        const named = answers[i].status === "fulfilled" ? answers[i].value : null;
+        return [name, named ?? ids[name] ?? known[name]];
+      })
+    );
+    const fromHub = (a) => (a.status === "fulfilled" ? Boolean(a.value) : held?.source === "hub");
+    source = answers.every(fromHub) ? "hub" : "fallback";
     names.set(key, { ids: hub, source });
     if (SOZU_NAMES.some((name) => hub[name] !== ids[name])) {
       ids = hub;
