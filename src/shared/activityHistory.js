@@ -14,14 +14,16 @@
 // aliases, and a run makes a bounded number of them; the next one carries on.
 //
 // Times, outcomes and fees come from one aliased `tx(hash:)` request per 50
-// entries, with a deposit to DuskEVM's call arguments, which name the DuskEVM
-// address it paid. The shielded history is phoenixHistory.js's.
+// entries, with the call arguments of a deposit to DuskEVM, which name the
+// DuskEVM address it paid, and of a call to Dusk Domains that may register a
+// .dusk name, which name it. The shielded history is phoenixHistory.js's.
 
 import { fetchWithTimeout } from "./networkStatus.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
 import { TX_KIND } from "./constants.js";
 import { depositsToBridge } from "./bridge.js";
 import { depositRecipientOf } from "./bridgeCalls.js";
+import { isDuskDomains, registeredNameOf } from "./knownCalls.js";
 import * as defaultStore from "./activityStore.js";
 
 export const TRANSFER_CONTRACT = "0100000000000000000000000000000000000000000000000000000000000000";
@@ -626,32 +628,41 @@ async function syncOnce({
 // Details
 // ---------------------------------------------------------------------------
 
+// A call to Dusk Domains by a function not known yet, or its register.
+const mayRegister = (entry, nodeUrl) =>
+  [entry?.contractId, entry?.counterparty].some((id) => isDuskDomains(id, nodeUrl)) && [undefined, "register"].includes(entry?.fnName);
+
 /**
  * Whether a kept entry's details are still to look up: it has none, or it is
- * a deposit to DuskEVM whose DuskEVM address wasn't read yet.
- * @param {{ detailsAt?: number, bridgeTo?: string|null, counterparty?: string|null, contractId?: string }} entry
+ * a deposit to DuskEVM whose DuskEVM address wasn't read yet, or a .dusk
+ * name's registration whose name wasn't.
+ * @param {{ detailsAt?: number, bridgeTo?: string|null, registeredName?: string|null, counterparty?: string|null, contractId?: string, fnName?: string }} entry
  * @param {string} nodeUrl
  */
 export const needsDetails = (entry, nodeUrl) =>
-  !entry?.detailsAt || (entry.bridgeTo === undefined && depositsToBridge(entry, nodeUrl));
+  !entry?.detailsAt ||
+  (entry.bridgeTo === undefined && depositsToBridge(entry, nodeUrl)) ||
+  (entry.registeredName === undefined && entry.fnName === "register" && mayRegister(entry, nodeUrl));
 
 /**
  * Times, outcomes, fees and calls of transactions, from one aliased request:
  * by hash, for those the node has. For the hashes in `args`, deposits to
  * DuskEVM, the call's arguments too, read for the DuskEVM address it paid:
- * `bridgeTo`, null when they don't name one.
+ * `bridgeTo`, null when they don't name one. For those in `names`, calls to
+ * Dusk Domains, read for the .dusk name a registration registered:
+ * `registeredName`, null when they don't read.
  * @param {string} url
  * @param {string[]} hashes - at most DETAILS_BATCH
- * @param {{ nodeUrl?: string, args?: Set<string> }} [opts]
+ * @param {{ nodeUrl?: string, args?: Set<string>, names?: Set<string> }} [opts]
  * @returns {Promise<Map<string, object>>}
  */
-export async function fetchTxDetails(url, hashes, { nodeUrl, args = new Set() } = {}) {
+export async function fetchTxDetails(url, hashes, { nodeUrl, args = new Set(), names = new Set() } = {}) {
   const list = hashes.filter((h) => HASH.test(h)).slice(0, DETAILS_BATCH);
   const out = new Map();
   if (!list.length) return out;
   const fields = list.map(
     (hash, i) =>
-      `t${i}: tx(hash: "${hash}") { err gasSpent blockHash blockTimestamp tx { gasPrice gasLimit callData { contractId fnName${args.has(hash) ? " data" : ""} } } }`
+      `t${i}: tx(hash: "${hash}") { err gasSpent blockHash blockTimestamp tx { gasPrice gasLimit callData { contractId fnName${args.has(hash) || names.has(hash) ? " data" : ""} } } }`
   );
   const data = await archiveQuery(url, `query { ${fields.join(" ")} }`);
   list.forEach((hash, i) => {
@@ -662,10 +673,12 @@ export async function fetchTxDetails(url, hashes, { nodeUrl, args = new Set() } 
     const seconds = Number(tx.blockTimestamp);
     const err = tx.err == null ? "" : typeof tx.err === "string" ? tx.err : JSON.stringify(tx.err);
     const call = tx.tx?.callData;
+    const registeredName = names.has(hash) ? registeredNameOf({ nodeUrl, contractId: call?.contractId, fnName: call?.fnName, args: call?.data }) : undefined;
     out.set(hash, {
       ...(args.has(hash)
         ? { bridgeTo: depositRecipientOf({ nodeUrl, contractId: call?.contractId, fnName: call?.fnName, data: call?.data }) }
         : {}),
+      ...(registeredName === undefined ? {} : { registeredName }),
       timestamp: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null,
       success: !err,
       error: err || undefined,
@@ -691,8 +704,9 @@ async function fillDetails({ url, nodeUrl, ownerKey, store, epoch, maxRequests, 
   );
   const missing = due.map((e) => e.hash);
   const args = new Set(due.filter((e) => depositsToBridge(e, nodeUrl)).map((e) => e.hash));
+  const names = new Set(due.filter((e) => mayRegister(e, nodeUrl)).map((e) => e.hash));
   for (let i = 0; i < missing.length && requests > 0; i += DETAILS_BATCH, requests--) {
-    const details = await fetchTxDetails(url, missing.slice(i, i + DETAILS_BATCH), { nodeUrl, args });
+    const details = await fetchTxDetails(url, missing.slice(i, i + DETAILS_BATCH), { nodeUrl, args, names });
     // A transaction the node doesn't have yet is looked up again next time.
     await store.patchActivityEntries(ownerKey, details, epoch);
     onStep?.();
@@ -743,6 +757,8 @@ export function activityEntry(row) {
     contractId: row.contractId,
     // A deposit to DuskEVM's address there: undefined until its call is read, null when it names none.
     bridgeTo: row.bridgeTo,
+    // A registration's .dusk name, the same way.
+    registeredName: row.registeredName,
     detailsAt: row.detailsAt,
   };
 }

@@ -617,9 +617,10 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   function check() {
     const raw = String(field.input.value ?? "").trim();
     st.stakeAmountDusk = raw;
+    // Both fees Max keeps, each at most, as maxTopupLux sets them aside.
     showNote(
       st.amountMode === "max" && blocked.ok
-        ? `Max keeps ${formatFee(unstakeFeeLux, { max: true })} DUSK for the fee to unstake later.`
+        ? `Max keeps ${formatFee(feeLux + unstakeFeeLux, { max: true })} DUSK: up to ${formatFee(feeLux, { max: true })} for this fee and ${formatFee(unstakeFeeLux, { max: true })} to unstake later.`
         : ""
     );
     if (!blocked.ok) {

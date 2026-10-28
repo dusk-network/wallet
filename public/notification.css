@@ -97,7 +97,8 @@ h1.ap-title {
   overflow-wrap: anywhere;
 }
 
-.ap-amount__unit {
+.ap-amount__unit,
+.ap-amount__lead {
   font-size: 17px;
   letter-spacing: 0;
   color: var(--text-muted);
@@ -169,6 +170,7 @@ p.ap-sub {
 .ap-recipient .mono {
   font-size: 13.5px;
   font-weight: 400;
+  white-space: nowrap;
 }
 
 .ap-recipient__tag {

@@ -231,6 +231,16 @@ describe("header", () => {
     expect(rule(".full-wrap")).not.toContain("overflow: hidden;");
   });
 
+  it("names the active site in the chip's tooltip as its approval did", async () => {
+    // Sites connect in the extension only.
+    vi.stubGlobal("chrome", { runtime: { id: "wallet", sendMessage: vi.fn() } });
+    const { renderHeader, chip } = await setup("popup");
+    renderHeader({ ...overview, activeOrigin: "http://127.0.0.1:5354", activeConnected: true });
+    expect(chip().title.split("\n").at(-1)).toBe("Connected: http://127.0.0.1:5354");
+    renderHeader({ ...overview, activeOrigin: "https://app.example:8443", activeConnected: false });
+    expect(chip().title.split("\n").at(-1)).toBe("Site: app.example:8443");
+  });
+
   it("keeps the keyboard on the chip when another profile redraws it", async () => {
     const { dom, renderHeader, chip } = await setup("popup");
     renderHeader(overview);

@@ -466,3 +466,34 @@ describe("a deposit to DuskEVM", async () => {
     expect(history.needsDetails({ detailsAt: 1, counterparty: bridge }, "https://nodes.dusk.network")).toBe(false);
   });
 });
+
+// Recorded on Testnet: A's registration of shpongle.dusk, with its call's arguments.
+describe("a .dusk name's registration", async () => {
+  const { calls } = (await import("./fixtures/dusk-domains-registrations.json")).default;
+  const call = calls.find((c) => c.name === "shpongle.dusk");
+  const recorded = fixture.details[call.hash];
+  const details = { ...fixture.details, [call.hash]: { ...recorded, tx: { ...recorded.tx, callData: { ...recorded.tx.callData, data: call.data } } } };
+  // The hashes whose call arguments a query asked for.
+  const withArgs = (node) =>
+    node.detailQueries().flatMap((l) => [...l.query.matchAll(/tx\(hash: "([0-9a-f]{64})"\)[^}]*\{ contractId fnName data \}/g)].map((m) => m[1]));
+
+  it("keeps the name it registered, its arguments asked of it alone", async () => {
+    const node = fakeArchive({ details });
+    await sync(A);
+    const { entries } = await history.readActivity({ nodeUrl: NODE, account: A });
+    expect(entries.find((e) => e.hash === call.hash)).toMatchObject({ fnName: "register", registeredName: "shpongle.dusk" });
+    expect(withArgs(node)).toEqual([call.hash]);
+  });
+
+  it("reads it once for a registration kept before the wallet read them, and not again when its call doesn't read", async () => {
+    const entry = entriesOf(A, "out").find((e) => e.origin === call.hash);
+    const kept = { ...history.parseHistoryEntry(A, entry), detailsAt: 1, success: true, contractId: STORE, fnName: "register" };
+    expect(history.needsDetails(kept, NODE)).toBe(true);
+    expect(history.needsDetails({ ...kept, fnName: "commit" }, NODE)).toBe(false);
+    const node = fakeArchive({ details: { ...details, [call.hash]: { ...details[call.hash], tx: { ...details[call.hash].tx, callData: { ...details[call.hash].tx.callData, data: "00ff" } } } } });
+    const read = await history.fetchTxDetails(NODE, [call.hash], { nodeUrl: NODE, names: new Set([call.hash]) });
+    expect(read.get(call.hash).registeredName).toBeNull();
+    expect(history.needsDetails({ ...kept, registeredName: null }, NODE)).toBe(false);
+    expect(withArgs(node)).toEqual([call.hash]);
+  });
+});

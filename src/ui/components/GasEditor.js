@@ -9,7 +9,9 @@ import { fieldLabel, integerInput } from "./FormControls.js";
 // minimum, or a price of 0, says so while it's typed, and the fee it comes to
 // shows in DUSK under the fields. While the gas won't do, `error` says why
 // and a "dusk-gas-validity" event tells the page (submitOnGasEnter keeps its
-// button off).
+// button off). A "dusk-gas-fee" event gives the most the gas comes to as it
+// changes, `detail.feeLux`, null while the gas won't do or isn't set, for a
+// page that shows it elsewhere too.
 
 function maxFeeFromGasStrings(limitStr, priceStr) {
   const l = String(limitStr ?? "").trim();
@@ -56,6 +58,7 @@ export class DuskGasEditor extends HTMLElement {
   #priceError = null;
   #maxLine = null;
   #lastError = "";
+  #lastFee = undefined;
   #feeValue = null;
   #totalValue = null;
   #details = null;
@@ -292,6 +295,11 @@ export class DuskGasEditor extends HTMLElement {
     if (error !== this.#lastError) {
       this.#lastError = error;
       this.dispatchEvent(new CustomEvent("dusk-gas-validity", { bubbles: true, detail: { error } }));
+    }
+    const fee = error ? null : feeLux;
+    if (fee !== this.#lastFee) {
+      this.#lastFee = fee;
+      this.dispatchEvent(new CustomEvent("dusk-gas-fee", { bubbles: true, detail: { feeLux: fee } }));
     }
 
     // Back to the network's price, once the gas is your own.

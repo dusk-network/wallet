@@ -162,9 +162,10 @@ describe("Activity's rows", () => {
     expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe(
       `${short(FAUCET)}, Failed · nothing sent · fee 0.0037 DUSK paid, 200 DUSK`
     );
-    // Hide balances hides the amount, not the fee.
+    // Hide balances hides the fee too, as it does the amount.
     setup({ local: [failed], hidden: true });
-    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee 0.0037 DUSK paid•••• DUSK`);
+    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee •••• DUSK paid•••• DUSK`);
+    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe(`${short(FAUCET)}, Failed · nothing sent · fee hidden, amount hidden`);
     // Without a fee charged, it says so.
     setup({ local: [{ ...failed, feePaid: undefined }] });
     expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);

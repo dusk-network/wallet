@@ -163,6 +163,9 @@ describe("settings", () => {
     expect(view.actions.send).not.toHaveBeenCalledWith({ type: "DUSK_UI_CLEAR_PERMISSIONS" });
     // Reset wallet is in a section of its own.
     expect(view.shownButtons(sites)).not.toContain("Reset wallet");
+    // A local http:// site by its whole origin, as its approval named it.
+    const local = (await settings({ permissions: [{ origin: "http://127.0.0.1:5354", accountIndex: 0 }] })).section("Connected sites");
+    expect(local.querySelectorAll(".settings-site__host").map(visibleText)).toEqual(["http://127.0.0.1:5354"]);
     expect(view.shownButtons(view.section("Reset"))).toEqual(["Reset wallet"]);
   });
 

@@ -98,6 +98,17 @@ describe("fee editor", () => {
     expect([editor.error, fee()]).toEqual(["", "Network feeup to 0.0025 DUSKTotalup to 1.0025 DUSK"]);
   });
 
+  it("tells the page the most the gas comes to as it changes, and none while it won't do", async () => {
+    const { editor, field } = await feeEditor();
+    const fees = [];
+    editor.addEventListener("dusk-gas-fee", (event) => fees.push(event.detail.feeLux));
+    typeInto(field("Gas limit"), "3000000");
+    typeInto(field("Gas limit"), "3000000");
+    typeInto(field("Gas price (LUX)"), "0");
+    typeInto(field("Gas price (LUX)"), "");
+    expect(fees).toEqual([6_000_000n, null]);
+  });
+
   it("keeps Confirm off while the gas won't do, and on again once it will", async () => {
     const { submitOnGasEnter } = await import("./FormControls.js");
     const { editor, field } = await feeEditor();

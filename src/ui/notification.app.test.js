@@ -115,6 +115,19 @@ describe("a site's request while the wallet is locked", () => {
     expect(visibleText(app.querySelector(".ap-recipient"))).toBe("to 0x96BA…893e on DuskEVM");
   });
 
+  it("shows what a withdrawal's proof costs first, then the withdrawal and whom it pays", async () => {
+    const prove = fixtures.calls.find((c) => c.name === "prove-account");
+    await render(
+      "send_tx",
+      { kind: "contract_call", contractId: BRIDGE_CONTRACTS.testnet.portal, fnName: prove.fnName, fnArgs: prove.args, chainId: "dusk:2", nodeUrl: TESTNET, gas: { limit: "51000000", price: "1" } },
+      locked
+    );
+    expect(title()).toBe("Prove a DuskEVM withdrawal");
+    expect(visibleText(app.querySelector(".ap-amount"))).toBe("Costs up to 0.051 DUSK");
+    expect(visibleText(app.querySelector(".ap-recipient__line"))).toBe(`for a 1,008 DUSK withdrawal that pays ${SHOP.slice(0, 6)}…${SHOP.slice(-6)} on Dusk`);
+    expect(app.querySelector(".ap-head .ap-sub").textContent).toBe("Proving moves no DUSK. You claim it once the waiting period ends.");
+  });
+
   it("rejects without unlocking", async () => {
     await render("send_tx", pay, locked);
     button("Reject").click();

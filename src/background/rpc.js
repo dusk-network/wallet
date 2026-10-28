@@ -19,6 +19,7 @@ import {
 } from "../shared/securityPolicy.js";
 import { bytesToHex, messageBytes, sha256Hex, toBytes } from "../shared/bytes.js";
 import { bridgeDepositRecipient } from "../shared/bridgeCalls.js";
+import { registeredNameOf } from "../shared/knownCalls.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import {
   hashTypedDataHex,
@@ -794,6 +795,11 @@ export async function handleRpc(origin, request) {
             bridgeTo:
               kind === TX_KIND.CONTRACT_CALL
                 ? bridgeDepositRecipient({ ...finalParams, nodeUrl })
+                : undefined,
+            // The .dusk name a registration registers, for Activity: it too is in the call's bytes.
+            registeredName:
+              kind === TX_KIND.CONTRACT_CALL
+                ? registeredNameOf({ ...finalParams, nodeUrl, args: finalParams?.fnArgs }) || undefined
                 : undefined,
             gasLimit: finalParams?.gas?.limit != null ? String(finalParams.gas.limit) : undefined,
             gasPrice: finalParams?.gas?.price != null ? String(finalParams.gas.price) : undefined,

@@ -5,7 +5,7 @@ import { networkNameFromNodeUrl } from "../../../shared/network.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { shortAddress } from "../../lib/strings.js";
+import { shortAddress, siteName } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
@@ -17,8 +17,8 @@ import { activityRows, loadActivityDetail } from "../activity.js";
 
 // A transaction's details: a centred summary (who, how much, its status),
 // then its date, memo, fee, the profile it left or reached, and its ID, which
-// opens Dusk's explorer. Block, gas and finality sit under Technical details.
-// Hide balances hides the amount; the fee stays.
+// opens Dusk's explorer. Block, gas, finality and a call's contract sit under
+// Technical details. Hide balances hides the amount; the fee stays.
 
 const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 
@@ -73,7 +73,7 @@ function feeRow(tx, desc) {
   return null;
 }
 
-function technicalRows(tx, ov, nodeUrl) {
+function technicalRows(tx, ov, nodeUrl, showToast) {
   const kind = String(tx?.kind ?? "").toLowerCase();
   const num = (v) => (v != null && /^\d+$/.test(String(v)) ? groupThousands(String(v)) : null);
   const at = (label, ms) => (Number(ms) > 0 ? kv(label, dateText(Number(ms))) : null);
@@ -88,7 +88,7 @@ function technicalRows(tx, ov, nodeUrl) {
     // The fee to the last LUX: the summary rounds it to 4 decimals.
     safeBigInt(tx?.feePaid, 0n) > 0n ? kv("Exact fee", `${formatDuskExact(tx.feePaid)} DUSK`) : null,
     finalKnown && ["executed", "failed"].includes(String(tx?.status ?? "")) ? kv("Finality", "Final") : null,
-    kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", mono(String(tx.contractId), shortAddress(String(tx.contractId)))) : null,
+    kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", [mono(String(tx.contractId), shortAddress(String(tx.contractId))), copyContract(String(tx.contractId), showToast)]) : null,
     tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,
     tx?.blockHash ? kv("Block hash", mono(String(tx.blockHash), shortAddress(String(tx.blockHash)))) : null,
     at("Submitted", tx?.submittedAt),
@@ -100,6 +100,21 @@ function technicalRows(tx, ov, nodeUrl) {
     // The chain's own words for a failure; the summary says it plainly.
     String(tx?.status ?? "") === "failed" && tx?.error ? kv("Error", String(tx.error), { className: "kv--wrap" }) : null,
   ].filter(Boolean);
+}
+
+// Copy beside a call's contract, as an icon.
+function copyContract(id, showToast) {
+  return h("button", {
+    class: "copy-ico",
+    type: "button",
+    title: "Copy contract ID",
+    "aria-label": "Copy contract ID",
+    html: iconSvg("copy"),
+    onclick: async () => {
+      const ok = await copyToClipboard(id);
+      showToast?.(ok ? "Contract ID copied" : "Couldn't copy the contract ID");
+    },
+  });
 }
 
 function explorerButton(url, actions, text = "View in Dusk explorer") {
@@ -163,17 +178,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
   // Who: the other side's name with its short address and Copy, a saved
   // contact's .dusk name before it; an address without a name shows in full
   // mono, Copy beside it; a deposit to DuskEVM is "To" the DuskEVM address it
-  // paid, Copy beside it; another contract call shows the contract.
-  const other =
-    desc.evm
-      ? ""
-      : desc.address && !desc.isAddress
-      ? desc.address
-      : kind === TX_KIND.CONTRACT_CALL && !desc.address && tx?.contractId
-      ? String(tx.contractId)
-      : "";
-  const otherLabel =
-    kind === TX_KIND.CONTRACT_CALL && other === String(tx?.contractId ?? "") ? "Copy contract ID" : "Copy address";
+  // paid, Copy beside it. A call's contract is under Technical details.
+  const other = !desc.evm && desc.address && !desc.isAddress ? desc.address : "";
   const hero = h("div", { class: "tx-hero" }, [
     h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true", html: txIconSvg(desc.icon) }),
     desc.lead ? h("div", { class: "tx-hero-lead", text: desc.lead }) : null,
@@ -185,7 +191,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
       ? h("div", { class: "tx-hero-addr" }, [
           desc.alias ? h("span", { class: "tx-hero-alias", text: `${desc.alias} · ` }) : null,
           mono(other, shortAddress(other)),
-          copyButton(other, { label: otherLabel, showToast }),
+          copyButton(other, { label: "Copy address", showToast }),
         ].filter(Boolean))
       : null,
     amountEl(desc.amount, hidden, "tx-hero-amount"),
@@ -213,14 +219,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
   // The site that asked for it. The wallet records its own transactions'
   // origin as "Wallet": they come from no site, so they show none.
   const origin = String(tx?.origin ?? "");
-  let site = "";
-  if (origin && origin.toLowerCase() !== "wallet") {
-    try {
-      site = new URL(origin).host || origin;
-    } catch {
-      site = origin;
-    }
-  }
+  const site = origin && origin.toLowerCase() !== "wallet" ? siteName(origin) : "";
 
   const when = txTime(tx);
   const idButton = h("button", {
@@ -280,7 +279,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
   // Technical details stay open across redraws (a sync can redraw this view).
   const tech = h("details", { class: "advanced tx-tech", open: Boolean(state?.txTechOpen) }, [
     h("summary", { text: "Technical details" }),
-    h("div", { class: "group group--inset" }, technicalRows(tx, ov, nodeUrl)),
+    h("div", { class: "group group--inset" }, technicalRows(tx, ov, nodeUrl, showToast)),
   ]);
   tech.addEventListener("toggle", () => {
     if (state) state.txTechOpen = tech.open;

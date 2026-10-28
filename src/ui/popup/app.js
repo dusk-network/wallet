@@ -4,6 +4,7 @@ import { emptyAddressBook, state, ONBOARD_ROUTES } from "./state.js";
 import { switchContext } from "./context.js";
 import { refreshOverview, getActiveOrigin } from "./overview.js";
 import { h, setChildren } from "../lib/dom.js";
+import { siteName } from "../lib/strings.js";
 import { createToaster } from "../components/Toast.js";
 import { balancesHidden } from "../components/Balance.js";
 import { txStatusToast } from "./txToast.js";
@@ -201,7 +202,7 @@ function setApp(children) {
       // Keep lastAnimatedRoute in sync even if we skip animation.
       lastAnimatedRoute = r;
 
-      // Activity is an internal dashboard subview, not a top-level nav item.
+      // Home and its full Activity list move without the transition.
       const isHomeTab = (x) => x === "home" || x === "activity";
       if (!(isHomeTab(prev) && isHomeTab(r))) {
         pulseViewAnimation();
@@ -284,17 +285,18 @@ function updateFullNav() {
   try {
     if (!fullNav) return;
     const rawRoute = state?.route || "home";
+    // A transaction's details stay under the item they were opened from.
     const route =
       rawRoute === "convert_confirm"
         ? "convert"
-        : rawRoute === "activity"
-        ? "home"
+        : rawRoute === "tx"
+        ? state?.txDetailFrom || "home"
         : rawRoute === "sent"
         ? state?.sent?.doneRoute || "home"
         : rawRoute;
     for (const item of fullNav.querySelectorAll("[data-route]")) {
       const itemRoute = item.getAttribute("data-route");
-      const active = itemRoute === route || (itemRoute === "home" && route === "tx");
+      const active = itemRoute === route;
       item.classList.toggle("is-active", active);
       if (active) item.setAttribute("aria-current", "page");
       else item.removeAttribute("aria-current");
@@ -313,8 +315,9 @@ if (fullNav) {
     netMenu.close();
     acctMenu.close();
     state.route = route;
-    // Staking opens on its overview.
+    // Staking opens on its overview, and Activity on all of it, as See all does.
     if (route === "stake" && state.staking) state.staking.screen = "overview";
+    if (route === "activity") state.activityFilter = "all";
     state.needsRefresh = true;
     if (route !== "home") state.highlightTx = null;
     await render({ forceRefresh: true });
@@ -333,16 +336,10 @@ function activeSiteInfo(ov) {
   if (!origin) return null;
   if (!origin.startsWith("https://") && !origin.startsWith("http://")) return null;
 
-  let host = origin;
-  try {
-    host = new URL(origin).hostname;
-  } catch {
-    // keep origin fallback
-  }
-
+  // As its approval named it: "http://127.0.0.1:5354", "app.dusk.network".
   return {
     origin,
-    host,
+    host: siteName(origin),
     connected: Boolean(ov?.activeConnected),
   };
 }

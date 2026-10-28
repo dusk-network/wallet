@@ -327,10 +327,10 @@ describe("native staking", () => {
     expect(button("Review stake").disabled).toBe(false);
     expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available 1,482.9383 DUSK from your public balance");
 
-    // Max leaves the network fee, and the fee to unstake later, and says so.
+    // Max leaves this stake's fee and the fee to unstake later, and says both.
     button("Max").click();
     expect(field("Stake amount").value).toBe("1482.8383");
-    expect(visibleText(body.querySelector(".amount-note"))).toBe("Max keeps 0.05 DUSK for the fee to unstake later.");
+    expect(visibleText(body.querySelector(".amount-note"))).toBe("Max keeps 0.1 DUSK: up to 0.05 for this fee and 0.05 to unstake later.");
 
     // Too much says by how much, fee included.
     typeInto(field("Stake amount"), "5000");
@@ -362,6 +362,7 @@ describe("native staking", () => {
     );
     button("Max").click();
     expect(field("Stake amount").value).toBe("1482.6383");
+    expect(visibleText(body.querySelector(".amount-note"))).toBe("Max keeps 0.3 DUSK: up to 0.15 for this fee and 0.15 to unstake later.");
     button("Review stake").click();
     await settle();
     expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.15 DUSKTotalup to 1,482.7883 DUSK");

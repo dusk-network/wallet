@@ -731,19 +731,33 @@ describe("contract calls", () => {
     expect(head().querySelector(".ap-tag").textContent).toBe("Known DuskEVM bridge call");
   });
 
+  // The gas a proof or claim comes with: 0.051 DUSK at most.
+  const GAS = { gas: { limit: "51000000", price: "1" } };
+
   it.each([
     ["prove-account", "Prove a DuskEVM withdrawal", "Proving moves no DUSK. You claim it once the waiting period ends."],
     ["claim-external-account", "Claim a DuskEVM withdrawal", "Claiming pays this DUSK to the account above. You pay only the network fee."],
-  ])("reads %s: the withdrawal's amount and whom it pays on Dusk", async (name, title, noteText) => {
+  ])("reads %s: what it costs first, then the withdrawal and whom it pays on Dusk", async (name, title, noteText) => {
     // It pays the wallet's second profile.
-    await render("send_tx", contractCall(portal, name), { duskNames: { [MAIN]: "alice.dusk", [SAVINGS]: "bob.dusk" } });
+    await render("send_tx", contractCall(portal, name, GAS), { duskNames: { [MAIN]: "alice.dusk", [SAVINGS]: "bob.dusk" } });
     expect(head().querySelector("h1").textContent).toBe(title);
-    expect(visibleText(head().querySelector(".ap-amount"))).toBe("1,008 DUSK");
+    // The cost leads, as on the bridge's review, then the withdrawal it's for.
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("Costs up to 0.051 DUSK");
+    expect(visibleText(head().querySelector(".ap-recipient__line"))).toBe("for a 1,008 DUSK withdrawal that pays bob.dusk on Dusk");
     expect(recipient()).toEqual({ lead: "bob.dusk", tag: "Profile 2 · your profile" });
+    expect(head().querySelector(".ap-sub").textContent).toBe(noteText);
+    expect(app.textContent.split(noteText)).toHaveLength(2);
     expect(row("Pays to").textContent).toBe(SAVINGS);
+    expect(row("Amount").textContent).toBe("1,008 DUSK");
     expect(row("Sent from DuskEVM").textContent).toBe(fixture(name).expected.from);
-    expect(app.textContent).toContain(noteText);
     expect(head().querySelector(".ap-tag").textContent).toBe("Known DuskEVM bridge call");
+
+    // It follows the fee as Custom fee changes it, and shows none while the gas won't do.
+    const editor = app.querySelector("dusk-gas-editor");
+    editor.dispatchEvent(fakeEvent("dusk-gas-fee", { detail: { feeLux: 102_000_000n } }));
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("Costs up to 0.102 DUSK");
+    editor.dispatchEvent(fakeEvent("dusk-gas-fee", { detail: { feeLux: null } }));
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("Costs up to —");
   });
 
   it("shows a withdrawal off the bridge's route as the call it is, with a warning, never as known", async () => {
@@ -761,9 +775,13 @@ describe("contract calls", () => {
   });
 
   it("names a withdrawal that pays a contract", async () => {
-    await render("send_tx", contractCall(portal, "claim-contract"));
-    expect(row("Pays to contract").textContent).toBe(fixture("claim-contract").expected.recipient);
-    expect(visibleText(head().querySelector(".ap-amount"))).toBe("1 DUSK");
+    await render("send_tx", contractCall(portal, "claim-contract", GAS));
+    const contract = fixture("claim-contract").expected.recipient;
+    expect(row("Pays to contract").textContent).toBe(contract);
+    expect(visibleText(head().querySelector(".ap-amount"))).toBe("Costs up to 0.051 DUSK");
+    expect(visibleText(head().querySelector(".ap-recipient__line"))).toBe(
+      `for a 1 DUSK withdrawal that pays ${contract.slice(0, 6)}…${contract.slice(-6)} on Dusk, a contract`
+    );
   });
 
   it("leaves the same call undecoded on Mainnet, where no bridge is configured", async () => {

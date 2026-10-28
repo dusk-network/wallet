@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
 import releases from "../shared/dusk-domains-releases.json";
 import { TX_KIND } from "../shared/constants.js";
-import { installFakeDom, visibleText } from "./testing/fakeDom.js";
+import { installFakeDom, settle, visibleText } from "./testing/fakeDom.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
 
 const HASH = "ab".repeat(32);
@@ -63,7 +63,7 @@ describe("transaction details", () => {
     expect([view.status, view.note]).toEqual(["Completed", ""]);
   });
 
-  it("names the contract a call went to, and offers no Add token or Import NFT", () => {
+  it("names the contract a call went to under Technical details only, with Copy, and offers no Add token or Import NFT", async () => {
     const contractId = "cd".repeat(32);
     const view = details({
       kind: TX_KIND.CONTRACT_CALL,
@@ -72,8 +72,14 @@ describe("transaction details", () => {
       status: "executed",
     });
     expect(view.name).toBe("Call transfer");
-    expect(visibleText(view.body.querySelector(".tx-hero-addr"))).toBe("0xcdcd…cdcdcd");
-    expect(view.body.querySelector(".tx-hero-addr button").getAttribute("aria-label")).toBe("Copy contract ID");
+    expect(view.body.querySelector(".tx-hero-addr")).toBeNull();
+    const contract = view.body.querySelectorAll(".tx-tech .kv").find((row) => row.querySelector(".kv-label").textContent === "Contract");
+    expect(visibleText(contract)).toBe("Contract0xcdcd…cdcdcd");
+    const copy = contract.querySelector("button");
+    expect(copy.getAttribute("aria-label")).toBe("Copy contract ID");
+    copy.click();
+    await settle();
+    expect(dom.clipboard.writeText).toHaveBeenCalledWith(`0x${contractId}`);
     expect(view.body.querySelector(".tx-assets")).toBeNull();
     expect(view.body.querySelectorAll("button").map((b) => b.textContent)).not.toEqual(expect.arrayContaining(["Add token"]));
     expect(view.body.querySelectorAll("button").map((b) => b.textContent)).not.toEqual(expect.arrayContaining(["Import NFT"]));
@@ -85,6 +91,9 @@ describe("transaction details", () => {
     const register = details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "register", deposit: "10000000000", status: "executed" });
     expect([visibleText(register.lead), register.name]).toEqual(["Dusk Domains", "Registered a .dusk name"]);
     expect(visibleText(register.body.querySelector(".tx-hero-amount"))).toBe("−10 DUSK");
+    // By the name it registered, once read; its contract under Technical details alone.
+    const named = details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "register", registeredName: "alice.dusk", status: "executed" });
+    expect([named.name, named.body.querySelector(".tx-hero-addr")]).toEqual(["Registered alice.dusk", null]);
     const commit = details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "commit", status: "executed" });
     expect(commit.name).toBe("Reserved a .dusk name");
     // The same contract ID through a custom node is any contract.
@@ -112,9 +121,9 @@ describe("transaction details", () => {
     expect(view.body.querySelector(".tx-hero-addr")).toBeNull();
     expect(view.rows).toContain(`DuskEVM recipient${evm}Copy`);
     expect(view.body.querySelector(".tx-evm-recipient button").getAttribute("aria-label")).toBe("Copy DuskEVM address");
-    // Without it, the bridge's contract, and no recipient row.
+    // Without it, no recipient row; the bridge's contract is under Technical details.
     const old = details(deposit);
-    expect(visibleText(old.body.querySelector(".tx-hero-addr"))).toBe("2257e5…a1b31d");
+    expect(old.body.querySelector(".tx-hero-addr")).toBeNull();
     expect(old.rows.filter((r) => r.startsWith("DuskEVM recipient"))).toEqual([]);
   });
 
@@ -142,6 +151,7 @@ describe("transaction details", () => {
   it("names the site a transaction came from, and none for the wallet's own", () => {
     const send = { kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed" };
     expect(details({ ...send, origin: "https://shop.example" }).rows).toContain("Siteshop.example");
+    expect(details({ ...send, origin: "http://127.0.0.1:5354" }).rows).toContain("Sitehttp://127.0.0.1:5354");
     for (const origin of ["Wallet", undefined]) {
       expect(details({ ...send, origin }).rows.filter((r) => r.startsWith("Site")), String(origin)).toEqual([]);
     }

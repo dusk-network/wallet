@@ -4,7 +4,7 @@
 // on top of the component layer in ui.css.
 
 import { h } from "../lib/dom.js";
-import { truncateMiddle } from "../lib/strings.js";
+import { siteName, truncateMiddle } from "../lib/strings.js";
 import { iconSvg } from "../components/ActionIcon.js";
 
 // A globe: a site.
@@ -17,20 +17,6 @@ export function icon(name) {
   return name === "globe" ? GLOBE : iconSvg(name);
 }
 
-/**
- * Where the request comes from: its host, or for a local http:// site its
- * whole origin, so the scheme shows too.
- * @param {string} origin
- */
-export function siteName(origin) {
-  try {
-    const url = new URL(String(origin ?? ""));
-    return url.protocol === "https:" ? url.host : url.origin;
-  } catch {
-    return String(origin ?? "");
-  }
-}
-
 /** The site that asks, as a chip above what it asks for. */
 export function siteChip(origin) {
   return h("div", { class: "ap-site", title: String(origin ?? "") }, [
@@ -41,16 +27,27 @@ export function siteChip(origin) {
 }
 
 /**
+ * An amount's parts for h(): the number large, the unit and any words before
+ * it ("Costs up to") small.
+ * @param {{ lead?: string, value: string, unit?: string }} amount
+ */
+export function amountParts({ lead = "", value, unit = "" }) {
+  return [
+    lead ? h("span", { class: "ap-amount__lead", text: `${lead} ` }) : null,
+    value,
+    unit ? h("span", { class: "ap-amount__unit", text: ` ${unit}` }) : null,
+  ].filter((part) => part != null);
+}
+
+/**
  * What the site asks for: a title, then an amount, a line saying to whom, and
  * small print, each optional.
- * @param {{ title: string, amount?: {value: string, unit: string}|null, to?: Node|string|null, sub?: Node|string|null, tag?: Node|null }} parts
+ * @param {{ title: string, amount?: {lead?: string, value: string, unit: string}|null, to?: Node|string|null, sub?: Node|string|null, tag?: Node|null }} parts
  */
 export function requestHead({ title, amount = null, to = null, sub = null, tag = null }) {
   return h("div", { class: "ap-head" }, [
     h("h1", { class: "ap-title", text: title }),
-    amount
-      ? h("div", { class: "ap-amount" }, [amount.value, h("span", { class: "ap-amount__unit", text: ` ${amount.unit}` })])
-      : null,
+    amount ? h("div", { class: "ap-amount" }, amountParts(amount)) : null,
     to ? h("div", { class: "ap-to" }, [to]) : null,
     sub ? h("div", { class: "ap-sub" }, [sub]) : null,
     tag,

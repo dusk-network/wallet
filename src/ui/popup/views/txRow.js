@@ -5,6 +5,7 @@
 // calls say what they did: "Registered a .dusk name". A status word shows only while its outcome isn't known. One that failed or
 // was dropped says so under the name, "Failed · nothing sent · fee 0.0037
 // DUSK paid", and its amount shows muted, without a sign: nothing left.
+// Hide balances hides that fee too.
 
 import { formatDusk, formatFee, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
@@ -160,7 +161,10 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   let d;
   const bridge = bridgeTransfer(tx, tx?.nodeUrl || nodeUrl);
   // A known contract's call, by what it did.
-  const named = kind === TX_KIND.CONTRACT_CALL ? knownCall({ contractId: tx?.contractId, fnName: fn, nodeUrl: tx?.nodeUrl || nodeUrl }) : null;
+  const named =
+    kind === TX_KIND.CONTRACT_CALL
+      ? knownCall({ contractId: tx?.contractId, fnName: fn, nodeUrl: tx?.nodeUrl || nodeUrl, registeredName: tx?.registeredName })
+      : null;
   if (bridge) {
     const value = tx?.amount ?? tx?.deposit;
     // A deposit's DuskEVM address, read from its call: the one the wallet
@@ -351,25 +355,30 @@ export function txIconSvg(icon) {
 
 /**
  * The line under the name: "Sent · Shielded · 14:32", or for one that failed,
- * "Failed · nothing sent · fee 0.0037 DUSK paid". Fees show with Hide
- * balances on.
+ * "Failed · nothing sent · fee 0.0037 DUSK paid". With Hide balances on
+ * (`hidden`), the fee is hidden as amounts are, "fee •••• DUSK paid", and
+ * `spoken` says so in words for a screen reader: "fee hidden".
+ * @param {object} desc - describeTx's
+ * @param {string} when
+ * @param {{ hidden?: boolean, spoken?: boolean }} [opts]
  */
-export function subText(desc, when) {
-  if (desc.unsent) return [desc.statusWord, ...unsentParts(desc)].join(" · ");
+export function subText(desc, when, opts) {
+  if (desc.unsent) return [desc.statusWord, ...unsentParts(desc, opts)].join(" · ");
   return [desc.generic ? "" : desc.word, desc.note, when].filter(Boolean).join(" · ");
 }
 
-function unsentParts(desc) {
+function unsentParts(desc, { hidden = false, spoken = false } = {}) {
   const paid = desc.failed && desc.fee && !/^0\.0+$/.test(desc.fee);
-  return ["nothing sent", paid ? `fee ${desc.fee} DUSK paid` : "no fee"];
+  const fee = !paid ? "no fee" : !hidden ? `fee ${desc.fee} DUSK paid` : spoken ? "fee hidden" : `fee ${HIDDEN_BALANCE} DUSK paid`;
+  return ["nothing sent", fee];
 }
 
 // The line under the name, its status word in the status colour.
-function subEl(desc, when) {
+function subEl(desc, when, hidden) {
   if (!desc.unsent) return h("div", { class: "row-sub tx-sub", "aria-hidden": "true", text: subText(desc, when) });
   return h("div", { class: "row-sub tx-sub", "aria-hidden": "true" }, [
     h("span", { class: `tx-status--${desc.tone}`, text: desc.statusWord }),
-    ` · ${unsentParts(desc).join(" · ")}`,
+    ` · ${unsentParts(desc, { hidden }).join(" · ")}`,
   ]);
 }
 
@@ -438,7 +447,7 @@ function pulseClass(state, hash) {
 export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when }) {
   const desc = describeTx(tx, { contactName, nodeUrl });
   const hash = String(tx?.hash ?? "");
-  const sub = subText(desc, when(tx));
+  const sub = subText(desc, when(tx), { hidden, spoken: true });
   // What the row says, for the button that opens it.
   const spoken = !desc.amount ? "" : hidden && !desc.amount.text ? "amount hidden" : amountText(desc.amount, false);
   const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, sub, spoken, desc.unsent ? "" : desc.statusWord].filter(Boolean).join(", ");
@@ -479,7 +488,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
           : null,
       ].filter(Boolean)),
       // The button's name says these already.
-      sub ? subEl(desc, when(tx)) : null,
+      sub ? subEl(desc, when(tx), hidden) : null,
     ].filter(Boolean)),
     h("div", { class: "tx-right", "aria-hidden": "true" }, [
       amountEl(desc.amount, hidden),

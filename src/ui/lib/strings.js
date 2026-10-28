@@ -33,3 +33,19 @@ export function normalizeMnemonic(m) {
     .split(/\s+/)
     .join(" ");
 }
+
+/**
+ * A site as the wallet names it, in approvals and the popup alike: its host
+ * with any port, or for a local http:// site its whole origin, so the scheme
+ * shows too.
+ * @param {string} origin
+ * @returns {string}
+ */
+export function siteName(origin) {
+  try {
+    const url = new URL(String(origin ?? ""));
+    return url.protocol === "https:" ? url.host : url.origin;
+  } catch {
+    return String(origin ?? "");
+  }
+}

@@ -9,7 +9,7 @@ import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.j
 import { platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
 import { h } from "../../lib/dom.js";
-import { shortAddress } from "../../lib/strings.js";
+import { shortAddress, siteName } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -180,13 +180,6 @@ export function optionsView(ov, { state, actions } = {}) {
 
   // Connected sites, each with its profile and Disconnect; Disconnect all asks first.
   const connectedSites = Array.isArray(ov?.permissions) ? ov.permissions : [];
-  const siteHost = (origin) => {
-    try {
-      return new URL(origin).host || origin;
-    } catch {
-      return origin;
-    }
-  };
   const disconnect = async (message, done) => {
     try {
       const response = await actions?.send?.(message);
@@ -200,7 +193,7 @@ export function optionsView(ov, { state, actions } = {}) {
   };
   const siteRows = connectedSites.map((p) => {
     const origin = String(p?.origin ?? "");
-    const host = siteHost(origin);
+    const host = siteName(origin);
     const idx = Number(p?.accountIndex ?? 0) || 0;
     const sel = h(
       "select",

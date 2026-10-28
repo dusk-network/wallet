@@ -2406,8 +2406,9 @@ button.net-menu-item--active {
   text-overflow: ellipsis;
 }
 
-.net-menu-item-left .dusk-name {
-  font-size: 11px;
+/* "alice.dusk · qxwSid…kQ2Bgr": the name at the line's size, the account muted */
+.net-menu-item-hint .dusk-name {
+  font-size: inherit;
 }
 
 .net-menu-check {
