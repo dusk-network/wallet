@@ -6,6 +6,7 @@ import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress } from "../../lib/strings.js";
 import { txErrorText } from "./txDisplay.js";
+import { zonedClockText } from "../../lib/time.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 
@@ -36,9 +37,9 @@ export function sendRefused(error) {
 
 let sentSeq = 0;
 
+// "13:21 CET": when it was sent, with the time zone it shows in.
 function clock(ts) {
-  const d = new Date(Number(ts) || Date.now());
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return zonedClockText(Number(ts) || Date.now());
 }
 
 /** An error as a short sentence: one line, at most 140 characters, ending in a full stop. */

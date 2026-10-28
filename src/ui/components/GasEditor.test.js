@@ -62,6 +62,65 @@ describe("fee editor", () => {
     expect(fee()).toBe("Network feeup to 0.006 DUSKTotalup to 1.006 DUSK");
   });
 
+  it("shows what the gas comes to in DUSK under the fields, exactly", async () => {
+    const { editor, field } = await feeEditor();
+    const max = () => editor.querySelector(".gas-max");
+    expect([isShown(max()), visibleText(max())]).toEqual([true, "At most 0.005 DUSK"]);
+    typeInto(field("Gas limit"), "2840001");
+    typeInto(field("Gas price (LUX)"), "1");
+    expect(visibleText(max())).toBe("At most 0.002840001 DUSK");
+    // Nothing to add up without both.
+    typeInto(field("Gas price (LUX)"), "");
+    expect(isShown(max())).toBe(false);
+  });
+
+  it("refuses a price of 0, and shows no fee or total for gas that won't do", async () => {
+    const { editor, field, fee } = await feeEditor();
+    const price = field("Gas price (LUX)");
+    typeInto(price, "0");
+    const error = dom.document.getElementById(price.getAttribute("aria-describedby"));
+    expect([isShown(error), error.textContent, price.getAttribute("aria-invalid")]).toEqual([
+      true,
+      "The gas price must be at least 1 LUX.",
+      "true",
+    ]);
+    expect(fee()).toBe("Network fee—Total—");
+    expect(editor.error).toBe("The gas price must be at least 1 LUX.");
+    expect(isShown(editor.querySelector(".gas-max"))).toBe(false);
+    expect(() => editor.readFinalGas()).toThrow("The gas price must be at least 1 LUX.");
+    expect(() => editor.readOverrideGas({ limit: "2500000", price: "2" })).toThrow("The gas price must be at least 1 LUX.");
+
+    // A limit under the minimum doesn't show a fee either.
+    typeInto(price, "1");
+    typeInto(field("Gas limit"), "1000");
+    expect(fee()).toBe("Network fee—Total—");
+    typeInto(field("Gas limit"), "2500000");
+    expect([editor.error, fee()]).toEqual(["", "Network feeup to 0.0025 DUSKTotalup to 1.0025 DUSK"]);
+  });
+
+  it("keeps Confirm off while the gas won't do, and on again once it will", async () => {
+    const { submitOnGasEnter } = await import("./FormControls.js");
+    const { editor, field } = await feeEditor();
+    const confirm = dom.document.createElement("button");
+    let ready = true;
+    submitOnGasEnter(editor, confirm, { ready: () => ready });
+    expect(confirm.disabled).toBe(false);
+    typeInto(field("Gas price (LUX)"), "0");
+    expect(confirm.disabled).toBe(true);
+    typeInto(field("Gas limit"), "10");
+    expect(confirm.disabled).toBe(true);
+    typeInto(field("Gas price (LUX)"), "1");
+    expect(confirm.disabled).toBe(true);
+    // Fixed, unless the page isn't ready for its own reasons.
+    ready = false;
+    typeInto(field("Gas limit"), "2500000");
+    expect(confirm.disabled).toBe(true);
+    typeInto(field("Gas limit"), "10");
+    ready = true;
+    typeInto(field("Gas limit"), "2500000");
+    expect(confirm.disabled).toBe(false);
+  });
+
   it("refuses an approval's override under the minimum too, so the window stays open to fix it", () => {
     const editor = dom.document.createElement("dusk-gas-editor");
     const base = { limit: "2500000", price: "1" };

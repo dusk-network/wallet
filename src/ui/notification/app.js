@@ -4,7 +4,7 @@
 // Details. A locked wallet shows what is asked, with Unlock and Reject.
 
 import { UI_DISPLAY_DECIMALS, formatDuskExact, groupThousands, safeBigInt } from "../../shared/amount.js";
-import { callsBridge } from "../../shared/bridgeCalls.js";
+import { bridgeServiceTransfer, callsBridge } from "../../shared/bridgeCalls.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { getMinimumGas } from "../../shared/txDefaults.js";
@@ -12,6 +12,8 @@ import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
+import { syncTestnetStrip } from "../components/TestnetStrip.js";
+import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
 import { shortAddress } from "../lib/strings.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
@@ -73,8 +75,10 @@ function renderError(text) {
   show([h("div", { class: "err", role: "alert", text })]);
 }
 
-// The network the request is on, in the header beside the wallet's name.
+// The network the request is on, in the header beside the wallet's name, and
+// on a test network the strip at the top that says its DUSK has no value.
 function showNetwork(name) {
+  syncTestnetStrip(app?.closest?.(".panel") ?? document.body, name);
   const chip = document.getElementById("approval-network");
   if (!chip) return;
   chip.textContent = name || "";
@@ -131,16 +135,12 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
   return frac ? `${intPart}.${frac}` : intPart;
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-// A time as the popup writes it: "26 Oct 2026, 14:10". One that isn't a
+// A time as the popup writes it: "26 Oct 2026, 14:10 CET". One that isn't a
 // time shows as it came.
 function dateText(value) {
   const d = new Date(String(value ?? ""));
   if (!Number.isFinite(d.getTime())) return String(value ?? "");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm}`;
+  return fullDateText(d.getTime());
 }
 
 // The network of a known chain ID: "dusk:2" is Testnet.
@@ -196,17 +196,33 @@ async function decide(decision, approvedParams) {
   window.close();
 }
 
+// What a window says when its answer didn't reach the wallet.
+function answerFailedText(e) {
+  const reason = String(e?.message ?? e ?? "").trim();
+  return reason ? `Couldn't send your answer to the wallet: ${reason}` : "Couldn't send your answer to the wallet. Try again.";
+}
+
 /**
  * Reject and the approve button, side by side. Input that won't do (a gas
- * edit, a missing MAX) says so above them; nothing is sent.
+ * edit, a missing MAX) says so above them; nothing is sent. An answer that
+ * doesn't reach the wallet (Firefox's runtime rejects when the background is
+ * gone) says so there too, and the window stays open to try again.
  */
 function decisionBar({ approveText = "Approve", approveDisabled = false, approveTitle = "", getApprovedParams } = {}) {
   const error = h("div", { class: "field-error ap-actions__error", role: "alert", hidden: true });
+  const answer = async (decision, approvedParams) => {
+    try {
+      await decide(decision, approvedParams);
+    } catch (e) {
+      error.textContent = answerFailedText(e);
+      error.hidden = false;
+    }
+  };
   const rejectBtn = h("button", {
     class: "btn-outline",
     type: "button",
     text: "Reject",
-    onclick: () => decide("reject"),
+    onclick: () => answer("reject"),
   });
   const approveBtn = h("button", {
     class: "btn-primary",
@@ -224,7 +240,7 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
         return;
       }
       error.hidden = true;
-      await decide("approve", approvedParams);
+      await answer("approve", approvedParams);
     },
   });
   return { nodes: [error, rejectBtn, approveBtn], approveBtn, rejectBtn, error };
@@ -398,7 +414,7 @@ export async function renderNotification() {
         requestHead({ title: "Set up Dusk Wallet first", sub: "Create or import a recovery phrase, then try again on the site." }),
       ],
       [
-        h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject") }),
+        h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject").catch((e) => renderError(answerFailedText(e))) }),
         h("button", {
           class: "btn-primary",
           type: "button",
@@ -504,12 +520,12 @@ export async function renderNotification() {
     };
     unlockBtn.addEventListener("click", unlock);
 
-    const to =
-      summary.to?.network === "duskevm"
-        ? plainTo(summary.to.address, "on DuskEVM")
-        : summary.to?.address
-          ? toLine(summary.to.address)
-          : null;
+    // An address on another chain, else a Dusk recipient by its name.
+    const to = summary.to?.on
+      ? plainTo(summary.to.address, summary.to.on)
+      : summary.to?.address
+        ? toLine(summary.to.address)
+        : null;
 
     show(
       [
@@ -522,7 +538,7 @@ export async function renderNotification() {
           busyNote,
         ]),
       ],
-      [h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject") }), unlockBtn]
+      [h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject").catch((e) => showError(answerFailedText(e))) }), unlockBtn]
     );
   }
 
@@ -987,22 +1003,53 @@ export async function renderNotification() {
       const gasEditor = gasEditorFor(amountLux);
       const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
       submitOnGasEnter(gasEditor, bar.approveBtn);
+      // To the bridge's account: the memo is the address the bridge pays
+      // out to on another chain, and one that isn't an address there is
+      // flagged.
+      const service = bridgeServiceTransfer({ nodeUrl, to, memo });
       // A public transfer shows on chain for good: say what, only what
       // applies, and under which name. A shielded one gets no line.
-      const visible = memo
-        ? `Visible to everyone: amount, memo, and ${me}.`
-        : `Visible to everyone: amount and ${me}.`;
+      const visible = service
+        ? `Visible to everyone: amount, the recipient on ${service.short}, and ${me}.`
+        : memo
+          ? `Visible to everyone: amount, memo, and ${me}.`
+          : `Visible to everyone: amount and ${me}.`;
+      const amount = { value: formatDuskExact(amountLux), unit: "DUSK" };
+      const head = service
+        ? requestHead({
+            title: `Bridge to ${service.chain}`,
+            amount,
+            to: service.recipientOk ? plainTo(service.recipient, `on ${service.short}`) : null,
+            tag: headTag("Known bridge account"),
+          })
+        : requestHead({ title: "Pay", amount, to: toLine(to) });
 
       show(
         [
           site,
-          requestHead({ title: "Pay", amount: { value: formatDuskExact(amountLux), unit: "DUSK" }, to: toLine(to) }),
-          gasEditor,
+          head,
+          // What everyone sees, under the amount, before the fee: in view without scrolling.
           shielded ? null : note(visible, "eye", { className: "ap-visible" }),
+          service && !service.recipientOk
+            ? warning(
+                `The memo isn't an address on ${service.short}`,
+                `The bridge pays out to the address in the memo. Reject this, and check the address on the site.`
+              )
+            : null,
+          gasEditor,
           group([
             kv("From", shielded ? "Your shielded balance" : payerLine(rail)),
-            kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
-            memo ? kv("Memo", memo, { stack: memo.length > 24 }) : null,
+            service
+              ? kv("To", [h("span", { class: "ap-kv-note", text: `The bridge's account for ${service.chain}` }), h("code", { class: "ap-address", text: to })], {
+                  stack: true,
+                  className: "ap-to-row",
+                })
+              : kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
+            service
+              ? kv(`Recipient on ${service.short}`, h("code", { class: "ap-address", text: memo || "(none)" }), { stack: true })
+              : memo
+                ? kv("Memo", memo, { stack: memo.length > 24 })
+                : null,
           ]),
           details("Details", [group(networkRows(), { className: "group--inset" })]),
         ],
@@ -1136,10 +1183,10 @@ export async function renderNotification() {
         [
           site,
           head,
+          visible(bridge.kind === "deposit" ? "the amount, the DuskEVM recipient" : "this call, the withdrawal"),
           decoded,
           extra,
           gasEditor,
-          visible(bridge.kind === "deposit" ? "the amount, the DuskEVM recipient" : "this call, the withdrawal"),
           callRows(),
           detailsBlock(),
         ],
@@ -1217,15 +1264,17 @@ export async function renderNotification() {
         approveTitle: isMax ? "Type MAX to enable approval" : "",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
       });
-      submitOnGasEnter(gasEditor, bar.approveBtn);
+      // An unlimited allowance waits for MAX, and any approval for gas that will do.
+      const acknowledged = () => !isMax || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
       const ackInput = textInput({
         placeholder: "Type MAX to confirm",
         "aria-label": "Type MAX to confirm",
         onEnter: () => bar.approveBtn.click(),
         oninput: () => {
-          bar.approveBtn.disabled = String(ackInput.value ?? "").trim().toUpperCase() !== "MAX";
+          bar.approveBtn.disabled = !acknowledged() || Boolean(gasEditor.error);
         },
       });
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: acknowledged });
 
       show(
         [
@@ -1236,6 +1285,7 @@ export async function renderNotification() {
             to: (isTransfer || isTransferFrom) && toStr ? toLine(toStr) : null,
             sub: `${name} · DRC20`,
           }),
+          visible("this call, the tokens it moves"),
           group([
             kv("From", payerLine(rail)),
             isTransfer || isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
@@ -1249,7 +1299,6 @@ export async function renderNotification() {
             : null,
           callRows(),
           gasEditor,
-          visible("this call, the tokens it moves"),
           detailsBlock(),
         ],
         bar.nodes
@@ -1287,6 +1336,7 @@ export async function renderNotification() {
             to: isTransferFrom && toStr ? toLine(toStr) : null,
             sub: `${name} (${sym})${tokenIdStr ? ` · #${tokenIdStr}` : ""}`,
           }),
+          visible("this call"),
           group([
             kv("From", payerLine(rail)),
             tokenIdStr ? kv("Token ID", mono(tokenIdStr)) : null,
@@ -1302,7 +1352,6 @@ export async function renderNotification() {
             : null,
           callRows(),
           gasEditor,
-          visible("this call"),
           detailsBlock(),
         ],
         bar.nodes
@@ -1331,10 +1380,10 @@ export async function renderNotification() {
           title: summary.title,
           amount: sendsLux > 0n ? { value: formatDuskExact(sendsLux), unit: "DUSK" } : null,
         }),
+        visible("this call, the DUSK it sends"),
         callRows({ from: true }),
         unchecked,
         gasEditor,
-        visible("this call, the DUSK it sends"),
         detailsBlock(),
       ],
       bar.nodes

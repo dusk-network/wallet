@@ -170,7 +170,13 @@ function removeListener(node, type, fn) {
   node._listeners = node._listeners.filter((l) => l.type !== type || l.fn !== fn);
 }
 
-function dispatch(start, event) {
+function dispatch(start, given) {
+  // A real Event (a component's CustomEvent) keeps its target read-only: a
+  // plain copy goes round instead.
+  const event =
+    typeof Event !== "undefined" && given instanceof Event
+      ? fakeEvent(given.type, { bubbles: given.bubbles, detail: given.detail })
+      : given;
   if (!event.target) event.target = start;
   for (let node = start; node; node = node.parentNode) {
     event.currentTarget = node;

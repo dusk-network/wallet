@@ -26,6 +26,7 @@ export async function getTxEpoch() {
  * @property {string=} deposit
  * @property {string=} contractId
  * @property {string=} fnName
+ * @property {string=} bridgeTo The DuskEVM address a deposit to DuskEVM pays, read from its call.
  * @property {string=} gasLimit
  * @property {string=} gasPrice
  * @property {any=} asset Optional UI hint for Activity labeling (e.g. DRC20/DRC721 summary).

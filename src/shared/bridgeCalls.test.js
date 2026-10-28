@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { BRIDGE_CONTRACTS } from "./bridge.js";
-import { BRIDGE_FUNCTIONS, bridgeEnvelopeOk, callsBridge, checksumAddress, decodeBridgeCall, evmAddressOf, weiToDusk } from "./bridgeCalls.js";
+import { BRIDGE_FUNCTIONS, bridgeDepositRecipient, bridgeEnvelopeOk, callsBridge, checksumAddress, decodeBridgeCall, evmAddressOf, weiToDusk } from "./bridgeCalls.js";
 import { hexToBytes } from "./bytes.js";
 import fixtures from "./fixtures/duskevm-bridge-calls.json";
 
@@ -40,6 +40,16 @@ describe("DuskEVM bridge calls", () => {
     }
     // A deposit that sends other DUSK than it bridges says so.
     expect(decode("deposit", { deposit: "200000000" })).toMatchObject({ amountLux: 100000000n, sentLux: 200000000n });
+  });
+
+  it("names a deposit's DuskEVM recipient for the wallet's record, only when sent as the bridge expects", () => {
+    const { args, expected } = call("deposit-shoot");
+    const tx = { nodeUrl: TESTNET, contractId: bridge, fnName: BRIDGE_FUNCTIONS.deposit, fnArgs: args, amount: "0", deposit: expected.amountLux };
+    expect(bridgeDepositRecipient(tx)).toBe(expected.to);
+    expect(bridgeDepositRecipient({ ...tx, fnArgs: Array.from(hexToBytes(args)) })).toBe(expected.to);
+    for (const over of [{ deposit: "1" }, { amount: "1" }, { nodeUrl: "https://nodes.dusk.network" }, { fnArgs: "0x00" }, { fnArgs: { bad: 1 } }, { contractId: portal }]) {
+      expect(bridgeDepositRecipient({ ...tx, ...over }), JSON.stringify(over)).toBeUndefined();
+    }
   });
 
   it.each([

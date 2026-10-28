@@ -99,8 +99,8 @@ describe("Activity's rows", () => {
   it("lead with the other side's name, else its short address with Copy, and say when", async () => {
     setup({ names: new Map([[FAUCET, "faucet.dusk"], [SENDER, null]]) });
     expect(rows()).toEqual([
-      "Call registerContract · Yesterday−100 DUSK",
-      "Call commitContract · Yesterday",
+      "Registered a .dusk nameDusk Domains · Yesterday−100 DUSK",
+      "Reserved a .dusk nameDusk Domains · Yesterday",
       `${short(SENDER)}Received · Yesterday+1,000 DUSK`,
       "faucet.duskReceived · Yesterday+1,100 DUSK",
     ]);
@@ -113,7 +113,7 @@ describe("Activity's rows", () => {
     await settle();
     expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(SENDER);
     // Opening a row says what it holds.
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Call register, Contract · Yesterday, −100 DUSK");
+    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Registered a .dusk name, Dusk Domains · Yesterday, −100 DUSK");
   });
 
   it("say a status only while it isn't final: the wallet's pending send, named as typed", () => {
@@ -132,6 +132,14 @@ describe("Activity's rows", () => {
     expect(rows()[0]).toBe("faucet.duskSent · Just now−5 DUSKPending");
     // Completed rows say nothing about it.
     expect(rows().slice(1).join("\n")).not.toMatch(/Completed|Finalized|Executed/);
+
+    // Saved as a contact, its own name leads, the .dusk name after it.
+    const view = setup({ local: [pending] });
+    view.state.addressBook = { loaded: true, items: [{ name: "Faucet (test)", address: FAUCET }] };
+    view.draw();
+    expect(rows()[0]).toBe("Faucet (test) · faucet.duskSent · Just now−5 DUSKPending");
+    expect(body().querySelector(".tx-row .tx-alias").textContent).toBe(" · faucet.dusk");
+    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Faucet (test) · faucet.dusk, Sent · Just now, −5 DUSK, Pending");
   });
 
   it("say a failed one sent nothing, with the fee paid, its amount muted and unsigned", () => {
@@ -191,7 +199,7 @@ describe("Activity's rows", () => {
     state.route = "activity";
     draw();
     expect(amounts()).toEqual(Array(3).fill(["•••• DUSK", "hidden DUSK"]));
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Call register, Contract · 16:45, amount hidden");
+    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Registered a .dusk name, Dusk Domains · 16:45, amount hidden");
   });
 
   it("label bridge transfers, and mark shielded ones", () => {
@@ -238,8 +246,8 @@ describe("the Activity view", () => {
       "Claim rewardsStaking · 00:59+62,166.5879 DUSK",
       "UnstakeStaking · 00:59+500,000 DUSK",
       "Claim rewardsStaking · 17:54+239,121.4534 DUSK",
-      "Stake with SozuStaking · 20:10−50 DUSK",
-      "Stake with SozuStaking · 14:00−1,000 DUSK",
+      "Staked with SozuStaking · 20:10−50 DUSK",
+      "Staked with SozuStaking · 14:00−1,000 DUSK",
       "Claim rewardsStaking · 13:35+1,609,142.7584 DUSK",
     ]);
     expect(days()).toEqual(["Wed, 21 Oct", "Fri, 18 Sep", "Wed, 17 Jun", "Sun, 31 May"]);
@@ -295,7 +303,7 @@ describe("a transaction's details", () => {
     await settle();
     expect(visibleText(body().querySelector(".tx-hero"))).toBe("Sent tofaucet.dusk" + `${short(FAUCET)}−25 DUSKCompleted`);
     expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText)).toEqual([
-      "Date22 Oct 2026, 14:32",
+      "Date22 Oct 2026, 14:32 UTC",
       "MemoOrder 1042",
       "Network fee0.0037 DUSK",
       "Fromalice.dusk · Public",
@@ -321,7 +329,8 @@ describe("a transaction's details", () => {
       "Block4,658,100",
       "Gas used3,700,000 of 10,000,000",
       "Gas price1 LUX",
-      "Submitted22 Oct 2026, 14:32",
+      "Exact fee0.0037 DUSK",
+      "Submitted22 Oct 2026, 14:32 UTC",
     ]);
     button("View in Dusk explorer").click();
     await settle();
@@ -406,25 +415,25 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     const view = setup();
     const entry = unfetched(view);
     const line = () =>
-      visibleText(body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Call register")).querySelector(".tx-sub"));
+      visibleText(body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Registered a .dusk name")).querySelector(".tx-sub"));
     view.draw();
-    expect(line()).toBe("Contract · Syncing…");
+    expect(line()).toBe("Dusk Domains · Syncing…");
     view.state.route = "activity";
     view.draw();
-    expect(line()).toBe("Contract · Syncing…");
+    expect(line()).toBe("Dusk Domains · Syncing…");
 
     // Another entry of the same block has come with its time.
     const other = view.state.activity.entries.find((e) => e !== entry && e.timestamp);
     entry.blockHeight = other.blockHeight;
     view.draw();
-    expect(line()).toBe(`Contract · ${new Date(other.timestamp).toISOString().slice(11, 16)}`);
+    expect(line()).toBe(`Dusk Domains · ${new Date(other.timestamp).toISOString().slice(11, 16)}`);
   });
 
   it("says Unknown, muted, not Completed or Pending", () => {
     const view = setup();
     unfetched(view);
     view.draw();
-    const row = body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Call register"));
+    const row = body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Registered a .dusk name"));
     expect(visibleText(row)).toMatch(/Unknown$/);
     expect(row.querySelector(".tx-right .tx-status").className).toBe("tx-status tx-status--neutral");
     expect(row.className).not.toMatch(/is-pending/);
@@ -457,7 +466,7 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     // And its row the same.
     view.state.route = "home";
     view.draw();
-    const row = body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Call register"));
+    const row = body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Registered a .dusk name"));
     expect(row.querySelector(".tx-right .tx-status").className).toBe("tx-status tx-status--neutral");
   });
 });

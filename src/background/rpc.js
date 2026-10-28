@@ -18,6 +18,7 @@ import {
   isAllowedDappOrigin,
 } from "../shared/securityPolicy.js";
 import { bytesToHex, messageBytes, sha256Hex, toBytes } from "../shared/bytes.js";
+import { bridgeDepositRecipient } from "../shared/bridgeCalls.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import {
   hashTypedDataHex,
@@ -788,6 +789,11 @@ export async function handleRpc(origin, request) {
             fnName:
               kind === TX_KIND.CONTRACT_CALL && finalParams?.fnName
                 ? String(finalParams.fnName)
+                : undefined,
+            // Where a deposit to DuskEVM pays, for Activity: the chain keeps it in the call's bytes.
+            bridgeTo:
+              kind === TX_KIND.CONTRACT_CALL
+                ? bridgeDepositRecipient({ ...finalParams, nodeUrl })
                 : undefined,
             gasLimit: finalParams?.gas?.limit != null ? String(finalParams.gas.limit) : undefined,
             gasPrice: finalParams?.gas?.price != null ? String(finalParams.gas.price) : undefined,

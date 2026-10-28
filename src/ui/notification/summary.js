@@ -3,7 +3,7 @@
 // while the wallet is locked shows it above Unlock and Reject, so nobody has
 // to type a password to learn what a site wants.
 
-import { bridgeEnvelopeOk, decodeBridgeCall, weiToDusk } from "../../shared/bridgeCalls.js";
+import { bridgeEnvelopeOk, bridgeServiceTransfer, decodeBridgeCall, weiToDusk } from "../../shared/bridgeCalls.js";
 import { toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { formatDuskExact, safeBigInt } from "../../shared/amount.js";
@@ -41,13 +41,14 @@ export function withdrawalAmount(wei) {
  * The title of a request's approval, and what it is about.
  *
  * - `amount`: `{ value, unit }` for a request that moves DUSK
- * - `to`: `{ address, network }` of whom it pays, for the window to name
+ * - `to`: `{ address, network, on? }` of whom it pays, for the window to
+ *   name: `on` says where an address on another chain is, "on Sepolia"
  * - `sub`: a line of small print
  *
  * @param {string} kind - the approval kind (connect, send_tx, sign_message, ...)
  * @param {object} params - the request as rpc.js passes it on
  * @param {{ own?: string[] }} [ctx] - the wallet's accounts and addresses (bridgeCallOf)
- * @returns {{ title: string, amount?: {value: string, unit: string}, to?: {address: string, network: "dusk"|"duskevm"}, sub?: string }}
+ * @returns {{ title: string, amount?: {value: string, unit: string}, to?: {address: string, network: "dusk"|"duskevm"|"evm", on?: string}, sub?: string }}
  */
 export function requestSummary(kind, params = {}, { own = [] } = {}) {
   const p = params ?? {};
@@ -88,11 +89,19 @@ export function requestSummary(kind, params = {}, { own = [] } = {}) {
 function txSummary(p, own) {
   const kind = String(p.kind ?? "").toLowerCase();
   if (kind === TX_KIND.TRANSFER) {
-    return {
-      title: "Pay",
-      amount: { value: formatDuskExact(p.amount), unit: "DUSK" },
-      to: { address: String(p.to ?? "").trim(), network: "dusk" },
-    };
+    const amount = { value: formatDuskExact(p.amount), unit: "DUSK" };
+    // To the bridge's account, which pays the memo's address on another chain.
+    const service = bridgeServiceTransfer({ nodeUrl: p.nodeUrl, to: p.to, memo: p.memo });
+    if (service) {
+      return {
+        title: `Bridge to ${service.chain}`,
+        amount,
+        to: service.recipientOk
+          ? { address: service.recipient, network: "evm", on: `on ${service.short}` }
+          : { address: String(p.to ?? "").trim(), network: "dusk" },
+      };
+    }
+    return { title: "Pay", amount, to: { address: String(p.to ?? "").trim(), network: "dusk" } };
   }
   if (kind === TX_KIND.CONTRACT_CALL) {
     const bridge = bridgeCallOf(p, { own });
@@ -100,7 +109,7 @@ function txSummary(p, own) {
       return {
         title: "Bridge to DuskEVM",
         amount: { value: formatDuskExact(bridge.amountLux), unit: "DUSK" },
-        to: { address: bridge.recipient, network: "duskevm" },
+        to: { address: bridge.recipient, network: "duskevm", on: "on DuskEVM" },
       };
     }
     if (bridge) {

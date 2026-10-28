@@ -92,7 +92,7 @@ function walletShell({
 
   const lines = [];
   lines.push(`<!doctype html>`);
-  lines.push(`<html>`);
+  lines.push(`<html lang="en">`);
   lines.push(`  <head>`);
   lines.push(`    <meta charset="UTF-8" />`);
   lines.push(
@@ -174,7 +174,7 @@ function tauriDevIndex() {
 
   return `<!doctype html>
 ${devComment}
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />

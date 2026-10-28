@@ -6,6 +6,7 @@ import { isExtensionRuntime } from "../../platform/runtime.js";
 import { platform } from "../../platform/index.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
 import { profileLabelOf } from "../components/ProfileName.js";
+import { syncTestnetStrip } from "../components/TestnetStrip.js";
 
 /**
  * Get a CSS class for network status indicator.
@@ -55,6 +56,9 @@ export function createHeaderRenderer({
     if (networkLabel && !networkPill.classList.contains("is-switching")) {
       networkLabel.textContent = ov?.networkName ?? "Network";
     }
+
+    // A test network says so above the header: its DUSK has no value.
+    syncTestnetStrip(document.querySelector(".panel"), ov?.networkName);
 
     // Update network status indicator
     const nodeStatus = ov?.networkStatus?.nodeStatus ?? "unknown";

@@ -13,7 +13,6 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
-import { identiconEl } from "../../components/Identicon.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, searchInput, textInput } from "../../components/FormControls.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
@@ -22,7 +21,6 @@ import { activityRows } from "../activity.js";
 import { blockTimes, contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
 
 import {
-  clearAddressBook,
   listAddressBook,
   markAddressBookNameChecked,
   removeAddressBookEntry,
@@ -36,6 +34,9 @@ import {
 
 /** How long a contact's .dusk name stays checked before its page looks it up again. */
 export const NAME_RECHECK_MS = 60 * 60_000;
+
+// Lookups that say a saved name no longer reaches anyone.
+const STALE_NAME_REASONS = new Set(["expired", "not_registered", "no_account"]);
 
 function typeLabel(t) {
   if (t === "address") return "Shielded";
@@ -53,6 +54,19 @@ function normalizeRecipient(raw) {
 }
 
 const lower = (v) => String(v ?? "").trim().toLowerCase();
+
+/**
+ * A contact's picture: the first letter of its name, as Assets shows a
+ * token's; a person icon for one known by its address alone.
+ * @param {string} name
+ * @param {string} [className]
+ */
+export function contactAvatar(name, className = "row-icon contact-letter") {
+  const letter = Array.from(String(name ?? "").trim())[0]?.toUpperCase() ?? "";
+  return letter
+    ? h("span", { class: className, "aria-hidden": "true", text: letter })
+    : h("span", { class: className, "aria-hidden": "true", html: iconSvg("contacts") });
+}
 
 function ownAddresses(ov) {
   const idx = Math.max(0, Math.floor(Number(ov?.selectedAccountIndex) || 0));
@@ -221,7 +235,7 @@ export function addressBookView(ov, { state, actions } = {}) {
           { class: "group" },
           recent.map((d) =>
             h("div", { class: "list-row contact-row" }, [
-              h("span", { class: "row-icon", "aria-hidden": "true" }, [identiconEl(d.address)]),
+              contactAvatar(d.isAddress ? "" : d.name),
               h("button", { class: "contact-row__main", type: "button", onclick: () => pick(d.address) }, [
                 h("span", { class: d.isAddress ? "row-title mono" : "row-title", text: d.name }),
                 h("span", { class: "row-sub", text: typeLabel(ProfileGenerator.typeOf(d.address)) }),
@@ -266,7 +280,7 @@ export function addressBookView(ov, { state, actions } = {}) {
               },
             },
             [
-              h("span", { class: "row-icon", "aria-hidden": "true" }, [identiconEl(addr || "dusk")]),
+              contactAvatar(String(entry?.name ?? "")),
               h("span", { class: "row-main" }, [
                 h("span", { class: "row-title", text: String(entry?.name ?? "") || "(No name)" }),
                 h("span", { class: entry?.duskName ? "row-sub" : "row-sub mono", text: rowLine(entry) }),
@@ -278,29 +292,6 @@ export function addressBookView(ov, { state, actions } = {}) {
       );
     }
 
-    // Deletes every contact, so it asks first, sits apart, and only shows when there are some.
-    const clearBtn =
-      ab.mode === "manage" && items.length
-        ? h("button", {
-            class: "text-btn contacts-delete-all",
-            type: "button",
-            text: "Delete all contacts",
-            onclick: async () => {
-              if (!confirm("Delete all contacts?")) return;
-              try {
-                await clearAddressBook();
-                ab.loaded = false;
-                ab.items = null;
-                ab.query = "";
-                actions?.showToast?.("Deleted all contacts");
-                rerender();
-              } catch (e) {
-                actions?.showToast?.(e?.message ?? String(e), 2500);
-              }
-            },
-          })
-        : null;
-
     return [
       subnav({ title: ab.mode === "pick" ? "Select contact" : "Contacts", onBack: goBack }),
       h("div", { class: "row contacts" }, [
@@ -308,7 +299,6 @@ export function addressBookView(ov, { state, actions } = {}) {
         recentGroup,
         recentGroup ? h("h2", { class: "contacts-section-title", text: "Contacts" }) : null,
         listBody,
-        clearBtn,
       ].filter(Boolean)),
     ];
   };
@@ -329,13 +319,21 @@ export function addressBookView(ov, { state, actions } = {}) {
     const typ = entry?.type || ProfileGenerator.typeOf(addr) || "unknown";
     const nodeUrl = String(ov?.nodeUrl ?? "");
 
-    // A name an hour old is looked up again: one that points elsewhere now says so.
+    // A name an hour old is looked up again: one that points elsewhere now, or
+    // nowhere (expired, released, without an address), says so. A lookup that
+    // failed says nothing: the name may be fine.
     const nameCheck = h("p", { class: "field-error contact-name-check", role: "alert", hidden: true });
     if (entry.duskName && duskNamesNetwork(nodeUrl) && Date.now() - Number(entry.checkedAt || 0) > NAME_RECHECK_MS) {
       const { result, promise } = lookupDuskName(entry.duskName, { nodeUrl });
       Promise.resolve(result ?? promise)
         .then(async (res) => {
-          if (!res?.ok) return;
+          if (!res?.ok) {
+            if (STALE_NAME_REASONS.has(res?.reason)) {
+              nameCheck.textContent = `${duskNameErrorText({ name: entry.duskName, reason: res.reason })} Edit the contact before you send to it.`;
+              nameCheck.hidden = false;
+            }
+            return;
+          }
           const now = duskNameRecipient(res, { shielded: typ === "address" });
           if (now === addr) {
             // On the contact as saved now: one edited or deleted meanwhile stays so.
@@ -361,7 +359,7 @@ export function addressBookView(ov, { state, actions } = {}) {
     });
 
     const hero = h("div", { class: "tx-hero contact-hero" }, [
-      h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true" }, [identiconEl(addr || "dusk")]),
+      contactAvatar(String(entry?.name ?? ""), "row-icon tx-hero-icon contact-letter"),
       h("h2", { class: "tx-hero-name", text: String(entry?.name ?? "") || "(No name)" }),
       entry.duskName ? h("div", { class: "tx-hero-lead", text: entry.duskName }) : null,
       h("div", { class: "tx-hero-addr" }, [h("span", { class: "mono", title: addr, text: shortAddress(addr) }), copyBtn]),
@@ -388,8 +386,11 @@ export function addressBookView(ov, { state, actions } = {}) {
     const now = Date.now();
     const all = activityRows(ov, state);
     const times = blockTimes(all);
+    // A token's counterparties too: whom it went to or came from, and whom an approval lets spend it.
     const rows = all.filter((tx) =>
-      [tx?.to, tx?.from, tx?.counterparty, tx?.asset?.to].some((a) => a && lower(a) === lower(addr))
+      [tx?.to, tx?.from, tx?.counterparty, tx?.asset?.to, tx?.asset?.from, tx?.asset?.spender].some(
+        (a) => typeof a === "string" && a && lower(a) === lower(addr)
+      )
     );
     const activity = h("section", { class: "contacts-section" }, [
       h("h2", { class: "contacts-section-title", text: "Activity" }),

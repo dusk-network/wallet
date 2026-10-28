@@ -213,6 +213,72 @@ describe("shielded history", () => {
   });
 });
 
+describe("shielded history retries", () => {
+  const shieldedRow = { hash: "cd".repeat(32), source: "shielded", privacy: "shielded", kind: "transfer", direction: "in", amount: "5", status: "executed", timestamp: 1_000, blockHeight: 10 };
+  const synced = (account = A) => overview(account, { shieldedSync: { state: "done" } });
+
+  // The minute-later retries, held to be run by hand; other timers run as usual.
+  function holdRetries() {
+    const held = [];
+    const realSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...rest) => {
+      if (ms !== activity.SHIELDED_RETRY_MS) return realSetTimeout(fn, ms, ...rest);
+      held.push(fn);
+      return 9000 + held.length;
+    });
+    const cleared = vi.spyOn(globalThis, "clearTimeout");
+    return { held, cleared };
+  }
+
+  it.each([
+    ["an error", { error: { message: "Shielded sync is busy" } }],
+    ["no entries", { ok: true, result: null }],
+    ["another profile's", { ok: true, result: { profileIndex: 3, entries: [shieldedRow] } }],
+  ])("asks again after %s, instead of never", async (_label, first) => {
+    fakeArchive();
+    const { held } = holdRetries();
+    const send = vi.fn().mockResolvedValueOnce(first).mockResolvedValue({ ok: true, result: { profileIndex: 0, entries: [shieldedRow] } });
+    const state = { route: "home" };
+    const render = vi.fn(async () => {});
+    activity.ensureActivity(synced(), { state, render, send });
+    await until(() => send.mock.calls.length === 1 && state.activity.shieldedAsked === false && held.length === 1);
+    // A render once the minute is up asks again.
+    vi.spyOn(Date, "now").mockReturnValue(state.activity.shieldedRetryAt + 1);
+    activity.ensureActivity(synced(), { state, render, send });
+    await until(() => state.activity.shielded.length > 0);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks again a minute later by itself in a view nothing redraws, and stops when the activity goes", async () => {
+    fakeArchive();
+    const { held, cleared } = holdRetries();
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, result: { profileIndex: 0, entries: [], pending: true } })
+      .mockResolvedValueOnce({ ok: true, result: { profileIndex: 0, entries: [shieldedRow], pending: true } })
+      .mockResolvedValue({ ok: true, result: { profileIndex: 0, entries: [shieldedRow] } });
+    const state = { route: "home" };
+    const render = vi.fn(async () => {});
+    activity.ensureActivity(synced(), { state, render, send });
+    await until(() => held.length === 1);
+    // No render meanwhile: the timer asks.
+    held[0]();
+    await until(() => state.activity.shielded.length > 0);
+    expect(send).toHaveBeenCalledTimes(2);
+
+    // Still pending: another timer, cancelled once another account's activity takes over.
+    await until(() => held.length === 2);
+    const before = send.mock.calls.length;
+    activity.ensureActivity(synced(B), { state, render, send });
+    expect(cleared).toHaveBeenCalledWith(9002);
+    // The new account asks for its own; the old timer, had it run anyway, asks nothing.
+    await until(() => send.mock.calls.length === before + 1);
+    held[1]();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(send).toHaveBeenCalledTimes(before + 1);
+  });
+});
+
 describe("loadActivityDetail", () => {
   it("asks again a while after a lookup that brought nothing, not before", async () => {
     const node = fakeArchive();

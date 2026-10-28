@@ -14,7 +14,7 @@
 import { TX_KIND } from "./constants.js";
 
 // What the wallet's record of a transaction adds to the chain's.
-const LOCAL_ONLY = ["toName", "origin", "asset", "payment", "ownerProfileIndex", "submittedAt", "pendingNullifiers", "reservationStatus"];
+const LOCAL_ONLY = ["toName", "origin", "asset", "payment", "ownerProfileIndex", "submittedAt", "pendingNullifiers", "reservationStatus", "bridgeTo"];
 
 const lower = (hash) => String(hash ?? "").toLowerCase();
 

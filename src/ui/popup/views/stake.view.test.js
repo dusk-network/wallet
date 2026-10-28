@@ -4,9 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
 import { accessibleName, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "../../testing/fakeDom.js";
+import { lookupPrimaryName } from "../../../shared/duskNames.js";
+import { maxAmountLux } from "../../../shared/amount.js";
 import { stakeConfirmView, stakeFormView } from "./stake.js";
 import { sozuConfirmView, stDuskEstimate } from "./sozu.js";
 import { sentView } from "./sent.js";
+
+// The profile's verified name, as the header shows it: none unless a test gives one.
+vi.mock("../../../shared/duskNames.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  lookupPrimaryName: vi.fn(async () => null),
+}));
 
 const ACCOUNT =
   "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
@@ -87,6 +95,8 @@ let body;
 beforeEach(() => {
   dom = installFakeDom();
   body = dom.document.body;
+  lookupPrimaryName.mockReset();
+  lookupPrimaryName.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -167,7 +177,7 @@ describe("staking overview", () => {
     expect([button("Unstake").disabled, button("Claim rewards").disabled]).toEqual([true, true]);
     expect(body.querySelectorAll(".stake-sum .stake-cap").map(visibleText)).toEqual([
       "Locked: 10 DUSK. It's still yours, and unstaking returns it.",
-      "Add gas funds to Profile 2 before managing this stake. Profile 1 owns this stake. Gas still comes from Profile 2.",
+      "You need some public DUSK in Profile 2 to pay the network fee.",
     ]);
 
     for (const [ownerKind, reason] of [
@@ -225,8 +235,9 @@ describe("staking overview", () => {
     state.staking.screen = "native";
     popup(state);
     expect(body.querySelectorAll("details.advanced .kv").map(visibleText)[0]).toBe("OwnerContract");
-    // Blocked: the field says why and Review stays off.
-    expect(body.querySelector(".amount-field__error").textContent).toBe("Contract-owned stake. View only.");
+    // Blocked: a note says why, not an error, and Review stays off.
+    expect(body.querySelector(".amount-note").textContent).toBe("Contract-owned stake. View only.");
+    expect(body.querySelector(".amount-field__error").hidden).toBe(true);
     expect(button("Review stake").disabled).toBe(true);
   });
 
@@ -299,9 +310,10 @@ describe("native staking", () => {
     expect(button("Review stake").disabled).toBe(false);
     expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available 1,482.9383 DUSK from your public balance");
 
-    // Max leaves the network fee.
+    // Max leaves the network fee, and the fee to unstake later, and says so.
     button("Max").click();
-    expect(field("Stake amount").value).toBe("1482.8883");
+    expect(field("Stake amount").value).toBe("1482.8383");
+    expect(visibleText(body.querySelector(".amount-note"))).toBe("Max keeps 0.05 DUSK for the fee to unstake later.");
 
     // Too much says by how much, fee included.
     typeInto(field("Stake amount"), "5000");
@@ -332,27 +344,27 @@ describe("native staking", () => {
       "That's 0.0117 DUSK more than the public balance, with the network fee."
     );
     button("Max").click();
-    expect(field("Stake amount").value).toBe("1482.7883");
+    expect(field("Stake amount").value).toBe("1482.6383");
     button("Review stake").click();
     await settle();
-    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.15 DUSKTotalup to 1,482.9383 DUSK");
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.15 DUSKTotalup to 1,482.7883 DUSK");
   });
 
   it("sets aside Sozu's fee with custom gas from Settings: the custom price at the call's own limit", async () => {
     const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
     popup(state, ov({ customGas: { limit: "2500000", price: "3" } }));
     button("Max").click();
-    expect(field("Stake amount").value).toBe("1481.4383");
+    expect(field("Stake amount").value).toBe("1479.9383");
     button("Review stake").click();
     await settle();
-    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 1.5 DUSKTotalup to 1,482.9383 DUSK");
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 1.5 DUSKTotalup to 1,481.4383 DUSK");
     expect(button("Confirm").disabled).toBe(false);
   });
 
   it("states the node, timing, penalty and fee facts from Dusk's staking docs", () => {
     popup({ route: "stake", staking: staking(owner(), { screen: "native" }) });
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
-      "Needs your own Dusk nodeA computer that runs Dusk's node software and stays online, with Profile 1's consensus key from this recovery phrase. How native staking works",
+      "Needs your own Dusk nodeAn always-on computer running Dusk's node with Profile 1's consensus key. How native staking works",
       "Rewards start in about 6 to 12 hoursUnstake any time, with no waiting period.",
       "If your node misses its turnPart of your stake gets locked. It's still yours, and unstaking returns it. If the node breaks the rules, part of the stake can be burned (lost).",
       "Network fee up to 0.05 DUSK",
@@ -408,12 +420,12 @@ describe("native staking", () => {
     typeInto(field("Stake amount"), "1000");
     button("Review stake").click();
     await settle();
-    expect(visibleText(body.querySelector(".review-head"))).toBe("Stake1,000 DUSKNative staking");
+    expect(visibleText(body.querySelector(".review-head"))).toBe(
+      "Stake1,000 DUSKNative stakingVisible to everyone: the amount staked, your rewards and your account."
+    );
     // The review's rows; the fee's own come after them.
     expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual([
-      "Stake accountProfile 1",
-      "OwnerProfile 1",
-      "Fee paid fromProfile 1 public balance",
+      "FromProfile 1 · Public",
       "Rewards startIn about 6 to 12 hours",
     ]);
 
@@ -425,6 +437,88 @@ describe("native staking", () => {
     expect(state.staking.screen).toBe("overview");
     button("Done").click();
     expect(state.route).toBe("stake");
+  });
+});
+
+describe("staking with little or nothing", () => {
+  it("opens without an error when the profile has no DUSK, saying plainly what it needs", () => {
+    const empty = owner({ publicBalance: { value: "0" } });
+    popup({ route: "stake", staking: staking(empty, { screen: "native" }) });
+    const amount = field("Stake amount");
+    // Nothing was tried: no error, nothing marked invalid, a note instead.
+    expect(body.querySelector(".amount-field__error").hidden).toBe(true);
+    expect(amount.getAttribute("aria-invalid")).toBeNull();
+    expect(body.querySelector(".amount-field").classList.contains("is-invalid")).toBe(false);
+    expect(visibleText(body.querySelector(".amount-note"))).toBe("You need some public DUSK to pay the network fee.");
+    expect(button("Review stake").disabled).toBe(true);
+    expect(body.textContent).not.toMatch(/gas funds/i);
+  });
+
+  it("keeps Max to the 4 decimals amounts show with, and below what's there", () => {
+    expect(maxAmountLux(1_480_550_766_286n, 100_000_000n)).toBe(1_480_450_700_000n);
+    expect(maxAmountLux(50_000_000n, 100_000_000n)).toBe(0n);
+    // 1,480.550766286 DUSK, less 0.05 for this fee and 0.05 to unstake later.
+    popup({ route: "stake", staking: staking(owner({ publicBalance: { value: "1480550766286" } }), { screen: "native" }) });
+    button("Max").click();
+    expect(field("Stake amount").value).toBe("1480.4507");
+    expect(button("Review stake").disabled).toBe(false);
+  });
+});
+
+describe("staking reviews", () => {
+  const named = () => ov({ accounts: [ACCOUNT, OTHER] });
+
+  it("name the profile as the header does, say the stake is public, and repeat the node warning", async () => {
+    lookupPrimaryName.mockImplementation(async (account) => (account === ACCOUNT ? "alice.dusk" : null));
+    const state = { route: "stake", staking: staking(owner(), { screen: "native" }) };
+    popup(state, named());
+    typeInto(field("Stake amount"), "1000");
+    button("Review stake").click();
+    await settle();
+    expect(body.querySelector(".review-visible").textContent).toBe(
+      "Visible to everyone: the amount staked, your rewards and your name alice.dusk."
+    );
+    expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual([
+      "Fromalice.dusk · Public",
+      "Rewards startIn about 6 to 12 hours",
+    ]);
+    expect(visibleText(body.querySelector(".row > .group.info"))).toBe(
+      "Your node must run with alice.dusk's consensus keyIf it misses its turn, part of the stake gets locked. It's still yours, and unstaking returns it. If it breaks the rules, part of the stake can be burned (lost)."
+    );
+    expect(visibleText(body)).not.toContain("Profile 1");
+  });
+
+  it("name another owner, and say what an unstake makes public", async () => {
+    const state = { route: "stake", staking: staking(owner({ relatedStakes: [related()] })) };
+    popup(state, named());
+    button("Unstake").click();
+    await settle();
+    expect(body.querySelector(".review-visible").textContent).toBe("Visible to everyone: the amount unstaked and your account.");
+    expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual(["ToProfile 2 · Public", "OwnerProfile 1"]);
+    // No node warning to unstake.
+    expect(body.querySelector(".row > .group.info")).toBeNull();
+  });
+
+  it("say on Sozu's what is public, what it's worth now and how the DUSK comes back", async () => {
+    lookupPrimaryName.mockResolvedValue("alice.dusk");
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }) };
+    const app = popup(state, named());
+    typeInto(field("Stake amount"), "50");
+    button("Review stake").click();
+    await settle();
+    expect(body.querySelector(".review-visible").textContent).toBe(
+      "Visible to everyone: the amount you stake with Sozu and your name alice.dusk."
+    );
+    expect(body.querySelectorAll(".row > .group .kv").map(visibleText)[0]).toBe("You get about16.27 stDUSK, worth 50 DUSK now");
+
+    state.route = "stake";
+    state.sozu.action = "withdraw";
+    app.draw();
+    typeInto(field("Unstake amount"), "5");
+    button("Review unstake").click();
+    await settle();
+    expect(body.querySelectorAll(".row > .group .kv").map(visibleText)).toEqual(["Toalice.dusk · Public"]);
+    expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)[0]).toBe("Sozu returns the DUSK under Sozu's own rules.");
   });
 });
 
@@ -446,7 +540,7 @@ describe("liquid staking", () => {
     // With nothing staked yet, stDUSK can still be added to Assets.
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
       "Any amount, no node neededYou get stDUSK, a token for your share of Sozu's pool.Add to Assets",
-      "Network fee up to 0.5 DUSK",
+      "Network fee up to 0.5 DUSKContract calls need more gas. You pay only what's used.",
       `Sozu's contract${"72".repeat(3)}…${"72".repeat(3)}Copy`,
     ]);
     expect(body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Add stDUSK to Assets")).toBeTruthy();
@@ -469,7 +563,7 @@ describe("liquid staking", () => {
     );
     expect(button("Review stake").disabled).toBe(true);
     button("Max").click();
-    expect(field("Stake amount").value).toBe("1482.4383");
+    expect(field("Stake amount").value).toBe("1481.9383");
     typeInto(field("Stake amount"), "5");
     button("Review stake").click();
     expect(state.sozuDraft).toMatchObject({ kind: "contract_call", fnName: "sozu_stake", amount: "0", deposit: dusk(5) });
@@ -492,10 +586,17 @@ describe("liquid staking", () => {
     typeInto(field("Stake amount"), "100");
     button("Review stake").click();
     await settle();
-    expect(visibleText(body.querySelector(".review-head"))).toBe("Liquid staking100 DUSKWith Sozu, a third party");
+    expect(visibleText(body.querySelector(".review-head"))).toBe(
+      "Liquid staking100 DUSKWith Sozu, a third partyVisible to everyone: the amount you stake with Sozu and your account."
+    );
     expect(body.querySelectorAll(".row > .group .kv").map(visibleText)).toEqual([
-      "You get about32.55 stDUSK",
-      "Fee paid fromProfile 1 public balance",
+      "You get about32.55 stDUSK, worth 100 DUSK now",
+      "FromProfile 1 · Public",
+    ]);
+    // Who holds it, and why the fee cap is higher than a transfer's.
+    expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)).toEqual([
+      "Sozu, not Dusk, holds this DUSK and returns it under Sozu's own rules.",
+      "Contract calls need more gas. You pay only what's used.",
     ]);
     button("Confirm").click();
     await settle();

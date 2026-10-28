@@ -213,8 +213,9 @@ test.describe("Sozu liquid staking", () => {
     await page.getByLabel("Stake amount").fill("5000");
     await expect(page.locator(".amount-field__error")).toHaveText("That's more than your public balance, with the network fee.");
     await expect(page.getByRole("button", { name: "Review stake" })).toBeDisabled();
+    // Max keeps the fee, and the fee to unstake later.
     await page.getByRole("button", { name: "Max" }).click();
-    await expect(page.getByLabel("Stake amount")).toHaveValue("4999.5");
+    await expect(page.getByLabel("Stake amount")).toHaveValue("4999");
 
     await page.getByLabel("Stake amount").fill("5");
     await expect(page.locator(".stake-estimate__main")).toHaveText(/^You get about [\d.,]+ stDUSK, worth 5 DUSK now\.$/);
@@ -228,7 +229,7 @@ test.describe("Sozu liquid staking", () => {
     });
     await expect(page.locator(".review-head")).toContainText("Liquid staking");
     await expect(page.locator(".review-head")).toContainText("With Sozu, a third party");
-    await expect(page.getByText("Fee paid from")).toBeVisible();
+    await expect(page.locator(".review-visible")).toContainText("Visible to everyone: the amount you stake with Sozu");
     await expect(page.locator(".gas-fee")).toContainText("Network fee");
     // The network's gas price, with one Custom fee, closed, and no presets.
     await expect(page.getByRole("button", { name: "Recommended" })).toHaveCount(0);

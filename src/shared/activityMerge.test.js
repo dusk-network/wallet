@@ -82,6 +82,7 @@ describe("mergeActivity", () => {
       profileIndex: 0,
       origin: "https://app.example",
       toName: "shpongle.dusk",
+      bridgeTo: "0x5A3d8e1B7c2f4A6b9e0D1C3f5A7b9C2D4e6F8a01",
       submittedAt: 1_792_687_500_000,
     };
     const [row] = mergeActivity({ local: [pending], history: [registered()], profileIndex: 0 });
@@ -92,6 +93,8 @@ describe("mergeActivity", () => {
       timestamp: 1_792_687_511_000,
       toName: "shpongle.dusk",
       origin: "https://app.example",
+      // Where a deposit to DuskEVM pays: the chain has it only in the call's bytes.
+      bridgeTo: "0x5A3d8e1B7c2f4A6b9e0D1C3f5A7b9C2D4e6F8a01",
       profileIndex: 0,
     });
   });

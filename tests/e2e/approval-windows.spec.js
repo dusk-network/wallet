@@ -126,14 +126,20 @@ test("a DuskEVM deposit shows what it does on top, and its bytes' hash under Det
   expect(callY).toBeLessThan(rawY);
 });
 
-test("a gas limit under the transaction's minimum keeps the window open, saying why", async ({ page }) => {
+test("a gas limit under the transaction's minimum, or a price of 0, keeps Approve off, saying why", async ({ page }) => {
   await open(page, pendingFor("send_tx", pay));
   await page.getByText("Custom fee", { exact: true }).click();
+  const approve = page.getByRole("button", { name: "Approve", exact: true });
   await page.getByLabel("Gas limit", { exact: true }).fill("1500000");
-  await page.getByRole("button", { name: "Approve", exact: true }).click();
-  await expect(page.locator(".ap-actions__error")).toHaveText("The gas limit can't be under 2,000,000 for this transaction.");
-  expect(await page.evaluate(() => window.decisions)).toEqual([]);
+  await expect(page.getByText("The gas limit can't be under 2,000,000 for this transaction.", { exact: true })).toBeVisible();
+  await expect(approve).toBeDisabled();
   await page.getByLabel("Gas limit", { exact: true }).fill("2000000");
+  await page.getByLabel("Gas price (LUX)", { exact: true }).fill("0");
+  await expect(page.getByText("The gas price must be at least 1 LUX.", { exact: true })).toBeVisible();
+  await expect(approve).toBeDisabled();
+  expect(await page.evaluate(() => window.decisions)).toEqual([]);
+  await page.getByLabel("Gas price (LUX)", { exact: true }).fill("1");
+  await expect(page.getByText("At most 0.002 DUSK", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.decisions.map((d) => [d.decision, d.approvedParams?.gas?.limit]))).toEqual([
     ["approve", "2000000"],

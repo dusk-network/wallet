@@ -1,13 +1,15 @@
 // Activity's rows, on Home and in the full Activity view: a direction icon,
-// the other side's name first (else its short address in mono, with Copy on
-// hover or focus), "Sent · 14:32" under it, and the amount with DUSK on the
-// right. A status word shows only while its outcome isn't known. One that failed or
+// the other side's name first, a saved contact's own before its .dusk name
+// (else its short address in mono, with Copy on hover or focus), "Sent ·
+// 14:32" under it, and the amount with DUSK on the right. Known contract
+// calls say what they did: "Registered a .dusk name". A status word shows only while its outcome isn't known. One that failed or
 // was dropped says so under the name, "Failed · nothing sent · fee 0.0037
 // DUSK paid", and its amount shows muted, without a sign: nothing left.
 
 import { formatDusk, formatFee, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { bridgeTransfer } from "../../../shared/bridge.js";
+import { knownCall } from "../../../shared/knownCalls.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { SOZU_FN } from "../../../shared/sozuAdapter.js";
 import { h } from "../../lib/dom.js";
@@ -15,6 +17,7 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
+import { MONTHS, clockText, dateText } from "../../lib/time.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
 
 export const MINUS = "−";
@@ -28,28 +31,17 @@ export const ACTIVITY_FILTERS = Object.freeze([
 ]);
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const two = (n) => String(n).padStart(2, "0");
-
-/** "14:32", in the popup's time zone. */
-export function clockText(ms) {
-  const d = new Date(ms);
-  return `${two(d.getHours())}:${two(d.getMinutes())}`;
-}
+// "14:32", and a transaction's Date row in full with its time zone, "26 Oct
+// 2026, 14:32 CET".
+export { clockText, dateText };
 
 const startOfDay = (ms) => {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 };
-
-/** "26 Oct 2026, 14:32": a transaction's Date row. */
-export function dateText(ms) {
-  const d = new Date(ms);
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${clockText(ms)}`;
-}
 
 /** A day group's title: "Today", "Yesterday", "Fri, 24 Oct", or with its year when it isn't this one. */
 export function dayLabel(ms, now = Date.now()) {
@@ -132,7 +124,7 @@ function tokenUnits(units, decimals) {
  * @returns {{
  *   icon: "out"|"in"|"stake"|"bridge"|"shield"|"call",
  *   category: "sent"|"received"|"staking"|"bridge"|"other",
- *   lead: string, name: string, address: string|null, isAddress: boolean, generic: boolean,
+ *   lead: string, name: string, alias: string, address: string|null, isAddress: boolean, generic: boolean,
  *   word: string, note: string,
  *   amount: { sign: string, value: string, unit: string } | null,
  *   status: string, tone: "ok"|"bad"|"pending"|"neutral", statusWord: string|null,
@@ -145,14 +137,18 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
   const fn = String(tx?.fnName ?? asset?.action ?? "");
 
-  // The other side, by the name typed when sending, its verified .dusk name,
-  // a saved contact's name, else its short address.
+  // The other side: a saved contact's own name, with its .dusk name (as
+  // typed when sending, else verified) beside it; else the .dusk name; else
+  // its short address.
   const party = (address, typed = "") => {
     const addr = String(address ?? "").trim();
-    const name = [typed, tx?.counterpartyName, addr ? contactName?.(addr) : ""]
-      .map((s) => String(s ?? "").trim())
-      .find(Boolean);
-    if (name) return { name, address: addr || null, isAddress: false };
+    const contact = String((addr && contactName?.(addr)) ?? "").trim();
+    const dusk = [typed, tx?.counterpartyName].map((s) => String(s ?? "").trim()).find(Boolean) ?? "";
+    if (contact) {
+      const alias = dusk && dusk.toLowerCase() !== contact.toLowerCase() ? dusk : "";
+      return { name: contact, alias, address: addr || null, isAddress: false };
+    }
+    if (dusk) return { name: dusk, address: addr || null, isAddress: false };
     if (addr) return { name: shortAddress(addr), address: addr, isAddress: true };
     return null;
   };
@@ -160,11 +156,24 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
 
   let d;
   const bridge = bridgeTransfer(tx, tx?.nodeUrl || nodeUrl);
+  // A known contract's call, by what it did.
+  const named = kind === TX_KIND.CONTRACT_CALL ? knownCall({ contractId: tx?.contractId, fnName: fn, nodeUrl: tx?.nodeUrl || nodeUrl }) : null;
   if (bridge) {
     const value = tx?.amount ?? tx?.deposit;
+    // A deposit's DuskEVM address, as the wallet read it from the call it approved.
+    const evm = /^0x[0-9a-fA-F]{40}$/.test(String(tx?.bridgeTo ?? "")) ? String(tx.bridgeTo) : null;
     d =
       bridge === "to"
-        ? { icon: "bridge", category: "bridge", lead: "Bridge", name: "To DuskEVM", word: "Bridge", amount: dusk(positive(tx?.deposit) ? tx.deposit : value, MINUS) }
+        ? {
+            icon: "bridge",
+            category: "bridge",
+            lead: "Bridge",
+            name: "To DuskEVM",
+            word: "Bridge",
+            address: evm,
+            evm: Boolean(evm),
+            amount: dusk(positive(tx?.deposit) ? tx.deposit : value, MINUS),
+          }
         : bridge === "from"
         ? { icon: "bridge", category: "bridge", lead: "Bridge", name: "From DuskEVM", word: "Bridge", amount: dusk(value, "+") }
         : {
@@ -206,7 +215,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
       icon: "stake",
       category: "staking",
       lead: "Liquid staking",
-      name: stake ? "Stake with Sozu" : "Unstake from Sozu",
+      name: stake ? "Staked with Sozu" : "Unstaked from Sozu",
       word: "Staking",
       amount: stake ? dusk(positive(tx?.deposit) ? tx.deposit : tx?.amount, MINUS) : dir === "in" ? dusk(tx?.amount, "+") : null,
     };
@@ -225,12 +234,19 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
         amount: units !== "0" ? { sign: MINUS, value: units, unit: sym } : null,
       };
     } else if (op === "approve") {
+      // Whom it lets spend the token, as a counterparty; an allowance of 0 takes it back.
+      const p = party(asset.spender);
+      const revoke = !asset.isMax && units === "0" && (asset.valueUnits ?? asset.value) != null;
       d = {
         icon: "call",
         category: "sent",
-        name: `Approve ${sym}`,
-        word: "Approval",
-        amount: asset.isMax ? { sign: "", value: "Unlimited", unit: sym, text: true } : units !== "0" ? { sign: "", value: units, unit: sym } : null,
+        ...(p ? { ...p, lead: revoke ? `Revoked ${sym} for` : `Approved ${sym} for` } : { name: `${revoke ? "Revoke" : "Approve"} ${sym}` }),
+        word: revoke ? "Revoke" : "Approval",
+        amount: asset.isMax
+          ? { sign: "", value: "Unlimited", unit: sym, text: true }
+          : units !== "0" || revoke
+          ? { sign: "", value: units, unit: sym }
+          : null,
       };
     } else {
       d = { icon: "call", category: "sent", name: `${sym} ${fn || "call"}`, word: "Contract", amount: null };
@@ -239,6 +255,16 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     const sym = String(asset.symbol ?? "").trim() || "NFT";
     const id = asset.tokenId != null ? ` #${asset.tokenId}` : "";
     d = { icon: "call", category: "sent", name: `${sym}${id}`, word: "NFT", amount: null };
+  } else if (named) {
+    const value = positive(tx?.deposit) ? tx.deposit : tx?.amount;
+    d = {
+      icon: positive(value) ? "out" : "call",
+      category: dir === "in" ? "received" : "sent",
+      lead: named.app,
+      name: named.label,
+      word: named.app,
+      amount: dusk(value, dir === "in" ? "+" : MINUS),
+    };
   } else if (kind === TX_KIND.CONTRACT_CALL) {
     const value = positive(tx?.deposit) ? tx.deposit : tx?.amount;
     const moved = positive(value);
@@ -263,8 +289,10 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const amount = d.amount && unsent ? { ...d.amount, sign: "", muted: true } : d.amount;
   return {
     lead: "",
+    alias: "",
     address: null,
     isAddress: false,
+    evm: false,
     generic: false,
     ...d,
     note: String(tx?.privacy ?? "").toLowerCase() === "shielded" && kind !== TX_KIND.SHIELD && kind !== TX_KIND.UNSHIELD ? "Shielded" : "",
@@ -398,7 +426,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
   const sub = subText(desc, when(tx));
   // What the row says, for the button that opens it.
   const spoken = !desc.amount ? "" : hidden && !desc.amount.text ? "amount hidden" : amountText(desc.amount, false);
-  const label = [desc.name, sub, spoken, desc.unsent ? "" : desc.statusWord].filter(Boolean).join(", ");
+  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, sub, spoken, desc.unsent ? "" : desc.statusWord].filter(Boolean).join(", ");
 
   const open = () => {
     if (!state || !hash) return;
@@ -422,7 +450,10 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
     h("div", { class: "row-main" }, [
       h("div", { class: "tx-name-line" }, [
         h("button", { class: "tx-open", type: "button", "aria-label": label, onclick: open }, [
-          h("span", { class: desc.isAddress ? "tx-name mono" : "tx-name", title: desc.isAddress ? desc.address : undefined, text: desc.name }),
+          h("span", { class: desc.isAddress ? "tx-name mono" : "tx-name", title: desc.isAddress ? desc.address : undefined }, [
+            desc.name,
+            desc.alias ? h("span", { class: "tx-alias", text: ` · ${desc.alias}` }) : null,
+          ]),
         ]),
         desc.isAddress ? copyButton(desc.address, { showToast: actions?.showToast, className: "copy-ico tx-copy" }) : null,
       ].filter(Boolean)),

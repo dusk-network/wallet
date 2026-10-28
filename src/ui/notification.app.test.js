@@ -171,6 +171,27 @@ describe("the request's network", () => {
     await render("connect", { requestedProfiles: true }, { networkName: "Devnet" });
     expect(chip.textContent).toBe("Devnet");
   });
+
+  it("says at the top that test DUSK has no value on a test network, and nothing on Mainnet", async () => {
+    // The window's panel, its header first, as notification.html has it.
+    const panel = dom.document.createElement("div");
+    panel.className = "panel";
+    const header = dom.document.createElement("div");
+    header.className = "panel-header";
+    panel.append(header, app);
+    dom.document.body.appendChild(panel);
+    const strips = () => dom.document.body.querySelectorAll(".testnet-strip");
+
+    await render("send_tx", { kind: "transfer", privacy: "public", to: SHOP, amount: "1", networkName: "Testnet", nodeUrl: TESTNET });
+    expect(strips().map((s) => s.textContent)).toEqual(["Testnet · Test DUSK has no value"]);
+    expect(panel.children[0]).toBe(strips()[0]);
+    // A locked wallet's window says it too.
+    await render("connect", { requestedProfiles: true }, { isUnlocked: false, accounts: [], duskNames: {} });
+    expect(strips()).toHaveLength(1);
+
+    await render("sign_message", { chainId: "dusk:1", messageLen: 1 }, { networkName: "Testnet" });
+    expect(strips()).toHaveLength(0);
+  });
 });
 
 describe("contract-call decoding", () => {
@@ -257,6 +278,29 @@ describe("typed-data approval", () => {
 });
 
 describe("decisions", () => {
+  it("says so when an answer doesn't reach the wallet, and stays open to try again", async () => {
+    // Firefox's runtime rejects when the background is gone.
+    mocks.answers.DUSK_PENDING_DECISION = async () => {
+      throw new Error("Receiving end does not exist.");
+    };
+    const failed = "Couldn't send your answer to the wallet: Receiving end does not exist.";
+    await render("connect", { requestedProfiles: true });
+    const error = () => bar().querySelector(".ap-actions__error");
+    button("Connect").click();
+    await vi.waitFor(() => expect(error().hidden).toBe(false));
+    expect(error().textContent).toBe(failed);
+    button("Reject").click();
+    await settle();
+    expect(error().textContent).toBe(failed);
+    expect(dom.window.close).not.toHaveBeenCalled();
+
+    // Locked, Reject says it under the password.
+    await render("connect", { requestedProfiles: true }, { isUnlocked: false, accounts: [], duskNames: {} });
+    button("Reject").click();
+    await vi.waitFor(() => expect(app.querySelector("#approval-unlock-error").hidden).toBe(false));
+    expect(app.querySelector("#approval-unlock-error").textContent).toBe(failed);
+  });
+
   it("sends the approval with what the window collected, then closes", async () => {
     await render("connect", { requestedProfiles: true });
     button("Connect").click();

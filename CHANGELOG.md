@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Showed a site's payment to the bridge's account as a bridge to BNB Smart Chain, or Ethereum (Sepolia) on Testnet, with the memo as the recipient there, and a warning when the memo isn't an address there.
+- Said at the top of a test network, in the popup, the full view and site approvals, that test DUSK has no value.
 - Read the DuskEVM bridge's deposit, prove and claim calls on Testnet in their approvals: amount and recipient, marked as a known bridge call.
 - Accepted a gas limit without a price from sites, at the node's gas price.
 - Added a Sent screen after Confirm that follows the transaction: Sending, Sent to the network, then Completed or Failed with the reason and the fee charged, with its ID, Copy and the Dusk explorer link.
@@ -39,6 +41,24 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Warned on a contact's page when its saved `.dusk` name has expired, isn't registered or has no address any more.
+- Named whom a token approval lets spend in Activity, showed an allowance of 0 as a revoke, and listed approvals in the spender's contact Activity.
+- Named the eye button Show balances while balances are hidden.
+- Moved what a site's request makes visible to everyone up, under the amount, in every approval window.
+- Set every extension page's language to English.
+- Showed the time zone with full dates and times in a transaction's details, the Sent screen and approvals.
+- Moved Delete all contacts to Settings' Advanced, asking first, and showed each contact by its first letter.
+- Kept Confirm and Approve off while a custom gas limit is under the minimum or the gas price is 0, with the reason under the field.
+- Showed under Custom fee what the gas limit and price come to in DUSK.
+- Showed a transaction's exact fee under Technical details.
+- Said plainly that staking needs some public DUSK for the network fee, without an error before anything is typed.
+- Kept Max on Staking to 4 decimals, and left the fee to unstake later.
+- Said on both staking Reviews that a stake is public, named the profile by its `.dusk` name, and repeated the node warning before Confirm.
+- Showed on Sozu's Review what the stDUSK is worth now and who holds the DUSK, and said why a contract call's fee cap is higher.
+- Led Activity and a transaction's details with a saved contact's own name, its `.dusk` name beside it.
+- Named Dusk Domains calls in Activity by what they did, such as "Registered a .dusk name", and Sozu's as "Staked with Sozu".
+- Kept a deposit to DuskEVM's recipient with the transaction and showed it in its details.
+- Stopped offering Add token and Import NFT on a contract call's details.
 - Gave the site approval windows the calm look, with Reject and the approve button always in view, and the chain, node, function, call data and the site's own details under Details.
 - Led a site's payment approval with the amount, the recipient's name and the fee.
 - Said in the connect approval what a site sees and that it can't move funds without your approval, with its own wording for a request for the shielded address.

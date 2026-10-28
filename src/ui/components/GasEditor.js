@@ -1,4 +1,4 @@
-import { UI_DISPLAY_DECIMALS, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { h, setChildren } from "../lib/dom.js";
 import { fieldLabel, integerInput } from "./FormControls.js";
 
@@ -6,7 +6,10 @@ import { fieldLabel, integerInput } from "./FormControls.js";
 // network fee and the total, then "Custom fee" for a gas limit and price of
 // your own. By default a Review sets the network's gas price and a limit that
 // suits the transaction (NetworkGas.js); a limit under the transaction's
-// minimum says so while it's typed.
+// minimum, or a price of 0, says so while it's typed, and the fee it comes to
+// shows in DUSK under the fields. While the gas won't do, `error` says why
+// and a "dusk-gas-validity" event tells the page (submitOnGasEnter keeps its
+// button off).
 
 function maxFeeFromGasStrings(limitStr, priceStr) {
   const l = String(limitStr ?? "").trim();
@@ -21,6 +24,15 @@ function maxFeeFromGasStrings(limitStr, priceStr) {
 }
 
 let editorSeq = 0;
+
+const PRICE_ZERO_TEXT = "The gas price must be at least 1 LUX.";
+
+const showError = (input, line, text) => {
+  line.textContent = text;
+  line.hidden = !text;
+  if (text) input.setAttribute("aria-invalid", "true");
+  else input.removeAttribute("aria-invalid");
+};
 
 export const sameGas = (a, b) =>
   Boolean(a && b) && String(a.limit ?? "") === String(b.limit ?? "") && String(a.price ?? "") === String(b.price ?? "");
@@ -41,6 +53,9 @@ export class DuskGasEditor extends HTMLElement {
   #limitInput = null;
   #priceInput = null;
   #limitError = null;
+  #priceError = null;
+  #maxLine = null;
+  #lastError = "";
   #feeValue = null;
   #totalValue = null;
   #details = null;
@@ -169,6 +184,19 @@ export class DuskGasEditor extends HTMLElement {
     return `The gas limit can't be under ${groupThousands(this.#minLimit.toString())} for this transaction.`;
   }
 
+  // A price of 0 LUX: the network takes none.
+  #priceZero() {
+    const { price } = this.getGasInputs();
+    return /^\d+$/.test(price) && BigInt(price) === 0n;
+  }
+
+  /** Why the gas typed won't do, or "" when it will: a limit under the minimum, or a price of 0. */
+  get error() {
+    if (this.#underMinimum()) return this.#minimumText();
+    if (this.#priceZero()) return PRICE_ZERO_TEXT;
+    return "";
+  }
+
   render() {
     // Build DOM only once, keep references.
     this.innerHTML = "";
@@ -186,6 +214,11 @@ export class DuskGasEditor extends HTMLElement {
     const errorId = `gas-limit-error-${++editorSeq}`;
     this.#limitError = h("div", { class: "field-error", id: errorId, role: "alert", hidden: true });
     this.#limitInput.setAttribute("aria-describedby", errorId);
+    const priceErrorId = `gas-price-error-${editorSeq}`;
+    this.#priceError = h("div", { class: "field-error", id: priceErrorId, role: "alert", hidden: true });
+    this.#priceInput.setAttribute("aria-describedby", priceErrorId);
+    // What the limit and price come to, at most.
+    this.#maxLine = h("div", { class: "gas-max", "aria-live": "polite", hidden: true });
 
     this.#feeValue = h("span", { class: "kv-value gas-fee-value", text: "—" });
     this.#totalValue = h("span", { class: "kv-value gas-total-value", text: "—" });
@@ -211,6 +244,8 @@ export class DuskGasEditor extends HTMLElement {
         this.#limitError,
         fieldLabel(this.#priceInput, "Gas price (LUX)"),
         this.#priceInput,
+        this.#priceError,
+        this.#maxLine,
         this.#helpNode,
         this.#resetBtn,
       ]),
@@ -250,15 +285,30 @@ export class DuskGasEditor extends HTMLElement {
     const { limit, price } = this.getGasInputs();
     const feeLux = maxFeeFromGasStrings(limit, price);
 
-    // A limit under the transaction's minimum says so under the field.
-    const under = this.#underMinimum();
-    this.#limitError.textContent = under ? this.#minimumText() : "";
-    this.#limitError.hidden = !under;
-    if (under) this.#limitInput.setAttribute("aria-invalid", "true");
-    else this.#limitInput.removeAttribute("aria-invalid");
+    // A limit under the transaction's minimum, or a price of 0, says so under its field.
+    showError(this.#limitInput, this.#limitError, this.#underMinimum() ? this.#minimumText() : "");
+    showError(this.#priceInput, this.#priceError, this.#priceZero() ? PRICE_ZERO_TEXT : "");
+    const error = this.error;
+    if (error !== this.#lastError) {
+      this.#lastError = error;
+      this.dispatchEvent(new CustomEvent("dusk-gas-validity", { bubbles: true, detail: { error } }));
+    }
 
     // Back to the network's price, once the gas is your own.
     if (this.#resetBtn) this.#resetBtn.hidden = !this.#networkGas || sameGas({ limit, price }, this.#networkGas);
+
+    // What it comes to, exactly, under the fields.
+    this.#maxLine.textContent = feeLux !== null && !error ? `At most ${formatDuskExact(feeLux)} DUSK` : "";
+    this.#maxLine.hidden = !this.#maxLine.textContent;
+
+    // Gas that won't do has no fee or total to show.
+    if (error) {
+      this.#feeValue.textContent = "—";
+      this.#feeValue.title = "";
+      this.#totalValue.textContent = "—";
+      this.#totalValue.title = "";
+      return;
+    }
 
     if (feeLux === null) {
       this.#feeValue.textContent = "Set by the network";
@@ -301,7 +351,7 @@ export class DuskGasEditor extends HTMLElement {
     if ((gl === undefined) !== (gp === undefined)) {
       throw new Error("Enter both the gas limit and the gas price, or clear both.");
     }
-    if (gl !== undefined && this.#underMinimum()) throw new Error(this.#minimumText());
+    if (gl !== undefined && this.error) throw new Error(this.error);
 
     if (gl !== undefined) gas.limit = gl;
     if (gp !== undefined) gas.price = gp;
@@ -326,8 +376,8 @@ export class DuskGasEditor extends HTMLElement {
     if ((limit === "") !== (price === "")) {
       throw new Error("Enter both the gas limit and the gas price, or clear both.");
     }
-    // Never under the transaction's minimum: the approval stays open to fix it.
-    if (limit !== "" && this.#underMinimum()) throw new Error(this.#minimumText());
+    // Never under the transaction's minimum, nor at a price of 0: the approval stays open to fix it.
+    if (limit !== "" && this.error) throw new Error(this.error);
 
     const gas = {};
     let changed = false;

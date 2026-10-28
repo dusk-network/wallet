@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAccountName } from "../shared/accountNames.js";
+import { clearAddressBook } from "../shared/addressBook.js";
 import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 vi.mock("../shared/accountNames.js", () => ({ setAccountName: vi.fn(async () => {}) }));
+vi.mock("../shared/addressBook.js", () => ({ clearAddressBook: vi.fn(async () => {}) }));
 // The first profile has a verified .dusk name, as the header shows it.
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -191,5 +193,48 @@ describe("settings", () => {
     expect(visibleText(advanced.querySelector(".settings-note"))).toBe(
       "Each transaction costs at most 0.0025 DUSK. One that needs more gas than this limit keeps its own."
     );
+  });
+
+  it("keeps custom gas being typed through a redraw, until it's saved", async () => {
+    const view = await settings({ customGas: { limit: "3000000", price: "2" } });
+    const field = (name) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === name);
+    typeInto(field("Gas limit"), "4500000");
+    typeInto(field("Gas price (LUX)"), "3");
+    // A sync or status push draws Settings again before the field is left.
+    view.draw();
+    expect([field("Gas limit").value, field("Gas price (LUX)").value]).toEqual(["4500000", "3"]);
+    expect(view.actions.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_SET_CUSTOM_GAS" }));
+
+    // Left, it's saved, and the saved gas shows from then on.
+    field("Gas price (LUX)").dispatchEvent(fakeEvent("change"));
+    await settle();
+    expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_CUSTOM_GAS", customGas: { limit: "4500000", price: "3" } });
+    expect(view.state.settings.customGasDraft).toBeNull();
+    view.draw();
+    expect([field("Gas limit").value, field("Gas price (LUX)").value]).toEqual(["4500000", "3"]);
+  });
+
+  it("keeps Delete all contacts under Advanced, asking first", async () => {
+    const view = await settings();
+    view.state.addressBook = { loaded: true, items: [{ id: "1", name: "Jan (flour)" }] };
+    const advanced = dom.document.body.querySelector("details.settings-advanced");
+    const remove = advanced.querySelectorAll("button").find((b) => b.textContent === "Delete all contacts");
+    expect(remove).toBeTruthy();
+    // Not near the Contacts row.
+    const contacts = view.section("Contacts");
+    expect(contacts.querySelectorAll("button").map(visibleText)).toEqual(["Contacts"]);
+
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    remove.click();
+    await settle();
+    expect(clearAddressBook).not.toHaveBeenCalled();
+
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    remove.click();
+    await settle();
+    expect(confirm).toHaveBeenCalledWith("Delete all saved contacts from this wallet? This can't be undone.");
+    expect(clearAddressBook).toHaveBeenCalledTimes(1);
+    expect(view.state.addressBook).toMatchObject({ loaded: false, items: null });
+    expect(view.actions.showToast).toHaveBeenCalledWith("Deleted all contacts");
   });
 });

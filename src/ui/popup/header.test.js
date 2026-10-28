@@ -180,6 +180,31 @@ describe("header", () => {
     expect([label.textContent, pill.className]).toEqual(["Mainnet", "network-pill"]);
   });
 
+  it.each(Object.keys(VIEWS))("says above the header that test DUSK has no value, on a test network only (%s)", async (view) => {
+    const { dom, renderHeader } = await setup(view);
+    // The page's panel, its header first, as popup.html and full.html have it.
+    const panel = dom.document.createElement("div");
+    panel.className = "panel";
+    const header = dom.document.createElement("div");
+    header.className = "panel-header";
+    panel.appendChild(header);
+    dom.document.body.appendChild(panel);
+    const strips = () => panel.querySelectorAll(".testnet-strip");
+
+    renderHeader(overview);
+    expect(strips().map((s) => [s.textContent, s.getAttribute("role")])).toEqual([["Testnet · Test DUSK has no value", "note"]]);
+    expect(panel.children[0]).toBe(strips()[0]);
+    // Locked, it still says so; a redraw keeps the one strip.
+    renderHeader({ ...overview, isUnlocked: false });
+    expect(strips()).toHaveLength(1);
+    renderHeader({ ...overview, networkName: "Devnet" });
+    expect(strips().map((s) => s.textContent)).toEqual(["Devnet · Test DUSK has no value"]);
+
+    renderHeader({ ...overview, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" });
+    expect(strips()).toHaveLength(0);
+    expect(panel.children).toEqual([header]);
+  });
+
   it("keeps the keyboard on the chip when another profile redraws it", async () => {
     const { dom, renderHeader, chip } = await setup("popup");
     renderHeader(overview);

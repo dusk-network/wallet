@@ -90,13 +90,13 @@ describe("Hide balances", () => {
     const draw = () => show(homeView(state.overview, { state, actions: act }));
     act.render.mockImplementation(draw);
     const eye = () => body.querySelector(".balance-label button.balance-eye");
-    const eyeState = () => [eye().getAttribute("aria-label"), eye().title, eye().getAttribute("aria-pressed"), eye().innerHTML];
+    const eyeState = () => [eye().getAttribute("aria-label"), eye().title, eye().innerHTML];
     const values = () => body.querySelectorAll(".balance-amount, .balance-split-value, .asset-amt").map(seen);
     const titles = () =>
       body.querySelectorAll(".balance-amount, .balance-split-value, .balance-split-label").map((el) => el.getAttribute("title"));
 
     await draw();
-    expect(eyeState()).toEqual(["Hide balances", "Hide balances", "false", iconSvg("eye")]);
+    expect(eyeState()).toEqual(["Hide balances", "Hide balances", iconSvg("eye")]);
     // The total, its Public and Shielded split, and the token.
     expect(values()).toEqual([
       ["1,507.9383 DUSK", "1,507.9383 DUSK"],
@@ -114,7 +114,10 @@ describe("Hide balances", () => {
     // Redrawn at once, the focus still on the eye.
     expect(act.render).toHaveBeenCalledTimes(1);
     expect(dom.document.activeElement).toBe(eye());
-    expect(eyeState()).toEqual(["Hide balances", "Hide balances", "true", iconSvg("eye-off")]);
+    // Named for what it does now: show them again.
+    expect(eyeState()).toEqual(["Show balances", "Show balances", iconSvg("eye-off")]);
+    // Its name says the state: no pressed state to contradict it.
+    expect(eye().getAttribute("aria-pressed")).toBeNull();
     expect(values()).toEqual([...Array(3).fill(["•••• DUSK", "hidden DUSK"]), ["•••• TKN", "hidden TKN"]]);
     // No tooltip gives them away either, the shielded amount held back included.
     expect(titles()).toEqual([null, null, null, null, null]);
@@ -129,7 +132,7 @@ describe("Hide balances", () => {
     eye().click();
     await settle();
     expect(act.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: false });
-    expect(eyeState()).toEqual(["Hide balances", "Hide balances", "false", iconSvg("eye")]);
+    expect(eyeState()).toEqual(["Hide balances", "Hide balances", iconSvg("eye")]);
     expect(values()[0]).toEqual(["1,507.9383 DUSK", "1,507.9383 DUSK"]);
   });
 
@@ -272,7 +275,7 @@ describe("hidden balances", () => {
       "Available hidden DUSK from your public balance",
     ]);
     button("Max").click();
-    expect(state.staking.stakeAmountDusk).toBe("1482.8883");
+    expect(state.staking.stakeAmountDusk).toBe("1482.8383");
 
     // Too much: the check holds, under the field, and doesn't give the balance away.
     typeInto(body.querySelector("input.amount-field__input"), "5000");
@@ -334,10 +337,10 @@ describe("hidden balances", () => {
       "stDUSK•••• stDUSKAdd to Assets",
     ]);
     button("Max").click();
-    expect(st.depositAmountDusk).toBe("1482.4383");
+    expect(st.depositAmountDusk).toBe("1481.9383");
     // What the typed amount gets isn't a balance: it shows.
     expect(visibleText(body.querySelector(".stake-estimate .stake-estimate__main"))).toBe(
-      "You get about 1,411.84 stDUSK, worth 1,482.4383 DUSK now."
+      "You get about 1,411.36 stDUSK, worth 1,481.9383 DUSK now."
     );
   });
 });
