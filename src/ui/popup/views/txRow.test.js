@@ -171,7 +171,7 @@ describe("what a row says", () => {
     const MAINNET = "https://nodes.dusk.network";
     const { hub } = networks.mainnet.sozu;
     const hubCall = describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: `0x${hub.toUpperCase()}`, fnName: "contract" }, { nodeUrl: MAINNET });
-    expect([hubCall.lead, hubCall.name]).toEqual(["Sozu hub", "Call contract"]);
+    expect([hubCall.lead, hubCall.name, subText(hubCall, "14:32")]).toEqual(["Sozu hub", "Call contract", "Sozu hub · 14:32"]);
     const bsc = routes(networks.mainnet).find((route) => route.kind === "service").account;
     const paid = describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc, amount: "2000000000" }, { nodeUrl: MAINNET });
     expect([paid.lead, paid.name, paid.address, paid.isAddress]).toEqual(["Sent to", "BSC bridge", bsc, false]);

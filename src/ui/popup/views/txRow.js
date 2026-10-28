@@ -286,14 +286,15 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   } else if (kind === TX_KIND.CONTRACT_CALL) {
     const value = positive(tx?.deposit) ? tx.deposit : tx?.amount;
     const moved = positive(value);
-    // The contract by what the network's file calls it, where it does.
+    // The contract by what the network's file calls it, where it does, as
+    // a known contract's call names its app.
     const label = labelForNode(network, tx?.contractId);
     d = {
       icon: moved ? "out" : "call",
       category: dir === "in" ? "received" : "sent",
       ...(label ? { lead: label } : {}),
       name: fn ? `Call ${fn}` : "Contract call",
-      word: "Contract",
+      word: label ?? "Contract",
       amount: dusk(value, dir === "in" ? "+" : MINUS),
     };
   } else {
