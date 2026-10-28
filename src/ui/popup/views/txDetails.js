@@ -2,10 +2,11 @@ import { formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../..
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { networkNameFromNodeUrl } from "../../../shared/network.js";
+import { labelForNode } from "../../../shared/nodeNetwork.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { shortAddress, siteName } from "../../lib/strings.js";
+import { contractIdText, shortAddress, siteName } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
@@ -88,7 +89,7 @@ function technicalRows(tx, ov, nodeUrl, showToast) {
     // The fee to the last LUX: the summary rounds it to 4 decimals.
     safeBigInt(tx?.feePaid, 0n) > 0n ? kv("Exact fee", `${formatDuskExact(tx.feePaid)} DUSK`) : null,
     finalKnown && ["executed", "failed"].includes(String(tx?.status ?? "")) ? kv("Finality", "Final") : null,
-    kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", [mono(String(tx.contractId), shortAddress(String(tx.contractId))), copyContract(String(tx.contractId), showToast)]) : null,
+    kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", contractValue(String(tx.contractId), nodeUrl || ov?.nodeUrl, showToast)) : null,
     tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,
     tx?.blockHash ? kv("Block hash", mono(String(tx.blockHash), shortAddress(String(tx.blockHash)))) : null,
     at("Submitted", tx?.submittedAt),
@@ -100,6 +101,14 @@ function technicalRows(tx, ov, nodeUrl, showToast) {
     // The chain's own words for a failure; the summary says it plainly.
     String(tx?.status ?? "") === "failed" && tx?.error ? kv("Error", String(tx.error), { className: "kv--wrap" }) : null,
   ].filter(Boolean);
+}
+
+// A call's contract: what the network's file calls it, where it does, then
+// its short ID and Copy.
+function contractValue(raw, nodeUrl, showToast) {
+  const label = labelForNode(String(nodeUrl ?? ""), raw);
+  const id = contractIdText(raw);
+  return [label ? `${label} · ` : null, mono(id, contractIdText(raw, { short: true })), copyContract(id, showToast)];
 }
 
 // Copy beside a call's contract, as an icon.

@@ -56,12 +56,12 @@ describe("Activity's CSV", () => {
   it("writes each row as the web wallet does: exact amounts, a minus for what left, a failed one's fee alone", () => {
     const [, ...rows] = lines(activityCsv(ROWS, { nodeUrl: NODE }));
     expect(rows).toEqual([
-      `2026-10-23T07:00:30.000Z,"Fri, 23 Oct 2026, 07:00 UTC",4658012,${hash(1)},in,Public,Received,,${SENDER},1000,,"'=HYPERLINK(1), ""rent""",Completed`,
-      `2026-10-23T07:00:30.000Z,"Fri, 23 Oct 2026, 07:00 UTC",,${hash(2)},out,Public,faucet.dusk (Sent),faucet.dusk,${FAUCET},-5,,,Pending`,
-      `2026-10-23T07:00:30.000Z,"Fri, 23 Oct 2026, 07:00 UTC",4658013,${hash(3)},out,Public,Call convert (Failed · nothing sent · fee 0.0019 DUSK paid),,${"00".repeat(32)},0,0.001856398,,Failed`,
-      `2026-10-23T07:00:30.000Z,"Fri, 23 Oct 2026, 07:00 UTC",4697290,${hash(4)},out,Public,To 0xAB84…C86F (Bridge to DuskEVM),,${EVM},-0.5,0.001985878,,Completed`,
+      `2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",4658012,${hash(1)},in,Public,Received,,${SENDER},1000,,"'=HYPERLINK(1), ""rent""",Completed`,
+      `2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",,${hash(2)},out,Public,faucet.dusk (Sent),faucet.dusk,${FAUCET},-5,,,Pending`,
+      `2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",4658013,${hash(3)},out,Public,Call convert (Failed · nothing sent · fee 0.0019 DUSK paid),,${"00".repeat(32)},0,0.001856398,,Failed`,
+      `2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",4697290,${hash(4)},out,Public,To 0xAB84…C86F (Bridge to DuskEVM),,${EVM},-0.5,0.001985878,,Completed`,
       `,,4658014,${hash(5)},out,Public,Sent,,${FAUCET},-3,,,Not looked up yet`,
-      `2026-10-23T07:00:30.000Z,"Fri, 23 Oct 2026, 07:00 UTC",,${hash(6)},in,Shielded,Received (Shielded),,,3,,,Completed`,
+      `2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",,${hash(6)},in,Shielded,Received (Shielded),,,3,,,Completed`,
     ]);
   });
 
@@ -82,6 +82,13 @@ describe("Activity's CSV", () => {
     expect(amountOf([both], { local: [pending] })).toEqual(["-5"]);
     expect(amountOf([{ ...both, deposit: undefined }], { local: [pending] })).toEqual(["-5"]);
     expect(amountOf([{ ...chain, ...pending, source: "both", amount: "5000000000", deposit: "5000000000", success: true, status: "executed" }], { local: [pending] })).toEqual(["-5"]);
+  });
+
+  it("writes a contract a site called by its ID as every Dusk app does, without the 0x the site sent", () => {
+    const CONTRACT = "cd".repeat(32);
+    const call = { hash: hash(8), source: "local", kind: TX_KIND.CONTRACT_CALL, contractId: `0x${CONTRACT.toUpperCase()}`, fnName: "pay", status: "submitted", submittedAt: AT, profileIndex: 0 };
+    const counterparty = lines(activityCsv([call], { nodeUrl: NODE, own: [SENDER] }))[1].split(",").at(-5);
+    expect(counterparty).toBe(CONTRACT);
   });
 
   it("adds the user's contact names in a column of their own only when asked, never in the words", () => {

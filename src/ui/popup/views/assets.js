@@ -1,9 +1,8 @@
 import { UI_DISPLAY_DECIMALS, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
-import { useNetworkGas } from "../../components/NetworkGas.js";
+import { reviewGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
-import { shortAddress } from "../../lib/strings.js";
+import { contractIdText, shortAddress } from "../../lib/strings.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -20,7 +19,7 @@ function normalizeContractIdInput(s) {
   if (!raw) throw new Error("Enter a contract ID.");
   if (/^0x[0-9a-f]{64}$/i.test(raw)) return raw.toLowerCase();
   if (/^[0-9a-f]{64}$/i.test(raw)) return `0x${raw.toLowerCase()}`;
-  throw new Error("That isn't a contract ID: it has 64 hex characters, after 0x.");
+  throw new Error("That isn't a contract ID: it has 64 hex characters.");
 }
 
 function contractIdsEqual(a, b) {
@@ -232,10 +231,11 @@ const kv = (label, value, className = "") =>
     h("span", { class: "kv-value" }, [].concat(value)),
   ]);
 
-// A contract ID, short, with Copy beside it.
+// A contract ID, short and without 0x, with Copy beside it.
 function contractValue(cid, actions) {
+  const id = contractIdText(cid);
   return [
-    h("span", { class: "mono", title: cid, text: shortAddress(cid) }),
+    h("span", { class: "mono", title: id, text: contractIdText(cid, { short: true }) }),
     h("button", {
       class: "copy-ico",
       type: "button",
@@ -243,7 +243,7 @@ function contractValue(cid, actions) {
       "aria-label": "Copy contract ID",
       html: iconSvg("copy"),
       onclick: async () => {
-        const ok = await copyToClipboard(cid);
+        const ok = await copyToClipboard(id);
         actions?.showToast?.(ok ? "Contract ID copied" : "Couldn't copy the contract ID");
       },
     }),
@@ -356,7 +356,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
   });
 
   const input = textInput({
-    placeholder: "0x…",
+    placeholder: "64 hex characters",
     value: String(st.contractId ?? ""),
     onEnter: () => lookupBtn.click(),
     oninput: (e) => {
@@ -454,7 +454,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
   });
 
   const contractInput = textInput({
-    placeholder: "0x…",
+    placeholder: "64 hex characters",
     value: String(st.contractId ?? ""),
     onEnter: () => tokenIdInput.focus(),
     oninput: (e) => {
@@ -858,24 +858,14 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
     return [];
   }
 
-  const defaultGas = getDefaultGas(TX_KIND.CONTRACT_CALL);
-  const defaultLimit = defaultGas?.limit != null ? String(defaultGas.limit) : "";
-  const fallbackPrice = defaultGas?.price != null ? String(defaultGas.price) : "1";
-
-  const gasEditor = document.createElement("dusk-gas-editor");
-  gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-  gasEditor.amountLux = "0";
-  gasEditor.setGas(d?.gas ?? null);
-
   // The network's gas price by default; Custom fee for gas of your own.
-  useNetworkGas({
-    customGas: ov?.customGas,
+  const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
+    kind: TX_KIND.CONTRACT_CALL,
+    amountLux: "0",
+    ov,
     actions,
-    defaultLimit,
-    fallbackPrice,
     gas: d?.gas,
-    gasEditor,
-    minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL)?.limit,
+    fallbackPrice: "1",
   });
 
   const valueUnits = String(d?.asset?.valueUnits ?? d?.asset?.value ?? "0");
@@ -893,19 +883,9 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   // Back returns to the token, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
-  // Gas that won't do says so above Confirm; nothing is sent.
-  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
-
   confirmBtn.addEventListener("click", async () => {
-    let gas;
-    try {
-      gas = gasEditor.readFinalGas();
-    } catch (e) {
-      confirmError.textContent = e?.message ?? String(e);
-      confirmError.hidden = false;
-      return;
-    }
-    confirmError.hidden = true;
+    const gas = readGas();
+    if (gas === false) return;
     confirmBtn.disabled = true;
     d.gas = gas;
 

@@ -1,3 +1,5 @@
+import { UI_DISPLAY_DECIMALS } from "../../shared/amount.js";
+import { getDefaultGas, getMinimumGas } from "../../shared/txDefaults.js";
 import { h } from "../lib/dom.js";
 import { sameGas } from "./GasEditor.js";
 
@@ -85,4 +87,46 @@ export function useNetworkGas({ actions, gasEditor, defaultLimit, fallbackPrice,
     gasEditor.networkGas = network;
     if (untouched) gasEditor.setGas(network);
   })().catch(() => {});
+}
+
+/**
+ * A Review's fee, as Send, Staking, Shield and Unshield and a token's Review
+ * set it up: the gas editor for `kind` at the network's price
+ * (useNetworkGas), the error above Confirm when gas won't do, and readGas:
+ * the gas to send, undefined for the network's, or false once the error
+ * says why it can't be sent.
+ *
+ * @param {{
+ *   kind: string, gasOpts?: object, amountLux?: string, ov?: object, actions: object,
+ *   gas?: { limit: string, price: string } | null, fallbackPrice?: string,
+ * }} opts
+ */
+export function reviewGas({ kind, gasOpts, amountLux, ov, actions, gas, fallbackPrice = "" }) {
+  const defaultGas = getDefaultGas(kind, gasOpts);
+  const editor = document.createElement("dusk-gas-editor");
+  editor.amountLux = amountLux;
+  editor.maxDecimals = UI_DISPLAY_DECIMALS;
+  useNetworkGas({
+    customGas: ov?.customGas,
+    actions,
+    defaultLimit: defaultGas?.limit != null ? String(defaultGas.limit) : "",
+    fallbackPrice: defaultGas?.price != null ? String(defaultGas.price) : fallbackPrice,
+    gas,
+    gasEditor: editor,
+    minLimit: getMinimumGas(kind, gasOpts)?.limit,
+  });
+  // Gas that won't do says so above Confirm; nothing is sent.
+  const error = h("div", { class: "field-error", role: "alert", hidden: true });
+  const readGas = () => {
+    try {
+      const final = editor.readFinalGas();
+      error.hidden = true;
+      return final;
+    } catch (e) {
+      error.textContent = e?.message ?? String(e);
+      error.hidden = false;
+      return false;
+    }
+  };
+  return { defaultGas, editor, error, readGas };
 }

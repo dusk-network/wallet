@@ -14,6 +14,8 @@
  * - Don't block saving settings on validation failures
  */
 
+import { chainIdOfInfo, listedChainId } from "./nodeNetwork.js";
+import { rememberNodeChain } from "./settings.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 
 // ============================================================================
@@ -39,6 +41,7 @@ import { storage, STORAGE_KEYS } from "./storage.js";
  * @typedef {Object} ProbeResult
  * @property {boolean} ok - Whether the endpoint is reachable
  * @property {string} [error] - Error message if not reachable
+ * @property {number|null} [chainId] - A node's chain ID, from its /on/node/info
  */
 
 // ============================================================================
@@ -67,9 +70,17 @@ export async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
 // Endpoint Probes
 // ============================================================================
 
+// What Rusk wants on its HTTP API, as the wallet's engine (w3sper) asks it:
+// a node that checks the version answers 400 to a request without one.
+const RUSK_HEADERS = Object.freeze({
+  "Content-Type": "application/octet-stream",
+  Accept: "application/json",
+  "Rusk-Version": "1.0.0-rc.0",
+});
+
 /**
- * Probe a node endpoint for reachability.
- * Tests the /on/node/info endpoint.
+ * Probe a node endpoint for reachability, and read the chain ID that names
+ * its network (nodeNetwork.js), from its /on/node/info.
  * @param {string} baseUrl - Base URL of the node
  * @param {number} [timeoutMs=6000] - Request timeout in milliseconds
  * @returns {Promise<ProbeResult>}
@@ -81,27 +92,45 @@ export async function probeNode(baseUrl, timeoutMs = 6000) {
 
     const resp = await fetchWithTimeout(
       infoUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/octet-stream",
-          Accept: "application/json",
-        },
-        body: new Uint8Array(0),
-      },
+      { method: "POST", headers: RUSK_HEADERS, body: new Uint8Array(0) },
       timeoutMs
     );
 
-    // Rusk can return 400/424 when Rusk-Version/Rusk-Session-Id headers are
-    // missing or mismatched. Still means the node is alive.
-    if (resp.ok || resp.status === 400 || resp.status === 424) {
-      return { ok: true };
+    if (resp.ok) {
+      const info = await resp.json().catch(() => null);
+      return { ok: true, chainId: chainIdOfInfo(info) };
+    }
+
+    // Rusk can return 400/424 when its Rusk-Version/Rusk-Session-Id
+    // checks fail. Still means the node is alive, though it gave no info.
+    if (resp.status === 400 || resp.status === 424) {
+      return { ok: true, chainId: null };
     }
 
     return { ok: false, error: `HTTP ${resp.status}` };
   } catch (e) {
     return { ok: false, error: e?.message ?? String(e) };
   }
+}
+
+/**
+ * The chain ID a node gives, read when the node is chosen (Settings, or a
+ * site's switch): a network's own node's at once, else the node's own
+ * answer, asked again once after a short wait; null when it can't be read,
+ * and the next status check asks again.
+ * @param {string} nodeUrl
+ * @param {{ attempts?: number, waitMs?: number, timeoutMs?: number }} [opts]
+ * @returns {Promise<number | null>}
+ */
+export async function readChainId(nodeUrl, { attempts = 2, waitMs = 500, timeoutMs = 4000 } = {}) {
+  const listed = listedChainId(nodeUrl);
+  if (listed !== null) return listed;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    const { chainId } = await probeNode(nodeUrl, timeoutMs);
+    if (Number.isInteger(chainId)) return chainId;
+  }
+  return null;
 }
 
 /**
@@ -327,6 +356,11 @@ async function runEndpointChecks({ nodeUrl, proverUrl, archiverUrl }) {
     safeProbe(probeProver, proverUrl, "Prover"),
     safeProbe(probeArchiver, archiverUrl, "Archiver"),
   ]);
+
+  // A node whose chain ID wasn't read when it was chosen gets it here.
+  if (Number.isInteger(nodeResult.chainId)) {
+    await rememberNodeChain(nodeUrl, nodeResult.chainId).catch(() => {});
+  }
 
   // Update status
   return setNetworkStatus({

@@ -288,7 +288,11 @@ describe("resolveDuskName", () => {
     expect(lens.createLensReader).toHaveBeenCalledTimes(1);
 
     await names.resolveDuskName("alice.dusk", { nodeUrl: MAINNET });
-    await names.resolveDuskName("alice.dusk", { nodeUrl: "https://testnet.example.org" });
+    // Another node of Testnet's, and a custom node whose network isn't known, which reads no names.
+    await names.resolveDuskName("alice.dusk", { nodeUrl: `${TESTNET}/rusk` });
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: "https://testnet.example.org" })).resolves.toMatchObject({
+      reason: "unsupported_network",
+    });
     expect(lens.createLensReader).toHaveBeenCalledTimes(3);
   });
 

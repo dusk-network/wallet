@@ -133,6 +133,9 @@ vi.mock("../shared/permissions.js", async (importOriginal) => ({
   revokeOrigin,
 }));
 vi.mock("../shared/settings.js", () => ({ getSettings, setSettings }));
+// A custom node's chain ID, as networkStatus.js reads it: Testnet's here, and nothing asked of the network.
+const readChainId = vi.fn(async () => 2);
+vi.mock("../shared/networkStatus.js", async (importOriginal) => ({ ...(await importOriginal()), readChainId }));
 vi.mock("./engineHost.js", () => ({
   engineCall,
   ensureEngineConfigured,
@@ -1545,6 +1548,33 @@ describe("background rpc handler", () => {
     expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
   });
 
+  it("dusk_sendTransaction passes on and records the kind it checked, however the site spelled it", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+
+    const call = { privacy: "public", contractId: `0x${"ab".repeat(32)}`, fnName: "transfer", fnArgs: "0x1234", amount: "0", deposit: "0" };
+    await handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params: { ...call, kind: "CONTRACT_CALL" } });
+    await handleRpc("https://dapp.example", {
+      method: "dusk_sendTransaction",
+      params: { kind: "Transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1" },
+    });
+
+    const sent = engineCall.mock.calls.filter(([m]) => m === "dusk_sendTransaction").map(([, p]) => p.kind);
+    const asked = requestUserApproval.mock.calls.filter(([type]) => type === "send_tx").map(([, , p]) => p.kind);
+    const kept = putTxMeta.mock.calls.map(([, meta]) => meta);
+    expect([sent, asked, kept.map((m) => m.kind)]).toEqual([
+      ["contract_call", "transfer"],
+      ["contract_call", "transfer"],
+      ["contract_call", "transfer"],
+    ]);
+    // What Activity shows of the call.
+    expect(kept[0]).toMatchObject({ contractId: expect.stringMatching(/ab/), fnName: "transfer" });
+  });
+
   it("dusk_sendTransaction strips shielded contract-call nullifiers from provider response", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -1699,7 +1729,25 @@ describe("background rpc handler", () => {
         to: expect.objectContaining({ nodeUrl }),
       })
     );
-    expect(setSettings).toHaveBeenCalledWith({ nodeUrl });
+    // Saved with the chain ID the node gave, asked only once the user agreed.
+    expect(setSettings).toHaveBeenCalledWith({ nodeUrl, chainId: 2 });
+    expect(readChainId).toHaveBeenCalledWith(nodeUrl);
+    expect(readChainId.mock.invocationCallOrder.at(-1)).toBeGreaterThan(requestUserApproval.mock.invocationCallOrder.at(-1));
+  });
+
+  it("dusk_switchNetwork asks a site's node nothing when the user declines the switch", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    requestUserApproval.mockRejectedValueOnce(Object.assign(new Error("User rejected"), { code: 4001 }));
+
+    await expect(
+      handleRpc("https://dapp.example", { method: "dusk_switchNetwork", params: { nodeUrl: "https://node.example" } })
+    ).rejects.toThrow("User rejected");
+    expect(readChainId).not.toHaveBeenCalled();
+    expect(setSettings).not.toHaveBeenCalled();
   });
 
   it("dusk_switchNetwork returns null without approval when target preset URL matches current settings", async () => {

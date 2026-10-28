@@ -184,15 +184,17 @@ describe("display formatting", () => {
     expect(formatDuskExact("100000000")).toBe("0.1");
   });
 
-  it("shows a fee exactly up to 4 decimals, rounding a maximum up and a fee paid to the nearest", () => {
+  it("shows a fee as every Dusk app does, rounding a maximum up and a fee paid to the nearest", () => {
     // Up to 4 decimals, exact either way.
     expect([formatFee("2500000"), formatFee("2500000", { max: true })]).toEqual(["0.0025", "0.0025"]);
     // Past them: a fee paid to the nearest, a maximum up, so it never reads lower than it can be.
     expect([formatFee("1840001"), formatFee("1840001", { max: true })]).toEqual(["0.0018", "0.0019"]);
     expect([formatFee("1853542"), formatFee("1853542", { max: true })]).toEqual(["0.0019", "0.0019"]);
     expect([formatFee("1849999"), formatFee("1850000")]).toEqual(["0.0018", "0.0019"]);
-    // Too small for 4 decimals: paid, in full; a maximum, up to the smallest step.
-    expect([formatFee("40000"), formatFee("40000", { max: true })]).toEqual(["0.00004", "0.0001"]);
+    // Under 0.01: 2 significant digits (@dusk-network/networks/format), never 0.
+    expect([formatFee("185000"), formatFee("185001", { max: true })]).toEqual(["0.00019", "0.00019"]);
+    expect([formatFee("40000"), formatFee("40000", { max: true })]).toEqual(["0.00004", "0.00004"]);
+    expect([formatFee("10"), formatFee("5000000000123", { max: true })]).toEqual(["0.00000001", "5,000.0001"]);
     expect(formatFee("0", { max: true })).toBe("0");
   });
 

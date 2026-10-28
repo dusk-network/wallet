@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { explorerAccountUrl, explorerTxUrl } from "./explorer.js";
+import { noteChainId } from "./nodeNetwork.js";
 
 describe("explorerTxUrl", () => {
   it("returns mainnet explorer URL", () => {
@@ -24,6 +25,14 @@ describe("explorerTxUrl", () => {
 
   it("returns null for custom networks (no explorer)", () => {
     expect(explorerTxUrl("https://my-custom-node.example.com", "abc123")).toBeNull();
+  });
+
+  it("links a custom node's transaction on its network's explorer, once the node gave its chain ID", () => {
+    expect(explorerTxUrl("https://rusk.example.com", "abc123")).toBeNull();
+    noteChainId("https://rusk.example.com", 2);
+    expect(explorerTxUrl("https://rusk.example.com/", "abc123")).toBe(
+      "https://apps.testnet.dusk.network/explorer/transactions/transaction/?id=abc123"
+    );
   });
 
   it("returns null for empty hash", () => {

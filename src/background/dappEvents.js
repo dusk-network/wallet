@@ -10,6 +10,7 @@ import { chainIdFromNodeUrl } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { duskNamesNetwork } from "../shared/verifiedNames.js";
+import { listedChainId, noteChainId } from "../shared/nodeNetwork.js";
 import { getEngineStatus } from "./engineHost.js";
 import { profileVisibilityChanged, readCurrent, siteNames } from "./siteNames.js";
 import { getExtensionApi } from "../platform/extensionApi.js";
@@ -505,14 +506,15 @@ function permissionProfileKey(perm) {
 export async function handleSettingsDiff(oldSettings, newSettings) {
   const oldUrl = String(oldSettings?.nodeUrl ?? "");
   const newUrl = String(newSettings?.nodeUrl ?? "");
-  if (oldUrl !== newUrl) {
-    // A profile's .dusk name is the one checked on its network: profile
-    // updates begun before the move are dropped, and sites get them again.
-    const moved = duskNamesNetwork(oldUrl) !== duskNamesNetwork(newUrl);
-    if (moved) profileVisibilityChanged();
-    await broadcastChainChangedAll();
-    if (moved) await broadcastProfilesChangedAll();
-  }
+  // Each node's network, as the settings keep its chain ID (settings.js).
+  const chainOf = (settings, url) => (Number.isInteger(settings?.chainId) ? settings.chainId : listedChainId(url));
+  noteChainId(newUrl, chainOf(newSettings, newUrl));
+  // A profile's .dusk name is the one checked on its network: profile
+  // updates begun before the move are dropped, and sites get them again.
+  const moved = duskNamesNetwork(oldUrl, chainOf(oldSettings, oldUrl)) !== duskNamesNetwork(newUrl, chainOf(newSettings, newUrl));
+  if (moved) profileVisibilityChanged();
+  if (oldUrl !== newUrl) await broadcastChainChangedAll();
+  if (moved) await broadcastProfilesChangedAll();
 }
 
 /**

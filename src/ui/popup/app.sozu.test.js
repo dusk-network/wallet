@@ -208,7 +208,58 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     await import("./app.js");
     const before = state.context;
     onMessage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
-    expect([state.context, state.overview?.isUnlocked]).toEqual([before + 1, false]);
+    expect(state.context).not.toBe(before);
+    expect([state.context.reason, state.overview?.isUnlocked]).toEqual(["lock", false]);
     await flush();
+  });
+
+  it("draws again from a fresh overview when the wallet reads the chain ID a custom node didn't give when chosen", async () => {
+    popupPage();
+    let onMessage = null;
+    vi.stubGlobal("browser", {
+      runtime: { id: "dusk-wallet", sendMessage: () => {}, onMessage: { addListener: (fn) => (onMessage = fn) } },
+    });
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    send.mockReset();
+    const custom = { ...TESTNET, nodeUrl: "https://my-node.example", networkName: "Custom", chainId: null };
+    send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? custom : {}));
+    const { state } = await import("./state.js");
+    const { render } = await import("./app.js");
+    await render();
+    await flush();
+    const overviews = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_OVERVIEW").length;
+    const before = overviews();
+
+    custom.chainId = 2;
+    onMessage({ type: "DUSK_UI_NETWORK_CHANGED" });
+    await flush();
+    expect(overviews()).toBe(before + 1);
+    expect(state.overview.chainId).toBe(2);
+    const { networkForNode } = await import("../../shared/nodeNetwork.js");
+    expect(networkForNode("https://my-node.example")?.name).toBe("testnet");
+  });
+
+  it("draws again, too, when the desktop app's wallet in this page says it read that chain ID", async () => {
+    const { dom } = popupPage();
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    send.mockReset();
+    const custom = { ...TESTNET, nodeUrl: "https://my-node.example", networkName: "Custom", chainId: null };
+    send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? custom : {}));
+    const { state } = await import("./state.js");
+    const { render } = await import("./app.js");
+    await render();
+    await flush();
+    const overviews = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_OVERVIEW").length;
+    const before = overviews();
+
+    custom.chainId = 2;
+    const told = dom.window._listeners.filter((l) => l.type === "dusk-wallet-message");
+    expect(told).toHaveLength(1);
+    told[0].fn({ type: "dusk-wallet-message", detail: { type: "DUSK_UI_NETWORK_CHANGED" } });
+    await flush();
+    expect(overviews()).toBe(before + 1);
+    expect(state.overview.chainId).toBe(2);
   });
 });

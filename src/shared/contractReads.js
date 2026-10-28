@@ -2,7 +2,8 @@
 // one task go as one `aggregate` query (multicallFetch.js), and each gets its
 // own reply's bytes, as the node would have sent them. A read alone in its
 // task goes as it is. The caller encodes the argument and decodes the reply,
-// as Sozu's reads do (sozuStatus.js): only the transport changes.
+// as Sozu's reads do (readSozuStatus, @dusk-network/networks/sozu): only
+// the transport changes.
 
 import { createMulticallFetch } from "./multicallFetch.js";
 

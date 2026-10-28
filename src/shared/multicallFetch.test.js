@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import recorded from "./fixtures/multicall-testnet.json";
 import { decodeAggregate, encodeAggregate } from "../vendor/duskdomains-multicall.js";
 import { MAX_BATCH, MULTICALL_CONTRACT_ID, createMulticallFetch } from "./multicallFetch.js";
+import { aggregateReply as reply } from "./fixtures/multicallCodec.js";
+import { noteChainId } from "./nodeNetwork.js";
 
 const NODE = "https://testnet.nodes.dusk.network";
 const AGGREGATE = `${NODE}/on/contracts:${MULTICALL_CONTRACT_ID}/aggregate`;
@@ -12,34 +14,6 @@ const hex = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, "0")).join(
 // The lens reader's gas for a reverse read inside a multicall, as duskNames.js gives it.
 const gasFor = (id, fn) => (id === LENS && fn === "reverse" ? 842_000_000n : 0n);
 const read = (fn, body = [1, 2, 3]) => [`${NODE}/on/contracts:${LENS}/${fn}`, { method: "POST", body: new Uint8Array(body) }];
-
-// An `aggregate` reply as the contract writes it (rkyv 0.7): each Ok result's
-// bytes, then one 16-byte slot per result, then the root.
-function reply(results, height = 7n) {
-  const align = (n, to) => Math.ceil(n / to) * to;
-  const data = results.filter((r) => "Ok" in r).reduce((n, r) => n + r.Ok.length, 0);
-  const slots = align(data, 4);
-  const root = align(slots + 16 * results.length, 8);
-  const out = new Uint8Array(root + 16);
-  const view = new DataView(out.buffer);
-  let at = 0;
-  results.forEach((r, i) => {
-    const slot = slots + 16 * i;
-    if ("Ok" in r) {
-      out.set(r.Ok, at);
-      view.setInt32(slot + 4, at - (slot + 4), true);
-      view.setUint32(slot + 8, r.Ok.length, true);
-      at += r.Ok.length;
-    } else {
-      out[slot] = 1;
-      out[slot + 4] = 1; // OutOfGas
-    }
-  });
-  view.setBigUint64(root, height, true);
-  view.setInt32(root + 8, slots - (root + 8), true);
-  view.setUint32(root + 12, results.length, true);
-  return out;
-}
 
 function node(answer) {
   return vi.fn(async (input, init) => answer(String(input), init));
@@ -223,6 +197,27 @@ describe("createMulticallFetch", () => {
     answers = await round();
     expect(sizes).toEqual([32, 32, 6]);
     expect(answers.every((r) => r.status === 200)).toBe(true);
+  });
+
+  it("batches only on a network whose file has Multicall for Dusk, by the chain ID the node gave", async () => {
+    const reads = async (nodeUrl) => {
+      const base = node(() => new Response(bytes("aa")));
+      const fetch = createMulticallFetch({ nodeUrl, fetch: base, gasFor });
+      const at = (fn) => [`${nodeUrl}/on/contracts:${LENS}/${fn}`, { method: "POST", body: new Uint8Array([1]) }];
+      await Promise.all([fetch(...at("binding")), fetch(...at("reverse"))]);
+      return base.mock.calls.map(([url]) => url.slice(nodeUrl.length));
+    };
+    // Devnet has none, and a node that hasn't said its network may have none.
+    expect(await reads("https://devnet.nodes.dusk.network")).toEqual([`/on/contracts:${LENS}/binding`, `/on/contracts:${LENS}/reverse`]);
+    const custom = "https://rusk.example.net";
+    expect(await reads(custom)).toHaveLength(2);
+    noteChainId(custom, 2);
+    // Testnet's: one aggregate (whose reply here is no aggregate, so each read goes alone after it).
+    expect(await reads(custom)).toEqual([
+      `/on/contracts:${MULTICALL_CONTRACT_ID}/aggregate`,
+      `/on/contracts:${LENS}/binding`,
+      `/on/contracts:${LENS}/reverse`,
+    ]);
   });
 
   it("leaves other requests alone", async () => {

@@ -10,12 +10,15 @@ import { TX_KIND } from "../../shared/constants.js";
 import { getMinimumGas } from "../../shared/txDefaults.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
+import { networkFor } from "@dusk-network/networks";
+import { chainIdForNode, noteChainId } from "../../shared/nodeNetwork.js";
+import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
 import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
-import { shortAddress } from "../lib/strings.js";
+import { contractIdText, shortAddress } from "../lib/strings.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
 import "../components/GasEditor.js";
@@ -144,9 +147,10 @@ function dateText(value) {
   return fullDateText(d.getTime());
 }
 
-// The network of a known chain ID: "dusk:2" is Testnet.
+// The network of a known chain ID, by its file's label: "dusk:2" is Testnet.
 function chainName(chainId) {
-  return { "dusk:1": "Mainnet", "dusk:2": "Testnet", "dusk:3": "Devnet", "dusk:0": "Local" }[String(chainId ?? "").trim()] ?? "";
+  const id = String(chainId ?? "").trim();
+  return id === "dusk:0" ? "Local" : /^dusk:\d+$/.test(id) ? networkFor(id)?.label ?? "" : "";
 }
 
 // "40 bytes · sha256=2f64b19f5ac0…731c7c2a": a call's arguments as the
@@ -254,6 +258,8 @@ export async function renderNotification() {
   }
 
   const pending = await send({ type: "DUSK_GET_PENDING", rid });
+  // The node's network, by the chain ID it gave, for what the window knows only by the node.
+  noteChainId(pending?.nodeUrl, pending?.chainId);
   if (!pending) {
     approvalLive = false;
     stopActivityHeartbeat();
@@ -926,7 +932,7 @@ export async function renderNotification() {
         requestHead({ title: requestSummary("watch_asset", params).title, sub: label || undefined }),
         group([
           kv("Standard", type || "(missing)"),
-          kv("Contract", contractId ? shortMono(contractId) : "(missing)"),
+          kv("Contract", contractId ? shortMono(contractIdText(contractId)) : "(missing)"),
           nft ? kv("Token ID", mono(tokenId || "(missing)")) : null,
           kv("Account", profileValue()),
         ]),
@@ -1002,8 +1008,10 @@ export async function renderNotification() {
       const amountLux = safeBigInt(params?.amount, 0n).toString();
       const memo = String(params?.memo ?? "");
       const gasEditor = gasEditorFor(amountLux);
-      const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
-      submitOnGasEnter(gasEditor, bar.approveBtn);
+      // A recipient the network's file blocks: why, at the top, and no Approve.
+      const blocked = blockedRecipient(to, chainIdForNode(nodeUrl));
+      const bar = decisionBar({ approveDisabled: Boolean(blocked), getApprovedParams: () => gasEditor.readOverrideGas(gas) });
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => !blocked });
       // To the bridge's account: the memo is the address the bridge pays
       // out to on another chain, and one that isn't an address there is
       // flagged, as are its fee taking the whole amount and a route it
@@ -1012,7 +1020,7 @@ export async function renderNotification() {
       // A public transfer shows on chain for good: say what, only what
       // applies, and under which name. A shielded one gets no line.
       const visible = service
-        ? `Visible to everyone: amount, the recipient on ${service.short}, and ${me}.`
+        ? `Visible to everyone: amount, the recipient on ${service.chain}, and ${me}.`
         : memo
           ? `Visible to everyone: amount, memo, and ${me}.`
           : `Visible to everyone: amount and ${me}.`;
@@ -1021,7 +1029,7 @@ export async function renderNotification() {
         ? requestHead({
             title: `Bridge to ${service.chain}`,
             amount,
-            to: service.recipientOk ? plainTo(service.recipient, `on ${service.short}`) : null,
+            to: service.recipientOk ? plainTo(service.recipient, `on ${service.chain}`) : null,
             // What arrives there, once the bridge takes its fee.
             sub: bridgeServiceLine(service),
             tag: headTag("Known bridge account"),
@@ -1032,12 +1040,13 @@ export async function renderNotification() {
         [
           site,
           head,
+          blocked ? warning(BLOCKED_TITLE, blocked) : null,
           // What everyone sees, under the amount, before the fee: in view without scrolling.
           shielded ? null : note(visible, "eye", { className: "ap-visible" }),
           ...(service ? bridgeServiceWarnings(service).map((w) => warning(w.title, w.text)) : []),
           service && !service.recipientOk
             ? warning(
-                `The memo isn't an address on ${service.short}`,
+                `The memo isn't an address on ${service.chain}`,
                 `The bridge pays out to the address in the memo. Reject this, and check the address on the site.`
               )
             : null,
@@ -1051,7 +1060,7 @@ export async function renderNotification() {
                 })
               : kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
             service
-              ? kv(`Recipient on ${service.short}`, h("code", { class: "ap-address", text: memo || "(none)" }), { stack: true })
+              ? kv(`Recipient on ${service.chain}`, h("code", { class: "ap-address", text: memo || "(none)" }), { stack: true })
               : memo
                 ? kv("Memo", memo, { stack: memo.length > 24 })
                 : null,
@@ -1089,6 +1098,9 @@ export async function renderNotification() {
       contractIdHex = String(contractIdRaw ?? "");
     }
 
+    // As every Dusk app writes a contract ID: without 0x.
+    const contractShown = contractIdText(contractIdHex);
+
     const fnName = String(params?.fnName ?? "");
     const fnNameTrim = fnName.trim();
     const fnNameLower = fnNameTrim.toLowerCase();
@@ -1107,7 +1119,7 @@ export async function renderNotification() {
     const callRows = ({ from = false } = {}) =>
       group([
         from ? kv("From", payerLine(rail)) : null,
-        kv("Contract", shortMono(contractIdHex)),
+        kv("Contract", shortMono(contractShown)),
         safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${formatDuskExact(amountLux)} DUSK`) : null,
         safeBigInt(amountLux, 0n) > 0n && amountTo ? kv("Amount to", h("code", { class: "ap-address", text: amountTo }), { stack: true }) : null,
         safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${formatDuskExact(depositLux)} DUSK`) : null,
@@ -1119,7 +1131,7 @@ export async function renderNotification() {
         group(
           [
             ...networkRows(),
-            kv("Contract ID", mono(contractIdHex), { stack: true }),
+            kv("Contract ID", mono(contractShown), { stack: true }),
             kv("Function", mono(fnName || "(none)")),
             kv("Call data", mono(callData), { stack: true }),
           ],
@@ -1289,7 +1301,7 @@ export async function renderNotification() {
             isTransfer || isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
             isApprove ? kv("Spender", h("code", { class: "ap-address", text: spenderStr || "(missing)" }), { stack: true }) : null,
             isTransferFrom ? kv("Owner", h("code", { class: "ap-address", text: ownerStr || "(missing)" }), { stack: true }) : null,
-            kv("Token", h("span", {}, [h("span", { text: `${name} (${sym}) ` }), shortMono(contractIdHex, 6, 6)])),
+            kv("Token", h("span", {}, [h("span", { text: `${name} (${sym}) ` }), shortMono(contractShown, 6, 6)])),
             valueUnitsStr ? kv("Units", mono(valueUnitsStr)) : null,
           ]),
           isMax
@@ -1343,7 +1355,7 @@ export async function renderNotification() {
             isSetApprovalForAll ? kv("Approved for all", approvedBool ? "Yes" : "No") : null,
             isTransferFrom ? kv("Owner", h("code", { class: "ap-address", text: fromStr || "(missing)" }), { stack: true }) : null,
             isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
-            kv("Collection", shortMono(contractIdHex, 6, 6)),
+            kv("Collection", shortMono(contractShown, 6, 6)),
           ]),
           isSetApprovalForAll && approvedBool
             ? warning("High risk", "This lets the operator move all of your NFTs in this collection.")

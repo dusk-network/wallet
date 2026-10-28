@@ -1,3 +1,5 @@
+import { formatContractId } from "@dusk-network/networks/format";
+
 export function truncateMiddle(str, head = 8, tail = 8) {
   if (!str || str.length <= head + tail + 3) return str;
   return `${str.slice(0, head)}…${str.slice(str.length - tail)}`;
@@ -47,5 +49,27 @@ export function siteName(origin) {
     return url.protocol === "https:" ? url.host : url.origin;
   } catch {
     return String(origin ?? "");
+  }
+}
+
+/**
+ * A yearly rate as the wallet says it: "23%".
+ * @param {number} rate - a fraction
+ */
+export const ratePercent = (rate) => new Intl.NumberFormat("en", { maximumFractionDigits: 0, style: "percent" }).format(rate);
+
+/**
+ * A Dusk contract ID as every Dusk app writes it (@dusk-network/networks):
+ * lower-case hex without 0x, or with `short` 6 characters at each end.
+ * Anything that isn't one, as it is.
+ * @param {unknown} id
+ * @param {{ short?: boolean }} [opts]
+ */
+export function contractIdText(id, { short = false } = {}) {
+  const text = String(id ?? "");
+  try {
+    return formatContractId(text, { short });
+  } catch {
+    return short ? shortAddress(text) : text;
   }
 }

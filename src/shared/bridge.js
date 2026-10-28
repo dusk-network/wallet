@@ -1,42 +1,32 @@
 // The DuskEVM bridge's contracts on DuskDS, so Activity can label bridge
-// transfers. Deposits to DuskEVM call the bridge (`depositETHToWithValue`);
-// withdrawals back are proved and finalized at the portal, which pays the
-// DUSK out. Mainnet has no bridge yet.
+// transfers, from the node's network's file in @dusk-network/networks.
+// Deposits to DuskEVM call the bridge (`depositETHToWithValue`); withdrawals
+// back are proved and finalized at the portal, which pays the DUSK out. A
+// network without DuskEVM (Mainnet, for now) has none. The bridge's accounts
+// for DUSK leaving Dusk are the network's service routes (bridgeCalls.js).
 
-import { detectPresetIdFromNodeUrl } from "./network.js";
+import { networks } from "@dusk-network/networks";
 
-export const BRIDGE_CONTRACTS = Object.freeze({
-  testnet: Object.freeze({
-    bridge: "2257e5f8ff49cf7c9704a14ca35acbf48eb7ade11a079d98d5cd5655eea1b31d",
-    portal: "14eeb3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9",
-  }),
-});
+import { networkForNode } from "./nodeNetwork.js";
 
-// The bridge's account on Dusk for DUSK leaving Dusk for an EVM chain: a
-// transfer to it pays the bridge, and its memo names the EVM address the
-// bridge pays out to. As the bridge's own config names them (src/config.js),
-// with its fee (VITE_SERVICE_BRIDGE_FEE_LUX, 1 DUSK), which it takes from the
-// amount: what arrives is the amount less the fee. `running` says whether
-// the bridge pays out there now: testnet's to Sepolia hasn't since February
-// 2026. Set it back to true once it does.
-export const BRIDGE_SERVICE_ACCOUNTS = Object.freeze({
-  mainnet: Object.freeze({
-    account:
-      "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x",
-    chain: "BNB Smart Chain",
-    short: "BSC",
-    feeLux: "1000000000",
-    running: true,
-  }),
-  testnet: Object.freeze({
-    account:
-      "25z9o6qCaVk1ReyHjmB4pyXcE3D1vRu4FVV1rR8ChYcosdTSktkANLDHq9GD6B4985Q1S2KrDZYBRrohWAjrNmACFUb3UMSRyYctJRzh3d28R1ZNC1ZyKm1HwXL4FF5Etftt",
-    chain: "Ethereum (Sepolia)",
-    short: "Sepolia",
-    feeLux: "1000000000",
-    running: false,
-  }),
-});
+const contractsOf = (net) => {
+  const contracts = net?.duskEvm?.contracts;
+  const bridge = contracts?.l1_standard_bridge?.contractId;
+  const portal = contracts?.optimism_portal?.contractId;
+  return bridge && portal ? Object.freeze({ bridge, portal }) : null;
+};
+
+/** The bridge and the portal on each network that has DuskEVM, by its name. */
+export const BRIDGE_CONTRACTS = Object.freeze(
+  Object.fromEntries(Object.values(networks).flatMap((net) => (contractsOf(net) ? [[net.name, contractsOf(net)]] : [])))
+);
+
+/**
+ * The bridge and the portal on the node's network, as contract IDs, or null.
+ * @param {string} nodeUrl
+ * @returns {{ bridge: string, portal: string } | null}
+ */
+export const bridgeContractsOf = (nodeUrl) => contractsOf(networkForNode(String(nodeUrl ?? "")));
 
 const norm = (id) =>
   String(id ?? "")
@@ -52,7 +42,7 @@ const norm = (id) =>
  * @returns {boolean}
  */
 export function depositsToBridge(entry, nodeUrl) {
-  const contracts = BRIDGE_CONTRACTS[detectPresetIdFromNodeUrl(String(nodeUrl ?? ""))];
+  const contracts = bridgeContractsOf(nodeUrl);
   return Boolean(contracts) && [entry?.counterparty, entry?.contractId].some((id) => norm(id) === contracts.bridge);
 }
 
@@ -65,7 +55,7 @@ export function depositsToBridge(entry, nodeUrl) {
  * @returns {"to"|"from"|"call"|null}
  */
 export function bridgeTransfer(tx, nodeUrl = tx?.nodeUrl) {
-  const contracts = BRIDGE_CONTRACTS[detectPresetIdFromNodeUrl(String(nodeUrl ?? ""))];
+  const contracts = bridgeContractsOf(nodeUrl);
   if (!contracts) return null;
   const ids = new Set(Object.values(contracts));
   const touched = [tx?.contractId, tx?.counterparty, tx?.to, tx?.from].some((id) => ids.has(norm(id)));

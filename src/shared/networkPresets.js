@@ -1,30 +1,24 @@
-// `hint` is a preset's second line, where its name doesn't say it all.
+// The networks Settings and the network menu offer: Dusk's own, with their
+// endpoints and explorer from their files in @dusk-network/networks, then a
+// node on this machine and any other. `hint` is a preset's second line,
+// where its name doesn't say it all.
+
+import { networks } from "@dusk-network/networks";
+
+const own = (net, extra = {}) => ({
+  id: net.name,
+  label: net.label,
+  nodeUrl: net.urls.node,
+  proverUrl: net.urls.prover,
+  archiverUrl: net.urls.archive,
+  explorerBase: net.apps.explorer,
+  ...extra,
+});
+
 export const NETWORK_PRESETS = [
-  {
-    id: "mainnet",
-    label: "Mainnet",
-    nodeUrl: "https://nodes.dusk.network",
-    proverUrl: "https://provers.dusk.network",
-    archiverUrl: "https://nodes.dusk.network",
-    explorerBase: "https://apps.dusk.network/explorer",
-  },
-  {
-    id: "testnet",
-    label: "Testnet",
-    nodeUrl: "https://testnet.nodes.dusk.network",
-    proverUrl: "https://testnet.provers.dusk.network",
-    archiverUrl: "https://testnet.nodes.dusk.network",
-    explorerBase: "https://apps.testnet.dusk.network/explorer",
-  },
-  {
-    id: "devnet",
-    label: "Devnet",
-    nodeUrl: "https://devnet.nodes.dusk.network",
-    proverUrl: "https://devnet.provers.dusk.network",
-    archiverUrl: "https://devnet.nodes.dusk.network",
-    explorerBase: "https://apps.devnet.dusk.network/explorer",
-    hint: "Experimental",
-  },
+  own(networks.mainnet),
+  own(networks.testnet),
+  own(networks.devnet, { hint: "Experimental" }),
   {
     id: "local",
     label: "Local",

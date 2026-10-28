@@ -6,6 +6,7 @@ import {
   bytesToTransportHex,
   base64ToBytes,
   messageBytes,
+  normalizeNullifiers,
   toBytes,
 } from "./bytes.js";
 
@@ -91,6 +92,14 @@ describe("bytesToTransportHex", () => {
     expect(() => toBytes(JSON.parse(JSON.stringify(new Uint8Array([0, 255]))))).toThrow(
       "Unsupported byte encoding"
     );
+  });
+});
+
+describe("normalizeNullifiers", () => {
+  it("gives a transaction's nullifiers as lower-case hex, from hex or bytes, leaving out the rest", () => {
+    expect(normalizeNullifiers([" AB01 ", new Uint8Array([0, 255]), [16, 32], "zz", "", {}, null])).toEqual(["ab01", "00ff", "1020"]);
+    expect(normalizeNullifiers(undefined)).toEqual([]);
+    expect(normalizeNullifiers("ab")).toEqual([]);
   });
 });
 

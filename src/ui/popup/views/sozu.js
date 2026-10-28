@@ -10,16 +10,16 @@ import {
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
+import { SOZU_FN, feePercent, leastSozuStake, parsePool, sozuStake, sozuUnstakeAllowed } from "@dusk-network/networks/sozu";
+
 import {
-  SOZU_FN,
   buildSozuDepositTx,
   buildSozuWithdrawTx,
   makeSozuStDuskToken,
   parseSozuPoolState,
   parseSozuPosition,
 } from "../../../shared/sozuAdapter.js";
-import { feePercent, leastSozuStake, parsePool, sozuStakeQuote, sozuUnstakeOk } from "../../../shared/sozuAmounts.js";
-import { getSozuConfig } from "../../../shared/sozuConfig.js";
+import { sozuConfigOf } from "../../../shared/sozuConfig.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
@@ -34,15 +34,11 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { profileNameEl } from "../../components/ProfileName.js";
-import { contextOf } from "../context.js";
 import { sendFromReview } from "./sent.js";
 
-function networkKey(ov) {
-  const name = String(ov?.networkName ?? "").trim().toLowerCase();
-  if (name === "mainnet") return "mainnet";
-  if (name === "testnet") return "testnet";
-  return name || "custom";
-}
+// What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
+// rate and the deposit fee are read; null until then.
+const stakeQuote = (amount, pool, depositFee) => (pool && depositFee ? sozuStake(amount, pool, depositFee) : null);
 
 function fmtLux(value) {
   return formatDusk(value ?? "0", UI_DISPLAY_DECIMALS);
@@ -174,7 +170,7 @@ async function readStakeTerms(actions, draft) {
     // Not read: nothing is sent.
   }
   const { pool, depositFee } = stakeTerms(status);
-  const quote = sozuStakeQuote(draftAmountLux(draft), pool, depositFee);
+  const quote = stakeQuote(draftAmountLux(draft), pool, depositFee);
   const poolId = hexId(status?.contracts?.pool);
   return quote && /^[0-9a-f]{64}$/.test(poolId) ? { status, quote, depositFee, poolId } : null;
 }
@@ -213,11 +209,15 @@ const rechecking = new WeakSet();
  * Where a drafted call to Sozu belongs, recorded as it enters Review: the
  * popup's context, and the node, network, wallet, profile and account, as
  * the form it was drafted on was drawn. Its Review compares the popup with
- * this record, never with what the Review was last drawn with, and the
- * wallet's engine checks the same just before it sends.
+ * this record, never with what the Review was last drawn with: the context
+ * is replaced the moment a switch starts (context.js), before the overview
+ * names the new network or profile. Drawn after a switch or a lock, the
+ * Review offers no Confirm; a check that answers after one, from another
+ * network, or after the Review was left, does nothing at all. The wallet's
+ * engine checks the same just before it sends.
  * @param {object} ov - the overview the form was drawn with
  * @param {number} profileIndex - the profile the call is sent from
- * @param {number} context - the popup's context as the form was drawn
+ * @param {object | null} context - the popup's context as the form was drawn
  * @param {string} [networkKey] - the network Sozu's terms were read on
  */
 function reviewRecord(ov, profileIndex, context, networkKey) {
@@ -242,7 +242,7 @@ function stillFor(record, state, ov) {
   const accounts = Array.isArray(now?.accounts) ? now.accounts : [];
   return (
     Boolean(record) &&
-    contextOf(state) === record.context &&
+    state.context === record.context &&
     now?.isUnlocked !== false &&
     String(now?.nodeUrl ?? "") === record.nodeUrl &&
     (Number(now?.selectedAccountIndex ?? 0) || 0) === record.profileIndex &&
@@ -257,7 +257,7 @@ function stillFor(record, state, ov) {
  */
 function leaveReview(state, st, record, ov) {
   const now = state.overview ?? ov;
-  const locked = now?.isUnlocked === false || (contextOf(state) !== record?.context && state.contextReason === "lock");
+  const locked = now?.isUnlocked === false || (state.context !== record?.context && state.context?.reason === "lock");
   st.notice = locked ? LOCKED_NOTICE : SWITCHED_NOTICE;
   st.loaded = false;
   state.sozuDraft = null;
@@ -399,9 +399,9 @@ function syncWarning() {
  */
 export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   // The popup's context as this form is drawn: what its figures are for.
-  const formContext = contextOf(state);
+  const formContext = state.context;
   const st = ensureSozuLoaded(ov, { state, actions });
-  const staticCfg = getSozuConfig(networkKey(ov));
+  const staticCfg = sozuConfigOf(ov?.chainId ?? null);
   const liveStatus = st.status;
   const cfg = liveStatus?.configured && liveStatus?.contracts?.pool
     ? { networkKey: liveStatus.networkKey, contracts: liveStatus.contracts }
@@ -497,7 +497,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       return null;
     }
     if (isWithdraw) {
-      if (!sozuUnstakeOk(lux, maxUnstakeLux)) {
+      if (!sozuUnstakeAllowed(lux, maxUnstakeLux)) {
         field.setError("That's more than you have staked with Sozu.");
         reviewBtn.disabled = true;
         return null;
@@ -507,7 +507,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       return lux;
     }
     // A stake needs the pool's rate and Sozu's fee, read now.
-    const quote = sozuStakeQuote(lux, pool, depositFee);
+    const quote = stakeQuote(lux, pool, depositFee);
     if (!quote) {
       field.setError(st.loading ? "" : "Sozu's rate and fees couldn't be read. Try again later.");
       reviewBtn.disabled = true;
@@ -544,7 +544,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       field.input.focus();
       return;
     }
-    const quote = isWithdraw ? null : sozuStakeQuote(amountLux, pool, depositFee);
+    const quote = isWithdraw ? null : stakeQuote(amountLux, pool, depositFee);
     const profileIndex = Number(ov?.selectedAccountIndex ?? 0) || 0;
     st.notice = "";
     state.sozuDraft = {
@@ -743,9 +743,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   }
 
   const st = sozuState(state);
-  // Where this stake belongs, recorded as it entered Review. Drawn anywhere
-  // else, after a switch of network, profile or wallet, or a lock, it offers
-  // no Confirm: back to the stake's form, with why.
+  // Where this stake belongs (reviewRecord); anywhere else, back to the stake's form, with why.
   const record = draft.reviewed ?? null;
   if (!stillFor(record, state, ov)) {
     leaveReview(state, st, record, ov);
@@ -768,7 +766,6 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const quoteRate = feeRateOf(quote?.feeRate);
   const getsNothing = quote?.ok === false;
   const submitDisabled =
-    st.submitting ||
     paused ||
     getsNothing ||
     (isStake && stakeRequiredLux > publicBalance) ||
@@ -827,11 +824,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   // Gas that won't do, or terms that couldn't be checked, say so above Confirm; nothing is sent.
   const confirmError = h("div", { class: "field-error", role: "alert", hidden: !draft.checkError, text: draft.checkError ?? "" });
 
-  // This Review, with the popup still where its stake belongs: compared with
-  // the record, never with what the Review was drawn with. `state.context`
-  // moves the moment a switch starts, before the overview names the new
-  // network or profile. A check that answers after that, from another
-  // network, or after the Review was left, does nothing at all.
+  // This Review, with the popup still where its stake belongs (reviewRecord).
   const onThisReview = () => state.route === "sozu_confirm" && state.sozuDraft === draft;
   const belongs = () => stillFor(record, state, ov);
   const stillHere = (terms) =>

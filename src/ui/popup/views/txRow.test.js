@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { networks, routes } from "@dusk-network/networks";
+
 import { TX_KIND } from "../../../shared/constants.js";
 import releases from "../../../shared/dusk-domains-releases.json";
 import { amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
@@ -25,19 +27,19 @@ describe("when a row says it happened", () => {
   it("titles the Activity view's day groups, and dates the details", () => {
     expect(dayLabel(at("2026-10-26T00:00:00Z"), NOW)).toBe("Today");
     expect(dayLabel(at("2026-10-25T12:00:00Z"), NOW)).toBe("Yesterday");
-    expect(dayLabel(at("2026-10-24T12:00:00Z"), NOW)).toBe("Sat, 24 Oct");
-    expect(dayLabel(at("2025-11-16T23:03:38Z"), NOW)).toBe("Sun, 16 Nov 2025");
+    expect(dayLabel(at("2026-10-24T12:00:00Z"), NOW)).toBe("Sat 24 Oct");
+    expect(dayLabel(at("2025-11-16T23:03:38Z"), NOW)).toBe("Sun 16 Nov 2025");
     // In full, with the time zone it shows in.
-    expect(dateText(at("2026-10-26T14:32:59Z"))).toBe("26 Oct 2026, 14:32 UTC");
+    expect(dateText(at("2026-10-26T14:32:59Z"))).toBe("Mon 26 Oct 2026, 14:32 UTC");
   });
 
   it("names the time zone by its short name, else by its offset", () => {
     // TZ is read when a date is formatted, so each zone's own name shows.
     const cases = [
-      ["Europe/Amsterdam", "2026-10-26T12:22:00Z", "26 Oct 2026, 13:22 CET"],
-      ["Europe/Amsterdam", "2026-07-01T12:22:00Z", "1 Jul 2026, 14:22 CEST"],
-      ["America/New_York", "2026-10-26T12:22:00Z", "26 Oct 2026, 08:22 EDT"],
-      ["Asia/Kolkata", "2026-10-26T12:22:00Z", "26 Oct 2026, 17:52 GMT+5:30"],
+      ["Europe/Amsterdam", "2026-10-26T12:22:00Z", "Mon 26 Oct 2026, 13:22 CET"],
+      ["Europe/Amsterdam", "2026-07-01T12:22:00Z", "Wed 1 Jul 2026, 14:22 CEST"],
+      ["America/New_York", "2026-10-26T12:22:00Z", "Mon 26 Oct 2026, 08:22 EDT"],
+      ["Asia/Kolkata", "2026-10-26T12:22:00Z", "Mon 26 Oct 2026, 17:52 GMT+5:30"],
     ];
     try {
       for (const [zone, iso, text] of cases) {
@@ -163,6 +165,20 @@ describe("what a row says", () => {
     expect(call("register", { nodeUrl: "https://nodes.dusk.network" }).name).toBe("Call register");
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: store, fnName: "register" }, { nodeUrl: "https://node.example" }).name).toBe("Call register");
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, fnName: "sozu_stake", deposit: "1000000000" }).name).toBe("Staked with Sozu");
+  });
+
+  it("names the contracts and accounts the network's file names: a call by its contract, a transfer by whom it paid", () => {
+    const MAINNET = "https://nodes.dusk.network";
+    const { hub } = networks.mainnet.sozu;
+    const hubCall = describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: `0x${hub.toUpperCase()}`, fnName: "contract" }, { nodeUrl: MAINNET });
+    expect([hubCall.lead, hubCall.name, subText(hubCall, "14:32")]).toEqual(["Sozu hub", "Call contract", "Sozu hub · 14:32"]);
+    const bsc = routes(networks.mainnet).find((route) => route.kind === "service").account;
+    const paid = describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc, amount: "2000000000" }, { nodeUrl: MAINNET });
+    expect([paid.lead, paid.name, paid.address, paid.isAddress]).toEqual(["Sent to", "BSC bridge", bsc, false]);
+    // A contact's own name still comes first; another network's file names nothing here.
+    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: MAINNET, contactName: () => "Bridge" }).name).toBe("Bridge");
+    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: TESTNET }).isAddress).toBe(true);
+    expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: hub, fnName: "contract" }, { nodeUrl: TESTNET }).lead).toBe("");
   });
 
   it("puts each under one filter: DUSK bridged to DuskEVM under Sent, back from it under Received, a proof under All", () => {

@@ -5,16 +5,19 @@
 // which is how we reuse it in Tauri desktop/mobile.
 
 import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault.js";
-import { getSettings, setSettings } from "../shared/settings.js";
+import { getSettings, rememberNodeChain, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { readChainId } from "../shared/networkStatus.js";
+import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta, typedRecipientName } from "../shared/txStore.js";
+import { serializeError } from "../shared/transport.js";
+import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
+import { submittedTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
-import { bytesToHex } from "../shared/bytes.js";
 import {
   executionEventError,
   executionEventOk,
@@ -60,31 +63,19 @@ import {
   getSozuStatus,
 } from "../shared/walletEngine.js";
 
-function nullifierHexes(value) {
-  const out = [];
-  for (const n of Array.isArray(value) ? value : []) {
-    try {
-      if (typeof n === "string") {
-        const hex = n.trim();
-        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
-        continue;
-      }
-      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
-      const hex = bytesToHex(u8);
-      if (hex) out.push(hex);
-    } catch {
-      // ignore invalid nullifier shapes
-    }
-  }
-  return out;
-}
+// A node's chain ID being asked for again: the app has no status checks, so
+// a node whose chain ID couldn't be read when it was chosen is asked as the
+// wallet draws, once at a time and at most every 30 seconds, as the
+// extension's checks do. Once read, the page draws again (popup/app.js).
+let askingChain = null;
+let chainAskedAt = -Infinity;
 
-function serializeError(err) {
-  return {
-    code: err?.code ?? ERROR_CODES.INTERNAL,
-    message: err?.message ?? String(err),
-    data: err?.data,
-  };
+function tellPage(message) {
+  try {
+    globalThis.window?.dispatchEvent(new CustomEvent(WALLET_MESSAGE_EVENT, { detail: message }));
+  } catch {
+    // no page to tell
+  }
 }
 
 async function ensureEngineConfigured() {
@@ -93,9 +84,22 @@ async function ensureEngineConfigured() {
     nodeUrl: settings.nodeUrl,
     proverUrl: settings.proverUrl,
     archiverUrl: settings.archiverUrl,
+    chainId: settings.chainId,
     accountCount: settings.accountCount,
     selectedAccountIndex: settings.selectedAccountIndex,
   });
+  if (settings.chainId === null && !askingChain && Date.now() - chainAskedAt >= 30_000) {
+    chainAskedAt = Date.now();
+    askingChain = readChainId(settings.nodeUrl)
+      .then((chainId) => rememberNodeChain(settings.nodeUrl, chainId))
+      .then((changed) => {
+        if (changed) tellPage({ type: "DUSK_UI_NETWORK_CHANGED" });
+      })
+      .catch(() => false)
+      .finally(() => {
+        askingChain = null;
+      });
+  }
   return settings;
 }
 
@@ -279,8 +283,12 @@ export async function localSend(message) {
         }
       }
 
+      // The node's chain ID, which names its network, kept with it, as the
+      // background keeps it.
+      const chainId = await readChainId(nodeUrl);
       const nextSettings = await setSettings({
         nodeUrl,
+        chainId,
         ...(proverUrl ? { proverUrl } : {}),
         ...(archiverUrl ? { archiverUrl } : {}),
       });
@@ -289,6 +297,7 @@ export async function localSend(message) {
         nodeUrl: nextSettings.nodeUrl,
         proverUrl: nextSettings.proverUrl,
         archiverUrl: nextSettings.archiverUrl,
+        chainId: nextSettings.chainId,
       });
 
       return {
@@ -398,6 +407,7 @@ export async function localSend(message) {
         ipfsGateway: settings.ipfsGateway ?? "",
         hideBalances: settings.hideBalances === true,
         customGas: settings.customGas ?? null,
+        chainId: settings.chainId,
         networkName: networkNameFromNodeUrl(settings.nodeUrl),
         activeOrigin,
         activeConnected,
@@ -430,58 +440,19 @@ export async function localSend(message) {
 
       // Persist metadata (see background/index.js comments).
       const hash = result?.hash ?? "";
-      const kind = String(baseParams?.kind ?? "");
       try {
         const nodeUrl = (await getSettings())?.nodeUrl ?? "";
 
         if (hash) {
-          const pendingNullifiers = nullifierHexes(result?.nullifiers);
-          await putTxMeta(hash, {
-            origin: "Wallet",
-            nodeUrl,
-            kind,
-            privacy: baseParams?.privacy ? String(baseParams.privacy) : undefined,
-            // The profile that paid, as the extension keeps it: a stake's own
-            // profile may not be the one selected.
-            profileIndex:
-              baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
-                ? Number(baseParams.profileIndex) || 0
-                : Number(status.selectedAccountIndex ?? 0) || 0,
-            ownerProfileIndex:
-              baseParams?.ownerProfileIndex !== undefined && baseParams?.ownerProfileIndex !== null
-                ? Number(baseParams.ownerProfileIndex) || 0
-                : undefined,
-            payment: baseParams?.payment ? String(baseParams.payment) : undefined,
-            asset:
-              message?.asset && typeof message.asset === "object"
-                ? message.asset
-                : undefined,
-            to: baseParams?.to ? String(baseParams.to) : undefined,
-            toName: typedRecipientName(message?.toName),
-            amount:
-              baseParams?.amount !== undefined && baseParams?.amount !== null
-                ? String(baseParams.amount)
-                : undefined,
-            deposit:
-              baseParams?.deposit !== undefined && baseParams?.deposit !== null
-                ? String(baseParams.deposit)
-                : undefined,
-            contractId:
-              kind === "contract_call" && baseParams?.contractId
-                ? String(baseParams.contractId)
-                : undefined,
-            fnName:
-              kind === "contract_call" && baseParams?.fnName
-                ? String(baseParams.fnName)
-                : undefined,
-            gasLimit: baseParams?.gas?.limit != null ? String(baseParams.gas.limit) : undefined,
-            gasPrice: baseParams?.gas?.price != null ? String(baseParams.gas.price) : undefined,
-            pendingNullifiers,
-            reservationStatus: pendingNullifiers.length ? "pending" : undefined,
-            reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
-            submittedAt: Date.now(),
-            status: "submitted",
-          }, { epoch: txEpoch });
+          // The profile that paid, as the extension keeps it: a stake's own
+          // profile may not be the one selected.
+          const profileIndex =
+            baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
+              ? Number(baseParams.profileIndex) || 0
+              : Number(status.selectedAccountIndex ?? 0) || 0;
+          const record = submittedTxMeta(baseParams, { origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message));
+          const { pendingNullifiers } = record;
+          await putTxMeta(hash, record, { epoch: txEpoch });
 
           // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
           (async () => {

@@ -4,6 +4,8 @@ import "fake-indexeddb/auto";
 
 import { bytesToHex, sha256Hex, toBytes } from "./bytes.js";
 import phoenix from "./fixtures/phoenix-testnet.json";
+import { aggregateReply, envelopeCalls } from "./fixtures/multicallCodec.js";
+import { networks } from "@dusk-network/networks";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -402,52 +404,6 @@ vi.mock("@dusk/w3sper", () => {
     useAsProtocolDriver,
   };
 });
-
-// The calls of a Multicall for Dusk `aggregate` envelope (rkyv 0.7): contract,
-// function and argument of each.
-function envelopeCalls(body) {
-  const b = new Uint8Array(body);
-  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
-  const root = b.length - 8;
-  const array = root + v.getInt32(root, true);
-  const text = new TextDecoder();
-  const calls = [];
-  for (let i = 0; i < v.getUint32(root + 4, true); i++) {
-    const slot = array + i * 56;
-    const last = b[slot + 39];
-    const at = slot + 32 + v.getInt32(slot + 36, true);
-    const name = (last & 0x80) === 0 ? b.subarray(slot + 32, slot + 32 + last) : b.subarray(at, at + v.getUint32(slot + 32, true));
-    const args = slot + 40 + v.getInt32(slot + 40, true);
-    calls.push({
-      contract: Array.from(b.subarray(slot, slot + 32), (x) => x.toString(16).padStart(2, "0")).join(""),
-      fnName: text.decode(name),
-      args: text.decode(b.subarray(args, args + v.getUint32(slot + 44, true))),
-    });
-  }
-  return calls;
-}
-
-// An `aggregate` reply as the contract writes it (rkyv 0.7): each result's
-// bytes, then one 16-byte slot per result, then the root.
-function aggregateReply(results) {
-  const align = (n, to) => Math.ceil(n / to) * to;
-  const slots = align(results.reduce((n, r) => n + r.length, 0), 4);
-  const root = align(slots + 16 * results.length, 8);
-  const out = new Uint8Array(root + 16);
-  const view = new DataView(out.buffer);
-  let at = 0;
-  results.forEach((r, i) => {
-    const slot = slots + 16 * i;
-    out.set(r, at);
-    view.setInt32(slot + 4, at - (slot + 4), true);
-    view.setUint32(slot + 8, r.length, true);
-    at += r.length;
-  });
-  view.setBigUint64(root, 7n, true);
-  view.setInt32(root + 8, slots - (root + 8), true);
-  view.setUint32(root + 12, results.length, true);
-  return out;
-}
 
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -1038,68 +994,23 @@ describe("walletEngine", () => {
     }
   });
 
-  it("rejects a public balance read when the approved engine context changed", async () => {
-    engine.configure({
-      nodeUrl: NETWORK_KEY,
-      accountCount: 1,
-      selectedAccountIndex: 0,
-    });
+  // The RPC layer checks its own snapshot, but engineCall is mocked in those
+  // tests, so this is the only place the engine-side guard actually runs.
+  // Without it a stale approval would still read, or produce a signature.
+  it.each([
+    ["a public balance read", (engine, ctx) => engine.getPublicBalance({ profileIndex: 0, ...ctx })],
+    [
+      "signing",
+      (engine, ctx) =>
+        engine.signMessage({ origin: "https://example.com", chainId: "dusk:2", message: "0x0102", profileIndex: 0, ...ctx }),
+    ],
+    ["typed-data signing", (engine, ctx) => engine.signTypedData({ digestHex: `0x${"11".repeat(32)}`, profileIndex: 0, ...ctx })],
+  ])("rejects %s when the approved engine context changed", async (_, run) => {
+    engine.configure({ nodeUrl: NETWORK_KEY, accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
 
-    await expect(engine.getPublicBalance({
-      profileIndex: 0,
-      _approvalContext: {
-        walletId: WALLET_ID,
-        profileIndex: 0,
-        account: "acct0",
-        nodeUrl: "https://different.example",
-      },
-    })).rejects.toThrow("Wallet changed while awaiting approval");
-  });
-
-  it("rejects signing when the approved engine context changed", async () => {
-    engine.configure({
-      nodeUrl: NETWORK_KEY,
-      accountCount: 1,
-      selectedAccountIndex: 0,
-    });
-    await engine.unlockWithMnemonic(MNEMONIC);
-
-    await expect(engine.signMessage({
-      origin: "https://example.com",
-      chainId: "dusk:2",
-      message: "0x0102",
-      profileIndex: 0,
-      _approvalContext: {
-        walletId: WALLET_ID,
-        profileIndex: 0,
-        account: "acct0",
-        nodeUrl: "https://different.example",
-      },
-    })).rejects.toThrow("Wallet changed while awaiting approval");
-  });
-
-  it("rejects typed-data signing when the approved engine context changed", async () => {
-    // The RPC layer checks its own snapshot, but engineCall is mocked in those
-    // tests, so this is the only place the engine-side guard actually runs.
-    // Without it a stale approval would still produce a signature.
-    engine.configure({
-      nodeUrl: NETWORK_KEY,
-      accountCount: 1,
-      selectedAccountIndex: 0,
-    });
-    await engine.unlockWithMnemonic(MNEMONIC);
-
-    await expect(engine.signTypedData({
-      digestHex: `0x${"11".repeat(32)}`,
-      profileIndex: 0,
-      _approvalContext: {
-        walletId: WALLET_ID,
-        profileIndex: 0,
-        account: "acct0",
-        nodeUrl: "https://different.example",
-      },
-    })).rejects.toThrow("Wallet changed while awaiting approval");
+    const stale = { walletId: WALLET_ID, profileIndex: 0, account: "acct0", nodeUrl: "https://different.example" };
+    await expect(run(engine, { _approvalContext: stale })).rejects.toThrow("Wallet changed while awaiting approval");
   });
 
   it("signs typed data when the approved engine context still matches", async () => {
@@ -1199,6 +1110,16 @@ describe("walletEngine", () => {
     expect(tx.profile?.account?.toString?.()).toBe("acct1");
     expect(tx.toValue).toBe("acct0");
     expect(tx.memoValue).toBe("hi");
+  });
+
+  it("sends nothing to a recipient the network's file blocks, whichever screen or site asked", async () => {
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const { account } = networks.mainnet.display.blocklist.find((entry) => entry.reason === "compromised");
+
+    await expect(engine.sendTransaction({ kind: "transfer", privacy: "public", to: account, amount: "1" })).rejects.toThrow(
+      "Transfer restricted: this recipient address has been reported as compromised."
+    );
+    expect(globalThis.__W3SPER_LAST_EXEC_TX__).toBeNull();
   });
 
   it("sendTransaction requires transfer privacy and validates recipient rail", async () => {
@@ -1502,6 +1423,35 @@ describe("walletEngine", () => {
       calls.map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)
     );
     delete globalThis.__W3SPER_DRIVER_GETS__;
+  });
+
+  it("reads the Sozu of the network a custom node says it's on, by the chain ID its settings keep", async () => {
+    engine.configure({ nodeUrl: "https://my-node.example", chainId: 2, accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+
+    const status = await engine.getSozuStatus();
+    expect(status).toMatchObject({ networkKey: "testnet", configured: true, source: "fallback" });
+    expect(status.contracts).toEqual({
+      hub: "bae85f8c24730a5a19fbe3d3bd58248ac8c302b62fe414a8c640d8c0ed286b9e",
+      pool: "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+      substrate: "0077ecbf88aa20d6d0a6afa20bd26300a2b562fdbac368bf1e3c1325e8555941",
+      "staked-dusk": "fdbf49102e76cf58224003451c6cb9e3403c54ff1d9042f8bc46ec25c6a4337c",
+    });
+  });
+
+  it("has no Sozu on a node whose network isn't known yet, and its network's once the chain ID comes", async () => {
+    engine.configure({ nodeUrl: "https://testnet.example.com", chainId: null, accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+    // Its name says testnet; the node didn't say when it was chosen.
+    await expect(engine.getSozuStatus()).resolves.toMatchObject({ networkKey: "custom", configured: false });
+    // A status check read it since: it comes with the next config, never given up on.
+    engine.configure({ nodeUrl: "https://testnet.example.com", chainId: 2 });
+    await expect(engine.getSozuStatus()).resolves.toMatchObject({ networkKey: "testnet", configured: true });
+    // Another node starts without it.
+    engine.configure({ nodeUrl: "https://other.example.com" });
+    await expect(engine.getSozuStatus()).resolves.toMatchObject({ networkKey: "custom", configured: false });
   });
 
   it("returns owner-separated stake status for local owner profiles", async () => {

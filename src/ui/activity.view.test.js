@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import fixture from "../shared/fixtures/activity-testnet.json";
@@ -6,6 +8,8 @@ import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
 import { TX_KIND } from "../shared/constants.js";
 import { openUrl } from "../platform/index.js";
 import { accessibleName, installFakeDom, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
+import { bracketTitle } from "./components/BracketTitle.js";
+import { subnav } from "./components/Subnav.js";
 import { homeView } from "./popup/views/home.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
 import { activityKey } from "./popup/activity.js";
@@ -166,8 +170,10 @@ describe("Activity's rows", () => {
     setup({ local: [failed], hidden: true });
     expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee •••• DUSK paid•••• DUSK`);
     expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe(`${short(FAUCET)}, Failed · nothing sent · fee hidden, amount hidden`);
-    // Without a fee charged, it says so.
+    // Without a fee charged, it says so, a fee of 0 included.
     setup({ local: [{ ...failed, feePaid: undefined }] });
+    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);
+    setup({ local: [{ ...failed, feePaid: "0" }] });
     expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);
   });
 
@@ -237,8 +243,8 @@ describe("the Activity view", () => {
     const filters = () => body().querySelectorAll(".filter-chip").map((b) => [visibleText(b), b.getAttribute("aria-pressed")]);
     const days = () => body().querySelectorAll(".tx-day-label").map(visibleText);
     expect(filters()).toEqual([["All", "true"], ["Sent", "false"], ["Received", "false"], ["Staking", "false"]]);
-    expect(days().slice(0, 4)).toEqual(["Yesterday", "Wed, 21 Oct", "Fri, 18 Sep", "Fri, 17 Jul"]);
-    expect(days()).toContain("Sun, 16 Nov 2025");
+    expect(days().slice(0, 4)).toEqual(["Yesterday", "Wed 21 Oct", "Fri 18 Sep", "Fri 17 Jul"]);
+    expect(days()).toContain("Sun 16 Nov 2025");
 
     button("Staking").click();
     expect(state.activityFilter).toBe("staking");
@@ -251,7 +257,7 @@ describe("the Activity view", () => {
       "Staked with SozuStaking · 14:00−1,000 DUSK",
       "Claim rewardsStaking · 13:35+1,609,142.7584 DUSK",
     ]);
-    expect(days()).toEqual(["Wed, 21 Oct", "Fri, 18 Sep", "Wed, 17 Jun", "Sun, 31 May"]);
+    expect(days()).toEqual(["Wed 21 Oct", "Fri 18 Sep", "Wed 17 Jun", "Sun 31 May"]);
 
     button("Received").click();
     expect(rows().every((text) => /Received · /.test(text))).toBe(true);
@@ -304,7 +310,7 @@ describe("a transaction's details", () => {
     await settle();
     expect(visibleText(body().querySelector(".tx-hero"))).toBe("Sent tofaucet.dusk" + `${short(FAUCET)}−25 DUSKCompleted`);
     expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText)).toEqual([
-      "Date22 Oct 2026, 14:32 UTC",
+      "DateThu 22 Oct 2026, 14:32 UTC",
       "MemoOrder 1042",
       "Network fee0.0037 DUSK",
       "Fromalice.dusk · Public",
@@ -331,7 +337,7 @@ describe("a transaction's details", () => {
       "Gas used3,700,000 of 10,000,000",
       "Gas price1 LUX",
       "Exact fee0.0037 DUSK",
-      "Submitted22 Oct 2026, 14:32 UTC",
+      "SubmittedThu 22 Oct 2026, 14:32 UTC",
     ]);
     button("View in Dusk explorer").click();
     await settle();
@@ -469,5 +475,138 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     view.draw();
     const row = body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Registered a .dusk name"));
     expect(row.querySelector(".tx-right .tx-status").className).toBe("tx-status tx-status--neutral");
+  });
+});
+
+// The look the explorer and the web wallet share: heads and labels in the
+// ledger's type, the chain's blue on what leads somewhere.
+
+const css = () => readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+// A rule's body, by its selector as the stylesheet writes it.
+const rule = (sheet, selector) => sheet.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
+const blue = () => body().querySelectorAll(".chain-link");
+
+describe("a section's head", () => {
+  it("reads as [ ACTIVITY ], its brackets drawn and not read", () => {
+    const head = bracketTitle({ text: "Activity" });
+    expect(head.localName).toBe("h2");
+    expect(visibleText(head)).toBe("[Activity]");
+    expect(screenReaderText(head)).toBe("Activity");
+    expect(head.querySelectorAll(".bracket-title__bracket").map((b) => [b.textContent, b.getAttribute("aria-hidden")])).toEqual([
+      ["[", "true"],
+      ["]", "true"],
+    ]);
+  });
+
+  it("is in the ledger's type, in Söhne Mono, with brackets in the muted text colour", async () => {
+    const sheet = await css();
+    const head = rule(sheet, ".bracket-title");
+    expect(head).toContain("font-family: var(--font-mono);");
+    expect(head).toContain("letter-spacing: var(--ledger-tracking);");
+    expect(head).toContain("text-transform: uppercase;");
+    expect(rule(sheet, ".bracket-title__bracket")).toContain("color: var(--text-muted);");
+    // Söhne Mono, the extension's own, as the web wallet and the explorer set it.
+    expect(sheet).toMatch(/--font-mono: "Soehne Mono", ui-monospace,/);
+  });
+});
+
+describe("a head with a link beside it", () => {
+  it("sets the two on one baseline, as See all beside [ ACTIVITY ]", async () => {
+    const head = rule(await css(), ".section-head");
+    expect(head).toContain("align-items: baseline;");
+    expect(head).not.toContain("align-items: center;");
+    setup({ route: "home" });
+    const row = body().querySelector(".home-activity .section-head");
+    expect(row.children.map((child) => child.className)).toEqual(["bracket-title", "see-all chain-link"]);
+  });
+});
+
+describe("a sub-page's title", () => {
+  it("stays plain, without brackets, in the text font", async () => {
+    const title = subnav({ title: "Staking", onBack: () => {} }).querySelector(".subnav-title");
+    expect(title.localName).toBe("h1");
+    expect(title.textContent).toBe("Staking");
+    expect(title.children).toHaveLength(0);
+    const plain = rule(await css(), ".subnav-title");
+    expect(plain).not.toContain("text-transform");
+    expect(plain).not.toContain("--font-mono");
+  });
+});
+
+describe("the labels of balances and stakes", () => {
+  it("are in the ledger's type; day groups keep sentence case", async () => {
+    const sheet = await css();
+    for (const label of [".balance-label__text", ".balance-split-label", ".stake-lbl"]) {
+      const body = rule(sheet, label);
+      expect(body, label).toContain("font-family: var(--font-mono);");
+      expect(body, label).toContain("font-size: var(--ledger-size);");
+      expect(body, label).toContain("text-transform: uppercase;");
+    }
+    expect(rule(sheet, "h2.tx-day-label")).not.toContain("text-transform");
+    setup({ route: "activity" });
+    expect(body().querySelectorAll("h2.tx-day-label").map((day) => day.textContent)[0]).toBe("Yesterday");
+  });
+});
+
+describe("an ellipsis", () => {
+  it("is one character in everything the wallet writes, as every Dusk app writes it", async () => {
+    const { readdir } = await import("node:fs/promises");
+    const files = (await readdir(path.resolve(process.cwd(), "src"), { recursive: true })).filter(
+      (file) => file.endsWith(".js") && !file.endsWith(".test.js") && !file.includes("vendor")
+    );
+    const dots = [];
+    for (const file of files) {
+      const source = await readFile(path.resolve(process.cwd(), "src", file), "utf8");
+      // Three dots after a word, closing a string: "Saving...".
+      for (const [found] of source.matchAll(/\w\.\.\.["'`]/g)) dots.push(`${file}: ${found}`);
+    }
+    expect(dots).toEqual([]);
+  });
+});
+
+describe("the chain's blue", () => {
+  it("is only on what leads somewhere: See all, the explorer and a transaction's ID", async () => {
+    const view = setup({ route: "home" });
+    // Home: See all, which opens Activity. A row opens its details: a row, not a link.
+    expect(blue().map(visibleText)).toEqual(["See all"]);
+    expect(body().querySelectorAll(".tx-row .chain-link")).toHaveLength(0);
+    blue()[0].click();
+    await settle();
+    expect(view.state.route).toBe("activity");
+
+    // Activity: the account on Dusk's explorer.
+    expect(blue().map(visibleText)).toEqual(["View in Dusk explorer"]);
+    blue()[0].click();
+    await settle();
+    expect(openUrl).toHaveBeenCalledTimes(1);
+
+    // A transaction's details: its ID, which opens it on the explorer. Copy acts, so it isn't blue.
+    Object.assign(view.state, { route: "tx", txDetailHash: view.state.activity.entries[0].hash, txDetailFrom: "home" });
+    view.draw();
+    expect(blue().map((el) => el.className)).toEqual(["text-btn tx-id chain-link"]);
+    blue()[0].click();
+    await settle();
+    expect(openUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an underline at rest on a link inside a sentence, sozu.fi and the staking docs: its blue alone isn't enough", async () => {
+    const sheet = await css();
+    const inline = rule(sheet, "button.chain-link.text-btn--inline:not(:disabled)");
+    expect(inline).toContain("text-decoration-line: underline;");
+    expect(inline).not.toContain("--chain-blue");
+    // Other links still show theirs only under the pointer.
+    expect(sheet).toMatch(/button\.chain-link:not\(:disabled\),\nbutton\.chain-link:not\(:disabled\):hover \{\n  color: var\(--chain-blue\);\n  text-decoration-line: none;/);
+  });
+
+  it("is set only through .chain-link, on buttons that aren't disabled", async () => {
+    const sheet = await css();
+    const blocks = sheet.split("\n}").filter((block) => block.includes("var(--chain-blue)"));
+    expect(blocks).toHaveLength(1);
+    const selectors = blocks[0]
+      .slice(0, blocks[0].indexOf("{"))
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split(",")
+      .map((selector) => selector.trim());
+    expect(selectors).toEqual(["button.chain-link:not(:disabled)", "button.chain-link:not(:disabled):hover"]);
   });
 });

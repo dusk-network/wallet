@@ -12,6 +12,7 @@ import { createNetworkMenuController } from "../components/NetworkMenu.js";
 import { createAccountMenuController } from "../components/AccountMenu.js";
 import { createHeaderRenderer } from "./header.js";
 import { send as rawSend } from "../../wallet/bus.js";
+import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
 import { ensureActivity, refreshActivitySoon } from "./activity.js";
@@ -499,9 +500,7 @@ function installTxStatusListener() {
   txStatusListenerInstalled = true;
 
   try {
-    if (!ext?.runtime?.onMessage) return;
-
-    ext.runtime.onMessage.addListener((msg) => {
+    const onWalletMessage = (msg) => {
       try {
         if (msg?.type === "DUSK_UI_LOCK_STATE") {
           if (msg.isUnlocked === false) {
@@ -509,6 +508,14 @@ function installTxStatusListener() {
             return;
           }
 
+          state.needsRefresh = true;
+          render({ forceRefresh: true }).catch(() => {});
+          return;
+        }
+
+        // The node's chain ID, read after the popup drew: its network's names,
+        // explorer and bridge, from a fresh overview.
+        if (msg?.type === "DUSK_UI_NETWORK_CHANGED") {
           state.needsRefresh = true;
           render({ forceRefresh: true }).catch(() => {});
           return;
@@ -605,7 +612,10 @@ function installTxStatusListener() {
       } catch {
         // ignore
       }
-    });
+    };
+    // The desktop app's wallet runs in this page and tells it with events.
+    window.addEventListener(WALLET_MESSAGE_EVENT, (event) => onWalletMessage(event?.detail));
+    ext?.runtime?.onMessage?.addListener(onWalletMessage);
   } catch {
     // ignore
   }

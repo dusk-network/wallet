@@ -20,6 +20,8 @@
 // Parsing intentionally supports ONLY the canonical v1 form above (plus an
 // optional raw recipient string).
 
+import { networkFor } from "@dusk-network/networks";
+
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "./chain.js";
 import { formatLuxToDusk } from "./amount.js";
 
@@ -191,11 +193,9 @@ export function normalizeChainId(chain) {
   return chainReferenceFromChainId(chain);
 }
 
+// A chain by its network's label in @dusk-network/networks; "Local" for 0.
 export function chainLabel(chainDec) {
   const c = normalizeChainId(chainDec);
-  if (c === "1") return "Mainnet";
-  if (c === "2") return "Testnet";
-  if (c === "3") return "Devnet";
   if (c === "0") return "Local";
-  return c ? `Chain ${c}` : "";
+  return c ? networkFor(c)?.label ?? `Chain ${c}` : "";
 }

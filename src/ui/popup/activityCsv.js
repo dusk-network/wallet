@@ -6,8 +6,10 @@
 // isn't looked up yet says so in its status. Pure functions of the rows.
 
 import { formatLuxToDusk, safeBigInt } from "../../shared/amount.js";
+import { dateText } from "../lib/time.js";
+import { contractIdText } from "../lib/strings.js";
 import { TX_KIND } from "../../shared/constants.js";
-import { SOZU_FN } from "../../shared/sozuAdapter.js";
+import { SOZU_FN } from "@dusk-network/networks/sozu";
 import { describeTx, subText, txTime } from "./views/txRow.js";
 
 /** The columns of an export. */
@@ -51,15 +53,8 @@ const csvText = (value) => {
   return csvField(/^[=+\-@\t\r]/.test(text) ? `'${text}` : text);
 };
 
-/** "Wed, 28 Oct 2026, 06:51 CET": a time in full, in the browser's language. */
-export function fullDateTime(ms) {
-  const options = { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" };
-  try {
-    return new Intl.DateTimeFormat(globalThis.navigator?.language || undefined, options).format(new Date(ms));
-  } catch {
-    return new Intl.DateTimeFormat(undefined, options).format(new Date(ms));
-  }
-}
+/** "Wed 28 Oct 2026, 06:51 CET": a time in full, as the wallet writes it everywhere (time.js). */
+export const fullDateTime = (ms) => dateText(ms);
 
 /** Whether a row's time, fee and outcome are still to be looked up. */
 export const isRowIncomplete = (tx) =>
@@ -106,7 +101,8 @@ function csvLine(tx, { nodeUrl, contactName, records, own }, withContacts) {
   const token = desc.amount && desc.amount.unit !== "DUSK" ? `${desc.amount.value} ${desc.amount.unit}` : "";
   const line = [subText(desc, ""), token].filter(Boolean).join(" · ");
   const what = desc.isAddress ? line : line ? `${desc.name} (${line})` : desc.name;
-  const counterparty = (desc.evm ? desc.address : desc.address ?? tx?.to ?? tx?.from ?? tx?.counterparty ?? tx?.contractId) ?? "";
+  // A contract by its ID as every Dusk app writes one, without 0x.
+  const counterparty = contractIdText((desc.evm ? desc.address : desc.address ?? tx?.to ?? tx?.from ?? tx?.counterparty ?? tx?.contractId) ?? "");
   const status = isRowIncomplete(tx) ? "Not looked up yet" : STATUS_WORDS[String(tx?.status ?? "")] ?? "";
   return [
     csvField(time ? new Date(time).toISOString() : ""),

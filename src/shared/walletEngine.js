@@ -12,16 +12,17 @@ import {
   dataDrivers,
   useAsProtocolDriver,
 } from "@dusk/w3sper";
+import { networks } from "@dusk-network/networks";
+import { readSozuStatus } from "@dusk-network/networks/sozu";
 import { bytesToHex, hexToBytes, messageBytes, sha256Hex, toBytes } from "./bytes.js";
 import { signProfileTypedDataDigest } from "./blsDigest.js";
 import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
-import { detectPresetIdFromNodeUrl } from "./network.js";
 import { createContractReads } from "./contractReads.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
-import { getSozuHubBootstrap } from "./sozuConfig.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
-import { readSozuStatus } from "./sozuStatus.js";
+import { blockedRecipient } from "./recipientBlocklist.js";
+import { chainIdForNode, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
 
 import {
   clearNotes,
@@ -41,6 +42,7 @@ import {
   putShieldedMeta,
 } from "./shieldedStore.js";
 import { contactsNamespace, deriveContactsKey, openContacts, sealContacts } from "./contactsCrypto.js";
+import { serializeStakeInfo } from "./transport.js";
 import { activityNetworkKey, assertArchive, historyArchiverUrl } from "./activityHistory.js";
 import {
   StaleActivityError,
@@ -264,9 +266,10 @@ async function withTimeout(promise, ms, message, onTimeout) {
 // We keep it in a small mutable object so we can reconfigure network routing
 // without restarting the whole engine.
 let engineConfig = {
-  nodeUrl: "https://nodes.dusk.network",
-  proverUrl: "https://provers.dusk.network",
-  archiverUrl: "https://nodes.dusk.network",
+  nodeUrl: networks.mainnet.urls.node,
+  proverUrl: networks.mainnet.urls.prover,
+  archiverUrl: networks.mainnet.urls.archive,
+  chainId: null,
   accountCount: 2,
   selectedAccountIndex: 0,
 };
@@ -364,6 +367,15 @@ export function configure(patch = {}) {
     changedArchiver = next !== engineConfig.archiverUrl;
     engineConfig.archiverUrl = next;
   }
+
+  // The node's chain ID, as the wallet's settings keep it (settings.js), for
+  // what the engine finds by the node: its network's Sozu, history and lists.
+  if ("chainId" in patch) {
+    engineConfig.chainId = Number.isInteger(patch.chainId) ? patch.chainId : null;
+  } else if (changedNode) {
+    engineConfig.chainId = null;
+  }
+  noteChainId(engineConfig.nodeUrl, engineConfig.chainId);
 
   // Account derivation config (persisted in settings). This is used on unlock
   // to restore the same derived accounts.
@@ -1490,25 +1502,6 @@ export async function getStakeInfo({ profileIndex } = {}) {
   );
 }
 
-function serializeStakeAmount(amount) {
-  if (!amount) return null;
-  return {
-    value: amount.value?.toString?.() ?? String(amount.value),
-    locked: amount.locked?.toString?.() ?? String(amount.locked),
-    eligibility: amount.eligibility?.toString?.() ?? String(amount.eligibility),
-    total: amount.total?.toString?.() ?? String(amount.total),
-  };
-}
-
-function serializeStakeInfo(info) {
-  return {
-    amount: serializeStakeAmount(info?.amount),
-    reward: info?.reward?.toString?.() ?? String(info?.reward ?? 0),
-    faults: Number(info?.faults ?? 0) || 0,
-    hardFaults: Number(info?.hardFaults ?? 0) || 0,
-  };
-}
-
 function accountOwnerString(owner) {
   if (owner && typeof owner === "object" && "Account" in owner) {
     return String(owner.Account);
@@ -1829,8 +1822,12 @@ export async function getDrc721TokenUri(params = {}) {
   return String(out ?? "");
 }
 
+// The node's chain ID, which names its network: as the wallet's settings keep
+// it, handed over with the engine's config; a network's own node's otherwise.
+const nodeChainId = () => chainIdForNode(engineConfig.nodeUrl);
+
 // Sozu's contracts are read through Multicall for Dusk: one query a refresh
-// (sozuStatus.js), with one batcher per node.
+// (readSozuStatus), with one batcher per node.
 let sozuReads = null;
 
 function readSozu(contractId, fnName, args) {
@@ -1862,10 +1859,11 @@ export async function getSozuStatus(params = {}) {
   const network = await ensureNetwork();
   const idx = resolveProfileIndex(params?.profileIndex);
   const profile = await ensureProfileIndex(idx);
-  const networkKey = detectPresetIdFromNodeUrl(engineConfig.nodeUrl);
-  const bootstrap = getSozuHubBootstrap(networkKey);
+  const chainId = nodeChainId();
+  const networkKey = networkKeyOf(chainId, engineConfig.nodeUrl);
+  const sozu = networkOf(chainId)?.sozu ?? null;
 
-  if (!bootstrap) {
+  if (!sozu) {
     return Object.freeze({
       networkKey,
       configured: false,
@@ -1873,6 +1871,8 @@ export async function getSozuStatus(params = {}) {
       reason: "Sozu liquid staking is not configured for this network.",
     });
   }
+  const { pool: poolId, stDusk, substrate } = sozu.fallbacks;
+  const fallbackContracts = { hub: sozu.hub, pool: poolId, substrate, "staked-dusk": stDusk };
 
   const balanceRead = withTimeout(
     state.bookkeeper.balance(profile.account),
@@ -1883,32 +1883,31 @@ export async function getSozuStatus(params = {}) {
   let read = null;
   let reason = "";
   try {
-    const account = await sozuAccountArgs(network, bootstrap.fallbackContracts.pool, profile);
-    read = await readSozuStatus({
-      read: readSozu,
-      nodeUrl: String(engineConfig.nodeUrl || ""),
-      contracts: bootstrap.fallbackContracts,
-      account,
-    });
+    const account = await sozuAccountArgs(network, poolId, profile);
+    read = await readSozuStatus({ read: readSozu, contracts: sozu, account });
     reason = read.error;
   } catch (e) {
     reason = e?.message ?? String(e);
   }
   const balance = await balanceRead;
-  const { pool, position, fees, features } = read ?? {};
+  const { contracts, pool, position, fees, flags } = read ?? {};
+  // Both balances, or neither: what the views show the profile has.
+  const both = position && position.balance !== null && position.stDusk !== null;
 
   return Object.freeze({
     networkKey,
     configured: true,
     source: read?.source ?? "fallback",
-    contracts: read?.contracts ?? { ...bootstrap.fallbackContracts },
+    contracts: contracts
+      ? { hub: contracts.hub, pool: contracts.pool, substrate: contracts.substrate, "staked-dusk": contracts.stDusk }
+      : fallbackContracts,
     reason,
     pool: pool ? parseSozuPoolState({ totalStakeLux: pool.stake, tokenTotalSupply: pool.supply }) : null,
-    position: position
+    position: both
       ? { poolBalanceLux: position.balance.toString(), stDuskBalanceLux: position.stDusk.toString() }
       : null,
     fees: fees ? { deposit: ratioJson(fees.deposit), reward: ratioJson(fees.reward) } : null,
-    features: features ?? null,
+    features: flags ?? null,
     profileIndex: idx,
     account: profile.account.toString(),
     publicBalance: balance
@@ -2893,6 +2892,10 @@ async function sendTransactionUnlocked(params) {
   const profile = await ensureProfileIndex(idx);
 
   if (kind === TX_KIND.TRANSFER) {
+    // A recipient the network's file blocks gets nothing, whichever screen
+    // or site asked: the forms say why first (recipientBlocklist.js).
+    const blocked = blockedRecipient(String(params.to ?? ""), nodeChainId());
+    if (blocked) throw new Error(blocked);
     // Reuse existing transfer logic for now.
     return await transfer(params);
   }

@@ -1,5 +1,7 @@
 import { getSettings, normalizeCustomGas, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
+import { serializeStakeInfo } from "../shared/transport.js";
+import { nativeRewardRate } from "../shared/rewardRate.js";
 import { clearContacts, contactsStore } from "../shared/contactsStore.js";
 import {
   getWatchedAssets,
@@ -66,22 +68,6 @@ function profileIndex(message, status) {
     : Number(status.selectedAccountIndex ?? 0) || 0;
 }
 
-function serializeStakeInfo(info) {
-  return {
-    amount: info?.amount
-      ? {
-          value: info.amount.value?.toString?.() ?? String(info.amount.value),
-          locked: info.amount.locked?.toString?.() ?? String(info.amount.locked),
-          eligibility: info.amount.eligibility?.toString?.() ?? String(info.amount.eligibility),
-          total: info.amount.total?.toString?.() ?? String(info.amount.total),
-        }
-      : null,
-    reward: info?.reward?.toString?.() ?? String(info?.reward ?? 0),
-    faults: Number(info?.faults ?? 0) || 0,
-    hardFaults: Number(info?.hardFaults ?? 0) || 0,
-  };
-}
-
 function serializeResult(type, result) {
   if (type === "DUSK_UI_GET_MINIMUM_STAKE" || type === "DUSK_UI_DRC20_GET_BALANCE") {
     return String(result ?? "0");
@@ -115,6 +101,11 @@ export async function handleUiCommand(
   if (type === "DUSK_UI_SET_CUSTOM_GAS") {
     const next = await setSettings({ customGas: normalizeCustomGas(message.customGas) });
     return { ok: true, customGas: next.customGas ?? null };
+  }
+
+  // About what native staking pays a year lately: from the node, at most once a day.
+  if (type === "DUSK_UI_GET_REWARD_RATE") {
+    return { ok: true, result: await nativeRewardRate((await getSettings()).nodeUrl) };
   }
 
   if (type === "DUSK_UI_GET_CACHED_GAS_PRICE") {

@@ -9,7 +9,7 @@ import { blake2b } from "@noble/hashes/blake2b";
 
 import releases from "./dusk-domains-releases.json";
 import { toBytes } from "./bytes.js";
-import { detectPresetIdFromNodeUrl } from "./network.js";
+import { networkForNode } from "./nodeNetwork.js";
 
 // What a Dusk Domains call did, by its function.
 const NAME_CALLS = Object.freeze({
@@ -38,12 +38,14 @@ const DUSK_DOMAINS = Object.fromEntries(
 );
 
 /**
- * Whether `contractId` is one of Dusk Domains' contracts on the network of `nodeUrl`.
+ * Whether `contractId` is one of Dusk Domains' contracts on the network of
+ * `nodeUrl`, by the chain ID the node gave (nodeNetwork.js).
  * @param {string} contractId
  * @param {string} nodeUrl
  */
 export function isDuskDomains(contractId, nodeUrl) {
-  return Boolean(DUSK_DOMAINS[detectPresetIdFromNodeUrl(String(nodeUrl ?? ""))]?.has(norm(contractId)));
+  const net = networkForNode(String(nodeUrl ?? ""));
+  return Boolean(net?.duskDomains && DUSK_DOMAINS[net.name]?.has(norm(contractId)));
 }
 
 /**

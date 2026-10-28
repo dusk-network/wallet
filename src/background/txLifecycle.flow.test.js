@@ -467,85 +467,40 @@ describe("background Phoenix tx lifecycle flow", () => {
     });
   });
 
-  it("rechecks old shielded reservations without clearing pending nullifiers", async () => {
-    const hash = "0xrecheck";
-    await seedTxMeta(hash, { status: "unknown", recoveryReason: "watcher_timeout" });
-    mocks.classifyTxPresence.mockResolvedValueOnce({ state: "mempool", tx: { id: hash } });
-
-    await expect(sendBackgroundMessage({ type: "DUSK_UI_RECHECK_TX", hash })).resolves.toMatchObject({
-      ok: true,
+  it.each([
+    {
+      name: "rechecks old shielded reservations without clearing pending nullifiers",
+      presence: { state: "mempool" },
       result: { status: "mempool" },
-    });
-
-    const { getTxMeta } = await import("../shared/txStore.js");
-    await expect(getTxMeta(hash)).resolves.toMatchObject({
-      status: "mempool",
-      reservationStatus: "pending",
-      pendingNullifiers: ["aa"],
-    });
-
-    expect(mocks.sentMessages).toContainEqual(
-      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "mempool" })
-    );
-    expect(mocks.sentMessages).not.toContainEqual(
-      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "failed" })
-    );
-    expect(mocks.notifyTxExecuted).not.toHaveBeenCalled();
-  });
-
-  it("rechecks old shielded reservations to finalized success and marks reservation spent", async () => {
-    const hash = "0xrecheck-success";
-    await seedTxMeta(hash, { status: "unknown", recoveryReason: "watcher_timeout" });
-    mocks.classifyTxPresence.mockResolvedValueOnce({ state: "executed_success", tx: { id: hash } });
-
-    await expect(sendBackgroundMessage({ type: "DUSK_UI_RECHECK_TX", hash })).resolves.toMatchObject({
-      ok: true,
+      stored: { status: "mempool", reservationStatus: "pending" },
+    },
+    {
+      name: "rechecks old shielded reservations to finalized success and marks reservation spent",
+      presence: { state: "executed_success" },
       result: { status: "executed", ok: true },
-    });
-
-    const { getTxMeta } = await import("../shared/txStore.js");
-    await expect(getTxMeta(hash)).resolves.toMatchObject({
-      status: "executed",
-      reservationStatus: "spent",
-      pendingNullifiers: ["aa"],
-    });
-
-    expect(mocks.sentMessages).toContainEqual(
-      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed", ok: true })
-    );
-  });
-
-  it("rechecks old shielded reservations to finalized failure and marks reservations spent", async () => {
-    const hash = "0xrecheck-failed";
-    await seedTxMeta(hash, { status: "unknown", recoveryReason: "watcher_timeout" });
-    mocks.classifyTxPresence.mockResolvedValueOnce({
-      state: "executed_failed",
-      tx: { id: hash },
-      error: "OutOfGas",
-    });
-
-    await expect(sendBackgroundMessage({ type: "DUSK_UI_RECHECK_TX", hash })).resolves.toMatchObject({
-      ok: true,
+      stored: { status: "executed", reservationStatus: "spent" },
+    },
+    {
+      name: "rechecks old shielded reservations to finalized failure and marks reservations spent",
+      presence: { state: "executed_failed", error: "OutOfGas" },
       result: { status: "failed", ok: false, error: "OutOfGas" },
-    });
+      stored: { status: "failed", error: "OutOfGas", reservationStatus: "spent" },
+    },
+  ])("$name", async ({ presence, result, stored }) => {
+    const hash = `0xrecheck-${presence.state}`;
+    await seedTxMeta(hash, { status: "unknown", recoveryReason: "watcher_timeout" });
+    mocks.classifyTxPresence.mockResolvedValueOnce({ ...presence, tx: { id: hash } });
 
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_RECHECK_TX", hash })).resolves.toMatchObject({ ok: true, result });
+
+    // The reserved notes stay with it, whatever the recheck found.
     const { getTxMeta } = await import("../shared/txStore.js");
-    await expect(getTxMeta(hash)).resolves.toMatchObject({
-      status: "failed",
-      error: "OutOfGas",
-      reservationStatus: "spent",
-      pendingNullifiers: ["aa"],
-    });
+    await expect(getTxMeta(hash)).resolves.toMatchObject({ ...stored, pendingNullifiers: ["aa"] });
 
-    expect(mocks.sentMessages).toContainEqual(
-      expect.objectContaining({
-        type: "DUSK_UI_TX_STATUS",
-        hash,
-        status: "failed",
-        ok: false,
-        error: "OutOfGas",
-      })
-    );
+    // One status, the one found; a recheck notifies nothing.
+    const statuses = mocks.sentMessages.filter((m) => m.type === "DUSK_UI_TX_STATUS" && m.hash === hash);
+    expect(statuses).toEqual([expect.objectContaining(result)]);
+    expect(mocks.notifyTxExecuted).not.toHaveBeenCalled();
   });
 
   it("serializes under-floor Phoenix gas from dApp RPC as INVALID_PARAMS", async () => {

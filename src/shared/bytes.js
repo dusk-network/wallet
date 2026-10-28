@@ -27,6 +27,31 @@ export function bytesToTransportHex(bytes) {
   return `0x${bytesToHex(bytes)}`;
 }
 
+/**
+ * A transaction's nullifiers as lower-case hex, from hex strings or byte
+ * arrays; anything else in the list is left out.
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+export function normalizeNullifiers(value) {
+  const out = [];
+  for (const n of Array.isArray(value) ? value : []) {
+    try {
+      if (typeof n === "string") {
+        const hex = n.trim();
+        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
+        continue;
+      }
+      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
+      const hex = bytesToHex(u8);
+      if (hex) out.push(hex);
+    } catch {
+      // ignore invalid nullifier shapes
+    }
+  }
+  return out;
+}
+
 export function base64ToBytes(b64) {
   const s = String(b64 || "").trim().replace(/^base64:/i, "");
   if (!s) return new Uint8Array();

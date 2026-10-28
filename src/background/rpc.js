@@ -12,12 +12,13 @@ import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { readChainId } from "../shared/networkStatus.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
 import {
   isAllowedDappEndpoint,
   isAllowedDappOrigin,
 } from "../shared/securityPolicy.js";
-import { bytesToHex, messageBytes, sha256Hex, toBytes } from "../shared/bytes.js";
+import { messageBytes, sha256Hex, toBytes } from "../shared/bytes.js";
 import { bridgeDepositRecipient } from "../shared/bridgeCalls.js";
 import { registeredNameOf } from "../shared/knownCalls.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
@@ -44,6 +45,7 @@ import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { readCurrent, siteNames } from "./siteNames.js";
 import { getTxEpoch, putTxMeta } from "../shared/txStore.js";
+import { submittedTxMeta } from "../shared/txRecord.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
 import {
   broadcastChainChangedAll,
@@ -74,25 +76,6 @@ export async function handleRpc(origin, request) {
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
   const MAX_U64 = 18446744073709551615n;
-
-  function nullifierHexes(value) {
-    const out = [];
-    for (const n of Array.isArray(value) ? value : []) {
-      try {
-        if (typeof n === "string") {
-          const hex = n.trim();
-          if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
-          continue;
-        }
-        const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
-        const hex = bytesToHex(u8);
-        if (hex) out.push(hex);
-      } catch {
-        // ignore invalid nullifier shapes
-      }
-    }
-    return out;
-  }
 
   function mergeGas(baseGas, overrideGas) {
     if (!overrideGas || typeof overrideGas !== "object") {
@@ -615,10 +598,13 @@ export async function handleRpc(origin, request) {
 
       // Ask user approval.
       await requestUserApproval("switch_network", origin, { from, to });
+      // Then the node's chain ID, kept with it as Settings keeps a chosen
+      // node's: a site's node is asked nothing before the user agreed.
+      const chainId = await readChainId(targetNodeUrl);
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         await assertApprovalContext(approvalContext);
         cancelPendingApprovals(null, "Network changed");
-        await setSettings({ nodeUrl: targetNodeUrl });
+        await setSettings({ nodeUrl: targetNodeUrl, chainId });
         invalidateEngineConfig();
         await ensureEngineConfigured();
         broadcastChainChangedAll().catch(() => {});
@@ -674,10 +660,12 @@ export async function handleRpc(origin, request) {
         );
       }
 
-      let normalizedParams = params;
+      // The kind as checked, from here on: the approval, the engine and the
+      // transaction's record all read this one spelling (txRecord.js).
+      let normalizedParams = { ...params, kind };
       if (kind === TX_KIND.TRANSFER) {
         normalizedParams = {
-          ...params,
+          ...normalizedParams,
           privacy: validateTransferPrivacy(params),
           amount: validateU64(params.amount, "amount", { required: true, allowZero: false }),
           memo: validateMemo(params.memo),
@@ -766,49 +754,18 @@ export async function handleRpc(origin, request) {
       try {
         const nodeUrl = executionContext.nodeUrl;
         if (hash) {
-          const pendingNullifiers = nullifierHexes(result?.nullifiers);
-          await putTxMeta(hash, {
-            origin,
-            nodeUrl,
-            kind,
-            privacy: finalParams?.privacy ? String(finalParams.privacy) : undefined,
-            profileIndex: idx,
-            // Helpful fields for the Activity list UI
-            to: finalParams?.to ? String(finalParams.to) : undefined,
-            amount:
-              finalParams?.amount !== undefined && finalParams?.amount !== null
-                ? String(finalParams.amount)
-                : undefined,
-            deposit:
-              finalParams?.deposit !== undefined && finalParams?.deposit !== null
-                ? String(finalParams.deposit)
-                : undefined,
-            contractId:
-              kind === TX_KIND.CONTRACT_CALL && finalParams?.contractId
-                ? String(finalParams.contractId)
-                : undefined,
-            fnName:
-              kind === TX_KIND.CONTRACT_CALL && finalParams?.fnName
-                ? String(finalParams.fnName)
-                : undefined,
-            // Where a deposit to DuskEVM pays, for Activity: the chain keeps it in the call's bytes.
-            bridgeTo:
-              kind === TX_KIND.CONTRACT_CALL
-                ? bridgeDepositRecipient({ ...finalParams, nodeUrl })
-                : undefined,
-            // The .dusk name a registration registers, for Activity: it too is in the call's bytes.
-            registeredName:
-              kind === TX_KIND.CONTRACT_CALL
-                ? registeredNameOf({ ...finalParams, nodeUrl, args: finalParams?.fnArgs }) || undefined
-                : undefined,
-            gasLimit: finalParams?.gas?.limit != null ? String(finalParams.gas.limit) : undefined,
-            gasPrice: finalParams?.gas?.price != null ? String(finalParams.gas.price) : undefined,
-            pendingNullifiers,
-            reservationStatus: pendingNullifiers.length ? "pending" : undefined,
-            reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
-            submittedAt: Date.now(),
-            status: "submitted",
-          }, { epoch: txEpoch });
+          await putTxMeta(
+            hash,
+            submittedTxMeta(finalParams, { origin, nodeUrl, profileIndex: idx, nullifiers: result?.nullifiers }, {
+              // Where a deposit to DuskEVM pays, and the .dusk name a
+              // registration registers, for Activity: the chain keeps both in
+              // the call's bytes.
+              bridgeTo: kind === TX_KIND.CONTRACT_CALL ? bridgeDepositRecipient({ ...finalParams, nodeUrl }) : undefined,
+              registeredName:
+                kind === TX_KIND.CONTRACT_CALL ? registeredNameOf({ ...finalParams, nodeUrl, args: finalParams?.fnArgs }) || undefined : undefined,
+            }),
+            { epoch: txEpoch }
+          );
         }
 
         // Best-effort system notification (extension).

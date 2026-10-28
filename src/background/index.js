@@ -11,11 +11,9 @@ import {
 import { getSettings, normalizeAutoLock, setSettings } from "../shared/settings.js";
 import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { TX_KIND } from "../shared/constants.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
-import { bytesToHex } from "../shared/bytes.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 
@@ -51,13 +49,14 @@ import {
   patchTxMeta as patchStored,
   putTxMeta,
   listTxs,
-  typedRecipientName,
 } from "../shared/txStore.js";
+import { submittedTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
 import {
   getNetworkStatus,
   checkAllEndpoints,
+  readChainId,
   resetNetworkStatus,
   isStatusStale,
 } from "../shared/networkStatus.js";
@@ -220,25 +219,6 @@ async function updateDappActivity(request, context = null) {
   const status = await getEngineStatus();
   if (!status?.isUnlocked) return;
   await updateActivity();
-}
-
-function nullifierHexes(value) {
-  const out = [];
-  for (const n of Array.isArray(value) ? value : []) {
-    try {
-      if (typeof n === "string") {
-        const hex = n.trim();
-        if (/^[0-9a-fA-F]+$/.test(hex)) out.push(hex.toLowerCase());
-        continue;
-      }
-      const u8 = n instanceof Uint8Array ? n : new Uint8Array(n);
-      const hex = bytesToHex(u8);
-      if (hex) out.push(hex);
-    } catch {
-      // ignore invalid nullifier shapes
-    }
-  }
-  return out;
 }
 
 function isShieldedTxMeta(meta) {
@@ -764,8 +744,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           kind: entry.kind,
           origin: entry.origin,
           params: entry.params,
-          // The wallet's network, for the approval's header.
+          // The wallet's network, for the approval's header, by the chain ID its node gave.
           nodeUrl: String(settings?.nodeUrl ?? ""),
+          chainId: settings?.chainId ?? null,
           networkName: networkNameFromNodeUrl(String(settings?.nodeUrl ?? "")),
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
@@ -1074,6 +1055,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
+        // The node's chain ID, which names its network, kept with it (null
+        // while it can't be read: the next status check asks again).
+        const chainId = await readChainId(nodeUrl);
+
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           cancelPendingApprovals(null, "Network changed");
           // Reset network status when endpoints change (will be checked in background)
@@ -1083,6 +1068,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           // when omitted).
           const nextSettings = await setSettings({
             nodeUrl,
+            chainId,
             ...(proverUrl ? { proverUrl } : {}),
             ...(archiverUrl ? { archiverUrl } : {}),
           });
@@ -1195,15 +1181,26 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           accountNames = {};
         }
 
+        // The node's network, by the chain ID kept with it (settings.js).
+        const { chainId } = settings;
+
         // Get network status and check if we need to refresh it
         let networkStatus = await getNetworkStatus();
         if (isStatusStale(networkStatus, 30000)) {
-          // Kick off a background check (don't await)
+          // Kick off a background check (don't await). A node whose chain ID
+          // wasn't read yet gets it there: the popup is told to draw again.
           checkAllEndpoints({
             nodeUrl: settings.nodeUrl,
             proverUrl: settings.proverUrl,
             archiverUrl: settings.archiverUrl,
-          }).catch(() => {});
+          })
+            .then(async () => {
+              const now = await getSettings();
+              if (now.nodeUrl === settings.nodeUrl && now.chainId !== chainId) {
+                await runtimeSendMessage({ type: "DUSK_UI_NETWORK_CHANGED" }).catch(() => {});
+              }
+            })
+            .catch(() => {});
         }
 
         if (status.isUnlocked) {
@@ -1291,6 +1288,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           nftMetadataEnabled: settings.nftMetadataEnabled !== false,
           ipfsGateway: settings.ipfsGateway ?? "",
           hideBalances: settings.hideBalances === true,
+          chainId,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           networkStatus,
           activeOrigin,
@@ -1336,60 +1334,23 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         // Persist metadata (see rpc.js comments).
         const hash = result?.hash ?? "";
-        const kind = String(baseParams?.kind ?? "");
         try {
           const settings = await getSettings();
           const nodeUrl = settings?.nodeUrl ?? "";
 
           if (hash) {
-            const pendingNullifiers = nullifierHexes(result?.nullifiers);
-            await putTxMeta(hash, {
-              origin: "Wallet",
-              nodeUrl,
-              kind,
-              privacy: baseParams?.privacy ? String(baseParams.privacy) : undefined,
-              profileIndex:
-                baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
-                  ? Number(baseParams.profileIndex) || 0
-                  : status?.selectedAccountIndex !== undefined && status?.selectedAccountIndex !== null
-                  ? Number(status.selectedAccountIndex) || 0
-                  : Number(settings?.selectedAccountIndex ?? 0) || 0,
-              ownerProfileIndex:
-                baseParams?.ownerProfileIndex !== undefined && baseParams?.ownerProfileIndex !== null
-                  ? Number(baseParams.ownerProfileIndex) || 0
-                  : undefined,
-              payment: baseParams?.payment ? String(baseParams.payment) : undefined,
-              asset:
-                message?.asset && typeof message.asset === "object"
-                  ? message.asset
-                  : undefined,
-              // Helpful fields for the Activity list UI
-              to: baseParams?.to ? String(baseParams.to) : undefined,
-              toName: typedRecipientName(message?.toName),
-              amount:
-                baseParams?.amount !== undefined && baseParams?.amount !== null
-                  ? String(baseParams.amount)
-                  : undefined,
-              deposit:
-                baseParams?.deposit !== undefined && baseParams?.deposit !== null
-                  ? String(baseParams.deposit)
-                  : undefined,
-              contractId:
-                kind === TX_KIND.CONTRACT_CALL && baseParams?.contractId
-                  ? String(baseParams.contractId)
-                  : undefined,
-              fnName:
-                kind === TX_KIND.CONTRACT_CALL && baseParams?.fnName
-                  ? String(baseParams.fnName)
-                  : undefined,
-              gasLimit: baseParams?.gas?.limit != null ? String(baseParams.gas.limit) : undefined,
-              gasPrice: baseParams?.gas?.price != null ? String(baseParams.gas.price) : undefined,
-              pendingNullifiers,
-              reservationStatus: pendingNullifiers.length ? "pending" : undefined,
-              reservationUpdatedAt: pendingNullifiers.length ? Date.now() : undefined,
-              submittedAt: Date.now(),
-              status: "submitted",
-            }, { epoch: txEpoch });
+            // The profile that paid: a stake's own may not be the one selected.
+            const profileIndex =
+              baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
+                ? Number(baseParams.profileIndex) || 0
+                : status?.selectedAccountIndex !== undefined && status?.selectedAccountIndex !== null
+                ? Number(status.selectedAccountIndex) || 0
+                : Number(settings?.selectedAccountIndex ?? 0) || 0;
+            await putTxMeta(
+              hash,
+              submittedTxMeta(baseParams, { origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message)),
+              { epoch: txEpoch }
+            );
           }
 
           await notifyTxSubmitted({ hash, origin: "Wallet", nodeUrl });

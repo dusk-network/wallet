@@ -1,5 +1,4 @@
 import {
-  UI_DISPLAY_DECIMALS,
   formatDusk,
   formatDuskExact,
   formatFee,
@@ -10,6 +9,7 @@ import {
 import { TX_KIND } from "../../../shared/constants.js";
 import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, noBridgeRecipientText } from "../../../shared/bridgeCalls.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
+import { BLOCKED_TITLE, blockedRecipient } from "../../../shared/recipientBlocklist.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
@@ -20,7 +20,7 @@ import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
-import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import {
   hideRecipientBadge,
@@ -409,8 +409,15 @@ export function sendFormView(ov, { state, actions } = {}) {
     nameBox.style.display = shown.length ? "" : "none";
   };
 
-  // Sending to your own account or address only costs a fee: say so, and let it go ahead.
+  // Sending to your own account or address only costs a fee: say so, and let
+  // it go ahead. A recipient the network's file blocks says why, and Review
+  // stays off.
   const selfNote = h("div", { class: "send-self-note", hidden: true });
+  const blockedText = h("div", { class: "muted" });
+  const blockedNote = h("div", { class: "callout warn send-blocked", role: "alert", hidden: true }, [
+    h("div", { class: "callout-title", text: BLOCKED_TITLE }),
+    blockedText,
+  ]);
   const showSelfNote = (recipient) => {
     const own =
       recipient && recipient === ownAccount
@@ -420,6 +427,11 @@ export function sendFormView(ov, { state, actions } = {}) {
           : "";
     selfNote.textContent = own ? `This is your own ${own}. Sending to yourself only costs a fee.` : "";
     selfNote.hidden = !own;
+    const blocked = blockedRecipient(recipient, ov?.chainId);
+    blockedText.textContent = blocked ?? "";
+    blockedNote.hidden = !blocked;
+    if (blocked) nextBtn.disabled = true;
+    return !blocked;
   };
 
   // Opens Shield, for a shielded address the shielded balance can't pay.
@@ -456,9 +468,9 @@ export function sendFormView(ov, { state, actions } = {}) {
   const showNameAddress = (result) => {
     const recipient = nameRecipient(result);
     const t = ProfileGenerator.typeOf(recipient);
-    showSelfNote(recipient);
+    const allowed = showSelfNote(recipient);
     detectedRecipientType = t;
-    const sendable = t === "account" || shieldedCovers;
+    const sendable = allowed && (t === "account" || shieldedCovers);
     nextBtn.disabled = !sendable;
     updateAmountHelpers();
     return sendable;
@@ -795,6 +807,8 @@ export function sendFormView(ov, { state, actions } = {}) {
         if (recType !== "account" && recType !== "address") {
           throw new Error("Invalid recipient: expected a Dusk account or shielded address");
         }
+        const blocked = blockedRecipient(recipient, ov?.chainId);
+        if (blocked) throw new Error(blocked);
         const privacy = recType === "address" ? "shielded" : "public";
 
         // The amount says what's wrong under it; Review waits until it's right.
@@ -848,6 +862,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       chainNote,
       nameBox,
       selfNote,
+      blockedNote,
       fieldLabel(amount, "Amount"),
       h("div", { class: "amount-entry send-amount" }, [field.el, field.error, available, feeNote]),
       fieldLabel(memo, "Memo"),
@@ -918,7 +933,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const ownAccount = String(ov?.accounts?.[ownIdx] ?? "");
   const ownAddress = String(ov?.addresses?.[ownIdx] ?? "");
   // To the bridge, the memo is the recipient on the other chain.
-  const memoAs = service ? `the recipient on ${service.short}` : "memo";
+  const memoAs = service ? `the recipient on ${service.chain}` : "memo";
   const visibleLine = h("div", { class: "review-line review-visible", text: publicSendLine({ memo: d.memo, name: null, memoAs }) });
   const fromName = profileNameEl(ov, {
     index: ownIdx,
@@ -1011,45 +1026,20 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // Back returns to Send with the draft, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm", disabled: nothingArrives });
 
-  const defaultGas = getDefaultGas(TX_KIND.TRANSFER, { privacy });
-  const defaultLimit =
-    defaultGas?.limit !== undefined && defaultGas?.limit !== null
-      ? String(defaultGas.limit)
-      : "";
-  const fallbackPrice =
-    defaultGas?.price !== undefined && defaultGas?.price !== null
-      ? String(defaultGas.price)
-      : "";
-
-  const gasEditor = document.createElement("dusk-gas-editor");
-  gasEditor.amountLux = d.amountLux;
-  gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-
   // The network's gas price by default; Custom fee for gas of your own.
-  useNetworkGas({
-    customGas: ov?.customGas,
+  const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
+    kind: TX_KIND.TRANSFER,
+    gasOpts: { privacy },
+    amountLux: d.amountLux,
+    ov,
     actions,
-    defaultLimit,
-    fallbackPrice,
     gas: d?.gas,
-    gasEditor,
-    minLimit: getMinimumGas(TX_KIND.TRANSFER, { privacy })?.limit,
   });
-
-  // Gas that won't do says so above Confirm; nothing is sent.
-  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
 
   confirmBtn.addEventListener("click", async () => {
     if (nothingArrives) return;
-    let gas;
-    try {
-      gas = gasEditor.readFinalGas();
-    } catch (e) {
-      confirmError.textContent = e?.message ?? String(e);
-      confirmError.hidden = false;
-      return;
-    }
-    confirmError.hidden = true;
+    const gas = readGas();
+    if (gas === false) return;
     confirmBtn.disabled = true;
 
     // Persist edits so Back/forward keeps them, on this review's own draft.
@@ -1127,14 +1117,14 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       h("div", { class: "group" }, [
         kv("To", h("span", { class: "review-to" }, [toNames, h("span", { class: "mono review-to__address", text: toAddr })]), "kv--wrap"),
         kv("From", h("span", {}, [fromName, h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
-        d.memo ? kv(service ? `Recipient on ${service.short}` : "Memo", d.memo, "kv--wrap") : null,
+        d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", d.memo, "kv--wrap") : null,
       ].filter(Boolean)),
       ...serviceNotes
         .filter((n) => n.kind !== "fee")
         .map((n) => h("div", { class: "callout warn", role: "note" }, [h("div", { class: "callout-title", text: n.title }), h("div", { class: "muted", text: n.text })])),
       service && !service.recipientOk
         ? h("div", { class: "callout warn", role: "note" }, [
-            h("div", { class: "callout-title", text: `The memo isn't an address on ${service.short}` }),
+            h("div", { class: "callout-title", text: `The memo isn't an address on ${service.chain}` }),
             h("div", { class: "muted", text: "The bridge pays out to the address in the memo. Go back and check it." }),
           ])
         : null,

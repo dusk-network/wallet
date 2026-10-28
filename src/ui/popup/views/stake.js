@@ -1,3 +1,6 @@
+import { sozuRateEstimate } from "@dusk-network/networks/rates";
+import { feePercent } from "@dusk-network/networks/sozu";
+
 import {
   UI_DISPLAY_DECIMALS,
   formatDusk,
@@ -9,10 +12,11 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
+import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
-import { shortAddress } from "../../lib/strings.js";
+import { ratePercent, shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -20,7 +24,7 @@ import { amountField } from "../../components/AmountField.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
-import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { publicStakeLine, sozuLiquidStakingView } from "./sozu.js";
 import { sendFromReview } from "./sent.js";
@@ -421,6 +425,45 @@ export function stakeFormView(ov, { state, actions } = {}) {
   return stakingOverview(ov, ctx, { state, actions });
 }
 
+// What each way of staking pays a year, beside the choice: native staking's
+// estimate across the network (one read of the node a day, rewardRate.js)
+// and Sozu's after its fee on rewards, as its status reads it. Asked once a
+// popup, node and network (a custom node's once its chain ID is read too),
+// and drawn again when the answers come.
+function rewardRates(ov, { state, actions }) {
+  const nodeUrl = String(ov?.nodeUrl ?? "");
+  const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
+  const ofNetwork = (status) => (status?.networkKey === networkKey ? status : null);
+  // Sozu's status as Liquid staking read it last, while it's this network's.
+  const held = ofNetwork(state.sozu?.status)?.fees?.reward ?? null;
+  const key = `${networkKey} ${nodeUrl}`;
+  if (state.rewardRates?.key !== key) {
+    const rates = (state.rewardRates = { key, native: null, sozuFee: null });
+    const result = (res) => (res?.error ? null : res?.result ?? null);
+    const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
+    Promise.all([
+      Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_REWARD_RATE" })).then(result, () => null),
+      held ??
+        Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: idx })).then(
+          (res) => ofNetwork(result(res))?.fees?.reward ?? null,
+          () => null
+        ),
+    ]).then(([native, sozuFee]) => {
+      if (state.rewardRates !== rates) return;
+      Object.assign(rates, { native: typeof native === "number" ? native : null, sozuFee });
+      if (rates.native !== null) actions?.render?.().catch(() => {});
+    });
+  }
+  // Sozu's fee as Liquid staking read it last, else as asked here.
+  const sozuFee = held ?? state.rewardRates.sozuFee;
+  const native = state.rewardRates.native;
+  const sozu = native !== null && sozuFee ? sozuRateEstimate(native, sozuFee) : null;
+  return {
+    native: native !== null ? `About ${ratePercent(native)} a year lately, across the network. Not promised.` : null,
+    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year after Sozu's ${feePercent(sozuFee, "en")}` : null,
+  };
+}
+
 function stakingOverview(ov, ctx, { state, actions }) {
   const { st, minLux, positions, pos, hidden, feeGas } = ctx;
   const onBack = () => {
@@ -480,20 +523,23 @@ function stakingOverview(ov, ctx, { state, actions }) {
     ...reasons.map((reason) => h("div", { class: "stake-cap", text: reason })),
   ].filter(Boolean));
 
-  // Two equal choices; neither is picked for you.
+  // Two equal choices; neither is picked for you. Each says about what it
+  // pays a year, once that's read.
+  const rates = rewardRates(ov, { state, actions });
   const choices = h("div", { class: "group stake-choices" }, [
     listRow({
       icon: "server",
       title: "Native staking",
-      subs: pos.hasStake
-        ? ["Add to your stake", "Needs your own Dusk node"]
-        : [`Minimum ${fmtLux(minLux)} DUSK`, "Needs your own Dusk node"],
+      subs: [
+        ...(pos.hasStake ? ["Add to your stake", "Needs your own Dusk node"] : [`Minimum ${fmtLux(minLux)} DUSK`, "Needs your own Dusk node"]),
+        rates.native,
+      ],
       onClick: () => setScreen(st, SCREEN_NATIVE, actions),
     }),
     listRow({
       icon: "drop",
       title: ["Liquid staking", h("span", { class: "tag", text: "Sozu · third party" })],
-      subs: ["Any amount · No node needed", "You get stDUSK for your share"],
+      subs: ["Any amount · No node needed", "You get stDUSK for your share", rates.sozu],
       onClick: () => setScreen(st, SCREEN_LIQUID, actions),
     }),
   ]);
@@ -814,26 +860,14 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
   const gasPrivacy = d.payment === FUNDING_SHIELDED ? "shielded" : "public";
-  const defaultGas = getDefaultGas(kind, { privacy: gasPrivacy });
-  const defaultLimit =
-    defaultGas?.limit !== undefined && defaultGas?.limit !== null ? String(defaultGas.limit) : "";
-  const fallbackPrice =
-    defaultGas?.price !== undefined && defaultGas?.price !== null ? String(defaultGas.price) : "";
-
-  const gasEditor = document.createElement("dusk-gas-editor");
-  gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
-  gasEditor.amountLux = kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0";
-  gasEditor.setGas(d?.gas ?? null);
-
   // The network's gas price by default; Custom fee for gas of your own.
-  useNetworkGas({
-    customGas: ov?.customGas,
+  const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
+    kind,
+    gasOpts: { privacy: gasPrivacy },
+    amountLux: kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0",
+    ov,
     actions,
-    defaultLimit,
-    fallbackPrice,
     gas: d?.gas,
-    gasEditor,
-    minLimit: getMinimumGas(kind, { privacy: gasPrivacy })?.limit,
   });
 
   // What moves: the amount staked, or all of the stake or the rewards. The
@@ -848,19 +882,9 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   const line =
     kind === TX_KIND.STAKE ? "Native staking" : kind === TX_KIND.UNSTAKE ? "Back to your public balance" : "To your public balance";
 
-  // Gas that won't do says so above Confirm; nothing is sent.
-  const confirmError = h("div", { class: "field-error", role: "alert", hidden: true });
-
   confirmBtn.addEventListener("click", async () => {
-    let gas;
-    try {
-      gas = gasEditor.readFinalGas();
-    } catch (e) {
-      confirmError.textContent = e?.message ?? String(e);
-      confirmError.hidden = false;
-      return;
-    }
-    confirmError.hidden = true;
+    const gas = readGas();
+    if (gas === false) return;
     confirmBtn.disabled = true;
     d.gas = gas;
     const params = {
