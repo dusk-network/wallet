@@ -16,7 +16,8 @@ export const STORAGE_KEYS = {
   TXS: "dusk_txs_v1", // { [hash]: { origin, nodeUrl, kind, submittedAt, status, error? } }
   TXS_EPOCH: "dusk_txs_epoch_v1", // number: how many times TXS was cleared for a wallet reset
   ACCOUNT_NAMES: "dusk_account_names_v1", // { [walletId]: { [profileIndex]: string } }
-  ADDRESS_BOOK: "dusk_addressbook_v1", // { [id]: { id, name, address, type, createdAt, updatedAt } }
+  ADDRESS_BOOK: "dusk_addressbook_v1", // contacts in plain text, from before CONTACTS; moved there on unlock
+  CONTACTS: "dusk_contacts_v2", // { [walletPlace]: { v, iv, data } }: each wallet's contacts, encrypted (contactsCrypto.js)
   ASSETS: "dusk_assets_v1", // { [walletId]: { [networkKey]: { [profileIndex]: { tokens: [], nfts: [] } } } }
   NETWORK_STATUS: "dusk_network_status_v1", // { nodeStatus, proverStatus, archiverStatus, lastChecked, errors }
   AUTO_LOCK_ACTIVITY: "dusk_auto_lock_activity_v1", // { lastActivityAt }

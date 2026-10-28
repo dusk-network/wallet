@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added Export to Activity: the rows listed as a CSV file with the web wallet's columns, your contact names only when asked.
 - Showed a site's payment to the bridge's account as a bridge to BNB Smart Chain, or Ethereum (Sepolia) on Testnet, with the memo as the recipient there, and a warning when the memo isn't an address there.
 - Said at the top of a test network, in the popup, the full view and site approvals, that test DUSK has no value.
 - Read the DuskEVM bridge's deposit, prove and claim calls on Testnet in their approvals: amount and recipient, marked as a known bridge call.
@@ -41,6 +42,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Showed a deposit to DuskEVM as To its DuskEVM address in Activity and its details, with Copy, and listed bridge transfers under Sent and Received.
+- Put the test network strip across the top of the full view, and kept it and the sidebar in place as the page scrolls.
+- Asked to unlock before showing Contacts.
 - Set section heads and balance labels in small capitals, the heads between grey brackets.
 - Showed links and a transaction's ID in blue.
 - Set addresses, IDs and block heights in Söhne Mono.
@@ -110,12 +114,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Security
 
+- Encrypted contacts with a key only the unlocked wallet has, kept apart for each wallet, and moved plain ones in on the first unlock.
+- Deleted contacts on Reset wallet, and started a new or imported wallet with none.
 - Rejected non-integer and out-of-u8-range profile indices before BLS key derivation. ([#117])
 - Pinned direct Noble dependencies to exact reviewed versions. ([#22])
 - Typed-data signatures cover a domain-separated message rather than the bare 32-byte digest, so they cannot be produced by, or replayed as, a signature over a caller-supplied digest.
 
 ### Fixed
 
+- Underlined links inside a sentence, such as sozu.fi and How native staking works.
 - Fixed links sitting higher than the section head beside them.
 - Hid controls that showed while hidden: Review's Use the network's price, Max on an empty Send, and Settings' custom gas fields when off.
 - Kept a profile label being typed when Settings redraws, and saved it when the field is left.

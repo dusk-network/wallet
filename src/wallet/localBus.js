@@ -21,7 +21,8 @@ import {
   waitForTxExecution,
 } from "../shared/txExecution.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
-import { handleUiCommand } from "./uiCommands.js";
+import { engineContactsVault, handleUiCommand } from "./uiCommands.js";
+import { clearContacts, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
   configure,
   getAccounts,
@@ -43,6 +44,8 @@ import {
   getShieldedStatus,
   isUnlocked,
   lock,
+  openContactsRecords,
+  sealContactsRecord,
   sendTransaction,
   selectAccountIndex,
   setShieldedCheckpointNow,
@@ -120,7 +123,11 @@ const localEngineMethods = {
   dusk_setShieldedCheckpointNow: setShieldedCheckpointNow,
   dusk_getShieldedHistory: getShieldedHistory,
   engine_selectAccount: selectAccountIndex,
+  engine_contactsOpen: ({ records }) => openContactsRecords(records),
+  engine_contactsSeal: ({ text }) => sealContactsRecord(text),
 };
+
+const localEngineCall = (method, params) => localEngineMethods[method](params ?? {});
 
 /**
  * @param {any} message
@@ -128,7 +135,7 @@ const localEngineMethods = {
 export async function localSend(message) {
   try {
     const common = await handleUiCommand(message, {
-      engineCall: (method, params) => localEngineMethods[method](params ?? {}),
+      engineCall: localEngineCall,
       ensureEngineConfigured,
       getEngineStatus: engineStatus,
     });
@@ -141,6 +148,9 @@ export async function localSend(message) {
         const mnemonic = await unlockVault(message.password);
         await ensureEngineConfigured();
         await unlockWithMnemonic(mnemonic);
+        // Contacts kept in plain text before they were encrypted move into
+        // this wallet's record (background/index.js does the same).
+        await moveLegacyContacts(engineContactsVault(localEngineCall)).catch(() => {});
         return { ok: true, accounts: getAccounts() };
       });
     }
@@ -182,6 +192,8 @@ export async function localSend(message) {
         }
         // A reset that couldn't clear the old wallet's data finishes first.
         await finishPendingReset();
+        // A new wallet starts with no contacts: any kept here are another's.
+        await clearContacts();
         await createVault(mnemonic, password);
         await ensureEngineConfigured();
         await unlockWithMnemonic(String(mnemonic));

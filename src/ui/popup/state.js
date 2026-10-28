@@ -8,6 +8,38 @@ export const ONBOARD_ROUTES = new Set([
   "onboard_import",
 ]);
 
+/**
+ * The address book's state with nothing of any wallet in it: no contacts
+ * read, no form filled in.
+ */
+export function emptyAddressBook() {
+  return {
+    // "manage" | "pick"
+    mode: "manage",
+    // route to return to when exiting contacts
+    fromRoute: null,
+    // When picking, which route to return to after selecting
+    pickReturnRoute: null,
+    // Prefill values when adding a new contact
+    prefillAddress: "",
+    prefillName: "",
+    // UI state
+    view: "list", // "list" | "detail" | "edit"
+    query: "",
+    loaded: false,
+    loading: false,
+    error: null,
+    items: null,
+    detailId: null,
+    // edit form
+    editId: null,
+    editReturnView: "list",
+    editName: "",
+    editAddress: "",
+    editShielded: false,
+  };
+}
+
 export const state = {
   // home | send | confirm | convert | convert_confirm | stake | stake_confirm | sozu_confirm
   // | asset_add_token | asset_add_nft | asset_token | asset_token_confirm | asset_nft
@@ -87,29 +119,9 @@ export const state = {
     amountDusk: "", // Optional amount encoded into receive QR / request link
     memo: "", // Optional memo/message included in request link
   },
-  addressBook: {
-    // "manage" | "pick"
-    mode: "manage",
-    // route to return to when exiting contacts
-    fromRoute: null,
-    // When picking, which route to return to after selecting
-    pickReturnRoute: null,
-    // Prefill value when adding a new contact
-    prefillAddress: "",
-    // UI state
-    view: "list", // "list" | "detail" | "edit"
-    query: "",
-    loaded: false,
-    loading: false,
-    error: null,
-    items: null,
-    detailId: null,
-    // edit form
-    editId: null,
-    editReturnView: "list",
-    editName: "",
-    editAddress: "",
-  },
+  addressBook: emptyAddressBook(),
+  // The wallet the address book's state is of: its first public account.
+  contactsWallet: "",
   needsRefresh: true,
   lastOrigin: null,
 };

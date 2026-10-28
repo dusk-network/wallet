@@ -14,11 +14,14 @@
 // aliases, and a run makes a bounded number of them; the next one carries on.
 //
 // Times, outcomes and fees come from one aliased `tx(hash:)` request per 50
-// entries. The shielded history is phoenixHistory.js's.
+// entries, with a deposit to DuskEVM's call arguments, which name the DuskEVM
+// address it paid. The shielded history is phoenixHistory.js's.
 
 import { fetchWithTimeout } from "./networkStatus.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
 import { TX_KIND } from "./constants.js";
+import { depositsToBridge } from "./bridge.js";
+import { depositRecipientOf } from "./bridgeCalls.js";
 import * as defaultStore from "./activityStore.js";
 
 export const TRANSFER_CONTRACT = "0100000000000000000000000000000000000000000000000000000000000000";
@@ -538,7 +541,7 @@ async function syncOnce({
     // come at once, before the run reads further down.
     if (entries.length && added === entries.length && detailsLeft > 0) {
       detailsLeft -= 1;
-      await fillDetails({ url, ownerKey, store, epoch, maxRequests: 1, onStep: () => onStep?.(meta) });
+      await fillDetails({ url, nodeUrl, ownerKey, store, epoch, maxRequests: 1, onStep: () => onStep?.(meta) });
     }
   };
 
@@ -615,7 +618,7 @@ async function syncOnce({
     );
   }
 
-  await fillDetails({ url, ownerKey, store, epoch, maxRequests: detailsLeft, onStep: () => onStep?.(meta) });
+  await fillDetails({ url, nodeUrl, ownerKey, store, epoch, maxRequests: detailsLeft, onStep: () => onStep?.(meta) });
   return { meta, requests: Math.max(1, Math.floor(maxRequests)) - budget.left, added };
 }
 
@@ -624,19 +627,31 @@ async function syncOnce({
 // ---------------------------------------------------------------------------
 
 /**
+ * Whether a kept entry's details are still to look up: it has none, or it is
+ * a deposit to DuskEVM whose DuskEVM address wasn't read yet.
+ * @param {{ detailsAt?: number, bridgeTo?: string|null, counterparty?: string|null, contractId?: string }} entry
+ * @param {string} nodeUrl
+ */
+export const needsDetails = (entry, nodeUrl) =>
+  !entry?.detailsAt || (entry.bridgeTo === undefined && depositsToBridge(entry, nodeUrl));
+
+/**
  * Times, outcomes, fees and calls of transactions, from one aliased request:
- * by hash, for those the node has.
+ * by hash, for those the node has. For the hashes in `args`, deposits to
+ * DuskEVM, the call's arguments too, read for the DuskEVM address it paid:
+ * `bridgeTo`, null when they don't name one.
  * @param {string} url
  * @param {string[]} hashes - at most DETAILS_BATCH
+ * @param {{ nodeUrl?: string, args?: Set<string> }} [opts]
  * @returns {Promise<Map<string, object>>}
  */
-export async function fetchTxDetails(url, hashes) {
+export async function fetchTxDetails(url, hashes, { nodeUrl, args = new Set() } = {}) {
   const list = hashes.filter((h) => HASH.test(h)).slice(0, DETAILS_BATCH);
   const out = new Map();
   if (!list.length) return out;
   const fields = list.map(
     (hash, i) =>
-      `t${i}: tx(hash: "${hash}") { err gasSpent blockHash blockTimestamp tx { gasPrice gasLimit callData { contractId fnName } } }`
+      `t${i}: tx(hash: "${hash}") { err gasSpent blockHash blockTimestamp tx { gasPrice gasLimit callData { contractId fnName${args.has(hash) ? " data" : ""} } } }`
   );
   const data = await archiveQuery(url, `query { ${fields.join(" ")} }`);
   list.forEach((hash, i) => {
@@ -646,7 +661,11 @@ export async function fetchTxDetails(url, hashes) {
     const gasPrice = u64(tx.tx?.gasPrice);
     const seconds = Number(tx.blockTimestamp);
     const err = tx.err == null ? "" : typeof tx.err === "string" ? tx.err : JSON.stringify(tx.err);
+    const call = tx.tx?.callData;
     out.set(hash, {
+      ...(args.has(hash)
+        ? { bridgeTo: depositRecipientOf({ nodeUrl, contractId: call?.contractId, fnName: call?.fnName, data: call?.data }) }
+        : {}),
       timestamp: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null,
       success: !err,
       error: err || undefined,
@@ -663,15 +682,17 @@ export async function fetchTxDetails(url, hashes) {
   return out;
 }
 
-/** Details for the newest kept entries that have none, a batch per request. */
-async function fillDetails({ url, ownerKey, store, epoch, maxRequests, onStep, entries }) {
+/** Details for the newest kept entries that need them, a batch per request. */
+async function fillDetails({ url, nodeUrl, ownerKey, store, epoch, maxRequests, onStep, entries }) {
   let requests = Math.max(0, Math.floor(maxRequests));
   if (!requests) return;
-  const missing = (entries ?? (await store.listActivityEntries(ownerKey, { limit: DETAILS_BATCH * requests })))
-    .filter((e) => !e.detailsAt)
-    .map((e) => e.hash);
+  const due = (entries ?? (await store.listActivityEntries(ownerKey, { limit: DETAILS_BATCH * requests }))).filter((e) =>
+    needsDetails(e, nodeUrl)
+  );
+  const missing = due.map((e) => e.hash);
+  const args = new Set(due.filter((e) => depositsToBridge(e, nodeUrl)).map((e) => e.hash));
   for (let i = 0; i < missing.length && requests > 0; i += DETAILS_BATCH, requests--) {
-    const details = await fetchTxDetails(url, missing.slice(i, i + DETAILS_BATCH));
+    const details = await fetchTxDetails(url, missing.slice(i, i + DETAILS_BATCH), { nodeUrl, args });
     // A transaction the node doesn't have yet is looked up again next time.
     await store.patchActivityEntries(ownerKey, details, epoch);
     onStep?.();
@@ -687,9 +708,9 @@ async function fillDetails({ url, ownerKey, store, epoch, maxRequests, onStep, e
 export async function fillActivityDetails({ nodeUrl, archiverUrl, account, entries, store = defaultStore, epoch: seen }) {
   const url = historyArchiverUrl({ nodeUrl, archiverUrl });
   const ownerKey = store.activityOwnerKey(activityNetworkKey(nodeUrl), account);
-  const missing = entries.filter((e) => !e.detailsAt);
+  const missing = entries.filter((e) => needsDetails(e, nodeUrl));
   const epoch = seen ?? (await store.getActivityEpoch());
-  await fillDetails({ url, ownerKey, store, epoch, entries: missing, maxRequests: Math.ceil(missing.length / DETAILS_BATCH) });
+  await fillDetails({ url, nodeUrl, ownerKey, store, epoch, entries: missing, maxRequests: Math.ceil(missing.length / DETAILS_BATCH) });
 }
 
 // ---------------------------------------------------------------------------
@@ -720,6 +741,8 @@ export function activityEntry(row) {
     blockHash: row.blockHash,
     fnName: row.fnName,
     contractId: row.contractId,
+    // A deposit to DuskEVM's address there: undefined until its call is read, null when it names none.
+    bridgeTo: row.bridgeTo,
     detailsAt: row.detailsAt,
   };
 }

@@ -24,6 +24,8 @@ import {
   getShieldedStatus,
   isUnlocked,
   lock,
+  openContactsRecords,
+  sealContactsRecord,
   sendTransaction,
   selectAccountIndex,
   signAuth,
@@ -264,6 +266,16 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
           sendResponse({ id, result: true });
           return;
         }
+
+        // The contacts' key stays here: the background, which keeps the
+        // records, asks for them opened and sealed (contactsStore.js).
+        case "engine_contactsOpen":
+          sendResponse({ id, result: await openContactsRecords(params?.records) });
+          return;
+
+        case "engine_contactsSeal":
+          sendResponse({ id, result: await sealContactsRecord(params?.text) });
+          return;
 
         case "engine_recipientName": {
           // The .dusk name of the recipient of a site's request to send, for

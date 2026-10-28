@@ -46,6 +46,7 @@ import {
   putNotesMap,
   putShieldedMeta,
 } from "./shieldedStore.js";
+import { contactsNamespace, deriveContactsKey, openContacts, sealContacts } from "./contactsCrypto.js";
 import { activityNetworkKey, assertArchive, historyArchiverUrl } from "./activityHistory.js";
 import {
   StaleActivityError,
@@ -529,6 +530,9 @@ const state = {
   bookkeeper: null,
   treasuryAll: null,
   bookkeeperAll: null,
+  // The contacts' key and place, made from the seed when first needed:
+  // { generation, keys: Promise<{ key, namespace }> }. Gone on lock.
+  contacts: null,
   protocolLoaded: false,
   drivers: {
     registry: null,
@@ -757,6 +761,7 @@ function clearWalletState() {
     } catch {}
   }
   state.seed = null;
+  state.contacts = null;
   state.profiles = [];
   state.profileGenerator = null;
   state.currentIndex = 0;
@@ -785,6 +790,67 @@ function clearWalletState() {
 export function lock() {
   unlockGeneration += 1;
   clearWalletState();
+}
+
+// ---------------------------------------------------------------------------
+// Contacts: their key comes from the seed and stays here (contactsCrypto.js)
+// ---------------------------------------------------------------------------
+
+// This wallet's contacts key and place, made once per unlock, with the
+// unlock and the wallet they were made for.
+function contactsKeys() {
+  if (!state.unlocked || !state.seed) throw new Error("Wallet locked");
+  if (state.contacts?.generation !== unlockGeneration) {
+    const seed = state.seed.slice();
+    const walletId = getWalletId();
+    state.contacts = {
+      generation: unlockGeneration,
+      keys: Promise.all([deriveContactsKey(seed), contactsNamespace(walletId)])
+        .then(([key, namespace]) => ({ key, namespace, walletId }))
+        .finally(() => seed.fill(0)),
+    };
+  }
+  const { generation, keys } = state.contacts;
+  return keys.then((made) => {
+    // Locked, or another wallet unlocked, while the key was being made.
+    assertContactsSession(generation, made.walletId);
+    return { ...made, generation };
+  });
+}
+
+// Still the unlock and the wallet a contacts key was made for: checked
+// again after each encryption and decryption, so a lock meanwhile returns
+// nothing they made.
+function assertContactsSession(generation, walletId) {
+  if (!state.unlocked || generation !== unlockGeneration || getWalletId() !== walletId) throw new Error("Wallet locked");
+}
+
+/**
+ * This wallet's contacts, from the records kept: its place, and its own
+ * record's text, or null when it has none. A record that doesn't open with
+ * this wallet's key throws, as does a lock before the text is returned.
+ * @param {Record<string, object>} records - by place
+ * @returns {Promise<{ namespace: string, text: string|null }>}
+ */
+export async function openContactsRecords(records) {
+  const { key, namespace, walletId, generation } = await contactsKeys();
+  const record = records && typeof records === "object" && Object.hasOwn(records, namespace) ? records[namespace] : null;
+  const text = record ? await openContacts(key, namespace, record) : null;
+  assertContactsSession(generation, walletId);
+  return { namespace, text };
+}
+
+/**
+ * This wallet's contacts, encrypted for keeping at its place. A lock before
+ * the record is returned throws.
+ * @param {string} text
+ * @returns {Promise<{ namespace: string, record: object }>}
+ */
+export async function sealContactsRecord(text) {
+  const { key, namespace, walletId, generation } = await contactsKeys();
+  const record = await sealContacts(key, namespace, String(text ?? ""));
+  assertContactsSession(generation, walletId);
+  return { namespace, record };
 }
 
 /**

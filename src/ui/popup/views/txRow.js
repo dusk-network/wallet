@@ -14,13 +14,16 @@ import { listAddressBook } from "../../../shared/addressBook.js";
 import { SOZU_FN } from "../../../shared/sozuAdapter.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { shortAddress } from "../../lib/strings.js";
+import { shortAddress, truncateMiddle } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
 import { MONTHS, clockText, dateText } from "../../lib/time.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
 
 export const MINUS = "−";
+
+/** A DuskEVM address as EVM wallets and the approval window shorten it: "0xAB84…C86F". */
+export const shortEvmAddress = (address) => truncateMiddle(String(address ?? ""), 6, 4);
 
 /** Activity's filters, in order. */
 export const ACTIVITY_FILTERS = Object.freeze([
@@ -160,22 +163,25 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const named = kind === TX_KIND.CONTRACT_CALL ? knownCall({ contractId: tx?.contractId, fnName: fn, nodeUrl: tx?.nodeUrl || nodeUrl }) : null;
   if (bridge) {
     const value = tx?.amount ?? tx?.deposit;
-    // A deposit's DuskEVM address, as the wallet read it from the call it approved.
+    // A deposit's DuskEVM address, read from its call: the one the wallet
+    // approved, or the chain's record of it.
     const evm = /^0x[0-9a-fA-F]{40}$/.test(String(tx?.bridgeTo ?? "")) ? String(tx.bridgeTo) : null;
+    // DUSK that left for DuskEVM is under Sent too, and DUSK back from it under Received.
     d =
       bridge === "to"
         ? {
             icon: "bridge",
             category: "bridge",
-            lead: "Bridge",
-            name: "To DuskEVM",
-            word: "Bridge",
+            alsoUnder: "sent",
+            lead: evm ? "Bridge to DuskEVM" : "Bridge",
+            name: evm ? `To ${shortEvmAddress(evm)}` : "To DuskEVM",
+            word: evm ? "Bridge to DuskEVM" : "Bridge",
             address: evm,
             evm: Boolean(evm),
             amount: dusk(positive(tx?.deposit) ? tx.deposit : value, MINUS),
           }
         : bridge === "from"
-        ? { icon: "bridge", category: "bridge", lead: "Bridge", name: "From DuskEVM", word: "Bridge", amount: dusk(value, "+") }
+        ? { icon: "bridge", category: "bridge", alsoUnder: "received", lead: "Bridge", name: "From DuskEVM", word: "Bridge", amount: dusk(value, "+") }
         : {
             icon: "bridge",
             category: "bridge",
@@ -294,6 +300,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     isAddress: false,
     evm: false,
     generic: false,
+    alsoUnder: "",
     ...d,
     note: String(tx?.privacy ?? "").toLowerCase() === "shielded" && kind !== TX_KIND.SHIELD && kind !== TX_KIND.UNSHIELD ? "Shielded" : "",
     status,
@@ -306,10 +313,18 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   };
 }
 
-/** Whether a row shows under an Activity filter. */
+/** Whether a row shows under an Activity filter: its own, or one it also counts under. */
 export function inFilter(desc, filter) {
   if (!filter || filter === "all") return true;
-  return desc.category === filter;
+  return desc.category === filter || desc.alsoUnder === filter;
+}
+
+/**
+ * A row's name for h(): a deposit to DuskEVM's "To 0x5A3d…8a01", its
+ * address in mono, else the name as it is.
+ */
+export function nameParts(desc) {
+  return desc.evm ? ["To ", h("span", { class: "mono", text: shortEvmAddress(desc.address) })] : [desc.name];
 }
 
 /** The amount as text, "−25 DUSK", or "•••• DUSK" while balances are hidden. */
@@ -450,12 +465,18 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
     h("div", { class: "row-main" }, [
       h("div", { class: "tx-name-line" }, [
         h("button", { class: "tx-open", type: "button", "aria-label": label, onclick: open }, [
-          h("span", { class: desc.isAddress ? "tx-name mono" : "tx-name", title: desc.isAddress ? desc.address : undefined }, [
-            desc.name,
+          h("span", { class: desc.isAddress ? "tx-name mono" : "tx-name", title: desc.isAddress || desc.evm ? desc.address : undefined }, [
+            ...nameParts(desc),
             desc.alias ? h("span", { class: "tx-alias", text: ` · ${desc.alias}` }) : null,
           ]),
         ]),
-        desc.isAddress ? copyButton(desc.address, { showToast: actions?.showToast, className: "copy-ico tx-copy" }) : null,
+        desc.isAddress || desc.evm
+          ? copyButton(desc.address, {
+              label: desc.evm ? "Copy DuskEVM address" : "Copy address",
+              showToast: actions?.showToast,
+              className: "copy-ico tx-copy",
+            })
+          : null,
       ].filter(Boolean)),
       // The button's name says these already.
       sub ? subEl(desc, when(tx)) : null,

@@ -408,3 +408,61 @@ describe("historyArchiverUrl", () => {
     expect(history.historyArchiverUrl({ nodeUrl: testnet })).toBe(testnet);
   });
 });
+
+// Recorded on Testnet: alice.dusk's deposit of 0.5 DUSK to DuskEVM.
+describe("a deposit to DuskEVM", async () => {
+  const deposit = (await import("./fixtures/duskevm-deposit-history.json")).default;
+  const { BRIDGE_CONTRACTS } = await import("./bridge.js");
+  const HASH = deposit.entry.origin;
+  const H = deposit.entry.block_height;
+  const accounts = { [deposit.account]: { sender: [deposit.entry], receiver: [] } };
+  const details = { ...fixture.details, ...deposit.details };
+
+  it("keeps the DuskEVM address it paid, read from its call, whose arguments are asked of it alone", async () => {
+    const node = fakeArchive({ accounts: { ...fixture.accounts, ...accounts }, details, finalized: H + 100 });
+    await history.syncActivity({ nodeUrl: NODE, account: deposit.account });
+    const { entries } = await history.readActivity({ nodeUrl: NODE, account: deposit.account });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ hash: HASH, counterparty: BRIDGE_CONTRACTS.testnet.bridge, success: true, bridgeTo: deposit.recipient });
+    const asked = node.detailQueries().map((l) => l.query).join("\n");
+    expect(asked).toContain(`tx(hash: "${HASH}") { err gasSpent blockHash blockTimestamp tx { gasPrice gasLimit callData { contractId fnName data } } }`);
+
+    // Another account's transfers and calls: no arguments asked.
+    node.log.length = 0;
+    await sync(B);
+    expect(node.detailQueries().length).toBeGreaterThan(0);
+    expect(node.detailQueries().some((l) => /callData \{[^}]*\bdata\b/.test(l.query))).toBe(false);
+  });
+
+  it("reads it once for a deposit kept before the wallet read them, and not again when its call names none", async () => {
+    const node = fakeArchive({ accounts, details, finalized: H + 100 });
+    // Kept with its details, but not its DuskEVM address.
+    const kept = { ...history.parseHistoryEntry(deposit.account, deposit.entry), detailsAt: 1, success: true };
+    expect(history.needsDetails(kept, NODE)).toBe(true);
+    const ownerKey = store.activityOwnerKey("testnet", deposit.account);
+    await store.commitActivityStep(ownerKey, [{ ...kept, value: kept.value.toString() }], () => ({ covered: [[0, H + 90]], target: H + 90 }));
+    await history.fillActivityDetails({ nodeUrl: NODE, account: deposit.account, entries: [kept] });
+    const [entry] = await store.listActivityEntries(ownerKey);
+    expect(entry.bridgeTo).toBe(deposit.recipient);
+    expect(history.needsDetails(entry, NODE)).toBe(false);
+
+    // A deposit call that doesn't decode: looked up, and left so.
+    const broken = { ...details, [HASH]: { ...details[HASH], tx: { ...details[HASH].tx, callData: { ...details[HASH].tx.callData, data: "00ff" } } } };
+    fakeArchive({ accounts, details: broken, finalized: H + 100 });
+    const read = await history.fetchTxDetails(NODE, [HASH], { nodeUrl: NODE, args: new Set([HASH]) });
+    expect(read.get(HASH).bridgeTo).toBeNull();
+    expect(history.needsDetails({ ...kept, bridgeTo: null }, NODE)).toBe(false);
+    expect(node.detailQueries()).toHaveLength(1);
+  });
+
+  it("needs its details while it has none, or its address isn't read, on a network with the bridge", () => {
+    const bridge = BRIDGE_CONTRACTS.testnet.bridge;
+    expect(history.needsDetails({ counterparty: "other" }, NODE)).toBe(true);
+    expect(history.needsDetails({ detailsAt: 1, counterparty: "other" }, NODE)).toBe(false);
+    expect(history.needsDetails({ detailsAt: 1, counterparty: bridge }, NODE)).toBe(true);
+    expect(history.needsDetails({ detailsAt: 1, contractId: bridge }, NODE)).toBe(true);
+    expect(history.needsDetails({ detailsAt: 1, counterparty: bridge, bridgeTo: null }, NODE)).toBe(false);
+    // Mainnet has no bridge yet.
+    expect(history.needsDetails({ detailsAt: 1, counterparty: bridge }, "https://nodes.dusk.network")).toBe(false);
+  });
+});

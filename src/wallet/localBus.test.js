@@ -1,7 +1,16 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A" }));
+
+// The engine's contacts key for the unlocked wallet, made as walletEngine.js
+// makes it: from its seed (here, a hash of its phrase), at its own place.
+async function contactsKeys() {
+  if (!engine.unlocked) throw new Error("Wallet locked");
+  const { contactsNamespace, deriveContactsKey } = await import("../shared/contactsCrypto.js");
+  const seed = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(engine.wallet)));
+  return { key: await deriveContactsKey(seed), namespace: await contactsNamespace(`account of ${engine.wallet}`) };
+}
 
 // The wallet engine without the network: a transfer just gets its hash.
 vi.mock("../shared/walletEngine.js", () => ({
@@ -29,6 +38,21 @@ vi.mock("../shared/walletEngine.js", () => ({
   isUnlocked: () => engine.unlocked,
   lock: () => {
     engine.unlocked = false;
+  },
+  unlockWithMnemonic: async (mnemonic) => {
+    engine.wallet = mnemonic;
+    engine.unlocked = true;
+  },
+  openContactsRecords: async (records) => {
+    const { openContacts } = await import("../shared/contactsCrypto.js");
+    const { key, namespace } = await contactsKeys();
+    const record = Object.hasOwn(records, namespace) ? records[namespace] : null;
+    return { namespace, text: record ? await openContacts(key, namespace, record) : null };
+  },
+  sealContactsRecord: async (text) => {
+    const { sealContacts } = await import("../shared/contactsCrypto.js");
+    const { key, namespace } = await contactsKeys();
+    return { namespace, record: await sealContacts(key, namespace, text) };
   },
   getAccounts: () => ["acct0"],
   getSelectedAccountIndex: () => 0,
@@ -61,6 +85,7 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   engine.sendTransaction.mockReset();
   engine.unlocked = true;
+  engine.wallet = "wallet A";
 });
 
 afterEach(() => {
@@ -145,3 +170,63 @@ describe("a wallet reset", () => {
     expect(await activity.getActivityEpoch()).toBe(epoch);
   });
 });
+
+describe("contacts", () => {
+  const LABEL = "Alice (landlord, private)";
+  const contacts = async (message) => {
+    const { localSend } = await import("./localBus.js");
+    const res = await localSend({ type: "DUSK_UI_CONTACTS", ...message });
+    if (res.error) throw new Error(res.error.message);
+    return res.result;
+  };
+  // What this browser keeps, as text.
+  const kept = () => JSON.stringify(Object.fromEntries(Array.from({ length: localStorage.length }, (_, i) => [localStorage.key(i), localStorage.getItem(localStorage.key(i))])));
+  // Contacts in plain text, as a wallet before this one kept them.
+  const leavePlain = (entries) =>
+    localStorage.setItem("dusk_addressbook_v1", JSON.stringify(Object.fromEntries(entries.map((e) => [e.id, e]))));
+
+  it("are kept encrypted, and a reset deletes them", async () => {
+    const { localSend } = await import("./localBus.js");
+    await contacts({ op: "upsert", entry: { name: LABEL, address: ACCOUNT } });
+    expect(kept()).not.toContain("landlord");
+    expect(kept()).not.toContain(ACCOUNT.slice(0, 16));
+    expect((await contacts({ op: "list" })).map((e) => e.name)).toEqual([LABEL]);
+
+    await expect(localSend({ type: "DUSK_UI_RESET_WALLET" })).resolves.toEqual({ ok: true });
+    expect(localStorage.getItem("dusk_contacts_v2")).toBeNull();
+  });
+
+  it("read nothing while the wallet is locked", async () => {
+    await contacts({ op: "upsert", entry: { name: LABEL, address: ACCOUNT } });
+    engine.unlocked = false;
+    await expect(contacts({ op: "list" })).rejects.toThrow("Wallet locked");
+  });
+
+  it("start with none in a new wallet, even when an older one left plain ones here", async () => {
+    const { localSend } = await import("./localBus.js");
+    await contacts({ op: "upsert", entry: { name: LABEL, address: ACCOUNT } });
+    await localSend({ type: "DUSK_UI_RESET_WALLET" });
+    leavePlain([{ id: "1", name: LABEL, address: ACCOUNT, updatedAt: 1 }]);
+
+    const created = await localSend({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet B", password: "password123" });
+    expect(created).toMatchObject({ ok: true });
+    expect(await contacts({ op: "list" })).toEqual([]);
+    expect(kept()).not.toContain("landlord");
+  });
+
+  it("move from plain text into the wallet's record on the first unlock, and the plain copy goes", async () => {
+    const { localSend } = await import("./localBus.js");
+    await localSend({ type: "DUSK_UI_RESET_WALLET" });
+    await localSend({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet A", password: "password123" });
+    await contacts({ op: "upsert", entry: { id: "2", name: "Bob", address: "addr2" } });
+    await localSend({ type: "DUSK_UI_LOCK" });
+    // Left by the wallet before it was updated.
+    leavePlain([{ id: "1", name: LABEL, address: ACCOUNT, updatedAt: 1 }]);
+
+    await expect(localSend({ type: "DUSK_UI_UNLOCK", password: "password123" })).resolves.toMatchObject({ ok: true });
+    expect(localStorage.getItem("dusk_addressbook_v1")).toBeNull();
+    expect(kept()).not.toContain("landlord");
+    expect((await contacts({ op: "list" })).map((e) => e.name)).toEqual([LABEL, "Bob"]);
+  });
+});
+

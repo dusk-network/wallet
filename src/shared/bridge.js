@@ -37,6 +37,18 @@ const norm = (id) =>
     .replace(/^0x/, "");
 
 /**
+ * Whether a synced history entry paid the bridge's deposit contract on this
+ * network: a deposit to DuskEVM, whose DuskEVM address is in its call.
+ * @param {{ counterparty?: string|null, contractId?: string }} entry
+ * @param {string} nodeUrl
+ * @returns {boolean}
+ */
+export function depositsToBridge(entry, nodeUrl) {
+  const contracts = BRIDGE_CONTRACTS[detectPresetIdFromNodeUrl(String(nodeUrl ?? ""))];
+  return Boolean(contracts) && [entry?.counterparty, entry?.contractId].some((id) => norm(id) === contracts.bridge);
+}
+
+/**
  * What a transaction did through the bridge: "to" DuskEVM (a deposit), "from"
  * DuskEVM (a finalized withdrawal), "call" (a proof, or another call with no
  * DUSK moved), or null when it didn't touch the bridge.

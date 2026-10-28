@@ -1,6 +1,6 @@
 // Popup/Full/Options UI entry.
 import { isPopupView, isFullView } from "./env.js";
-import { state, ONBOARD_ROUTES } from "./state.js";
+import { emptyAddressBook, state, ONBOARD_ROUTES } from "./state.js";
 import { refreshOverview, getActiveOrigin } from "./overview.js";
 import { h, setChildren } from "../lib/dom.js";
 import { createToaster } from "../components/Toast.js";
@@ -13,6 +13,7 @@ import { send as rawSend } from "../../wallet/bus.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
 import { ensureActivity, refreshActivitySoon } from "./activity.js";
+import { saveHandedExport } from "./activityExport.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
@@ -755,6 +756,22 @@ const renderHeader = createHeaderRenderer({
   onExpand,
 });
 
+// Contacts belong to one wallet. A reset, or another wallet unlocked here,
+// starts their state over, a form being filled in included. A lock drops
+// what the page read with their key, which is read again once the same
+// wallet is unlocked.
+function keepContactsToTheirWallet(ov) {
+  const wallet = ov?.isUnlocked ? String(ov?.accounts?.[0] ?? "").trim() : "";
+  const otherWallet = Boolean(wallet && state.contactsWallet && wallet !== state.contactsWallet);
+  if (ov?.hasVault === false || otherWallet) {
+    state.addressBook = emptyAddressBook();
+    state.contactsWallet = "";
+  } else if (!ov?.isUnlocked && (state.addressBook?.items || state.addressBook?.error)) {
+    state.addressBook = { ...state.addressBook, loaded: false, loading: false, error: null, items: null };
+  }
+  if (wallet) state.contactsWallet = wallet;
+}
+
 // --- Main render ----------------------------------------------------------
 export async function render({ forceRefresh = false } = {}) {
   const overviewRefreshed = await refreshOverview(send, { force: forceRefresh });
@@ -770,6 +787,7 @@ export async function render({ forceRefresh = false } = {}) {
   if (overviewRefreshed) {
     await maybeAutoWatchDashboardStDusk(ov);
   }
+  keepContactsToTheirWallet(ov);
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";
   } catch {
@@ -801,12 +819,6 @@ export async function render({ forceRefresh = false } = {}) {
   // TODO: Reconsider?
   if (state.route === "options") {
     setApp(optionsView(ov, { state, actions }));
-    return;
-  }
-
-  // Contacts are also safe to show without unlocking.
-  if (state.route === "contacts") {
-    setApp(addressBookView(ov, { state, actions }));
     return;
   }
 
@@ -914,12 +926,25 @@ export async function render({ forceRefresh = false } = {}) {
     setApp(txDetailsView(ov, { state, actions }));
     return;
   }
+  // Contacts open only unlocked: the wallet's key opens them.
+  if (state.route === "contacts") {
+    setApp(addressBookView(ov, { state, actions }));
+    return;
+  }
 
   // default: home
   setApp(homeView(ov, { state, actions }));
 }
 
 export function mountPopup() {
+  // A tab the popup opened to save its Activity export saves it now.
+  if (!isPopupView) {
+    saveHandedExport()
+      .then((name) => {
+        if (name) showToast("CSV saved");
+      })
+      .catch((e) => showToast(e?.message ?? String(e), 3000));
+  }
   render().catch((e) => {
     setApp([showError(e)]);
   });

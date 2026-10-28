@@ -12,6 +12,7 @@
 
 import {
   fillActivityDetails,
+  needsDetails,
   noteActivityUnavailable,
   readActivity,
   syncActivity,
@@ -285,7 +286,7 @@ export async function showMoreActivity({ state, render }) {
   a.limit += ACTIVITY_PAGE;
   await reload(a).catch(() => {});
   redraw(state, render);
-  const missing = a.entries.filter((e) => !e.detailsAt);
+  const missing = a.entries.filter((e) => needsDetails(e, a.nodeUrl));
   const epoch = await a.epoch;
   if (missing.length && epoch !== undefined) {
     await fillActivityDetails({ nodeUrl: a.nodeUrl, archiverUrl: a.archiverUrl, account: a.account, entries: missing, epoch }).catch(
@@ -306,8 +307,8 @@ const detailLoads = new Map();
 
 /**
  * The time, outcome and fee of one synced entry, for its details view, when
- * no sync looked them up yet: one request at a time, again a minute after
- * one that brought nothing.
+ * no sync looked them up yet, and a deposit to DuskEVM's address there: one
+ * request at a time, again a minute after one that brought nothing.
  * @param {{ state: object, render: () => Promise<void> }} ctx
  * @param {string} hash
  */
@@ -316,7 +317,7 @@ export function loadActivityDetail({ state, render }, hash) {
   const entry = a?.entries.find((e) => e.hash === hash);
   const key = `${a?.key}\n${hash}`;
   const last = detailLoads.get(key);
-  if (!entry || last === "loading" || (typeof last === "number" && Date.now() - last < DETAIL_RETRY_MS)) return;
+  if (!entry || !needsDetails(entry, a.nodeUrl) || last === "loading" || (typeof last === "number" && Date.now() - last < DETAIL_RETRY_MS)) return;
   detailLoads.set(key, "loading");
   a.epoch
     .then((epoch) => {
@@ -327,7 +328,8 @@ export function loadActivityDetail({ state, render }, hash) {
     .then(() => redraw(state, render))
     .catch(() => {})
     .finally(() => {
-      if (a.entries.find((e) => e.hash === hash)?.detailsAt) detailLoads.delete(key);
+      const now = a.entries.find((e) => e.hash === hash);
+      if (now && !needsDetails(now, a.nodeUrl)) detailLoads.delete(key);
       else detailLoads.set(key, Date.now());
     });
 }

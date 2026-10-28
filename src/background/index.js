@@ -44,7 +44,7 @@ import {
   registerTxNotificationHandlers,
 } from "./txNotify.js";
 import { getAccountNames } from "../shared/accountNames.js";
-import { listAddressBook } from "../shared/addressBook.js";
+import { clearContacts, contactsStore, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
   getTxEpoch,
   getTxMeta,
@@ -54,7 +54,7 @@ import {
   typedRecipientName,
 } from "../shared/txStore.js";
 import { beginReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
-import { handleUiCommand } from "../wallet/uiCommands.js";
+import { engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
 import {
   getNetworkStatus,
   checkAllEndpoints,
@@ -748,11 +748,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const names = await siteNames(String(settings?.nodeUrl ?? ""), accounts);
 
         // The saved contacts, so a request to send names a recipient the
-        // user saved from its first paint, as it names the profiles.
+        // user saved from its first paint, as it names the profiles. They
+        // open only while the wallet is unlocked.
         let contacts = [];
-        if (entry.kind === "send_tx") {
+        if (entry.kind === "send_tx" && status.isUnlocked) {
           try {
-            contacts = (await listAddressBook()).map(({ name, address }) => ({ name, address }));
+            contacts = (await contactsStore(engineContactsVault(engineCall)).list()).map(({ name, address }) => ({ name, address }));
           } catch {
             contacts = [];
           }
@@ -804,6 +805,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           const mnemonic = await unlockVault(password);
           await ensureEngineConfigured();
           const result = await unlockEngine(mnemonic);
+          // Contacts kept in plain text before they were encrypted move into
+          // this wallet's record now. Unlocking doesn't wait on a failure:
+          // the next read of the contacts moves them.
+          await moveLegacyContacts(engineContactsVault(engineCall)).catch(() => {});
           await updateActivity();
           setupAutoLockAlarm().catch(console.error);
           broadcastProfilesChangedAll().catch(() => {});
@@ -951,6 +956,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
           // A reset that couldn't clear the old wallet's data finishes first.
           await finishPendingReset();
+          // A new wallet starts with no contacts: any kept here are another's.
+          await clearContacts();
 
           await createVault(mnemonic, password);
           await ensureEngineConfigured();

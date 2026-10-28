@@ -205,6 +205,32 @@ describe("header", () => {
     expect(panel.children).toEqual([header]);
   });
 
+  it("puts the strip across the top of the full view, over the sidebar, staying as the page scrolls", async () => {
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    // A rule's declarations, by its selector and indent as the sheet writes it.
+    const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
+    const desktop = css.slice(css.indexOf("@media (min-width: 861px) {"));
+    const inDesktop = (selector) => desktop.split("\n  }").find((block) => `\n${block}`.includes(`\n  ${selector} {`)) ?? "";
+
+    const strip = inDesktop("body.page--full .panel > .testnet-strip");
+    for (const declaration of ["position: sticky;", "top: 0;", "grid-column: 1 / -1;", "grid-row: 1;", "height: var(--strip-height);"]) {
+      expect(strip, declaration).toContain(declaration);
+    }
+    expect(inDesktop("body.page--full .panel")).toContain("grid-template-rows: auto minmax(0, 1fr);");
+    // The sidebar and the page under it.
+    const sidebar = inDesktop("body.page--full .panel-header");
+    expect(sidebar).toContain("grid-row: 2;");
+    expect(sidebar).toContain("top: var(--strip-height);");
+    expect(sidebar).toContain("height: calc(100vh - var(--strip-height));");
+    expect(inDesktop("body.page--full .panel-content")).toContain("grid-row: 2;");
+    // The strip's height, only while it shows.
+    expect(rule("body.page--full")).toContain("--strip-height: 0px;");
+    expect(rule("body.page--full:has(.panel > .testnet-strip)")).toContain("--strip-height: 35px;");
+    // Sticky to the window: the wrap clips without becoming a scroll box.
+    expect(rule(".full-wrap")).toContain("overflow: clip;");
+    expect(rule(".full-wrap")).not.toContain("overflow: hidden;");
+  });
+
   it("keeps the keyboard on the chip when another profile redraws it", async () => {
     const { dom, renderHeader, chip } = await setup("popup");
     renderHeader(overview);

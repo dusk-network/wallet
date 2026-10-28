@@ -128,8 +128,10 @@ export function addressBookView(ov, { state, actions } = {}) {
     rerender();
   };
 
+  // One read per visit: one that failed says why rather than asking again on
+  // every redraw, and a wallet that locked meanwhile shows its unlock form.
   const ensureLoaded = () => {
-    if (ab.loaded || ab.loading) return;
+    if (ab.loaded || ab.loading || ab.error) return;
     ab.loading = true;
     listAddressBook()
       .then((items) => {
@@ -142,7 +144,8 @@ export function addressBookView(ov, { state, actions } = {}) {
       .catch((e) => {
         ab.loading = false;
         ab.error = e?.message ?? String(e);
-        rerender();
+        if (/wallet locked/i.test(ab.error)) actions?.render?.({ forceRefresh: true })?.catch?.(() => {});
+        else rerender();
       });
   };
 
