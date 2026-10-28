@@ -4,14 +4,18 @@
 // A page that stays open saves the file itself: the full view, and a tab
 // like it. The popup closes when a save dialog takes the focus, and the file
 // with it, so it hands the file to a new full view tab, through the
-// extension's session storage, and that tab saves it as it opens.
+// extension's session storage, and that tab saves it as it opens. Each
+// export has a key of its own there, so two at once don't meet.
 
+import { listAddressBook } from "../../shared/addressBook.js";
 import { runtimeGetURL, storageSessionGet, storageSessionRemove, storageSessionSet, tabsCreate } from "../../platform/extensionApi.js";
 import { h } from "../lib/dom.js";
 import { activityCsv, activityCsvFilename, isRowIncomplete } from "./activityCsv.js";
 
-/** Where the popup leaves a file for the full view to save: `{ id, filename, csv, at }`. */
-export const HANDED_EXPORT_KEY = "dusk_activity_export_v1";
+/** Where the popup leaves one export's file for the full view to save: `{ id, filename, csv, at }`. */
+export const handedExportKey = (id) => `dusk_activity_export_v1:${id}`;
+
+const EXPORT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The popup, as env.js tells it, asked when it matters.
 const inPopup = () =>
@@ -35,11 +39,12 @@ export function saveTextFile(text, filename) {
 // The popup's file, for the full view tab it opens to save it.
 async function handOver(csv, filename) {
   const id = globalThis.crypto.randomUUID();
-  await storageSessionSet({ [HANDED_EXPORT_KEY]: { id, filename, csv, at: Date.now() } });
+  const key = handedExportKey(id);
+  await storageSessionSet({ [key]: { id, filename, csv, at: Date.now() } });
   try {
     await tabsCreate({ url: runtimeGetURL(`full.html?route=activity&save=${encodeURIComponent(id)}`) });
   } catch (error) {
-    await storageSessionRemove(HANDED_EXPORT_KEY).catch(() => {});
+    await storageSessionRemove(key).catch(() => {});
     throw error;
   }
 }
@@ -57,11 +62,29 @@ export async function saveHandedExport() {
   params.delete("save");
   const query = params.toString();
   history.replaceState(history.state, "", `${location.pathname}${query ? `?${query}` : ""}`);
-  const handed = (await storageSessionGet(HANDED_EXPORT_KEY))?.[HANDED_EXPORT_KEY];
-  await storageSessionRemove(HANDED_EXPORT_KEY);
-  if (!handed || handed.id !== id || typeof handed.csv !== "string") throw new Error("The export isn't here any more. Export it again.");
+  const gone = new Error("The export isn't here any more. Export it again.");
+  if (!EXPORT_ID.test(id)) throw gone;
+  // This export's file alone: another one handed over meanwhile stays.
+  const key = handedExportKey(id);
+  const handed = (await storageSessionGet(key))?.[key];
+  await storageSessionRemove(key);
+  if (!handed || handed.id !== id || typeof handed.csv !== "string") throw gone;
   saveTextFile(handed.csv, String(handed.filename || "dusk-activity.csv"));
   return handed.filename;
+}
+
+// The user's contact names for an export, read in full first: a list still
+// loading would leave their column blank. Throws when they can't be read.
+async function exportContactNames(state) {
+  const ab = state?.addressBook;
+  const items = ab?.loaded && Array.isArray(ab.items) ? ab.items : await listAddressBook();
+  const byAddress = new Map();
+  for (const entry of items ?? []) {
+    const address = String(entry?.address ?? "").trim().toLowerCase();
+    const name = String(entry?.name ?? "").trim();
+    if (address && name) byAddress.set(address, name);
+  }
+  return (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? "";
 }
 
 /**
@@ -69,10 +92,10 @@ export async function saveHandedExport() {
  * contact names, what the file holds, and Save CSV.
  * @param {object} ov - the overview
  * @param {object[]} rows - the rows listed
- * @param {{ state: object, actions: object, nodeUrl: string, contactName: (address: string) => string }} ctx
+ * @param {{ state: object, actions: object, nodeUrl: string }} ctx
  * @returns {HTMLElement}
  */
-export function activityExportPanel(ov, rows, { state, actions, nodeUrl, contactName }) {
+export function activityExportPanel(ov, rows, { state, actions, nodeUrl }) {
   const ex = state.activityExport;
   const contacts = h("input", {
     type: "checkbox",
@@ -89,9 +112,28 @@ export function activityExportPanel(ov, rows, { state, actions, nodeUrl, contact
     text: "Save CSV",
     disabled: !rows.length,
     onclick: async () => {
-      const filename = activityCsvFilename({ networkName: ov?.networkName, profileIndex: ov?.selectedAccountIndex });
-      const csv = activityCsv(rows, { nodeUrl, contactName, withContacts: Boolean(ex.withContacts) });
+      const withContacts = Boolean(ex.withContacts);
+      const index = Math.max(0, Math.floor(Number(ov?.selectedAccountIndex) || 0));
+      save.disabled = true;
       try {
+        let contactName;
+        if (withContacts) {
+          try {
+            contactName = await exportContactNames(state);
+          } catch {
+            actions?.showToast?.("Couldn't read your contacts, so nothing was saved. Try again.", 2500);
+            return;
+          }
+        }
+        const filename = activityCsvFilename({ networkName: ov?.networkName, profileIndex: index });
+        const csv = activityCsv(rows, {
+          nodeUrl,
+          contactName,
+          withContacts,
+          // The wallet's own records, and this profile's own account and address.
+          local: Array.isArray(ov?.txs) ? ov.txs : [],
+          own: [ov?.accounts?.[index], ov?.addresses?.[index]].filter(Boolean),
+        });
         if (inPopup()) {
           await handOver(csv, filename);
           globalThis.close?.();
@@ -103,6 +145,8 @@ export function activityExportPanel(ov, rows, { state, actions, nodeUrl, contact
         actions?.render?.()?.catch?.(() => {});
       } catch (e) {
         actions?.showToast?.(e?.message ?? "Couldn't export. Try again.", 2500);
+      } finally {
+        save.disabled = !rows.length;
       }
     },
   });

@@ -6,8 +6,12 @@ import { accessibleName, installFakeDom, settle, visibleText } from "./testing/f
 import { activityView } from "./popup/views/activityView.js";
 import { activityKey } from "./popup/activity.js";
 import { CSV_COLUMNS } from "./popup/activityCsv.js";
-import { HANDED_EXPORT_KEY, saveHandedExport } from "./popup/activityExport.js";
+import { handedExportKey, saveHandedExport } from "./popup/activityExport.js";
 import { runtimeGetURL, storageSessionGet, storageSessionRemove, storageSessionSet, tabsCreate } from "../platform/extensionApi.js";
+import { listAddressBook } from "../shared/addressBook.js";
+
+// The contacts, read from the wallet when the page hasn't read them yet.
+vi.mock("../shared/addressBook.js", () => ({ listAddressBook: vi.fn(async () => []) }));
 
 vi.mock("../platform/extensionApi.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -167,7 +171,9 @@ describe("Activity's Export", () => {
     // The popup saves nothing itself: the file goes to the tab it opens.
     expect(saved).toHaveLength(0);
     const [[items]] = storageSessionSet.mock.calls;
-    const handed = items[HANDED_EXPORT_KEY];
+    const [key] = Object.keys(items);
+    const handed = items[key];
+    expect(key).toBe(handedExportKey(handed.id));
     expect(handed).toMatchObject({ filename: "dusk-activity-testnet-profile-1-2026-10-23.csv" });
     expect(handed.csv.split("\r\n")).toHaveLength(4);
     expect(runtimeGetURL).toHaveBeenCalledWith(`full.html?route=activity&save=${handed.id}`);
@@ -177,11 +183,11 @@ describe("Activity's Export", () => {
     // The tab: it saves the file, forgets it, and takes the request off its address.
     page("/full.html");
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${handed.id}` });
-    storageSessionGet.mockResolvedValueOnce({ [HANDED_EXPORT_KEY]: handed });
+    storageSessionGet.mockImplementationOnce(async (asked) => (asked === key ? { [key]: handed } : {}));
     await expect(saveHandedExport()).resolves.toBe(handed.filename);
     expect(saved.map((s) => s.name)).toEqual([handed.filename]);
     expect(await csvLines()).toEqual(handed.csv.split("\r\n"));
-    expect(storageSessionRemove).toHaveBeenCalledWith(HANDED_EXPORT_KEY);
+    expect(storageSessionRemove).toHaveBeenCalledWith(key);
     expect(history.replaceState).toHaveBeenCalledWith(null, "", "/full.html?route=activity");
 
     // Opened without one: nothing. With one gone: it says so.
@@ -192,6 +198,79 @@ describe("Activity's Export", () => {
     expect(saved).toHaveLength(1);
   });
 
+  it("keeps two exports at once apart: each tab saves its own file and removes only its own", async () => {
+    // Two session storages' worth of handovers, in memory.
+    const kept = {};
+    storageSessionSet.mockImplementation(async (items) => Object.assign(kept, items));
+    storageSessionGet.mockImplementation(async (key) => (key in kept ? { [key]: kept[key] } : {}));
+    storageSessionRemove.mockImplementation(async (key) => {
+      delete kept[key];
+    });
+    page("/popup.html");
+    setup();
+    button("Export").click();
+    button("Save CSV").click();
+    await settle();
+    setup();
+    button("Sent").click();
+    button("Export").click();
+    button("Save CSV").click();
+    await settle();
+    const handed = Object.values(kept);
+    expect(handed).toHaveLength(2);
+    expect(new Set(handed.map((h) => h.id)).size).toBe(2);
+    expect(Object.keys(kept).sort()).toEqual(handed.map((h) => handedExportKey(h.id)).sort());
+
+    // The first export's tab: its file, and the second export's still there.
+    const [first, second] = handed;
+    page("/full.html");
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${first.id}` });
+    await expect(saveHandedExport()).resolves.toBe(first.filename);
+    expect(await csvLines()).toEqual(first.csv.split("\r\n"));
+    expect(Object.keys(kept)).toEqual([handedExportKey(second.id)]);
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${second.id}` });
+    await expect(saveHandedExport()).resolves.toBe(second.filename);
+    expect(kept).toEqual({});
+    // An address that isn't an export's ID asks nothing.
+    storageSessionGet.mockClear();
+    vi.stubGlobal("location", { pathname: "/full.html", search: "?save=../vault" });
+    await expect(saveHandedExport()).rejects.toThrow("The export isn't here any more");
+    expect(storageSessionGet).not.toHaveBeenCalled();
+    storageSessionSet.mockImplementation(async () => {});
+    storageSessionGet.mockImplementation(async () => ({}));
+    storageSessionRemove.mockImplementation(async () => {});
+  });
+
+  it("reads the contacts first for their names, and says so when it can't", async () => {
+    page("/full.html");
+    const { state, actions } = setup();
+    // The page's own read of the contacts is still out.
+    state.addressBook = { loaded: false, loading: true, items: null };
+    const read = Promise.withResolvers();
+    listAddressBook.mockReturnValueOnce(read.promise);
+    button("Export").click();
+    const box = body().querySelector("#activity-export-contacts");
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    button("Save CSV").click();
+    await settle();
+    expect(saved).toHaveLength(0);
+    read.resolve([{ id: "1", name: "Faucet (test)", address: FAUCET }]);
+    await settle();
+    expect(saved).toHaveLength(1);
+    const [head, ...rows] = await csvLines();
+    expect(head.endsWith(",Your contact name")).toBe(true);
+    expect(rows[0].endsWith(",Faucet (test)")).toBe(true);
+
+    // They can't be read: nothing saved, and it says so.
+    listAddressBook.mockRejectedValueOnce(new Error("Wallet locked"));
+    button("Export").click();
+    button("Save CSV").click();
+    await settle();
+    expect(saved).toHaveLength(1);
+    expect(actions.showToast).toHaveBeenLastCalledWith("Couldn't read your contacts, so nothing was saved. Try again.", 2500);
+  });
+
   it("keeps nothing handed over when the tab couldn't open", async () => {
     page("/popup.html");
     const { actions } = setup();
@@ -199,7 +278,8 @@ describe("Activity's Export", () => {
     button("Export").click();
     button("Save CSV").click();
     await settle();
-    expect(storageSessionRemove).toHaveBeenCalledWith(HANDED_EXPORT_KEY);
+    const [[items]] = storageSessionSet.mock.calls;
+    expect(storageSessionRemove).toHaveBeenCalledWith(Object.keys(items)[0]);
     expect(close).not.toHaveBeenCalled();
     expect(actions.showToast).toHaveBeenCalledWith("Couldn't open a tab", 2500);
   });

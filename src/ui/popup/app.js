@@ -1,6 +1,6 @@
 // Popup/Full/Options UI entry.
 import { isPopupView, isFullView } from "./env.js";
-import { state, ONBOARD_ROUTES } from "./state.js";
+import { emptyAddressBook, state, ONBOARD_ROUTES } from "./state.js";
 import { refreshOverview, getActiveOrigin } from "./overview.js";
 import { h, setChildren } from "../lib/dom.js";
 import { createToaster } from "../components/Toast.js";
@@ -756,6 +756,22 @@ const renderHeader = createHeaderRenderer({
   onExpand,
 });
 
+// Contacts belong to one wallet. A reset, or another wallet unlocked here,
+// starts their state over, a form being filled in included. A lock drops
+// what the page read with their key, which is read again once the same
+// wallet is unlocked.
+function keepContactsToTheirWallet(ov) {
+  const wallet = ov?.isUnlocked ? String(ov?.accounts?.[0] ?? "").trim() : "";
+  const otherWallet = Boolean(wallet && state.contactsWallet && wallet !== state.contactsWallet);
+  if (ov?.hasVault === false || otherWallet) {
+    state.addressBook = emptyAddressBook();
+    state.contactsWallet = "";
+  } else if (!ov?.isUnlocked && (state.addressBook?.items || state.addressBook?.error)) {
+    state.addressBook = { ...state.addressBook, loaded: false, loading: false, error: null, items: null };
+  }
+  if (wallet) state.contactsWallet = wallet;
+}
+
 // --- Main render ----------------------------------------------------------
 export async function render({ forceRefresh = false } = {}) {
   const overviewRefreshed = await refreshOverview(send, { force: forceRefresh });
@@ -771,11 +787,7 @@ export async function render({ forceRefresh = false } = {}) {
   if (overviewRefreshed) {
     await maybeAutoWatchDashboardStDusk(ov);
   }
-  // Locked or reset: the contacts this page read go with their key, and are
-  // read again once a wallet is unlocked.
-  if (!ov?.isUnlocked && (state.addressBook?.items || state.addressBook?.error)) {
-    state.addressBook = { ...state.addressBook, loaded: false, loading: false, error: null, items: null };
-  }
+  keepContactsToTheirWallet(ov);
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";
   } catch {

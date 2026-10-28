@@ -892,6 +892,25 @@ describe("walletEngine", () => {
     expect((await engine.openContactsRecords(records)).text).toBe(book);
   });
 
+  it.each(["decrypt", "encrypt"])("returns nothing a contacts %s made when the wallet locked during it", async (step) => {
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const sealed = await engine.sealContactsRecord(JSON.stringify({ 1: { id: "1", name: "Alice (landlord, private)" } }));
+    const records = { [sealed.namespace]: sealed.record };
+    // The lock lands while WebCrypto works, after the key was checked.
+    const real = crypto.subtle[step].bind(crypto.subtle);
+    const during = vi.spyOn(crypto.subtle, step).mockImplementationOnce(async (...args) => {
+      engine.lock();
+      return real(...args);
+    });
+    try {
+      const work = step === "decrypt" ? engine.openContactsRecords(records) : engine.sealContactsRecord("{}");
+      await expect(work).rejects.toThrow("Wallet locked");
+      expect(during).toHaveBeenCalledTimes(1);
+    } finally {
+      during.mockRestore();
+    }
+  });
+
   it("drops a contacts key made for a wallet that locked meanwhile", async () => {
     await engine.unlockWithMnemonic(MNEMONIC);
     const sealing = engine.sealContactsRecord("{}");

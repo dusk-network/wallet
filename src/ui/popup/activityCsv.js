@@ -73,19 +73,34 @@ function directionOf(tx) {
   return back ? "in" : "out";
 }
 
-// The DUSK it moved: a call's deposit, else its amount.
-function movedLux(tx) {
-  const deposit = safeBigInt(tx?.deposit, 0n);
-  return deposit > 0n ? deposit : safeBigInt(tx?.amount, 0n);
+const lower = (value) => String(value ?? "").trim().toLowerCase();
+
+// The DUSK that left or reached the account. The chain's record says it as
+// one value, which a call's deposit holds too. The wallet's own record of a
+// call keeps its parts apart: the deposit, and the amount, which left only
+// when it went to someone else rather than back to the profile. A row the
+// chain hasn't settled shows the wallet's own record.
+function movedLux(tx, { records, own }) {
+  const settled = typeof tx?.success === "boolean" && tx?.status === "executed";
+  const mine = tx?.source === "local" ? tx : tx?.source === "both" && !settled ? records.get(lower(tx?.hash)) ?? tx : null;
+  if (!mine) {
+    const deposit = safeBigInt(tx?.deposit, 0n);
+    return deposit > 0n ? deposit : safeBigInt(tx?.amount, 0n);
+  }
+  const amount = safeBigInt(mine.amount, 0n);
+  const deposit = safeBigInt(mine.deposit, 0n);
+  if (lower(mine.kind ?? tx?.kind) !== TX_KIND.CONTRACT_CALL) return deposit > 0n ? deposit : amount;
+  const to = String(mine.to ?? "").trim();
+  return deposit + (to && !own.includes(to) ? amount : 0n);
 }
 
 // One row as a line. Its words never use the user's contact names: those go
 // in their own column, when asked for.
-function csvLine(tx, { nodeUrl, contactName }, withContacts) {
+function csvLine(tx, { nodeUrl, contactName, records, own }, withContacts) {
   const desc = describeTx(tx, { nodeUrl });
   const time = txTime(tx);
   const direction = directionOf(tx);
-  const lux = desc.unsent ? 0n : movedLux(tx);
+  const lux = desc.unsent ? 0n : movedLux(tx, { records, own });
   const signed = direction === "out" && lux > 0n ? `-${formatLuxToDusk(lux)}` : formatLuxToDusk(lux);
   // A token's amount, which no DUSK column holds, goes with what it did.
   const token = desc.amount && desc.amount.unit !== "DUSK" ? `${desc.amount.value} ${desc.amount.unit}` : "";
@@ -115,12 +130,17 @@ function csvLine(tx, { nodeUrl, contactName }, withContacts) {
  * The rows as CSV: the columns of CSV_COLUMNS, and the user's contact names
  * in CSV_CONTACT_COLUMN only `withContacts`.
  * @param {object[]} rows - Activity's rows (activity.js activityRows)
- * @param {{ nodeUrl?: string, contactName?: (address: string) => string, withContacts?: boolean }} [opts]
+ * @param {{
+ *   nodeUrl?: string, contactName?: (address: string) => string, withContacts?: boolean,
+ *   local?: object[], own?: string[],
+ * }} [opts] - `local`: the wallet's own records (the overview's `txs`); `own`:
+ *   the profile's own account and shielded address
  * @returns {string}
  */
-export function activityCsv(rows, { nodeUrl, contactName, withContacts = false } = {}) {
+export function activityCsv(rows, { nodeUrl, contactName, withContacts = false, local = [], own = [] } = {}) {
   const columns = withContacts ? [...CSV_COLUMNS, CSV_CONTACT_COLUMN] : CSV_COLUMNS;
-  const lines = (rows ?? []).map((tx) => csvLine(tx, { nodeUrl, contactName }, withContacts));
+  const records = new Map((local ?? []).map((tx) => [lower(tx?.hash), tx]));
+  const lines = (rows ?? []).map((tx) => csvLine(tx, { nodeUrl, contactName, records, own }, withContacts));
   return [columns.map(csvField).join(","), ...lines].join("\r\n");
 }
 

@@ -190,7 +190,7 @@ export function activityView(ov, { state, actions } = {}) {
       },
     }),
     h("div", { class: "activity-page" }, [
-      ex.open ? activityExportPanel(ov, rows, { state, actions, nodeUrl, contactName }) : null,
+      ex.open ? activityExportPanel(ov, rows, { state, actions, nodeUrl }) : null,
       chips,
       ...(groups.length ? groups : [empty(emptyText(state, filter))]),
       more,

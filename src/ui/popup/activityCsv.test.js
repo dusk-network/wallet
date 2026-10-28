@@ -65,6 +65,25 @@ describe("Activity's CSV", () => {
     ]);
   });
 
+  it("counts a call's amount and deposit apart in the wallet's own record, the chain's value as it is", () => {
+    const CONTRACT = "cd".repeat(32);
+    const call = (over) => ({ kind: TX_KIND.CONTRACT_CALL, contractId: CONTRACT, fnName: "pay", status: "submitted", submittedAt: AT, profileIndex: 0, ...over });
+    const amountOf = (rows, opts = {}) => lines(activityCsv(rows, { nodeUrl: NODE, own: [SENDER], ...opts })).slice(1).map((l) => l.split(",").at(-4));
+    // Sent: 2 DUSK to someone else, and 3 DUSK attached to the call.
+    const pending = call({ hash: hash(7), source: "local", to: FAUCET, amount: "2000000000", deposit: "3000000000" });
+    expect(amountOf([pending])).toEqual(["-5"]);
+    // The amount back to the profile itself, with no recipient or its own: the deposit alone left.
+    expect(amountOf([{ ...pending, to: undefined }, { ...pending, to: SENDER }])).toEqual(["-3", "-3"]);
+    // The chain's record already says what left in one value, in a call's deposit too.
+    const chain = { hash: hash(7), source: "archive", nodeUrl: NODE, kind: TX_KIND.CONTRACT_CALL, direction: "out", contractId: CONTRACT, fnName: "pay", amount: "5000000000", deposit: "5000000000", timestamp: AT, blockHeight: 9, success: true, status: "executed" };
+    expect(amountOf([chain])).toEqual(["-5"]);
+    // Both: the chain's once it settled, the wallet's own record until then.
+    const both = { ...chain, ...pending, source: "both", amount: "2000000000", deposit: "3000000000", success: null, status: "unknown" };
+    expect(amountOf([both], { local: [pending] })).toEqual(["-5"]);
+    expect(amountOf([{ ...both, deposit: undefined }], { local: [pending] })).toEqual(["-5"]);
+    expect(amountOf([{ ...chain, ...pending, source: "both", amount: "5000000000", deposit: "5000000000", success: true, status: "executed" }], { local: [pending] })).toEqual(["-5"]);
+  });
+
   it("adds the user's contact names in a column of their own only when asked, never in the words", () => {
     const contactName = (address) => ({ [FAUCET]: "Faucet (test)", [SENDER]: "@landlord" })[address] ?? "";
     const without = activityCsv(ROWS, { nodeUrl: NODE, contactName });
