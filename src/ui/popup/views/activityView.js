@@ -1,6 +1,6 @@
 // Activity on Home (the five newest rows and See all) and the full Activity
-// view: day groups, the All / Sent / Received / Staking filters, and Show more
-// for older history.
+// view: day groups, the All / Sent / Received / Staking filters, Show more
+// for older history, and Export for the rows listed (activityExport.js).
 
 import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { openUrl } from "../../../platform/index.js";
@@ -10,6 +10,7 @@ import { balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { subnav } from "../../components/Subnav.js";
 import { activityRows, hasMoreActivity, showMoreActivity } from "../activity.js";
+import { activityExportPanel } from "../activityExport.js";
 import { ACTIVITY_FILTERS, blockTimes, clockText, contactNames, dayLabel, describeTx, inFilter, recentText, txRowEl, txTime, whenText } from "./txRow.js";
 
 /** Rows Home shows. */
@@ -165,15 +166,31 @@ export function activityView(ov, { state, actions } = {}) {
       )
     : null;
 
+  // Export: the rows listed, as a CSV file, from a panel under the head.
+  const ex = (state.activityExport ??= { open: false, withContacts: false });
+  const exportToggle = h("button", {
+    class: "btn-outline activity-export-toggle",
+    type: "button",
+    text: "Export",
+    "aria-expanded": ex.open,
+    "aria-controls": "activity-export",
+    onclick: () => {
+      ex.open = !ex.open;
+      actions?.render?.()?.catch?.(() => {});
+    },
+  });
+
   return [
     subnav({
       title: "Activity",
+      actions: [exportToggle],
       onBack: () => {
         state.route = "home";
         actions?.render?.()?.catch?.(() => {});
       },
     }),
     h("div", { class: "activity-page" }, [
+      ex.open ? activityExportPanel(ov, rows, { state, actions, nodeUrl, contactName }) : null,
       chips,
       ...(groups.length ? groups : [empty(emptyText(state, filter))]),
       more,

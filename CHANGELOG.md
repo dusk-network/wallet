@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added Export to Activity: the rows listed as a CSV file with the web wallet's columns, your contact names only when asked.
 - Showed a site's payment to the bridge's account as a bridge to BNB Smart Chain, or Ethereum (Sepolia) on Testnet, with the memo as the recipient there, and a warning when the memo isn't an address there.
 - Said at the top of a test network, in the popup, the full view and site approvals, that test DUSK has no value.
 - Read the DuskEVM bridge's deposit, prove and claim calls on Testnet in their approvals: amount and recipient, marked as a known bridge call.
@@ -41,6 +42,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Showed a deposit to DuskEVM as To its DuskEVM address in Activity and its details, with Copy, and listed bridge transfers under Sent and Received.
 - Asked to unlock before showing Contacts.
 - Set section heads and balance labels in small capitals, the heads between grey brackets.
 - Showed links and a transaction's ID in blue.

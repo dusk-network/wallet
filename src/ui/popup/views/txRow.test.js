@@ -163,17 +163,43 @@ describe("what a row says", () => {
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, fnName: "sozu_stake", deposit: "1000000000" }).name).toBe("Staked with Sozu");
   });
 
-  it("puts each under one filter, and bridge transfers under All alone", () => {
+  it("puts each under one filter: DUSK bridged to DuskEVM under Sent, back from it under Received, a proof under All", () => {
+    const BRIDGE = "2257e5f8ff49cf7c9704a14ca35acbf48eb7ade11a079d98d5cd5655eea1b31d";
+    const PORTAL = "14eeb3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9";
     const kinds = [
       [{ kind: TX_KIND.TRANSFER, direction: "out" }, "sent"],
       [{ kind: TX_KIND.TRANSFER, direction: "in" }, "received"],
       [{ kind: TX_KIND.STAKE }, "staking"],
       [{ kind: TX_KIND.WITHDRAW_REWARD }, "staking"],
       [{ kind: TX_KIND.SHIELD }, "all"],
+      [{ kind: TX_KIND.CONTRACT_CALL, contractId: BRIDGE, fnName: "depositETHToWithValue", deposit: "500000000" }, "sent"],
+      [{ kind: TX_KIND.CONTRACT_CALL, direction: "in", contractId: PORTAL, amount: "500000000" }, "received"],
+      [{ kind: TX_KIND.CONTRACT_CALL, contractId: PORTAL, fnName: "proveWithdrawalTransaction" }, "all"],
     ];
     for (const [tx, only] of kinds) {
-      const d = describeTx(tx);
+      const d = describeTx({ nodeUrl: TESTNET, ...tx });
       expect(["all", "sent", "received", "staking"].filter((f) => inFilter(d, f))).toEqual(only === "all" ? ["all"] : ["all", only]);
+    }
+  });
+
+  it("says where a deposit to DuskEVM went: To its DuskEVM address", () => {
+    const BRIDGE = "2257e5f8ff49cf7c9704a14ca35acbf48eb7ade11a079d98d5cd5655eea1b31d";
+    const evm = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
+    const deposit = { kind: TX_KIND.CONTRACT_CALL, contractId: BRIDGE, fnName: "depositETHToWithValue", deposit: "500000000", status: "executed", nodeUrl: TESTNET };
+    const d = describeTx({ ...deposit, bridgeTo: evm });
+    expect([d.lead, d.name, d.address, d.evm, d.isAddress, subText(d, "06:51"), amountText(d.amount, false)]).toEqual([
+      "Bridge to DuskEVM",
+      "To 0xAB84…C86F",
+      evm,
+      true,
+      false,
+      "Bridge to DuskEVM · 06:51",
+      "−0.5 DUSK",
+    ]);
+    // Not read yet, or read as none: To DuskEVM.
+    for (const bridgeTo of [undefined, null, "0x12"]) {
+      const plain = describeTx({ ...deposit, bridgeTo });
+      expect([plain.lead, plain.name, plain.evm, subText(plain, "06:51")]).toEqual(["Bridge", "To DuskEVM", false, "Bridge · 06:51"]);
     }
   });
 });

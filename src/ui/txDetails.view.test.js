@@ -104,10 +104,14 @@ describe("transaction details", () => {
       status: "executed",
     };
     const view = details({ ...deposit, bridgeTo: evm });
-    expect([visibleText(view.lead), view.name]).toEqual(["Bridge", "To DuskEVM"]);
-    expect(visibleText(view.body.querySelector(".tx-hero-addr"))).toBe("0x5A3d…6F8a01");
-    expect(view.body.querySelector(".tx-hero-addr button").getAttribute("aria-label")).toBe("Copy DuskEVM address");
-    expect(view.rows).toContain(`DuskEVM recipient${evm}`);
+    // "To" the DuskEVM address, Copy beside it, and in full with Copy in the rows.
+    expect([visibleText(view.lead), view.name]).toEqual(["Bridge to DuskEVM", "To 0x5A3d…8a01"]);
+    expect(view.body.querySelector(".tx-hero-name .mono").textContent).toBe("0x5A3d…8a01");
+    expect(view.body.querySelector(".tx-hero-name").getAttribute("title")).toBe(evm);
+    expect(view.body.querySelector(".tx-hero-name-line button").getAttribute("aria-label")).toBe("Copy DuskEVM address");
+    expect(view.body.querySelector(".tx-hero-addr")).toBeNull();
+    expect(view.rows).toContain(`DuskEVM recipient${evm}Copy`);
+    expect(view.body.querySelector(".tx-evm-recipient button").getAttribute("aria-label")).toBe("Copy DuskEVM address");
     // Without it, the bridge's contract, and no recipient row.
     const old = details(deposit);
     expect(visibleText(old.body.querySelector(".tx-hero-addr"))).toBe("2257e5…a1b31d");

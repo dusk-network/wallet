@@ -13,6 +13,7 @@ import { send as rawSend } from "../../wallet/bus.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
 import { ensureActivity, refreshActivitySoon } from "./activity.js";
+import { saveHandedExport } from "./activityExport.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
@@ -924,6 +925,14 @@ export async function render({ forceRefresh = false } = {}) {
 }
 
 export function mountPopup() {
+  // A tab the popup opened to save its Activity export saves it now.
+  if (!isPopupView) {
+    saveHandedExport()
+      .then((name) => {
+        if (name) showToast("CSV saved");
+      })
+      .catch((e) => showToast(e?.message ?? String(e), 3000));
+  }
   render().catch((e) => {
     setApp([showError(e)]);
   });

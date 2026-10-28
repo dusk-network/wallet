@@ -18,13 +18,19 @@ export function page(list, { fromBlock = 0, toBlock, maxCount, pageCount = 1 }) 
 }
 
 /**
- * Stub `fetch` with a node holding the recorded history. Change `finalized`
- * (its last finalized block), `genesis`, `down` (every request fails),
- * `archive` (false: a node without the archive's fields) or `before` (awaited
- * with each query before its answer) as a test goes; `log` keeps each query
- * and its answer.
+ * Stub `fetch` with a node holding the recorded history, and `details` by
+ * hash, whose call arguments (`callData.data`) it gives only to a query that
+ * asks for them. Change `finalized` (its last finalized block), `genesis`,
+ * `down` (every request fails), `archive` (false: a node without the
+ * archive's fields) or `before` (awaited with each query before its answer)
+ * as a test goes; `log` keeps each query and its answer.
  */
-export function fakeArchive({ accounts = fixture.accounts, finalized = fixture.head.last_finalized_block[0], genesis = fixture.head.genesis } = {}) {
+export function fakeArchive({
+  accounts = fixture.accounts,
+  details = fixture.details,
+  finalized = fixture.head.last_finalized_block[0],
+  genesis = fixture.head.genesis,
+} = {}) {
   const node = { finalized, genesis, down: false, archive: true, before: null, log: [] };
   const fetchMock = vi.fn(async (url, init) => {
     expect(String(url)).toBe(`${fixture.nodeUrl}/on/graphql/query`);
@@ -49,7 +55,11 @@ export function fakeArchive({ accounts = fixture.accounts, finalized = fixture.h
       const list = (accounts[m[3]]?.[m[2]] ?? []).filter((e) => e.block_height <= node.finalized);
       data[m[1]] = page(list, args);
     }
-    for (const m of query.matchAll(/(t\d+): tx\(hash: "([0-9a-f]{64})"\)/g)) data[m[1]] = fixture.details[m[2]] ?? null;
+    for (const m of query.matchAll(/(t\d+): tx\(hash: "([0-9a-f]{64})"\) \{[^{]*\{[^{]*\{([^}]*)\}/g)) {
+      const tx = structuredClone(details[m[2]] ?? null);
+      if (tx?.tx?.callData && !/\bdata\b/.test(m[3])) delete tx.tx.callData.data;
+      data[m[1]] = tx;
+    }
     node.log.push({ query, data });
     return { ok: true, status: 200, text: async () => JSON.stringify(data) };
   });

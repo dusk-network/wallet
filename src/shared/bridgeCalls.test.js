@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { BRIDGE_CONTRACTS } from "./bridge.js";
-import { BRIDGE_FUNCTIONS, bridgeDepositRecipient, bridgeEnvelopeOk, callsBridge, checksumAddress, decodeBridgeCall, evmAddressOf, weiToDusk } from "./bridgeCalls.js";
+import {
+  BRIDGE_FUNCTIONS,
+  bridgeDepositRecipient,
+  bridgeEnvelopeOk,
+  callsBridge,
+  checksumAddress,
+  decodeBridgeCall,
+  depositRecipientOf,
+  evmAddressOf,
+  weiToDusk,
+} from "./bridgeCalls.js";
 import { hexToBytes } from "./bytes.js";
 import fixtures from "./fixtures/duskevm-bridge-calls.json";
 
@@ -149,6 +159,23 @@ describe("DuskEVM bridge calls", () => {
     expect(weiToDusk(1008000000000000000000n)).toEqual({ lux: 1008000000000n, text: "" });
     expect(weiToDusk(1n)).toEqual({ lux: null, text: "0.000000000000000001" });
     expect(weiToDusk(1500000000000000001n)).toEqual({ lux: null, text: "1.500000000000000001" });
+  });
+});
+
+describe("depositRecipientOf", () => {
+  it("reads the DuskEVM address a deposit paid from its call's arguments as the archive gives them, in hex", async () => {
+    const recorded = (await import("./fixtures/duskevm-deposit-history.json")).default;
+    const [details] = Object.values(recorded.details);
+    const { contractId, fnName, data } = details.tx.callData;
+    expect(depositRecipientOf({ nodeUrl: TESTNET, contractId, fnName, data })).toBe(recorded.recipient);
+    expect(depositRecipientOf({ nodeUrl: TESTNET, contractId, fnName, data: `0x${data.toUpperCase()}` })).toBe(recorded.recipient);
+    // Through another node, another call, or arguments that aren't a deposit's: none.
+    expect(depositRecipientOf({ nodeUrl: "https://node.example", contractId, fnName, data })).toBeNull();
+    expect(depositRecipientOf({ nodeUrl: TESTNET, contractId: portal, fnName, data })).toBeNull();
+    expect(depositRecipientOf({ nodeUrl: TESTNET, contractId, fnName: "other", data })).toBeNull();
+    for (const bad of [undefined, "", "0", "zz", data.slice(0, 20)]) {
+      expect(depositRecipientOf({ nodeUrl: TESTNET, contractId, fnName, data: bad })).toBeNull();
+    }
   });
 });
 

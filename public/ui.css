@@ -4098,6 +4098,32 @@ p.tx-empty {
   gap: 6px;
 }
 
+/* Export: whether to add contact names, what the file holds, Save CSV */
+.group.activity-export {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.activity-export-contacts {
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.activity-export-contacts input[type="checkbox"] {
+  flex: 0 0 auto;
+  accent-color: var(--pill);
+}
+
+p.activity-export-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 button.filter-chip {
   height: 32px;
   padding: 0 14px;

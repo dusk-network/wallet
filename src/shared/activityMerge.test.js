@@ -73,6 +73,17 @@ describe("historyRow", () => {
   });
 });
 
+describe("a deposit to DuskEVM from the chain", () => {
+  it("keeps the DuskEVM address its call paid, which the wallet's own record of it may lack", async () => {
+    const deposit = (await import("./fixtures/duskevm-deposit-history.json")).default;
+    const kept = activityEntry({ ...parseHistoryEntry(deposit.account, deposit.entry), value: "500000000", detailsAt: 1, success: true, bridgeTo: deposit.recipient });
+    expect(historyRow(kept)).toMatchObject({ kind: "contract_call", deposit: "500000000", bridgeTo: deposit.recipient });
+    const local = { hash: kept.hash, kind: "contract_call", status: "submitted", profileIndex: 0, deposit: "500000000" };
+    const [row] = mergeActivity({ local: [local], history: [kept], profileIndex: 0 });
+    expect(row).toMatchObject({ source: "both", bridgeTo: deposit.recipient });
+  });
+});
+
 describe("mergeActivity", () => {
   it("replaces the wallet's pending record with the final entry, keeping the name typed for the recipient", () => {
     const pending = {

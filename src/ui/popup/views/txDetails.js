@@ -11,7 +11,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
-import { amountEl, contactNames, copyButton, dateText, describeTx, txIconSvg, txTime } from "./txRow.js";
+import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, txIconSvg, txTime } from "./txRow.js";
 import { reasonText } from "./sent.js";
 import { activityRows, loadActivityDetail } from "../activity.js";
 
@@ -122,8 +122,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const hash = String(state?.txDetailHash ?? "");
   const txs = activityRows(ov, state);
   const tx = txs.find((t) => String(t?.hash ?? "") === hash.toLowerCase()) || null;
-  // A synced entry not looked up yet gets its time, outcome and fee now.
-  if ((tx?.source === "archive" || tx?.source === "both") && !tx.detailsAt) {
+  // A synced entry not looked up yet gets its time, outcome and fee now, and
+  // a deposit to DuskEVM its address there.
+  if (tx?.source === "archive" || tx?.source === "both") {
     loadActivityDetail({ state, render: actions?.render }, tx.hash);
   }
 
@@ -161,25 +162,24 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   // Who: the other side's name with its short address and Copy, a saved
   // contact's .dusk name before it; an address without a name shows in full
-  // mono, Copy beside it; a deposit to DuskEVM shows the DuskEVM address it
-  // pays; another contract call shows the contract.
+  // mono, Copy beside it; a deposit to DuskEVM is "To" the DuskEVM address it
+  // paid, Copy beside it; another contract call shows the contract.
   const other =
-    desc.address && !desc.isAddress
+    desc.evm
+      ? ""
+      : desc.address && !desc.isAddress
       ? desc.address
       : kind === TX_KIND.CONTRACT_CALL && !desc.address && tx?.contractId
       ? String(tx.contractId)
       : "";
-  const otherLabel = desc.evm
-    ? "Copy DuskEVM address"
-    : kind === TX_KIND.CONTRACT_CALL && other === String(tx?.contractId ?? "")
-    ? "Copy contract ID"
-    : "Copy address";
+  const otherLabel =
+    kind === TX_KIND.CONTRACT_CALL && other === String(tx?.contractId ?? "") ? "Copy contract ID" : "Copy address";
   const hero = h("div", { class: "tx-hero" }, [
     h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true", html: txIconSvg(desc.icon) }),
     desc.lead ? h("div", { class: "tx-hero-lead", text: desc.lead }) : null,
     h("div", { class: "tx-hero-name-line" }, [
-      h("h2", { class: desc.isAddress ? "tx-hero-name mono" : "tx-hero-name", title: desc.isAddress ? desc.address : undefined, text: desc.name }),
-      desc.isAddress ? copyButton(desc.address, { showToast }) : null,
+      h("h2", { class: desc.isAddress ? "tx-hero-name mono" : "tx-hero-name", title: desc.isAddress || desc.evm ? desc.address : undefined }, nameParts(desc)),
+      desc.isAddress || desc.evm ? copyButton(desc.address, { label: desc.evm ? "Copy DuskEVM address" : "Copy address", showToast }) : null,
     ].filter(Boolean)),
     other
       ? h("div", { class: "tx-hero-addr" }, [
@@ -246,10 +246,30 @@ export function txDetailsView(ov, { state, actions } = {}) {
     },
   });
 
+  // Where a deposit to DuskEVM went, in full, with Copy.
+  const evmRow = desc.evm
+    ? kv(
+        "DuskEVM recipient",
+        [
+          h("span", { class: "mono", text: desc.address }),
+          h("button", {
+            class: "mini-btn",
+            type: "button",
+            text: "Copy",
+            "aria-label": "Copy DuskEVM address",
+            onclick: async () => {
+              const ok = await copyToClipboard(desc.address);
+              showToast?.(ok ? "Address copied" : "Couldn't copy the address");
+            },
+          }),
+        ],
+        { className: "kv--wrap tx-evm-recipient" }
+      )
+    : null;
+
   const rows = h("div", { class: "group" }, [
     when ? kv("Date", dateText(when)) : null,
-    // Where a deposit to DuskEVM went, in full.
-    desc.evm ? kv("DuskEVM recipient", h("span", { class: "mono", text: desc.address }), { className: "kv--wrap" }) : null,
+    evmRow,
     tx?.memo ? kv("Memo", String(tx.memo), { className: "kv--wrap" }) : null,
     feeRow(tx, desc),
     ...ownRows,

@@ -59,6 +59,8 @@ export function historyRow(entry, { nodeUrl } = {}) {
     gasSpent: entry.gasSpent,
     gasPrice: entry.gasPrice,
     gasLimit: entry.gasLimit,
+    // A deposit to DuskEVM's address there, read from its call; null when it names none.
+    bridgeTo: entry.bridgeTo,
     detailsAt: entry.detailsAt,
   };
 }
