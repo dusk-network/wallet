@@ -445,6 +445,37 @@ describe("lookupPrimaryName", () => {
     await expect(pending).resolves.toBe("domains.dusk");
   });
 
+  it("reads through Multicall for Dusk, and alone a lookup the lens refused for want of gas in it", async () => {
+    const refused = new lens.LensReaderError("refused", "Lens reverse refused: GasBudget", {
+      refusal: { code: "GasBudget", contract: null, cause: null, height: 1n },
+    });
+    const batched = { resolve: vi.fn(), verifyPrimary: vi.fn(async () => Promise.reject(refused)) };
+    const direct = { resolve: vi.fn(), verifyPrimary: vi.fn(async () => primary("domains.dusk")) };
+    lens.createLensReader.mockResolvedValueOnce(batched).mockResolvedValueOnce(direct);
+
+    await expect(lookup()).resolves.toBe("domains.dusk");
+    expect(batched.verifyPrimary).toHaveBeenCalledTimes(1);
+    expect(direct.verifyPrimary).toHaveBeenCalledTimes(1);
+
+    // The first reader's reads of one task go out as one query.
+    const { fetch, nodeUrl: node } = lens.createLensReader.mock.calls[0][1];
+    const sent = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        sent.push(String(url));
+        return new Response("", { status: 500 });
+      })
+    );
+    const LENS = releases.testnet.lens.contractId;
+    await Promise.all(
+      ["lens_interface", "binding", "reverse"].map((fn) =>
+        fetch(`${node}/on/contracts:${LENS}/${fn}`, { method: "POST", body: new Uint8Array([1]) })
+      )
+    );
+    expect(sent[0]).toBe(`${node}/on/contracts:93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4/aggregate`);
+  });
+
   it("shares a lookup, reuses its answer for a minute, and then gives the answer of a new one", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const reader = useReader({ verifyPrimary: async () => primary("domains.dusk") });

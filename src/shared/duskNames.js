@@ -178,23 +178,28 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
  * reader's `verifyPrimary` through the wallet's node; `name` is null when the
  * account has none. Never throws.
  *
+ * With `batched`, the reads of the lookup go through Multicall for Dusk as one
+ * query, and a lookup the lens refused for want of gas in it is made again on
+ * its own.
+ *
  * @param {string} account - Base58 public account
- * @param {{ nodeUrl?: string }} [opts] - the wallet's node for the active network
+ * @param {{ nodeUrl?: string, batched?: boolean }} [opts] - the wallet's node for the active network
  * @returns {Promise<{ ok: true, name: string|null } | { ok: false, reason: "unsupported_network"|"lookup_failed" }>}
  */
-export async function resolvePrimaryName(account, { nodeUrl } = {}) {
+export async function resolvePrimaryName(account, { nodeUrl, batched = false } = {}) {
   const network = duskNamesNetwork(nodeUrl);
   if (!network) return { ok: false, reason: "unsupported_network" };
   // Only a public account, a Moonlight key, can have a primary name.
   if (classifyDuskIdentifier(account) !== "account") return { ok: true, name: null };
   try {
     const [sdk, { default: releases }] = await loadSdk();
-    const reader = await readerFor(sdk.createLensReader, releases[network], network, nodeHref(nodeUrl));
+    const reader = await readerFor(sdk.createLensReader, releases[network], network, nodeHref(nodeUrl), { batched });
     // The reader takes the 96-byte key as plain numbers.
     const verified = await reader.verifyPrimary(Array.from(sdk.decodeBase58(account)));
     const name = verified === null ? null : verified.primary.spelling;
     return name === null || typeof name === "string" ? { ok: true, name } : { ok: false, reason: "lookup_failed" };
-  } catch {
+  } catch (error) {
+    if (batched && shortOfGas(error)) return resolvePrimaryName(account, { nodeUrl });
     return { ok: false, reason: "lookup_failed" };
   }
 }
@@ -285,7 +290,7 @@ export function lookupPrimaryName(account, { nodeUrl, stale = false } = {}) {
   const fresh = Date.now() - entry.at < LOOKUP_REUSE_MS;
   if (!fresh && !entry.running) {
     entry.running = new Promise((start) => setTimeout(start)).then(async () => {
-      const result = await resolvePrimaryName(account, { nodeUrl });
+      const result = await resolvePrimaryName(account, { nodeUrl, batched: true });
       entry.running = null;
       if (!result.ok) return null;
       Object.assign(entry, { name: result.name, at: Date.now() });
