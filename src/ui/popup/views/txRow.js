@@ -9,7 +9,8 @@
 
 import { formatDusk, formatFee, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { bridgeTransfer } from "../../../shared/bridge.js";
+import { bridgeRouteTransfer, bridgeTransfer } from "../../../shared/bridge.js";
+import { isEvmAddress } from "../../../shared/bridgeCalls.js";
 import { knownCall } from "../../../shared/knownCalls.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { labelForNode } from "../../../shared/nodeNetwork.js";
@@ -142,7 +143,10 @@ function tokenUnits(units, decimals) {
  *   amount: { sign: string, value: string, unit: string } | null,
  *   status: string, tone: "ok"|"bad"|"pending"|"neutral", statusWord: string|null,
  *   failed: boolean, unsent: boolean, fee: string|null, arrival: string|null, arrivedAt: number|null,
- * }}
+ *   recipient: string|null, evmChain: string, via: { name: string, address: string|null, isAddress: boolean } | null,
+ * }} `recipient`: the address on another chain, `evmChain`, a bridge transfer
+ *   paid, which `evm` rows are named by; `via`: the bridge's account on Dusk
+ *   it went through
  */
 export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const kind = String(tx?.kind ?? "").toLowerCase();
@@ -173,6 +177,8 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
 
   let d;
   const bridge = bridgeTransfer(tx, network);
+  // A transfer to or from another chain through one of the network's bridge routes.
+  const route = bridge ? null : bridgeRouteTransfer(tx, network);
   // A known contract's call, by what it did.
   const named =
     kind === TX_KIND.CONTRACT_CALL
@@ -193,6 +199,8 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
             word: evm ? "Bridge to DuskEVM" : "Bridge",
             address: evm,
             evm: Boolean(evm),
+            recipient: evm,
+            evmChain: "DuskEVM",
             amount: dusk(positive(tx?.deposit) ? tx.deposit : value, MINUS),
           }
         : bridge === "from"
@@ -205,6 +213,26 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
             word: "Bridge",
             amount: null,
           };
+  } else if (route) {
+    // To or from another chain, by the route's name for it, under Bridge,
+    // with the bridge's account it went through; to one, the address there
+    // is the memo the bridge pays out to.
+    const chain = route.chain;
+    const memo = String(tx?.memo ?? "").trim();
+    d =
+      route.direction === "to"
+        ? {
+            icon: "bridge",
+            category: "bridge",
+            lead: `Bridge to ${chain}`,
+            name: `To ${chain}`,
+            word: "Bridge",
+            recipient: isEvmAddress(memo) ? memo : null,
+            evmChain: chain,
+            via: party(tx?.to, tx?.toName),
+            amount: dusk(tx?.amount, MINUS),
+          }
+        : { icon: "bridge", category: "bridge", lead: "Bridge", name: `From ${chain}`, word: "Bridge", via: party(tx?.from), amount: dusk(tx?.amount, "+") };
   } else if (kind === TX_KIND.TRANSFER) {
     if (dir === "in") {
       const p = party(tx?.from);
@@ -331,6 +359,9 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     address: null,
     isAddress: false,
     evm: false,
+    recipient: null,
+    evmChain: "",
+    via: null,
     generic: false,
     ...d,
     note: String(tx?.privacy ?? "").toLowerCase() === "shielded" && kind !== TX_KIND.SHIELD && kind !== TX_KIND.UNSHIELD ? "Shielded" : "",
@@ -510,7 +541,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
         ]),
         desc.isAddress || desc.evm
           ? copyButton(desc.address, {
-              label: desc.evm ? "Copy DuskEVM address" : "Copy address",
+              label: desc.evm ? `Copy ${desc.evmChain} address` : "Copy address",
               showToast: actions?.showToast,
               className: "copy-ico tx-copy",
             })

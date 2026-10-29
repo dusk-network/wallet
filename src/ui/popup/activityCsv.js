@@ -101,8 +101,9 @@ function csvLine(tx, { nodeUrl, contactName, records, own }, withContacts) {
   const token = desc.amount && desc.amount.unit !== "DUSK" ? `${desc.amount.value} ${desc.amount.unit}` : "";
   const line = [subText(desc, ""), token].filter(Boolean).join(" · ");
   const what = desc.isAddress ? line : line ? `${desc.name} (${line})` : desc.name;
-  // A contract by its ID as every Dusk app writes one, without 0x.
-  const counterparty = contractIdText((desc.evm ? desc.address : desc.address ?? tx?.to ?? tx?.from ?? tx?.counterparty ?? tx?.contractId) ?? "");
+  // A contract by its ID as every Dusk app writes one, without 0x; a transfer
+  // through a bridge's account, that account.
+  const counterparty = contractIdText((desc.via?.address ?? (desc.evm ? desc.address : desc.address ?? tx?.to ?? tx?.from ?? tx?.counterparty ?? tx?.contractId)) ?? "");
   const status = isRowIncomplete(tx) ? "Not looked up yet" : STATUS_WORDS[String(tx?.status ?? "")] ?? "";
   return [
     csvField(time ? new Date(time).toISOString() : ""),
@@ -118,7 +119,7 @@ function csvLine(tx, { nodeUrl, contactName, records, own }, withContacts) {
     csvField(tx?.feePaid != null && tx.feePaid !== "" ? formatLuxToDusk(tx.feePaid) : ""),
     csvText(tx?.memo ?? ""),
     csvField(status),
-    ...(withContacts ? [csvText((!desc.evm && counterparty && contactName?.(counterparty)) || "")] : []),
+    ...(withContacts ? [csvText(((desc.via || !desc.evm) && counterparty && contactName?.(counterparty)) || "")] : []),
   ].join(",");
 }
 

@@ -57,6 +57,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Named DUSK bridged to and from BNB Smart Chain and Ethereum in Activity by their routes, To BNB Smart Chain and From Ethereum, under Bridge, with the bridge's account it went through.
 - Named a `.dusk` name's reservation in Activity by the name its registration reveals, else Name reservation (step 1 of 2).
 - Said on Send that a pasted 0x address is an EVM address, not a Dusk account, and kept Review off.
 - Called a failed shield Shield attempt (failed) in Activity, and one that went through Shield, not Call convert.

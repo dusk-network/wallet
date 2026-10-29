@@ -177,9 +177,10 @@ describe("what a row says", () => {
     expect([hubCall.lead, hubCall.name, subText(hubCall, "14:32")]).toEqual(["Sozu hub", "Call contract", "Sozu hub · 14:32"]);
     const bsc = routes(networks.mainnet).find((route) => route.kind === "service").account;
     const paid = describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc, amount: "2000000000" }, { nodeUrl: MAINNET });
-    expect([paid.lead, paid.name, paid.address, paid.isAddress]).toEqual(["Sent to", "BSC bridge", bsc, false]);
+    // The bridge's account, which the payment went through, as the file names it.
+    expect([paid.lead, paid.name, paid.via]).toEqual(["Bridge to BNB Smart Chain", "To BNB Smart Chain", { name: "BSC bridge", address: bsc, isAddress: false }]);
     // A contact's own name still comes first; another network's file names nothing here.
-    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: MAINNET, contactName: () => "Bridge" }).name).toBe("Bridge");
+    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: MAINNET, contactName: () => "Bridge" }).via.name).toBe("Bridge");
     expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: TESTNET }).isAddress).toBe(true);
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: hub, fnName: "contract" }, { nodeUrl: TESTNET }).lead).toBe("");
   });
@@ -202,6 +203,49 @@ describe("what a row says", () => {
       const d = describeTx({ nodeUrl: TESTNET, ...tx });
       expect(ACTIVITY_FILTERS.map((f) => f.id).filter((f) => inFilter(d, f))).toEqual(only === "all" ? ["all"] : ["all", only]);
     }
+  });
+
+  it("puts DUSK bridged to and from BNB Smart Chain and Ethereum under Bridge, named by their routes, not under Sent or Received", () => {
+    const MAINNET = "https://nodes.dusk.network";
+    const [bscOut, bscIn, ethIn] = [
+      routes(networks.mainnet).find((route) => route.kind === "service").account,
+      routes(networks.mainnet).find((route) => route.id === "bsc-to-dusk").payoutAccount,
+      routes(networks.mainnet).find((route) => route.id === "ethereum-to-dusk").payoutAccount,
+    ];
+    const evm = "0xab84edffd745af9420ac74fec73121fbee9fc86f";
+    const filters = (d) => ACTIVITY_FILTERS.map((f) => f.id).filter((f) => inFilter(d, f));
+    // To BNB Smart Chain: the bridge's account, the address there in the memo.
+    const out = describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bscOut, memo: evm, amount: "2000000000", status: "executed" }, { nodeUrl: MAINNET });
+    expect([out.lead, out.name, subText(out, "17:22"), amountText(out.amount, false), out.recipient, out.evmChain, out.via.name, filters(out)]).toEqual([
+      "Bridge to BNB Smart Chain",
+      "To BNB Smart Chain",
+      "Bridge · 17:22",
+      "−2 DUSK",
+      evm,
+      "BNB Smart Chain",
+      "BSC bridge",
+      ["all", "bridge"],
+    ]);
+    // From BNB Smart Chain and from Ethereum: their routes' payout accounts.
+    for (const [from, chain, payer] of [
+      [bscIn, "BNB Smart Chain", "BSC bridge"],
+      [ethIn, "Ethereum", "Ethereum migration payouts"],
+    ]) {
+      const back = describeTx({ kind: TX_KIND.TRANSFER, direction: "in", from, amount: "5000000000", status: "executed" }, { nodeUrl: MAINNET });
+      expect([back.lead, back.name, subText(back, "17:19"), amountText(back.amount, false), back.via.name, filters(back)]).toEqual([
+        "Bridge",
+        `From ${chain}`,
+        "Bridge · 17:19",
+        "+5 DUSK",
+        payer,
+        ["all", "bridge"],
+      ]);
+    }
+    // Testnet's route to Sepolia, by the chain it names; any other account is a send or a receipt.
+    const sepolia = routes(networks.testnet).find((route) => route.kind === "service").account;
+    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: sepolia, memo: evm, amount: "1" }, { nodeUrl: TESTNET }).lead).toBe("Bridge to Sepolia");
+    expect(filters(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bscIn, amount: "1" }, { nodeUrl: TESTNET }))).toEqual(["all", "sent"]);
+    expect(filters(describeTx({ kind: TX_KIND.TRANSFER, direction: "in", from: bscOut, amount: "1" }, { nodeUrl: TESTNET }))).toEqual(["all", "received"]);
   });
 
   it("calls a shield through the transfer contract a shield, and one that failed an attempt", () => {

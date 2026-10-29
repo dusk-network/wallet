@@ -174,19 +174,22 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   // Who: the other side's name with its short address and Copy, a saved
   // contact's .dusk name before it; an address without a name shows in full
-  // mono, Copy beside it; a deposit to DuskEVM is "To" the DuskEVM address it
-  // paid, Copy beside it. A call's contract is under Technical details.
-  const other = !desc.evm && desc.address && !desc.isAddress ? desc.address : "";
+  // mono, Copy beside it; a deposit to DuskEVM is "To" the address it paid
+  // there, Copy beside it; a transfer through a bridge's account shows that
+  // account under it. A call's contract is under Technical details.
+  const via = desc.via?.address ? desc.via : null;
+  const other = via ? via.address : !desc.evm && desc.address && !desc.isAddress ? desc.address : "";
+  const otherAlias = via ? (via.isAddress ? "" : via.name) : desc.alias;
   const hero = h("div", { class: "tx-hero" }, [
     h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true", html: txIconSvg(desc.icon) }),
     desc.lead ? h("div", { class: "tx-hero-lead", text: desc.lead }) : null,
     h("div", { class: "tx-hero-name-line" }, [
       h("h2", { class: desc.isAddress ? "tx-hero-name mono" : "tx-hero-name", title: desc.isAddress || desc.evm ? desc.address : undefined }, nameParts(desc)),
-      desc.isAddress || desc.evm ? copyButton(desc.address, { label: desc.evm ? "Copy DuskEVM address" : "Copy address", showToast }) : null,
+      desc.isAddress || desc.evm ? copyButton(desc.address, { label: desc.evm ? `Copy ${desc.evmChain} address` : "Copy address", showToast }) : null,
     ].filter(Boolean)),
     other
       ? h("div", { class: "tx-hero-addr" }, [
-          desc.alias ? h("span", { class: "tx-hero-alias", text: `${desc.alias} · ` }) : null,
+          otherAlias ? h("span", { class: "tx-hero-alias", text: `${otherAlias} · ` }) : null,
           mono(other, shortAddress(other)),
           copyButton(other, { label: "Copy address", showToast }),
         ].filter(Boolean))
@@ -242,19 +245,19 @@ export function txDetailsView(ov, { state, actions } = {}) {
     },
   });
 
-  // Where a deposit to DuskEVM went, in full, with Copy.
-  const evmRow = desc.evm
+  // Where a transfer to another chain went, in full, with Copy.
+  const evmRow = desc.recipient
     ? kv(
-        "DuskEVM recipient",
+        `${desc.evmChain} recipient`,
         [
-          h("span", { class: "mono", text: desc.address }),
+          h("span", { class: "mono", text: desc.recipient }),
           h("button", {
             class: "mini-btn",
             type: "button",
             text: "Copy",
-            "aria-label": "Copy DuskEVM address",
+            "aria-label": `Copy ${desc.evmChain} address`,
             onclick: async () => {
-              const ok = await copyToClipboard(desc.address);
+              const ok = await copyToClipboard(desc.recipient);
               showToast?.(ok ? "Address copied" : "Couldn't copy the address");
             },
           }),
@@ -296,7 +299,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
     when ? kv("Date", dateText(when)) : null,
     desc.arrivedAt ? kv("Arrived", dateText(desc.arrivedAt)) : null,
     evmRow,
-    tx?.memo ? kv("Memo", String(tx.memo), { className: "kv--wrap" }) : null,
+    // A memo that is the recipient on another chain shows as that.
+    tx?.memo && String(tx.memo).trim() !== desc.recipient ? kv("Memo", String(tx.memo), { className: "kv--wrap" }) : null,
     feeRow(tx, desc),
     ...ownRows,
     site ? kv("Site", site) : null,

@@ -1,4 +1,4 @@
-import { networks } from "@dusk-network/networks";
+import { networks, routes } from "@dusk-network/networks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
@@ -184,6 +184,33 @@ describe("transaction details", () => {
     const onItsWay = details(deposit);
     expect([onItsWay.status, onItsWay.rows.some((r) => r.startsWith("DuskEVM transaction") || r.startsWith("Arrived"))]).toEqual(["Completed", false]);
     expect(onItsWay.body.querySelectorAll(".tx-explorer-btn").map(visibleText)).toEqual(["View in Dusk explorer"]);
+  });
+
+  it("names DUSK bridged to BNB Smart Chain and back from Ethereum by their routes, with the bridge's account each went through", () => {
+    const MAINNET = "https://nodes.dusk.network";
+    const route = (id) => routes(networks.mainnet).find((r) => r.id === id);
+    const bsc = route("dusk-to-bsc").account;
+    const payouts = route("ethereum-to-dusk").payoutAccount;
+    const evm = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
+    const on = (tx) => {
+      const ov = { nodeUrl: MAINNET, txs: [{ hash: HASH, nodeUrl: MAINNET, status: "executed", ...tx }] };
+      dom.document.body.replaceChildren(...txDetailsView(ov, { state: { route: "tx", txDetailHash: HASH, addressBook: { loaded: true, items: [] } }, actions: {} }));
+      const body = dom.document.body;
+      return {
+        lead: visibleText(body.querySelector(".tx-hero-lead")),
+        name: visibleText(body.querySelector(".tx-hero-name")),
+        via: visibleText(body.querySelector(".tx-hero-addr")),
+        rows: body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText),
+        copy: body.querySelector(".tx-hero-name-line button")?.getAttribute("aria-label"),
+      };
+    };
+    const sent = on({ kind: TX_KIND.TRANSFER, to: bsc, memo: evm, amount: "2000000000" });
+    expect([sent.lead, sent.name, sent.via]).toEqual(["Bridge to BNB Smart Chain", "To BNB Smart Chain", `BSC bridge · ${bsc.slice(0, 6)}…${bsc.slice(-6)}`]);
+    // The address there, in full, once: the memo it was sent with.
+    expect(sent.rows).toContain(`BNB Smart Chain recipient${evm}Copy`);
+    expect(sent.rows.filter((r) => r.startsWith("Memo"))).toEqual([]);
+    const back = on({ kind: TX_KIND.TRANSFER, direction: "in", from: payouts, amount: "5000000000" });
+    expect([back.lead, back.name, back.via]).toEqual(["Bridge", "From Ethereum", `Ethereum migration payouts · ${payouts.slice(0, 6)}…${payouts.slice(-6)}`]);
   });
 
   it("leads with a saved contact's own name, its .dusk name beside the address", () => {
