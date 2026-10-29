@@ -45,6 +45,10 @@ import { sendFromReview } from "./sent.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
 
+// A pasted EVM address, which a Dusk transfer can't pay.
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+export const EVM_ADDRESS_TEXT = "That's an EVM address, not a Dusk account.";
+
 /**
  * The .dusk name the draft's recipient was resolved from, while the recipient
  * is still the address it resolved to. Contacts can replace the recipient, and
@@ -639,6 +643,17 @@ export function sendFormView(ov, { state, actions } = {}) {
       updateContactMatch(v, t);
       showSelfNote(v);
       if (t === "account") showPrimaryName(v);
+      updateAmountHelpers();
+      return;
+    }
+
+    // An EVM address can't receive DUSK on Dusk: say what it is, and Review stays off.
+    if (EVM_ADDRESS.test(v)) {
+      hideRecipientBadge(toTypePill);
+      showNameBox([h("div", { class: "err", text: EVM_ADDRESS_TEXT })]);
+      detectedRecipientType = null;
+      nextBtn.disabled = true;
+      updateContactMatch("", null);
       updateAmountHelpers();
       return;
     }

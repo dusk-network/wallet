@@ -58,8 +58,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 
 - Named a `.dusk` name's reservation in Activity by the name its registration reveals, else Name reservation (step 1 of 2).
+- Said on Send that a pasted 0x address is an EVM address, not a Dusk account, and kept Review off.
 - Called a failed shield Shield attempt (failed) in Activity, and one that went through Shield, not Call convert.
 - Named Dusk Domains' contracts in Technical details, and every named contract in approvals, as the explorer does.
+- Said under Reset what it removes, and that your funds stay on Dusk.
 - Hid Sozu's deposit fee in DUSK while balances are hidden, on the stake form and its Review.
 - Worked out Sozu's yearly estimate from native staking's figure as shown, as the web wallet does, and added Not promised.
 - Moved Sozu's contract from the stake form to its Review, under Custom fee.

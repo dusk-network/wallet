@@ -567,6 +567,26 @@ describe("a name typed without .dusk", () => {
   });
 });
 
+describe("an EVM address", () => {
+  it("says it's an EVM address, not a Dusk account, and keeps Review off", () => {
+    for (const nodeUrl of [undefined, "http://127.0.0.1:8080"]) {
+      const form = mount(newState(), overview(nodeUrl ? { nodeUrl } : {}));
+      typeInto(form.to, "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F");
+      expect([visibleText(form.nameBox()), form.pill(), form.review.disabled]).toEqual([
+        "That's an EVM address, not a Dusk account.",
+        "",
+        true,
+      ]);
+      // In any case.
+      typeInto(form.to, "0xab84edffd745af9420ac74fec73121fbee9fc86f");
+      expect(visibleText(form.nameBox())).toBe("That's an EVM address, not a Dusk account.");
+      // Anything shorter isn't one.
+      typeInto(form.to, "0xAB84EDFF");
+      expect([visibleText(form.nameBox()), form.pill(), form.review.disabled]).toEqual(["", "?Unknown", false]);
+    }
+  });
+});
+
 describe("sending to yourself", () => {
   const ACCOUNT_NOTE = "This is your own account. Sending to yourself only costs a fee.";
   const ADDRESS_NOTE = "This is your own address. Sending to yourself only costs a fee.";

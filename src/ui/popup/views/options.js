@@ -534,7 +534,10 @@ export function optionsView(ov, { state, actions } = {}) {
     // Advanced is its own section, its title the disclosure's.
     h("section", { class: "settings-section" }, [advanced]),
     section("Reset", [
-      h("p", { class: "settings-note", text: "Removes this wallet from this browser. You need the recovery phrase to use it again." }),
+      h("p", {
+        class: "settings-note",
+        text: "Removes this wallet, its contacts, activity and connected sites from this browser. Your funds stay on Dusk. You need the recovery phrase to use it again.",
+      }),
       resetBtn,
     ], "settings-section--danger"),
     section("About", [
