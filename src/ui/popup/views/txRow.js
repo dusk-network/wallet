@@ -37,6 +37,8 @@ export const ACTIVITY_FILTERS = Object.freeze([
 const TRANSFER_CONTRACT = "0100000000000000000000000000000000000000000000000000000000000000";
 const isConvert = (tx, fn) =>
   String(tx?.contractId ?? "").trim().toLowerCase().replace(/^0x/, "") === TRANSFER_CONTRACT && fn === "convert" && tx?.direction !== "in";
+// A shield, sent from this wallet or read from the chain: one that failed was only an attempt.
+const shieldName = (tx) => (String(tx?.status ?? "").toLowerCase() === "failed" ? "Shield attempt (failed)" : "Shield");
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -218,17 +220,17 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     d = {
       icon: "shield",
       category: "other",
-      name: shield ? "Shield" : "Unshield",
+      name: shield ? shieldName(tx) : "Unshield",
       word: shield ? "Public to shielded" : "Shielded to public",
       amount: dusk(tx?.amount, ""),
     };
   } else if (kind === TX_KIND.CONTRACT_CALL && isConvert(tx, fn)) {
-    // A shield as the chain records it: one that failed says it was only an attempt.
+    // A shield as the chain records it.
     const value = positive(tx?.deposit) ? tx.deposit : tx?.amount;
     d = {
       icon: "shield",
       category: "other",
-      name: String(tx?.status ?? "").toLowerCase() === "failed" ? "Shield attempt (failed)" : "Shield",
+      name: shieldName(tx),
       word: "Public to shielded",
       amount: dusk(value, ""),
     };

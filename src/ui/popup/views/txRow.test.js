@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
 
+import { mergeActivity } from "../../../shared/activityMerge.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import releases from "../../../shared/dusk-domains-releases.json";
 import { ACTIVITY_FILTERS, amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
@@ -217,6 +218,16 @@ describe("what a row says", () => {
     expect([done.name, subText(done, "19:30"), amountText(done.amount, false)]).toEqual(["Shield", "Public to shielded · 19:30", "20 DUSK"]);
     // Another contract's convert is any call.
     expect(describeTx({ ...convert, contractId: "ab".repeat(32), status: "failed" }).name).toBe("Call convert");
+
+    // This wallet's own shield keeps its kind: sent from here, or merged with the chain's record of it.
+    const own = { hash: "f0".repeat(32), kind: TX_KIND.SHIELD, privacy: "public", amount: "20000000000", status: "submitted", submittedAt: 1, nodeUrl: TESTNET };
+    expect(describeTx({ ...own, status: "failed", feePaid: "50000000" }).name).toBe("Shield attempt (failed)");
+    expect(describeTx({ ...own, status: "executed" }).name).toBe("Shield");
+    const chain = { hash: own.hash, blockHeight: 4_600_000, direction: "out", kind: TX_KIND.TRANSFER, contractId: TRANSFER, fnName: "convert", value: 0n, success: false, error: "Panic", fee: 50_000_000n, detailsAt: 1 };
+    const [merged] = mergeActivity({ local: [own], history: [chain], nodeUrl: TESTNET });
+    expect([merged.kind, merged.status, describeTx(merged).name]).toEqual([TX_KIND.SHIELD, "failed", "Shield attempt (failed)"]);
+    // An unshield that failed keeps its name.
+    expect(describeTx({ kind: TX_KIND.UNSHIELD, status: "failed" }).name).toBe("Unshield");
   });
 
   it("says where a deposit to DuskEVM went: To its DuskEVM address", () => {
