@@ -1189,7 +1189,7 @@ export async function renderNotification() {
             { stack: true }
           ),
           kv("Amount", `${amount.value} ${amount.unit}`),
-          kv("Sent from DuskEVM", h("code", { class: "ap-address", text: bridge.sender }), { stack: true }),
+          kv("Sent from DuskEVM", h("code", { class: "ap-address", text: bridge.from }), { stack: true }),
           bridge.proofSubmitter ? kv("Proved by", h("code", { class: "ap-address", text: bridge.proofSubmitter }), { stack: true }) : null,
         ]);
       }

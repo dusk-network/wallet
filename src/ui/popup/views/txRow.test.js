@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
+import { PINNED_RELEASES as releases } from "@duskdomains/sdk/releases";
 
 import { mergeActivity } from "../../../shared/activityMerge.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import releases from "../../../shared/dusk-domains-releases.json";
 import { ACTIVITY_FILTERS, amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
 
 process.env.TZ = "UTC";
@@ -100,7 +100,8 @@ describe("what a row says", () => {
       null,
     ]);
     // Liquid staking's unstake: the DUSK comes back once the chain says so.
-    expect(read({ kind: TX_KIND.CONTRACT_CALL, fnName: "sozu_unstake", deposit: "0", amount: "0", status: "submitted" })).toEqual([
+    const pool = networks.testnet.sozu.fallbacks.pool;
+    expect(read({ kind: TX_KIND.CONTRACT_CALL, contractId: pool, nodeUrl: TESTNET, fnName: "sozu_unstake", deposit: "0", amount: "0", status: "submitted" })).toEqual([
       "stake",
       "Unstaked from Sozu",
       "Staking · 14:32",
@@ -167,7 +168,13 @@ describe("what a row says", () => {
     // On another network's node, or a custom one, it's any contract.
     expect(call("register", { nodeUrl: "https://nodes.dusk.network" }).name).toBe("Call register");
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: store, fnName: "register" }, { nodeUrl: "https://node.example" }).name).toBe("Call register");
-    expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, fnName: "sozu_stake", deposit: "1000000000" }).name).toBe("Staked with Sozu");
+    // Sozu's: a stake or an unstake on its network's pool, not the same function on another contract.
+    const pool = { kind: TX_KIND.CONTRACT_CALL, contractId: networks.testnet.sozu.fallbacks.pool, fnName: "sozu_stake", deposit: "1000000000" };
+    expect(describeTx(pool, { nodeUrl: TESTNET }).name).toBe("Staked with Sozu");
+    expect(describeTx({ ...pool, contractId: "ab".repeat(32) }, { nodeUrl: TESTNET }).name).toBe("Call sozu_stake");
+    expect(describeTx(pool, { nodeUrl: "https://node.example" }).name).toBe("Call sozu_stake");
+    // A records change, whether it changes some or replaces them all.
+    for (const fnName of ["mutate_records", "replace_records"]) expect(call(fnName).name).toBe("Changed a .dusk name's records");
   });
 
   it("names the contracts and accounts the network's file names: a call by its contract, a transfer by whom it paid", () => {
@@ -226,6 +233,9 @@ describe("what a row says", () => {
       "BSC bridge",
       ["all", "bridge"],
     ]);
+    // The wallet's own send, which has no direction, too; one to yourself isn't one.
+    expect(describeTx({ kind: TX_KIND.TRANSFER, to: bscOut, memo: evm, amount: "2000000000" }, { nodeUrl: MAINNET }).lead).toBe("Bridge to BNB Smart Chain");
+    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "self", to: bscOut, amount: "1" }, { nodeUrl: MAINNET }).name).toBe("To yourself");
     // From BNB Smart Chain and from Ethereum: their routes' payout accounts.
     for (const [from, chain, payer] of [
       [bscIn, "BNB Smart Chain", "BSC bridge"],

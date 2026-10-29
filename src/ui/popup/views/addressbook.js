@@ -1,12 +1,7 @@
 import { ProfileGenerator } from "@dusk/w3sper";
+import { isDuskName } from "@duskdomains/sdk/names";
 import { explorerAccountUrl } from "../../../shared/explorer.js";
-import {
-  duskNameErrorText,
-  duskNameRecipient,
-  duskNamesNetwork,
-  isDuskName,
-  lookupDuskName,
-} from "../../../shared/duskNames.js";
+import { duskNameErrorText, duskNameRecipient, duskNamesNetwork, lookupDuskName } from "../../../shared/duskNames.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";

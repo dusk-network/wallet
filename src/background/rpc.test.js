@@ -1612,7 +1612,7 @@ describe("background rpc handler", () => {
   it("dusk_sendTransaction keeps where a deposit to DuskEVM pays on its record, read from its call", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
-    const { BRIDGE_CONTRACTS } = await import("../shared/bridge.js");
+    const { duskEvmContracts } = await import("@dusk-network/networks/duskevm");
     const { default: fixtures } = await import("../shared/fixtures/duskevm-bridge-calls.json");
     const deposit = fixtures.calls.find((c) => c.name === "deposit-shoot");
 
@@ -1623,7 +1623,7 @@ describe("background rpc handler", () => {
     const call = {
       kind: "contract_call",
       privacy: "public",
-      contractId: `0x${BRIDGE_CONTRACTS.testnet.bridge}`,
+      contractId: `0x${duskEvmContracts(2).bridge}`,
       fnName: deposit.fnName,
       fnArgs: deposit.args,
       amount: "0",

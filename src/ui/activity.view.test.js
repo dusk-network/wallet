@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import fixture from "../shared/fixtures/activity-testnet.json";
 import { activityEntry, parseHistoryEntry } from "../shared/activityHistory.js";
-import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
 import { TX_KIND } from "../shared/constants.js";
 import { openUrl } from "../platform/index.js";
 import { accessibleName, installFakeDom, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
@@ -220,7 +220,7 @@ describe("Activity's rows", () => {
   });
 
   it("label bridge transfers, and mark shielded ones", () => {
-    const { bridge, portal } = BRIDGE_CONTRACTS.testnet;
+    const { bridge, portal } = duskEvmContracts(2);
     const at = Date.parse("2026-10-23T07:00:30Z");
     const local = [
       { hash: "c1".repeat(32), kind: TX_KIND.CONTRACT_CALL, contractId: bridge, fnName: "depositETHToWithValue", deposit: dusk(5), status: "executed", submittedAt: at, profileIndex: 0 },

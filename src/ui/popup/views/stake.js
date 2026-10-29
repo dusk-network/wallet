@@ -2,7 +2,6 @@ import { sozuRateEstimate } from "@dusk-network/networks/rates";
 import { feePercent } from "@dusk-network/networks/sozu";
 
 import {
-  UI_DISPLAY_DECIMALS,
   formatDusk,
   formatFee,
   formatLuxToDusk,
@@ -59,7 +58,7 @@ function actionToKind(action) {
 }
 
 function fmtLux(luxStr) {
-  return formatDusk(luxStr, UI_DISPLAY_DECIMALS);
+  return formatDusk(luxStr);
 }
 
 function profileLabel(index) {

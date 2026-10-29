@@ -4,35 +4,23 @@
 // A name resolves to the public account in its `moonlight_address` record and
 // the shielded address in its `phoenix_payment_endpoint` record, and a public
 // account to its verified primary name, read through the SDK's lens reader and
-// the wallet's own node. The SDK and the pinned release descriptors are loaded
-// on the first lookup only, so they stay out of the popup bundle. The lens data
+// the wallet's own node. The reader and its account check are loaded on the
+// first lookup only, so they stay out of the popup bundle. The lens data
 // driver ships with the extension in public/drivers/dusk-domains, and the SDK
-// checks it against the sha256 pinned in dusk-domains-releases.json. Nothing
-// else is fetched.
+// checks it against the sha256 of its pinned release. Nothing else is fetched.
+
+import { nameToShow, toDuskName } from "@duskdomains/sdk/names";
+import { PINNED_RELEASES } from "@duskdomains/sdk/releases";
+import { createMulticallFetch } from "@hdauven/dusk-multicall";
 
 import { assetUrl } from "../platform/assets.js";
 import { classifyDuskIdentifier } from "./duskIdentifiers.js";
-import { createMulticallFetch } from "./multicallFetch.js";
+import { networkForNode } from "./nodeNetwork.js";
 import { duskNamesNetwork, rememberVerifiedName } from "./verifiedNames.js";
 
 export { duskNamesNetwork };
 
 const LOOKUP_REUSE_MS = 60_000;
-
-// The records a name is sent to by: its public account, then its opt-in shielded address.
-const RECORD_KEYS = Object.freeze(["moonlight_address", "phoenix_payment_endpoint"]);
-
-/**
- * Whether recipient input is meant as a .dusk name. Base58 recipients never
- * contain a dot, so this never claims a raw address; `dusk:` request links
- * keep their own handling.
- * @param {unknown} value
- * @returns {boolean}
- */
-export function isDuskName(value) {
-  const text = String(value ?? "").trim();
-  return /\.dusk$/i.test(text) && !/^dusk:/i.test(text);
-}
 
 // Release roles whose data drivers ship with the extension, in
 // public/drivers/dusk-domains. Name lookups load exactly these.
@@ -40,7 +28,7 @@ export const BUNDLED_DRIVER_ROLES = Object.freeze(["lens"]);
 
 /**
  * The bundled data drivers of a release, from its pinned descriptors.
- * @param {object} release - one network of dusk-domains-releases.json
+ * @param {object} release - one network's of PINNED_RELEASES (@duskdomains/sdk/releases)
  * @returns {{ url: string, file: string, sha256: string }[]} pinned driver URL, file name, sha256
  */
 export function bundledDrivers(release) {
@@ -67,8 +55,8 @@ function bundledFetch(release, nodeUrl) {
   };
 }
 
-// The SDK and the pinned release descriptors, loaded on the first lookup.
-const loadSdk = () => Promise.all([import("./duskNamesSdk.js"), import("./dusk-domains-releases.json")]);
+// The SDK's reader and account check, loaded on the first lookup.
+const loadSdk = () => import("./duskNamesSdk.js");
 
 // The SDK's own spelling of the node URL, which its reads start with.
 const nodeHref = (nodeUrl) => new URL(String(nodeUrl)).href.replace(/\/$/, "");
@@ -87,16 +75,19 @@ const lensGas = (release) => (contractId, fnName) =>
     ? BigInt(LENS_READS[fnName]) * 4_000_000n + 30_000_000n
     : 0n;
 
-function readerFor(createLensReader, release, network, nodeUrl, { batched = false } = {}) {
+function readerFor(createLensReader, network, nodeUrl, { batched = false } = {}) {
   const cache = batched ? batchedReaders : readers;
   const cached = cache.get(network);
   if (cached?.nodeUrl === nodeUrl) return cached.promise;
 
+  const release = PINNED_RELEASES[network];
   const direct = bundledFetch(release, nodeUrl);
+  // The multicall on the node's network, as its file has it.
+  const multicallId = networkForNode(nodeUrl)?.contracts.multicall ?? null;
   const promise = createLensReader(release, {
     nodeUrl,
     artifactBaseUrl: release.artifactBaseUrl,
-    fetch: batched ? createMulticallFetch({ nodeUrl, fetch: direct, gasFor: lensGas(release) }) : direct,
+    fetch: batched ? createMulticallFetch({ nodeUrl, multicallId, fetch: direct, gasFor: lensGas(release) }) : direct,
   });
   const entry = { nodeUrl, promise };
   cache.set(network, entry);
@@ -105,29 +96,6 @@ function readerFor(createLensReader, release, network, nodeUrl, { batched = fals
     if (cache.get(network) === entry) cache.delete(network);
   });
   return promise;
-}
-
-// What an answer lets the wallet send to: the public account in the name's
-// `moonlight_address` record and the shielded address its
-// `phoenix_payment_endpoint` record holds as UTF-8 text. The wallet checks each
-// as it checks any address, and a record that fails counts as absent.
-function addressesFrom(sdk, { status, records }, name) {
-  const fail = (reason) => ({ ok: false, name, reason });
-  if (status === "Absent" || status === "Released") return fail("not_registered");
-  if (status === "Grace" || status === "Expired") return fail("expired");
-  if (status !== "Active") return fail("lookup_failed");
-  const [moonlight, phoenix] = records;
-  // The key check the reader's own resolveMoonlightAccount makes.
-  const account =
-    moonlight && sdk.hasClaimableReferrerShape({ kind: "Moonlight", bytes: moonlight.value })
-      ? sdk.encodeBase58(moonlight.value)
-      : "";
-  // A shielded address and nothing else, not even a byte order mark.
-  const text = phoenix ? new TextDecoder("utf-8", { ignoreBOM: true }).decode(Uint8Array.from(phoenix.value)) : "";
-  const result = { ok: true, name };
-  if (classifyDuskIdentifier(account) === "account") result.account = account;
-  if (text === text.trim() && classifyDuskIdentifier(text) === "address") result.address = text;
-  return result.account || result.address ? result : fail("no_account");
 }
 
 /**
@@ -145,29 +113,24 @@ function addressesFrom(sdk, { status, records }, name) {
  * >}
  */
 export async function resolveDuskName(input, { nodeUrl } = {}) {
-  let name = String(input ?? "").trim();
-  const fail = (reason) => ({ ok: false, name, reason });
-
+  const typed = String(input ?? "").trim();
   const network = duskNamesNetwork(nodeUrl);
-  if (!network) return fail("unsupported_network");
-  const node = nodeHref(nodeUrl);
-
-  let sdk;
-  let releases;
-  try {
-    [sdk, { default: releases }] = await loadSdk();
-  } catch {
-    return fail("lookup_failed");
-  }
-
-  const checked = sdk.validateName(name);
-  if (!checked.ok) return fail("invalid_name");
-  name = checked.name.canonical;
+  if (!network) return { ok: false, name: typed, reason: "unsupported_network" };
+  const name = toDuskName(typed);
+  if (!name) return { ok: false, name: typed, reason: "invalid_name" };
+  const fail = (reason) => ({ ok: false, name, reason });
 
   // The reader bounds its own build and reads; any LensReaderError is a failed lookup.
   try {
-    const reader = await readerFor(sdk.createLensReader, releases[network], network, node);
-    return addressesFrom(sdk, await reader.resolve(name, RECORD_KEYS), name);
+    const sdk = await loadSdk();
+    const reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl));
+    // The public account only when it's a valid key, the shielded address only when it's exactly one.
+    const { status, account, address } = await sdk.resolveAccounts(reader, name);
+    if (status === "Absent" || status === "Released") return fail("not_registered");
+    if (status === "Grace" || status === "Expired") return fail("expired");
+    if (status !== "Active") return fail("lookup_failed");
+    if (!account && !address) return fail("no_account");
+    return { ok: true, name, ...(account ? { account } : {}), ...(address ? { address } : {}) };
   } catch {
     return fail("lookup_failed");
   }
@@ -192,8 +155,8 @@ export async function resolvePrimaryName(account, { nodeUrl, batched = false } =
   // Only a public account, a Moonlight key, can have a primary name.
   if (classifyDuskIdentifier(account) !== "account") return { ok: true, name: null };
   try {
-    const [sdk, { default: releases }] = await loadSdk();
-    const reader = await readerFor(sdk.createLensReader, releases[network], network, nodeHref(nodeUrl), { batched });
+    const sdk = await loadSdk();
+    const reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl), { batched });
     // The reader takes the 96-byte key as plain numbers.
     const verified = await reader.verifyPrimary(Array.from(sdk.decodeBase58(account)));
     const name = verified === null ? null : verified.primary.spelling;
@@ -322,15 +285,8 @@ export async function lookupShieldedName(account, address, { nodeUrl } = {}) {
 
 // The longest name an approval shows for a recipient, ".dusk" included, so it
 // fits on its line beside "name set by the recipient". A longer name is left
-// out rather than cut short: the part cut off could be what gives it away.
-export const RECIPIENT_NAME_MAX = 24;
-
-// A label that reads as key material rather than a name: a contract ID's 0x
-// and hex digits, or 16 or more letters and digits with both among them, as
-// the start of an account or a shielded address reads.
-const keyLike = (label) =>
-  /^0x[0-9a-f]*$/.test(label) ||
-  (label.length >= 16 && /^[a-z0-9]+$/.test(label) && /[0-9]/.test(label) && /[a-z]/.test(label));
+// out rather than cut short (nameToShow): the part cut off could give it away.
+const RECIPIENT_NAME_MAX = 24;
 
 /**
  * The primary .dusk name of the recipient of a site's request to send, for
@@ -347,20 +303,7 @@ const keyLike = (label) =>
  */
 export async function lookupRecipientName(recipient, { nodeUrl } = {}) {
   const result = await resolvePrimaryName(String(recipient ?? "").trim(), { nodeUrl });
-  const name = result.ok ? result.name : null;
-  try {
-    return shownRecipientName((await loadSdk())[0], name);
-  } catch {
-    return null;
-  }
-}
-
-// A verified primary name as lookupRecipientName gives it: canonical, at most
-// RECIPIENT_NAME_MAX characters and no label like key material; else null.
-function shownRecipientName(sdk, name) {
-  if (typeof name !== "string" || name.length > RECIPIENT_NAME_MAX) return null;
-  const checked = sdk.validateName(name);
-  return checked.ok && checked.name.canonical === name && !checked.name.labels.some(keyLike) ? name : null;
+  return result.ok ? nameToShow(result.name, RECIPIENT_NAME_MAX) : null;
 }
 
 // A lens refusal for want of gas, which a multicall's share of gas can cause
@@ -372,7 +315,7 @@ const shortOfGas = (error) =>
 /**
  * `lookupRecipientName` for many accounts at once, as Activity names its
  * counterparties: the lookups go out together, so Multicall for Dusk carries
- * up to 32 of them in one query (multicallFetch.js), and the lens reader
+ * up to 32 of them in one query (@hdauven/dusk-multicall), and the lens reader
  * checks each answer as it checks one read alone. A lookup the lens refused
  * for want of gas in the batch is made again on its own. Accounts whose
  * lookup failed are left out. Never throws.
@@ -391,9 +334,8 @@ export async function lookupRecipientNames(accounts, { nodeUrl } = {}) {
   let sdk;
   let reader;
   try {
-    let releases;
-    [sdk, { default: releases }] = await loadSdk();
-    reader = await readerFor(sdk.createLensReader, releases[network], network, nodeHref(nodeUrl), { batched: true });
+    sdk = await loadSdk();
+    reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl), { batched: true });
   } catch {
     return out;
   }
@@ -412,13 +354,7 @@ export async function lookupRecipientNames(accounts, { nodeUrl } = {}) {
     const result = await resolvePrimaryName(account, { nodeUrl });
     if (result.ok) out.set(account, result.name);
   }
-  for (const [account, name] of out) {
-    try {
-      out.set(account, name === null ? null : shownRecipientName(sdk, name));
-    } catch {
-      out.delete(account);
-    }
-  }
+  for (const [account, name] of out) out.set(account, nameToShow(name, RECIPIENT_NAME_MAX));
   return out;
 }
 

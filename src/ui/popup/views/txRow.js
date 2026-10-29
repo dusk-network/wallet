@@ -7,14 +7,16 @@
 // DUSK paid", and its amount shows muted, without a sign: nothing left.
 // Hide balances hides that fee too.
 
+import { routeForAccount } from "@dusk-network/networks";
+import { SOZU_FN, isSozuCall } from "@dusk-network/networks/sozu";
+
 import { formatDusk, formatFee, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { bridgeRouteTransfer, bridgeTransfer } from "../../../shared/bridge.js";
+import { bridgeTransfer } from "../../../shared/bridge.js";
 import { isEvmAddress } from "../../../shared/bridgeCalls.js";
 import { knownCall } from "../../../shared/knownCalls.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
-import { labelForNode } from "../../../shared/nodeNetwork.js";
-import { SOZU_FN } from "@dusk-network/networks/sozu";
+import { labelForNode, networkForNode } from "../../../shared/nodeNetwork.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress, shortEvmAddress } from "../../lib/strings.js";
@@ -156,6 +158,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
 
   // The network's file, for the names it gives contracts and accounts.
   const network = tx?.nodeUrl || nodeUrl;
+  const net = networkForNode(String(network ?? ""));
   // The other side: a saved contact's own name, with its .dusk name (as
   // typed when sending, else verified) beside it; else the .dusk name; else
   // what the network's file calls it; else its short address.
@@ -177,8 +180,11 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
 
   let d;
   const bridge = bridgeTransfer(tx, network);
-  // A transfer to or from another chain through one of the network's bridge routes.
-  const route = bridge ? null : bridgeRouteTransfer(tx, network);
+  // A transfer to or from another chain through one of the network's bridge
+  // routes: to a service route's account, or from a migration's payout account.
+  const into = dir === "in";
+  const route =
+    bridge || !net || kind !== TX_KIND.TRANSFER || dir === "self" ? null : routeForAccount(net, into ? tx?.from : tx?.to, into ? "in" : "out");
   // A known contract's call, by what it did.
   const named =
     kind === TX_KIND.CONTRACT_CALL
@@ -217,10 +223,10 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     // To or from another chain, by the route's name for it, under Bridge,
     // with the bridge's account it went through; to one, the address there
     // is the memo the bridge pays out to.
-    const chain = route.chain;
+    const chain = route.chain.name;
     const memo = String(tx?.memo ?? "").trim();
     d =
-      route.direction === "to"
+      route.kind === "service"
         ? {
             icon: "bridge",
             category: "bridge",
@@ -268,7 +274,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     d = { icon: "stake", category: "staking", lead: "Native staking", name: "Unstake", word: "Staking", amount: dusk(tx?.amount, "+") };
   } else if (kind === TX_KIND.WITHDRAW_REWARD) {
     d = { icon: "stake", category: "staking", lead: "Native staking", name: "Claim rewards", word: "Staking", amount: dusk(tx?.amount, "+") };
-  } else if (fn === SOZU_FN.STAKE || fn === SOZU_FN.UNSTAKE) {
+  } else if (net && isSozuCall(net, { contractId: tx?.contractId, fnName: fn })) {
     const stake = fn === SOZU_FN.STAKE;
     d = {
       icon: "stake",

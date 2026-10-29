@@ -3,7 +3,9 @@
 // while the wallet is locked shows it above Unlock and Reject, so nobody has
 // to type a password to learn what a site wants.
 
-import { bridgeEnvelopeOk, bridgeServiceLine, bridgeServiceTransfer, decodeBridgeCall, weiToDusk } from "../../shared/bridgeCalls.js";
+import { bridgeEnvelopeOk } from "@dusk-network/networks/duskevm";
+
+import { bridgeCallFor, bridgeServiceLine, bridgeServiceTransfer, weiToDusk } from "../../shared/bridgeCalls.js";
 import { toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { formatDuskExact, formatFee, safeBigInt } from "../../shared/amount.js";
@@ -24,11 +26,8 @@ export function callArgs(params) {
  */
 export function bridgeCallOf(params, { own = [] } = {}) {
   if (String(params?.kind ?? "").toLowerCase() !== TX_KIND.CONTRACT_CALL) return null;
-  const args = callArgs(params);
-  const call = args
-    ? decodeBridgeCall({ nodeUrl: params?.nodeUrl, contractId: params?.contractId, fnName: params?.fnName, args, deposit: params?.deposit })
-    : null;
-  return call && bridgeEnvelopeOk(call, { amount: params?.amount, deposit: params?.deposit, to: params?.to, own }) ? call : null;
+  const call = bridgeCallFor({ nodeUrl: params?.nodeUrl, contractId: params?.contractId, fnName: params?.fnName, args: params?.fnArgs });
+  return bridgeEnvelopeOk(call, { amount: params?.amount, deposit: params?.deposit, to: params?.to, own }) ? call : null;
 }
 
 /** A withdrawal's amount as `{ value, unit }`. */
