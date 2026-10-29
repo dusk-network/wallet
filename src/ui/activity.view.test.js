@@ -104,7 +104,7 @@ describe("Activity's rows", () => {
     setup({ names: new Map([[FAUCET, "faucet.dusk"], [SENDER, null]]) });
     expect(rows()).toEqual([
       "Registered a .dusk nameDusk Domains · Yesterday−100 DUSK",
-      "Reserved a .dusk nameDusk Domains · Yesterday",
+      "Name reservation (step 1 of 2)Dusk Domains · Yesterday",
       `${short(SENDER)}Received · Yesterday+1,000 DUSK`,
       "faucet.duskReceived · Yesterday+1,100 DUSK",
     ]);
@@ -118,6 +118,16 @@ describe("Activity's rows", () => {
     expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(SENDER);
     // Opening a row says what it holds.
     expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Registered a .dusk name, Dusk Domains · Yesterday, −100 DUSK");
+  });
+
+  it("name a .dusk name's reservation by the registration that follows it, once both calls are read", () => {
+    const { state, draw } = setup();
+    const R = "1f".repeat(32);
+    state.activity.entries = state.activity.entries.map((e) =>
+      e.fnName === "register" ? { ...e, registeredName: "shpongle.dusk", reservation: R } : e.fnName === "commit" ? { ...e, reservation: R } : e
+    );
+    draw();
+    expect(rows().slice(0, 2)).toEqual(["Registered shpongle.duskDusk Domains · Yesterday−100 DUSK", "Reserved shpongle.duskDusk Domains · Yesterday"]);
   });
 
   it("say a status only while it isn't final: the wallet's pending send, named as typed", () => {
@@ -238,11 +248,11 @@ describe("Home's Activity", () => {
 });
 
 describe("the Activity view", () => {
-  it("groups by day under the All, Sent, Received and Staking filters", () => {
+  it("groups by day under the All, Sent, Received, Staking and Bridge filters", () => {
     const { state, draw } = setup({ account: B, route: "activity" });
     const filters = () => body().querySelectorAll(".filter-chip").map((b) => [visibleText(b), b.getAttribute("aria-pressed")]);
     const days = () => body().querySelectorAll(".tx-day-label").map(visibleText);
-    expect(filters()).toEqual([["All", "true"], ["Sent", "false"], ["Received", "false"], ["Staking", "false"]]);
+    expect(filters()).toEqual([["All", "true"], ["Sent", "false"], ["Received", "false"], ["Staking", "false"], ["Bridge", "false"]]);
     expect(days().slice(0, 4)).toEqual(["Yesterday", "Wed 21 Oct", "Fri 18 Sep", "Fri 17 Jul"]);
     expect(days()).toContain("Sun 16 Nov 2025");
 
@@ -263,6 +273,9 @@ describe("the Activity view", () => {
     expect(rows().every((text) => /Received · /.test(text))).toBe(true);
     button("Sent").click();
     expect(rows().some((text) => /Received|Staking · /.test(text))).toBe(false);
+    // No bridge transfers here.
+    button("Bridge").click();
+    expect([rows(), visibleText(body().querySelector(".tx-empty"))]).toEqual([[], "No bridge transfers yet."]);
     state.activityFilter = "all";
     draw();
   });
@@ -336,7 +349,7 @@ describe("a transaction's details", () => {
       "Block4,658,100",
       "Gas used3,700,000 of 10,000,000",
       "Gas price1 LUX",
-      "Exact fee0.0037 DUSK",
+      "Fee paid0.0037 DUSK",
       "SubmittedThu 22 Oct 2026, 14:32 UTC",
     ]);
     button("View in Dusk explorer").click();

@@ -1,6 +1,7 @@
 // Plain words for the contract calls Activity knows, as the explorer names
-// them: a call to Dusk Domains by what it did to a .dusk name, and a
-// registration by the name it registered, read from its arguments. Only on
+// them: a call to Dusk Domains by what it did to a .dusk name, a
+// registration by the name it registered, read from its arguments, and a
+// name reservation by the name of the registration that follows it. Only on
 // the network the contracts are on, and only for a node of that network: a
 // custom node's contract at the same ID could be anything. It reads nothing
 // from the node.
@@ -8,12 +9,13 @@
 import { blake2b } from "@noble/hashes/blake2b";
 
 import releases from "./dusk-domains-releases.json";
-import { toBytes } from "./bytes.js";
-import { networkForNode } from "./nodeNetwork.js";
+import { bytesToHex, toBytes } from "./bytes.js";
+import { base58Decode } from "./duskIdentifiers.js";
+import { labelForNode, networkForNode } from "./nodeNetwork.js";
 
 // What a Dusk Domains call did, by its function.
 const NAME_CALLS = Object.freeze({
-  commit: "Reserved a .dusk name",
+  commit: "Name reservation (step 1 of 2)",
   register: "Registered a .dusk name",
   renew: "Renewed a .dusk name",
   issue_reserved: "Issued a reserved .dusk name",
@@ -49,17 +51,32 @@ export function isDuskDomains(contractId, nodeUrl) {
 }
 
 /**
+ * What a contract is called on the node's network, as the explorer names it:
+ * by the network's file, or Dusk Domains for one of its contracts; null for
+ * any other.
+ * @param {string} contractId
+ * @param {string} nodeUrl
+ * @returns {string | null}
+ */
+export function contractLabel(contractId, nodeUrl) {
+  return labelForNode(String(nodeUrl ?? ""), String(contractId ?? "")) ?? (isDuskDomains(contractId, nodeUrl) ? "Dusk Domains" : null);
+}
+
+/**
  * What a known contract call did, or null for a contract the wallet doesn't
  * name on this network.
- * @param {{ contractId?: string, fnName?: string, nodeUrl?: string, registeredName?: string|null }} call
- *   `registeredName`: the name a registration registered, once read (registeredNameOf)
+ * @param {{ contractId?: string, fnName?: string, nodeUrl?: string, registeredName?: string|null, reservedName?: string|null }} call
+ *   `registeredName`: the name a registration registered, once read
+ *   (registeredNameOf); `reservedName`: the name a reservation was for, once
+ *   its registration followed (activityMerge.js)
  * @returns {{ app: "Dusk Domains", label: string } | null} `label`: the call
  *   in words, or the app's name for a function without them
  */
-export function knownCall({ contractId, fnName, nodeUrl, registeredName } = {}) {
+export function knownCall({ contractId, fnName, nodeUrl, registeredName, reservedName } = {}) {
   if (!isDuskDomains(contractId, nodeUrl)) return null;
   const fn = String(fnName ?? "").trim();
   if (fn === "register" && registeredName) return { app: "Dusk Domains", label: `Registered ${registeredName}` };
+  if (fn === "commit" && reservedName) return { app: "Dusk Domains", label: `Reserved ${reservedName}` };
   return { app: "Dusk Domains", label: Object.hasOwn(NAME_CALLS, fn) ? NAME_CALLS[fn] : "Dusk Domains" };
 }
 
@@ -91,6 +108,17 @@ function labelBytes(args, at, root) {
   return length > INLINE && start >= 0 && start + length <= root ? args.subarray(start, start + length) : null;
 }
 
+// A registration's arguments as read: where their root starts, and the
+// label, when it is the name of the node they name.
+function readRegistration(bytes) {
+  const root = bytes.length - ROOT_BYTES;
+  const label = root >= 0 && root % 8 === 0 ? labelBytes(bytes, root + LABEL_AT, root) : null;
+  const text = label ? String.fromCharCode(...label) : "";
+  if (!LABEL.test(text)) return null;
+  const node = blake(DUSK_NODE, blake(label));
+  return node.every((b, i) => b === bytes[root + i]) ? { root, label, text } : null;
+}
+
 /**
  * The .dusk name a registration registered, read from its arguments, in any
  * encoding bytes.js reads: undefined for any other call, and null for
@@ -107,10 +135,42 @@ export function registeredNameOf({ contractId, fnName, nodeUrl, args } = {}) {
   } catch {
     return null;
   }
-  const root = bytes.length - ROOT_BYTES;
-  const label = root >= 0 && root % 8 === 0 ? labelBytes(bytes, root + LABEL_AT, root) : null;
-  const text = label ? String.fromCharCode(...label) : "";
-  if (!LABEL.test(text)) return null;
-  const node = blake(DUSK_NODE, blake(label));
-  return node.every((b, i) => b === bytes[root + i]) ? `${text}.dusk` : null;
+  const registration = readRegistration(bytes);
+  return registration ? `${registration.text}.dusk` : null;
+}
+
+// Matches a reservation to the registration that reveals it.
+const RESERVATION_BYTES = 32;
+const REVEALED_AT = 41;
+const SECRET_AT = 73;
+const REGISTRATION_TAG = utf8.encode("dusk-domains:registration:v1");
+const AUTHORITY_TAG = utf8.encode("dusk-domains:runtime-authority:v1");
+
+/**
+ * A name reservation as a reservation makes it, or as a registration reveals
+ * it once it checks out for the account that sent it, in hex: the two match
+ * when they're for the same name. Undefined for any other call, null for
+ * arguments that don't read, or a registration that doesn't check out.
+ * @param {{ contractId?: string, fnName?: string, nodeUrl?: string, args?: unknown, account?: string }} call
+ *   `account`: the public account that sent it
+ * @returns {string|null|undefined}
+ */
+export function nameReservationOf({ contractId, fnName, nodeUrl, args, account } = {}) {
+  const fn = String(fnName ?? "").trim();
+  if ((fn !== "commit" && fn !== "register") || !isDuskDomains(contractId, nodeUrl)) return undefined;
+  let bytes;
+  try {
+    bytes = toBytes(args);
+  } catch {
+    return null;
+  }
+  if (fn === "commit") return bytes.length === RESERVATION_BYTES ? bytesToHex(bytes) : null;
+  const registration = readRegistration(bytes);
+  const key = base58Decode(account);
+  if (!registration || key?.length !== 96) return null;
+  const { root, label } = registration;
+  const revealed = bytes.subarray(root + REVEALED_AT, root + REVEALED_AT + 32);
+  const secret = bytes.subarray(root + SECRET_AT, root + SECRET_AT + 32);
+  const expected = blake(REGISTRATION_TAG, blake(AUTHORITY_TAG, key), bytes.subarray(root, root + 32), label, secret);
+  return expected.every((b, i) => b === revealed[i]) ? bytesToHex(revealed) : null;
 }

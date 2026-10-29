@@ -1,6 +1,7 @@
 // Activity on Home (the five newest rows and See all) and the full Activity
-// view: day groups, the All / Sent / Received / Staking filters, Show more
-// for older history, and Export for the rows listed (activityExport.js).
+// view: day groups, the All / Sent / Received / Staking / Bridge filters,
+// Show more for older history, and Export for the rows listed
+// (activityExport.js).
 
 import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { openUrl } from "../../../platform/index.js";
@@ -34,6 +35,7 @@ function emptyText(state, filter) {
   if (filter === "sent") return "Nothing sent yet.";
   if (filter === "received") return "Nothing received yet.";
   if (filter === "staking") return "No staking yet.";
+  if (filter === "bridge") return "No bridge transfers yet.";
   return "No activity yet.";
 }
 

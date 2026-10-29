@@ -4,7 +4,7 @@ import { networks, routes } from "@dusk-network/networks";
 
 import { TX_KIND } from "../../../shared/constants.js";
 import releases from "../../../shared/dusk-domains-releases.json";
-import { amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
+import { ACTIVITY_FILTERS, amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
 
 process.env.TZ = "UTC";
 // Times follow the browser's language: British English, with its 24-hour clock.
@@ -158,7 +158,9 @@ describe("what a row says", () => {
       "−10 DUSK",
       "sent",
     ]);
-    expect(call("commit").name).toBe("Reserved a .dusk name");
+    // A reservation by the name its registration revealed, once one follows; until then, step 1 of 2.
+    expect(call("commit").name).toBe("Name reservation (step 1 of 2)");
+    expect(call("commit", { reservedName: "alice.dusk" }).name).toBe("Reserved alice.dusk");
     // A registration by its name, once read from its call.
     expect(call("register", { registeredName: "alice.dusk" }).name).toBe("Registered alice.dusk");
     // On another network's node, or a custom one, it's any contract.
@@ -181,7 +183,7 @@ describe("what a row says", () => {
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: hub, fnName: "contract" }, { nodeUrl: TESTNET }).lead).toBe("");
   });
 
-  it("puts each under one filter: DUSK bridged to DuskEVM under Sent, back from it under Received, a proof under All", () => {
+  it("puts each under one filter: DUSK bridged to DuskEVM, back from it and a proof under Bridge, not Sent or Received", () => {
     const BRIDGE = "2257e5f8ff49cf7c9704a14ca35acbf48eb7ade11a079d98d5cd5655eea1b31d";
     const PORTAL = "14eeb3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9";
     const kinds = [
@@ -190,14 +192,31 @@ describe("what a row says", () => {
       [{ kind: TX_KIND.STAKE }, "staking"],
       [{ kind: TX_KIND.WITHDRAW_REWARD }, "staking"],
       [{ kind: TX_KIND.SHIELD }, "all"],
-      [{ kind: TX_KIND.CONTRACT_CALL, contractId: BRIDGE, fnName: "depositETHToWithValue", deposit: "500000000" }, "sent"],
-      [{ kind: TX_KIND.CONTRACT_CALL, direction: "in", contractId: PORTAL, amount: "500000000" }, "received"],
-      [{ kind: TX_KIND.CONTRACT_CALL, contractId: PORTAL, fnName: "proveWithdrawalTransaction" }, "all"],
+      [{ kind: TX_KIND.CONTRACT_CALL, contractId: BRIDGE, fnName: "depositETHToWithValue", deposit: "500000000" }, "bridge"],
+      [{ kind: TX_KIND.CONTRACT_CALL, direction: "in", contractId: PORTAL, amount: "500000000" }, "bridge"],
+      [{ kind: TX_KIND.CONTRACT_CALL, contractId: PORTAL, fnName: "proveWithdrawalTransaction" }, "bridge"],
     ];
+    expect(ACTIVITY_FILTERS.map((f) => f.label)).toEqual(["All", "Sent", "Received", "Staking", "Bridge"]);
     for (const [tx, only] of kinds) {
       const d = describeTx({ nodeUrl: TESTNET, ...tx });
-      expect(["all", "sent", "received", "staking"].filter((f) => inFilter(d, f))).toEqual(only === "all" ? ["all"] : ["all", only]);
+      expect(ACTIVITY_FILTERS.map((f) => f.id).filter((f) => inFilter(d, f))).toEqual(only === "all" ? ["all"] : ["all", only]);
     }
+  });
+
+  it("calls a shield through the transfer contract a shield, and one that failed an attempt", () => {
+    const TRANSFER = "0100000000000000000000000000000000000000000000000000000000000000";
+    const convert = { kind: TX_KIND.CONTRACT_CALL, direction: "out", contractId: TRANSFER, fnName: "convert", source: "archive", nodeUrl: TESTNET };
+    const failed = describeTx({ ...convert, status: "failed", feePaid: "50000000" });
+    expect([failed.lead, failed.name, failed.icon, subText(failed, "19:30")]).toEqual([
+      "",
+      "Shield attempt (failed)",
+      "shield",
+      "Failed · nothing sent · fee 0.05 DUSK paid",
+    ]);
+    const done = describeTx({ ...convert, status: "executed", deposit: "20000000000" });
+    expect([done.name, subText(done, "19:30"), amountText(done.amount, false)]).toEqual(["Shield", "Public to shielded · 19:30", "20 DUSK"]);
+    // Another contract's convert is any call.
+    expect(describeTx({ ...convert, contractId: "ab".repeat(32), status: "failed" }).name).toBe("Call convert");
   });
 
   it("says where a deposit to DuskEVM went: To its DuskEVM address", () => {

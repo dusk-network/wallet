@@ -4,7 +4,7 @@
 // on top of the component layer in ui.css.
 
 import { h } from "../lib/dom.js";
-import { siteName, truncateMiddle } from "../lib/strings.js";
+import { shortAddress, siteName } from "../lib/strings.js";
 import { iconSvg } from "../components/ActionIcon.js";
 
 // A globe: a site.
@@ -84,10 +84,13 @@ export function mono(text, { title } = {}) {
   return h("span", { class: "mono", title, text: String(text ?? "") });
 }
 
-/** An address or ID shown short, the whole of it in its tooltip and for screen readers. */
-export function shortMono(value, head = 8, tail = 8) {
+/**
+ * An address or ID shown short, the whole of it in its tooltip and for screen
+ * readers: `short` as given, else cut as every Dusk app cuts a Dusk ID (6…6).
+ */
+export function shortMono(value, short) {
   const full = String(value ?? "");
-  const short = truncateMiddle(full, head, tail);
+  short ??= shortAddress(full);
   return short === full
     ? mono(full)
     : h("span", { class: "mono", title: full }, [h("span", { "aria-hidden": "true", text: short }), h("span", { class: "sr-only", text: full })]);

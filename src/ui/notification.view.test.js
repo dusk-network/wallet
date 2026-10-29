@@ -676,11 +676,11 @@ describe("contract calls", () => {
     expect(folded(row("Contract"))).toBe(false);
     expect(app.querySelector(".ap-opaque").textContent).toBe("The wallet can't read this call's arguments. Check them on the site before you approve.");
     expect(app.textContent).not.toContain("Known DuskEVM bridge call");
-    // What a person checks stays on top; the rest is folded.
-    expect(row("Function").textContent).toBe("stake");
+    // What a person checks stays on top; the rest is folded, labelled as in every Dusk app.
+    expect(row("Method").textContent).toBe("stake");
     expect(row("Call data").textContent).toMatch(/^1 bytes · sha256=6e340b9cffb3…/);
     const raw = app.querySelectorAll("details").find((d) => d.querySelector("summary").textContent === "Raw call data");
-    for (const el of [row("Function"), row("Call data"), raw]) expect(folded(el)).toBe(true);
+    for (const el of [row("Method"), row("Call data"), raw]) expect(folded(el)).toBe(true);
   });
 
   it("reads a DuskEVM deposit: its recipient and amount on top, the call data's hash and the site's words under Details", async () => {
@@ -705,12 +705,15 @@ describe("contract calls", () => {
     const siteWords = app.querySelector(".ap-site-details");
     expect(siteWords.querySelector("pre").textContent).toContain('"label": "Bridge 0.1 DUSK to DuskEVM"');
     expect(folded(row("DuskEVM recipient"))).toBe(false);
-    for (const el of [row("Function"), row("Call data"), raw, siteWords]) expect(folded(el)).toBe(true);
+    for (const el of [row("Method"), row("Call data"), raw, siteWords]) expect(folded(el)).toBe(true);
     const inDetails = detailsBlock().querySelectorAll("*");
-    const [fn, callData, rawAt, siteAt] = [row("Function"), row("Call data"), raw, siteWords].map((el) => inDetails.indexOf(el));
+    const [fn, callData, rawAt, siteAt] = [row("Method"), row("Call data"), raw, siteWords].map((el) => inDetails.indexOf(el));
     expect(fn).toBeLessThan(callData);
     expect(callData).toBeLessThan(rawAt);
     expect(rawAt).toBeLessThan(siteAt);
+    // Its contract by the network's name for it, its ID 6…6.
+    const bridgeId = BRIDGE_CONTRACTS.testnet.bridge;
+    expect(visibleText(row("Contract"))).toBe(`DuskEVM bridge · ${bridgeId.slice(0, 6)}…${bridgeId.slice(-6)}`);
     expect(app.querySelector(".ap-visible").textContent).toBe(
       "Visible to everyone: the amount, the DuskEVM recipient, and your name alice.dusk."
     );

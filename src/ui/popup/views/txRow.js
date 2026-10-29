@@ -16,7 +16,7 @@ import { labelForNode } from "../../../shared/nodeNetwork.js";
 import { SOZU_FN } from "@dusk-network/networks/sozu";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { shortAddress, truncateMiddle } from "../../lib/strings.js";
+import { shortAddress, shortEvmAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
 import { MONTHS, clockText, dateText } from "../../lib/time.js";
@@ -24,16 +24,19 @@ import { txStatusTone, txStatusWord } from "./txDisplay.js";
 
 export const MINUS = "−";
 
-/** A DuskEVM address as EVM wallets and the approval window shorten it: "0xAB84…C86F". */
-export const shortEvmAddress = (address) => truncateMiddle(String(address ?? ""), 6, 4);
-
 /** Activity's filters, in order. */
 export const ACTIVITY_FILTERS = Object.freeze([
   { id: "all", label: "All" },
   { id: "sent", label: "Sent" },
   { id: "received", label: "Received" },
   { id: "staking", label: "Staking" },
+  { id: "bridge", label: "Bridge" },
 ]);
+
+// The transfer contract, whose convert shields DUSK sent from a public account.
+const TRANSFER_CONTRACT = "0100000000000000000000000000000000000000000000000000000000000000";
+const isConvert = (tx, fn) =>
+  String(tx?.contractId ?? "").trim().toLowerCase().replace(/^0x/, "") === TRANSFER_CONTRACT && fn === "convert" && tx?.direction !== "in";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -136,7 +139,7 @@ function tokenUnits(units, decimals) {
  *   word: string, note: string,
  *   amount: { sign: string, value: string, unit: string } | null,
  *   status: string, tone: "ok"|"bad"|"pending"|"neutral", statusWord: string|null,
- *   failed: boolean, unsent: boolean, fee: string|null, arrival: string|null,
+ *   failed: boolean, unsent: boolean, fee: string|null, arrival: string|null, arrivedAt: number|null,
  * }}
  */
 export function describeTx(tx, { contactName, nodeUrl } = {}) {
@@ -171,20 +174,18 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   // A known contract's call, by what it did.
   const named =
     kind === TX_KIND.CONTRACT_CALL
-      ? knownCall({ contractId: tx?.contractId, fnName: fn, nodeUrl: network, registeredName: tx?.registeredName })
+      ? knownCall({ contractId: tx?.contractId, fnName: fn, nodeUrl: network, registeredName: tx?.registeredName, reservedName: tx?.reservedName })
       : null;
   if (bridge) {
     const value = tx?.amount ?? tx?.deposit;
     // A deposit's DuskEVM address, read from its call: the one the wallet
     // approved, or the chain's record of it.
     const evm = /^0x[0-9a-fA-F]{40}$/.test(String(tx?.bridgeTo ?? "")) ? String(tx.bridgeTo) : null;
-    // DUSK that left for DuskEVM is under Sent too, and DUSK back from it under Received.
     d =
       bridge === "to"
         ? {
             icon: "bridge",
             category: "bridge",
-            alsoUnder: "sent",
             lead: evm ? "Bridge to DuskEVM" : "Bridge",
             name: evm ? `To ${shortEvmAddress(evm)}` : "To DuskEVM",
             word: evm ? "Bridge to DuskEVM" : "Bridge",
@@ -193,7 +194,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
             amount: dusk(positive(tx?.deposit) ? tx.deposit : value, MINUS),
           }
         : bridge === "from"
-        ? { icon: "bridge", category: "bridge", alsoUnder: "received", lead: "Bridge", name: "From DuskEVM", word: "Bridge", amount: dusk(value, "+") }
+        ? { icon: "bridge", category: "bridge", lead: "Bridge", name: "From DuskEVM", word: "Bridge", amount: dusk(value, "+") }
         : {
             icon: "bridge",
             category: "bridge",
@@ -220,6 +221,16 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
       name: shield ? "Shield" : "Unshield",
       word: shield ? "Public to shielded" : "Shielded to public",
       amount: dusk(tx?.amount, ""),
+    };
+  } else if (kind === TX_KIND.CONTRACT_CALL && isConvert(tx, fn)) {
+    // A shield as the chain records it: one that failed says it was only an attempt.
+    const value = positive(tx?.deposit) ? tx.deposit : tx?.amount;
+    d = {
+      icon: "shield",
+      category: "other",
+      name: String(tx?.status ?? "").toLowerCase() === "failed" ? "Shield attempt (failed)" : "Shield",
+      word: "Public to shielded",
+      amount: dusk(value, ""),
     };
   } else if (kind === TX_KIND.STAKE) {
     d = { icon: "stake", category: "staking", lead: "Native staking", name: "Stake", word: "Staking", amount: dusk(tx?.amount, MINUS) };
@@ -309,8 +320,9 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   // Failed, or dropped before it ran: the amount stayed in the wallet.
   const unsent = failed || status === "removed";
   const amount = d.amount && unsent ? { ...d.amount, sign: "", muted: true } : d.amount;
-  // A deposit to DuskEVM that arrived there: its transaction there (bridgeArrival.js).
+  // A deposit to DuskEVM that arrived there: its transaction there, and when (bridgeArrival.js).
   const arrival = d.evm && status === "executed" && /^0x[0-9a-fA-F]{64}$/.test(String(tx?.arrival?.hash ?? "")) ? String(tx.arrival.hash) : null;
+  const arrivedAt = arrival && Number(tx.arrival.at) > 0 ? Number(tx.arrival.at) : null;
   return {
     lead: "",
     alias: "",
@@ -318,7 +330,6 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     isAddress: false,
     evm: false,
     generic: false,
-    alsoUnder: "",
     ...d,
     note: String(tx?.privacy ?? "").toLowerCase() === "shielded" && kind !== TX_KIND.SHIELD && kind !== TX_KIND.UNSHIELD ? "Shielded" : "",
     status,
@@ -329,13 +340,14 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     unsent,
     fee: tx?.feePaid != null && tx.feePaid !== "" ? formatFee(tx.feePaid) : null,
     arrival,
+    arrivedAt,
   };
 }
 
-/** Whether a row shows under an Activity filter: its own, or one it also counts under. */
+/** Whether a row shows under an Activity filter: All, or its own. */
 export function inFilter(desc, filter) {
   if (!filter || filter === "all") return true;
-  return desc.category === filter || desc.alsoUnder === filter;
+  return desc.category === filter;
 }
 
 /**

@@ -1302,6 +1302,7 @@ body.page--popup .site-bar-action {
 .gas-edit-extra:empty {
   display: none;
 }
+
 /* Tx details key/value block (avoid input-like boxes) */
 .account-line {
   display: flex;
@@ -3627,6 +3628,21 @@ button.list-row:focus-visible {
   font-size: 12.5px;
 }
 
+/* A contract: its name, then "· 2257e5…a1b31d" and Copy. A narrow row
+   breaks between the two, never after the "·" or inside the ID. */
+.contract-value {
+  min-width: 0;
+}
+
+.contract-id {
+  white-space: nowrap;
+}
+
+.contract-id .copy-ico {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 /* A small pill: Copy, Max, Use 1,000 */
 button.mini-btn {
   height: 28px;
@@ -4149,7 +4165,7 @@ p.activity-export-note {
 
 button.filter-chip {
   height: 32px;
-  padding: 0 14px;
+  padding: 0 12px;
   background: var(--surface-1);
   color: var(--text-muted);
   font-size: 13px;

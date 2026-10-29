@@ -1,31 +1,40 @@
-import { formatContractId } from "@dusk-network/networks/format";
-
-export function truncateMiddle(str, head = 8, tail = 8) {
-  if (!str || str.length <= head + tail + 3) return str;
-  return `${str.slice(0, head)}…${str.slice(str.length - tail)}`;
-}
+import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
 /**
- * An account or address as the .dusk name views shorten it: its first and
- * last six characters around "…". Short input comes back as it is.
+ * A Dusk account, address, contract ID or hash as every Dusk app shortens it
+ * (@dusk-network/networks/format): its first and last six characters around
+ * "…". Short input comes back as it is.
  * @param {string} address
  * @returns {string}
  */
 export function shortAddress(address) {
-  return truncateMiddle(String(address ?? ""), 6, 6);
+  return shortAccount(String(address ?? ""));
 }
 
 /**
- * Convenience helper for displaying transaction hashes in compact form.
- * Returns first 10 chars + ellipsis + last 8 chars.
+ * An EVM address as every Dusk app shortens it: 0x and four characters, "…"
+ * and the last four, with its EIP-55 checksum ("0xAB84…C86F"). Anything else
+ * as shortAddress cuts it.
+ * @param {string} address
+ * @returns {string}
+ */
+export function shortEvmAddress(address) {
+  const text = String(address ?? "").trim();
+  try {
+    return formatEvmAddress(text, { short: true });
+  } catch {
+    return shortAddress(text);
+  }
+}
+
+/**
+ * An EVM transaction's hash, cut as an EVM address is: "0x029e…d61b".
  * @param {string} hash
  * @returns {string}
  */
-export function shortHash(hash) {
-  const h = String(hash ?? "");
-  if (!h) return "";
-  if (h.length <= 18) return h;
-  return `${h.slice(0, 10)}…${h.slice(-8)}`;
+export function shortEvmHash(hash) {
+  const text = String(hash ?? "").trim();
+  return /^0x[0-9a-fA-F]{64}$/.test(text) ? `${text.slice(0, 6)}…${text.slice(-4)}` : shortAddress(text);
 }
 
 export function normalizeMnemonic(m) {

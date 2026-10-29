@@ -28,6 +28,7 @@ export async function getTxEpoch() {
  * @property {string=} fnName
  * @property {string=} bridgeTo The DuskEVM address a deposit to DuskEVM pays, read from its call.
  * @property {string=} registeredName The .dusk name a registration registers, read from its call.
+ * @property {string=} reservation A .dusk name's reservation, as its call makes it or a registration reveals it.
  * @property {string=} gasLimit
  * @property {string=} gasPrice
  * @property {any=} asset Optional UI hint for Activity labeling (e.g. DRC20/DRC721 summary).

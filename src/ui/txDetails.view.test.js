@@ -5,6 +5,7 @@ import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
 import releases from "../shared/dusk-domains-releases.json";
 import { TX_KIND } from "../shared/constants.js";
 import { installFakeDom, settle, visibleText } from "./testing/fakeDom.js";
+import { dateText } from "./lib/time.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
 
 const HASH = "ab".repeat(32);
@@ -93,6 +94,9 @@ describe("transaction details", () => {
     expect([visibleText(view.lead), view.name]).toEqual(["Sozu pool", "Call exchange_rate"]);
     const contract = view.body.querySelectorAll(".tx-tech .kv").find((row) => row.querySelector(".kv-label").textContent === "Contract");
     expect(visibleText(contract)).toBe(`ContractSozu pool · ${pool.slice(0, 6)}…${pool.slice(-6)}`);
+    // The "·" stays with the short ID and its Copy, which never break apart.
+    const id = contract.querySelector(".contract-id");
+    expect([visibleText(id), Boolean(id.querySelector("button.copy-ico"))]).toEqual([`· ${pool.slice(0, 6)}…${pool.slice(-6)}`, true]);
   });
 
   it("says what a Dusk Domains call did, on its own network", () => {
@@ -104,8 +108,15 @@ describe("transaction details", () => {
     // By the name it registered, once read; its contract under Technical details alone.
     const named = details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "register", registeredName: "alice.dusk", status: "executed" });
     expect([named.name, named.body.querySelector(".tx-hero-addr")]).toEqual(["Registered alice.dusk", null]);
+    // Its contract named as the explorer names it.
+    const contract = named.body.querySelectorAll(".tx-tech .kv").map(visibleText).find((r) => r.startsWith("Contract"));
+    expect(contract).toBe(`ContractDusk Domains · ${STORE.slice(0, 6)}…${STORE.slice(-6)}`);
+    // A reservation: step 1 of 2, until a registration that reveals it follows.
     const commit = details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "commit", status: "executed" });
-    expect(commit.name).toBe("Reserved a .dusk name");
+    expect(commit.name).toBe("Name reservation (step 1 of 2)");
+    expect(details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "commit", reservedName: "alice.dusk", status: "executed" }).name).toBe(
+      "Reserved alice.dusk"
+    );
     // The same contract ID through a custom node is any contract.
     const ov = { nodeUrl: "https://node.example", txs: [{ hash: HASH, nodeUrl: "https://node.example", kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "register", status: "executed" }] };
     dom.document.body.replaceChildren(...txDetailsView(ov, { state: { route: "tx", txDetailHash: HASH, addressBook: { loaded: true, items: [] } }, actions: {} }));
@@ -149,11 +160,21 @@ describe("transaction details", () => {
       bridgeTo: evm,
       status: "executed",
     };
-    const view = details({ ...deposit, arrival: { hash: l2, at: 1 } });
+    const arrivedAt = Date.UTC(2026, 9, 27, 5, 52, 13);
+    const view = details({ ...deposit, timestamp: arrivedAt - 60_000, arrival: { hash: l2, at: arrivedAt } });
     expect(view.status).toBe("Arrived");
+    // When it arrived, under when it was sent.
+    expect(view.rows.slice(0, 2)).toEqual([`Date${dateText(arrivedAt - 60_000)}`, `Arrived${dateText(arrivedAt)}`]);
     expect(view.rows.at(-1)).toBe("DuskEVM transaction0x029e…d61bCopy");
     dom.window.open = vi.fn(() => ({}));
     view.body.querySelectorAll("button").find((b) => b.textContent === "0x029e…d61b").click();
+    await settle();
+    expect(dom.window.open).toHaveBeenCalledWith(`${networks.testnet.duskEvm.explorerUrl}/tx/${l2}`, "_blank", "noopener,noreferrer");
+    // And from its own button, beside Dusk's explorer.
+    const buttons = view.body.querySelectorAll(".tx-explorer-btn");
+    expect(buttons.map(visibleText)).toEqual(["View in Dusk explorer", "View in DuskEVM explorer"]);
+    dom.window.open.mockClear();
+    buttons[1].click();
     await settle();
     expect(dom.window.open).toHaveBeenCalledWith(`${networks.testnet.duskEvm.explorerUrl}/tx/${l2}`, "_blank", "noopener,noreferrer");
     // Its contract keeps the network's name for it under Technical details.
@@ -161,7 +182,8 @@ describe("transaction details", () => {
 
     // On its way, it went through: nothing more.
     const onItsWay = details(deposit);
-    expect([onItsWay.status, onItsWay.rows.some((r) => r.startsWith("DuskEVM transaction"))]).toEqual(["Completed", false]);
+    expect([onItsWay.status, onItsWay.rows.some((r) => r.startsWith("DuskEVM transaction") || r.startsWith("Arrived"))]).toEqual(["Completed", false]);
+    expect(onItsWay.body.querySelectorAll(".tx-explorer-btn").map(visibleText)).toEqual(["View in Dusk explorer"]);
   });
 
   it("leads with a saved contact's own name, its .dusk name beside the address", () => {
@@ -174,15 +196,16 @@ describe("transaction details", () => {
     expect(details(send).name).toBe("wallet-both.dusk");
   });
 
-  it("shows the exact fee under Technical details, the summary's rounded", () => {
+  it("shows the exact fee under Technical details, the summary's rounded, with every Dusk app's labels", () => {
     const send = { kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", feePaid: "1856398", gasSpent: "1856398", gasPrice: "1", gasLimit: "2500000" };
     const view = details(send);
     expect(view.rows).toContain("Network fee0.0019 DUSK");
     const tech = view.body.querySelectorAll(".tx-tech .kv").map(visibleText);
-    expect(tech).toContain("Exact fee0.001856398 DUSK");
+    expect(tech).toContain("Fee paid0.001856398 DUSK");
     expect(tech).toContain("Gas used1,856,398 of 2,500,000");
+    expect(tech).toContain("Gas price1 LUX");
     // None charged, none shown.
-    expect(details({ ...send, feePaid: "0" }).body.querySelectorAll(".tx-tech .kv").map(visibleText).filter((r) => r.startsWith("Exact fee"))).toEqual([]);
+    expect(details({ ...send, feePaid: "0" }).body.querySelectorAll(".tx-tech .kv").map(visibleText).filter((r) => r.startsWith("Fee paid"))).toEqual([]);
   });
 
   it("names the site a transaction came from, and none for the wallet's own", () => {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import fixture from "./fixtures/activity-testnet.json";
 import { fakeArchive } from "./fixtures/fakeArchive.js";
+import { mergeActivity } from "./activityMerge.js";
 
 // Recorded on Testnet: A registered a .dusk name and received two transfers;
 // B has years of transfers, contract calls, a shield, stake rewards and an
@@ -135,7 +136,8 @@ describe("syncActivity", () => {
       [target - 77_760 - 552_959, target - 77_760],
       [0, target - 630_720],
     ]);
-    // The head, four windows, and the details of the four entries found, at once.
+    // The head, four windows, the details of the four entries found, at once,
+    // and the arguments of the name reservation once its contract is known.
     expect(node.log.map((l) => (l.query.includes("lastBlockPair") ? "head" : l.query.includes("tx(hash:") ? "details" : "window"))).toEqual([
       "head",
       "window",
@@ -143,6 +145,7 @@ describe("syncActivity", () => {
       "details",
       "window",
       "window",
+      "details",
     ]);
     expect(result.meta.covered).toEqual([[0, target]]);
 
@@ -199,12 +202,14 @@ describe("syncActivity", () => {
     const before = node.log.length;
     const result = await sync(A);
     const refresh = node.log.slice(before);
-    // One request has the head and everything above the kept heights; one more has the new entries' details.
-    expect(refresh).toHaveLength(2);
+    // One request has the head and everything above the kept heights; one more has the new entries' details,
+    // and a last one the name reservation's arguments, once its contract is known.
+    expect(refresh).toHaveLength(3);
     expect(refresh[0].query).toContain("pair: lastBlockPair { json }");
     expect(refresh[0].query).toContain(`moonlightHistory(sender: "${A}", fromBlock: ${4_656_000 - history.FINALITY_MARGIN + 1}, maxCount: 50)`);
     expect(refresh[0].query).not.toContain("toBlock");
     expect(refresh[1].query.match(/tx\(hash:/g)).toHaveLength(3);
+    expect(refresh[2].query.match(/tx\(hash:/g)).toHaveLength(1);
     expect(result.meta.covered).toEqual([[0, FINALIZED - history.FINALITY_MARGIN]]);
     expect((await history.readActivity({ nodeUrl: NODE, account: A })).entries.map((e) => e.blockHeight)).toEqual([
       4658012, 4658000, 4657992, 4655845,
@@ -439,33 +444,55 @@ describe("a deposit to DuskEVM", async () => {
   });
 });
 
-// Recorded on Testnet: A's registration of shpongle.dusk, with its call's arguments.
+// Recorded on Testnet: A's registration of shpongle.dusk, and its reservation before it, with their calls' arguments.
 describe("a .dusk name's registration", async () => {
-  const { calls } = (await import("./fixtures/dusk-domains-registrations.json")).default;
+  const { calls, reservations } = (await import("./fixtures/dusk-domains-registrations.json")).default;
   const call = calls.find((c) => c.name === "shpongle.dusk");
-  const recorded = fixture.details[call.hash];
-  const details = { ...fixture.details, [call.hash]: { ...recorded, tx: { ...recorded.tx, callData: { ...recorded.tx.callData, data: call.data } } } };
+  const reservation = reservations.find((c) => c.name === "shpongle.dusk");
+  const withData = (all, { hash, data }) => ({
+    ...all,
+    [hash]: { ...all[hash], tx: { ...all[hash].tx, callData: { ...all[hash].tx.callData, data } } },
+  });
+  const details = withData(withData(fixture.details, call), reservation);
   // The hashes whose call arguments a query asked for.
   const withArgs = (node) =>
     node.detailQueries().flatMap((l) => [...l.query.matchAll(/tx\(hash: "([0-9a-f]{64})"\)[^}]*\{ contractId fnName data \}/g)].map((m) => m[1]));
 
-  it("keeps the name it registered, its arguments asked of it alone", async () => {
+  it("keeps the name it registered, and the reservation both calls name, their arguments asked of them alone", async () => {
     const node = fakeArchive({ details });
     await sync(A);
     const { entries } = await history.readActivity({ nodeUrl: NODE, account: A });
-    expect(entries.find((e) => e.hash === call.hash)).toMatchObject({ fnName: "register", registeredName: "shpongle.dusk" });
-    expect(withArgs(node)).toEqual([call.hash]);
+    expect(entries.find((e) => e.hash === call.hash)).toMatchObject({
+      fnName: "register",
+      registeredName: "shpongle.dusk",
+      reservation: reservation.data,
+    });
+    expect(entries.find((e) => e.hash === reservation.hash)).toMatchObject({ fnName: "commit", reservation: reservation.data });
+    // The registration's with its details; the reservation's once its contract is known.
+    expect(withArgs(node)).toEqual([call.hash, reservation.hash]);
+    // Activity names the reservation by the name its registration revealed.
+    const rows = mergeActivity({ history: entries, nodeUrl: NODE });
+    expect(rows.find((r) => r.hash === reservation.hash).reservedName).toBe("shpongle.dusk");
   });
 
   it("reads it once for a registration kept before the wallet read them, and not again when its call doesn't read", async () => {
     const entry = entriesOf(A, "out").find((e) => e.origin === call.hash);
     const kept = { ...history.parseHistoryEntry(A, entry), detailsAt: 1, success: true, contractId: STORE, fnName: "register" };
     expect(history.needsDetails(kept, NODE)).toBe(true);
-    expect(history.needsDetails({ ...kept, fnName: "commit" }, NODE)).toBe(false);
-    const node = fakeArchive({ details: { ...details, [call.hash]: { ...details[call.hash], tx: { ...details[call.hash].tx, callData: { ...details[call.hash].tx.callData, data: "00ff" } } } } });
-    const read = await history.fetchTxDetails(NODE, [call.hash], { nodeUrl: NODE, names: new Set([call.hash]) });
-    expect(read.get(call.hash).registeredName).toBeNull();
-    expect(history.needsDetails({ ...kept, registeredName: null }, NODE)).toBe(false);
+    // A reservation kept before the wallet read reservations, once.
+    expect(history.needsDetails({ ...kept, fnName: "commit" }, NODE)).toBe(true);
+    expect(history.needsDetails({ ...kept, fnName: "commit", reservation: null }, NODE)).toBe(false);
+    const node = fakeArchive({ details: withData(details, { hash: call.hash, data: "00ff" }) });
+    const read = await history.fetchTxDetails(NODE, [call.hash], { nodeUrl: NODE, account: A, names: new Set([call.hash]) });
+    expect([read.get(call.hash).registeredName, read.get(call.hash).reservation]).toEqual([null, null]);
+    expect(history.needsDetails({ ...kept, registeredName: null, reservation: null }, NODE)).toBe(false);
     expect(withArgs(node)).toEqual([call.hash]);
+  });
+
+  it("matches a registration to its reservation only for the account that sent it", async () => {
+    fakeArchive({ details });
+    const read = await history.fetchTxDetails(NODE, [call.hash, reservation.hash], { nodeUrl: NODE, account: B, names: new Set([call.hash, reservation.hash]) });
+    // The reservation's own reads the same; the registration doesn't check out for another account.
+    expect([read.get(call.hash).reservation, read.get(reservation.hash).reservation]).toEqual([null, reservation.data]);
   });
 });
