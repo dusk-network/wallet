@@ -242,13 +242,16 @@ test.describe("Sozu liquid staking", () => {
     });
     await expect(page.locator(".review-head")).toContainText("Liquid staking");
     await expect(page.locator(".review-head")).toContainText("With Sozu, a third party");
-    await expect(page.locator(".review-visible")).toContainText("Visible to everyone: the amount you stake with Sozu");
+    // What's visible to everyone is said on Send only.
+    await expect(page.locator(".review-visible")).toHaveCount(0);
     await expect(page.locator(".gas-fee")).toContainText("Network fee");
     // The network's gas price, with one Custom fee, closed, and no presets.
     await expect(page.getByRole("button", { name: "Recommended" })).toHaveCount(0);
     await expect(page.getByLabel("Gas limit")).toBeHidden();
     await page.locator("details.gas-custom summary").click();
     await expect(page.getByLabel("Gas limit")).toBeVisible();
+    // The contract it calls, in there to check before Confirm.
+    await expect(page.locator("details.gas-custom .sozu-contract")).toContainText(/^Contract\s*Sozu pool · [0-9a-f]{6}…[0-9a-f]{6}/);
 
     await page.getByRole("button", { name: "Confirm" }).click();
     const submitted = await page.evaluate(() =>

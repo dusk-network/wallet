@@ -1143,7 +1143,8 @@ export async function renderNotification() {
         details("Raw call data", [h("code", { class: "ap-raw", text: argsHex || String(params?.fnArgs ?? "") })]),
         siteDetails(display),
       ]);
-    const visible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
+    // What everyone sees of a send, as on Send's Review; other calls have no such line.
+    const sendVisible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
 
     // A known DuskEVM bridge call: what it does, read from its arguments,
     // above the call and its bytes.
@@ -1197,7 +1198,6 @@ export async function renderNotification() {
         [
           site,
           head,
-          visible(bridge.kind === "deposit" ? "the amount, the DuskEVM recipient" : "this call, the withdrawal"),
           decoded,
           gasEditor,
           callRows(),
@@ -1298,7 +1298,7 @@ export async function renderNotification() {
             to: (isTransfer || isTransferFrom) && toStr ? toLine(toStr) : null,
             sub: `${name} · DRC20`,
           }),
-          visible("this call, the tokens it moves"),
+          isApprove ? null : sendVisible("this call, the tokens it moves"),
           group([
             kv("From", payerLine(rail)),
             isTransfer || isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
@@ -1349,7 +1349,7 @@ export async function renderNotification() {
             to: isTransferFrom && toStr ? toLine(toStr) : null,
             sub: `${name} (${sym})${tokenIdStr ? ` · #${tokenIdStr}` : ""}`,
           }),
-          visible("this call"),
+          isTransferFrom ? sendVisible("this call") : null,
           group([
             kv("From", payerLine(rail)),
             tokenIdStr ? kv("Token ID", mono(tokenIdStr)) : null,
@@ -1393,7 +1393,6 @@ export async function renderNotification() {
           title: summary.title,
           amount: sendsLux > 0n ? { value: formatDuskExact(sendsLux), unit: "DUSK" } : null,
         }),
-        visible("this call, the DUSK it sends"),
         callRows({ from: true }),
         unchecked,
         gasEditor,

@@ -26,7 +26,7 @@ import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balanc
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { profileNameEl } from "../../components/ProfileName.js";
-import { publicStakeLine, sozuLiquidStakingView } from "./sozu.js";
+import { sozuLiquidStakingView } from "./sozu.js";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -442,7 +442,8 @@ export function stakeFormView(ov, { state, actions } = {}) {
 
 // What each way of staking pays a year, beside the choice: native staking's
 // estimate across the network (one read of the node a day, rewardRate.js)
-// and Sozu's after its fee on rewards, as its status reads it. Asked once a
+// and Sozu's after its fee on rewards, as its status reads it, from native
+// staking's figure as shown, so both wallets give the same one. Asked once a
 // popup, node and network (a custom node's once its chain ID is read too),
 // and drawn again when the answers come.
 function rewardRates(ov, { state, actions }) {
@@ -472,10 +473,10 @@ function rewardRates(ov, { state, actions }) {
   // Sozu's fee as Liquid staking read it last, else as asked here.
   const sozuFee = held ?? state.rewardRates.sozuFee;
   const native = state.rewardRates.native;
-  const sozu = native !== null && sozuFee ? sozuRateEstimate(native, sozuFee) : null;
+  const sozu = native !== null && sozuFee ? sozuRateEstimate(Math.round(native * 100) / 100, sozuFee) : null;
   return {
     native: native !== null ? `About ${ratePercent(native)} a year lately, across the network. Not promised.` : null,
-    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year after Sozu's ${feePercent(sozuFee, "en")}` : null,
+    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year after Sozu's ${feePercent(sozuFee, "en")}. Not promised.` : null,
   };
 }
 
@@ -928,17 +929,9 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   const stakeIndex = d.stakeProfileIndex ?? d.profileIndex;
   const severalProfiles = Number(d.ownerProfileIndex) !== Number(stakeIndex);
 
-  // A stake is public: the explorer shows it, and its rewards, under the
-  // profile's name.
-  const publicWhat =
-    kind === TX_KIND.STAKE ? "the amount staked, your rewards" : kind === TX_KIND.UNSTAKE ? "the amount unstaked" : "the rewards claimed";
-  const visibleLine = h("div", { class: "review-line review-visible", text: publicStakeLine(publicWhat) });
-  const showName = (name) => {
-    visibleLine.textContent = publicStakeLine(publicWhat, name);
-  };
   // The profile the stake is for, by its name as the header shows it: the
   // stake comes from its public balance, and an unstake or a claim goes back to it.
-  const stakeName = profileNameEl(ov, { index: Number(stakeIndex) || 0, onName: showName });
+  const stakeName = profileNameEl(ov, { index: Number(stakeIndex) || 0 });
 
   return [
     subnav({ title: "Review", onBack: goBack }),
@@ -947,8 +940,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "review-kind", text: kindLabel }),
         h("div", { class: "balance-amount" }, amountLine()),
         h("div", { class: "review-line", text: line }),
-        d.payment === FUNDING_SHIELDED ? null : visibleLine,
-      ].filter(Boolean)),
+      ]),
       h("div", { class: "group" }, [
         // One line, "alice.dusk · Public", as on Send's Review.
         kvRow(kind === TX_KIND.STAKE ? "From" : "To", [

@@ -1303,6 +1303,11 @@ body.page--popup .site-bar-action {
   display: none;
 }
 
+/* A row there, such as the contract a call goes to: flush with the fields under it */
+.gas-edit-extra .kv {
+  min-height: 0;
+  padding: 0;
+}
 /* Tx details key/value block (avoid input-like boxes) */
 .account-line {
   display: flex;

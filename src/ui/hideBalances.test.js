@@ -314,7 +314,7 @@ describe("hidden balances", () => {
     expect(body.querySelectorAll("details.advanced .kv").map(visibleText)).toContain("Active fromActive now");
   });
 
-  it("hide what Sozu holds for the profile, but not the pool's rate", async () => {
+  it("hide what Sozu holds for the profile, and the deposit fee that gives the amount away, but not the pool's rate", async () => {
     const pool = `0x${"01".repeat(32)}`;
     const st = {
       action: "deposit",
@@ -343,11 +343,18 @@ describe("hidden balances", () => {
     ]);
     button("Max").click();
     expect(st.depositAmountDusk).toBe("1482.9233");
-    // What the typed amount gets, and Sozu's fee off it, aren't balances: they show.
+    // What the typed amount gets isn't a balance: it shows.
     expect(visibleText(body.querySelector(".stake-estimate .stake-estimate__main"))).toBe(
-      "You get about 1,408.77 stDUSK, worth about 1,479.2159 DUSK now."
+      "You get about 1,408.7771 stDUSK, worth about 1,479.2159 DUSK now."
     );
-    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25% · 3.70730825 DUSK");
+    // Sozu's fee off it in DUSK gives the amount away: hidden, its rate shown.
+    expect(seen(body.querySelector(".sozu-terms"))).toEqual(["Deposit fee 0.25% · •••• DUSK", "Deposit fee 0.25% · hidden DUSK"]);
+
+    // So on its Review.
+    button("Review stake").click();
+    await show(sozuConfirmView(overview(HIDDEN), { state, actions: actions() }));
+    const fee = body.querySelectorAll(".kv").find((row) => visibleText(row).startsWith("Deposit fee"));
+    expect(seen(fee)).toEqual(["Deposit fee0.25% · •••• DUSK", "Deposit fee0.25% · hidden DUSK"]);
   });
 });
 

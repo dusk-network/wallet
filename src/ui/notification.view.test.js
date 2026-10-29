@@ -344,19 +344,24 @@ describe("a site's request to pay", () => {
     expect(app.querySelector(".ap-visible")?.textContent ?? null).toBe(line);
   });
 
-  it("says what becomes visible right under the amount, before the fee, in every window", async () => {
+  it("says what becomes visible right under the amount, before the fee, on a payment, as Send does, and on no other call", async () => {
     const deposit = fixtures.calls.find((c) => c.name === "deposit-shoot");
     for (const params of [
       transfer(BOB, { memo: "Order 1042" }),
       transfer(routes(networks.testnet).find((route) => route.kind === "service").account, { memo: deposit.expected.to }),
-      { kind: "contract_call", contractId: BRIDGE_CONTRACTS.testnet.bridge, fnName: deposit.fnName, fnArgs: deposit.args, deposit: deposit.expected.amountLux, chainId: "dusk:2", nodeUrl: TESTNET },
-      { kind: "contract_call", privacy: "public", contractId: `0x${"11".repeat(32)}`, fnName: "x", fnArgs: "0x00", deposit: "5", nodeUrl: TESTNET },
     ]) {
       await render("send_tx", params);
       const children = [...app.children];
       const visibleAt = children.findIndex((el) => el.classList.contains("ap-visible"));
-      expect(visibleAt, params.fnName ?? params.to).toBe(children.indexOf(head()) + 1);
+      expect(visibleAt, params.to).toBe(children.indexOf(head()) + 1);
       expect(visibleAt).toBeLessThan(children.findIndex((el) => el.localName === "dusk-gas-editor"));
+    }
+    for (const params of [
+      { kind: "contract_call", contractId: BRIDGE_CONTRACTS.testnet.bridge, fnName: deposit.fnName, fnArgs: deposit.args, deposit: deposit.expected.amountLux, chainId: "dusk:2", nodeUrl: TESTNET },
+      { kind: "contract_call", privacy: "public", contractId: `0x${"11".repeat(32)}`, fnName: "x", fnArgs: "0x00", deposit: "5", nodeUrl: TESTNET },
+    ]) {
+      await render("send_tx", params);
+      expect(app.querySelector(".ap-visible"), params.fnName).toBeNull();
     }
   });
 
@@ -711,12 +716,10 @@ describe("contract calls", () => {
     expect(fn).toBeLessThan(callData);
     expect(callData).toBeLessThan(rawAt);
     expect(rawAt).toBeLessThan(siteAt);
-    // Its contract by the network's name for it, its ID 6…6.
+    // Its contract by the network's name for it, its ID 6…6; nothing on what's public, which is for a payment.
     const bridgeId = BRIDGE_CONTRACTS.testnet.bridge;
     expect(visibleText(row("Contract"))).toBe(`DuskEVM bridge · ${bridgeId.slice(0, 6)}…${bridgeId.slice(-6)}`);
-    expect(app.querySelector(".ap-visible").textContent).toBe(
-      "Visible to everyone: the amount, the DuskEVM recipient, and your name alice.dusk."
-    );
+    expect(app.querySelector(".ap-visible")).toBeNull();
   });
 
   // The call shown as the opaque one it is, with the bridge's warning, never as known.
