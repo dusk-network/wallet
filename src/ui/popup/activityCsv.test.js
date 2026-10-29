@@ -1,6 +1,6 @@
+import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { BRIDGE_CONTRACTS } from "../../shared/bridge.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { CSV_COLUMNS, CSV_CONTACT_COLUMN, activityCsv, activityCsvFilename } from "./activityCsv.js";
 
@@ -24,7 +24,7 @@ const ROWS = [
   // A call that failed: nothing moved, the fee paid.
   { hash: hash(3), source: "archive", nodeUrl: NODE, kind: TX_KIND.CONTRACT_CALL, direction: "out", contractId: "00".repeat(32), fnName: "convert", deposit: "2000000000", amount: "2000000000", timestamp: AT, blockHeight: 4658013, success: false, status: "failed", feePaid: "1856398" },
   // DUSK bridged to DuskEVM.
-  { hash: hash(4), source: "archive", nodeUrl: NODE, kind: TX_KIND.CONTRACT_CALL, direction: "out", contractId: BRIDGE_CONTRACTS.testnet.bridge, counterparty: BRIDGE_CONTRACTS.testnet.bridge, fnName: "depositETHToWithValue", deposit: "500000000", amount: "500000000", bridgeTo: EVM, timestamp: AT, blockHeight: 4697290, success: true, status: "executed", feePaid: "1985878" },
+  { hash: hash(4), source: "archive", nodeUrl: NODE, kind: TX_KIND.CONTRACT_CALL, direction: "out", contractId: duskEvmContracts(2).bridge, counterparty: duskEvmContracts(2).bridge, fnName: "depositETHToWithValue", deposit: "500000000", amount: "500000000", bridgeTo: EVM, timestamp: AT, blockHeight: 4697290, success: true, status: "executed", feePaid: "1985878" },
   // Synced, its details not looked up yet.
   { hash: hash(5), source: "archive", nodeUrl: NODE, kind: TX_KIND.TRANSFER, direction: "out", to: FAUCET, counterparty: FAUCET, amount: "3000000000", blockHeight: 4658014, success: null, status: "unknown" },
   // Shielded, received.

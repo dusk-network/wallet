@@ -1827,13 +1827,14 @@ export async function getDrc721TokenUri(params = {}) {
 const nodeChainId = () => chainIdForNode(engineConfig.nodeUrl);
 
 // Sozu's contracts are read through Multicall for Dusk: one query a refresh
-// (readSozuStatus), with one batcher per node.
+// (readSozuStatus), with one batcher per node and its network's multicall.
 let sozuReads = null;
 
 function readSozu(contractId, fnName, args) {
   const nodeUrl = String(engineConfig.nodeUrl || "");
-  if (sozuReads?.nodeUrl !== nodeUrl) {
-    sozuReads = { nodeUrl, read: createContractReads({ nodeUrl }) };
+  const multicallId = networkOf(nodeChainId())?.contracts.multicall ?? null;
+  if (sozuReads?.nodeUrl !== nodeUrl || sozuReads.multicallId !== multicallId) {
+    sozuReads = { nodeUrl, multicallId, read: createContractReads({ nodeUrl, multicallId }) };
   }
   return withTimeout(sozuReads.read(contractId, fnName, args), 8_000, "Timed out reading Sozu");
 }

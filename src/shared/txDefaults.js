@@ -6,7 +6,7 @@
 //
 // Values are expressed in LUX (1 LUX = 10^-9 DUSK) as decimal strings.
 
-import { SOZU_GAS as PACKAGE_SOZU_GAS } from "@dusk-network/networks/sozu";
+import { SOZU_GAS as PACKAGE_SOZU_GAS, TRANSFER_GAS } from "@dusk-network/networks/gas";
 
 import { TX_KIND } from "./constants.js";
 
@@ -51,11 +51,12 @@ import { TX_KIND } from "./constants.js";
  * (30M) and public staking (35M) floors sit 5% to 12% above the highest
  * spend measured.
  *
- * The web wallet uses the same numbers.
+ * The web wallet uses the same numbers; the public transfer's come from
+ * @dusk-network/networks/gas.
  */
 export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
   public: Object.freeze({
-    limit: "2500000",
+    limit: String(TRANSFER_GAS.limit),
     price: "1",
   }),
   shielded: Object.freeze({
@@ -66,7 +67,7 @@ export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
 
 export const MIN_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
   public: Object.freeze({
-    limit: "2000000",
+    limit: String(TRANSFER_GAS.minimum),
   }),
   shielded: Object.freeze({
     limit: "30000000",

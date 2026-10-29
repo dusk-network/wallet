@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { MULTICALL_CONTRACT_ID } from "@hdauven/dusk-multicall";
+
 import { createContractReads } from "./contractReads.js";
-import { MULTICALL_CONTRACT_ID } from "./multicallFetch.js";
 import { aggregateReply as reply, envelopeCalls } from "./fixtures/multicallCodec.js";
 
 const NODE = "https://testnet.nodes.dusk.network";
@@ -27,7 +28,7 @@ function node() {
 describe("createContractReads", () => {
   it("sends the reads made together as one Multicall for Dusk query, each with its argument, and gives each its reply", async () => {
     const base = node();
-    const read = createContractReads({ nodeUrl: `${NODE}/`, fetch: base });
+    const read = createContractReads({ nodeUrl: `${NODE}/`, multicallId: MULTICALL_CONTRACT_ID, fetch: base });
 
     const answers = await Promise.all([
       read(POOL, "exchange_rate", new Uint8Array(0)),
@@ -48,7 +49,7 @@ describe("createContractReads", () => {
 
   it("sends a read alone in its task as it is", async () => {
     const base = node();
-    const read = createContractReads({ nodeUrl: NODE, fetch: base });
+    const read = createContractReads({ nodeUrl: NODE, multicallId: MULTICALL_CONTRACT_ID, fetch: base });
 
     expect(text.decode(await read(POOL, "balance_of", utf8.encode("acct0")))).toBe('"acct0"');
     expect(base).toHaveBeenCalledTimes(1);
@@ -57,10 +58,10 @@ describe("createContractReads", () => {
 
   it("fails a read the node refused, with what it said", async () => {
     const base = vi.fn(async () => new Response("Contract does not exist", { status: 500 }));
-    const read = createContractReads({ nodeUrl: NODE, fetch: base });
+    const read = createContractReads({ nodeUrl: NODE, multicallId: MULTICALL_CONTRACT_ID, fetch: base });
 
     await expect(read(POOL, "exchange_rate", new Uint8Array(0))).rejects.toThrow("Contract does not exist");
-    const silent = createContractReads({ nodeUrl: NODE, fetch: vi.fn(async () => new Response("", { status: 503 })) });
+    const silent = createContractReads({ nodeUrl: NODE, multicallId: MULTICALL_CONTRACT_ID, fetch: vi.fn(async () => new Response("", { status: 503 })) });
     await expect(silent(POOL, "exchange_rate", new Uint8Array(0))).rejects.toThrow("HTTP 503");
   });
 });

@@ -4,8 +4,6 @@ import {
   LUX_SCALE,
   safeBigInt,
   formatLuxToDusk,
-  clampDecimals,
-  formatLuxShort,
   parseDuskToLux,
   groupThousands,
   formatDusk,
@@ -84,45 +82,6 @@ describe("formatLuxToDusk", () => {
   });
 });
 
-describe("clampDecimals", () => {
-  it("returns string unchanged if no decimals", () => {
-    expect(clampDecimals("123")).toBe("123");
-  });
-
-  it("clamps to specified precision", () => {
-    expect(clampDecimals("1.123456789", 4)).toBe("1.1234");
-    expect(clampDecimals("1.123456789", 2)).toBe("1.12");
-  });
-
-  it("keeps shorter decimals unchanged", () => {
-    expect(clampDecimals("1.12", 4)).toBe("1.12");
-  });
-
-  it("defaults to 4 decimals", () => {
-    expect(clampDecimals("1.123456789")).toBe("1.1234");
-  });
-
-  it("handles edge case with only zeros after clamp", () => {
-    expect(clampDecimals("1.0001", 2)).toBe("1.00");
-  });
-});
-
-describe("formatLuxShort", () => {
-  it("formats and clamps", () => {
-    expect(formatLuxShort("1234567890", 4)).toBe("1.2345");
-  });
-
-  it("preserves very small non-zero values", () => {
-    // 1 Lux = 0.000000001 DUSK, clamping to 4 would give "0.0000"
-    // But since it's non-zero, should show full value
-    expect(formatLuxShort("1", 4)).toBe("0.000000001");
-  });
-
-  it("defaults to 6 decimals", () => {
-    expect(formatLuxShort("1234567890")).toBe("1.234567");
-  });
-});
-
 describe("parseDuskToLux", () => {
   it("parses whole numbers", () => {
     expect(parseDuskToLux("1")).toBe("1000000000");
@@ -174,8 +133,8 @@ describe("display formatting", () => {
     expect(formatDusk("2000010000")).toBe("2");
     expect(formatDusk("100000000")).toBe("0.1");
     expect(formatDusk("1234567890123")).toBe("1,234.5678");
-    // Too small to show at 4 decimals: in full, never as zero.
-    expect(formatDusk("40000")).toBe("0.00004");
+    // Under 0.01, 2 significant digits as every Dusk app shows them, rounded down, never as zero.
+    expect([formatDusk("55555"), formatDusk("123450"), formatDusk("40000"), formatDusk("1")]).toEqual(["0.000055", "0.00012", "0.00004", "0.000000001"]);
     expect(formatDusk("0")).toBe("0");
   });
 

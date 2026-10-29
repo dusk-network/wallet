@@ -1,8 +1,8 @@
 import { networks, routes } from "@dusk-network/networks";
+import { duskEvmContracts } from "@dusk-network/networks/duskevm";
+import { PINNED_RELEASES as releases } from "@duskdomains/sdk/releases";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
-import releases from "../shared/dusk-domains-releases.json";
 import { TX_KIND } from "../shared/constants.js";
 import { installFakeDom, settle, visibleText } from "./testing/fakeDom.js";
 import { dateText } from "./lib/time.js";
@@ -127,7 +127,7 @@ describe("transaction details", () => {
     const evm = "0x5A3d8e1B7c2f4A6b9e0D1C3f5A7b9C2D4e6F8a01";
     const deposit = {
       kind: TX_KIND.CONTRACT_CALL,
-      contractId: BRIDGE_CONTRACTS.testnet.bridge,
+      contractId: duskEvmContracts(2).bridge,
       fnName: "depositETHToWithValue",
       amount: "0",
       deposit: "500000000",
@@ -153,7 +153,7 @@ describe("transaction details", () => {
     const l2 = "0x029e2c6ebfe60452800c97eaa2ac36f40039812679c9cee414ea6a8b1877d61b";
     const deposit = {
       kind: TX_KIND.CONTRACT_CALL,
-      contractId: BRIDGE_CONTRACTS.testnet.bridge,
+      contractId: duskEvmContracts(2).bridge,
       fnName: "depositETHToWithValue",
       amount: "0",
       deposit: "500000000",

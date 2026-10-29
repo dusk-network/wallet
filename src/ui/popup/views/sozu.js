@@ -40,7 +40,7 @@ import { sendFromReview } from "./sent.js";
 const stakeQuote = (amount, pool, depositFee) => (pool && depositFee ? sozuStake(amount, pool, depositFee) : null);
 
 function fmtLux(value) {
-  return formatDusk(value ?? "0", UI_DISPLAY_DECIMALS);
+  return formatDusk(value ?? "0");
 }
 
 // Sozu's site.

@@ -169,6 +169,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Showed amounts under 0.01 DUSK to two significant digits, as the other Dusk apps do.
+- Sent nothing to a .dusk name whose public account isn't a valid key.
+- Named a call that replaces a .dusk name's records in Activity, as one that changes them.
+- Named only calls to Sozu's own pool as Sozu stakes and unstakes in Activity.
 - Kept a contract's "·" with its short ID and Copy when its row wraps.
 - Refused a stake with Sozu too small to get any stDUSK, and said the minimum.
 - Kept Confirm off on Send's Review when the bridge's 1 DUSK fee takes the whole amount.

@@ -30,12 +30,11 @@ import {
 } from "../../components/RecipientBadge.js";
 
 import { listAddressBook } from "../../../shared/addressBook.js";
-import { asDuskName, closeDuskName } from "../../lib/nameSuggest.js";
+import { asDuskName, closeDuskName, isDuskName } from "@duskdomains/sdk/names";
 import {
   duskNameErrorText,
   duskNameRecipient,
   duskNamesNetwork,
-  isDuskName,
   lookupDuskName,
   lookupPrimaryName,
 } from "../../../shared/duskNames.js";
@@ -659,7 +658,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
 
     // A name typed without .dusk, or with a dot after it, where the network
-    // has names: the name it likely means (nameSuggest.js).
+    // has names: the name it likely means (asDuskName).
     const bare = duskNamesNetwork(ov?.nodeUrl) ? asDuskName(v) : null;
     if (bare) {
       hideRecipientBadge(toTypePill);

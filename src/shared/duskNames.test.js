@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
+import { decodeBase58 } from "@duskdomains/sdk";
+import { PINNED_RELEASES as releases } from "@duskdomains/sdk/releases";
 
-import releases from "./dusk-domains-releases.json";
 import { NETWORK_PRESETS } from "./networkPresets.js";
 
 vi.mock("@duskdomains/sdk/lens-reader", async (importOriginal) => ({
@@ -24,11 +24,13 @@ const ACCOUNT =
   "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
 const ADDRESS =
   "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
-// The same shapes with their last byte changed.
-const otherOf = (value) => encodeBase58(decodeBase58(value).map((b, i, all) => (i === all.length - 1 ? b ^ 1 : b)));
-const OTHER_ACCOUNT = otherOf(ACCOUNT);
-const OTHER_ADDRESS = otherOf(ADDRESS);
+// Testnet's faucet, and another shielded address.
+const OTHER_ACCOUNT =
+  "26JfWKvhYdVY71bdSPVLNJ51Buy4GjimCT7zcsoxNQtydDbdoH2AwZaH8W7rjcAc9riAu39Vw9Lx1w7yrkBgotSjWmUdkSyQuaTKDZWVCKp9g1GxiEnnksv3W3onToB5NsNi";
+const OTHER_ADDRESS = "3rTbMbu2ffd3kuUiq766HJBh3eYHpKbwZFZtXLFtadRMFw6dLqxAUr1n5PtAXfb3xnBhGssELCC64cxd4dSYyjEj";
 const RECORD_KEYS = ["moonlight_address", "phoenix_payment_endpoint"];
+// A contract read as the lens reader sends one.
+const OCTETS = { "Content-Type": "application/octet-stream", Accept: "application/octet-stream" };
 
 let lens;
 let names;
@@ -71,22 +73,6 @@ function useReader({ resolve = async () => answer("Absent"), verifyPrimary = asy
   lens.createLensReader.mockResolvedValue(reader);
   return reader;
 }
-
-describe("isDuskName", () => {
-  it("detects input ending in .dusk", () => {
-    expect(names.isDuskName("alice.dusk")).toBe(true);
-    expect(names.isDuskName("  Alice.DUSK ")).toBe(true);
-    expect(names.isDuskName("pay.alice.dusk")).toBe(true);
-  });
-
-  it("leaves raw recipients and other text alone", () => {
-    for (const value of [ACCOUNT, ADDRESS, "", null, undefined, "alice", "alice.dus", "alice.dusk.network"]) {
-      expect(names.isDuskName(value)).toBe(false);
-    }
-    expect(names.isDuskName(`dusk:public-${ACCOUNT}`)).toBe(false);
-    expect(names.isDuskName("dusk:alice.dusk")).toBe(false);
-  });
-});
 
 describe("duskNamesNetwork", () => {
   it("turns names on for mainnet and testnet only", () => {
@@ -247,6 +233,7 @@ describe("resolveDuskName", () => {
     ["a shielded address's 64 bytes", record("moonlight_address", decodeBase58(ADDRESS))],
     ["96 bytes without a compressed key's flags", record("moonlight_address", new Uint8Array(96))],
     ["a coordinate outside the field", record("moonlight_address", [0x9f, ...new Array(95).fill(0xff)])],
+    ["a key's shape off the curve", record("moonlight_address", decodeBase58(ACCOUNT).map((b, i) => (i === 95 ? b ^ 1 : b)))],
     ["no bytes", record("moonlight_address", [])],
   ])("checks the public account as the reader and any address are checked (%s)", async (_label, account) => {
     useReader({ resolve: async () => active(account, null) });
@@ -474,7 +461,7 @@ describe("lookupPrimaryName", () => {
     const LENS = releases.testnet.lens.contractId;
     await Promise.all(
       ["lens_interface", "binding", "reverse"].map((fn) =>
-        fetch(`${node}/on/contracts:${LENS}/${fn}`, { method: "POST", body: new Uint8Array([1]) })
+        fetch(`${node}/on/contracts:${LENS}/${fn}`, { method: "POST", headers: OCTETS, body: new Uint8Array([1]) })
       )
     );
     expect(sent[0]).toBe(`${node}/on/contracts:93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4/aggregate`);
@@ -697,7 +684,7 @@ describe("lookupRecipientNames", () => {
         return new Response(reply);
       })
     );
-    const read = (body) => fetch(`${node}/on/contracts:${LENS}/reverse`, { method: "POST", body: new Uint8Array(body) });
+    const read = (body) => fetch(`${node}/on/contracts:${LENS}/reverse`, { method: "POST", headers: OCTETS, body: new Uint8Array(body) });
     const answers = await Promise.all([read([1]), read([2])]);
     expect(sent.map(([url]) => url)).toEqual([`${node}/on/contracts:93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4/aggregate`]);
     // Each reverse read capped at the SDK client's 842M gas: 203 reads at 4M, and 30M.
@@ -770,8 +757,13 @@ describe("bundled data drivers", () => {
 });
 
 describe("bundle boundary", () => {
-  it("loads the SDK and release descriptors only on lookup", async () => {
-    const read = (...parts) => readFile(path.resolve(process.cwd(), "src", ...parts), "utf8");
+  const read = (...parts) => readFile(path.resolve(process.cwd(), "src", ...parts), "utf8");
+  // The SDK's root, its reader and its account check, which carries the curve's
+  // code; its name rules, call facts and releases are light.
+  const heavySdk = /(?:from\s*|import\(\s*)["'](?:@duskdomains\/sdk(?:\/lens-reader|\/accounts)?|[^"']*duskNamesSdk\.js)["']/;
+  const namesCode = /(?:from\s*|import\(\s*)["'][^"']*\/duskNames\.js["']/;
+
+  it("loads the SDK's reader and account check only on lookup", async () => {
     const module = await read("shared", "duskNames.js");
     const shim = await read("shared", "duskNamesSdk.js");
     const users = [
@@ -783,23 +775,21 @@ describe("bundle boundary", () => {
       ["ui", "components", "DuskName.js"],
     ];
 
-    expect(module).not.toContain("@duskdomains/sdk");
-    expect(module).not.toMatch(/^import[^;]*(duskNamesSdk|dusk-domains-releases)/m);
     expect(module).toContain('import("./duskNamesSdk.js")');
-    expect(module).toContain('import("./dusk-domains-releases.json"');
-    expect(shim).toContain(
-      'export { decodeBase58, encodeBase58, hasClaimableReferrerShape, validateName } from "@duskdomains/sdk";'
-    );
-    expect(shim).toContain('export { createLensReader } from "@duskdomains/sdk/lens-reader";');
+    expect(module.replace('import("./duskNamesSdk.js")', "")).not.toMatch(heavySdk);
+    expect(shim).toContain('export { createLensReader, decodeBase58 } from "@duskdomains/sdk/lens-reader";');
+    expect(shim).toContain('export { resolveAccounts } from "@duskdomains/sdk/accounts";');
     for (const parts of users) {
-      expect(await read(...parts), parts.join("/")).not.toMatch(/@duskdomains\/sdk|duskNamesSdk/);
+      expect(await read(...parts), parts.join("/")).not.toMatch(heavySdk);
     }
+    expect('import { nameToShow } from "@duskdomains/sdk/names";').not.toMatch(heavySdk);
+    expect('import("@duskdomains/sdk/accounts")').toMatch(heavySdk);
   });
 
   it("keeps the names code out of the service worker and the approval window", async () => {
-    const read = (...parts) => readFile(path.resolve(process.cwd(), "src", ...parts), "utf8");
     const readers = [
       ["shared", "verifiedNames.js"],
+      ["shared", "knownCalls.js"],
       ["shared", "permissions.js"],
       ["background", "siteNames.js"],
       ["background", "rpc.js"],
@@ -807,11 +797,12 @@ describe("bundle boundary", () => {
       ["background", "index.js"],
       ["ui", "notification", "app.js"],
     ];
-    const importsNames = /(?:from\s*|import\(\s*)["'][^"']*(?:@duskdomains\/sdk|duskNamesSdk|\/duskNames\.js)["']/;
     for (const parts of readers) {
-      expect(await read(...parts), parts.join("/")).not.toMatch(importsNames);
+      const text = await read(...parts);
+      expect(text, parts.join("/")).not.toMatch(heavySdk);
+      expect(text, parts.join("/")).not.toMatch(namesCode);
     }
-    expect('import { x } from "../shared/duskNames.js";').toMatch(importsNames);
+    expect('import { x } from "../shared/duskNames.js";').toMatch(namesCode);
     // The engine checks the names sites get.
     expect(await read("engine", "runtime.js")).toMatch(/import \{[^}]*\blookupPrimaryName\b[^}]*\} from "\.\.\/shared\/duskNames\.js";/);
   });

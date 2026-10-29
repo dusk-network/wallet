@@ -50,41 +50,6 @@ export function formatLuxToDusk(luxStr) {
 }
 
 /**
- * Clamp a decimal string to `maxDecimals`.
- *
- * Note: we intentionally keep trailing zeros introduced by clamping to avoid
- * inconsistent widths like `1.123` vs `1.1230` across screens.
- * @param {string} numStr
- * @param {number} maxDecimals
- */
-export function clampDecimals(numStr, maxDecimals = 4) {
-  const s = String(numStr ?? "");
-  if (!s.includes(".")) return s;
-  const [u, d] = s.split(".");
-  const short = d.slice(0, maxDecimals);
-  return short ? `${u}.${short}` : u;
-}
-
-/**
- * Convenience helper: format Lux -> DUSK and clamp.
- * @param {string|bigint|number} luxStr
- * @param {number} maxDecimals
- */
-export function formatLuxShort(luxStr, maxDecimals = 6) {
-  const full = formatLuxToDusk(luxStr);
-  const clamped = clampDecimals(full, maxDecimals);
-
-  // If clamping would hide a non-zero value (e.g. very small Lux amounts)
-  // we fall back to the full (up to 9 decimals) representation.
-  const lux = safeBigInt(luxStr);
-  // Avoid hiding non-zero values when clamping would produce something
-  // that looks like 0 (e.g. 0.0000).
-  if (lux !== 0n && /^0(\.0+)?$/.test(clamped)) return full;
-
-  return clamped;
-}
-
-/**
  * A number as shown to people, its whole part grouped in thousands:
  * "1484.9235" becomes "1,484.9235". Inputs keep the plain form; anything that
  * isn't a plain decimal comes back as it is.
@@ -98,20 +63,18 @@ export function groupThousands(numStr) {
   return `${m[1]}${m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${m[3] ?? ""}`;
 }
 
-// "1.1000" becomes "1.1", and "2.0000" becomes "2".
-const trimZeros = (numStr) => String(numStr).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
-
 /**
- * DUSK as the wallet shows it, the one number format for amounts and fees
- * alike: at most `maxDecimals` (4) decimals, trailing zeros trimmed,
- * thousands grouped. An amount that would show as zero at that precision
- * shows in full.
+ * An amount in DUSK as every Dusk app writes one (@dusk-network/networks): at
+ * most 4 decimals, but 2 significant digits under 0.01, and never 0 for an
+ * amount that isn't; rounded down, so a balance never reads more than there
+ * is. In the wallet's separators: "1,484.9235". Anything that isn't a whole
+ * number of Lux comes back as it is.
  * @param {string|bigint|number} luxStr
- * @param {number} [maxDecimals]
  * @returns {string}
  */
-export function formatDusk(luxStr, maxDecimals = UI_DISPLAY_DECIMALS) {
-  return groupThousands(trimZeros(formatLuxShort(luxStr, maxDecimals)));
+export function formatDusk(luxStr) {
+  const lux = safeBigInt(luxStr, null);
+  return lux === null ? String(luxStr ?? "0") : formatDuskShared(lux, { round: "down", locale: "en-US" }).text;
 }
 
 /**

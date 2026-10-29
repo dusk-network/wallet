@@ -389,7 +389,7 @@ describe("historyArchiverUrl", () => {
 // Recorded on Testnet: alice.dusk's deposit of 0.5 DUSK to DuskEVM.
 describe("a deposit to DuskEVM", async () => {
   const deposit = (await import("./fixtures/duskevm-deposit-history.json")).default;
-  const { BRIDGE_CONTRACTS } = await import("./bridge.js");
+  const { duskEvmContracts } = await import("@dusk-network/networks/duskevm");
   const HASH = deposit.entry.origin;
   const H = deposit.entry.block_height;
   const accounts = { [deposit.account]: { sender: [deposit.entry], receiver: [] } };
@@ -400,7 +400,7 @@ describe("a deposit to DuskEVM", async () => {
     await history.syncActivity({ nodeUrl: NODE, account: deposit.account });
     const { entries } = await history.readActivity({ nodeUrl: NODE, account: deposit.account });
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ hash: HASH, counterparty: BRIDGE_CONTRACTS.testnet.bridge, success: true, bridgeTo: deposit.recipient });
+    expect(entries[0]).toMatchObject({ hash: HASH, counterparty: duskEvmContracts(2).bridge, success: true, bridgeTo: deposit.recipient });
     const asked = node.detailQueries().map((l) => l.query).join("\n");
     expect(asked).toContain(`tx(hash: "${HASH}") { err gasSpent blockHash blockTimestamp tx { gasPrice gasLimit callData { contractId fnName data } } }`);
 
@@ -433,7 +433,7 @@ describe("a deposit to DuskEVM", async () => {
   });
 
   it("needs its details while it has none, or its address isn't read, on a network with the bridge", () => {
-    const bridge = BRIDGE_CONTRACTS.testnet.bridge;
+    const bridge = duskEvmContracts(2).bridge;
     expect(history.needsDetails({ counterparty: "other" }, NODE)).toBe(true);
     expect(history.needsDetails({ detailsAt: 1, counterparty: "other" }, NODE)).toBe(false);
     expect(history.needsDetails({ detailsAt: 1, counterparty: bridge }, NODE)).toBe(true);

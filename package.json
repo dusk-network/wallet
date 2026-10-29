@@ -40,10 +40,11 @@
     "e2e:rusk": "node scripts/e2e-with-rusk.js"
   },
   "dependencies": {
-    "@dusk-network/networks": "0.1.0",
+    "@dusk-network/networks": "^0.3.0",
     "@dusk/typed-data": "npm:@jsr/dusk__typed-data@0.1.0-rc.0",
     "@dusk/w3sper": "npm:@jsr/dusk__w3sper@1.7.0-rc.0",
-    "@duskdomains/sdk": "npm:@jsr/duskdomains__sdk@0.5.4",
+    "@duskdomains/sdk": "npm:@jsr/duskdomains__sdk@0.6.0",
+    "@hdauven/dusk-multicall": "npm:@jsr/hdauven__dusk-multicall@0.1.0",
     "@noble/curves": "1.9.7",
     "@noble/hashes": "1.8.0",
     "@tauri-apps/api": "^2.0.0",

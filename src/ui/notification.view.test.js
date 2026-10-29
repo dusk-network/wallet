@@ -3,8 +3,8 @@ import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
+import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 
-import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
 import { fakeEvent, installFakeDom, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
@@ -357,7 +357,7 @@ describe("a site's request to pay", () => {
       expect(visibleAt).toBeLessThan(children.findIndex((el) => el.localName === "dusk-gas-editor"));
     }
     for (const params of [
-      { kind: "contract_call", contractId: BRIDGE_CONTRACTS.testnet.bridge, fnName: deposit.fnName, fnArgs: deposit.args, deposit: deposit.expected.amountLux, chainId: "dusk:2", nodeUrl: TESTNET },
+      { kind: "contract_call", contractId: duskEvmContracts(2).bridge, fnName: deposit.fnName, fnArgs: deposit.args, deposit: deposit.expected.amountLux, chainId: "dusk:2", nodeUrl: TESTNET },
       { kind: "contract_call", privacy: "public", contractId: `0x${"11".repeat(32)}`, fnName: "x", fnArgs: "0x00", deposit: "5", nodeUrl: TESTNET },
     ]) {
       await render("send_tx", params);
@@ -643,7 +643,7 @@ describe("the recipient of a site's request to send", () => {
 });
 
 describe("contract calls", () => {
-  const { bridge, portal } = BRIDGE_CONTRACTS.testnet;
+  const { bridge, portal } = duskEvmContracts(2);
   const fixture = (name) => fixtures.calls.find((c) => c.name === name);
   const contractCall = (contractId, name, over = {}) => ({
     kind: "contract_call",
@@ -717,7 +717,7 @@ describe("contract calls", () => {
     expect(callData).toBeLessThan(rawAt);
     expect(rawAt).toBeLessThan(siteAt);
     // Its contract by the network's name for it, its ID 6…6; nothing on what's public, which is for a payment.
-    const bridgeId = BRIDGE_CONTRACTS.testnet.bridge;
+    const bridgeId = duskEvmContracts(2).bridge;
     expect(visibleText(row("Contract"))).toBe(`DuskEVM bridge · ${bridgeId.slice(0, 6)}…${bridgeId.slice(-6)}`);
     expect(app.querySelector(".ap-visible")).toBeNull();
   });
@@ -868,7 +868,7 @@ describe("a site's request while the wallet is locked", () => {
     const deposit = fixtures.calls.find((c) => c.name === "deposit-shoot");
     await renderShop(
       "send_tx",
-      { kind: "contract_call", contractId: BRIDGE_CONTRACTS.testnet.bridge, fnName: deposit.fnName, fnArgs: deposit.args, deposit: "100000000", chainId: "dusk:2", nodeUrl: TESTNET },
+      { kind: "contract_call", contractId: duskEvmContracts(2).bridge, fnName: deposit.fnName, fnArgs: deposit.args, deposit: "100000000", chainId: "dusk:2", nodeUrl: TESTNET },
       locked
     );
     expect(title()).toBe("Bridge to DuskEVM");
@@ -880,7 +880,7 @@ describe("a site's request while the wallet is locked", () => {
     const prove = fixtures.calls.find((c) => c.name === "prove-account");
     await renderShop(
       "send_tx",
-      { kind: "contract_call", contractId: BRIDGE_CONTRACTS.testnet.portal, fnName: prove.fnName, fnArgs: prove.args, chainId: "dusk:2", nodeUrl: TESTNET, gas: { limit: "51000000", price: "1" } },
+      { kind: "contract_call", contractId: duskEvmContracts(2).portal, fnName: prove.fnName, fnArgs: prove.args, chainId: "dusk:2", nodeUrl: TESTNET, gas: { limit: "51000000", price: "1" } },
       locked
     );
     expect(title()).toBe("Prove a DuskEVM withdrawal");
@@ -991,7 +991,7 @@ describe("contract-call decoding", () => {
 
   it("makes no driver call for a known bridge call, which the wallet reads itself", async () => {
     const claim = fixtures.calls.find((c) => c.name === "claim-account");
-    await renderShop("send_tx", { kind: "contract_call", contractId: BRIDGE_CONTRACTS.testnet.portal, fnName: claim.fnName, fnArgs: claim.args, chainId: "dusk:2", nodeUrl: TESTNET });
+    await renderShop("send_tx", { kind: "contract_call", contractId: duskEvmContracts(2).portal, fnName: claim.fnName, fnArgs: claim.args, chainId: "dusk:2", nodeUrl: TESTNET });
     expect(title()).toBe("Claim a DuskEVM withdrawal");
     expect(mocks.sent.some((m) => /DECODE_INPUT$/.test(m.type))).toBe(false);
   });

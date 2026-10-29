@@ -1,6 +1,6 @@
+import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BRIDGE_CONTRACTS } from "../shared/bridge.js";
 import { TX_KIND } from "../shared/constants.js";
 import { accessibleName, installFakeDom, settle, visibleText } from "./testing/fakeDom.js";
 import { activityView } from "./popup/views/activityView.js";
@@ -36,7 +36,7 @@ const LOCAL = [
   {
     hash: "a2".repeat(32),
     kind: TX_KIND.CONTRACT_CALL,
-    contractId: BRIDGE_CONTRACTS.testnet.bridge,
+    contractId: duskEvmContracts(2).bridge,
     fnName: "depositETHToWithValue",
     amount: "0",
     deposit: "500000000",

@@ -1,5 +1,5 @@
 // The DuskEVM bridge's contracts on DuskDS, so Activity can label bridge
-// transfers, from the node's network's file in @dusk-network/networks.
+// transfers, from the node's network's file (@dusk-network/networks/duskevm).
 // Deposits to DuskEVM call the bridge (`depositETHToWithValue`); withdrawals
 // back are proved and finalized at the portal, which pays the DUSK out. A
 // network without DuskEVM (Mainnet, for now) has none. The bridge's accounts
@@ -7,29 +7,9 @@
 // and DUSK coming in from another chain is paid from its migration routes'
 // payout accounts.
 
-import { networks, routes } from "@dusk-network/networks";
+import { duskEvmContracts, isBridgeContract } from "@dusk-network/networks/duskevm";
 
-import { TX_KIND } from "./constants.js";
 import { networkForNode } from "./nodeNetwork.js";
-
-const contractsOf = (net) => {
-  const contracts = net?.duskEvm?.contracts;
-  const bridge = contracts?.l1_standard_bridge?.contractId;
-  const portal = contracts?.optimism_portal?.contractId;
-  return bridge && portal ? Object.freeze({ bridge, portal }) : null;
-};
-
-/** The bridge and the portal on each network that has DuskEVM, by its name. */
-export const BRIDGE_CONTRACTS = Object.freeze(
-  Object.fromEntries(Object.values(networks).flatMap((net) => (contractsOf(net) ? [[net.name, contractsOf(net)]] : [])))
-);
-
-/**
- * The bridge and the portal on the node's network, as contract IDs, or null.
- * @param {string} nodeUrl
- * @returns {{ bridge: string, portal: string } | null}
- */
-export const bridgeContractsOf = (nodeUrl) => contractsOf(networkForNode(String(nodeUrl ?? "")));
 
 const norm = (id) =>
   String(id ?? "")
@@ -45,8 +25,9 @@ const norm = (id) =>
  * @returns {boolean}
  */
 export function depositsToBridge(entry, nodeUrl) {
-  const contracts = bridgeContractsOf(nodeUrl);
-  return Boolean(contracts) && [entry?.counterparty, entry?.contractId].some((id) => norm(id) === contracts.bridge);
+  const net = networkForNode(String(nodeUrl ?? ""));
+  const bridge = net ? duskEvmContracts(net)?.bridge : null;
+  return Boolean(bridge) && [entry?.counterparty, entry?.contractId].some((id) => norm(id) === bridge);
 }
 
 /**
@@ -58,32 +39,10 @@ export function depositsToBridge(entry, nodeUrl) {
  * @returns {"to"|"from"|"call"|null}
  */
 export function bridgeTransfer(tx, nodeUrl = tx?.nodeUrl) {
-  const contracts = bridgeContractsOf(nodeUrl);
-  if (!contracts) return null;
-  const ids = new Set(Object.values(contracts));
-  const touched = [tx?.contractId, tx?.counterparty, tx?.to, tx?.from].some((id) => ids.has(norm(id)));
+  const net = networkForNode(String(nodeUrl ?? ""));
+  const touched = Boolean(net) && [tx?.contractId, tx?.counterparty, tx?.to, tx?.from].some((id) => isBridgeContract(net, id));
   if (!touched) return null;
   if (tx?.direction === "in") return "from";
   const moved = [tx?.amount, tx?.deposit].some((v) => /^\d+$/.test(String(v ?? "")) && BigInt(String(v)) > 0n);
   return moved ? "to" : "call";
-}
-
-/**
- * A transfer through one of the network's bridge routes to or from another
- * chain: "to" one when it paid a service route's account, "from" one when a
- * migration route's payout account paid it, with the chain as the route names
- * it ("BNB Smart Chain", "Ethereum"); null for any other transaction.
- * @param {object} tx - an Activity row (activityMerge.js)
- * @param {string} [nodeUrl]
- * @returns {{ direction: "to"|"from", chain: string } | null}
- */
-export function bridgeRouteTransfer(tx, nodeUrl = tx?.nodeUrl) {
-  const net = networkForNode(String(nodeUrl ?? ""));
-  if (!net || String(tx?.kind ?? "").toLowerCase() !== TX_KIND.TRANSFER || tx?.direction === "self") return null;
-  const from = tx?.direction === "in";
-  const account = String((from ? tx?.from : tx?.to) ?? "").trim();
-  const route = account
-    ? routes(net).find((r) => (from ? r.kind === "migration" && r.payoutAccount === account : r.kind === "service" && r.account === account))
-    : null;
-  return route ? { direction: from ? "from" : "to", chain: route.chain.name } : null;
 }
