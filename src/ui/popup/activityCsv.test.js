@@ -33,6 +33,17 @@ const ROWS = [
 
 const lines = (csv) => csv.split("\r\n");
 
+describe("DUSK bridged through a route's account", () => {
+  it("is a bridge transfer, the bridge's account its counterparty", async () => {
+    const { networks, routes } = await import("@dusk-network/networks");
+    const MAINNET = "https://nodes.dusk.network";
+    const bsc = routes(networks.mainnet).find((route) => route.kind === "service").account;
+    const sent = { hash: hash(8), source: "local", nodeUrl: MAINNET, kind: TX_KIND.TRANSFER, privacy: "public", to: bsc, memo: EVM, amount: "2000000000", submittedAt: AT, status: "executed", profileIndex: 0 };
+    const [, row] = lines(activityCsv([sent], { nodeUrl: MAINNET }));
+    expect(row).toBe(`2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",,${hash(8)},out,Public,To BNB Smart Chain (Bridge),,${bsc},-2,,${EVM},Completed`);
+  });
+});
+
 describe("Activity's CSV", () => {
   it("has the web wallet's History columns, by the same names", () => {
     expect(CSV_COLUMNS).toEqual([

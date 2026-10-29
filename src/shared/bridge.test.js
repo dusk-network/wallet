@@ -1,7 +1,7 @@
 import { networks, routes } from "@dusk-network/networks";
 import { describe, expect, it } from "vitest";
 
-import { BRIDGE_CONTRACTS, bridgeTransfer } from "./bridge.js";
+import { BRIDGE_CONTRACTS, bridgeRouteTransfer, bridgeTransfer } from "./bridge.js";
 import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings } from "./bridgeCalls.js";
 import { noteChainId } from "./nodeNetwork.js";
 
@@ -23,6 +23,34 @@ describe("bridge transfers", () => {
     expect(bridgeTransfer({ direction: "out", contractId: bridge, amount: "1" }, MAINNET)).toBeNull();
     // The row's own network when none is given.
     expect(bridgeTransfer({ nodeUrl: TESTNET, direction: "out", counterparty: bridge, amount: "1" })).toBe("to");
+  });
+});
+
+describe("transfers through the bridge's routes to and from other chains", () => {
+  const route = (net, id) => routes(net).find((r) => r.id === id);
+  const bsc = route(networks.mainnet, "dusk-to-bsc").account;
+  const bscPayout = route(networks.mainnet, "bsc-to-dusk").payoutAccount;
+  const ethPayout = route(networks.mainnet, "ethereum-to-dusk").payoutAccount;
+  const transfer = (over) => ({ kind: "transfer", amount: "2000000000", ...over });
+
+  it("are DUSK paid to a service route's account, or paid by a migration route's payout account", () => {
+    expect(bridgeRouteTransfer(transfer({ direction: "out", to: bsc }), MAINNET)).toEqual({ direction: "to", chain: "BNB Smart Chain" });
+    // The wallet's own send, which has no direction.
+    expect(bridgeRouteTransfer(transfer({ to: bsc }), MAINNET)).toEqual({ direction: "to", chain: "BNB Smart Chain" });
+    expect(bridgeRouteTransfer(transfer({ direction: "in", from: bscPayout }), MAINNET)).toEqual({ direction: "from", chain: "BNB Smart Chain" });
+    expect(bridgeRouteTransfer(transfer({ direction: "in", from: ethPayout }), MAINNET)).toEqual({ direction: "from", chain: "Ethereum" });
+    expect(bridgeRouteTransfer(transfer({ nodeUrl: TESTNET, direction: "out", to: route(networks.testnet, "dusk-to-ethereum").account }))).toEqual({
+      direction: "to",
+      chain: "Sepolia",
+    });
+  });
+
+  it("leave other transfers, calls and networks alone", () => {
+    expect(bridgeRouteTransfer(transfer({ direction: "out", to: ethPayout }), MAINNET)).toBeNull();
+    expect(bridgeRouteTransfer(transfer({ direction: "self", to: bsc }), MAINNET)).toBeNull();
+    expect(bridgeRouteTransfer({ kind: "contract_call", direction: "out", to: bsc, amount: "1" }, MAINNET)).toBeNull();
+    expect(bridgeRouteTransfer(transfer({ direction: "out", to: bsc }), TESTNET)).toBeNull();
+    expect(bridgeRouteTransfer(transfer({ direction: "out", to: bsc }), "https://node.example")).toBeNull();
   });
 });
 

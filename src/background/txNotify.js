@@ -6,7 +6,7 @@ import { networkNameFromNodeUrl } from "../shared/network.js";
 import { explorerTxUrl } from "../shared/explorer.js";
 import { chainIdForNode } from "../shared/nodeNetwork.js";
 import { getTxMeta } from "../shared/txStore.js";
-import { shortHash } from "../ui/lib/strings.js";
+import { shortAddress } from "../ui/lib/strings.js";
 import {
   getExtensionApi,
   notificationsCreate,
@@ -117,7 +117,7 @@ export async function notifyTxSubmitted({ hash, origin, title, nodeUrl } = {}) {
     const networkName = networkNameFromNodeUrl(sent.nodeUrl, sent.chainId);
 
     const msgLines = [];
-    const sh = shortHash(hash);
+    const sh = shortAddress(hash);
     if (sh) msgLines.push(`Tx: ${sh}`);
     if (networkName) msgLines.push(`Network: ${networkName}`);
 
@@ -164,7 +164,7 @@ export async function notifyTxExecuted({
     const explorerUrl = explorerTxUrl(sent.nodeUrl, hash, sent.chainId);
 
     const msgLines = [];
-    const sh = shortHash(hash);
+    const sh = shortAddress(hash);
     if (sh) msgLines.push(`Tx: ${sh}`);
     if (networkName) msgLines.push(`Network: ${networkName}`);
     if (!ok && error) msgLines.push(`Error: ${String(error).slice(0, 120)}`);

@@ -174,6 +174,10 @@ describe("settings", () => {
     const local = (await settings({ permissions: [{ origin: "http://127.0.0.1:5354", accountIndex: 0 }] })).section("Connected sites");
     expect(local.querySelectorAll(".settings-site__host").map(visibleText)).toEqual(["http://127.0.0.1:5354"]);
     expect(view.shownButtons(view.section("Reset"))).toEqual(["Reset wallet"]);
+    // One line on what it removes, and that the funds stay on Dusk.
+    expect(visibleText(view.section("Reset").querySelector(".settings-note"))).toBe(
+      "Removes this wallet, its contacts, activity and connected sites from this browser. Your funds stay on Dusk. You need the recovery phrase to use it again."
+    );
   });
 
   it("starts each switch of profile, network or wallet before asking the wallet, so a check begun before it can tell", async () => {

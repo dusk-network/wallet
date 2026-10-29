@@ -14,7 +14,19 @@
 import { TX_KIND } from "./constants.js";
 
 // What the wallet's record of a transaction adds to the chain's.
-const LOCAL_ONLY = ["toName", "origin", "asset", "payment", "ownerProfileIndex", "submittedAt", "pendingNullifiers", "reservationStatus", "bridgeTo", "registeredName"];
+const LOCAL_ONLY = [
+  "toName",
+  "origin",
+  "asset",
+  "payment",
+  "ownerProfileIndex",
+  "submittedAt",
+  "pendingNullifiers",
+  "reservationStatus",
+  "bridgeTo",
+  "registeredName",
+  "reservation",
+];
 
 const lower = (hash) => String(hash ?? "").toLowerCase();
 
@@ -63,6 +75,8 @@ export function historyRow(entry, { nodeUrl } = {}) {
     bridgeTo: entry.bridgeTo,
     // The .dusk name a registration registered, read from its call; null when it doesn't read.
     registeredName: entry.registeredName,
+    // A name's reservation, as its call made it or a registration revealed it (knownCalls.js).
+    reservation: entry.reservation,
     detailsAt: entry.detailsAt,
   };
 }
@@ -139,17 +153,44 @@ export function mergeActivity({ local = [], history = [], shielded = [], profile
     });
   }
 
-  const out = [...rows.values()].map((row) => {
-    const name = row.counterparty ? names?.get(row.counterparty) : undefined;
-    return typeof name === "string" ? { ...row, counterpartyName: name } : row;
-  });
   const time = (row) =>
     Number(row.timestamp ?? row.finalizedAt ?? row.submittedAt) ||
     (Number.isFinite(row.blockHeight) ? Number(estimateTime?.(row.blockHeight)) || 0 : 0);
+  const out = withReservedNames([...rows.values()], time).map((row) => {
+    const name = row.counterparty ? names?.get(row.counterparty) : undefined;
+    return typeof name === "string" ? { ...row, counterpartyName: name } : row;
+  });
   return out.sort(
     (a, b) =>
       time(b) - time(a) ||
       (Number(b.blockHeight) || 0) - (Number(a.blockHeight) || 0) ||
       (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0)
   );
+}
+
+// Whether `later` came after `row`: by their blocks where both have one, else
+// by their times where both have one.
+function cameAfter(later, row, time) {
+  const [a, b] = [Number(row.blockHeight), Number(later.blockHeight)];
+  if (a > 0 && b > 0) return b > a;
+  const [t, u] = [time(row), time(later)];
+  return !(t > 0 && u > 0) || u >= t;
+}
+
+/**
+ * A .dusk name's reservation with the name it was for, `reservedName`, once
+ * a registration that follows it in the same history reveals it
+ * (knownCalls.js nameReservationOf).
+ * @param {object[]} rows
+ * @param {(row: object) => number} time
+ * @returns {object[]}
+ */
+export function withReservedNames(rows, time = () => 0) {
+  const registrations = rows.filter((row) => row.fnName === "register" && row.reservation && row.registeredName);
+  if (!registrations.length) return rows;
+  return rows.map((row) => {
+    if (row.fnName !== "commit" || !row.reservation) return row;
+    const registration = registrations.find((r) => r.reservation === row.reservation && cameAfter(r, row, time));
+    return registration ? { ...row, reservedName: registration.registeredName } : row;
+  });
 }

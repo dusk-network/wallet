@@ -211,4 +211,21 @@ describe("mergeActivity", () => {
     });
     expect(rows.map((r) => r.hash.slice(0, 2))).toEqual(["dd", received().hash.slice(0, 2), "ee"]);
   });
+
+  it("names a .dusk name's reservation by the registration that follows it with the same reservation", () => {
+    const R = "1f".repeat(32);
+    const commit = { ...registered(), hash: "c1".repeat(32), blockHeight: 4_658_000, fnName: "commit", reservation: R };
+    const register = { ...registered(), registeredName: "shpongle.dusk", reservation: R };
+    const name = (history, local = []) => mergeActivity({ history, local }).find((r) => r.hash === commit.hash).reservedName;
+    expect(name([commit, register])).toBe("shpongle.dusk");
+    // Not one that came before it, another reservation's, or one whose name wasn't read.
+    expect(name([commit, { ...register, blockHeight: 4_657_000 }])).toBeUndefined();
+    expect(name([commit, { ...register, reservation: "2f".repeat(32) }])).toBeUndefined();
+    expect(name([commit, { ...register, registeredName: null }])).toBeUndefined();
+    expect(name([{ ...commit, reservation: null }, register])).toBeUndefined();
+    // The wallet's own registration, sent after it and not on chain yet.
+    const sent = { hash: "e1".repeat(32), kind: "contract_call", contractId: STORE, fnName: "register", registeredName: "shpongle.dusk", reservation: R, status: "submitted", submittedAt: commit.timestamp + 60_000 };
+    expect(name([commit], [sent])).toBe("shpongle.dusk");
+    expect(name([commit], [{ ...sent, submittedAt: commit.timestamp - 60_000 }])).toBeUndefined();
+  });
 });

@@ -159,7 +159,7 @@ describe("staking overview", () => {
     const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
     expect(subs()).toEqual([[], []]);
     await vi.waitFor(() =>
-      expect(subs()).toEqual([["About 23% a year lately, across the network. Not promised."], ["About 20% a year after Sozu's 15%"]])
+      expect(subs()).toEqual([["About 23% a year lately, across the network. Not promised."], ["About 20% a year after Sozu's 15%. Not promised."]])
     );
     // Asked once for this network, whatever is drawn again.
     actions.render();
@@ -168,6 +168,16 @@ describe("staking overview", () => {
     // Sozu's fee as Liquid staking read it, without reading Sozu again.
     expect(actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_GET_SOZU_STATUS")).toHaveLength(0);
     expect(body.textContent).not.toMatch(/\bEarn\b/);
+  });
+
+  it("works Sozu's rate out from native staking's as shown, so both wallets give the same figure", async () => {
+    // 86.15% shows as 86%: Sozu's 10% off that is 77.4%, never 77.5% from the figure before rounding.
+    const state = { route: "stake", staking: staking(), sozu: sozu() };
+    popup(state, ov(), { rewardRate: 0.8615 });
+    const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
+    await vi.waitFor(() =>
+      expect(subs()).toEqual([["About 86% a year lately, across the network. Not promised."], ["About 77% a year after Sozu's 10%. Not promised."]])
+    );
   });
 
   it("estimates with the Sozu of the node's own network: asked again once a custom node's chain ID is read, never another network's fee", async () => {
@@ -185,14 +195,14 @@ describe("staking overview", () => {
 
     // Read since: Testnet, whose Sozu is asked for, past the status held of before.
     const later = popup(state, { ...custom, chainId: 2 }, { rewardRate: 0.2, sozuStatus: async () => testnet });
-    await vi.waitFor(() => expect(rates()[1]).toEqual(["About 18% a year after Sozu's 10%"]));
+    await vi.waitFor(() => expect(rates()[1]).toEqual(["About 18% a year after Sozu's 10%. Not promised."]));
     expect(statusReads(later.actions)).toBe(1);
 
     // Mainnet's Sozu, held from before a switch, isn't Testnet's.
     const mainnet = { ...testnet, networkKey: "mainnet", fees: { ...testnet.fees, reward: { numerator: "15", denominator: "100" } } };
     const switched = { route: "stake", staking: staking(), sozu: sozu({ status: mainnet }) };
     const next = popup(switched, ov(), { rewardRate: 0.2, sozuStatus: async () => testnet });
-    await vi.waitFor(() => expect(rates()[1]).toEqual(["About 18% a year after Sozu's 10%"]));
+    await vi.waitFor(() => expect(rates()[1]).toEqual(["About 18% a year after Sozu's 10%. Not promised."]));
     expect(statusReads(next.actions)).toBe(1);
   });
 
@@ -495,9 +505,8 @@ describe("native staking", () => {
     typeInto(field("Stake amount"), "1000");
     button("Review stake").click();
     await settle();
-    expect(visibleText(body.querySelector(".review-head"))).toBe(
-      "Stake1,000 DUSKNative stakingVisible to everyone: the amount staked, your rewards and your account."
-    );
+    // What's public is said on Send only.
+    expect(visibleText(body.querySelector(".review-head"))).toBe("Stake1,000 DUSKNative staking");
     // The review's rows; the fee's own come after them.
     expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual([
       "FromProfile 1 · Public",
@@ -543,16 +552,14 @@ describe("staking with little or nothing", () => {
 describe("staking reviews", () => {
   const named = () => ov({ accounts: [ACCOUNT, OTHER] });
 
-  it("name the profile as the header does, say the stake is public, and repeat that it needs your own node", async () => {
+  it("name the profile as the header does, and repeat that it needs your own node", async () => {
     lookupPrimaryName.mockImplementation(async (account) => (account === ACCOUNT ? "alice.dusk" : null));
     const state = { route: "stake", staking: staking(owner(), { screen: "native" }) };
     popup(state, named());
     typeInto(field("Stake amount"), "1000");
     button("Review stake").click();
     await settle();
-    expect(body.querySelector(".review-visible").textContent).toBe(
-      "Visible to everyone: the amount staked, your rewards and your name alice.dusk."
-    );
+    expect(body.querySelector(".review-visible")).toBeNull();
     expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual([
       "Fromalice.dusk · Public",
       "Rewards startIn about 6 to 12 hours",
@@ -561,28 +568,33 @@ describe("staking reviews", () => {
     expect(visibleText(body)).not.toContain("Profile 1");
   });
 
-  it("name another owner, and say what an unstake makes public", async () => {
+  it("name another owner", async () => {
     const state = { route: "stake", staking: staking(owner({ relatedStakes: [related()] })) };
     popup(state, named());
     button("Unstake").click();
     await settle();
-    expect(body.querySelector(".review-visible").textContent).toBe("Visible to everyone: the amount unstaked and your account.");
+    expect(body.querySelector(".review-visible")).toBeNull();
     expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual(["ToProfile 2 · Public", "OwnerProfile 1"]);
     // No node warning to unstake.
     expect(body.querySelector(".row > .group.info")).toBeNull();
   });
 
-  it("say on Sozu's what is public, what it's worth now and how the DUSK comes back", async () => {
+  it("say on Sozu's what it's worth now and how the DUSK comes back, its contract under Custom fee", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }) };
     const app = popup(state, named());
     typeInto(field("Stake amount"), "50");
     button("Review stake").click();
     await settle();
-    expect(body.querySelector(".review-visible").textContent).toBe(
-      "Visible to everyone: the amount you stake with Sozu and your name alice.dusk."
-    );
-    expect(body.querySelectorAll(".row > .group .kv").map(visibleText)[0]).toBe("You get about16.23 stDUSK, worth about 49.875 DUSK now");
+    expect(body.querySelector(".review-visible")).toBeNull();
+    expect(body.querySelectorAll(".row > .group .kv").map(visibleText)[0]).toBe("You get about16.2357 stDUSK, worth about 49.875 DUSK now");
+    // The contract it calls, to check before Confirm: under Custom fee, as the network names it, with Copy.
+    const pool = "72".repeat(32);
+    const contract = body.querySelector("dusk-gas-editor details.gas-custom .sozu-contract");
+    expect(visibleText(contract)).toBe(`ContractSozu pool · ${pool.slice(0, 6)}…${pool.slice(-6)}`);
+    contract.querySelector("button.copy-ico").click();
+    await settle();
+    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(pool);
 
     state.route = "stake";
     state.sozu.action = "withdraw";
@@ -604,16 +616,16 @@ describe("liquid staking", () => {
     typeInto(field("Stake amount"), "100");
     expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25% · 0.25 DUSK");
     expect(body.querySelector(".stake-estimate").children.map(visibleText)).toEqual([
-      "You get about 32.47 stDUSK, worth about 99.75 DUSK now.",
+      "You get about 32.4714 stDUSK, worth about 99.75 DUSK now.",
       "stDUSK is Sozu's token for your share. Its DUSK value follows Sozu's pool, its rewards and its fees.",
     ]);
-    // Sozu's fees as read, the network fee and what a failed call costs, and the contract.
+    // Sozu's fees as read and the network fee; its contract is on Review.
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
       "Any amount, no node neededYou get stDUSK, a token for your share of Sozu's pool.Add to Assets",
       "Sozu keeps 10% of rewards0.25% on deposits · No fee to unstake",
-      "Network fee up to 0.005 DUSKYou pay only the gas used. A call that fails is charged its whole limit.",
-      `Sozu's contract${"72".repeat(3)}…${"72".repeat(3)}Copy`,
+      "Network fee up to 0.005 DUSK",
     ]);
+    expect(visibleText(body)).not.toMatch(/whole (gas )?limit|Sozu's contract/);
     expect(body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Add stDUSK to Assets")).toBeTruthy();
 
     // Mainnet's fees, as its substrate gives them.
@@ -668,10 +680,10 @@ describe("liquid staking", () => {
     typeInto(field("Unstake amount"), "5");
     expect(button("Review unstake").disabled).toBe(false);
 
-    // Synchronizing: a call can fail, and a failed one costs its whole limit.
+    // Synchronizing: a call can fail.
     status.features = { maintenance: false, synchronization: true };
     app.draw();
-    const sync = "Sozu is synchronizing its poolA stake or unstake can fail until it's done, and a failed call is charged its whole gas limit.";
+    const sync = "Sozu is synchronizing its poolA stake or unstake can fail until it's done.";
     expect(visibleText(body.querySelector(".sozu-sync"))).toBe(sync);
     button("Review unstake").click();
     await settle();
@@ -734,7 +746,7 @@ describe("liquid staking", () => {
     typeInto(field("Stake amount"), "100");
     button("Review stake").click();
     await settle();
-    expect(rows()).toEqual(["You get about32.47 stDUSK, worth about 99.75 DUSK now", "Deposit fee0.25% · 0.25 DUSK"]);
+    expect(rows()).toEqual(["You get about32.4714 stDUSK, worth about 99.75 DUSK now", "Deposit fee0.25% · 0.25 DUSK"]);
 
     // Sozu's manager raises the deposit fee to 5% meanwhile: nothing is sent, and the new figures show.
     now = { ...now, fees: { ...now.fees, deposit: { numerator: "5", denominator: "100" } } };
@@ -742,7 +754,7 @@ describe("liquid staking", () => {
     await settle();
     expect(sent()).toEqual([]);
     expect(visibleText(body.querySelector(".sozu-changed"))).toBe("Sozu's terms changedThese are the figures now. Check them, then confirm again.");
-    expect(rows()).toEqual(["You get about30.92 stDUSK, worth about 95 DUSK now", "Deposit fee5% · 5 DUSK"]);
+    expect(rows()).toEqual(["You get about30.9251 stDUSK, worth about 95 DUSK now", "Deposit fee5% · 5 DUSK"]);
 
     // Confirmed again on those terms: sent, and only the call goes.
     button("Confirm").click();
@@ -1036,18 +1048,15 @@ describe("liquid staking", () => {
     typeInto(field("Stake amount"), "100");
     button("Review stake").click();
     await settle();
-    expect(visibleText(body.querySelector(".review-head"))).toBe(
-      "Liquid staking100 DUSKWith Sozu, a third partyVisible to everyone: the amount you stake with Sozu and your account."
-    );
+    expect(visibleText(body.querySelector(".review-head"))).toBe("Liquid staking100 DUSKWith Sozu, a third party");
     expect(body.querySelectorAll(".row > .group .kv").map(visibleText)).toEqual([
-      "You get about32.47 stDUSK, worth about 99.75 DUSK now",
+      "You get about32.4714 stDUSK, worth about 99.75 DUSK now",
       "Deposit fee0.25% · 0.25 DUSK",
       "FromProfile 1 · Public",
     ]);
-    // What a failed call costs; Sozu is named a third party above.
-    expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)).toEqual([
-      "You pay only the gas used. A call that fails is charged its whole limit.",
-    ]);
+    // Nothing on what a failed call costs; Sozu is named a third party above.
+    expect(body.querySelectorAll(".row > .stake-cap")).toEqual([]);
+    expect(visibleText(body)).not.toMatch(/whole (gas )?limit/);
     button("Confirm").click();
     await settle();
     const sentTx = app.actions.send.mock.calls.map(([m]) => m).find((m) => m.type === "DUSK_UI_SEND_TX");
@@ -1086,7 +1095,7 @@ describe("liquid staking", () => {
     }
   });
 
-  it("hides what Sozu holds with Hide balances, but not what a typed amount gets or the fee", () => {
+  it("hides what Sozu holds with Hide balances, and the deposit fee in DUSK, but not what a typed amount gets or the network fee", () => {
     const state = {
       route: "stake",
       staking: staking(owner(), { screen: "liquid" }),
@@ -1099,7 +1108,8 @@ describe("liquid staking", () => {
     ]);
     expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available •••• DUSK from your public balance");
     typeInto(field("Stake amount"), "100");
-    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.47 stDUSK, worth about 99.75 DUSK now.");
+    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.4714 stDUSK, worth about 99.75 DUSK now.");
+    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25% · •••• DUSK");
     expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.005 DUSK");
   });
 });

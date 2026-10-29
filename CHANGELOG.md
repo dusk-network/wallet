@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added a Bridge filter to Activity, which now holds bridge transfers instead of Sent and Received.
+- Said when a deposit to DuskEVM arrived, and added View in DuskEVM explorer to its details.
 - Said Arrived on a deposit to DuskEVM once it's there, and linked its transaction on DuskEVM's explorer.
 - Offered alice.dusk for a recipient typed as alice or alice.dusk.
 - Linked Dusk's Terms of use and Privacy policy in Settings, under About.
@@ -55,6 +57,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Named DUSK bridged to and from BNB Smart Chain and Ethereum in Activity by their routes, To BNB Smart Chain and From Ethereum, under Bridge, with the bridge's account it went through.
+- Named a `.dusk` name's reservation in Activity by the name its registration reveals, else Name reservation (step 1 of 2).
+- Said on Send that a pasted 0x address is an EVM address, not a Dusk account, and kept Review off.
+- Called a failed shield Shield attempt (failed) in Activity, and one that went through Shield, not Call convert.
+- Named Dusk Domains' contracts in Technical details, and every named contract in approvals, as the explorer does.
+- Said under Reset what it removes, and that your funds stay on Dusk.
+- Hid Sozu's deposit fee in DUSK while balances are hidden, on the stake form and its Review.
+- Worked out Sozu's yearly estimate from native staking's figure as shown, as the web wallet does, and added Not promised.
+- Moved Sozu's contract from the stake form to its Review, under Custom fee.
+- Dropped the note that a failed call is charged its whole gas limit.
+- Said what's visible to everyone only on sends, not on staking Reviews or the bridge, allowance and other contract approvals.
+- Shortened EVM addresses and transactions to 0x and four characters at each end, addresses with their checksum, and Dusk IDs to six at each end in approvals and notifications too.
+- Renamed Exact fee to Fee paid under Technical details, and Function to Method in approvals.
+- Showed stDUSK estimates to 4 decimals.
 - Said only that native staking needs your own Dusk node, with Run a node to Dusk's docs on running one.
 - Wrote dates and times as every Dusk app does: in English, on the language's clock, as "Mon 26 Oct 2026, 2:32 PM CET", in the export too.
 - Wrote Dusk contract IDs without 0x, and an ellipsis as one character.
@@ -72,8 +88,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Moved a contract call's contract from under its title to Technical details, with Copy.
 - Hid a failed row's fee in Activity while balances are hidden.
 - Said that unstaking from Sozu returns the DUSK in the same transaction, with no fee and no waiting.
-- Gave stakes with Sozu a 5M gas limit and unstakes 10M, at the network's price, never under 2.5M and 4M, and said a failed call is charged its whole limit.
-- Showed a deposit to DuskEVM as To its DuskEVM address in Activity and its details, with Copy, and listed bridge transfers under Sent and Received.
+- Gave stakes with Sozu a 5M gas limit and unstakes 10M, at the network's price, never under 2.5M and 4M.
+- Showed a deposit to DuskEVM as To its DuskEVM address in Activity and its details, with Copy.
 - Put the test network strip across the top of the full view, and kept it and the sidebar in place as the page scrolls.
 - Asked to unlock before showing Contacts.
 - Set section heads and balance labels in small capitals, the heads between grey brackets.
@@ -84,7 +100,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Warned on a contact's page when its saved `.dusk` name has expired, isn't registered or has no address any more.
 - Named whom a token approval lets spend in Activity, showed an allowance of 0 as a revoke, and listed approvals in the spender's contact Activity.
 - Named the eye button Show balances while balances are hidden.
-- Moved what a site's request makes visible to everyone up, under the amount, in every approval window.
+- Moved what a site's payment makes visible to everyone up, under the amount, in its approval window.
 - Set every extension page's language to English.
 - Showed the time zone with full dates and times in a transaction's details, the Sent screen and approvals.
 - Moved Delete all contacts to Settings' Advanced, asking first, and showed each contact by its first letter.
@@ -93,7 +109,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed a transaction's exact fee under Technical details.
 - Said plainly that staking needs some public DUSK for the network fee, without an error before anything is typed.
 - Kept Max on Staking to 4 decimals, and left the fee to unstake later.
-- Said on both staking Reviews that a stake is public, named the profile by its `.dusk` name, and repeated before Confirm that it needs your own Dusk node.
+- Named the profile on both staking Reviews by its `.dusk` name, and repeated before Confirm that it needs your own Dusk node.
 - Showed on Sozu's Review what the stDUSK is worth now, and said why a contract call's fee cap is higher.
 - Led Activity and a transaction's details with a saved contact's own name, its `.dusk` name beside it.
 - Named Dusk Domains calls in Activity by what they did, such as "Registered a .dusk name", and Sozu's as "Staked with Sozu".
@@ -119,7 +135,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Stopped offering Save to Contacts for your own account or address.
 - Restyled Receive, Contacts and Settings, and showed what a `.dusk` name reaches under it on Receive.
 - Restyled the token and NFT screens, onboarding and Unlock, and kept the full view's pages to one readable column.
-- Shortened every address, contract ID and transaction ID the same way, to its first and last six characters.
+- Shortened every Dusk address, contract ID and transaction ID the same way, to its first and last six characters.
 - Named a profile without a `.dusk` name by its label in the header, with its account in the tooltip and the profile switcher.
 - Named profiles by their verified `.dusk` names in Settings and its profile pickers.
 - Offered auto-lock after 5 or 15 minutes, 15 by default, or Off; an open popup nobody uses locks too.
@@ -153,6 +169,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept a contract's "·" with its short ID and Copy when its row wraps.
 - Refused a stake with Sozu too small to get any stDUSK, and said the minimum.
 - Kept Confirm off on Send's Review when the bridge's 1 DUSK fee takes the whole amount.
 - Underlined links in a row's text, such as Run a node.

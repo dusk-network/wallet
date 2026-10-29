@@ -3,10 +3,13 @@
 // Deposits to DuskEVM call the bridge (`depositETHToWithValue`); withdrawals
 // back are proved and finalized at the portal, which pays the DUSK out. A
 // network without DuskEVM (Mainnet, for now) has none. The bridge's accounts
-// for DUSK leaving Dusk are the network's service routes (bridgeCalls.js).
+// for DUSK leaving Dusk are the network's service routes (bridgeCalls.js),
+// and DUSK coming in from another chain is paid from its migration routes'
+// payout accounts.
 
-import { networks } from "@dusk-network/networks";
+import { networks, routes } from "@dusk-network/networks";
 
+import { TX_KIND } from "./constants.js";
 import { networkForNode } from "./nodeNetwork.js";
 
 const contractsOf = (net) => {
@@ -63,4 +66,24 @@ export function bridgeTransfer(tx, nodeUrl = tx?.nodeUrl) {
   if (tx?.direction === "in") return "from";
   const moved = [tx?.amount, tx?.deposit].some((v) => /^\d+$/.test(String(v ?? "")) && BigInt(String(v)) > 0n);
   return moved ? "to" : "call";
+}
+
+/**
+ * A transfer through one of the network's bridge routes to or from another
+ * chain: "to" one when it paid a service route's account, "from" one when a
+ * migration route's payout account paid it, with the chain as the route names
+ * it ("BNB Smart Chain", "Ethereum"); null for any other transaction.
+ * @param {object} tx - an Activity row (activityMerge.js)
+ * @param {string} [nodeUrl]
+ * @returns {{ direction: "to"|"from", chain: string } | null}
+ */
+export function bridgeRouteTransfer(tx, nodeUrl = tx?.nodeUrl) {
+  const net = networkForNode(String(nodeUrl ?? ""));
+  if (!net || String(tx?.kind ?? "").toLowerCase() !== TX_KIND.TRANSFER || tx?.direction === "self") return null;
+  const from = tx?.direction === "in";
+  const account = String((from ? tx?.from : tx?.to) ?? "").trim();
+  const route = account
+    ? routes(net).find((r) => (from ? r.kind === "migration" && r.payoutAccount === account : r.kind === "service" && r.account === account))
+    : null;
+  return route ? { direction: from ? "from" : "to", chain: route.chain.name } : null;
 }

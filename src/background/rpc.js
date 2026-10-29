@@ -20,7 +20,7 @@ import {
 } from "../shared/securityPolicy.js";
 import { messageBytes, sha256Hex, toBytes } from "../shared/bytes.js";
 import { bridgeDepositRecipient } from "../shared/bridgeCalls.js";
-import { registeredNameOf } from "../shared/knownCalls.js";
+import { nameReservationOf, registeredNameOf } from "../shared/knownCalls.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import {
   hashTypedDataHex,
@@ -757,12 +757,16 @@ export async function handleRpc(origin, request) {
           await putTxMeta(
             hash,
             submittedTxMeta(finalParams, { origin, nodeUrl, profileIndex: idx, nullifiers: result?.nullifiers }, {
-              // Where a deposit to DuskEVM pays, and the .dusk name a
-              // registration registers, for Activity: the chain keeps both in
-              // the call's bytes.
+              // Where a deposit to DuskEVM pays, the .dusk name a registration
+              // registers, and a name's reservation, for Activity: the chain
+              // keeps them in the call's bytes.
               bridgeTo: kind === TX_KIND.CONTRACT_CALL ? bridgeDepositRecipient({ ...finalParams, nodeUrl }) : undefined,
               registeredName:
                 kind === TX_KIND.CONTRACT_CALL ? registeredNameOf({ ...finalParams, nodeUrl, args: finalParams?.fnArgs }) || undefined : undefined,
+              reservation:
+                kind === TX_KIND.CONTRACT_CALL
+                  ? nameReservationOf({ ...finalParams, nodeUrl, args: finalParams?.fnArgs, account: executionContext.account }) || undefined
+                  : undefined,
             }),
             { epoch: txEpoch }
           );

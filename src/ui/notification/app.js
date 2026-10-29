@@ -15,12 +15,14 @@ import { chainIdForNode, noteChainId } from "../../shared/nodeNetwork.js";
 import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
+import { contractLabel } from "../../shared/knownCalls.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
 import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
-import { contractIdText, shortAddress } from "../lib/strings.js";
+import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
+import { contractValueEl } from "../components/ContractValue.js";
 import "../components/GasEditor.js";
 import {
   amountParts,
@@ -330,7 +332,7 @@ export async function renderNotification() {
   const payerLine = (rail) => {
     const name = nameOf(activeAccount);
     return h("span", {}, [
-      name ? h("span", { text: name, title: activeAccount }) : shortMono(activeAccount, 6, 6),
+      name ? h("span", { text: name, title: activeAccount }) : shortMono(activeAccount),
       h("span", { class: "kv-muted", text: ` · ${rail}` }),
     ]);
   };
@@ -402,21 +404,22 @@ export async function renderNotification() {
       r.tag,
     ]);
   };
-  // An address without a name: "to 0x96BA…893e on DuskEVM".
-  const plainTo = (value, network, { head = 6, tail = 4, prefix = "to " } = {}) =>
+  // An address without a name, as every Dusk app shortens it: "to
+  // 0x96BA…893e on DuskEVM", or a Dusk contract's ID 6…6.
+  const plainTo = (value, network, { evm = true, prefix = "to " } = {}) =>
     h("span", { class: "ap-recipient" }, [
       h("span", { class: "ap-recipient__line" }, [
         h("span", { class: "ap-recipient__to", text: prefix }),
-        shortMono(value, head, tail),
+        shortMono(value, evm ? shortEvmAddress(value) : undefined),
         network ? h("span", { class: "ap-recipient__to", text: ` ${network}` }) : null,
       ]),
     ]);
   // A summary's `to` (summary.js) as its head's line: a Dusk account by its
-  // name, any other address as it is, a contract's ID 6…6.
+  // name, any other address as it is.
   const headTo = (to) => {
     if (!to?.address) return null;
     if (to.network === "dusk") return toLine(to.address, { network: to.on ?? "", prefix: to.prefix });
-    return plainTo(to.address, to.on, { ...(to.network === "contract" ? { tail: 6 } : {}), prefix: to.prefix });
+    return plainTo(to.address, to.on, { evm: to.network !== "contract", prefix: to.prefix });
   };
 
   const site = siteChip(origin);
@@ -1119,7 +1122,7 @@ export async function renderNotification() {
     const callRows = ({ from = false } = {}) =>
       group([
         from ? kv("From", payerLine(rail)) : null,
-        kv("Contract", shortMono(contractShown)),
+        kv("Contract", contractValueEl(contractLabel(contractShown, nodeUrl), shortMono(contractShown))),
         safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${formatDuskExact(amountLux)} DUSK`) : null,
         safeBigInt(amountLux, 0n) > 0n && amountTo ? kv("Amount to", h("code", { class: "ap-address", text: amountTo }), { stack: true }) : null,
         safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${formatDuskExact(depositLux)} DUSK`) : null,
@@ -1132,7 +1135,7 @@ export async function renderNotification() {
           [
             ...networkRows(),
             kv("Contract ID", mono(contractShown), { stack: true }),
-            kv("Function", mono(fnName || "(none)")),
+            kv("Method", mono(fnName || "(none)")),
             kv("Call data", mono(callData), { stack: true }),
           ],
           { className: "group--inset" }
@@ -1140,7 +1143,8 @@ export async function renderNotification() {
         details("Raw call data", [h("code", { class: "ap-raw", text: argsHex || String(params?.fnArgs ?? "") })]),
         siteDetails(display),
       ]);
-    const visible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
+    // What everyone sees of a send, as on Send's Review; other calls have no such line.
+    const sendVisible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
 
     // A known DuskEVM bridge call: what it does, read from its arguments,
     // above the call and its bytes.
@@ -1194,7 +1198,6 @@ export async function renderNotification() {
         [
           site,
           head,
-          visible(bridge.kind === "deposit" ? "the amount, the DuskEVM recipient" : "this call, the withdrawal"),
           decoded,
           gasEditor,
           callRows(),
@@ -1295,13 +1298,13 @@ export async function renderNotification() {
             to: (isTransfer || isTransferFrom) && toStr ? toLine(toStr) : null,
             sub: `${name} · DRC20`,
           }),
-          visible("this call, the tokens it moves"),
+          isApprove ? null : sendVisible("this call, the tokens it moves"),
           group([
             kv("From", payerLine(rail)),
             isTransfer || isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
             isApprove ? kv("Spender", h("code", { class: "ap-address", text: spenderStr || "(missing)" }), { stack: true }) : null,
             isTransferFrom ? kv("Owner", h("code", { class: "ap-address", text: ownerStr || "(missing)" }), { stack: true }) : null,
-            kv("Token", h("span", {}, [h("span", { text: `${name} (${sym}) ` }), shortMono(contractShown, 6, 6)])),
+            kv("Token", h("span", {}, [h("span", { text: `${name} (${sym}) ` }), shortMono(contractShown)])),
             valueUnitsStr ? kv("Units", mono(valueUnitsStr)) : null,
           ]),
           isMax
@@ -1346,7 +1349,7 @@ export async function renderNotification() {
             to: isTransferFrom && toStr ? toLine(toStr) : null,
             sub: `${name} (${sym})${tokenIdStr ? ` · #${tokenIdStr}` : ""}`,
           }),
-          visible("this call"),
+          isTransferFrom ? sendVisible("this call") : null,
           group([
             kv("From", payerLine(rail)),
             tokenIdStr ? kv("Token ID", mono(tokenIdStr)) : null,
@@ -1355,7 +1358,7 @@ export async function renderNotification() {
             isSetApprovalForAll ? kv("Approved for all", approvedBool ? "Yes" : "No") : null,
             isTransferFrom ? kv("Owner", h("code", { class: "ap-address", text: fromStr || "(missing)" }), { stack: true }) : null,
             isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
-            kv("Collection", shortMono(contractShown, 6, 6)),
+            kv("Collection", shortMono(contractShown)),
           ]),
           isSetApprovalForAll && approvedBool
             ? warning("High risk", "This lets the operator move all of your NFTs in this collection.")
@@ -1390,7 +1393,6 @@ export async function renderNotification() {
           title: summary.title,
           amount: sendsLux > 0n ? { value: formatDuskExact(sendsLux), unit: "DUSK" } : null,
         }),
-        visible("this call, the DUSK it sends"),
         callRows({ from: true }),
         unchecked,
         gasEditor,

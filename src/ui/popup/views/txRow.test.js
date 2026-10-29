@@ -2,9 +2,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
 
+import { mergeActivity } from "../../../shared/activityMerge.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import releases from "../../../shared/dusk-domains-releases.json";
-import { amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
+import { ACTIVITY_FILTERS, amountText, blockTimes, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
 
 process.env.TZ = "UTC";
 // Times follow the browser's language: British English, with its 24-hour clock.
@@ -158,7 +159,9 @@ describe("what a row says", () => {
       "−10 DUSK",
       "sent",
     ]);
-    expect(call("commit").name).toBe("Reserved a .dusk name");
+    // A reservation by the name its registration revealed, once one follows; until then, step 1 of 2.
+    expect(call("commit").name).toBe("Name reservation (step 1 of 2)");
+    expect(call("commit", { reservedName: "alice.dusk" }).name).toBe("Reserved alice.dusk");
     // A registration by its name, once read from its call.
     expect(call("register", { registeredName: "alice.dusk" }).name).toBe("Registered alice.dusk");
     // On another network's node, or a custom one, it's any contract.
@@ -174,14 +177,15 @@ describe("what a row says", () => {
     expect([hubCall.lead, hubCall.name, subText(hubCall, "14:32")]).toEqual(["Sozu hub", "Call contract", "Sozu hub · 14:32"]);
     const bsc = routes(networks.mainnet).find((route) => route.kind === "service").account;
     const paid = describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc, amount: "2000000000" }, { nodeUrl: MAINNET });
-    expect([paid.lead, paid.name, paid.address, paid.isAddress]).toEqual(["Sent to", "BSC bridge", bsc, false]);
+    // The bridge's account, which the payment went through, as the file names it.
+    expect([paid.lead, paid.name, paid.via]).toEqual(["Bridge to BNB Smart Chain", "To BNB Smart Chain", { name: "BSC bridge", address: bsc, isAddress: false }]);
     // A contact's own name still comes first; another network's file names nothing here.
-    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: MAINNET, contactName: () => "Bridge" }).name).toBe("Bridge");
+    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: MAINNET, contactName: () => "Bridge" }).via.name).toBe("Bridge");
     expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bsc }, { nodeUrl: TESTNET }).isAddress).toBe(true);
     expect(describeTx({ kind: TX_KIND.CONTRACT_CALL, contractId: hub, fnName: "contract" }, { nodeUrl: TESTNET }).lead).toBe("");
   });
 
-  it("puts each under one filter: DUSK bridged to DuskEVM under Sent, back from it under Received, a proof under All", () => {
+  it("puts each under one filter: DUSK bridged to DuskEVM, back from it and a proof under Bridge, not Sent or Received", () => {
     const BRIDGE = "2257e5f8ff49cf7c9704a14ca35acbf48eb7ade11a079d98d5cd5655eea1b31d";
     const PORTAL = "14eeb3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9";
     const kinds = [
@@ -190,14 +194,84 @@ describe("what a row says", () => {
       [{ kind: TX_KIND.STAKE }, "staking"],
       [{ kind: TX_KIND.WITHDRAW_REWARD }, "staking"],
       [{ kind: TX_KIND.SHIELD }, "all"],
-      [{ kind: TX_KIND.CONTRACT_CALL, contractId: BRIDGE, fnName: "depositETHToWithValue", deposit: "500000000" }, "sent"],
-      [{ kind: TX_KIND.CONTRACT_CALL, direction: "in", contractId: PORTAL, amount: "500000000" }, "received"],
-      [{ kind: TX_KIND.CONTRACT_CALL, contractId: PORTAL, fnName: "proveWithdrawalTransaction" }, "all"],
+      [{ kind: TX_KIND.CONTRACT_CALL, contractId: BRIDGE, fnName: "depositETHToWithValue", deposit: "500000000" }, "bridge"],
+      [{ kind: TX_KIND.CONTRACT_CALL, direction: "in", contractId: PORTAL, amount: "500000000" }, "bridge"],
+      [{ kind: TX_KIND.CONTRACT_CALL, contractId: PORTAL, fnName: "proveWithdrawalTransaction" }, "bridge"],
     ];
+    expect(ACTIVITY_FILTERS.map((f) => f.label)).toEqual(["All", "Sent", "Received", "Staking", "Bridge"]);
     for (const [tx, only] of kinds) {
       const d = describeTx({ nodeUrl: TESTNET, ...tx });
-      expect(["all", "sent", "received", "staking"].filter((f) => inFilter(d, f))).toEqual(only === "all" ? ["all"] : ["all", only]);
+      expect(ACTIVITY_FILTERS.map((f) => f.id).filter((f) => inFilter(d, f))).toEqual(only === "all" ? ["all"] : ["all", only]);
     }
+  });
+
+  it("puts DUSK bridged to and from BNB Smart Chain and Ethereum under Bridge, named by their routes, not under Sent or Received", () => {
+    const MAINNET = "https://nodes.dusk.network";
+    const [bscOut, bscIn, ethIn] = [
+      routes(networks.mainnet).find((route) => route.kind === "service").account,
+      routes(networks.mainnet).find((route) => route.id === "bsc-to-dusk").payoutAccount,
+      routes(networks.mainnet).find((route) => route.id === "ethereum-to-dusk").payoutAccount,
+    ];
+    const evm = "0xab84edffd745af9420ac74fec73121fbee9fc86f";
+    const filters = (d) => ACTIVITY_FILTERS.map((f) => f.id).filter((f) => inFilter(d, f));
+    // To BNB Smart Chain: the bridge's account, the address there in the memo.
+    const out = describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bscOut, memo: evm, amount: "2000000000", status: "executed" }, { nodeUrl: MAINNET });
+    expect([out.lead, out.name, subText(out, "17:22"), amountText(out.amount, false), out.recipient, out.evmChain, out.via.name, filters(out)]).toEqual([
+      "Bridge to BNB Smart Chain",
+      "To BNB Smart Chain",
+      "Bridge · 17:22",
+      "−2 DUSK",
+      evm,
+      "BNB Smart Chain",
+      "BSC bridge",
+      ["all", "bridge"],
+    ]);
+    // From BNB Smart Chain and from Ethereum: their routes' payout accounts.
+    for (const [from, chain, payer] of [
+      [bscIn, "BNB Smart Chain", "BSC bridge"],
+      [ethIn, "Ethereum", "Ethereum migration payouts"],
+    ]) {
+      const back = describeTx({ kind: TX_KIND.TRANSFER, direction: "in", from, amount: "5000000000", status: "executed" }, { nodeUrl: MAINNET });
+      expect([back.lead, back.name, subText(back, "17:19"), amountText(back.amount, false), back.via.name, filters(back)]).toEqual([
+        "Bridge",
+        `From ${chain}`,
+        "Bridge · 17:19",
+        "+5 DUSK",
+        payer,
+        ["all", "bridge"],
+      ]);
+    }
+    // Testnet's route to Sepolia, by the chain it names; any other account is a send or a receipt.
+    const sepolia = routes(networks.testnet).find((route) => route.kind === "service").account;
+    expect(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: sepolia, memo: evm, amount: "1" }, { nodeUrl: TESTNET }).lead).toBe("Bridge to Sepolia");
+    expect(filters(describeTx({ kind: TX_KIND.TRANSFER, direction: "out", to: bscIn, amount: "1" }, { nodeUrl: TESTNET }))).toEqual(["all", "sent"]);
+    expect(filters(describeTx({ kind: TX_KIND.TRANSFER, direction: "in", from: bscOut, amount: "1" }, { nodeUrl: TESTNET }))).toEqual(["all", "received"]);
+  });
+
+  it("calls a shield through the transfer contract a shield, and one that failed an attempt", () => {
+    const TRANSFER = "0100000000000000000000000000000000000000000000000000000000000000";
+    const convert = { kind: TX_KIND.CONTRACT_CALL, direction: "out", contractId: TRANSFER, fnName: "convert", source: "archive", nodeUrl: TESTNET };
+    const failed = describeTx({ ...convert, status: "failed", feePaid: "50000000" });
+    expect([failed.lead, failed.name, failed.icon, subText(failed, "19:30")]).toEqual([
+      "",
+      "Shield attempt (failed)",
+      "shield",
+      "Failed · nothing sent · fee 0.05 DUSK paid",
+    ]);
+    const done = describeTx({ ...convert, status: "executed", deposit: "20000000000" });
+    expect([done.name, subText(done, "19:30"), amountText(done.amount, false)]).toEqual(["Shield", "Public to shielded · 19:30", "20 DUSK"]);
+    // Another contract's convert is any call.
+    expect(describeTx({ ...convert, contractId: "ab".repeat(32), status: "failed" }).name).toBe("Call convert");
+
+    // This wallet's own shield keeps its kind: sent from here, or merged with the chain's record of it.
+    const own = { hash: "f0".repeat(32), kind: TX_KIND.SHIELD, privacy: "public", amount: "20000000000", status: "submitted", submittedAt: 1, nodeUrl: TESTNET };
+    expect(describeTx({ ...own, status: "failed", feePaid: "50000000" }).name).toBe("Shield attempt (failed)");
+    expect(describeTx({ ...own, status: "executed" }).name).toBe("Shield");
+    const chain = { hash: own.hash, blockHeight: 4_600_000, direction: "out", kind: TX_KIND.TRANSFER, contractId: TRANSFER, fnName: "convert", value: 0n, success: false, error: "Panic", fee: 50_000_000n, detailsAt: 1 };
+    const [merged] = mergeActivity({ local: [own], history: [chain], nodeUrl: TESTNET });
+    expect([merged.kind, merged.status, describeTx(merged).name]).toEqual([TX_KIND.SHIELD, "failed", "Shield attempt (failed)"]);
+    // An unshield that failed keeps its name.
+    expect(describeTx({ kind: TX_KIND.UNSHIELD, status: "failed" }).name).toBe("Unshield");
   });
 
   it("says where a deposit to DuskEVM went: To its DuskEVM address", () => {

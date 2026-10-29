@@ -1656,6 +1656,40 @@ describe("background rpc handler", () => {
     expect(putTxMeta.mock.lastCall[1].registeredName).toBeUndefined();
   });
 
+  it("dusk_sendTransaction keeps a .dusk name's reservation on the records of its reservation and its registration", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    const { calls, reservations } = (await import("../shared/fixtures/dusk-domains-registrations.json")).default;
+    const [account] = Object.keys((await import("../shared/fixtures/activity-testnet.json")).default.accounts);
+    const reserve = reservations.find((c) => c.name === "shpongle.dusk");
+    const register = calls.find((c) => c.name === "shpongle.dusk");
+
+    // The account that reserved shpongle.dusk on Testnet, then registered it.
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1, profileId: `account:0:${account}` };
+    vaultValue = { v: 1 };
+    engineStatus = { isUnlocked: true, accounts: [account], addresses: ["addr0"] };
+
+    const send = (c, over = {}) =>
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: { kind: "contract_call", privacy: "public", contractId: `0x${c.contractId}`, fnName: c.fnName, fnArgs: c.data, amount: "0", ...over },
+      });
+    await send(reserve);
+    expect(putTxMeta).toHaveBeenLastCalledWith("0xhash", expect.objectContaining({ reservation: reserve.data }), { epoch: 7 });
+    await send(register, { deposit: "10000000000" });
+    expect(putTxMeta).toHaveBeenLastCalledWith(
+      "0xhash",
+      expect.objectContaining({ registeredName: "shpongle.dusk", reservation: reserve.data }),
+      { epoch: 7 }
+    );
+
+    // From another account, the registration doesn't check out: no reservation kept.
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+    await send(register, { deposit: "10000000000" });
+    expect(putTxMeta.mock.lastCall[1].reservation).toBeUndefined();
+  });
+
   it.each([
     ["non-object params", null],
     ["unsupported type", { type: "ERC20", options: { contractId: `0x${"02".repeat(32)}` } }],

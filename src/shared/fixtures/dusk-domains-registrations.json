@@ -1,5 +1,5 @@
 {
-  "_about": "Registrations of .dusk names on Testnet, as the archive gives their calls (tx(hash) { tx { callData { contractId fnName data } } }), with the names they registered: the web wallet's three, then the one in activity-testnet.json.",
+  "_about": "Registrations of .dusk names on Testnet, as the archive gives their calls (tx(hash) { tx { callData { contractId fnName data } } }), with the names they registered: the web wallet's three, then the one in activity-testnet.json; and that one's reservation, the commit before it.",
   "calls": [
     {
       "name": "alice.dusk",
@@ -28,6 +28,15 @@
       "contractId": "4e2de1ed4f1fd53de83f4809a75367301c7645a546030fa199aff804e6854199",
       "fnName": "register",
       "data": "7368706f6e676c656d6f6f6e6c696768745f61646472657373b7c56b7b11f78c900bbe08c9dc5ff7d43df788259178813e473bb4e1f307a237ffb6ebdfa9365da31a95616ba5b0792b0df9666aab9f39450fee471ba77e8e53feebf6292144399d0721b38c1f8524292a9bc67fc881b443684ecd448086613b000000000000001100000088ffffff91ffffff600000002c01000000000000976d4478b8677979318a47a6605d67f56b6fc54ce5969da3b140900d6d400f8d0800000048ffffff0a1f528552a5eee2e3d6797d53f55b828f0cd7734506c1fc3df20e739bdf29a59884dea5b63bf3a240942f7c3db7f829edf2fc52b6ce082667f81672402c0b726e4e2de1ed4f1fd53de83f4809a75367301c7645a546030fa199aff804e68541990000000000000000e87648170000000100000000000000010000000000000010354700000000000000000000000000000000000000000028ffffff0100000001b7c56b7b11f78c900bbe08c9dc5ff7d43df788259178813e473bb4e1f307a237ffb6ebdfa9365da31a95616ba5b0792b0df9666aab9f39450fee471ba77e8e53feebf6292144399d0721b38c1f8524292a9bc67fc881b443684ecd448086613b00000000000000"
+    }
+  ],
+  "reservations": [
+    {
+      "name": "shpongle.dusk",
+      "hash": "5b092d248cc4ab029e80463d06bbdf8ac51aa19398bd173e940100ddf1bca849",
+      "contractId": "4e2de1ed4f1fd53de83f4809a75367301c7645a546030fa199aff804e6854199",
+      "fnName": "commit",
+      "data": "1f528552a5eee2e3d6797d53f55b828f0cd7734506c1fc3df20e739bdf29a598"
     }
   ]
 }

@@ -3,24 +3,27 @@ import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { arrivalUrl } from "../../../shared/bridgeArrival.js";
 import { networkNameFromNodeUrl } from "../../../shared/network.js";
-import { labelForNode } from "../../../shared/nodeNetwork.js";
+import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
-import { contractIdText, shortAddress, siteName } from "../../lib/strings.js";
+import { contractIdText, shortAddress, shortEvmHash, siteName } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
+import { contractValueEl, copyContractButton } from "../../components/ContractValue.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
-import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, shortEvmAddress, txIconSvg, txTime } from "./txRow.js";
+import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, txIconSvg, txTime } from "./txRow.js";
 import { reasonText } from "./sent.js";
 import { activityRows, loadActivityDetail } from "../activity.js";
 
 // A transaction's details: a centred summary (who, how much, its status),
 // then its date, memo, fee, the profile it left or reached, and its ID, which
-// opens Dusk's explorer. Block, gas, finality and a call's contract sit under
-// Technical details. Hide balances hides the amount; the fee stays.
+// opens Dusk's explorer; a deposit to DuskEVM that arrived adds when, and its
+// transaction there. Block, gas, finality and a call's contract sit under
+// Technical details, labelled as in every Dusk app. Hide balances hides the
+// amount; the fee stays.
 
 const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 
@@ -88,7 +91,7 @@ function technicalRows(tx, ov, nodeUrl, showToast) {
     used || limit ? kv("Gas used", used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
     // The fee to the last LUX: the summary rounds it to 4 decimals.
-    safeBigInt(tx?.feePaid, 0n) > 0n ? kv("Exact fee", `${formatDuskExact(tx.feePaid)} DUSK`) : null,
+    safeBigInt(tx?.feePaid, 0n) > 0n ? kv("Fee paid", `${formatDuskExact(tx.feePaid)} DUSK`) : null,
     finalKnown && ["executed", "failed"].includes(String(tx?.status ?? "")) ? kv("Finality", "Final") : null,
     kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", contractValue(String(tx.contractId), nodeUrl || ov?.nodeUrl, showToast)) : null,
     tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,
@@ -104,27 +107,11 @@ function technicalRows(tx, ov, nodeUrl, showToast) {
   ].filter(Boolean);
 }
 
-// A call's contract: what the network's file calls it, where it does, then
+// A call's contract: what the network calls it, as the explorer does, then
 // its short ID and Copy.
 function contractValue(raw, nodeUrl, showToast) {
-  const label = labelForNode(String(nodeUrl ?? ""), raw);
   const id = contractIdText(raw);
-  return [label ? `${label} · ` : null, mono(id, contractIdText(raw, { short: true })), copyContract(id, showToast)];
-}
-
-// Copy beside a call's contract, as an icon.
-function copyContract(id, showToast) {
-  return h("button", {
-    class: "copy-ico",
-    type: "button",
-    title: "Copy contract ID",
-    "aria-label": "Copy contract ID",
-    html: iconSvg("copy"),
-    onclick: async () => {
-      const ok = await copyToClipboard(id);
-      showToast?.(ok ? "Contract ID copied" : "Couldn't copy the contract ID");
-    },
-  });
+  return contractValueEl(contractLabel(raw, nodeUrl), mono(id, contractIdText(raw, { short: true })), copyContractButton(id, showToast));
 }
 
 function explorerButton(url, actions, text = "View in Dusk explorer") {
@@ -187,19 +174,22 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   // Who: the other side's name with its short address and Copy, a saved
   // contact's .dusk name before it; an address without a name shows in full
-  // mono, Copy beside it; a deposit to DuskEVM is "To" the DuskEVM address it
-  // paid, Copy beside it. A call's contract is under Technical details.
-  const other = !desc.evm && desc.address && !desc.isAddress ? desc.address : "";
+  // mono, Copy beside it; a deposit to DuskEVM is "To" the address it paid
+  // there, Copy beside it; a transfer through a bridge's account shows that
+  // account under it. A call's contract is under Technical details.
+  const via = desc.via?.address ? desc.via : null;
+  const other = via ? via.address : !desc.evm && desc.address && !desc.isAddress ? desc.address : "";
+  const otherAlias = via ? (via.isAddress ? "" : via.name) : desc.alias;
   const hero = h("div", { class: "tx-hero" }, [
     h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true", html: txIconSvg(desc.icon) }),
     desc.lead ? h("div", { class: "tx-hero-lead", text: desc.lead }) : null,
     h("div", { class: "tx-hero-name-line" }, [
       h("h2", { class: desc.isAddress ? "tx-hero-name mono" : "tx-hero-name", title: desc.isAddress || desc.evm ? desc.address : undefined }, nameParts(desc)),
-      desc.isAddress || desc.evm ? copyButton(desc.address, { label: desc.evm ? "Copy DuskEVM address" : "Copy address", showToast }) : null,
+      desc.isAddress || desc.evm ? copyButton(desc.address, { label: desc.evm ? `Copy ${desc.evmChain} address` : "Copy address", showToast }) : null,
     ].filter(Boolean)),
     other
       ? h("div", { class: "tx-hero-addr" }, [
-          desc.alias ? h("span", { class: "tx-hero-alias", text: `${desc.alias} · ` }) : null,
+          otherAlias ? h("span", { class: "tx-hero-alias", text: `${otherAlias} · ` }) : null,
           mono(other, shortAddress(other)),
           copyButton(other, { label: "Copy address", showToast }),
         ].filter(Boolean))
@@ -255,19 +245,19 @@ export function txDetailsView(ov, { state, actions } = {}) {
     },
   });
 
-  // Where a deposit to DuskEVM went, in full, with Copy.
-  const evmRow = desc.evm
+  // Where a transfer to another chain went, in full, with Copy.
+  const evmRow = desc.recipient
     ? kv(
-        "DuskEVM recipient",
+        `${desc.evmChain} recipient`,
         [
-          h("span", { class: "mono", text: desc.address }),
+          h("span", { class: "mono", text: desc.recipient }),
           h("button", {
             class: "mini-btn",
             type: "button",
             text: "Copy",
-            "aria-label": "Copy DuskEVM address",
+            "aria-label": `Copy ${desc.evmChain} address`,
             onclick: async () => {
-              const ok = await copyToClipboard(desc.address);
+              const ok = await copyToClipboard(desc.recipient);
               showToast?.(ok ? "Address copied" : "Couldn't copy the address");
             },
           }),
@@ -284,9 +274,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
           class: "text-btn tx-id chain-link",
           type: "button",
           title: arrivalLink ? "Open in DuskEVM explorer" : desc.arrival,
-          "aria-label": arrivalLink ? `DuskEVM transaction ${shortEvmAddress(desc.arrival)}, open in DuskEVM explorer` : undefined,
+          "aria-label": arrivalLink ? `DuskEVM transaction ${shortEvmHash(desc.arrival)}, open in DuskEVM explorer` : undefined,
           disabled: !arrivalLink,
-          text: shortEvmAddress(desc.arrival),
+          text: shortEvmHash(desc.arrival),
           onclick: async () => {
             const ok = arrivalLink ? await openUrl(arrivalLink) : false;
             if (!ok) showToast?.("Couldn't open the explorer");
@@ -307,8 +297,10 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   const rows = h("div", { class: "group" }, [
     when ? kv("Date", dateText(when)) : null,
+    desc.arrivedAt ? kv("Arrived", dateText(desc.arrivedAt)) : null,
     evmRow,
-    tx?.memo ? kv("Memo", String(tx.memo), { className: "kv--wrap" }) : null,
+    // A memo that is the recipient on another chain shows as that.
+    tx?.memo && String(tx.memo).trim() !== desc.recipient ? kv("Memo", String(tx.memo), { className: "kv--wrap" }) : null,
     feeRow(tx, desc),
     ...ownRows,
     site ? kv("Site", site) : null,
@@ -326,5 +318,14 @@ export function txDetailsView(ov, { state, actions } = {}) {
   });
 
   // A call's details offer no Add token or Import NFT: Assets has both.
-  return [nav, h("div", { class: "tx-detail" }, [hero, rows, tech, explorerButton(explorerUrl, actions)].filter(Boolean))];
+  return [
+    nav,
+    h("div", { class: "tx-detail" }, [
+      hero,
+      rows,
+      tech,
+      explorerButton(explorerUrl, actions),
+      explorerButton(arrivalLink, actions, "View in DuskEVM explorer"),
+    ].filter(Boolean)),
+  ];
 }

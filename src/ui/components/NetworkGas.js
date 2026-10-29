@@ -44,7 +44,8 @@ export function gasFeeLux(gas) {
  * kept its own gas keeps it, and custom gas from Settings comes before the
  * network's price (startingGas): its price, and its limit where that clears
  * the transaction's minimum, else the transaction's own. Until the node
- * answers, and if it can't, the wallet's default price stands in.
+ * answers, and if it can't, the wallet's default price stands in. `extra`
+ * goes in the Custom fee panel, after its note.
  *
  * @param {{
  *   actions: object, gasEditor: HTMLElement,
@@ -52,9 +53,10 @@ export function gasFeeLux(gas) {
  *   gas?: { limit: string, price: string } | null,
  *   minLimit?: string | null,
  *   customGas?: { limit: string, price: string } | null,
+ *   extra?: Node | null,
  * }} opts
  */
-export function useNetworkGas({ actions, gasEditor, defaultLimit, fallbackPrice, gas, minLimit, customGas }) {
+export function useNetworkGas({ actions, gasEditor, defaultLimit, fallbackPrice, gas, minLimit, customGas, extra = null }) {
   const fallback = defaultLimit && fallbackPrice ? { limit: String(defaultLimit), price: String(fallbackPrice) } : null;
   const custom =
     !gas && whole(customGas?.limit) && whole(customGas?.price) && defaultLimit
@@ -70,6 +72,7 @@ export function useNetworkGas({ actions, gasEditor, defaultLimit, fallbackPrice,
         ? "The wallet uses your custom gas from Settings."
         : "The wallet uses the network's gas price and a gas limit that suits this transaction.",
     }),
+    extra,
   ]);
   if (gas) gasEditor.setGas(gas);
   else if (custom) gasEditor.setGas(custom);

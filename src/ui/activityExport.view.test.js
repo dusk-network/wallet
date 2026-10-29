@@ -143,7 +143,7 @@ describe("Activity's Export", () => {
     await settle();
     const [head2, ...sent] = await csvLines(1);
     expect(head2.endsWith(",Your contact name")).toBe(true);
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
     expect(sent[0].endsWith(",Faucet (test)")).toBe(true);
   });
 
@@ -286,16 +286,19 @@ describe("Activity's Export", () => {
 });
 
 describe("DUSK bridged to DuskEVM in Activity", () => {
-  it("shows under Sent, To its DuskEVM address, with Copy", async () => {
+  it("shows under Bridge, not Sent, To its DuskEVM address, with Copy", async () => {
     page("/full.html");
     const { state } = setup();
     button("Sent").click();
     expect(state.activityFilter).toBe("sent");
+    expect(body().querySelectorAll(".tx-row").map(visibleText)).toEqual(["faucet.duskSent · 07:00−5 DUSK"]);
+    button("Bridge").click();
+    expect(state.activityFilter).toBe("bridge");
     const rows = body().querySelectorAll(".tx-row");
-    expect(rows.map(visibleText)).toEqual(["faucet.duskSent · 07:00−5 DUSK", "To 0xAB84…C86FBridge to DuskEVM · 07:00−0.5 DUSK"]);
-    const name = rows[1].querySelector(".tx-name");
+    expect(rows.map(visibleText)).toEqual(["To 0xAB84…C86FBridge to DuskEVM · 07:00−0.5 DUSK"]);
+    const name = rows[0].querySelector(".tx-name");
     expect([name.querySelector(".mono").textContent, name.getAttribute("title")]).toEqual(["0xAB84…C86F", EVM]);
-    const copy = rows[1].querySelector("button.tx-copy");
+    const copy = rows[0].querySelector("button.tx-copy");
     expect(accessibleName(copy)).toBe("Copy DuskEVM address");
     copy.click();
     await settle();

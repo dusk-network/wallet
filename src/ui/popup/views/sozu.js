@@ -3,9 +3,7 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
-  formatLuxShort,
   formatLuxToDusk,
-  groupThousands,
   maxAmountLux,
   parseDuskToLux,
   safeBigInt,
@@ -22,15 +20,16 @@ import {
 import { sozuConfigOf } from "../../../shared/sozuConfig.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
+import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
-import { copyToClipboard } from "../../lib/clipboard.js";
-import { shortAddress } from "../../lib/strings.js";
+import { contractIdText } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
+import { contractValueEl, copyContractButton } from "../../components/ContractValue.js";
 import { submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { profileNameEl } from "../../components/ProfileName.js";
@@ -47,18 +46,6 @@ function fmtLux(value) {
 // Sozu's site.
 const SOZU_URL = "https://sozu.fi/";
 
-/**
- * What a public staking transaction shows everyone, for its Review.
- * @param {string} what - e.g. "the amount staked, your rewards"
- * @param {string} [name] - the profile's verified .dusk name
- */
-export function publicStakeLine(what, name) {
-  return `Visible to everyone: ${what} and ${name ? `your name ${name}` : "your account"}.`;
-}
-
-// What a call to Sozu's pool costs when it fails.
-const FAILED_CALL_NOTE = "You pay only the gas used. A call that fails is charged its whole limit.";
-
 /** How an unstake from Sozu comes back: its pool pays it out in the same call. */
 export const SOZU_UNSTAKE_LINE = "The DUSK comes back in the same transaction. No fee, no waiting.";
 
@@ -66,7 +53,7 @@ export const SOZU_UNSTAKE_LINE = "The DUSK comes back in the same transaction. N
 const PAUSED_TITLE = "Sozu has paused deposits";
 const UNCHECKED_TITLE = "Sozu's deposits couldn't be checked";
 const SYNC_TITLE = "Sozu is synchronizing its pool";
-const SYNC_TEXT = "A stake or unstake can fail until it's done, and a failed call is charged its whole gas limit.";
+const SYNC_TEXT = "A stake or unstake can fail until it's done.";
 
 // A fee so high that no stake gets stDUSK: 100%, or so near it that the least is past any amount.
 const NO_STAKE_TEXT = "No stake gets stDUSK at Sozu's deposit fee now.";
@@ -81,11 +68,12 @@ const SWITCHED_NOTICE = "The network or profile changed, so nothing was sent. Ch
 const LOCKED_NOTICE = "The wallet locked, so nothing was sent. Check the stake again.";
 
 /**
- * About how much stDUSK a stake gets, as Review shows it: "32.47".
+ * About how much stDUSK a stake gets, as its form and Review show it, to 4
+ * decimals as every summary does: "32.4712".
  * @param {bigint|string} stDuskLux
  */
 export function stDuskText(stDuskLux) {
-  return groupThousands(formatLuxShort(String(stDuskLux), 2));
+  return formatDusk(String(stDuskLux));
 }
 
 // A fee rate as the engine sends it, as bigints; null when it isn't one.
@@ -131,6 +119,15 @@ function stakeTerms(status) {
 function depositFeeText(rate, feeLux = null) {
   const pct = feePercent(rate, "en");
   return feeLux === null ? pct : `${pct} · ${formatDuskExact(feeLux.toString())} DUSK`;
+}
+
+/**
+ * The deposit fee for h(): with Hide balances, its DUSK is hidden as the
+ * amount it gives away is ("0.25% · •••• DUSK").
+ */
+function depositFeeParts(rate, feeLux, hidden) {
+  const pct = feePercent(rate, "en");
+  return feeLux === null ? [pct] : [`${pct} · `, balance(hidden, formatDuskExact(feeLux.toString())), " DUSK"];
 }
 
 // A stake's quote as a draft keeps it, in strings: the fee and its rate,
@@ -451,12 +448,8 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
 
   const estimate = h("div", { class: "stake-estimate", hidden: true });
   // What Sozu takes of a stake, before and as it's typed; how an unstake comes back.
-  const feeLine = (feeLux = null) => (depositFee ? `Deposit fee ${depositFeeText(depositFee, feeLux)}` : "Deposit fee not read yet");
-  const termsNote = h("p", {
-    class: "amount-note sozu-terms",
-    hidden: stakeOff || !cfg,
-    text: isWithdraw ? SOZU_UNSTAKE_LINE : feeLine(),
-  });
+  const feeLine = (feeLux = null) => (depositFee ? ["Deposit fee ", ...depositFeeParts(depositFee, feeLux, hidden)] : ["Deposit fee not read yet"]);
+  const termsNote = h("p", { class: "amount-note sozu-terms", hidden: stakeOff || !cfg }, isWithdraw ? [SOZU_UNSTAKE_LINE] : feeLine());
   const reviewBtn = h("button", {
     class: "btn-primary",
     type: "button",
@@ -472,7 +465,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     if (isWithdraw) st.withdrawAmountDusk = raw;
     else st.depositAmountDusk = raw;
     estimate.hidden = true;
-    if (!isWithdraw) termsNote.textContent = feeLine();
+    if (!isWithdraw) termsNote.replaceChildren(...feeLine());
     if (!cfg) {
       field.setError(disabledReason);
       reviewBtn.disabled = true;
@@ -513,7 +506,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       reviewBtn.disabled = true;
       return null;
     }
-    termsNote.textContent = feeLine(quote.fee);
+    termsNote.replaceChildren(...feeLine(quote.fee));
     if (!quote.ok) {
       field.setError(leastLux === null ? NO_STAKE_TEXT : `The minimum stake is ${formatDuskExact(leastLux.toString())} DUSK.`);
       reviewBtn.disabled = true;
@@ -658,20 +651,6 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       ])
     : null;
 
-  const poolContract = cfg?.contracts?.pool ? String(cfg.contracts.pool) : "";
-  const copyContract = poolContract
-    ? h("button", {
-        class: "mini-btn",
-        type: "button",
-        text: "Copy",
-        "aria-label": "Copy Sozu's contract ID",
-        onclick: async () => {
-          const ok = await copyToClipboard(poolContract);
-          actions?.showToast?.(ok ? "Contract ID copied" : "Couldn't copy the contract ID");
-        },
-      })
-    : null;
-
   const sozuLink = h("button", {
     class: "text-btn chain-link sozu-site",
     type: "button",
@@ -686,24 +665,14 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const fact = (iconName, title, sub, extra = null) =>
     h("div", { class: "list-row" }, [
       h("span", { class: "row-icon", html: iconSvg(iconName) }),
-      h("span", { class: "row-main" }, [h("span", { class: "row-title", text: title }), h("span", { class: "row-sub", text: sub })]),
+      h("span", { class: "row-main" }, [h("span", { class: "row-title", text: title }), sub ? h("span", { class: "row-sub", text: sub }) : null].filter(Boolean)),
       extra,
     ].filter(Boolean));
   const facts = h("div", { class: "group info" }, [
     fact("drop", "Any amount, no node needed", "You get stDUSK, a token for your share of Sozu's pool.", positionGroup ? null : stDuskAction),
     // Sozu's own fees, read from its contract each time.
     fact("percent", fees.title, fees.sub),
-    fact("fee", `Network fee up to ${formatFee(isWithdraw ? unstakeFeeLux : stakeFeeLux, { max: true })} DUSK`, FAILED_CALL_NOTE),
-    poolContract
-      ? h("div", { class: "list-row" }, [
-          h("span", { class: "row-icon", html: iconSvg("server") }),
-          h("span", { class: "row-main" }, [
-            h("span", { class: "row-title", text: "Sozu's contract" }),
-            h("span", { class: "row-sub" }, [h("span", { class: "mono", title: poolContract, text: shortAddress(poolContract) })]),
-          ]),
-          copyContract,
-        ].filter(Boolean))
-      : null,
+    fact("fee", `Network fee up to ${formatFee(isWithdraw ? unstakeFeeLux : stakeFeeLux, { max: true })} DUSK`),
   ].filter(Boolean));
 
   // Brought back from Review, the amount says how it stands at once.
@@ -798,6 +767,19 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   gasEditor.amountLux = "0";
   gasEditor.extraLux = [String(draft.deposit ?? "0")];
   gasEditor.setGas(draft?.gas ?? null);
+  // The contract the call goes to, Sozu's pool as its hub named it, with the
+  // gas under Custom fee: there to check before Confirm, out of the way.
+  const poolId = contractIdText(draft.contractId);
+  const contractRow = h("div", { class: "kv sozu-contract" }, [
+    h("span", { class: "kv-label", text: "Contract" }),
+    h("span", { class: "kv-value" }, [
+      contractValueEl(
+        contractLabel(poolId, ov?.nodeUrl) ?? "Sozu pool",
+        h("span", { class: "mono", title: poolId, text: contractIdText(poolId, { short: true }) }),
+        copyContractButton(poolId, actions?.showToast)
+      ),
+    ]),
+  ]);
   useNetworkGas({
     customGas: ov?.customGas,
     actions,
@@ -806,19 +788,13 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     fallbackPrice: ownGas.price,
     gasEditor,
     minLimit: getMinimumGas(TX_KIND.CONTRACT_CALL, gasOpts)?.limit,
+    extra: contractRow,
   });
 
   const title = isStake ? "Liquid staking" : "Unstake from Sozu";
   const line = isStake ? "With Sozu, a third party" : "From Sozu, back to your public balance";
-  // A call to Sozu is public: the explorer shows it under the profile's name.
-  const publicWhat = isStake ? "the amount you stake with Sozu" : "the amount you unstake";
-  const visibleLine = h("div", { class: "review-line review-visible", text: publicStakeLine(publicWhat) });
-  const profileName = profileNameEl(ov, {
-    index: Number(draft.profileIndex ?? 0) || 0,
-    onName: (name) => {
-      visibleLine.textContent = publicStakeLine(publicWhat, name);
-    },
-  });
+  const hidden = balancesHidden(ov);
+  const profileName = profileNameEl(ov, { index: Number(draft.profileIndex ?? 0) || 0 });
 
   // Gas that won't do, or terms that couldn't be checked, say so above Confirm; nothing is sent.
   const confirmError = h("div", { class: "field-error", role: "alert", hidden: !draft.checkError, text: draft.checkError ?? "" });
@@ -940,7 +916,6 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "review-kind", text: title }),
         h("div", { class: "balance-amount", text: `${fmtLux(draftNeeds.toString())} DUSK` }),
         h("div", { class: "review-line", text: line }),
-        visibleLine,
       ]),
       draft.termsChanged
         ? h("div", { class: "callout warn sozu-changed", role: "alert" }, [
@@ -953,14 +928,13 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         quote
           ? kv("You get about", `${stDuskText(quote.stDusk)} stDUSK, worth about ${fmtLux(quote.worth)} DUSK now`)
           : null,
-        quote && quoteRate ? kv("Deposit fee", depositFeeText(quoteRate, safeBigInt(quote.fee, 0n))) : null,
+        quote && quoteRate ? kv("Deposit fee", h("span", {}, depositFeeParts(quoteRate, safeBigInt(quote.fee, 0n), hidden))) : null,
         kv(isStake ? "From" : "To", [h("span", {}, [profileName, h("span", { class: "kv-muted", text: " · Public" })])]),
       ].filter(Boolean)),
       // How an unstake comes back.
       isStake ? null : h("p", { class: "stake-cap", text: SOZU_UNSTAKE_LINE }),
       submitDisabledReason ? h("div", { class: "field-error", role: "alert", text: submitDisabledReason }) : null,
       gasEditor,
-      h("p", { class: "stake-cap review-fee-note", text: FAILED_CALL_NOTE }),
       confirmError,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ].filter(Boolean)),

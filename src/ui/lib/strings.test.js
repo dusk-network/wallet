@@ -1,30 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { truncateMiddle, shortAddress, shortHash, normalizeMnemonic, siteName } from "./strings.js";
-
-describe("truncateMiddle", () => {
-  it("returns short strings unchanged", () => {
-    expect(truncateMiddle("short")).toBe("short");
-    expect(truncateMiddle("exactly19chars!!")).toBe("exactly19chars!!");
-  });
-
-  it("truncates long strings with ellipsis", () => {
-    const long = "0123456789abcdefghijklmnopqrstuvwxyz";
-    // Default is head=8, tail=8: "01234567" + "…" + "stuvwxyz"
-    expect(truncateMiddle(long)).toBe("01234567…stuvwxyz");
-  });
-
-  it("uses custom head/tail lengths", () => {
-    const long = "0123456789abcdefghijklmnopqrstuvwxyz";
-    expect(truncateMiddle(long, 4, 4)).toBe("0123…wxyz");
-    expect(truncateMiddle(long, 10, 5)).toBe("0123456789…vwxyz");
-  });
-
-  it("handles null/undefined", () => {
-    expect(truncateMiddle(null)).toBe(null);
-    expect(truncateMiddle(undefined)).toBe(undefined);
-    expect(truncateMiddle("")).toBe("");
-  });
-});
+import { shortAddress, shortEvmAddress, shortEvmHash, normalizeMnemonic, siteName } from "./strings.js";
 
 describe("shortAddress", () => {
   it("keeps the first and last six characters, and short input as it is", () => {
@@ -36,29 +11,20 @@ describe("shortAddress", () => {
   });
 });
 
-describe("shortHash", () => {
-  it("returns empty string for empty input", () => {
-    expect(shortHash("")).toBe("");
-    expect(shortHash(null)).toBe("");
-    expect(shortHash(undefined)).toBe("");
+describe("shortEvmAddress", () => {
+  it("keeps 0x and four characters at each end, with its EIP-55 checksum", () => {
+    expect(shortEvmAddress("0xab84edffd745af9420ac74fec73121fbee9fc86f")).toBe("0xAB84…C86F");
+    expect(shortEvmAddress(" 0x5a3d8e1b7c2f4a6b9e0d1c3f5a7b9c2d4e6f8a01 ")).toBe("0x5A3d…8a01");
+    // Anything else is cut as a Dusk ID is.
+    expect(shortEvmAddress("0123456789abcdefghijklmnopqrstuvwxyz")).toBe("012345…uvwxyz");
+    expect([shortEvmAddress(""), shortEvmAddress(undefined)]).toEqual(["", ""]);
   });
+});
 
-  it("returns short hashes unchanged", () => {
-    expect(shortHash("abc123")).toBe("abc123");
-    expect(shortHash("exactly18chars!!")).toBe("exactly18chars!!");
-  });
-
-  it("truncates long hashes to 10…8 format", () => {
-    const hash = "0x1234567890abcdef1234567890abcdef1234567890abcdef";
-    expect(shortHash(hash)).toBe("0x12345678…90abcdef");
-  });
-
-  it("uses consistent format for tx hashes", () => {
-    const hash = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
-    const result = shortHash(hash);
-    // shortHash uses 10 head + ellipsis + 8 tail = 19 chars
-    expect(result.length).toBe(19);
-    expect(result).toBe("a1b2c3d4e5…e5f6a1b2");
+describe("shortEvmHash", () => {
+  it("keeps 0x and four characters at each end of an EVM transaction's hash", () => {
+    expect(shortEvmHash("0x029e2c6ebfe60452800c97eaa2ac36f40039812679c9cee414ea6a8b1877d61b")).toBe("0x029e…d61b");
+    expect(shortEvmHash("ab".repeat(32))).toBe("ababab…ababab");
   });
 });
 
