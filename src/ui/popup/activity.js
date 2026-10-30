@@ -37,7 +37,8 @@ const ROUTES = new Set(["home", "activity", "tx"]);
 // The wait after a transaction went through before the archive is asked for it.
 const AFTER_TX_MS = 10_000;
 
-function selected(ov) {
+/** The overview's selected profile: its index, and its public account. */
+export function selected(ov) {
   const raw = Number(ov?.selectedAccountIndex ?? 0);
   const profileIndex = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
   const account = String(ov?.accounts?.[profileIndex] ?? "").trim();

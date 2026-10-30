@@ -15,8 +15,9 @@ import { send as rawSend } from "../../wallet/bus.js";
 import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
-import { activityRows, ensureActivity, refreshActivitySoon } from "./activity.js";
-import { arrivalCheckDelay, awaitingArrival, checkArrivals, loadArrivals } from "../../shared/bridgeArrival.js";
+import { activityRows, ensureActivity, refreshActivitySoon, selected } from "./activity.js";
+import { checkArrivals } from "./arrivals.js";
+import { arrivalCheckDelay, awaitingArrival, loadArrivals } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
 
 import { homeView } from "./views/home.js";
@@ -457,10 +458,10 @@ function schedulePendingTxPoll(ov) {
 
 // --- Deposits to DuskEVM on their way ----------------------------------------
 // While Home, Activity or a transaction shows a deposit to DuskEVM that hasn't
-// arrived there, DuskEVM's explorer is asked for it, at once and then less
-// often the longer nothing changes (bridgeArrival.js). Nothing is asked
-// otherwise: a lock, or a switch of network, profile or wallet (a reset
-// included), ends the looks begun before it.
+// arrived there, DuskEVM is asked for it, at once and then less often the
+// longer nothing changes (arrivals.js). Nothing is asked otherwise: a lock, or
+// a switch of network, profile or wallet (a reset included), ends the looks
+// begun before it.
 const ARRIVAL_ROUTES = new Set(["home", "activity", "tx"]);
 let arrivalTimer = null;
 let arrivalLooks = 0;
@@ -484,7 +485,9 @@ function scheduleArrivalCheck(ov) {
   const current = () => state.context === context && Boolean(state.overview?.isUnlocked) && ARRIVAL_ROUTES.has(state.route);
   const timer = setTimeout(async () => {
     const now = state.overview;
-    const found = current() ? await checkArrivals(activityRows(now, state), { nodeUrl: now?.nodeUrl }).catch(() => 0) : 0;
+    const found = current()
+      ? await checkArrivals(activityRows(now, state), { account: selected(now).account, archiverUrl: now?.archiverUrl, nodeUrl: now?.nodeUrl }).catch(() => 0)
+      : 0;
     if (arrivalTimer !== timer) return;
     arrivalTimer = null;
     if (!current()) return;

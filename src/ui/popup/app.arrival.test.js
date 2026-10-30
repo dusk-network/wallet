@@ -1,6 +1,9 @@
+import { ETH_BRIDGE_FINALIZED_TOPIC } from "@dusk-network/app-core/bridge";
 import { networks } from "@dusk-network/networks";
+import { evmAddressOf } from "@dusk-network/networks/duskevm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { fakeChain, topicOf, wordOf } from "../../shared/fixtures/chain.js";
 import { installFakeDom, settle, visibleText } from "../testing/fakeDom.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
@@ -22,7 +25,7 @@ const TO = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
 const L2 = "0x029e2c6ebfe60452800c97eaa2ac36f40039812679c9cee414ea6a8b1877d61b";
 const duskEvm = networks.testnet.duskEvm;
 
-// A deposit of 0.5 DUSK to TO, gone through three minutes ago.
+// A deposit of 0.5 DUSK to TO, gone through three minutes ago in Dusk block 4,697,290.
 const deposit = (over = {}) => ({
   hash: "ee".repeat(32),
   kind: "contract_call",
@@ -34,8 +37,9 @@ const deposit = (over = {}) => ({
   status: "executed",
   submittedAt: Date.now() - 190_000,
   executedAt: Date.now() - 180_000,
-  // Its block's time, as the node gave it.
+  // Its block's time and height, as the node gave them.
   finalizedAt: Date.now() - 185_000,
+  blockHeight: "4697290",
   profileIndex: 0,
   nodeUrl: TESTNET,
   ...over,
@@ -80,8 +84,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// The popup at `route` with `ov`, DuskEVM's explorer listing the L2 bridge's
-// payment of 0.5 DUSK to TO a minute ago (or nothing yet); nothing else answers.
+// The popup at `route` with `ov`: DuskEVM, a block every 2 seconds, with the
+// bridge's payment of 0.5 DUSK to TO from ACCOUNT's DuskEVM address a minute
+// ago (or nothing yet), and the archive, where ACCOUNT sent nothing else to
+// the bridge. Nothing else answers. `duskEvm` lists the RPC's methods asked.
 async function popup(ov, route = "activity", { arrived = true } = {}) {
   const dom = installFakeDom({ pathname: "/popup.html" });
   dom.document.body.innerHTML = "";
@@ -92,26 +98,28 @@ async function popup(ov, route = "activity", { arrived = true } = {}) {
     dom.document.body.appendChild(el);
   }
   vi.stubGlobal("localStorage", memoryStorage());
-  const explorer = vi.fn(async () =>
-    new Response(
-      JSON.stringify({
-        items: !arrived ? [] : [
-          {
-            transaction_hash: L2,
-            from: { hash: duskEvm.predeploys.l2StandardBridge },
-            to: { hash: TO },
-            value: "500000000000000000",
-            success: true,
-            timestamp: new Date(Date.now() - 60_000).toISOString(),
-          },
-        ],
-      })
-    )
-  );
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url) => (String(url).startsWith(`${duskEvm.blockscoutApiUrl}/addresses/`) ? explorer(url) : Promise.reject(new Error("offline"))))
-  );
+  const head = 3_952_000n;
+  const chain = fakeChain({
+    blockMs: 2_000,
+    head,
+    headAt: Date.now(),
+    logs: !arrived ? [] : [
+      {
+        address: duskEvm.predeploys.l2StandardBridge,
+        block: head - 30n,
+        data: `0x${wordOf(500_000_000_000_000_000n)}${wordOf(0x40)}${wordOf(0)}`,
+        hash: L2,
+        topics: [ETH_BRIDGE_FINALIZED_TOPIC, topicOf(evmAddressOf(ACCOUNT)), topicOf(TO)],
+      },
+    ],
+    url: duskEvm.rpcUrl,
+  });
+  // The archive answers the account's deposits before this one: none.
+  const archive = async (url, init) =>
+    String(url) === `${TESTNET}/on/graphql/query` && /^query \{ out: moonlightHistory\(sender: /.test(String(init?.body))
+      ? new Response(JSON.stringify({ data: { out: null } }))
+      : Promise.reject(new Error("offline"));
+  vi.stubGlobal("fetch", vi.fn(async (url, init) => (chain.answers(url) ? chain.answer(url, init) : archive(url, init))));
   vi.resetModules();
   const { send } = await import("../../wallet/bus.js");
   send.mockReset();
@@ -126,28 +134,30 @@ async function popup(ov, route = "activity", { arrived = true } = {}) {
   // What the wallet tells this page, as the desktop app's does (and the extension's, with runtime messages).
   const tell = (message) =>
     dom.window._listeners.filter((l) => l.type === "dusk-wallet-message").forEach((l) => l.fn({ detail: message }));
-  return { dom, render, explorer, status, tell };
+  return { dom, render, duskEvm: () => chain.methods(), status, tell };
 }
 
 describe("a deposit to DuskEVM on its way, in the popup", () => {
-  it("is asked for on DuskEVM's explorer at once, Arrived once there, and not asked for again", async () => {
+  it("is asked for on DuskEVM at once, Arrived once there, and not asked for again", async () => {
     const view = await popup(overview());
-    expect(view.explorer.mock.calls.map(([url]) => url)).toEqual([`${duskEvm.blockscoutApiUrl}/addresses/${TO.toLowerCase()}/internal-transactions?filter=to`]);
+    expect(view.duskEvm()).toContain("eth_getLogs");
     expect(view.status()).toEqual(["Arrived"]);
+    const asked = view.duskEvm().length;
     await view.render({ forceRefresh: true });
     await flush();
-    expect([view.explorer.mock.calls.length, view.status()]).toEqual([1, ["Arrived"]]);
+    expect([view.duskEvm().length, view.status()]).toEqual([asked, ["Arrived"]]);
   });
 
   it("stops looking once the wallet locks: a look due after it asks nothing, though the locked overview still lists the deposit", async () => {
     const ov = overview();
     const view = await popup(ov, "activity", { arrived: false });
-    expect(view.explorer).toHaveBeenCalledTimes(1);
+    expect(view.duskEvm()).toContain("eth_getLogs");
+    const asked = view.duskEvm().length;
     ov.isUnlocked = false;
     view.tell({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
     await new Promise((resolve) => setTimeout(resolve, 150));
     await flush();
-    expect(view.explorer).toHaveBeenCalledTimes(1);
+    expect(view.duskEvm().length).toBe(asked);
   });
 
   it("asks nothing with no deposit on its way, on Mainnet, or away from Activity", async () => {
@@ -158,7 +168,7 @@ describe("a deposit to DuskEVM on its way, in the popup", () => {
       [overview(), "send"],
     ]) {
       const view = await popup(ov, route);
-      expect(view.explorer).not.toHaveBeenCalled();
+      expect(view.duskEvm()).toEqual([]);
     }
   });
 });
