@@ -2554,6 +2554,13 @@ export async function getShieldedHistory() {
   const promise = (async () => {
     // A reset of the activity store meanwhile refuses the write (StaleActivityError).
     const epoch = await getActivityEpoch();
+    // The notes, then whether the sync is done: one that started over while
+    // they were read leaves them unfinished, and the history pending.
+    const [unspent, spent] = await Promise.all([
+      getNotesMap(netKey, walletId, profileIndex),
+      getSpentNotesMap(netKey, walletId, profileIndex),
+    ]);
+    const synced = state.shielded.status.state === "done";
     const { entries, pending } = await shieldedHistory({
       archive: archiveAt(historyArchiverUrl({ nodeUrl, archiverUrl: engineConfig.archiverUrl })),
       // A lock, a reset, another profile, another node or a replaced chain
@@ -2565,16 +2572,10 @@ export async function getShieldedHistory() {
         getWalletId() === walletId &&
         getSelectedProfileIndex() === profileIndex &&
         engineConfig.nodeUrl === nodeUrl,
-      notes: async () => {
-        const [unspent, spent] = await Promise.all([
-          getNotesMap(netKey, walletId, profileIndex),
-          getSpentNotesMap(netKey, walletId, profileIndex),
-        ]);
-        return [
-          ...[...unspent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: false })),
-          ...[...spent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: true })),
-        ];
-      },
+      notes: async () => [
+        ...[...unspent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: false })),
+        ...[...spent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: true })),
+      ],
       valueOf: (note) => noteValue(profile, note),
       tree: {
         size: async () => readTransferContractBookmark(await ensureNetwork()),
@@ -2598,7 +2599,7 @@ export async function getShieldedHistory() {
         get: () => getNoteHeightPool(network),
         put: ({ heights, notes }) => putNoteHeightPool(network, heights, notes, epoch),
       },
-      synced: state.shielded.status.state === "done",
+      synced,
     });
     return pending ? { profileIndex, entries, pending } : { profileIndex, entries };
   })().finally(() => {

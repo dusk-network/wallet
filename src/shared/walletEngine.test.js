@@ -411,6 +411,19 @@ vi.mock("@dusk/w3sper", () => {
   };
 });
 
+// The shielded store, with a read of the profile's notes held while a test
+// says (__NOTES_READ__).
+vi.mock("./shieldedStore.js", async (importOriginal) => {
+  const store = await importOriginal();
+  return {
+    ...store,
+    getNotesMap: async (...args) => {
+      await globalThis.__NOTES_READ__?.();
+      return store.getNotesMap(...args);
+    },
+  };
+});
+
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const NETWORK_KEY = "https://nodes.dusk.network";
@@ -463,6 +476,7 @@ describe("walletEngine", () => {
     delete globalThis.__W3SPER_LAST_SEEDER__;
     delete globalThis.__W3SPER_PROFILE_GATE__;
     delete globalThis.__W3SPER_DRIVER_DELAYS__;
+    delete globalThis.__NOTES_READ__;
   });
 
   async function prepareReviewCache(tip = 10n) {
@@ -1858,6 +1872,36 @@ describe("walletEngine", () => {
       // before it asked, for next time.
       const record = await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`);
       expect(record?.entries ?? []).toEqual([]);
+    });
+
+    it("is pending, and keeps nothing, when the sync starts over while the notes are read", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      await growTree(leavesFromPos);
+      archive();
+      // The notes' read, held until the sync has started over.
+      const reading = Promise.withResolvers();
+      const held = Promise.withResolvers();
+      globalThis.__NOTES_READ__ = async () => {
+        reading.resolve();
+        await held.promise;
+      };
+      const history = engine.getShieldedHistory();
+      await reading.promise;
+      globalThis.__NOTES_READ__ = null;
+      const { AddressSyncer } = await import("@dusk/w3sper");
+      const scan = vi.spyOn(AddressSyncer.prototype, "notes").mockImplementation(() => new Promise(() => {}));
+      try {
+        await engine.startShieldedSync({ force: true });
+        await vi.waitFor(() => expect(engine.getShieldedStatus().state).toBe("syncing"));
+        held.resolve();
+        await expect(history).resolves.toEqual({ profileIndex: 0, entries: [], pending: true });
+        expect(await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`)).toBeNull();
+      } finally {
+        scan.mockRestore();
+      }
     });
 
     it("shows a history it couldn't keep", async () => {
