@@ -1,18 +1,14 @@
-// A deposit to DuskEVM, once it's there: the DuskEVM transaction that paid its
-// recipient, as DuskEVM's explorer (its Blockscout API, from the network's
-// file in @dusk-network/networks) lists the recipient's incoming calls: the
-// L2 bridge's, of the deposit's amount, after the deposit. Asked only while a
-// deposit is on its way, one request a recipient, less often the longer
-// nothing changes (as the web wallet's deposit tracking); kept once found,
-// until a wallet reset. A network without DuskEVM (Mainnet, for now) asks
-// nothing.
+// A deposit to DuskEVM, once it's there: the DuskEVM transaction that paid it,
+// and when, as the popup finds it on DuskEVM (ui/popup/arrivals.js). Looked
+// for only while a deposit is on its way, less often the longer nothing
+// changes (as the web wallet's deposit tracking); kept once found, until a
+// wallet reset. A network without DuskEVM (Mainnet, for now) asks nothing.
 //
 // What's kept is tagged with the transaction store's reset count it was found
 // under (txStore.js), and every page reads it again as it draws: after a
 // reset, in this page or another, no page shows the old wallet's arrivals,
 // and a check that began before it keeps nothing.
 
-import { fetchWithTimeout } from "./networkStatus.js";
 import { networkForNode } from "./nodeNetwork.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
@@ -20,14 +16,8 @@ import { getTxEpoch } from "./txStore.js";
 
 /** How long after it went through a deposit is looked for on DuskEVM. */
 export const ARRIVAL_WINDOW_MS = 7 * 24 * 60 * 60_000;
-// The deposit's time is its block's or the wallet's clock: DuskEVM's may differ a little.
-const CLOCK_SLACK_MS = 2 * 60_000;
-// DUSK has 9 decimals on Dusk and 18 on DuskEVM.
-const WEI_PER_LUX = 10n ** 9n;
 // Arrivals kept: the newest.
 const KEEP = 200;
-// Pages of a recipient's incoming calls read at most, back to its oldest deposit on its way.
-const MAX_PAGES = 5;
 
 const EVM_TX = /^0x[0-9a-fA-F]{64}$/;
 
@@ -79,15 +69,17 @@ export function arrivalUrl(nodeUrl, evmHash) {
   return base && EVM_TX.test(String(evmHash ?? "")) ? `${base.replace(/\/+$/, "")}/tx/${evmHash}` : null;
 }
 
-// What a deposit paid, in lux, as its call says; null for nothing.
-const depositLux = (row) => {
+/** What a deposit paid, in lux, as its call says; null for nothing. */
+export const depositLux = (row) => {
   const lux = row?.bridge?.amount ?? row?.value ?? 0n;
   return lux > 0n ? lux : null;
 };
 
-// When a deposit went through: its Dusk block's time, as the archive or the
-// node gave it; 0 until one did. Never the wallet's clock, which may be off.
-const depositTime = (row) => Number(row?.entry?.timestamp ?? row?.sent?.finalizedAt) || 0;
+/**
+ * When a deposit went through: its Dusk block's time, as the archive or the
+ * node gave it; 0 until one did. Never the wallet's clock, which may be off.
+ */
+export const depositTime = (row) => Number(row?.entry?.timestamp ?? row?.sent?.finalizedAt) || 0;
 
 /**
  * Whether an Activity row is a deposit to DuskEVM on its way: gone through on
@@ -104,84 +96,18 @@ export function awaitingArrival(row, nodeUrl, now = Date.now()) {
   return at > 0 && now - at < ARRIVAL_WINDOW_MS;
 }
 
-// A Blockscout time ("2026-10-27T05:52:13.000000Z") in milliseconds.
-const timeOf = (text) => Date.parse(String(text ?? "").replace(/(\.\d{3})\d+/, "$1"));
-
-// The recipient's incoming calls on DuskEVM, newest first, a page at a time
-// (Blockscout's next_page_params) back to `since`, at most MAX_PAGES:
-// `complete` when they reach it, or there are no more.
-async function incomingCalls(duskEvm, recipient, since) {
-  const base = `${duskEvm.blockscoutApiUrl.replace(/\/+$/, "")}/addresses/${recipient}/internal-transactions`;
-  const items = [];
-  let next = null;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const query = new URLSearchParams([["filter", "to"], ...Object.entries(next ?? {}).map(([key, value]) => [key, String(value)])]);
-    const res = await fetchWithTimeout(`${base}?${query}`, { headers: { Accept: "application/json" } }, 8_000);
-    if (!res.ok) throw new Error(`DuskEVM's explorer answered ${res.status}`);
-    const body = await res.json();
-    const calls = Array.isArray(body?.items) ? body.items : [];
-    items.push(...calls);
-    next = body?.next_page_params && typeof body.next_page_params === "object" ? body.next_page_params : null;
-    const oldest = Math.min(...calls.map((c) => timeOf(c?.timestamp)).filter(Number.isFinite));
-    if (!next || !calls.length || oldest < since) return { items, complete: true };
-  }
-  return { items, complete: false };
-}
-
 /**
- * Looks on DuskEVM for the deposits in `rows` on their way, a recipient's
- * incoming calls back to its oldest, and keeps those that arrived: each
- * takes the L2 bridge's first payment of its amount to its recipient from
- * after its block, in order, one payment for one deposit. A recipient whose
- * calls go further back than MAX_PAGES has none matched.
- * @param {object[]} rows - Activity rows on the overview's network
- * @param {{ nodeUrl: string, now?: number }} opts
- * @returns {Promise<number>} how many arrived
+ * Keeps the arrivals found, by the deposit's hash, with the reset count the
+ * check began under (`epoch`), unless a wallet reset came since: checked
+ * again right before the write, in the lock a reset's clear takes too. One
+ * that comes between that check and the write leaves arrivals under the old
+ * count, which nothing reads.
+ * @param {Record<string, { hash: string, at: number }>} found
+ * @param {number | undefined} epoch
+ * @returns {Promise<number>} how many of them are kept
  */
-export async function checkArrivals(rows, { nodeUrl, now = Date.now() }) {
-  await loadArrivals();
-  const duskEvm = networkForNode(String(nodeUrl ?? ""))?.duskEvm;
-  const waiting = (rows ?? []).filter((row) => awaitingArrival(row, nodeUrl, now));
-  if (!duskEvm || !waiting.length) return 0;
-  const epoch = await getTxEpoch().catch(() => undefined);
-  const bridge = duskEvm.predeploys.l2StandardBridge.toLowerCase();
-  const taken = new Set([...kept.values()].map((a) => a.hash.toLowerCase()));
-  const byRecipient = new Map();
-  for (const row of waiting) {
-    const to = row.bridge.to.toLowerCase();
-    byRecipient.set(to, [...(byRecipient.get(to) ?? []), row]);
-  }
-
-  const found = {};
-  for (const [recipient, deposits] of byRecipient) {
-    const since = Math.min(...deposits.map(depositTime)) - CLOCK_SLACK_MS;
-    const { items: calls, complete } = await incomingCalls(duskEvm, recipient, since).catch(() => ({}));
-    // Not back to its oldest deposit: a payment of an older one may be a newer one's, so none is matched.
-    if (!calls || !complete) continue;
-    const payments = calls
-      .filter((c) => c?.success !== false && String(c?.from?.hash ?? "").toLowerCase() === bridge && EVM_TX.test(String(c?.transaction_hash ?? "")))
-      .map((c) => ({ hash: String(c.transaction_hash), value: String(c.value ?? ""), at: timeOf(c.timestamp) }))
-      .filter((p) => Number.isFinite(p.at))
-      .sort((a, b) => a.at - b.at);
-    for (const row of [...deposits].sort((a, b) => depositTime(a) - depositTime(b))) {
-      const wei = (depositLux(row) * WEI_PER_LUX).toString();
-      const paid = payments.find((p) => !taken.has(p.hash.toLowerCase()) && p.value === wei && p.at >= depositTime(row) - CLOCK_SLACK_MS);
-      if (!paid) continue;
-      taken.add(paid.hash.toLowerCase());
-      found[String(row.hash).toLowerCase()] = { hash: paid.hash, at: paid.at };
-    }
-  }
-  if (!Object.keys(found).length) return 0;
-  await keep(found, epoch);
-  return Object.keys(found).filter((hash) => kept.has(hash)).length;
-}
-
-// Keeps what arrived with the reset count the check began under, unless a
-// wallet reset came since: checked again right before the write, in the lock
-// a reset's clear takes too. One that comes between that check and the write
-// leaves arrivals under the old count, which nothing reads.
-async function keep(found, epoch) {
-  if (epoch === undefined) return;
+export async function keepArrivals(found, epoch) {
+  if (epoch === undefined) return 0;
   await withStorageLock(STORAGE_KEYS.BRIDGE_ARRIVALS, async () => {
     const newest = Object.entries({ ...Object.fromEntries(await readKept(epoch)), ...found })
       .sort(([, a], [, b]) => b.at - a.at)
@@ -191,6 +117,7 @@ async function keep(found, epoch) {
     version += 1;
     for (const [hash, arrival] of Object.entries(found)) kept.set(hash, arrival);
   }).catch(() => {});
+  return Object.keys(found).filter((hash) => kept.has(hash)).length;
 }
 
 /** Forgets every arrival kept: a wallet reset. In the lock a check's write takes. */
