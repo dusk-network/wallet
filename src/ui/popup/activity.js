@@ -10,13 +10,9 @@
 // popup first saw it: after a wallet reset since, nothing more is kept. A
 // lock drops it.
 
-import {
-  fillActivityDetails,
-  needsDetails,
-  noteActivityUnavailable,
-  readActivity,
-  syncActivity,
-} from "../../shared/activityHistory.js";
+import { StaleHistoryError } from "@dusk-network/app-core/history";
+
+import { activityHistory, noteActivityUnavailable } from "../../shared/activityHistory.js";
 import { mergeActivity } from "../../shared/activityMerge.js";
 import { arrivalOf } from "../../shared/bridgeArrival.js";
 import {
@@ -26,6 +22,7 @@ import {
   putCounterpartyNames,
 } from "../../shared/activityStore.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
+import { chainIdForNode } from "../../shared/nodeNetwork.js";
 import { lookupRecipientNames } from "../../shared/duskNames.js";
 import { VERIFIED_NAME_TTL_MS, duskNamesNetwork } from "../../shared/verifiedNames.js";
 
@@ -43,10 +40,15 @@ function selected(ov) {
   return { account, profileIndex };
 }
 
-/** One activity per node, archiver and account: a change of any starts over. */
+/**
+ * One activity per node, archiver, account and the node's network as known:
+ * a change of any starts over, so a custom node's chain learned later counts.
+ */
 export const activityKey = (ov) => {
   const { account } = selected(ov);
-  return ov?.isUnlocked && account && ov?.nodeUrl ? `${ov.nodeUrl}\n${ov.archiverUrl ?? ""}\n${account}` : "";
+  return ov?.isUnlocked && account && ov?.nodeUrl
+    ? `${ov.nodeUrl}\n${ov.archiverUrl ?? ""}\n${account}\n${chainIdForNode(String(ov.nodeUrl)) ?? ""}`
+    : "";
 };
 
 let redrawTimer = null;
@@ -60,13 +62,9 @@ function redraw(state, render) {
 }
 
 async function reload(a) {
-  const { entries, meta, coveredTo, complete } = await readActivity({
-    nodeUrl: a.nodeUrl,
-    account: a.account,
-    limit: a.limit,
-  });
+  const { entries, state, coveredTo, complete } = await a.history.read({ limit: a.limit });
   a.entries = entries;
-  a.meta = meta;
+  a.meta = state;
   a.coveredTo = coveredTo;
   a.complete = complete;
   a.loaded = true;
@@ -84,12 +82,7 @@ async function keptNames(a) {
 }
 
 const counterparties = (a) => [
-  ...new Set(
-    a.entries
-      .slice(0, a.limit)
-      .map((e) => e.counterparty)
-      .filter((c) => c && c !== a.account && classifyDuskIdentifier(c) === "account")
-  ),
+  ...new Set(a.entries.map((e) => e.counterparty).filter((c) => c && c !== a.account && classifyDuskIdentifier(c) === "account")),
 ];
 
 // The shown counterparties' names, checked again: one Multicall query for up to 32.
@@ -173,11 +166,7 @@ async function run(a, state, render) {
   try {
     const epoch = await a.epoch;
     if (epoch === undefined) throw new Error("The activity store is out of reach");
-    await syncActivity({
-      nodeUrl: a.nodeUrl,
-      archiverUrl: a.archiverUrl,
-      account: a.account,
-      epoch,
+    await a.history.sync({
       onStep: () => {
         if (state.activity !== a) return;
         reload(a)
@@ -187,7 +176,8 @@ async function run(a, state, render) {
     });
     a.error = null;
   } catch (error) {
-    if (error instanceof StaleActivityError) a.stale = true;
+    // Reset since, or overtaken by another page's run: nothing more for this one.
+    if (error instanceof StaleActivityError || error instanceof StaleHistoryError) a.stale = true;
     else {
       a.error = error?.message ?? String(error);
       noteActivityUnavailable(error);
@@ -251,6 +241,7 @@ export function ensureActivity(ov, { state, render, send }) {
   state.activity = a;
   (async () => {
     try {
+      a.history = activityHistory({ nodeUrl: a.nodeUrl, archiverUrl: a.archiverUrl, account, epoch: a.epoch });
       await reload(a);
       await keptNames(a);
     } catch {
@@ -284,15 +275,14 @@ export function refreshActivitySoon({ state, render }, delayMs = AFTER_TX_MS) {
 export async function showMoreActivity({ state, render }) {
   const a = state.activity;
   if (!a) return;
-  a.limit += ACTIVITY_PAGE;
+  // From the rows shown: a read gives a block the page cuts through whole.
+  a.limit = Math.max(a.limit, a.entries.length) + ACTIVITY_PAGE;
   await reload(a).catch(() => {});
   redraw(state, render);
-  const missing = a.entries.filter((e) => needsDetails(e, a.nodeUrl));
+  const missing = a.entries.filter((e) => a.history.needsDetails(e));
   const epoch = await a.epoch;
   if (missing.length && epoch !== undefined) {
-    await fillActivityDetails({ nodeUrl: a.nodeUrl, archiverUrl: a.archiverUrl, account: a.account, entries: missing, epoch }).catch(
-      () => {}
-    );
+    await a.history.fillDetails(missing).catch(() => {});
     await reload(a).catch(() => {});
     redraw(state, render);
   }
@@ -318,19 +308,19 @@ export function loadActivityDetail({ state, render }, hash) {
   const entry = a?.entries.find((e) => e.hash === hash);
   const key = `${a?.key}\n${hash}`;
   const last = detailLoads.get(key);
-  if (!entry || !needsDetails(entry, a.nodeUrl) || last === "loading" || (typeof last === "number" && Date.now() - last < DETAIL_RETRY_MS)) return;
+  if (!entry || !a.history.needsDetails(entry) || last === "loading" || (typeof last === "number" && Date.now() - last < DETAIL_RETRY_MS)) return;
   detailLoads.set(key, "loading");
   a.epoch
     .then((epoch) => {
       if (epoch === undefined) throw new Error("The activity store is out of reach");
-      return fillActivityDetails({ nodeUrl: a.nodeUrl, archiverUrl: a.archiverUrl, account: a.account, entries: [entry], epoch });
+      return a.history.fillDetails([entry]);
     })
     .then(() => reload(a))
     .then(() => redraw(state, render))
     .catch(() => {})
     .finally(() => {
       const now = a.entries.find((e) => e.hash === hash);
-      if (now && !needsDetails(now, a.nodeUrl)) detailLoads.delete(key);
+      if (now && !a.history.needsDetails(now)) detailLoads.delete(key);
       else detailLoads.set(key, Date.now());
     });
 }

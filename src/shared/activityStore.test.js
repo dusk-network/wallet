@@ -29,6 +29,16 @@ describe("activityStore", () => {
     expect(await store.getArchiveRefusal("https://node.example")).toBeNull();
   });
 
+  it("keeps nothing of a sync step whose state can't be made", async () => {
+    const owner = store.activityOwnerKey("testnet", "acct");
+    const overtaken = () => {
+      throw new Error("Another run started this history over");
+    };
+    await expect(store.commitActivityStep(owner, [{ hash: "aa".repeat(32), blockHeight: 5 }], overtaken)).rejects.toThrow();
+    expect(await store.getActivityMeta(owner)).toBeNull();
+    expect(await store.listActivityEntries(owner)).toEqual([]);
+  });
+
   it("keeps when a node answered without the archive", async () => {
     expect(await store.getArchiveRefusal("https://node.example")).toBeNull();
     await store.putArchiveRefusal("https://node.example", 42);

@@ -1,8 +1,11 @@
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
+import { parseHistoryEntry } from "@dusk-network/app-core/history";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import fixture from "../../shared/fixtures/activity-testnet.json";
+import registrations from "../../shared/fixtures/dusk-domains-registrations.json";
+import deposit from "../../shared/fixtures/duskevm-deposit-history.json";
 import { fakeArchive } from "../../shared/fixtures/fakeArchive.js";
 
 const names = vi.hoisted(() => ({ lookupRecipientNames: vi.fn() }));
@@ -113,6 +116,142 @@ describe("ensureActivity", () => {
     // Rows are only ever the overview's account's.
     expect(activity.activityRows(overview(A), state)).toEqual([]);
   });
+
+  it("names every row it shows, a block the page cuts through whole", async () => {
+    // Derived: A received 49 transfers from SENDER, each in its own block,
+    // and below them one block with one from SENDER and one from FAUCET.
+    const [faucet, sender] = fixture.accounts[A].receiver;
+    const at = (entry, height, n) => ({ ...entry, block_height: height, origin: n.toString(16).padStart(64, "0") });
+    const top = fixture.head.last_finalized_block[0] - 100;
+    const receiver = [at(faucet, top - 10_000, 1), at(sender, top - 10_000, 2), ...Array.from({ length: 49 }, (_, i) => at(sender, top - 48 + i, 3 + i))];
+    fakeArchive({ accounts: { [A]: { sender: [], receiver } } });
+    const { state } = await popup();
+    expect(state.activity.entries).toHaveLength(activity.ACTIVITY_PAGE + 1);
+    expect(activity.activityRows(overview(), state).find((r) => r.hash === receiver[0].origin)).toMatchObject({ counterpartyName: "faucet.dusk" });
+  });
+});
+
+describe("Show more", () => {
+  it("goes on below a block the first page showed whole, however big", async () => {
+    // Derived: 10 transfers on top, each in its own block, then 100 in one
+    // block, then 30 older ones.
+    const [, sender] = fixture.accounts[A].receiver;
+    const at = (height, n) => ({ ...sender, block_height: height, origin: n.toString(16).padStart(64, "0") });
+    const top = fixture.head.last_finalized_block[0] - 100;
+    // Oldest first, as the archive lists them.
+    const receiver = [
+      ...Array.from({ length: 30 }, (_, i) => at(top - 59 + i, 300 + i)),
+      ...Array.from({ length: 100 }, (_, i) => at(top - 20, 100 + i)),
+      ...Array.from({ length: 10 }, (_, i) => at(top - 9 + i, 1 + i)),
+    ];
+    fakeArchive({ accounts: { [A]: { sender: [], receiver } } });
+    // A popup syncs once: enough of them to keep the whole history.
+    let shown = await popup();
+    for (let i = 0; i < 5 && !shown.state.activity.complete; i += 1) shown = await popup();
+    const { state, render } = shown;
+
+    // The first page: the 10, then the 100 of the block it cuts through.
+    expect(state.activity.complete).toBe(true);
+    expect(state.activity.entries).toHaveLength(110);
+    await activity.showMoreActivity({ state, render });
+    await until(() => !state.activity.syncing && state.activity.entries.length > 110);
+    expect(state.activity.entries).toHaveLength(140);
+  });
+});
+
+describe("a custom node whose network is learned later", () => {
+  it("is another activity once its chain is known, so it reads on that network", async () => {
+    const { noteChainId } = await import("../../shared/nodeNetwork.js");
+    const ov = overview(A, { nodeUrl: "https://node.example" });
+    const unknown = activity.activityKey(ov);
+    noteChainId("https://node.example", 2);
+    expect(activity.activityKey(ov)).not.toBe(unknown);
+  });
+});
+
+describe("a deposit to DuskEVM", () => {
+  const H = deposit.entry.block_height;
+  const archive = () => fakeArchive({ accounts: { [deposit.account]: { sender: [deposit.entry], receiver: [] } }, details: deposit.details, finalized: H + 100 });
+  const rowOf = (state) => activity.activityRows(overview(deposit.account), state).find((r) => r.hash === deposit.entry.origin);
+
+  it("shows the DuskEVM address it paid, read from its call", async () => {
+    archive();
+    const state = { route: "home" };
+    activity.ensureActivity(overview(deposit.account), { state, render: vi.fn(async () => {}) });
+    await until(() => rowOf(state)?.bridgeTo === deposit.recipient && !state.activity.syncing);
+  });
+
+  it("reads one kept before as it was kept, asking nothing more of it", async () => {
+    const node = archive();
+    const store = await import("../../shared/activityStore.js");
+    // As the wallet kept it before: its details and DuskEVM address, with every height to the head read.
+    const kept = { ...parseHistoryEntry(deposit.account, deposit.entry), detailsAt: 1, success: true, bridgeTo: deposit.recipient };
+    const covered = { account: deposit.account, covered: [[0, H + 90]], finalized: H + 100, genesis: fixture.head.genesis, target: H + 90, window: 8_640 };
+    await store.commitActivityStep(store.activityOwnerKey("testnet", deposit.account), [{ ...kept, value: String(kept.value) }], () => covered);
+    const state = { route: "home" };
+    activity.ensureActivity(overview(deposit.account), { state, render: vi.fn(async () => {}) });
+    await until(() => node.log.length > 0 && !state.activity.syncing);
+    expect(node.detailQueries()).toEqual([]);
+    expect(rowOf(state)).toMatchObject({ bridgeTo: deposit.recipient });
+  });
+});
+
+describe("a .dusk name's registration", () => {
+  it("names the registration and the reservation before it, reading their calls alone, once", async () => {
+    const call = registrations.calls.find((c) => c.name === "shpongle.dusk");
+    const reservation = registrations.reservations.find((c) => c.name === "shpongle.dusk");
+    const withData = (all, { hash, data }) => ({ ...all, [hash]: { ...all[hash], tx: { ...all[hash].tx, callData: { ...all[hash].tx.callData, data } } } });
+    const node = fakeArchive({ details: withData(withData(fixture.details, call), reservation) });
+    const { state } = await popup();
+    const rows = activity.activityRows(overview(), state);
+    expect(rows.find((r) => r.hash === call.hash)).toMatchObject({ registeredName: "shpongle.dusk" });
+    expect(rows.find((r) => r.hash === reservation.hash)).toMatchObject({ reservedName: "shpongle.dusk" });
+    // The hashes whose call arguments were asked for: theirs alone, and not again by the next popup.
+    const withArgs = node.detailQueries().flatMap((l) => [...l.query.matchAll(/tx\(hash: "(\w{64})"\)[^}]*\{ contractId fnName data \}/g)].map((m) => m[1]));
+    expect(withArgs).toEqual([call.hash, reservation.hash]);
+    const asked = node.detailQueries().length;
+    await popup();
+    expect(node.detailQueries()).toHaveLength(asked);
+  });
+});
+
+describe("another chain under the node", () => {
+  it("starts the account's history over, and leaves other accounts' as they are", async () => {
+    const node = fakeArchive();
+    const store = await import("../../shared/activityStore.js");
+    const kept = (account) => store.listActivityEntries(store.activityOwnerKey("testnet", account), { limit: 1_000 });
+    await popup(overview(A));
+    await popup(overview(B));
+    const before = await kept(B);
+    node.genesis = "ff".repeat(32);
+    node.finalized = 4_656_000;
+    const { state } = await popup(overview(A));
+    expect(state.activity.entries.map((e) => e.blockHeight)).toEqual([4655845]);
+    expect(await kept(B)).toEqual(before);
+  });
+});
+
+describe("a node without the archive", () => {
+  it("is asked nothing by the next popup for an hour, and the console is told once", async () => {
+    const node = fakeArchive();
+    node.archive = false;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const open = async () => {
+      const state = { route: "home" };
+      activity.ensureActivity(overview(), { state, render: vi.fn(async () => {}) });
+      await until(() => state.activity.error);
+    };
+    await open();
+    const asked = node.log.length;
+    await open();
+    expect(node.log.length).toBe(asked);
+    expect(warn).toHaveBeenCalledTimes(1);
+    // An hour on, the next popup asks again.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60 * 60_000);
+    node.archive = true;
+    const { state } = await popup();
+    expect(state.activity.entries).toHaveLength(4);
+  });
 });
 
 describe("a change of archiver", () => {
@@ -147,6 +286,29 @@ describe("a wallet reset or lock", () => {
     expect(await store.listActivityEntries(owner)).toEqual([]);
     expect(await store.getActivityMeta(owner)).toBeNull();
     expect(await store.getCounterpartyNames("testnet", [FAUCET, SENDER])).toEqual(new Map());
+  });
+
+  it("stops quietly when the wallet is reset while a lookup is out", async () => {
+    const node = fakeArchive();
+    const held = Promise.withResolvers();
+    const reached = Promise.withResolvers();
+    node.before = async (query) => {
+      if (!query.includes("tx(hash:")) return;
+      node.before = null;
+      reached.resolve();
+      await held.promise;
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const state = { route: "home" };
+    activity.ensureActivity(overview(), { state, render: vi.fn(async () => {}) });
+    await reached.promise;
+    const store = await import("../../shared/activityStore.js");
+    await store.clearActivityStore();
+    held.resolve();
+    await until(() => !state.activity.syncing);
+    expect(state.activity).toMatchObject({ stale: true, error: null });
+    expect(warn).not.toHaveBeenCalled();
+    expect(await store.listActivityEntries(store.activityOwnerKey("testnet", A))).toEqual([]);
   });
 
   it("drops the activity when the wallet locks", async () => {

@@ -43,7 +43,7 @@ import {
 } from "./shieldedStore.js";
 import { contactsNamespace, deriveContactsKey, openContacts, sealContacts } from "./contactsCrypto.js";
 import { serializeStakeInfo } from "./transport.js";
-import { activityNetworkKey, assertArchive, historyArchiverUrl } from "./activityHistory.js";
+import { activityNetworkKey, archiveAt, historyArchiverUrl } from "./activityHistory.js";
 import {
   StaleActivityError,
   clearShieldedActivity,
@@ -2602,7 +2602,7 @@ export async function getShieldedHistory() {
 
     // A node without the archive reads no note tree either.
     const url = historyArchiverUrl({ nodeUrl, archiverUrl: engineConfig.archiverUrl });
-    await assertArchive(url);
+    await archiveAt(url).assertArchive();
     const notes = [];
     for (const r of rows) {
       notes.push({ nullifier: bytesToHex(r.nullifier), leaf: r.leaf, spent: r.spent, value: await noteValue(profile, r.nullifier, r.leaf) });

@@ -49,18 +49,6 @@ export function bridgeDepositRecipient({ nodeUrl, contractId, fnName, fnArgs, am
 }
 
 /**
- * The DuskEVM address a deposit to DuskEVM paid, from its call's arguments
- * as the archive gives them, in hex: null for anything bridgeCallFor
- * doesn't read as a deposit.
- * @param {{ nodeUrl?: string, contractId?: string, fnName?: string, data?: string }} call
- * @returns {string|null} the address with its checksum
- */
-export function depositRecipientOf({ nodeUrl, contractId, fnName, data } = {}) {
-  const call = bridgeCallFor({ nodeUrl, contractId, fnName, args: data });
-  return call?.kind === "deposit" ? call.recipient : null;
-}
-
-/**
  * Whether a call goes to the DuskEVM bridge's contracts on this network,
  * decoded or not. One that bridgeCallFor doesn't read is the bridge's
  * contract doing something the wallet can't vouch for.

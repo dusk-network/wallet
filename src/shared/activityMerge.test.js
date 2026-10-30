@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import fixture from "./fixtures/activity-testnet.json";
-import { activityEntry, parseHistoryEntry } from "./activityHistory.js";
+import { historyEntry, parseHistoryEntry } from "@dusk-network/app-core/history";
 import { historyRow, mergeActivity } from "./activityMerge.js";
 
 const [A, B, C] = Object.keys(fixture.accounts);
 const NODE = fixture.nodeUrl;
 const STORE = "4e2de1ed4f1fd53de83f4809a75367301c7645a546030fa199aff804e6854199";
 
-// A's history as readActivity gives it: parsed entries with their details.
+// A's history as Activity reads it: parsed entries with their details.
 function entry(account, height) {
   const raw = [...fixture.accounts[account].sender, ...fixture.accounts[account].receiver].find((e) => e.block_height === height);
   const parsed = parseHistoryEntry(account, raw);
   const tx = fixture.details[parsed.hash];
-  return activityEntry({
+  return historyEntry({
     ...parsed,
     value: parsed.value.toString(),
     timestamp: tx.blockTimestamp * 1000,
@@ -64,7 +64,7 @@ describe("historyRow", () => {
 
   it("reads a call that sent its value to its own account as the call it was, once its call data came", () => {
     // Derived: A's register call as it would read had it sent 5 DUSK to itself.
-    const call = activityEntry({ ...registered(), direction: "self", kind: "transfer", counterparty: A, value: "5000000000", payer: true });
+    const call = historyEntry({ ...registered(), direction: "self", kind: "transfer", counterparty: A, value: "5000000000", payer: true });
     expect(historyRow(call)).toMatchObject({ kind: "contract_call", direction: "out", amount: "0", contractId: STORE, fnName: "register" });
     expect(historyRow(call).to).toBeUndefined();
     expect(historyRow(call).deposit).toBeUndefined();
@@ -76,7 +76,7 @@ describe("historyRow", () => {
 describe("a deposit to DuskEVM from the chain", () => {
   it("keeps the DuskEVM address its call paid, which the wallet's own record of it may lack", async () => {
     const deposit = (await import("./fixtures/duskevm-deposit-history.json")).default;
-    const kept = activityEntry({ ...parseHistoryEntry(deposit.account, deposit.entry), value: "500000000", detailsAt: 1, success: true, bridgeTo: deposit.recipient });
+    const kept = historyEntry({ ...parseHistoryEntry(deposit.account, deposit.entry), value: "500000000", detailsAt: 1, success: true, bridgeTo: deposit.recipient });
     expect(historyRow(kept)).toMatchObject({ kind: "contract_call", deposit: "500000000", bridgeTo: deposit.recipient });
     const local = { hash: kept.hash, kind: "contract_call", status: "submitted", profileIndex: 0, deposit: "500000000" };
     const [row] = mergeActivity({ local: [local], history: [kept], profileIndex: 0 });

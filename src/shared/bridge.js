@@ -7,28 +7,9 @@
 // and DUSK coming in from another chain is paid from its migration routes'
 // payout accounts.
 
-import { duskEvmContracts, isBridgeContract } from "@dusk-network/networks/duskevm";
+import { isBridgeContract } from "@dusk-network/networks/duskevm";
 
 import { networkForNode } from "./nodeNetwork.js";
-
-const norm = (id) =>
-  String(id ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/^0x/, "");
-
-/**
- * Whether a synced history entry paid the bridge's deposit contract on this
- * network: a deposit to DuskEVM, whose DuskEVM address is in its call.
- * @param {{ counterparty?: string|null, contractId?: string }} entry
- * @param {string} nodeUrl
- * @returns {boolean}
- */
-export function depositsToBridge(entry, nodeUrl) {
-  const net = networkForNode(String(nodeUrl ?? ""));
-  const bridge = net ? duskEvmContracts(net)?.bridge : null;
-  return Boolean(bridge) && [entry?.counterparty, entry?.contractId].some((id) => norm(id) === bridge);
-}
 
 /**
  * What a transaction did through the bridge: "to" DuskEVM (a deposit), "from"

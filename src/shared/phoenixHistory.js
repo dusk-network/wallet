@@ -19,7 +19,7 @@
 // read off the stream the shielded sync downloads anyway when it starts from
 // the first note, or else from one stream of it (9.5 MB on Mainnet, once).
 
-import { archiveQuery, assertArchive, rememberNoArchive } from "./activityHistory.js";
+import { archiveAt } from "./activityHistory.js";
 import { TX_KIND } from "./constants.js";
 
 export const TRANSFER_CONTRACT = "0100000000000000000000000000000000000000000000000000000000000000";
@@ -181,18 +181,16 @@ export function blocksQuery(heights) {
 
 /**
  * The blocks at `heights`, HEIGHTS_PER_REQUEST a request, in their order;
- * nothing asked of a node without the archive (activityHistory.assertArchive).
+ * nothing asked of a node without the archive (activityHistory.archiveAt).
  * @returns {Promise<Map<number, { timestamp: number|null, events: object[], txs: Map<string, object> }>>}
  */
 export async function fetchBlocks(url, heights) {
-  await assertArchive(url);
+  const archive = archiveAt(url);
+  await archive.assertArchive();
   const out = new Map();
   for (let i = 0; i < heights.length; i += HEIGHTS_PER_REQUEST) {
     const batch = heights.slice(i, i + HEIGHTS_PER_REQUEST);
-    const data = await archiveQuery(url, blocksQuery(batch), { timeoutMs: 30_000 }).catch(async (error) => {
-      await rememberNoArchive(url, error);
-      throw error;
-    });
+    const data = await archive.query(blocksQuery(batch), { timeoutMs: 30_000 });
     for (const h of batch) {
       const block = data?.[`b${h}`];
       const seconds = Number(block?.header?.timestamp);

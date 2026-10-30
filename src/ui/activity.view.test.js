@@ -4,7 +4,7 @@ import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import fixture from "../shared/fixtures/activity-testnet.json";
-import { activityEntry, parseHistoryEntry } from "../shared/activityHistory.js";
+import { historyEntry, parseHistoryEntry } from "@dusk-network/app-core/history";
 import { TX_KIND } from "../shared/constants.js";
 import { openUrl } from "../platform/index.js";
 import { accessibleName, installFakeDom, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
@@ -49,7 +49,7 @@ function history(account) {
     const tx = fixture.details[parsed.hash];
     seen.set(
       parsed.hash,
-      activityEntry({
+      historyEntry({
         ...parsed,
         value: parsed.value.toString(),
         timestamp: tx.blockTimestamp * 1000,

@@ -33,7 +33,7 @@ const lower = (hash) => String(hash ?? "").toLowerCase();
 /**
  * A synced history entry as an Activity row, in the shape of the wallet's own
  * records (`amount`, `to`, `status`, …).
- * @param {object} entry - from activityHistory.readActivity
+ * @param {object} entry - as the account's history reads it (activityHistory.js)
  * @param {{ nodeUrl?: string }} [ctx]
  */
 export function historyRow(entry, { nodeUrl } = {}) {

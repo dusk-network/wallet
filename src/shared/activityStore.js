@@ -147,7 +147,8 @@ export async function getActivityMeta(ownerKey) {
 /**
  * Keep a sync step: its entries and the new sync state, which `update` makes
  * from the state kept now, in one transaction, so two pages syncing the same
- * account never lose each other's coverage.
+ * account never lose each other's coverage. When `update` throws, nothing of
+ * the step is kept.
  *
  * @param {string} ownerKey
  * @param {object[]} entries - each with a `hash` and a `blockHeight`
@@ -162,7 +163,12 @@ export async function commitActivityStep(ownerKey, entries, update, epoch) {
     const entryStore = tx.objectStore(STORE_ENTRIES);
     const req = metaStore.get(ownerKey);
     req.onsuccess = () => {
-      next = { ...update(req.result ?? null), ownerKey };
+      try {
+        next = { ...update(req.result ?? null), ownerKey };
+      } catch {
+        tx.abort();
+        return;
+      }
       metaStore.put(next);
     };
     for (const entry of entries) {
