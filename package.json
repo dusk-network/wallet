@@ -63,7 +63,7 @@
     "@vitest/coverage-v8": "^4.1.9",
     "buffer": "^5.7.1",
     "fake-indexeddb": "^6.2.5",
-    "storybook": "^8.6.18",
+    "storybook": "^8.6.19",
     "vite": "^6.4.3",
     "vitest": "^4.1.11"
   }
