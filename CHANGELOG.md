@@ -210,6 +210,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Updated the dApp quick start to use conflict-aware provider selection. ([dusk-network/connect#42](https://github.com/dusk-network/connect/issues/42))
 - Serialized DRC20 and DRC721 encoded call arguments before browser extension messaging. ([#79])
 - Generated fresh discovery UUIDv4 values per page/provider, separate from the stable bridge routing identifier. ([dusk-network/connect#42](https://github.com/dusk-network/connect/issues/42))
+- Waited for the archive to have every block a shielded history needs, rather than keep it incomplete.
 
 [#22]: https://github.com/dusk-network/wallet/issues/22
 [#113]: https://github.com/dusk-network/wallet/issues/113

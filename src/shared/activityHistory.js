@@ -3,7 +3,7 @@
 // as it was kept before: a deposit to DuskEVM keeps the DuskEVM address it
 // paid as `bridgeTo`, and a call to Dusk Domains that may reserve or register
 // a .dusk name keeps `reservation` and `registeredName` (knownCalls.js). The
-// shielded history is phoenixHistory.js's.
+// shielded history is walletEngine.js's getShieldedHistory.
 
 import { createArchive, createHistory, historyArchiveUrl } from "@dusk-network/app-core/history";
 
