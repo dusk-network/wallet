@@ -1,11 +1,9 @@
-// Plain words for the contract calls Activity knows, as the explorer names
-// them: a call to Dusk Domains by what it did to a .dusk name, a
-// registration by the name it registered, read from its arguments, and a
-// name reservation by the name of the registration that follows it. Only on
-// the network the contracts are on, and only for a node of that network: a
-// custom node's contract at the same ID could be anything. The facts are
-// @duskdomains/sdk's (call-facts), read from the call alone; the words are
-// the wallet's.
+// The contract calls Activity knows: a call to Dusk Domains by what it did to
+// a .dusk name, a registration by the name it registered, read from its
+// arguments, and a name reservation as its call makes it or a registration
+// reveals it. Only on the network the contracts are on, and only for a node
+// of that network: a custom node's contract at the same ID could be anything.
+// The facts are @duskdomains/sdk's (call-facts), read from the call alone.
 
 import { nameCall } from "@duskdomains/sdk/call-facts";
 import { contractRole } from "@duskdomains/sdk/releases";
@@ -13,18 +11,6 @@ import { contractRole } from "@duskdomains/sdk/releases";
 import { toBytes } from "./bytes.js";
 import { labelForNode } from "./nodeNetwork.js";
 import { duskNamesNetwork } from "./verifiedNames.js";
-
-// What a Dusk Domains call did, by what it is.
-const NAME_CALLS = Object.freeze({
-  reservation: "Name reservation (step 1 of 2)",
-  registration: "Registered a .dusk name",
-  renewal: "Renewed a .dusk name",
-  issue: "Issued a reserved .dusk name",
-  subname: "Created a .dusk subname",
-  "primary-set": "Set a primary .dusk name",
-  "primary-cleared": "Cleared the primary .dusk name",
-  records: "Changed a .dusk name's records",
-});
 
 /**
  * Whether `contractId` is one of Dusk Domains' contracts on the network of
@@ -64,22 +50,19 @@ function factsOf({ contractId, fnName, nodeUrl, args, account }) {
 }
 
 /**
- * What a known contract call did, or null for a contract the wallet doesn't
- * name on this network.
- * @param {{ contractId?: string, fnName?: string, nodeUrl?: string, registeredName?: string|null, reservedName?: string|null }} call
- *   `registeredName`: the name a registration registered, once read
- *   (registeredNameOf); `reservedName`: the name a reservation was for, once
- *   its registration followed (activityMerge.js)
- * @returns {{ app: "Dusk Domains", label: string } | null} `label`: the call
- *   in words, or the app's name for a function without them
+ * What calls to Dusk Domains on the node's network did, for Activity's rows
+ * (@dusk-network/app-core/activity's `nameCall`): a call's kind, and the
+ * name a registration registered and the reservation, as kept with the
+ * entry or the send (registeredNameOf, nameReservationOf): undefined while
+ * its call isn't read, so the send's stand, and null for a call read that
+ * has none. Null for any other call.
+ * @param {string} nodeUrl
+ * @returns {(call: { contractId: string, fnName: string }, kept: object) => { kind: string, name?: string|null, reservation?: string|null } | null}
  */
-export function knownCall({ contractId, fnName, nodeUrl, registeredName, reservedName } = {}) {
-  const fact = factsOf({ contractId, fnName, nodeUrl });
-  if (!fact) return null;
-  if (fact.kind === "registration" && registeredName) return { app: "Dusk Domains", label: `Registered ${registeredName}` };
-  if (fact.kind === "reservation" && reservedName) return { app: "Dusk Domains", label: `Reserved ${reservedName}` };
-  return { app: "Dusk Domains", label: NAME_CALLS[fact.kind] ?? "Dusk Domains" };
-}
+export const nameFactsFor = (nodeUrl) => (call, kept) => {
+  const fact = factsOf({ ...call, nodeUrl });
+  return fact && { kind: fact.kind, name: kept?.registeredName, reservation: kept?.reservation };
+};
 
 /**
  * The .dusk name a registration registered, read from its arguments:

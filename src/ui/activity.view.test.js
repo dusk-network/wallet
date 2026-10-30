@@ -4,7 +4,7 @@ import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import fixture from "../shared/fixtures/activity-testnet.json";
-import { activityEntry, parseHistoryEntry } from "../shared/activityHistory.js";
+import { historyEntry, parseHistoryEntry } from "@dusk-network/app-core/history";
 import { TX_KIND } from "../shared/constants.js";
 import { openUrl } from "../platform/index.js";
 import { accessibleName, installFakeDom, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
@@ -49,7 +49,7 @@ function history(account) {
     const tx = fixture.details[parsed.hash];
     seen.set(
       parsed.hash,
-      activityEntry({
+      historyEntry({
         ...parsed,
         value: parsed.value.toString(),
         timestamp: tx.blockTimestamp * 1000,
@@ -358,6 +358,19 @@ describe("a transaction's details", () => {
     // Back says so, and goes back where it came from.
     button("← Back").click();
     expect(state.route).toBe("activity");
+  });
+
+  it("says under Technical details how the wallet watched a send only until the chain's history has it", () => {
+    const tech = () => body().querySelectorAll("details.tx-tech .kv").map(visibleText);
+    const checked = "Last checkedThu 22 Oct 2026, 14:32 UTC";
+    open({ local: [{ ...sent, lastCheckedAt: sent.executedAt }] }, sent.hash);
+    expect(tech()).toContain(checked);
+    // A's register call, which the history has: when it was sent stays.
+    const { hash, contractId } = history(A).find((e) => e.fnName === "register");
+    const call = { hash, kind: TX_KIND.CONTRACT_CALL, contractId, fnName: "register", status: "executed", profileIndex: 0 };
+    open({ local: [{ ...call, submittedAt: sent.submittedAt, lastCheckedAt: sent.executedAt }] }, hash);
+    expect(tech()).toContain("SubmittedThu 22 Oct 2026, 14:32 UTC");
+    expect(tech()).not.toContain(checked);
   });
 
   it("hides the amount with Hide balances, but not the fee", () => {

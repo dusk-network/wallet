@@ -7,16 +7,11 @@
 // DUSK paid", and its amount shows muted, without a sign: nothing left.
 // Hide balances hides that fee too.
 
-import { routeForAccount } from "@dusk-network/networks";
-import { SOZU_FN, isSozuCall } from "@dusk-network/networks/sozu";
-
 import { formatDusk, formatFee, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { bridgeTransfer } from "../../../shared/bridge.js";
 import { isEvmAddress } from "../../../shared/bridgeCalls.js";
-import { knownCall } from "../../../shared/knownCalls.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
-import { labelForNode, networkForNode } from "../../../shared/nodeNetwork.js";
+import { labelForNode } from "../../../shared/nodeNetwork.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress, shortEvmAddress } from "../../lib/strings.js";
@@ -35,13 +30,6 @@ export const ACTIVITY_FILTERS = Object.freeze([
   { id: "staking", label: "Staking" },
   { id: "bridge", label: "Bridge" },
 ]);
-
-// The transfer contract, whose convert shields DUSK sent from a public account.
-const TRANSFER_CONTRACT = "0100000000000000000000000000000000000000000000000000000000000000";
-const isConvert = (tx, fn) =>
-  String(tx?.contractId ?? "").trim().toLowerCase().replace(/^0x/, "") === TRANSFER_CONTRACT && fn === "convert" && tx?.direction !== "in";
-// A shield, sent from this wallet or read from the chain: one that failed was only an attempt.
-const shieldName = (tx) => (String(tx?.status ?? "").toLowerCase() === "failed" ? "Shield attempt (failed)" : "Shield");
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -82,46 +70,18 @@ export function recentText(ms, now = Date.now()) {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${year}`;
 }
 
-/** A row's time: the block's, else when this wallet sent it; 0 when neither is known yet. */
-export function txTime(tx) {
-  return Number(tx?.timestamp ?? tx?.finalizedAt ?? tx?.executedAt ?? tx?.submittedAt) || 0;
-}
-
-/**
- * The block times Activity knows, by height, from the rows that have theirs:
- * the rows of one block share its time.
- * @param {object[]} rows
- * @returns {Map<number, number>}
- */
-export function blockTimes(rows) {
-  const times = new Map();
-  for (const row of rows ?? []) {
-    const height = Number(row?.blockHeight);
-    const t = Number(row?.timestamp) || 0;
-    if (Number.isFinite(height) && t > 0 && !times.has(height)) times.set(height, t);
-  }
-  return times;
-}
-
 /** What a synced row says in place of its time until its outcome comes. */
 export const SYNCING = "Syncing…";
 
 /**
  * When a row happened, for the line under its name, through `format`: its
- * own time, else its block's when another row of that block has it. A synced
- * row whose outcome isn't looked up yet gets its time with it: "Syncing…"
- * meanwhile.
- * @param {object} tx
- * @param {{ times?: Map<number, number>, format: (ms: number) => string }} opts
+ * own time, or its block's, as activityRows gives it. A synced row whose
+ * outcome isn't looked up yet gets its time with it: "Syncing…" meanwhile.
+ * @param {object} row - an Activity row (activity.js activityRows)
+ * @param {(ms: number) => string} format
  * @returns {string}
  */
-export function whenText(tx, { times, format }) {
-  const t = txTime(tx) || times?.get(Number(tx?.blockHeight)) || 0;
-  if (t) return format(t);
-  return tx?.source === "archive" && !tx?.detailsAt ? SYNCING : "";
-}
-
-const positive = (lux) => /^\d+$/.test(String(lux ?? "")) && safeBigInt(lux, 0n) > 0n;
+export const whenText = (row, format) => (row?.time ? format(row.time) : row?.source === "public" && !row?.detailsAt ? SYNCING : "");
 
 function tokenUnits(units, decimals) {
   const u = safeBigInt(units, 0n).toString();
@@ -132,11 +92,24 @@ function tokenUnits(units, decimals) {
   return frac ? `${pad.slice(0, -d)}.${frac}` : pad.slice(0, -d);
 }
 
+// What a Dusk Domains call did, by what it is.
+const NAME_CALLS = Object.freeze({
+  reservation: "Name reservation (step 1 of 2)",
+  registration: "Registered a .dusk name",
+  renewal: "Renewed a .dusk name",
+  issue: "Issued a reserved .dusk name",
+  subname: "Created a .dusk subname",
+  "primary-set": "Set a primary .dusk name",
+  "primary-cleared": "Cleared the primary .dusk name",
+  records: "Changed a .dusk name's records",
+});
+
 /**
  * Everything a row says about a transaction.
- * @param {object} tx - an Activity row (activity.js activityRows)
+ * @param {object} tx - an Activity row (activity.js activityRows): what the
+ *   transaction did, as @dusk-network/app-core/activity says it
  * @param {{ contactName?: (address: string) => string, nodeUrl?: string }} [ctx] - `nodeUrl`:
- *   the overview's network, for a record that doesn't name its own
+ *   the overview's network
  * @returns {{
  *   icon: "out"|"in"|"stake"|"bridge"|"shield"|"call",
  *   category: "sent"|"received"|"staking"|"bridge"|"other",
@@ -151,55 +124,38 @@ function tokenUnits(units, decimals) {
  *   it went through
  */
 export function describeTx(tx, { contactName, nodeUrl } = {}) {
-  const kind = String(tx?.kind ?? "").toLowerCase();
   const dir = tx?.direction;
-  const asset = tx?.asset && typeof tx.asset === "object" ? tx.asset : null;
+  const value = tx?.value ?? 0n;
+  const asset = tx?.sent?.asset && typeof tx.sent.asset === "object" ? tx.sent.asset : null;
   const fn = String(tx?.fnName ?? asset?.action ?? "");
-
-  // The network's file, for the names it gives contracts and accounts.
-  const network = tx?.nodeUrl || nodeUrl;
-  const net = networkForNode(String(network ?? ""));
   // The other side: a saved contact's own name, with its .dusk name (as
-  // typed when sending, else verified) beside it; else the .dusk name; else
-  // what the network's file calls it; else its short address.
+  // verified, else as typed when sending) beside it; else the .dusk name;
+  // else what the network's file calls it; else its short address.
   const party = (address, typed = "") => {
     const addr = String(address ?? "").trim();
     const contact = String((addr && contactName?.(addr)) ?? "").trim();
-    const dusk = [typed, tx?.counterpartyName].map((s) => String(s ?? "").trim()).find(Boolean) ?? "";
+    const dusk = [tx?.counterpartyName, typed].map((s) => String(s ?? "").trim()).find(Boolean) ?? "";
     if (contact) {
       const alias = dusk && dusk.toLowerCase() !== contact.toLowerCase() ? dusk : "";
       return { name: contact, alias, address: addr || null, isAddress: false };
     }
     if (dusk) return { name: dusk, address: addr || null, isAddress: false };
-    const label = labelForNode(network, addr);
+    const label = labelForNode(nodeUrl, addr);
     if (label) return { name: label, address: addr, isAddress: false };
     if (addr) return { name: shortAddress(addr), address: addr, isAddress: true };
     return null;
   };
-  const dusk = (lux, sign) => (positive(lux) ? { sign, value: formatDusk(lux), unit: "DUSK" } : null);
+  const dusk = (lux, sign) => (lux > 0n ? { sign, value: formatDusk(lux), unit: "DUSK" } : null);
 
   let d;
-  const bridge = bridgeTransfer(tx, network);
-  // A transfer to or from another chain through one of the network's bridge
-  // routes: to a service route's account, or from a migration's payout account.
-  const into = dir === "in";
-  const route =
-    bridge || !net || kind !== TX_KIND.TRANSFER || dir === "self" ? null : routeForAccount(net, into ? tx?.from : tx?.to, into ? "in" : "out");
-  // A known contract's call, by what it did.
-  const named =
-    kind === TX_KIND.CONTRACT_CALL
-      ? knownCall({ contractId: tx?.contractId, fnName: fn, nodeUrl: network, registeredName: tx?.registeredName, reservedName: tx?.reservedName })
-      : null;
-  if (bridge) {
-    const value = tx?.amount ?? tx?.deposit;
-    // A deposit's DuskEVM address, read from its call: the one the wallet
-    // approved, or the chain's record of it.
-    const evm = /^0x[0-9a-fA-F]{40}$/.test(String(tx?.bridgeTo ?? "")) ? String(tx.bridgeTo) : null;
+  if (tx?.bridge) {
+    // DuskEVM's bridge: DUSK sent to DuskEVM, at the address its call names
+    // there; DUSK a withdrawal paid back; or a withdrawal's proof or claim.
+    const { step, to: evm } = tx.bridge;
     d =
-      bridge === "to"
+      step === "deposit"
         ? {
             icon: "bridge",
-            category: "bridge",
             lead: evm ? "Bridge to DuskEVM" : "Bridge",
             name: evm ? `To ${shortEvmAddress(evm)}` : "To DuskEVM",
             word: evm ? "Bridge to DuskEVM" : "Bridge",
@@ -207,83 +163,70 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
             evm: Boolean(evm),
             recipient: evm,
             evmChain: "DuskEVM",
-            amount: dusk(positive(tx?.deposit) ? tx.deposit : value, MINUS),
+            amount: dusk(value, MINUS),
           }
-        : bridge === "from"
-        ? { icon: "bridge", category: "bridge", lead: "Bridge", name: "From DuskEVM", word: "Bridge", amount: dusk(value, "+") }
+        : step === "withdrawal"
+        ? { icon: "bridge", lead: "Bridge", name: "From DuskEVM", word: "Bridge", amount: dusk(value, "+") }
         : {
             icon: "bridge",
-            category: "bridge",
             lead: "Bridge",
-            name: /^prove/i.test(fn) ? "Prove withdrawal" : /^finalize/i.test(fn) ? "Finalize withdrawal" : "DuskEVM bridge",
+            name: step === "proof" ? "Prove withdrawal" : step === "claim" ? "Finalize withdrawal" : "DuskEVM bridge",
             word: "Bridge",
             amount: null,
           };
-  } else if (route) {
+  } else if (tx?.route) {
     // To or from another chain, by the route's name for it, under Bridge,
     // with the bridge's account it went through; to one, the address there
     // is the memo the bridge pays out to.
-    const chain = route.chain.name;
+    const chain = tx.route.chain.name;
     const memo = String(tx?.memo ?? "").trim();
     d =
-      route.kind === "service"
+      tx.route.kind === "service"
         ? {
             icon: "bridge",
-            category: "bridge",
             lead: `Bridge to ${chain}`,
             name: `To ${chain}`,
             word: "Bridge",
             recipient: isEvmAddress(memo) ? memo : null,
             evmChain: chain,
-            via: party(tx?.to, tx?.toName),
-            amount: dusk(tx?.amount, MINUS),
+            via: party(tx?.counterparty, tx?.toName),
+            amount: dusk(value, MINUS),
           }
-        : { icon: "bridge", category: "bridge", lead: "Bridge", name: `From ${chain}`, word: "Bridge", via: party(tx?.from), amount: dusk(tx?.amount, "+") };
-  } else if (kind === TX_KIND.TRANSFER) {
-    if (dir === "in") {
-      const p = party(tx?.from);
-      d = { icon: "in", category: "received", lead: p ? "Received from" : "", ...(p ?? { name: "Received", generic: true }), word: "Received", amount: dusk(tx?.amount, "+") };
-    } else if (dir === "self") {
-      d = { icon: "out", category: "sent", lead: "Sent", name: "To yourself", word: "Sent", amount: dusk(tx?.amount, "") };
-    } else {
-      const p = party(tx?.to, tx?.toName);
-      d = { icon: "out", category: "sent", lead: p ? "Sent to" : "", ...(p ?? { name: "Sent", generic: true }), word: "Sent", amount: dusk(tx?.amount, MINUS) };
-    }
-  } else if (kind === TX_KIND.SHIELD || kind === TX_KIND.UNSHIELD) {
-    const shield = kind === TX_KIND.SHIELD;
-    d = {
-      icon: "shield",
-      category: "other",
-      name: shield ? shieldName(tx) : "Unshield",
-      word: shield ? "Public to shielded" : "Shielded to public",
-      amount: dusk(tx?.amount, ""),
-    };
-  } else if (kind === TX_KIND.CONTRACT_CALL && isConvert(tx, fn)) {
-    // A shield as the chain records it.
-    const value = positive(tx?.deposit) ? tx.deposit : tx?.amount;
-    d = {
-      icon: "shield",
-      category: "other",
-      name: shieldName(tx),
-      word: "Public to shielded",
-      amount: dusk(value, ""),
-    };
-  } else if (kind === TX_KIND.STAKE) {
-    d = { icon: "stake", category: "staking", lead: "Native staking", name: "Stake", word: "Staking", amount: dusk(tx?.amount, MINUS) };
-  } else if (kind === TX_KIND.UNSTAKE) {
-    d = { icon: "stake", category: "staking", lead: "Native staking", name: "Unstake", word: "Staking", amount: dusk(tx?.amount, "+") };
-  } else if (kind === TX_KIND.WITHDRAW_REWARD) {
-    d = { icon: "stake", category: "staking", lead: "Native staking", name: "Claim rewards", word: "Staking", amount: dusk(tx?.amount, "+") };
-  } else if (net && isSozuCall(net, { contractId: tx?.contractId, fnName: fn })) {
-    const stake = fn === SOZU_FN.STAKE;
+        : { icon: "bridge", lead: "Bridge", name: `From ${chain}`, word: "Bridge", via: party(tx?.counterparty), amount: dusk(value, "+") };
+  } else if (tx?.sozu) {
+    const stake = tx.sozu === "stake";
     d = {
       icon: "stake",
-      category: "staking",
       lead: "Liquid staking",
       name: stake ? "Staked with Sozu" : "Unstaked from Sozu",
       word: "Staking",
-      amount: stake ? dusk(positive(tx?.deposit) ? tx.deposit : tx?.amount, MINUS) : dir === "in" ? dusk(tx?.amount, "+") : null,
+      amount: stake ? dusk(value, MINUS) : dir === "in" ? dusk(value, "+") : null,
     };
+  } else if (tx?.kind === TX_KIND.TRANSFER) {
+    if (dir === "in") {
+      const p = party(tx?.counterparty);
+      d = { icon: "in", lead: p ? "Received from" : "", ...(p ?? { name: "Received", generic: true }), word: "Received", amount: dusk(value, "+") };
+    } else if (dir === "self") {
+      d = { icon: "out", lead: "Sent", name: "To yourself", word: "Sent", amount: dusk(value, "") };
+    } else {
+      const p = party(tx?.counterparty, tx?.toName);
+      d = { icon: "out", lead: p ? "Sent to" : "", ...(p ?? { name: "Sent", generic: true }), word: "Sent", amount: dusk(value, MINUS) };
+    }
+  } else if (tx?.kind === TX_KIND.SHIELD || tx?.kind === TX_KIND.UNSHIELD) {
+    // A shield sent from this wallet or read from the chain: one that failed was only an attempt.
+    const shield = tx.kind === TX_KIND.SHIELD;
+    d = {
+      icon: "shield",
+      name: shield ? (tx.status === "failed" ? "Shield attempt (failed)" : "Shield") : "Unshield",
+      word: shield ? "Public to shielded" : "Shielded to public",
+      amount: dusk(value, ""),
+    };
+  } else if (tx?.kind === TX_KIND.STAKE) {
+    d = { icon: "stake", lead: "Native staking", name: "Stake", word: "Staking", amount: dusk(value, MINUS) };
+  } else if (tx?.kind === TX_KIND.UNSTAKE) {
+    d = { icon: "stake", lead: "Native staking", name: "Unstake", word: "Staking", amount: dusk(value, "+") };
+  } else if (tx?.kind === TX_KIND.WITHDRAW_REWARD) {
+    d = { icon: "stake", lead: "Native staking", name: "Claim rewards", word: "Staking", amount: dusk(value, "+") };
   } else if (asset && String(asset.type ?? "") === "DRC20") {
     const sym = String(asset.symbol ?? "").trim() || "Token";
     const op = String(asset.op ?? "").toLowerCase();
@@ -292,7 +235,6 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
       const p = party(asset.to);
       d = {
         icon: "out",
-        category: "sent",
         lead: p ? "Sent to" : "",
         ...(p ?? { name: `Sent ${sym}`, generic: true }),
         word: "Sent",
@@ -304,7 +246,6 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
       const revoke = !asset.isMax && units === "0" && (asset.valueUnits ?? asset.value) != null;
       d = {
         icon: "call",
-        category: "sent",
         ...(p ? { ...p, lead: revoke ? `Revoked ${sym} for` : `Approved ${sym} for` } : { name: `${revoke ? "Revoke" : "Approve"} ${sym}` }),
         word: revoke ? "Revoke" : "Approval",
         amount: asset.isMax
@@ -314,51 +255,49 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
           : null,
       };
     } else {
-      d = { icon: "call", category: "sent", name: `${sym} ${fn || "call"}`, word: "Contract", amount: null };
+      d = { icon: "call", name: `${sym} ${fn || "call"}`, word: "Contract", amount: null };
     }
   } else if (asset && String(asset.type ?? "") === "DRC721") {
     const sym = String(asset.symbol ?? "").trim() || "NFT";
     const id = asset.tokenId != null ? ` #${asset.tokenId}` : "";
-    d = { icon: "call", category: "sent", name: `${sym}${id}`, word: "NFT", amount: null };
-  } else if (named) {
-    const value = positive(tx?.deposit) ? tx.deposit : tx?.amount;
+    d = { icon: "call", name: `${sym}${id}`, word: "NFT", amount: null };
+  } else if (tx?.nameCall) {
+    // A call to Dusk Domains, by what it did: a registration and a
+    // reservation by their name, once read.
+    const { kind, name } = tx.nameCall;
     d = {
-      icon: positive(value) ? "out" : "call",
-      category: dir === "in" ? "received" : "sent",
-      lead: named.app,
-      name: named.label,
-      word: named.app,
+      icon: value > 0n ? "out" : "call",
+      lead: "Dusk Domains",
+      name: kind === "registration" && name ? `Registered ${name}` : kind === "reservation" && name ? `Reserved ${name}` : NAME_CALLS[kind] ?? "Dusk Domains",
+      word: "Dusk Domains",
       amount: dusk(value, dir === "in" ? "+" : MINUS),
     };
-  } else if (kind === TX_KIND.CONTRACT_CALL) {
-    const value = positive(tx?.deposit) ? tx.deposit : tx?.amount;
-    const moved = positive(value);
+  } else if (tx?.kind === TX_KIND.CONTRACT_CALL) {
     // The contract by what the network's file calls it, where it does, as
     // a known contract's call names its app.
-    const label = labelForNode(network, tx?.contractId);
+    const label = labelForNode(nodeUrl, tx?.contractId);
     d = {
-      icon: moved ? "out" : "call",
-      category: dir === "in" ? "received" : "sent",
+      icon: value > 0n ? "out" : "call",
       ...(label ? { lead: label } : {}),
       name: fn ? `Call ${fn}` : "Contract call",
       word: label ?? "Contract",
       amount: dusk(value, dir === "in" ? "+" : MINUS),
     };
   } else {
-    d = { icon: "call", category: "other", name: "Transaction", word: "", amount: dusk(tx?.amount, "") };
+    d = { icon: "call", name: "Transaction", word: "", amount: dusk(value, "") };
   }
 
-  const status = String(tx?.status ?? "submitted").toLowerCase();
-  // A row the archive has is final on chain, its outcome looked up after.
-  const final = tx?.source === "archive" || tx?.source === "both";
+  // Its status in the words of a transaction's details (txDisplay.js): one
+  // the chain's history has is final, its outcome looked up after.
+  const status = tx?.dropped ? "removed" : tx?.status === "pending" ? "submitted" : String(tx?.status ?? "");
+  const final = tx?.source !== "sent";
   const tone = txStatusTone(status, { final });
-  const failed = status === "failed";
+  const failed = tx?.status === "failed";
   // Failed, or dropped before it ran: the amount stayed in the wallet.
-  const unsent = failed || status === "removed";
+  const unsent = failed || Boolean(tx?.dropped);
   const amount = d.amount && unsent ? { ...d.amount, sign: "", muted: true } : d.amount;
   // A deposit to DuskEVM that arrived there: its transaction there, and when (bridgeArrival.js).
-  const arrival = d.evm && status === "executed" && /^0x[0-9a-fA-F]{64}$/.test(String(tx?.arrival?.hash ?? "")) ? String(tx.arrival.hash) : null;
-  const arrivedAt = arrival && Number(tx.arrival.at) > 0 ? Number(tx.arrival.at) : null;
+  const arrival = d.evm ? tx.bridge.arrival : null;
   return {
     lead: "",
     alias: "",
@@ -370,16 +309,17 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     via: null,
     generic: false,
     ...d,
-    note: String(tx?.privacy ?? "").toLowerCase() === "shielded" && kind !== TX_KIND.SHIELD && kind !== TX_KIND.UNSHIELD ? "Shielded" : "",
-    status,
+    category: tx?.category,
+    note: tx?.privacy === "shielded" && tx?.kind !== TX_KIND.SHIELD && tx?.kind !== TX_KIND.UNSHIELD ? "Shielded" : "",
+    status: String(tx?.status ?? ""),
     tone,
     amount,
     statusWord: arrival ? "Arrived" : tone === "ok" ? null : txStatusWord(status, { final }),
     failed,
     unsent,
-    fee: tx?.feePaid != null && tx.feePaid !== "" ? formatFee(tx.feePaid) : null,
-    arrival,
-    arrivedAt,
+    fee: tx?.fee != null ? formatFee(tx.fee) : null,
+    arrival: arrival?.hash ?? null,
+    arrivedAt: arrival?.at || null,
   };
 }
 

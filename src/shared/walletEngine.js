@@ -43,7 +43,7 @@ import {
 } from "./shieldedStore.js";
 import { contactsNamespace, deriveContactsKey, openContacts, sealContacts } from "./contactsCrypto.js";
 import { serializeStakeInfo } from "./transport.js";
-import { activityNetworkKey, assertArchive, historyArchiverUrl } from "./activityHistory.js";
+import { activityNetworkKey, archiveAt, historyArchiverUrl } from "./activityHistory.js";
 import {
   StaleActivityError,
   clearShieldedActivity,
@@ -53,14 +53,7 @@ import {
   putNoteHeightPool,
   putShieldedHistoryRecord,
 } from "./activityStore.js";
-import {
-  buildShieldedHistory,
-  createLeafHeightTap,
-  fetchBlocks,
-  leafInfo,
-  pickHeights,
-  readNoteHeights,
-} from "./phoenixHistory.js";
+import { createLeafHeightTap, shieldedHistory } from "@dusk-network/app-core/shielded";
 
 const phoenixSpendLocks = new Map();
 const transactionLocks = new Map();
@@ -2505,29 +2498,25 @@ async function keepNoteHeights(tap, total, epochPromise) {
   }
 }
 
-// The note tree's heights on this network: kept, read once from the tree,
-// and extended with the leaves added since (a custom network's tree keeps
-// growing). Null while the tree can't be read.
-async function noteHeightPool(network, nodeUrl, epoch) {
-  const key = activityNetworkKey(nodeUrl);
-  const kept = await getNoteHeightPool(key).catch(() => null);
-  const have = kept?.heights?.length && Number.isSafeInteger(kept.notes) ? BigInt(kept.notes) : 0n;
-  const total = await readTransferContractBookmark(network);
-  if (!total) return null;
-  if (have && total <= have) return kept.heights;
-  const added = await readNoteHeights(network, total, { from: have });
-  if (!added) return null;
-  const heights = have ? [...new Set([...kept.heights, ...added])] : added;
-  await putNoteHeightPool(key, heights, Number(total), epoch).catch(() => {});
-  return heights;
-}
-
 // One note's value, from the profile's keys.
-async function noteValue(profile, nullifier, leaf) {
+async function noteValue(profile, { nullifier, leaf }) {
   const keeper = new Bookkeeper({ address: async () => new Map([[nullifier, leaf]]) });
   const balance = await keeper.balance(profile.address);
   return BigInt(balance?.value ?? 0n);
 }
+
+// A shielded history entry as this device keeps it, and back.
+const shieldedRow = (e) => ({
+  hash: e.hash, source: "shielded", privacy: "shielded", kind: e.kind, direction: e.direction,
+  amount: e.direction === "self" ? undefined : e.value, feePaid: e.fee ?? undefined,
+  status: e.success ? "executed" : "failed", error: e.error, timestamp: e.timestamp ?? undefined,
+  blockHeight: e.blockHeight,
+});
+const shieldedEntry = (row) => ({
+  hash: row.hash, kind: row.kind, direction: row.direction, value: row.amount ?? "0", fee: row.feePaid ?? null,
+  success: row.status !== "failed", ...(row.error ? { error: row.error } : {}), timestamp: row.timestamp ?? null,
+  blockHeight: row.blockHeight,
+});
 
 let shieldedHistoryRun = null;
 
@@ -2541,11 +2530,13 @@ async function forgetShieldedActivity(nodeUrl) {
 }
 
 /**
- * The selected profile's shielded history (phoenixHistory.js), worked out
- * once its shielded notes are synced and kept from then on. A profile
- * without shielded notes reads nothing. One build at a time per profile.
+ * The selected profile's shielded history (@dusk-network/app-core/shielded),
+ * worked out once its shielded notes are synced and kept from then on. A
+ * profile without shielded notes reads nothing. One read at a time per
+ * profile.
  *
- * @returns {Promise<{ profileIndex: number, entries: object[], pending?: boolean }>}
+ * @returns {Promise<{ profileIndex: number, entries: object[], pending?: boolean }>} `entries`: as
+ *   the package gives them
  */
 export async function getShieldedHistory() {
   if (!state.unlocked) throw new Error("Wallet locked");
@@ -2557,85 +2548,60 @@ export async function getShieldedHistory() {
   const chain = shieldedChainGeneration;
   // The keys the notes' values are read with: this profile's, whatever is selected later.
   const profile = getCurrentProfile();
-  const key = `${activityNetworkKey(nodeUrl)}::${walletId}::${profileIndex}`;
+  const network = activityNetworkKey(nodeUrl);
+  const key = `${network}::${walletId}::${profileIndex}`;
   if (shieldedHistoryRun?.key === key && shieldedHistoryRun.generation === generation) return shieldedHistoryRun.promise;
-  // A lock, a reset, another profile, another node or a replaced chain since
-  // the build began: it stops, and keeps nothing.
-  const assertCurrent = () => {
-    if (
-      !state.unlocked ||
-      unlockGeneration !== generation ||
-      shieldedChainGeneration !== chain ||
-      getWalletId() !== walletId ||
-      getSelectedProfileIndex() !== profileIndex ||
-      engineConfig.nodeUrl !== nodeUrl
-    ) {
-      throw new Error("The wallet changed while its shielded history was read");
-    }
-  };
   const promise = (async () => {
     // A reset of the activity store meanwhile refuses the write (StaleActivityError).
     const epoch = await getActivityEpoch();
+    // The notes, then whether the sync is done: one that started over while
+    // they were read leaves them unfinished, and the history pending.
     const [unspent, spent] = await Promise.all([
       getNotesMap(netKey, walletId, profileIndex),
       getSpentNotesMap(netKey, walletId, profileIndex),
     ]);
-    assertCurrent();
-    // Notes still being discovered aren't the history yet: what is known
-    // shows, marked pending, and is asked for again once they are.
-    const syncing = state.shielded.status.state !== "done";
-    const snapshot = (entries) => (syncing ? { profileIndex, entries, pending: true } : { profileIndex, entries });
-    if (!unspent.size && !spent.size) return snapshot([]);
-    const rows = [
-      ...[...unspent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: false })),
-      ...[...spent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: true })),
-    ];
-    // The notes it was worked out from: the same set needs no new lookups.
-    const fingerprint = rows
-      .map((r) => `${leafInfo(r.leaf).pos}${r.spent ? "s" : ""}`)
-      .sort()
-      .join(",");
-    const kept = await getShieldedHistoryRecord(key).catch(() => null);
-    assertCurrent();
-    if (kept?.fingerprint === fingerprint) return snapshot(kept.entries);
-    if (syncing) return snapshot(kept?.entries ?? []);
-
-    // A node without the archive reads no note tree either.
-    const url = historyArchiverUrl({ nodeUrl, archiverUrl: engineConfig.archiverUrl });
-    await assertArchive(url);
-    const notes = [];
-    for (const r of rows) {
-      notes.push({ nullifier: bytesToHex(r.nullifier), leaf: r.leaf, spent: r.spent, value: await noteValue(profile, r.nullifier, r.leaf) });
-    }
-    assertCurrent();
-    const network = await ensureNetwork();
-    const pool = await noteHeightPool(network, nodeUrl, epoch);
-    assertCurrent();
-    const real = [...new Set(notes.map((n) => leafInfo(n.leaf).height))];
-    // Without other heights to ask among, the node isn't asked at all; nor for
-    // a height the tree as read doesn't have, as no decoy could be one.
-    const inTree = new Set(pool ?? []);
-    if (!pool || real.some((h) => !inTree.has(h))) return { profileIndex, entries: kept?.entries ?? [], pending: true };
-    const { heights, decoys } = pickHeights(pool, real, { keep: kept?.decoys ?? [] });
-    // Not one other height to ask among: asking would name the profile's own.
-    if (!decoys.length) return { profileIndex, entries: kept?.entries ?? [], pending: true };
-    // The decoys are kept before any of them is asked for, with what was
-    // kept before: a build that fails partway asks among the same ones next
-    // time, so no two requests differ in their decoys alone. Nothing is
-    // asked unless they are kept.
-    const before = new Set(kept?.decoys ?? []);
-    if (decoys.length !== before.size || decoys.some((h) => !before.has(h))) {
-      await putShieldedHistoryRecord(key, { fingerprint: kept?.fingerprint ?? "", entries: kept?.entries ?? [], decoys }, epoch);
-      assertCurrent();
-    }
-    const blocks = await fetchBlocks(url, heights);
-    assertCurrent();
-    const entries = buildShieldedHistory({ notes, blocks });
-    // Kept unless the wallet was reset meanwhile; a store that can't keep it asks again next time.
-    await putShieldedHistoryRecord(key, { fingerprint, entries, decoys }, epoch).catch((error) => {
-      if (error instanceof StaleActivityError) throw error;
+    const synced = state.shielded.status.state === "done";
+    const { entries, pending } = await shieldedHistory({
+      archive: archiveAt(historyArchiverUrl({ nodeUrl, archiverUrl: engineConfig.archiverUrl })),
+      // A lock, a reset, another profile, another node or a replaced chain
+      // since the read began: it stops, and keeps nothing.
+      isCurrent: () =>
+        state.unlocked &&
+        unlockGeneration === generation &&
+        shieldedChainGeneration === chain &&
+        getWalletId() === walletId &&
+        getSelectedProfileIndex() === profileIndex &&
+        engineConfig.nodeUrl === nodeUrl,
+      notes: async () => [
+        ...[...unspent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: false })),
+        ...[...spent].map(([nullifier, leaf]) => ({ nullifier, leaf, spent: true })),
+      ],
+      valueOf: (note) => noteValue(profile, note),
+      tree: {
+        size: async () => readTransferContractBookmark(await ensureNetwork()),
+        leaves: async (from) =>
+          (await ensureNetwork()).contracts.transferContract.call.leaves_from_pos(Bookmark.from(from).data, {
+            headers: { "Rusk-Feeder": "true" },
+          }),
+      },
+      store: {
+        get: async () => {
+          const kept = await getShieldedHistoryRecord(key);
+          return kept && { ...kept, entries: kept.entries.map(shieldedEntry) };
+        },
+        // Kept unless the wallet was reset meanwhile; a store that can't keep it asks again next time.
+        put: (record) =>
+          putShieldedHistoryRecord(key, { ...record, entries: record.entries.map(shieldedRow) }, epoch).catch((error) => {
+            if (error instanceof StaleActivityError) throw error;
+          }),
+      },
+      treeHeights: {
+        get: () => getNoteHeightPool(network),
+        put: ({ heights, notes }) => putNoteHeightPool(network, heights, notes, epoch),
+      },
+      synced,
     });
-    return { profileIndex, entries };
+    return pending ? { profileIndex, entries, pending } : { profileIndex, entries };
   })().finally(() => {
     if (shieldedHistoryRun?.promise === promise) shieldedHistoryRun = null;
   });

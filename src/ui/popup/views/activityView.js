@@ -12,20 +12,18 @@ import { bracketTitle } from "../../components/BracketTitle.js";
 import { subnav } from "../../components/Subnav.js";
 import { activityRows, hasMoreActivity, showMoreActivity } from "../activity.js";
 import { activityExportPanel } from "../activityExport.js";
-import { ACTIVITY_FILTERS, blockTimes, clockText, contactNames, dayLabel, describeTx, inFilter, recentText, txRowEl, txTime, whenText } from "./txRow.js";
+import { ACTIVITY_FILTERS, clockText, contactNames, dayLabel, describeTx, inFilter, recentText, txRowEl, whenText } from "./txRow.js";
 
 /** Rows Home shows. */
 export const RECENT_ROWS = 5;
 
 // A row's time for its day: its own, else an estimate from its block height
 // (blocks come about every 10 seconds) until its details arrive.
-function rowTime(tx, state, times) {
-  const own = txTime(tx) || times?.get(Number(tx?.blockHeight)) || 0;
-  if (own) return own;
+function rowTime(row, state) {
+  if (row.time) return row.time;
   const meta = state?.activity?.meta;
-  const height = Number(tx?.blockHeight);
-  if (!meta?.headAt || !Number.isFinite(height)) return 0;
-  return meta.headAt - Math.max(0, Number(meta.finalized) - height) * 10_000;
+  if (!meta?.headAt || row.blockHeight === null) return 0;
+  return meta.headAt - Math.max(0, Number(meta.finalized) - row.blockHeight) * 10_000;
 }
 
 // Nothing to show yet: say whether the history is still being looked for.
@@ -52,8 +50,7 @@ export function recentActivitySection(ov, { state, actions } = {}) {
   const rows = activityRows(ov, state);
   const recent = rows.slice(0, RECENT_ROWS);
   const now = Date.now();
-  const times = blockTimes(rows);
-  const when = (tx) => whenText(tx, { times, format: (t) => recentText(t, now) });
+  const when = (row) => whenText(row, (t) => recentText(t, now));
 
   const seeAll = rows.length
     ? h(
@@ -88,10 +85,8 @@ export function activityView(ov, { state, actions } = {}) {
   const contactName = contactNames(state, actions);
   const filter = ACTIVITY_FILTERS.some((f) => f.id === state?.activityFilter) ? state.activityFilter : "all";
   const nodeUrl = String(ov?.nodeUrl ?? "");
-  const all = activityRows(ov, state);
-  const times = blockTimes(all);
-  const rows = all.filter((tx) => inFilter(describeTx(tx, { contactName, nodeUrl }), filter));
-  const when = (tx) => whenText(tx, { times, format: clockText });
+  const rows = activityRows(ov, state).filter((tx) => inFilter(describeTx(tx, { contactName, nodeUrl }), filter));
+  const when = (row) => whenText(row, clockText);
 
   const chips = h(
     "div",
@@ -116,7 +111,7 @@ export function activityView(ov, { state, actions } = {}) {
   const now = Date.now();
   const days = [];
   for (const tx of rows) {
-    const t = rowTime(tx, state, times);
+    const t = rowTime(tx, state);
     const label = t ? dayLabel(t, now) : "Earlier";
     const last = days[days.length - 1];
     if (last?.label === label) last.rows.push(tx);

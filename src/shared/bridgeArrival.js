@@ -12,7 +12,6 @@
 // reset, in this page or another, no page shows the old wallet's arrivals,
 // and a check that began before it keeps nothing.
 
-import { bridgeTransfer } from "./bridge.js";
 import { fetchWithTimeout } from "./networkStatus.js";
 import { networkForNode } from "./nodeNetwork.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
@@ -63,11 +62,11 @@ export function loadArrivals() {
 }
 
 /**
- * A deposit's arrival on DuskEVM, as found and kept, or null.
- * @param {string} hash - the deposit's transaction on Dusk
- * @returns {{ hash: string, at: number } | null}
+ * The deposits' arrivals on DuskEVM, as found and kept, by the deposit's
+ * transaction on Dusk: activityRows's `arrivals`.
+ * @returns {Map<string, { hash: string, at: number }>}
  */
-export const arrivalOf = (hash) => kept.get(String(hash ?? "").toLowerCase()) ?? null;
+export const keptArrivals = () => kept;
 
 /**
  * An arrival's transaction on DuskEVM's explorer, or null.
@@ -80,27 +79,28 @@ export function arrivalUrl(nodeUrl, evmHash) {
   return base && EVM_TX.test(String(evmHash ?? "")) ? `${base.replace(/\/+$/, "")}/tx/${evmHash}` : null;
 }
 
-// What a deposit paid, in lux, as Activity shows it.
-const depositLux = (tx) => [tx?.deposit, tx?.amount].map((v) => String(v ?? "")).find((v) => /^\d+$/.test(v) && BigInt(v) > 0n) ?? null;
+// What a deposit paid, in lux, as its call says; null for nothing.
+const depositLux = (row) => {
+  const lux = row?.bridge?.amount ?? row?.value ?? 0n;
+  return lux > 0n ? lux : null;
+};
 
 // When a deposit went through: its Dusk block's time, as the archive or the
 // node gave it; 0 until one did. Never the wallet's clock, which may be off.
-const depositTime = (tx) => Number(tx?.timestamp ?? tx?.finalizedAt) || 0;
+const depositTime = (row) => Number(row?.entry?.timestamp ?? row?.sent?.finalizedAt) || 0;
 
 /**
  * Whether an Activity row is a deposit to DuskEVM on its way: gone through on
  * Dusk this week, its block's time known, to a DuskEVM address, on a network
  * with DuskEVM, and not seen there yet.
- * @param {object} tx - an Activity row (activity.js activityRows)
+ * @param {object} row - an Activity row (activity.js activityRows)
  * @param {string} nodeUrl - the overview's network
  * @param {number} [now]
  */
-export function awaitingArrival(tx, nodeUrl, now = Date.now()) {
-  const network = String(tx?.nodeUrl || nodeUrl || "");
-  if (!networkForNode(network)?.duskEvm || bridgeTransfer(tx, network) !== "to") return false;
-  if (!/^0x[0-9a-fA-F]{40}$/.test(String(tx?.bridgeTo ?? "")) || String(tx?.status ?? "").toLowerCase() !== "executed") return false;
-  if (!depositLux(tx) || arrivalOf(tx?.hash)) return false;
-  const at = depositTime(tx);
+export function awaitingArrival(row, nodeUrl, now = Date.now()) {
+  if (!networkForNode(String(nodeUrl ?? ""))?.duskEvm || row?.bridge?.step !== "deposit" || !row.bridge.to) return false;
+  if (row.status !== "executed" || !depositLux(row) || kept.has(String(row.hash))) return false;
+  const at = depositTime(row);
   return at > 0 && now - at < ARRIVAL_WINDOW_MS;
 }
 
@@ -141,15 +141,15 @@ async function incomingCalls(duskEvm, recipient, since) {
 export async function checkArrivals(rows, { nodeUrl, now = Date.now() }) {
   await loadArrivals();
   const duskEvm = networkForNode(String(nodeUrl ?? ""))?.duskEvm;
-  const waiting = (rows ?? []).filter((tx) => awaitingArrival(tx, nodeUrl, now));
+  const waiting = (rows ?? []).filter((row) => awaitingArrival(row, nodeUrl, now));
   if (!duskEvm || !waiting.length) return 0;
   const epoch = await getTxEpoch().catch(() => undefined);
   const bridge = duskEvm.predeploys.l2StandardBridge.toLowerCase();
   const taken = new Set([...kept.values()].map((a) => a.hash.toLowerCase()));
   const byRecipient = new Map();
-  for (const tx of waiting) {
-    const to = String(tx.bridgeTo).toLowerCase();
-    byRecipient.set(to, [...(byRecipient.get(to) ?? []), tx]);
+  for (const row of waiting) {
+    const to = row.bridge.to.toLowerCase();
+    byRecipient.set(to, [...(byRecipient.get(to) ?? []), row]);
   }
 
   const found = {};
@@ -163,12 +163,12 @@ export async function checkArrivals(rows, { nodeUrl, now = Date.now() }) {
       .map((c) => ({ hash: String(c.transaction_hash), value: String(c.value ?? ""), at: timeOf(c.timestamp) }))
       .filter((p) => Number.isFinite(p.at))
       .sort((a, b) => a.at - b.at);
-    for (const tx of [...deposits].sort((a, b) => depositTime(a) - depositTime(b))) {
-      const wei = (BigInt(depositLux(tx)) * WEI_PER_LUX).toString();
-      const paid = payments.find((p) => !taken.has(p.hash.toLowerCase()) && p.value === wei && p.at >= depositTime(tx) - CLOCK_SLACK_MS);
+    for (const row of [...deposits].sort((a, b) => depositTime(a) - depositTime(b))) {
+      const wei = (depositLux(row) * WEI_PER_LUX).toString();
+      const paid = payments.find((p) => !taken.has(p.hash.toLowerCase()) && p.value === wei && p.at >= depositTime(row) - CLOCK_SLACK_MS);
       if (!paid) continue;
       taken.add(paid.hash.toLowerCase());
-      found[String(tx.hash).toLowerCase()] = { hash: paid.hash, at: paid.at };
+      found[String(row.hash).toLowerCase()] = { hash: paid.hash, at: paid.at };
     }
   }
   if (!Object.keys(found).length) return 0;

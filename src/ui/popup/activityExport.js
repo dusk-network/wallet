@@ -10,7 +10,7 @@
 import { listAddressBook } from "../../shared/addressBook.js";
 import { runtimeGetURL, storageSessionGet, storageSessionRemove, storageSessionSet, tabsCreate } from "../../platform/extensionApi.js";
 import { h } from "../lib/dom.js";
-import { activityCsv, activityCsvFilename, isRowIncomplete } from "./activityCsv.js";
+import { activityCsv, activityCsvFilename } from "./activityCsv.js";
 
 /** Where the popup leaves one export's file for the full view to save: `{ id, filename, csv, at }`. */
 export const handedExportKey = (id) => `dusk_activity_export_v1:${id}`;
@@ -105,7 +105,7 @@ export function activityExportPanel(ov, rows, { state, actions, nodeUrl }) {
       ex.withContacts = Boolean(e?.target?.checked);
     },
   });
-  const incomplete = rows.filter(isRowIncomplete).length;
+  const incomplete = rows.filter((row) => row.incomplete).length;
   const save = h("button", {
     class: "btn-primary btn-full",
     type: "button",
@@ -126,14 +126,7 @@ export function activityExportPanel(ov, rows, { state, actions, nodeUrl }) {
           }
         }
         const filename = activityCsvFilename({ networkName: ov?.networkName, profileIndex: index });
-        const csv = activityCsv(rows, {
-          nodeUrl,
-          contactName,
-          withContacts,
-          // The wallet's own records, and this profile's own account and address.
-          local: Array.isArray(ov?.txs) ? ov.txs : [],
-          own: [ov?.accounts?.[index], ov?.addresses?.[index]].filter(Boolean),
-        });
+        const csv = activityCsv(rows, { nodeUrl, contactName, withContacts });
         if (inPopup()) {
           await handOver(csv, filename);
           globalThis.close?.();

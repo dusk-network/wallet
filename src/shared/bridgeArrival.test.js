@@ -1,6 +1,8 @@
 import { networks } from "@dusk-network/networks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { rowOf, rowsOf } from "./fixtures/rows.js";
+
 // chrome.storage, as a map, a write held where a test says; the transaction store's reset count.
 const items = vi.hoisted(() => ({}));
 const hooks = vi.hoisted(() => ({ beforeSet: null }));
@@ -30,20 +32,21 @@ const TO = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
 const L2 = (n) => `0x${String(n).repeat(64).slice(0, 64)}`;
 const NOW = Date.parse("2026-10-28T12:00:00Z");
 
-// A deposit of `lux` to TO, in a Dusk block `ago` ms before NOW.
-const deposit = (hash, { lux = "500000000", ago = 180_000, ...over } = {}) => ({
-  hash: hash.repeat(64).slice(0, 64),
-  kind: "contract_call",
-  contractId: BRIDGE,
-  fnName: "depositETHToWithValue",
-  amount: "0",
-  deposit: lux,
-  bridgeTo: TO,
-  status: "executed",
-  finalizedAt: NOW - ago,
-  nodeUrl: TESTNET,
-  ...over,
-});
+// Activity's row of a deposit of `lux` to TO this wallet sent, in a Dusk block `ago` ms before NOW.
+const deposit = (hash, { lux = "500000000", ago = 180_000, ...over } = {}) =>
+  rowOf({
+    hash: hash.repeat(64).slice(0, 64),
+    kind: "contract_call",
+    contractId: BRIDGE,
+    fnName: "depositETHToWithValue",
+    amount: "0",
+    deposit: lux,
+    bridgeTo: TO,
+    status: "executed",
+    finalizedAt: NOW - ago,
+    nodeUrl: TESTNET,
+    ...over,
+  });
 // A call DuskEVM's explorer lists for TO: from the L2 bridge, of `wei`, `ago` ms before NOW.
 const call = (hash, { wei = "500000000000000000", ago = 60_000, from = L2_BRIDGE, success = true } = {}) => ({
   transaction_hash: hash,
@@ -58,6 +61,8 @@ const call = (hash, { wei = "500000000000000000", ago = 60_000, from = L2_BRIDGE
 let calls;
 let fetch;
 let arrivals;
+// The arrival kept for a deposit, or null.
+const arrivalOf = (hash, from = arrivals) => from.keptArrivals().get(hash) ?? null;
 // Blockscout's pages of TO's incoming calls, newest first: `calls` as one, else these, in order.
 let pages;
 
@@ -86,13 +91,29 @@ describe("a deposit to DuskEVM's arrival", () => {
   it("is awaited only for a deposit gone through this week, to a DuskEVM address, on a network with DuskEVM", () => {
     const { awaitingArrival } = arrivals;
     expect(awaitingArrival(deposit("a"), TESTNET, NOW)).toBe(true);
+    // One the account's history has, sent from another device: its block's time, read.
+    const [read] = rowsOf({
+      entries: [
+        {
+          bridge: { amount: "500000000", kind: "deposit", to: TO },
+          contractId: BRIDGE,
+          fnName: "depositETHToWithValue",
+          hash: "b".repeat(64),
+          kind: "contract_call",
+          timestamp: NOW - 180_000,
+          value: "500000000",
+        },
+      ],
+    });
+    expect(awaitingArrival(read, TESTNET, NOW)).toBe(true);
     for (const row of [
       deposit("b", { status: "submitted" }),
       deposit("c", { status: "failed" }),
       deposit("d", { bridgeTo: undefined }),
       deposit("e", { ago: 8 * 24 * 60 * 60_000 }),
       deposit("f", { lux: "0" }),
-      { ...deposit("g"), contractId: "11".repeat(32) },
+      // A call to another contract.
+      deposit("g", { bridgeTo: undefined, contractId: "11".repeat(32) }),
     ]) {
       expect(awaitingArrival(row, TESTNET, NOW)).toBe(false);
     }
@@ -103,7 +124,7 @@ describe("a deposit to DuskEVM's arrival", () => {
   });
 
   it("is the L2 bridge's payment of its amount to its recipient after it, asked once a recipient, and kept", async () => {
-    const { arrivalOf, checkArrivals } = arrivals;
+    const { checkArrivals } = arrivals;
     calls = [
       // Newest first, as Blockscout lists them: another sender's, another amount, one from before the deposit.
       call(L2(5), { from: "0x1111111111111111111111111111111111111111" }),
@@ -124,13 +145,13 @@ describe("a deposit to DuskEVM's arrival", () => {
     vi.resetModules();
     const fresh = await import("./bridgeArrival.js");
     await fresh.loadArrivals();
-    expect(fresh.arrivalOf(rows[0].hash)?.hash).toBe(L2(2));
+    expect(arrivalOf(rows[0].hash, fresh)?.hash).toBe(L2(2));
     expect(fresh.awaitingArrival(rows[0], TESTNET, NOW)).toBe(false);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("gives deposits of the same amount to the same recipient one payment each, in order, and waits for the one still on its way", async () => {
-    const { arrivalOf, checkArrivals } = arrivals;
+    const { checkArrivals } = arrivals;
     const first = deposit("a", { ago: 600_000 });
     const second = deposit("b", { ago: 300_000 });
     const third = deposit("c", { ago: 120_000 });
@@ -145,7 +166,7 @@ describe("a deposit to DuskEVM's arrival", () => {
   });
 
   it("finds nothing, and keeps nothing, when the explorer fails or a wallet reset came meanwhile", async () => {
-    const { arrivalOf, checkArrivals, clearArrivals } = arrivals;
+    const { checkArrivals, clearArrivals } = arrivals;
     calls = [call(L2(1))];
     fetch.mockResolvedValueOnce(new Response("", { status: 502 }));
     await expect(checkArrivals([deposit("a")], { nodeUrl: TESTNET, now: NOW })).resolves.toBe(0);
@@ -166,7 +187,7 @@ describe("a deposit to DuskEVM's arrival", () => {
   });
 
   it("reads the recipient's calls page after page back to its oldest deposit, so same-amount deposits each get their own", async () => {
-    const { arrivalOf, checkArrivals } = arrivals;
+    const { checkArrivals } = arrivals;
     const older = deposit("a", { ago: 3_600_000 });
     const newer = deposit("b", { ago: 300_000 });
     // The newer's payment on the first page, the older's on the second; the third goes back past both, the fourth isn't read.
@@ -186,7 +207,7 @@ describe("a deposit to DuskEVM's arrival", () => {
   });
 
   it("matches nothing for a recipient whose calls run past five pages before its oldest deposit", async () => {
-    const { arrivalOf, checkArrivals } = arrivals;
+    const { checkArrivals } = arrivals;
     const old = deposit("a", { ago: 3_600_000 });
     // Five pages of later calls, one a payment of the same amount for another deposit; the deposit's own beyond them.
     pages = [
@@ -198,20 +219,21 @@ describe("a deposit to DuskEVM's arrival", () => {
   });
 
   it("takes a deposit's time from its Dusk block, never the wallet's clock: nothing is asked until the block's time is known", async () => {
-    const { arrivalOf, awaitingArrival, checkArrivals } = arrivals;
+    const { awaitingArrival, checkArrivals } = arrivals;
     // The wallet's clock half an hour behind; an older deposit's payment of the same amount 20 minutes before this one's block.
-    const sent = { ...deposit("a"), finalizedAt: undefined, executedAt: NOW - 180_000 - 1_800_000, submittedAt: NOW - 190_000 - 1_800_000 };
+    const clock = { executedAt: NOW - 180_000 - 1_800_000, submittedAt: NOW - 190_000 - 1_800_000 };
+    const sent = deposit("a", { ...clock, finalizedAt: undefined });
     calls = [call(L2(2), { ago: 60_000 }), call(L2(1), { ago: 1_380_000 })];
     expect(awaitingArrival(sent, TESTNET, NOW)).toBe(false);
     await expect(checkArrivals([sent], { nodeUrl: TESTNET, now: NOW })).resolves.toBe(0);
     expect([fetch.mock.calls.length, arrivalOf(sent.hash)]).toEqual([0, null]);
     // Its block's time, from the node: its own payment, after it.
-    await expect(checkArrivals([{ ...sent, finalizedAt: NOW - 180_000 }], { nodeUrl: TESTNET, now: NOW })).resolves.toBe(1);
+    await expect(checkArrivals([deposit("a", clock)], { nodeUrl: TESTNET, now: NOW })).resolves.toBe(1);
     expect(arrivalOf(sent.hash)?.hash).toBe(L2(2));
   });
 
   it("is forgotten in every page once a wallet reset anywhere moves the reset count on", async () => {
-    const { arrivalOf, checkArrivals, loadArrivals } = arrivals;
+    const { checkArrivals, loadArrivals } = arrivals;
     calls = [call(L2(2))];
     await checkArrivals([deposit("a")], { nodeUrl: TESTNET, now: NOW });
     expect(arrivalOf(deposit("a").hash)?.hash).toBe(L2(2));
@@ -252,7 +274,7 @@ describe("a deposit to DuskEVM's arrival", () => {
     vi.resetModules();
     const fresh = await import("./bridgeArrival.js");
     await fresh.loadArrivals();
-    expect(fresh.arrivalOf(deposit("a").hash)).toBeNull();
+    expect(arrivalOf(deposit("a").hash, fresh)).toBeNull();
   });
 
   it("is looked for less often the longer nothing changes: 5 seconds, doubled every 6 looks, at most 5 minutes", () => {
