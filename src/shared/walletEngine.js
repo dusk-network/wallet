@@ -2505,7 +2505,7 @@ async function noteValue(profile, { nullifier, leaf }) {
   return BigInt(balance?.value ?? 0n);
 }
 
-// A shielded history entry as Activity's row, as it is kept and shown, and back.
+// A shielded history entry as this device keeps it, and back.
 const shieldedRow = (e) => ({
   hash: e.hash, source: "shielded", privacy: "shielded", kind: e.kind, direction: e.direction,
   amount: e.direction === "self" ? undefined : e.value, feePaid: e.fee ?? undefined,
@@ -2535,7 +2535,8 @@ async function forgetShieldedActivity(nodeUrl) {
  * profile without shielded notes reads nothing. One read at a time per
  * profile.
  *
- * @returns {Promise<{ profileIndex: number, entries: object[], pending?: boolean }>}
+ * @returns {Promise<{ profileIndex: number, entries: object[], pending?: boolean }>} `entries`: as
+ *   the package gives them
  */
 export async function getShieldedHistory() {
   if (!state.unlocked) throw new Error("Wallet locked");
@@ -2599,8 +2600,7 @@ export async function getShieldedHistory() {
       },
       synced: state.shielded.status.state === "done",
     });
-    const rows = entries.map(shieldedRow);
-    return pending ? { profileIndex, entries: rows, pending } : { profileIndex, entries: rows };
+    return pending ? { profileIndex, entries, pending } : { profileIndex, entries };
   })().finally(() => {
     if (shieldedHistoryRun?.promise === promise) shieldedHistoryRun = null;
   });

@@ -13,7 +13,7 @@ import { fieldLabel, searchInput, textInput } from "../../components/FormControl
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
-import { blockTimes, contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
+import { contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
 
 import {
   listAddressBook,
@@ -382,11 +382,9 @@ export function addressBookView(ov, { state, actions } = {}) {
     const hidden = balancesHidden(ov);
     const names = contactNames(state, actions);
     const now = Date.now();
-    const all = activityRows(ov, state);
-    const times = blockTimes(all);
     // A token's counterparties too: whom it went to or came from, and whom an approval lets spend it.
-    const rows = all.filter((tx) =>
-      [tx?.to, tx?.from, tx?.counterparty, tx?.asset?.to, tx?.asset?.from, tx?.asset?.spender].some(
+    const rows = activityRows(ov, state).filter(({ counterparty, sent }) =>
+      [counterparty, sent?.to, sent?.asset?.to, sent?.asset?.from, sent?.asset?.spender].some(
         (a) => typeof a === "string" && a && lower(a) === lower(addr)
       )
     );
@@ -403,7 +401,7 @@ export function addressBookView(ov, { state, actions } = {}) {
                 hidden,
                 nodeUrl,
                 contactName: names,
-                when: (t) => whenText(t, { times, format: (ms) => recentText(ms, now) }),
+                when: (row) => whenText(row, (ms) => recentText(ms, now)),
               })
             )
           )

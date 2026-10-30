@@ -1,7 +1,8 @@
 // Activity's data in the popup: the selected account's history, synced with
 // the archive node by block height (activityHistory.js), its counterparties'
 // verified .dusk names, and this wallet's own transactions, merged into the
-// rows Recent activity and the History view show.
+// rows Recent activity and the History view show
+// (@dusk-network/app-core/activity).
 //
 // The kept history paints at once. One sync run follows when the popup opens
 // and one after a transaction of this wallet goes through; nothing polls.
@@ -10,11 +11,11 @@
 // popup first saw it: after a wallet reset since, nothing more is kept. A
 // lock drops it.
 
+import { activityRows as rowsOf, settleSends } from "@dusk-network/app-core/activity";
 import { StaleHistoryError } from "@dusk-network/app-core/history";
 
 import { activityHistory, noteActivityUnavailable } from "../../shared/activityHistory.js";
-import { mergeActivity } from "../../shared/activityMerge.js";
-import { arrivalOf } from "../../shared/bridgeArrival.js";
+import { keptArrivals } from "../../shared/bridgeArrival.js";
 import {
   StaleActivityError,
   getActivityEpoch,
@@ -22,8 +23,10 @@ import {
   putCounterpartyNames,
 } from "../../shared/activityStore.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
-import { chainIdForNode } from "../../shared/nodeNetwork.js";
+import { nameFactsFor } from "../../shared/knownCalls.js";
+import { chainIdForNode, networkForNode } from "../../shared/nodeNetwork.js";
 import { lookupRecipientNames } from "../../shared/duskNames.js";
+import { forgetTxs, getTxEpoch, listTxs, patchTxMeta } from "../../shared/txStore.js";
 import { VERIFIED_NAME_TTL_MS, duskNamesNetwork } from "../../shared/verifiedNames.js";
 
 /** Rows read for the History view at first, and how many more Show more adds. */
@@ -68,6 +71,28 @@ async function reload(a) {
   a.coveredTo = coveredTo;
   a.complete = complete;
   a.loaded = true;
+}
+
+// What the wallet's own record of a send adds to the chain's row of it: the
+// name typed for its recipient, a token's details, the site that asked for
+// it, a shielded send's memo or recipient.
+const keeps = (tx) =>
+  Boolean(tx.toName || tx.asset || (tx.origin && tx.origin !== "Wallet") || (tx.privacy === "shielded" && (tx.memo || tx.to)));
+// A send the wallet's watcher still writes to: settled once it's done.
+const watched = (tx) => tx.status === "submitted" || tx.status === "mempool";
+
+// Settles the profile's own sends the chain's histories have the outcome of
+// (settleSends): those the chain's rows say all of are forgotten, the others
+// kept for what they add.
+async function settle(a) {
+  const own = (await listTxs({ nodeUrl: a.nodeUrl })).filter(
+    (tx) => !watched(tx) && (tx.profileIndex == null || Number(tx.profileIndex) === a.profileIndex)
+  );
+  const { drop, keep } = settleSends({ public: a.entries, shielded: a.shielded, pending: own, keeps });
+  const epoch = await a.txEpoch;
+  if (epoch === undefined) return;
+  await forgetTxs(drop, { epoch });
+  for (const { hash } of keep) await patchTxMeta(hash, { settled: true }, { epoch });
 }
 
 // Names kept from a check in the last ten minutes, as sites get them.
@@ -133,6 +158,7 @@ async function loadShielded(a, state, render) {
     }
     a.shielded = result.entries;
     if (result.pending) again();
+    await settle(a).catch(() => {});
     if (result.entries.length) redraw(state, render);
   } catch {
     if (state.activity === a) again();
@@ -188,6 +214,7 @@ async function run(a, state, render) {
   // Another wallet's now: nothing more for this one.
   if (state.activity !== a || a.stale) return;
   await reload(a).catch(() => {});
+  await settle(a).catch(() => {});
   redraw(state, render);
   if (await checkNames(a).catch(() => false)) redraw(state, render);
   loadShielded(a, state, render).catch(() => {});
@@ -235,8 +262,9 @@ export function ensureActivity(ov, { state, render, send }) {
     send,
     syncing: false,
     error: null,
-    // The store's epoch now; undefined when it can't be read.
+    // The stores' epochs now; undefined when they can't be read.
     epoch: getActivityEpoch().catch(() => undefined),
+    txEpoch: getTxEpoch().catch(() => undefined),
   };
   state.activity = a;
   (async () => {
@@ -331,36 +359,36 @@ export function hasMoreActivity(state) {
   return Boolean(a?.loaded && (!a.complete || a.entries.length >= a.limit));
 }
 
+// A send as the package reads it: a deposit's DuskEVM address, which the
+// wallet keeps as `bridgeTo`, as the bridge facts it is.
+const sentOf = (tx) => (tx?.bridgeTo ? { ...tx, bridge: { amount: String(tx.deposit ?? tx.amount ?? "0"), kind: "deposit", to: tx.bridgeTo } } : tx);
+
 /**
  * The rows Recent activity and the History view show: this wallet's own
- * transactions on the overview's network with the account's history.
+ * transactions on the overview's network with the account's history,
+ * newest first, as @dusk-network/app-core/activity merges them.
  * @param {object} ov
  * @param {object} state
  * @returns {object[]}
  */
 export function activityRows(ov, state) {
-  const local = Array.isArray(ov?.txs) ? ov.txs : [];
   const key = activityKey(ov);
   const a = state?.activity;
   const ours = a && key && a.key === key ? a : null;
-  const { profileIndex } = selected(ov);
-  const meta = ours?.meta;
-  const rows = mergeActivity({
-    local,
-    history: ours?.entries ?? [],
-    shielded: ours?.shielded ?? [],
-    // The selected profile's activity; every profile's while locked.
-    profileIndex: key ? profileIndex : undefined,
-    nodeUrl: ov?.nodeUrl,
+  const { account, profileIndex } = selected(ov);
+  const nodeUrl = String(ov?.nodeUrl ?? "");
+  return rowsOf({
+    account,
+    address: ov?.addresses?.[profileIndex],
+    arrivals: keptArrivals(),
+    nameCall: nameFactsFor(nodeUrl),
     names: ours?.names,
-    // Blocks come about every 10 seconds.
-    estimateTime: meta?.headAt
-      ? (height) => meta.headAt - Math.max(0, Number(meta.finalized) - height) * 10_000
-      : undefined,
-  });
-  // A deposit to DuskEVM that arrived there, with its transaction there (bridgeArrival.js).
-  return rows.map((row) => {
-    const arrival = arrivalOf(row?.hash);
-    return arrival ? { ...row, arrival } : row;
+    network: networkForNode(nodeUrl),
+    pending: (Array.isArray(ov?.txs) ? ov.txs : []).map(sentOf),
+    // The selected profile's activity; every profile's while locked.
+    profileIndex: key ? profileIndex : null,
+    public: ours?.entries,
+    shielded: ours?.shielded,
+    state: ours?.meta,
   });
 }

@@ -1759,15 +1759,28 @@ describe("walletEngine", () => {
       row({ hash: madeBy(226951, "phoenix"), kind: "shield", amount: "500000000", timestamp: 1_747_065_974_000, blockHeight: 226951 }),
       row({ hash: madeBy(184423, "convert"), kind: "shield", amount: "10000000000", timestamp: 1_746_640_694_000, blockHeight: 184423 }),
     ];
+    // A kept row as the entry it was, as the popup is given it.
+    const entryOf = ({ amount, blockHeight, direction, error, feePaid, hash, kind, status, timestamp }) => ({
+      blockHeight,
+      direction,
+      ...(error ? { error } : {}),
+      fee: feePaid ?? null,
+      hash,
+      kind,
+      success: status !== "failed",
+      timestamp: timestamp ?? null,
+      value: amount ?? "0",
+    });
+    const ENTRIES = ROWS.map(entryOf);
 
-    it("works the history out as Activity's rows, its notes' blocks asked for once among the tree's other heights, and reads rows kept before back as they were", async () => {
+    it("works the history out and keeps it as Activity's rows, its notes' blocks asked for once among the tree's other heights, and reads rows kept before back as they were", async () => {
       const { leavesFromPos } = await scanTree();
       await profileNotes();
       await growTree(leavesFromPos);
       const queries = archive();
 
       const first = await engine.getShieldedHistory();
-      expect(first).toEqual({ profileIndex: 0, entries: ROWS });
+      expect(first).toEqual({ profileIndex: 0, entries: ENTRIES });
       // The profile's heights went out among the tree's others, all in one request.
       expect(queries).toHaveLength(1);
       const asked = [...queries[0].matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h)).sort((a, b) => a - b);
@@ -1796,7 +1809,7 @@ describe("walletEngine", () => {
         { ...ROWS[0], direction: "self", amount: undefined, feePaid: "1000" },
       ];
       await activity.putShieldedHistoryRecord(key, { fingerprint: "0s,1s,493,494,495", entries: kept, decoys: [GROWN] });
-      await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: kept });
+      await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: kept.map(entryOf) });
       expect(queries).toHaveLength(1);
 
       // A profile without shielded notes reads nothing: pending until its
@@ -1861,7 +1874,7 @@ describe("walletEngine", () => {
         return keep(key, record, epoch);
       });
       try {
-        await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: ROWS });
+        await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: ENTRIES });
       } finally {
         put.mockRestore();
       }

@@ -3,6 +3,7 @@ import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { PINNED_RELEASES as releases } from "@duskdomains/sdk/releases";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { keptArrivals } from "../shared/bridgeArrival.js";
 import { TX_KIND } from "../shared/constants.js";
 import { installFakeDom, settle, visibleText } from "./testing/fakeDom.js";
 import { dateText } from "./lib/time.js";
@@ -21,11 +22,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Renders a transaction's details as the popup does.
-function details(tx, { contacts = [] } = {}) {
+// Renders a transaction's details as the popup does, the wallet's other records beside it.
+function details(tx, { contacts = [], others = [] } = {}) {
   const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home", addressBook: { loaded: true, items: contacts } };
   const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
-  const ov = { nodeUrl: NODE, txs: [{ hash: HASH, nodeUrl: NODE, ...tx }] };
+  const ov = { nodeUrl: NODE, txs: [{ hash: HASH, nodeUrl: NODE, ...tx }, ...others] };
   dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
   const body = dom.document.body;
   return {
@@ -112,11 +113,11 @@ describe("transaction details", () => {
     const contract = named.body.querySelectorAll(".tx-tech .kv").map(visibleText).find((r) => r.startsWith("Contract"));
     expect(contract).toBe(`ContractDusk Domains · ${STORE.slice(0, 6)}…${STORE.slice(-6)}`);
     // A reservation: step 1 of 2, until a registration that reveals it follows.
-    const commit = details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "commit", status: "executed" });
-    expect(commit.name).toBe("Name reservation (step 1 of 2)");
-    expect(details({ kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "commit", reservedName: "alice.dusk", status: "executed" }).name).toBe(
-      "Reserved alice.dusk"
-    );
+    const commit = { kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "commit", status: "executed" };
+    expect(details(commit).name).toBe("Name reservation (step 1 of 2)");
+    const reservation = "1f".repeat(32);
+    const registration = { hash: "cd".repeat(32), nodeUrl: NODE, kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "register", registeredName: "alice.dusk", reservation, status: "executed", submittedAt: 2 };
+    expect(details({ ...commit, reservation, submittedAt: 1 }, { others: [registration] }).name).toBe("Reserved alice.dusk");
     // The same contract ID through a custom node is any contract.
     const ov = { nodeUrl: "https://node.example", txs: [{ hash: HASH, nodeUrl: "https://node.example", kind: TX_KIND.CONTRACT_CALL, contractId: STORE, fnName: "register", status: "executed" }] };
     dom.document.body.replaceChildren(...txDetailsView(ov, { state: { route: "tx", txDetailHash: HASH, addressBook: { loaded: true, items: [] } }, actions: {} }));
@@ -161,7 +162,10 @@ describe("transaction details", () => {
       status: "executed",
     };
     const arrivedAt = Date.UTC(2026, 9, 27, 5, 52, 13);
-    const view = details({ ...deposit, timestamp: arrivedAt - 60_000, arrival: { hash: l2, at: arrivedAt } });
+    // Found there, and kept (bridgeArrival.js).
+    keptArrivals().set(HASH, { hash: l2, at: arrivedAt });
+    const view = details({ ...deposit, timestamp: arrivedAt - 60_000 });
+    keptArrivals().delete(HASH);
     expect(view.status).toBe("Arrived");
     // When it arrived, under when it was sent.
     expect(view.rows.slice(0, 2)).toEqual([`Date${dateText(arrivedAt - 60_000)}`, `Arrived${dateText(arrivedAt)}`]);

@@ -7,6 +7,7 @@ import fixture from "../../shared/fixtures/activity-testnet.json";
 import registrations from "../../shared/fixtures/dusk-domains-registrations.json";
 import deposit from "../../shared/fixtures/duskevm-deposit-history.json";
 import { fakeArchive } from "../../shared/fixtures/fakeArchive.js";
+import { describeTx } from "./views/txRow.js";
 
 const names = vi.hoisted(() => ({ lookupRecipientNames: vi.fn() }));
 vi.mock("../../shared/duskNames.js", () => names);
@@ -69,7 +70,7 @@ describe("ensureActivity", () => {
     expect(node.log.length).toBe(requests);
 
     const rows = activity.activityRows(overview(), state);
-    expect(rows.find((r) => r.from === FAUCET)).toMatchObject({ counterpartyName: "faucet.dusk", direction: "in" });
+    expect(rows.find((r) => r.counterparty === FAUCET)).toMatchObject({ counterpartyName: "faucet.dusk", direction: "in" });
   });
 
   it("paints the kept history and names before the archive answers", async () => {
@@ -178,7 +179,7 @@ describe("a deposit to DuskEVM", () => {
     archive();
     const state = { route: "home" };
     activity.ensureActivity(overview(deposit.account), { state, render: vi.fn(async () => {}) });
-    await until(() => rowOf(state)?.bridgeTo === deposit.recipient && !state.activity.syncing);
+    await until(() => rowOf(state)?.bridge?.to === deposit.recipient && !state.activity.syncing);
   });
 
   it("reads one kept before as it was kept, asking nothing more of it", async () => {
@@ -192,7 +193,7 @@ describe("a deposit to DuskEVM", () => {
     activity.ensureActivity(overview(deposit.account), { state, render: vi.fn(async () => {}) });
     await until(() => node.log.length > 0 && !state.activity.syncing);
     expect(node.detailQueries()).toEqual([]);
-    expect(rowOf(state)).toMatchObject({ bridgeTo: deposit.recipient });
+    expect(rowOf(state)).toMatchObject({ bridge: { step: "deposit", to: deposit.recipient } });
   });
 });
 
@@ -204,14 +205,63 @@ describe("a .dusk name's registration", () => {
     const node = fakeArchive({ details: withData(withData(fixture.details, call), reservation) });
     const { state } = await popup();
     const rows = activity.activityRows(overview(), state);
-    expect(rows.find((r) => r.hash === call.hash)).toMatchObject({ registeredName: "shpongle.dusk" });
-    expect(rows.find((r) => r.hash === reservation.hash)).toMatchObject({ reservedName: "shpongle.dusk" });
+    expect(rows.find((r) => r.hash === call.hash)).toMatchObject({ nameCall: { kind: "registration", name: "shpongle.dusk" } });
+    expect(rows.find((r) => r.hash === reservation.hash)).toMatchObject({ nameCall: { kind: "reservation", name: "shpongle.dusk" } });
     // The hashes whose call arguments were asked for: theirs alone, and not again by the next popup.
     const withArgs = node.detailQueries().flatMap((l) => [...l.query.matchAll(/tx\(hash: "(\w{64})"\)[^}]*\{ contractId fnName data \}/g)].map((m) => m[1]));
     expect(withArgs).toEqual([call.hash, reservation.hash]);
     const asked = node.detailQueries().length;
     await popup();
     expect(node.detailQueries()).toHaveLength(asked);
+  });
+});
+
+describe("the wallet's own sends", () => {
+  // A's two calls, as this wallet sent them: the first, here, a token transfer.
+  const [commit, register] = fixture.accounts[A].sender.map((e) => e.origin);
+  const TOKEN = "7e".repeat(32);
+  const asToken = { ...fixture.details, [commit]: { ...fixture.details[commit], tx: { ...fixture.details[commit].tx, callData: { contractId: TOKEN, fnName: "transfer" } } } };
+  const sent = (over) => ({ origin: "Wallet", nodeUrl: NODE, kind: "contract_call", profileIndex: 0, submittedAt: Date.now() - 60_000, status: "executed", ...over });
+  const registration = sent({ contractId: fixture.details[register].tx.callData.contractId, fnName: "register" });
+  // Where the transaction store lives outside the extension.
+  const memoryStorage = (store = new Map()) => ({
+    get length() {
+      return store.size;
+    },
+    key: (i) => [...store.keys()][i] ?? null,
+    getItem: (k) => store.get(String(k)) ?? null,
+    setItem: (k, v) => store.set(String(k), String(v)),
+    removeItem: (k) => store.delete(String(k)),
+  });
+  let txs;
+  beforeEach(async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    txs = await import("../../shared/txStore.js");
+  });
+
+  it("are forgotten once the chain's history says all of them, a token transfer kept for its details", async () => {
+    fakeArchive({ details: asToken });
+    const token = { type: "DRC20", op: "transfer", symbol: "TKN", decimals: 2, valueUnits: "1250", to: SENDER };
+    await txs.putTxMeta(register, registration);
+    await txs.putTxMeta(commit, sent({ contractId: TOKEN, fnName: "transfer", asset: token }));
+    const { state } = await popup();
+    const kept = await txs.listTxs({ nodeUrl: NODE });
+    expect(kept.map((tx) => [tx.hash, tx.settled])).toEqual([[commit, true]]);
+    // Each once, the transfer in the token's words.
+    const rows = activity.activityRows(overview(A, { txs: kept }), state);
+    expect(rows.filter((r) => r.hash === commit || r.hash === register)).toHaveLength(2);
+    expect(describeTx(rows.find((r) => r.hash === commit), { nodeUrl: NODE })).toMatchObject({ lead: "Sent to", amount: { value: "12.5", unit: "TKN" } });
+  });
+
+  it("are left as they are while the wallet still watches them", async () => {
+    fakeArchive();
+    await txs.putTxMeta(register, { ...registration, status: "mempool" });
+    await popup();
+    expect(await txs.getTxMeta(register)).toEqual({ ...registration, status: "mempool" });
+    // Its watch done, the next popup forgets it.
+    await txs.patchTxMeta(register, { status: "executed" });
+    await popup();
+    expect(await txs.getTxMeta(register)).toBeNull();
   });
 });
 

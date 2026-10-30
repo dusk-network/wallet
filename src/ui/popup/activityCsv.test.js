@@ -2,11 +2,15 @@ import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../../shared/constants.js";
+import { rowsOf } from "../../shared/fixtures/rows.js";
 import { CSV_COLUMNS, CSV_CONTACT_COLUMN, activityCsv, activityCsvFilename } from "./activityCsv.js";
 
 process.env.TZ = "UTC";
 beforeAll(() => vi.stubGlobal("navigator", { language: "en-GB" }));
 afterAll(() => vi.unstubAllGlobals());
+// A second after the sends: the wallet's own still waits for the chain.
+beforeAll(() => vi.useFakeTimers({ now: Date.parse("2026-10-23T07:00:31Z"), toFake: ["Date"] }));
+afterAll(() => vi.useRealTimers());
 
 const NODE = "https://testnet.nodes.dusk.network";
 const AT = Date.parse("2026-10-23T07:00:30Z");
@@ -15,21 +19,40 @@ const SENDER = "zFVXTQZfY6gB2rWZFEm4ToWY2NKrpgeswTboWMAe7cjzaqHjsdGuADp8GsYzeruR
 const EVM = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
 const hash = (n) => String(n).repeat(64).slice(0, 64);
 
-// Activity's rows, as activity.js merges them.
-const ROWS = [
+// Activity's rows, as activity.js merges them, each from its own source.
+const rowsOfEach = () => [
   // Received, from the chain, with a memo someone else wrote.
-  { hash: hash(1), source: "archive", nodeUrl: NODE, kind: TX_KIND.TRANSFER, direction: "in", from: SENDER, counterparty: SENDER, amount: "1000000000000", memo: "=HYPERLINK(1), \"rent\"", timestamp: AT, blockHeight: 4658012, success: true, status: "executed" },
+  { entries: [{ hash: hash(1), direction: "in", counterparty: SENDER, payer: false, value: "1000000000000", memo: "=HYPERLINK(1), \"rent\"", timestamp: AT, blockHeight: 4658012 }] },
   // The wallet's own send, still pending, to a name typed for it.
-  { hash: hash(2), source: "local", kind: TX_KIND.TRANSFER, privacy: "public", to: FAUCET, toName: "faucet.dusk", amount: "5000000000", submittedAt: AT, status: "submitted", profileIndex: 0 },
+  { txs: [{ hash: hash(2), kind: TX_KIND.TRANSFER, privacy: "public", to: FAUCET, toName: "faucet.dusk", amount: "5000000000", submittedAt: AT, status: "submitted", profileIndex: 0 }] },
   // A call that failed: nothing moved, the fee paid.
-  { hash: hash(3), source: "archive", nodeUrl: NODE, kind: TX_KIND.CONTRACT_CALL, direction: "out", contractId: "00".repeat(32), fnName: "convert", deposit: "2000000000", amount: "2000000000", timestamp: AT, blockHeight: 4658013, success: false, status: "failed", feePaid: "1856398" },
+  { entries: [{ hash: hash(3), kind: TX_KIND.CONTRACT_CALL, contractId: "00".repeat(32), fnName: "convert", value: "2000000000", timestamp: AT, blockHeight: 4658013, success: false, fee: "1856398" }] },
   // DUSK bridged to DuskEVM.
-  { hash: hash(4), source: "archive", nodeUrl: NODE, kind: TX_KIND.CONTRACT_CALL, direction: "out", contractId: duskEvmContracts(2).bridge, counterparty: duskEvmContracts(2).bridge, fnName: "depositETHToWithValue", deposit: "500000000", amount: "500000000", bridgeTo: EVM, timestamp: AT, blockHeight: 4697290, success: true, status: "executed", feePaid: "1985878" },
+  {
+    entries: [
+      {
+        hash: hash(4),
+        kind: TX_KIND.CONTRACT_CALL,
+        contractId: duskEvmContracts(2).bridge,
+        counterparty: duskEvmContracts(2).bridge,
+        fnName: "depositETHToWithValue",
+        value: "500000000",
+        bridge: { amount: "500000000", kind: "deposit", to: EVM },
+        timestamp: AT,
+        blockHeight: 4697290,
+        fee: "1985878",
+      },
+    ],
+  },
   // Synced, its details not looked up yet.
-  { hash: hash(5), source: "archive", nodeUrl: NODE, kind: TX_KIND.TRANSFER, direction: "out", to: FAUCET, counterparty: FAUCET, amount: "3000000000", blockHeight: 4658014, success: null, status: "unknown" },
+  { entries: [{ hash: hash(5), counterparty: FAUCET, value: "3000000000", blockHeight: 4658014, detailsAt: undefined, success: undefined, timestamp: undefined }] },
   // Shielded, received.
-  { hash: hash(6), source: "shielded", kind: TX_KIND.TRANSFER, direction: "in", privacy: "shielded", amount: "3000000000", timestamp: AT, status: "executed" },
-];
+  { shielded: [{ hash: hash(6), blockHeight: 4658015, direction: "in", kind: TX_KIND.TRANSFER, value: "3000000000", fee: null, success: true, timestamp: AT }] },
+].map((input) => rowsOf(input)[0]);
+let ROWS = [];
+beforeAll(() => {
+  ROWS = rowsOfEach();
+});
 
 const lines = (csv) => csv.split("\r\n");
 
@@ -38,8 +61,8 @@ describe("DUSK bridged through a route's account", () => {
     const { networks, routes } = await import("@dusk-network/networks");
     const MAINNET = "https://nodes.dusk.network";
     const bsc = routes(networks.mainnet).find((route) => route.kind === "service").account;
-    const sent = { hash: hash(8), source: "local", nodeUrl: MAINNET, kind: TX_KIND.TRANSFER, privacy: "public", to: bsc, memo: EVM, amount: "2000000000", submittedAt: AT, status: "executed", profileIndex: 0 };
-    const [, row] = lines(activityCsv([sent], { nodeUrl: MAINNET }));
+    const sent = { hash: hash(8), kind: TX_KIND.TRANSFER, privacy: "public", to: bsc, memo: EVM, amount: "2000000000", submittedAt: AT, status: "executed", profileIndex: 0 };
+    const [, row] = lines(activityCsv(rowsOf({ txs: [sent] }, { nodeUrl: MAINNET }), { nodeUrl: MAINNET }));
     expect(row).toBe(`2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",,${hash(8)},out,Public,To BNB Smart Chain (Bridge),,${bsc},-2,,${EVM},Completed`);
   });
 });
@@ -72,33 +95,14 @@ describe("Activity's CSV", () => {
       `2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",4658013,${hash(3)},out,Public,Call convert (Failed · nothing sent · fee 0.0019 DUSK paid),,${"00".repeat(32)},0,0.001856398,,Failed`,
       `2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",4697290,${hash(4)},out,Public,To 0xAB84…C86F (Bridge to DuskEVM),,${EVM},-0.5,0.001985878,,Completed`,
       `,,4658014,${hash(5)},out,Public,Sent,,${FAUCET},-3,,,Not looked up yet`,
-      `2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",,${hash(6)},in,Shielded,Received (Shielded),,,3,,,Completed`,
+      `2026-10-23T07:00:30.000Z,"Fri 23 Oct 2026, 07:00 UTC",4658015,${hash(6)},in,Shielded,Received (Shielded),,,3,,,Completed`,
     ]);
-  });
-
-  it("counts a call's amount and deposit apart in the wallet's own record, the chain's value as it is", () => {
-    const CONTRACT = "cd".repeat(32);
-    const call = (over) => ({ kind: TX_KIND.CONTRACT_CALL, contractId: CONTRACT, fnName: "pay", status: "submitted", submittedAt: AT, profileIndex: 0, ...over });
-    const amountOf = (rows, opts = {}) => lines(activityCsv(rows, { nodeUrl: NODE, own: [SENDER], ...opts })).slice(1).map((l) => l.split(",").at(-4));
-    // Sent: 2 DUSK to someone else, and 3 DUSK attached to the call.
-    const pending = call({ hash: hash(7), source: "local", to: FAUCET, amount: "2000000000", deposit: "3000000000" });
-    expect(amountOf([pending])).toEqual(["-5"]);
-    // The amount back to the profile itself, with no recipient or its own: the deposit alone left.
-    expect(amountOf([{ ...pending, to: undefined }, { ...pending, to: SENDER }])).toEqual(["-3", "-3"]);
-    // The chain's record already says what left in one value, in a call's deposit too.
-    const chain = { hash: hash(7), source: "archive", nodeUrl: NODE, kind: TX_KIND.CONTRACT_CALL, direction: "out", contractId: CONTRACT, fnName: "pay", amount: "5000000000", deposit: "5000000000", timestamp: AT, blockHeight: 9, success: true, status: "executed" };
-    expect(amountOf([chain])).toEqual(["-5"]);
-    // Both: the chain's once it settled, the wallet's own record until then.
-    const both = { ...chain, ...pending, source: "both", amount: "2000000000", deposit: "3000000000", success: null, status: "unknown" };
-    expect(amountOf([both], { local: [pending] })).toEqual(["-5"]);
-    expect(amountOf([{ ...both, deposit: undefined }], { local: [pending] })).toEqual(["-5"]);
-    expect(amountOf([{ ...chain, ...pending, source: "both", amount: "5000000000", deposit: "5000000000", success: true, status: "executed" }], { local: [pending] })).toEqual(["-5"]);
   });
 
   it("writes a contract a site called by its ID as every Dusk app does, without the 0x the site sent", () => {
     const CONTRACT = "cd".repeat(32);
-    const call = { hash: hash(8), source: "local", kind: TX_KIND.CONTRACT_CALL, contractId: `0x${CONTRACT.toUpperCase()}`, fnName: "pay", status: "submitted", submittedAt: AT, profileIndex: 0 };
-    const counterparty = lines(activityCsv([call], { nodeUrl: NODE, own: [SENDER] }))[1].split(",").at(-5);
+    const call = { hash: hash(8), kind: TX_KIND.CONTRACT_CALL, contractId: `0x${CONTRACT.toUpperCase()}`, fnName: "pay", status: "submitted", submittedAt: AT, profileIndex: 0 };
+    const counterparty = lines(activityCsv(rowsOf({ txs: [call] }), { nodeUrl: NODE }))[1].split(",").at(-5);
     expect(counterparty).toBe(CONTRACT);
   });
 

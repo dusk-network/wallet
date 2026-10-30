@@ -360,6 +360,19 @@ describe("a transaction's details", () => {
     expect(state.route).toBe("activity");
   });
 
+  it("says under Technical details how the wallet watched a send only until the chain's history has it", () => {
+    const tech = () => body().querySelectorAll("details.tx-tech .kv").map(visibleText);
+    const checked = "Last checkedThu 22 Oct 2026, 14:32 UTC";
+    open({ local: [{ ...sent, lastCheckedAt: sent.executedAt }] }, sent.hash);
+    expect(tech()).toContain(checked);
+    // A's register call, which the history has: when it was sent stays.
+    const { hash, contractId } = history(A).find((e) => e.fnName === "register");
+    const call = { hash, kind: TX_KIND.CONTRACT_CALL, contractId, fnName: "register", status: "executed", profileIndex: 0 };
+    open({ local: [{ ...call, submittedAt: sent.submittedAt, lastCheckedAt: sent.executedAt }] }, hash);
+    expect(tech()).toContain("SubmittedThu 22 Oct 2026, 14:32 UTC");
+    expect(tech()).not.toContain(checked);
+  });
+
   it("hides the amount with Hide balances, but not the fee", () => {
     open({ local: [sent], hidden: true }, sent.hash);
     expect(visibleText(body())).not.toContain("25 DUSK");

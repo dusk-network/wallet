@@ -153,7 +153,7 @@ describe("a deposit to DuskEVM on its way, in the popup", () => {
   it("asks nothing with no deposit on its way, on Mainnet, or away from Activity", async () => {
     for (const [ov, route] of [
       [overview({ txs: [deposit({ status: "submitted" })] }), "activity"],
-      [overview({ txs: [{ ...deposit(), kind: "transfer", contractId: undefined }] }), "home"],
+      [overview({ txs: [{ ...deposit(), kind: "transfer", contractId: undefined, fnName: undefined, bridgeTo: undefined }] }), "home"],
       [overview({ networkName: "Mainnet", nodeUrl: MAINNET, chainId: 1, txs: [deposit({ nodeUrl: MAINNET })] }), "activity"],
       [overview(), "send"],
     ]) {

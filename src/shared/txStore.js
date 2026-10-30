@@ -50,6 +50,7 @@ export async function getTxEpoch() {
  * @property {string=} blockHeight
  * @property {string=} blockTimestamp
  * @property {number=} finalizedAt
+ * @property {boolean=} settled Kept only for what the chain's row of it lacks (settleSends).
  */
 
 async function getAll() {
@@ -122,6 +123,21 @@ export async function patchTxMeta(hash, patch, { epoch } = {}) {
       ? { ...prev, lastCheckedAt: patch.lastCheckedAt ?? prev.lastCheckedAt }
       : { ...prev, ...nextPatch };
     await setAll(prune(current, hash));
+  });
+}
+
+/**
+ * Forget these transactions' metadata: the chain's history says all of them.
+ * @param {string[]} hashes
+ * @param {{ epoch?: number }} [opts] - `epoch`: getTxEpoch when the work began
+ */
+export async function forgetTxs(hashes, { epoch } = {}) {
+  if (!hashes.length) return;
+  return mutate(async () => {
+    if (await stale(epoch)) return;
+    const current = await getAll();
+    for (const hash of hashes) delete current[hash];
+    await setAll(current);
   });
 }
 

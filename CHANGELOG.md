@@ -57,6 +57,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Named a send's recipient in Activity by its verified `.dusk` name before the name typed when sending.
+- Showed a failed shield's details as a shield's, from the public balance to the shielded one.
+- Dropped Submitted and Shielded reservation from a send's Technical details once the chain's history has all of it.
 - Named DUSK bridged to and from BNB Smart Chain and Ethereum in Activity by their routes, To BNB Smart Chain and From Ethereum, under Bridge, with the bridge's account it went through.
 - Named a `.dusk` name's reservation in Activity by the name its registration reveals, else Name reservation (step 1 of 2).
 - Said on Send that a pasted 0x address is an EVM address, not a Dusk account, and kept Review off.
@@ -211,6 +214,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Serialized DRC20 and DRC721 encoded call arguments before browser extension messaging. ([#79])
 - Generated fresh discovery UUIDv4 values per page/provider, separate from the stable bridge routing identifier. ([dusk-network/connect#42](https://github.com/dusk-network/connect/issues/42))
 - Waited for the archive to have every block a shielded history needs, rather than keep it incomplete.
+- Marked an unshield as Shielded in the export.
 
 [#22]: https://github.com/dusk-network/wallet/issues/22
 [#113]: https://github.com/dusk-network/wallet/issues/113

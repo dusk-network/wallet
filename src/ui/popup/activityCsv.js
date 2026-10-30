@@ -5,12 +5,10 @@
 // amount is 0 and its fee stands on its own. A row whose time or outcome
 // isn't looked up yet says so in its status. Pure functions of the rows.
 
-import { formatLuxToDusk, safeBigInt } from "../../shared/amount.js";
+import { formatLuxToDusk } from "../../shared/amount.js";
 import { dateText } from "../lib/time.js";
 import { contractIdText } from "../lib/strings.js";
-import { TX_KIND } from "../../shared/constants.js";
-import { SOZU_FN } from "@dusk-network/networks/sozu";
-import { describeTx, subText, txTime } from "./views/txRow.js";
+import { describeTx, subText } from "./views/txRow.js";
 
 /** The columns of an export. */
 export const CSV_COLUMNS = Object.freeze([
@@ -35,9 +33,7 @@ export const CSV_CONTACT_COLUMN = "Your contact name";
 const STATUS_WORDS = Object.freeze({
   executed: "Completed",
   failed: "Failed",
-  mempool: "Pending",
-  removed: "Unknown",
-  submitted: "Pending",
+  pending: "Pending",
   unknown: "Unknown",
 });
 
@@ -56,69 +52,33 @@ const csvText = (value) => {
 /** "Wed 28 Oct 2026, 06:51 CET": a time in full, as the wallet writes it everywhere (time.js). */
 export const fullDateTime = (ms) => dateText(ms);
 
-/** Whether a row's time, fee and outcome are still to be looked up. */
-export const isRowIncomplete = (tx) =>
-  !txTime(tx) || ((tx?.source === "archive" || tx?.source === "both") && typeof tx?.success !== "boolean");
-
-// Which way it went, as the chain's history says, else as the wallet sent it.
-function directionOf(tx) {
-  if (["in", "out", "self"].includes(tx?.direction)) return tx.direction;
-  const kind = String(tx?.kind ?? "").toLowerCase();
-  const back = [TX_KIND.UNSHIELD, TX_KIND.UNSTAKE, TX_KIND.WITHDRAW_REWARD].includes(kind) || tx?.fnName === SOZU_FN.UNSTAKE;
-  return back ? "in" : "out";
-}
-
-const lower = (value) => String(value ?? "").trim().toLowerCase();
-
-// The DUSK that left or reached the account. The chain's record says it as
-// one value, which a call's deposit holds too. The wallet's own record of a
-// call keeps its parts apart: the deposit, and the amount, which left only
-// when it went to someone else rather than back to the profile. A row the
-// chain hasn't settled shows the wallet's own record.
-function movedLux(tx, { records, own }) {
-  const settled = typeof tx?.success === "boolean" && tx?.status === "executed";
-  const mine = tx?.source === "local" ? tx : tx?.source === "both" && !settled ? records.get(lower(tx?.hash)) ?? tx : null;
-  if (!mine) {
-    const deposit = safeBigInt(tx?.deposit, 0n);
-    return deposit > 0n ? deposit : safeBigInt(tx?.amount, 0n);
-  }
-  const amount = safeBigInt(mine.amount, 0n);
-  const deposit = safeBigInt(mine.deposit, 0n);
-  if (lower(mine.kind ?? tx?.kind) !== TX_KIND.CONTRACT_CALL) return deposit > 0n ? deposit : amount;
-  const to = String(mine.to ?? "").trim();
-  return deposit + (to && !own.includes(to) ? amount : 0n);
-}
-
 // One row as a line. Its words never use the user's contact names: those go
 // in their own column, when asked for.
-function csvLine(tx, { nodeUrl, contactName, records, own }, withContacts) {
+function csvLine(tx, { nodeUrl, contactName }, withContacts) {
   const desc = describeTx(tx, { nodeUrl });
-  const time = txTime(tx);
-  const direction = directionOf(tx);
-  const lux = desc.unsent ? 0n : movedLux(tx, { records, own });
-  const signed = direction === "out" && lux > 0n ? `-${formatLuxToDusk(lux)}` : formatLuxToDusk(lux);
+  const lux = desc.unsent ? 0n : tx.value;
+  const signed = tx.direction === "out" && lux > 0n ? `-${formatLuxToDusk(lux)}` : formatLuxToDusk(lux);
   // A token's amount, which no DUSK column holds, goes with what it did.
   const token = desc.amount && desc.amount.unit !== "DUSK" ? `${desc.amount.value} ${desc.amount.unit}` : "";
   const line = [subText(desc, ""), token].filter(Boolean).join(" · ");
   const what = desc.isAddress ? line : line ? `${desc.name} (${line})` : desc.name;
   // A contract by its ID as every Dusk app writes one, without 0x; a transfer
   // through a bridge's account, that account.
-  const counterparty = contractIdText((desc.via?.address ?? (desc.evm ? desc.address : desc.address ?? tx?.to ?? tx?.from ?? tx?.counterparty ?? tx?.contractId)) ?? "");
-  const status = isRowIncomplete(tx) ? "Not looked up yet" : STATUS_WORDS[String(tx?.status ?? "")] ?? "";
+  const counterparty = contractIdText((desc.via?.address ?? (desc.evm ? desc.address : desc.address ?? tx.counterparty ?? tx.contractId)) ?? "");
   return [
-    csvField(time ? new Date(time).toISOString() : ""),
-    csvField(time ? fullDateTime(time) : ""),
-    csvField(tx?.blockHeight ?? ""),
-    csvField(tx?.hash ?? ""),
-    csvField(direction),
-    csvField(String(tx?.privacy ?? "").toLowerCase() === "shielded" ? "Shielded" : "Public"),
+    csvField(tx.time ? new Date(tx.time).toISOString() : ""),
+    csvField(tx.time ? fullDateTime(tx.time) : ""),
+    csvField(tx.blockHeight ?? ""),
+    csvField(tx.hash),
+    csvField(tx.direction),
+    csvField(tx.privacy === "shielded" ? "Shielded" : "Public"),
     csvText(what),
-    csvText(tx?.counterpartyName ?? tx?.toName ?? ""),
+    csvText(tx.counterpartyName ?? tx.toName ?? ""),
     csvField(counterparty),
     csvField(signed),
-    csvField(tx?.feePaid != null && tx.feePaid !== "" ? formatLuxToDusk(tx.feePaid) : ""),
-    csvText(tx?.memo ?? ""),
-    csvField(status),
+    csvField(tx.fee !== null ? formatLuxToDusk(tx.fee) : ""),
+    csvText(tx.memo ?? ""),
+    csvField(tx.incomplete ? "Not looked up yet" : STATUS_WORDS[tx.status]),
     ...(withContacts ? [csvText(((desc.via || !desc.evm) && counterparty && contactName?.(counterparty)) || "")] : []),
   ].join(",");
 }
@@ -127,17 +87,12 @@ function csvLine(tx, { nodeUrl, contactName, records, own }, withContacts) {
  * The rows as CSV: the columns of CSV_COLUMNS, and the user's contact names
  * in CSV_CONTACT_COLUMN only `withContacts`.
  * @param {object[]} rows - Activity's rows (activity.js activityRows)
- * @param {{
- *   nodeUrl?: string, contactName?: (address: string) => string, withContacts?: boolean,
- *   local?: object[], own?: string[],
- * }} [opts] - `local`: the wallet's own records (the overview's `txs`); `own`:
- *   the profile's own account and shielded address
+ * @param {{ nodeUrl?: string, contactName?: (address: string) => string, withContacts?: boolean }} [opts]
  * @returns {string}
  */
-export function activityCsv(rows, { nodeUrl, contactName, withContacts = false, local = [], own = [] } = {}) {
+export function activityCsv(rows, { nodeUrl, contactName, withContacts = false } = {}) {
   const columns = withContacts ? [...CSV_COLUMNS, CSV_CONTACT_COLUMN] : CSV_COLUMNS;
-  const records = new Map((local ?? []).map((tx) => [lower(tx?.hash), tx]));
-  const lines = (rows ?? []).map((tx) => csvLine(tx, { nodeUrl, contactName, records, own }, withContacts));
+  const lines = (rows ?? []).map((tx) => csvLine(tx, { nodeUrl, contactName }, withContacts));
   return [columns.map(csvField).join(","), ...lines].join("\r\n");
 }
 
