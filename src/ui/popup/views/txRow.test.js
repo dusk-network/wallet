@@ -174,13 +174,15 @@ describe("what a row says", () => {
     // A reservation by the name its registration revealed, once one follows; until then, step 1 of 2.
     expect(call("commit").name).toBe("Name reservation (step 1 of 2)");
     const reservation = "1f".repeat(32);
-    const both = rowsOf({
-      txs: [
-        { contractId: store, fnName: "commit", hash: "c1".repeat(32), kind: TX_KIND.CONTRACT_CALL, reservation, status: "executed", submittedAt: 1 },
-        { contractId: store, fnName: "register", hash: "c2".repeat(32), kind: TX_KIND.CONTRACT_CALL, registeredName: "alice.dusk", reservation, status: "executed", submittedAt: 2 },
-      ],
-    });
-    expect(both.map((row) => describeTx(row, { nodeUrl: TESTNET }).name)).toEqual(["Registered alice.dusk", "Reserved alice.dusk"]);
+    const sends = [
+      { contractId: store, fnName: "commit", hash: "c1".repeat(32), kind: TX_KIND.CONTRACT_CALL, reservation, status: "executed", submittedAt: 1 },
+      { contractId: store, fnName: "register", hash: "c2".repeat(32), kind: TX_KIND.CONTRACT_CALL, registeredName: "alice.dusk", reservation, status: "executed", submittedAt: 2 },
+    ];
+    const names = (rows) => rows.map((row) => describeTx(row, { nodeUrl: TESTNET }).name);
+    expect(names(rowsOf({ txs: sends }))).toEqual(["Registered alice.dusk", "Reserved alice.dusk"]);
+    // The same in the chain's history, a block apart, before their calls are read: by what the wallet sent.
+    const entries = sends.map(({ contractId, fnName, hash, kind }, i) => ({ blockHeight: 4_687_000 + i, contractId, fnName, hash, kind }));
+    expect(names(rowsOf({ txs: sends, entries }))).toEqual(["Registered alice.dusk", "Reserved alice.dusk"]);
     // A registration by its name, once read from its call.
     expect(call("register", { registeredName: "alice.dusk" }).name).toBe("Registered alice.dusk");
     // On another network's node, or a custom one, it's any contract.

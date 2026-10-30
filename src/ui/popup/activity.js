@@ -28,6 +28,7 @@ import { chainIdForNode, networkForNode } from "../../shared/nodeNetwork.js";
 import { lookupRecipientNames } from "../../shared/duskNames.js";
 import { forgetTxs, getTxEpoch, listTxs, patchTxMeta } from "../../shared/txStore.js";
 import { VERIFIED_NAME_TTL_MS, duskNamesNetwork } from "../../shared/verifiedNames.js";
+import { noteTxStatus } from "./views/sent.js";
 
 /** Rows read for the History view at first, and how many more Show more adds. */
 export const ACTIVITY_PAGE = 50;
@@ -83,14 +84,18 @@ const watched = (tx) => tx.status === "submitted" || tx.status === "mempool";
 
 // Settles the profile's own sends the chain's histories have the outcome of
 // (settleSends): those the chain's rows say all of are forgotten, the others
-// kept for what they add.
-async function settle(a) {
+// kept for what they add. The Sent screen reads its send's result from the
+// record where no watcher's event brought it (the desktop app's): it keeps
+// that first.
+async function settle(a, state) {
   const own = (await listTxs({ nodeUrl: a.nodeUrl })).filter(
     (tx) => !watched(tx) && (tx.profileIndex == null || Number(tx.profileIndex) === a.profileIndex)
   );
   const { drop, keep } = settleSends({ public: a.entries, shielded: a.shielded, pending: own, keeps });
   const epoch = await a.txEpoch;
   if (epoch === undefined) return;
+  const shown = state?.sent?.hash && drop.includes(state.sent.hash) ? own.find((tx) => tx.hash === state.sent.hash) : null;
+  if (shown) noteTxStatus(state.sent, shown);
   await forgetTxs(drop, { epoch });
   for (const { hash } of keep) await patchTxMeta(hash, { settled: true }, { epoch });
 }
@@ -158,7 +163,7 @@ async function loadShielded(a, state, render) {
     }
     a.shielded = result.entries;
     if (result.pending) again();
-    await settle(a).catch(() => {});
+    await settle(a, state).catch(() => {});
     if (result.entries.length) redraw(state, render);
   } catch {
     if (state.activity === a) again();
@@ -214,7 +219,7 @@ async function run(a, state, render) {
   // Another wallet's now: nothing more for this one.
   if (state.activity !== a || a.stale) return;
   await reload(a).catch(() => {});
-  await settle(a).catch(() => {});
+  await settle(a, state).catch(() => {});
   redraw(state, render);
   if (await checkNames(a).catch(() => false)) redraw(state, render);
   loadShielded(a, state, render).catch(() => {});

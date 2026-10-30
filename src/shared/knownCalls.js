@@ -53,14 +53,15 @@ function factsOf({ contractId, fnName, nodeUrl, args, account }) {
  * What calls to Dusk Domains on the node's network did, for Activity's rows
  * (@dusk-network/app-core/activity's `nameCall`): a call's kind, and the
  * name a registration registered and the reservation, as kept with the
- * entry or the send (registeredNameOf, nameReservationOf); null for any
- * other call.
+ * entry or the send (registeredNameOf, nameReservationOf): undefined while
+ * its call isn't read, so the send's stand, and null for a call read that
+ * has none. Null for any other call.
  * @param {string} nodeUrl
- * @returns {(call: { contractId: string, fnName: string }, kept: object) => { kind: string, name: string|null, reservation: string|null } | null}
+ * @returns {(call: { contractId: string, fnName: string }, kept: object) => { kind: string, name?: string|null, reservation?: string|null } | null}
  */
 export const nameFactsFor = (nodeUrl) => (call, kept) => {
   const fact = factsOf({ ...call, nodeUrl });
-  return fact && { kind: fact.kind, name: kept?.registeredName ?? null, reservation: kept?.reservation ?? null };
+  return fact && { kind: fact.kind, name: kept?.registeredName, reservation: kept?.reservation };
 };
 
 /**

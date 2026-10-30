@@ -251,6 +251,21 @@ describe("the wallet's own sends", () => {
     const rows = activity.activityRows(overview(A, { txs: kept }), state);
     expect(rows.filter((r) => r.hash === commit || r.hash === register)).toHaveLength(2);
     expect(describeTx(rows.find((r) => r.hash === commit), { nodeUrl: NODE })).toMatchObject({ lead: "Sent to", amount: { value: "12.5", unit: "TKN" } });
+    // Forgotten for good: the watcher's last write, late, brings back none of it.
+    await txs.patchTxMeta(register, { status: "executed", blockHeight: "4658012", finalizedAt: Date.now() });
+    expect([await txs.getTxMeta(register), (await txs.listTxs()).map((tx) => tx.hash)]).toEqual([null, [commit]]);
+  });
+
+  it("leave the Sent screen its result when they're forgotten", async () => {
+    fakeArchive();
+    await txs.putTxMeta(register, { ...registration, blockHeight: "4658012" });
+    // This send's Sent screen, in the background since before its result came: it reads it from the record.
+    const state = { route: "home", sent: { hash: register, phase: "sent", status: "submitted" } };
+    activity.ensureActivity(overview(), { state, render: vi.fn(async () => {}) });
+    await until(() => state.activity?.loaded && !state.activity.syncing && state.activity.checked.size > 0);
+    expect(await txs.getTxMeta(register)).toBeNull();
+    const { sentSteps } = await import("./views/sent.js");
+    expect(sentSteps(state.sent, overview()).at(-1)).toMatchObject({ label: "Completed", state: "done", sub: "In block 4,658,012" });
   });
 
   it("are left as they are while the wallet still watches them", async () => {

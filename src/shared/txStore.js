@@ -53,6 +53,11 @@ export async function getTxEpoch() {
  * @property {boolean=} settled Kept only for what the chain's row of it lacks (settleSends).
  */
 
+// A record forgotten once the chain's history said all of it (forgetTxs)
+// keeps its place as this, so a watcher's late write brings back no part of
+// it: none without its network, profile and kind. Pruned before any record.
+const isForgotten = (meta) => meta?.forgotten === true;
+
 async function getAll() {
   const items = await storage.get(STORAGE_KEYS.TXS);
   return /** @type {Record<string, TxMeta>} */ (
@@ -88,6 +93,7 @@ export async function putTxMeta(hash, meta, { epoch } = {}) {
   return mutate(async () => {
     if (await stale(epoch)) return;
     const current = await getAll();
+    if (isForgotten(current[hash])) return;
     const next = { ...meta, ...current[hash] };
     const terminal = next.status === "executed" || next.status === "failed";
     const shielded = next.privacy === "shielded" ||
@@ -112,6 +118,7 @@ export async function patchTxMeta(hash, patch, { epoch } = {}) {
   return mutate(async () => {
     if (await stale(epoch)) return;
     const current = await getAll();
+    if (isForgotten(current[hash])) return;
     const prev = current[hash] ?? {};
     const terminal = prev.status === "executed" || prev.status === "failed";
     const weaker = patch.status && patch.status !== "executed" && patch.status !== "failed";
@@ -128,6 +135,7 @@ export async function patchTxMeta(hash, patch, { epoch } = {}) {
 
 /**
  * Forget these transactions' metadata: the chain's history says all of them.
+ * Each stays forgotten: a later write to it is dropped.
  * @param {string[]} hashes
  * @param {{ epoch?: number }} [opts] - `epoch`: getTxEpoch when the work began
  */
@@ -136,8 +144,8 @@ export async function forgetTxs(hashes, { epoch } = {}) {
   return mutate(async () => {
     if (await stale(epoch)) return;
     const current = await getAll();
-    for (const hash of hashes) delete current[hash];
-    await setAll(current);
+    for (const hash of hashes) current[hash] = { forgotten: true };
+    await setAll(prune(current));
   });
 }
 
@@ -155,8 +163,8 @@ export async function clearTxs() {
  */
 export async function getTxMeta(hash) {
   if (!hash) return null;
-  const current = await getAll();
-  return current[hash] ?? null;
+  const meta = (await getAll())[hash];
+  return meta && !isForgotten(meta) ? meta : null;
 }
 
 /**
@@ -173,7 +181,9 @@ export async function listTxs(opts = {}) {
   const limit = Number.isFinite(Number(opts.limit)) ? Math.max(0, Number(opts.limit)) : null;
 
   const current = await getAll();
-  let entries = Object.entries(current).map(([hash, meta]) => ({ hash, ...meta }));
+  let entries = Object.entries(current)
+    .filter(([, meta]) => !isForgotten(meta))
+    .map(([hash, meta]) => ({ hash, ...meta }));
 
   if (nodeUrl) {
     entries = entries.filter((e) => String(e.nodeUrl ?? "") === nodeUrl);
