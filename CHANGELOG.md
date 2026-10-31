@@ -63,6 +63,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Found where a deposit to DuskEVM arrived in fewer requests.
 - Kept site connections, sends and DuskEVM arrivals per wallet: a site connected to one wallet sees nothing of another.
 - Filled every word box from a whole recovery phrase pasted into any of them, with 24 boxes for 24 words.
 - Said what's wrong with a recovery phrase after a paste or on leaving its boxes: a word that isn't one, a missing word, the count or the checksum.
@@ -185,6 +186,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Showed an unshield as an unshield to a profile that only got its change, and two shielded payments one block made to one address as two transactions.
+- Showed a gas refund from another account's bridge call as received, not as a withdrawal from DuskEVM.
+- Kept syncing Activity when a transaction's time or outcome can't be read, and read it on the next sync.
+- Kept what another page read of a reset dev or local node's history, and none of the old chain's times or outcomes.
 - Kept looking for a bridge transfer's payment after a search missed it, rather than waiting for it for good.
 - Said Arrived on an earlier deposit to DuskEVM also after a later one was sent, and waited for a deposit the archive doesn't list yet rather than taking another's payment.
 - Showed amounts under 0.01 DUSK to two significant digits, as the other Dusk apps do.

@@ -53,6 +53,7 @@ import {
   getShieldedHistoryRecord,
   putNoteHeightPool,
   putShieldedHistoryRecord,
+  updateShieldedHistoryRecord,
 } from "./activityStore.js";
 import { createLeafHeightTap, shieldedHistory } from "@dusk-network/app-core/shielded";
 
@@ -2657,6 +2658,14 @@ const shieldedEntry = (row) => ({
   success: row.status !== "failed", ...(row.error ? { error: row.error } : {}), timestamp: row.timestamp ?? null,
   blockHeight: row.blockHeight,
 });
+// A kept history as the package reads it, and one to keep as this device keeps it.
+const shieldedRecordOf = (kept) => kept && { ...kept, entries: kept.entries.map(shieldedEntry) };
+const shieldedRowsOf = (record) => ({ ...record, entries: record.entries.map(shieldedRow) });
+// A write that rejects only for a wallet reset meanwhile: a store that can't
+// keep a history asks again next time.
+const unlessReset = (error) => {
+  if (error instanceof StaleActivityError) throw error;
+};
 
 let shieldedHistoryRun = null;
 
@@ -2725,15 +2734,12 @@ export async function getShieldedHistory() {
           }),
       },
       store: {
-        get: async () => {
-          const kept = await getShieldedHistoryRecord(key);
-          return kept && { ...kept, entries: kept.entries.map(shieldedEntry) };
-        },
+        get: async () => shieldedRecordOf(await getShieldedHistoryRecord(key)),
         // Kept unless the wallet was reset meanwhile; a store that can't keep it asks again next time.
-        put: (record) =>
-          putShieldedHistoryRecord(key, { ...record, entries: record.entries.map(shieldedRow) }, epoch).catch((error) => {
-            if (error instanceof StaleActivityError) throw error;
-          }),
+        put: (record) => putShieldedHistoryRecord(key, shieldedRowsOf(record), epoch).catch(unlessReset),
+        // In one transaction: two reads of this history at once ask among the same decoys.
+        update: (change) =>
+          updateShieldedHistoryRecord(key, (kept) => shieldedRowsOf(change(shieldedRecordOf(kept))), epoch).then(shieldedRecordOf, unlessReset),
       },
       treeHeights: {
         get: () => getNoteHeightPool(network),

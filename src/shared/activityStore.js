@@ -101,31 +101,51 @@ export async function getActivityEpoch() {
 }
 
 /**
- * One write transaction over `stores` that runs `write(tx)` only while the
- * store's epoch is still `epoch` (no check when it is undefined).
+ * One write transaction over `stores` that runs `write(tx, refuse)` only
+ * while the store's epoch is still `epoch` (no check when it is undefined).
+ * `refuse(error)` ends it with nothing written, and it rejects with `error`.
  * @returns {Promise<void>}
  */
 async function guardedWrite(stores, epoch, write) {
   const db = await openDb();
   const tx = db.transaction([...new Set([STORE_META, ...stores])], "readwrite");
-  let stale = false;
-  if (epoch === undefined) write(tx);
+  let refused = null;
+  const refuse = (error) => {
+    refused ??= error;
+    tx.abort();
+  };
+  if (epoch === undefined) write(tx, refuse);
   else {
     const life = tx.objectStore(STORE_META).get(LIFECYCLE);
     life.onsuccess = () => {
-      if ((Number(life.result?.epoch) || 0) !== epoch) {
-        stale = true;
-        tx.abort();
-        return;
-      }
-      write(tx);
+      if ((Number(life.result?.epoch) || 0) !== epoch) refuse(new StaleActivityError());
+      else write(tx, refuse);
     };
   }
   try {
     await done(tx);
   } catch (error) {
-    throw stale ? new StaleActivityError() : error;
+    throw refused ?? error;
   }
+}
+
+/**
+ * `write()` once `check`, when given, saw the account's sync state kept now,
+ * in the same transaction: when it throws, nothing is written, and the
+ * write rejects with what it threw.
+ */
+function afterCheck(tx, refuse, ownerKey, check, write) {
+  if (!check) return write();
+  const kept = tx.objectStore(STORE_META).get(ownerKey);
+  kept.onsuccess = () => {
+    try {
+      check(kept.result ?? null);
+    } catch (error) {
+      refuse(error);
+      return;
+    }
+    write();
+  };
 }
 
 /**
@@ -184,22 +204,27 @@ export async function commitActivityStep(ownerKey, entries, update, epoch) {
 
 /**
  * Add details (time, outcome, fee, call) to kept entries, by hash. Entries
- * that are not kept are left alone.
+ * that are not kept are left alone. `check` sees the account's sync state
+ * first, in the same transaction, and nothing is written when it throws: no
+ * details go on a history another run started over since.
  * @param {string} ownerKey
  * @param {Map<string, object>} details
  * @param {number} [epoch] - getActivityEpoch when the work began
+ * @param {import("@dusk-network/app-core/history").StoreCheck} [check]
  */
-export async function patchActivityEntries(ownerKey, details, epoch) {
+export async function patchActivityEntries(ownerKey, details, epoch, check) {
   if (!details?.size) return;
-  await guardedWrite([STORE_ENTRIES], epoch, (tx) => {
-    const store = tx.objectStore(STORE_ENTRIES);
-    for (const [hash, patch] of details) {
-      const req = store.get(`${ownerKey}::${hash}`);
-      req.onsuccess = () => {
-        if (req.result) store.put({ ...req.result, ...patch });
-      };
-    }
-  });
+  await guardedWrite([STORE_ENTRIES], epoch, (tx, refuse) =>
+    afterCheck(tx, refuse, ownerKey, check, () => {
+      const store = tx.objectStore(STORE_ENTRIES);
+      for (const [hash, patch] of details) {
+        const req = store.get(`${ownerKey}::${hash}`);
+        req.onsuccess = () => {
+          if (req.result) store.put({ ...req.result, ...patch });
+        };
+      }
+    })
+  );
 }
 
 /**
@@ -231,21 +256,27 @@ export async function listActivityEntries(ownerKey, { limit = 200, before } = {}
 
 /**
  * Forget an account's kept history on one network: entries and sync state.
+ * `check` sees the sync state first, in the same transaction, and nothing
+ * is forgotten when it throws: another run started the history over on the
+ * new chain already, and what it read stays.
  * @param {string} ownerKey
  * @param {number} [epoch] - getActivityEpoch when the work began
+ * @param {import("@dusk-network/app-core/history").StoreCheck} [check]
  */
-export async function clearActivity(ownerKey, epoch) {
-  await guardedWrite([STORE_META, STORE_ENTRIES], epoch, (tx) => {
-    tx.objectStore(STORE_META).delete(ownerKey);
-    const index = tx.objectStore(STORE_ENTRIES).index("byOwnerHeight");
-    const req = index.openCursor(IDBKeyRange.bound([ownerKey, -Infinity], [ownerKey, Infinity]));
-    req.onsuccess = () => {
-      const cursor = req.result;
-      if (!cursor) return;
-      cursor.delete();
-      cursor.continue();
-    };
-  });
+export async function clearActivity(ownerKey, epoch, check) {
+  await guardedWrite([STORE_META, STORE_ENTRIES], epoch, (tx, refuse) =>
+    afterCheck(tx, refuse, ownerKey, check, () => {
+      tx.objectStore(STORE_META).delete(ownerKey);
+      const index = tx.objectStore(STORE_ENTRIES).index("byOwnerHeight");
+      const req = index.openCursor(IDBKeyRange.bound([ownerKey, -Infinity], [ownerKey, Infinity]));
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) return;
+        cursor.delete();
+        cursor.continue();
+      };
+    })
+  );
 }
 
 /**
@@ -338,6 +369,34 @@ export async function putShieldedHistoryRecord(ownerKey, record, epoch) {
   await guardedWrite([STORE_SHIELDED], epoch, (tx) => {
     tx.objectStore(STORE_SHIELDED).put({ ...record, ownerKey, at: Date.now() });
   });
+}
+
+/**
+ * Keep `change(kept)` in place of a profile's shielded history, in one
+ * transaction, and give what was kept: two reads of the history at once draw
+ * its decoy heights from the same kept ones. When `change` throws, nothing
+ * is kept, and it rejects with what it threw.
+ * @param {string} ownerKey
+ * @param {(kept: object|null) => object} change
+ * @param {number} [epoch] - getActivityEpoch when the work began
+ * @returns {Promise<object>}
+ */
+export async function updateShieldedHistoryRecord(ownerKey, change, epoch) {
+  let kept = null;
+  await guardedWrite([STORE_SHIELDED], epoch, (tx, refuse) => {
+    const store = tx.objectStore(STORE_SHIELDED);
+    const req = store.get(ownerKey);
+    req.onsuccess = () => {
+      try {
+        kept = { ...change(req.result ?? null), ownerKey, at: Date.now() };
+      } catch (error) {
+        refuse(error);
+        return;
+      }
+      store.put(kept);
+    };
+  });
+  return kept;
 }
 
 /** When `url` last answered without the archive, or null. */

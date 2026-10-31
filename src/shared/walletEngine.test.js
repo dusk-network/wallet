@@ -1937,7 +1937,8 @@ describe("walletEngine", () => {
         timestamp: 1_782_131_528_000,
         blockHeight: 3602438,
       }),
-      row({ hash: madeBy(226951, "phoenix"), kind: "shield", amount: "500000000", timestamp: 1_747_065_974_000, blockHeight: 226951 }),
+      // An unshield as its event says, to a profile that only got its change.
+      row({ hash: madeBy(226951, "phoenix"), kind: "unshield", amount: "500000000", timestamp: 1_747_065_974_000, blockHeight: 226951 }),
       row({ hash: madeBy(184423, "convert"), kind: "shield", amount: "10000000000", timestamp: 1_746_640_694_000, blockHeight: 184423 }),
     ];
     // A kept row as the entry it was, as the popup is given it.
@@ -2078,19 +2079,49 @@ describe("walletEngine", () => {
       await profileNotes();
       await growTree(leavesFromPos);
       archive();
-      const keep = activity.putShieldedHistoryRecord;
+      const keep = activity.updateShieldedHistoryRecord;
       // The store has room for the decoys, not for the history.
-      const put = vi.spyOn(activity, "putShieldedHistoryRecord").mockImplementation(async (key, record, epoch) => {
-        if (record.entries.length) throw new DOMException("The store is full", "QuotaExceededError");
-        return keep(key, record, epoch);
+      const update = vi.spyOn(activity, "updateShieldedHistoryRecord").mockImplementation(async (key, change, epoch) => {
+        const next = change(await activity.getShieldedHistoryRecord(key));
+        if (next.entries.length) throw new DOMException("The store is full", "QuotaExceededError");
+        return keep(key, () => next, epoch);
       });
       try {
         await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: ENTRIES });
       } finally {
-        put.mockRestore();
+        update.mockRestore();
       }
       const record = await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`);
       expect(record?.entries ?? []).toEqual([]);
+    });
+
+    it("asks among the decoys another read of the profile kept meanwhile, and keeps them", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      // Hundreds of heights to draw decoys from: two draws all but never match.
+      await growTree(leavesFromPos, { distinct: true });
+      const queries = archive();
+      const key = `mainnet::${WALLET_ID}::0`;
+      // The four real heights' sixteen decoys, as another read of the profile
+      // drew and kept them while this one valued its notes.
+      const OTHER = Array.from({ length: 16 }, (_, i) => GROWN + 10 + i);
+      const value = globalThis.__W3SPER_BALANCE__;
+      let other = true;
+      globalThis.__W3SPER_BALANCE__ = async (...args) => {
+        if (other) {
+          other = false;
+          await activity.putShieldedHistoryRecord(key, { fingerprint: "", entries: [], decoys: OTHER });
+        }
+        return value(...args);
+      };
+
+      await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: ENTRIES });
+      const real = new Set([184423, 226951, 3602438, 3861643]);
+      const asked = queries.flatMap((q) => [...q.matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h))).filter((h) => !real.has(h));
+      expect(new Set(asked)).toEqual(new Set(OTHER));
+      expect((await activity.getShieldedHistoryRecord(key)).decoys).toEqual(OTHER);
     });
 
     it("forgets the tree's heights and the histories kept on a chain the sync finds replaced", async () => {
