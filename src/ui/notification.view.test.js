@@ -289,6 +289,38 @@ describe("sign approvals", () => {
   });
 });
 
+describe("a site's request with more than one wallet", () => {
+  const two = { walletName: "Wallet 2" };
+
+  it("names the wallet it's bound to beside the paying or signing profile", async () => {
+    await render("send_tx", transfer(BOB), two);
+    expect(visibleText(row("From"))).toBe("Wallet 2 · alice.dusk · Public");
+    await render("send_tx", transfer(ADDRESS, { privacy: "shielded" }), two);
+    expect(visibleText(row("From"))).toBe("Wallet 2 · Your shielded balance");
+    const deposit = fixtures.calls.find((c) => c.name === "deposit-shoot");
+    await render("send_tx", { kind: "contract_call", contractId: duskEvmContracts(2).bridge, fnName: deposit.fnName, fnArgs: deposit.args, deposit: deposit.expected.amountLux, chainId: "dusk:2", nodeUrl: TESTNET }, two);
+    expect(visibleText(row("From"))).toBe("Wallet 2 · alice.dusk · Public");
+
+    await render("sign_message", { chainId: "dusk:2", messageLen: 2, messagePreview: { kind: "text", text: "hi", truncated: false } }, two);
+    expect(visibleText(row("Account"))).toBe(`Wallet 2 · alice.dusk${shortAddress(MAIN)}`);
+    await render("sign_auth", { chainId: "dusk:2", nonce: "n-1" }, { ...two, duskNames: {} });
+    expect(visibleText(row("Account"))).toBe(`Wallet 2${MAIN}`);
+
+    await render("connect", { requestedProfiles: true }, two);
+    const group = app.querySelector("[role=radiogroup]");
+    expect(app.querySelector(`#${group.getAttribute("aria-labelledby")}`).textContent).toBe("Choose a profile in Wallet 2");
+    await render("connect", { requestedProfiles: true }, { ...two, accounts: [MAIN], accountCount: 1 });
+    expect(app.querySelector(".ap-profiles .ap-section").textContent).toBe("Profile in Wallet 2");
+  });
+
+  it("names no wallet with one", async () => {
+    await render("send_tx", transfer(BOB), { walletName: "" });
+    expect(visibleText(row("From"))).toBe("alice.dusk · Public");
+    await render("sign_message", { chainId: "dusk:2", messageLen: 2, messagePreview: { kind: "text", text: "hi", truncated: false } });
+    expectNamedAccount(row("Account"), "alice.dusk", MAIN);
+  });
+});
+
 describe("a site's request to pay", () => {
   it("says why it won't pay a recipient the network's file blocks, as the web wallet does, and offers only Reject", async () => {
     const { account } = networks.testnet.display.blocklist.find((entry) => entry.reason === "scam");

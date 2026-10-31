@@ -320,19 +320,26 @@ export async function renderNotification() {
   const nameMap = accountNames && typeof accountNames === "object" ? accountNames : {};
   // A profile's label: the one the user gave it, or its number.
   const profileLabel = (i) => String(nameMap?.[String(i)] ?? "").trim() || `Profile ${i + 1}`;
+  // With more than one wallet, the name of the one the request is bound to,
+  // first wherever a profile signs or pays: "Wallet 2 · alice.dusk".
+  const walletName = String(pending.walletName ?? "").trim();
+  const inWallet = (el) => (walletName ? h("span", { class: "ap-wallet" }, [`${walletName} · `, el]) : el);
 
   // The profile that signs or pays: its verified .dusk name over its short
-  // account, or the account in full without one.
+  // account, or the account in full without one; the wallet's name before
+  // the name, or over the account.
   const profileValue = (account = activeAccount) => {
     const name = nameOf(account);
-    if (!account || !name) return h("span", { class: "named-address" }, [h("code", { text: account || "(none)" })]);
-    return h("span", { class: "named-address" }, [h("span", { class: "dusk-name", text: name, title: name }), shortAddressEl(account)]);
+    if (!account || !name) {
+      return h("span", { class: "named-address" }, [walletName ? h("span", { text: walletName }) : null, h("code", { text: account || "(none)" })]);
+    }
+    return h("span", { class: "named-address" }, [inWallet(h("span", { class: "dusk-name", text: name, title: name })), shortAddressEl(account)]);
   };
   // The paying profile in one line: "alice.dusk · Public".
   const payerLine = (rail) => {
     const name = nameOf(activeAccount);
     return h("span", {}, [
-      name ? h("span", { text: name, title: activeAccount }) : shortMono(activeAccount),
+      inWallet(name ? h("span", { text: name, title: activeAccount }) : shortMono(activeAccount)),
       h("span", { class: "kv-muted", text: ` · ${rail}` }),
     ]);
   };
@@ -643,7 +650,7 @@ export async function renderNotification() {
         site,
         requestHead({ title: summary.title }),
         h("section", { class: "ap-profiles", "aria-labelledby": "connect-profile-label" }, [
-          sectionTitle(choosing ? "Choose a profile" : "Profile", "connect-profile-label"),
+          sectionTitle(`${choosing ? "Choose a profile" : "Profile"}${walletName ? ` in ${walletName}` : ""}`, "connect-profile-label"),
           h(
             "div",
             {
@@ -1055,7 +1062,7 @@ export async function renderNotification() {
             : null,
           gasEditor,
           group([
-            kv("From", shielded ? "Your shielded balance" : payerLine(rail)),
+            kv("From", shielded ? inWallet(h("span", { text: "Your shielded balance" })) : payerLine(rail)),
             service
               ? kv("To", [h("span", { class: "ap-kv-note", text: `The bridge's account for ${service.chain}` }), h("code", { class: "ap-address", text: to })], {
                   stack: true,

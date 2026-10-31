@@ -595,6 +595,29 @@ describe("background Phoenix tx lifecycle flow", () => {
     }
   });
 
+  it("names the wallet a site's request is bound to beside its profiles, with more than one wallet", async () => {
+    const { getEngineStatus } = await import("../background/engineHost.js");
+    const { getPending } = await import("../background/pending.js");
+    const { setWalletName } = await import("../shared/wallets.js");
+    const two = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0, walletKey: "k2", wallets: [{ key: "k1", n: 1 }, { key: "k2", n: 2 }] };
+    getEngineStatus.mockResolvedValue(two);
+    getPending.mockReturnValue({ kind: "connect", origin: "https://dapp.example", params: {}, shown: { walletId: "acct0" } });
+    const asked = async () => (await sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" }))?.walletName;
+    try {
+      await expect(asked()).resolves.toBe("Wallet 2");
+      await setWalletName("k2", "Savings");
+      await expect(asked()).resolves.toBe("Savings");
+      // One wallet: no name, as before.
+      getEngineStatus.mockResolvedValue({ ...two, wallets: [{ key: "k2", n: 2 }] });
+      await expect(asked()).resolves.toBe("");
+    } finally {
+      getPending.mockReset();
+      getPending.mockReturnValue(null);
+      getEngineStatus.mockReset();
+      getEngineStatus.mockResolvedValue({ isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 });
+    }
+  });
+
   it("shows a site's request only on its own wallet: on another, there's nothing to show", async () => {
     const { getPending } = await import("../background/pending.js");
     getPending.mockReturnValueOnce({ kind: "connect", origin: "https://dapp.example", params: {}, shown: { walletId: "acct9" } });

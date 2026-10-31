@@ -8,6 +8,7 @@ import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
+import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { fieldLabel, integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
 import { sendFromReview } from "./sent.js";
@@ -940,6 +941,8 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
         ]),
       ].filter(Boolean)),
       h("div", { class: "group" }, [
+        // With more than one wallet, which one it goes from, and its profile.
+        actions?.review?.walletName ? kv("From", withReviewWallet(profileNameEl(ov), actions.review)) : null,
         counterpartyAddr
           ? kv(op === "approve" ? "Spender" : "To", h("span", { class: "mono review-to__address", text: counterpartyAddr }), "kv--wrap")
           : null,

@@ -11,7 +11,7 @@ import { adoptLegacyTxs } from "../shared/txStore.js";
 import { adoptLegacyArrivals } from "../shared/bridgeArrival.js";
 import { forgetWalletData } from "../shared/walletReset.js";
 import { getAccountNames } from "../shared/accountNames.js";
-import { forgetWallet, getWalletDirectory, noteActiveWallet, normalizeWalletName, setWalletName } from "../shared/wallets.js";
+import { forgetWallet, getWalletDirectory, noteActiveWallet, normalizeWalletName, setWalletName, walletLabel } from "../shared/wallets.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 
@@ -72,6 +72,20 @@ export async function walletsShown(status) {
       };
     })
   );
+}
+
+/**
+ * The open wallet's name, as the switcher shows it, when there's more than
+ * one wallet: what a site's request names beside the profile. "" with one.
+ * @param {object} status - the engine's status
+ * @returns {Promise<string>}
+ */
+export async function openWalletName(status) {
+  const wallets = status?.isUnlocked && Array.isArray(status.wallets) ? status.wallets : [];
+  const open = wallets.length > 1 ? wallets.find((w) => w?.key === status.walletKey) : null;
+  if (!open) return "";
+  const { wallets: kept } = await getWalletDirectory().catch(() => ({ wallets: {} }));
+  return walletLabel({ n: open.n, name: kept?.[open.key]?.name });
 }
 
 /**

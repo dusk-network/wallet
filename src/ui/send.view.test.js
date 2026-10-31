@@ -495,6 +495,28 @@ describe("names on Send and Review", () => {
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
   });
 
+  it("names the wallet beside the profile with more than one wallet, the one the Review was drawn for", async () => {
+    lookupPrimaryName.mockImplementation(async (account) => (account === OWN.account ? "me.dusk" : null));
+    const draft = (to, privacy) => ({ to, privacy, amountDusk: "1", amountLux: "1000000000", memo: "" });
+    const wallets = [
+      { key: "w1", n: 1, name: "", active: false },
+      { key: "w2", n: 2, name: "", active: true },
+    ];
+    const from = () => visibleText(dom.document.body.querySelectorAll(".send-review > .group > .kv")[1]);
+    const state = { route: "confirm", addressBook: { loaded: true, items: [] }, draft: draft(BOB.account, "public") };
+    mount(state, overview({ wallets }));
+    await settle();
+    expect(from()).toBe("FromWallet 2 · me.dusk · Public");
+    // A name given to the wallet, on a shielded send.
+    mount({ ...state, draft: draft(BOB.address, "shielded") }, overview({ wallets: [wallets[0], { ...wallets[1], name: "Savings" }] }));
+    await settle();
+    expect(from()).toBe("FromSavings · me.dusk · Shielded");
+    // One wallet: the profile alone.
+    mount(state, overview({ wallets: [{ ...wallets[1], n: 1 }] }));
+    await settle();
+    expect(from()).toBe("Fromme.dusk · Public");
+  });
+
   it("offers no Save to Contacts for this wallet's own account or address", () => {
     for (const to of [OWN.account, OWN.address]) {
       mount({

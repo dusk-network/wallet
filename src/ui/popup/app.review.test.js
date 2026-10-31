@@ -110,6 +110,26 @@ describe("a Review drawn for wallet A, with wallet B opened in another window", 
   });
 });
 
+describe("a Review's From line", () => {
+  it("names the wallet the Review was drawn for, which its Confirm sends from", async () => {
+    const t = await popupOn("confirm", {
+      addressBook: { loaded: true, items: [] },
+      draft: { to: TO, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+    });
+    const from = () => t.app.querySelectorAll(".send-review > .group > .kv").map((kv) => kv.textContent).find((text) => text.startsWith("From"));
+    expect(from()).toBe("FromWallet 1 · Profile 1 · Public");
+
+    // Wallet B opens in another window: the Review drawn again says B, and sends from B.
+    t.open = wallet(B, "wb");
+    t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
+    await flush();
+    expect(from()).toBe("FromWallet 2 · Profile 1 · Public");
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await flush();
+    expect(t.asked("DUSK_UI_SEND_TX")).toEqual([expect.objectContaining({ walletId: B })]);
+  });
+});
+
 describe("a screen's own actions, after another wallet opened", () => {
   it("name the wallet the screen was drawn for, so the wallet refuses them for another", async () => {
     const t = await popupOn("options");

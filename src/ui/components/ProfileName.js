@@ -1,5 +1,31 @@
 import { duskNamesNetwork, lookupPrimaryName } from "../../shared/duskNames.js";
+import { walletLabel } from "../../shared/wallets.js";
 import { h } from "../lib/dom.js";
+
+/**
+ * The open wallet's name ("Wallet 2", or the one it was given) when there's
+ * more than one wallet here, for what names a profile to say whose it is;
+ * "" with one.
+ * @param {object} ov - the overview
+ */
+export function walletNameOf(ov) {
+  const wallets = Array.isArray(ov?.wallets) ? ov.wallets : [];
+  const open = wallets.length > 1 ? wallets.find((w) => w?.active) : null;
+  return open ? walletLabel(open) : "";
+}
+
+/**
+ * A profile on a Review, after its wallet's name when there's more than one
+ * wallet: "Wallet 2 · alice.dusk". The wallet is the one the Review was drawn
+ * for (`review`, reviewOf), never the one open since.
+ * @param {HTMLElement} profileEl - the profile's name (profileNameEl)
+ * @param {{ walletName?: string }} [review] - the Review's binding
+ * @returns {HTMLElement}
+ */
+export function withReviewWallet(profileEl, review) {
+  const wallet = String(review?.walletName ?? "").trim();
+  return wallet ? h("span", { class: "review-wallet" }, [`${wallet} · `, profileEl]) : profileEl;
+}
 
 /**
  * A profile's index: the one given, else the overview's selected profile.

@@ -44,6 +44,25 @@ describe("account chip", () => {
     expect(chip.title).toBe(`verylongname-shop.dusk\n${ACCOUNT}`);
   });
 
+  it("puts a wallet's name under the profile's, smaller, each line cut short on its own, and reads both", async () => {
+    const chip = accountChipEl(ACCOUNT, { label: "Profile 1", wallet: "Wallet 2", name: Promise.resolve("alice.dusk") });
+    await settle();
+    expect(parts(chip)).toEqual(["identicon", "chip-lines", "chip-chev"]);
+    expect(chip.querySelector(".chip-lines").children.map((child) => child.className)).toEqual(["chip-text", "sr-only", "chip-wallet"]);
+    expect([visibleText(line(chip)), visibleText(chip.querySelector(".chip-wallet"))]).toEqual(["alice.dusk", "Wallet 2"]);
+    expect(screenReaderText(chip)).toBe("alice.dusk, Wallet 2");
+    expect(chip.title).toBe(`alice.dusk\nWallet 2\n${ACCOUNT}`);
+    expect(chip.classList.contains("account-chip--wallet")).toBe(true);
+
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
+    for (const declaration of ["display: block;", "min-width: 0;", "overflow: hidden;", "text-overflow: ellipsis;", "white-space: nowrap;", "color: var(--text-muted);"]) {
+      expect(rule(".account-chip .chip-wallet")).toContain(declaration);
+    }
+    // Two lines take a few pixels more than the chip's one.
+    expect(rule("body.page--popup .account-chip.account-chip--wallet")).toContain("height: 38px;");
+  });
+
   it("keeps the label when there is no name", async () => {
     const chip = accountChipEl(ACCOUNT, { label: "Profile 2", name: Promise.resolve(null) });
     await settle();

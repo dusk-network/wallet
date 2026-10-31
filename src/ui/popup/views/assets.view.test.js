@@ -101,3 +101,31 @@ describe("tokens and NFTs after a switch to another wallet, on the same network 
     expect(rows(state, "wallet-b")).toEqual([]);
   });
 });
+
+describe("a token send's Review", () => {
+  it("names the wallet and profile it goes from with more than one wallet, and adds nothing with one", async () => {
+    const { installFakeDom, visibleText } = await import("../../testing/fakeDom.js");
+    const { vi } = await import("vitest");
+    const { document } = installFakeDom();
+    const { assetTokenConfirmView } = await import("./assets.js");
+    const { reviewOf } = await import("./sent.js");
+    const TOKEN = `0x${"cd".repeat(32)}`;
+    const TO = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
+    const draft = () => ({
+      op: "transfer",
+      token: { contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 },
+      params: { kind: "contract_call", privacy: "public", contractId: TOKEN, fnName: "transfer", fnArgs: "0x00", amount: "0", deposit: "0" },
+      asset: { type: "DRC20", op: "transfer", symbol: "TKN", name: "Token", decimals: 2, valueUnits: "150", to: TO },
+    });
+    // A local node: no .dusk names, so the profile shows by its label.
+    const ov = (wallets) => ({ isUnlocked: true, nodeUrl: "http://127.0.0.1:8080", accounts: ["acct"], selectedAccountIndex: 0, wallets });
+    const rows = (o) => {
+      const state = { route: "asset_token_confirm", assetTxDraft: draft() };
+      const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn(), review: reviewOf(o, state) };
+      document.body.replaceChildren(...assetTokenConfirmView(o, { state, actions }));
+      return document.body.querySelectorAll(".asset-review > .group > .kv").map(visibleText);
+    };
+    expect(rows(ov([{ key: "w1", n: 1, active: true }, { key: "w2", n: 2 }]))[0]).toBe("FromWallet 1 · Profile 1");
+    expect(rows(ov([{ key: "w1", n: 1, active: true }])).filter((r) => r.startsWith("From"))).toEqual([]);
+  });
+});

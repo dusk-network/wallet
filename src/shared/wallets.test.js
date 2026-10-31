@@ -31,6 +31,13 @@ describe("wallets", () => {
     expect(wallets.normalizeWalletName("x".repeat(40))).toHaveLength(32);
   });
 
+  it("numbers the next wallet one past the highest here, as the vault does", () => {
+    expect(wallets.nextWalletNumber([{ n: 1 }, { n: 2 }])).toBe(3);
+    // A removed wallet's number isn't given again.
+    expect(wallets.nextWalletNumber([{ n: 1 }, { n: 3 }])).toBe(4);
+    expect(wallets.nextWalletNumber([])).toBe(1);
+  });
+
   it("keeps what each wallet showed, and the one unlocked last", async () => {
     await expect(wallets.activeWalletId()).resolves.toBe("");
     await wallets.noteActiveWallet("k1", { walletId: "acct-a0", accounts: ["acct-a0", "acct-a1"] });

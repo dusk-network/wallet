@@ -1048,7 +1048,7 @@ export async function render({ forceRefresh = false } = {}) {
     return;
   }
   if (state.route === "wallet_add_phrase") {
-    setApp(onboardingCreatePhraseView({ state, actions, adding: true }));
+    setApp(onboardingCreatePhraseView({ state, actions, adding: true, ov }));
     return;
   }
   if (state.route === "wallet_add_confirm") {
@@ -1056,7 +1056,10 @@ export async function render({ forceRefresh = false } = {}) {
     return;
   }
   if (state.route === "wallet_add_import") {
-    setApp(keepForm(() => onboardingImportView({ state, actions, adding: true })));
+    const view = keepForm(() => onboardingImportView({ state, actions, adding: true, ov }));
+    // Kept, it says which wallet the phrase becomes by the wallets here now.
+    view.landing?.(ov);
+    setApp(view);
     return;
   }
   if (state.route === "wallet_remove") {

@@ -9,6 +9,7 @@ import { txErrorText } from "./txDisplay.js";
 import { zonedClockText } from "../../lib/time.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
+import { walletNameOf } from "../../components/ProfileName.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
 // with a toast: Sending while the wallet signs it and hands it to the network,
@@ -196,9 +197,11 @@ export function sentAnnouncement(sent, ov) {
 
 /**
  * What a screen was drawn for: the wallet (by its first public account, with
- * its profiles' accounts), the profile and the network of the overview it
- * was built from, and the popup's context then. render() makes one for each
- * screen it draws (`actions.review`): what the screen does, it does for that.
+ * its profiles' accounts, and with more than one wallet its name as shown),
+ * the profile and the network of the overview it was built from, and the
+ * popup's context then. render() makes one for each screen it draws
+ * (`actions.review`): what the screen does, and the wallet a Review names, is
+ * for that.
  * @param {object} ov - the overview the screen is built from
  * @param {object} state - the popup's state
  */
@@ -206,6 +209,7 @@ export function reviewOf(ov, state) {
   const accounts = ov?.isUnlocked !== false && Array.isArray(ov?.accounts) ? ov.accounts.map(String) : [];
   return Object.freeze({
     walletId: String(accounts[0] ?? ""),
+    walletName: accounts.length ? walletNameOf(ov) : "",
     accounts: Object.freeze(accounts),
     profileIndex: Number(ov?.selectedAccountIndex ?? 0) || 0,
     nodeUrl: String(ov?.nodeUrl ?? ""),

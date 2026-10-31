@@ -32,7 +32,7 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { contractValueEl, copyContractButton } from "../../components/ContractValue.js";
 import { submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
-import { profileNameEl } from "../../components/ProfileName.js";
+import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { sendFromReview } from "./sent.js";
 
 // What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
@@ -929,7 +929,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
           ? kv("You get about", `${stDuskText(quote.stDusk)} stDUSK, worth about ${fmtLux(quote.worth)} DUSK now`)
           : null,
         quote && quoteRate ? kv("Deposit fee", h("span", {}, depositFeeParts(quoteRate, safeBigInt(quote.fee, 0n), hidden))) : null,
-        kv(isStake ? "From" : "To", [h("span", {}, [profileName, h("span", { class: "kv-muted", text: " · Public" })])]),
+        kv(isStake ? "From" : "To", [h("span", {}, [withReviewWallet(profileName, actions?.review), h("span", { class: "kv-muted", text: " · Public" })])]),
       ].filter(Boolean)),
       // How an unstake comes back.
       isStake ? null : h("p", { class: "stake-cap", text: SOZU_UNSTAKE_LINE }),

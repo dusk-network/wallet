@@ -5,14 +5,14 @@
 import { walletLabel } from "../../../shared/wallets.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
-import { fieldError, fieldLabel, passwordInput } from "../../components/FormControls.js";
+import { fieldError, fieldLabel, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
 import { subnav } from "../../components/Subnav.js";
 import { switchContext } from "../context.js";
 
 // A wrong password, or one that has to wait, is said under the password.
 const passwordRefusal = (message) => /^Incorrect password$|^Too many attempts/.test(String(message ?? ""));
 
-function passwordField({ label = "Password", placeholder = "Your current password", autocomplete = "current-password", onEnter }) {
+function passwordField({ label, placeholder, autocomplete = "current-password", onEnter }) {
   const input = passwordInput({ placeholder, autocomplete, onEnter });
   const error = fieldError(input);
   input.addEventListener("input", () => error.show(""));
@@ -50,7 +50,8 @@ export function removeWalletView(ov, { state, actions } = {}) {
   }
   const name = walletLabel(wallet);
   const account = String(wallet.accounts?.[0] ?? wallet.walletId ?? "");
-  const pwd = passwordField({ onEnter: () => btn.click() });
+  // The password the wallets share, named for what it is.
+  const pwd = unlockPasswordField({ onEnter: () => btn.click() });
   const err = formError();
 
   let busy = false;

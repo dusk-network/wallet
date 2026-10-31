@@ -120,6 +120,32 @@ describe("header", () => {
     expect(chip().title).toBe(`alice.dusk\n${ACCOUNT}`);
   });
 
+  it("with more than one wallet, names the open one under the profile's name, smaller, and nothing more with one", async () => {
+    const { names, renderHeader, chip } = await setup("popup");
+    const wallets = [
+      { key: "w1", n: 1, name: "", active: false },
+      { key: "w2", n: 2, name: "", active: true },
+    ];
+    renderHeader({ ...overview, wallets });
+    await settle();
+    expect(chip().querySelector(".chip-text").textContent).toBe("Profile 1");
+    expect(chip().querySelector(".chip-wallet").textContent).toBe("Wallet 2");
+    expect(screenReaderText(chip())).toBe("Profile 1, Wallet 2");
+
+    // Its verified name keeps the line to itself, the wallet under it; a
+    // name given to the wallet shows as given.
+    names.lookupPrimaryName.mockResolvedValue("alice.dusk");
+    renderHeader({ ...overview, wallets: [wallets[0], { ...wallets[1], name: "Savings" }] });
+    await settle();
+    expect([chip().querySelector(".chip-text").textContent, chip().querySelector(".chip-wallet").textContent]).toEqual(["alice.dusk", "Savings"]);
+    expect(chip().title).toBe(`alice.dusk\nSavings\n${ACCOUNT}`);
+
+    // One wallet: one line, as before.
+    renderHeader({ ...overview, wallets: [{ ...wallets[1], n: 1 }] });
+    await settle();
+    expect([visibleText(chip()), chip().querySelector(".chip-wallet")]).toEqual(["alice.dusk▾", null]);
+  });
+
   it("opens and closes the profile switcher from the chip", async () => {
     const { acctMenu, renderHeader, chip, menu } = await setup("popup");
     renderHeader(overview);

@@ -15,7 +15,7 @@ import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
-import { profileNameEl } from "../../components/ProfileName.js";
+import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { segmented } from "../../components/Segmented.js";
 import { sendFromReview } from "./sent.js";
 
@@ -230,7 +230,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   const kv = (label, rail) =>
     h("div", { class: "kv" }, [
       h("span", { class: "kv-label", text: label }),
-      h("span", { class: "kv-value" }, [h("span", {}, [profileNameEl(ov), h("span", { class: "kv-muted", text: ` · ${rail}` })])]),
+      h("span", { class: "kv-value" }, [h("span", {}, [withReviewWallet(profileNameEl(ov), actions?.review), h("span", { class: "kv-muted", text: ` · ${rail}` })])]),
     ]);
 
   return [

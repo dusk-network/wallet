@@ -2,6 +2,7 @@ import { storage, STORAGE_KEYS } from "./storage.js";
 import { isTauriRuntime } from "../platform/runtime.js";
 import { withStorageLock } from "./storageLock.js";
 import { bytesToHex, sha256Hex } from "./bytes.js";
+import { nextWalletNumber } from "./wallets.js";
 import {
   base64ToBytes,
   bytesToBase64,
@@ -127,7 +128,7 @@ function samePhrase(a, b) {
 }
 
 const newWalletId = () => bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
-const nextNumber = (wallets) => Math.max(0, ...wallets.map((w) => Number(w?.n) || 0)) + 1;
+const nextNumber = nextWalletNumber;
 const byNumber = (a, b) => a.n - b.n;
 const publicOf = ({ id, n }) => ({ id, n });
 

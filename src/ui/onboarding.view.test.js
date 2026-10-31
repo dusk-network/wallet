@@ -33,11 +33,22 @@ function show(nodes) {
 
 const field = (body, name) => body.querySelectorAll("input").find((i) => accessibleName(i) === name);
 const button = (body, text) => body.querySelectorAll("button").find((b) => b.textContent === text);
-// What the field's error says, through aria-describedby, as a screen reader hears it.
-const errorOf = (el) => {
-  const id = el.getAttribute("aria-describedby");
-  return id && isShown(dom.document.getElementById(id)) ? dom.document.getElementById(id).textContent : "";
+// What describes a field, through aria-describedby, as a screen reader hears it.
+const describedBy = (el) =>
+  (el.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean).map((id) => dom.document.getElementById(id)).filter((n) => n && isShown(n));
+// What the field's error says.
+const errorOf = (el) => describedBy(el).find((n) => n.classList.contains("field-error"))?.textContent ?? "";
+// The password field beside other wallets: its label, no placeholder, and a line under it.
+const SHARED_PASSWORD = "Password you unlock with";
+const ONE_PASSWORD = "One password unlocks every wallet here.";
+const expectSharedPassword = (pwd) => {
+  expect(pwd.getAttribute("placeholder")).toBeNull();
+  expect(describedBy(pwd).map((n) => n.textContent)).toEqual([ONE_PASSWORD]);
+  expect(isShown(pwd.parentNode.querySelectorAll("p.field-hint").find((p) => p.textContent === ONE_PASSWORD))).toBe(true);
 };
+// Two wallets here, by number, and wallets 1 and 3 (2 was removed).
+const TWO = { wallets: [{ key: "k1", n: 1, active: true }, { key: "k2", n: 2 }] };
+const GAP = { wallets: [{ key: "k1", n: 1 }, { key: "k3", n: 3, active: true }] };
 
 describe("setting up and unlocking", () => {
   const onboard = () => ({ mode: null, mnemonic: MNEMONIC, password: "x".repeat(8), reveal: false });
@@ -101,6 +112,8 @@ describe("setting up and unlocking", () => {
     expect(body.querySelector("h1").textContent).toBe("Import wallet");
     expect(body.querySelector(".row").children[0].textContent).toBe("Recovery phrase");
     const group = body.querySelector("[role=group]");
+    // A line above the boxes, there to read, not a placeholder.
+    expect(describedBy(group).map((n) => n.textContent)).toEqual(["Paste the whole phrase into any box."]);
 
     button(body, "Import wallet").click();
     await settle();
@@ -108,10 +121,19 @@ describe("setting up and unlocking", () => {
     // A group is described by its error, not marked invalid.
     expect(group.getAttribute("aria-invalid")).toBeNull();
 
+    // A whole phrase put in at once is checked then, before Import.
     typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
+    expect(errorOf(group)).toBe("That isn't a valid recovery phrase. Check each word.");
     button(body, "Import wallet").click();
     await settle();
     expect(errorOf(group)).toBe("That isn't a valid recovery phrase. Check each word.");
+
+    // Words missing, on Import.
+    typeInto(field(body, "Word 1"), MNEMONIC);
+    typeInto(field(body, "Word 4"), "");
+    button(body, "Import wallet").click();
+    await settle();
+    expect(errorOf(group)).toBe("Word 4 is missing.");
 
     typeInto(field(body, "Word 1"), MNEMONIC);
     typeInto(field(body, "Password"), "long enough");
@@ -208,8 +230,12 @@ describe("adding a wallet beside the ones here", () => {
     expect(state.route).toBe("wallet_add_phrase");
     expect(state.onboard.mnemonic.split(" ")).toHaveLength(12);
 
-    // Its words, then Back to the choice, not to a new password.
-    const phrase = show(onboardingCreatePhraseView({ state, actions: acts, adding: true }));
+    // Its words, under the wallet it becomes, then Back to the choice, not to a new password.
+    const phrase = show(onboardingCreatePhraseView({ state, actions: acts, adding: true, ov: TWO }));
+    expect(phrase.querySelectorAll(".auth-lead").map((p) => p.textContent)).toEqual([
+      "This becomes Wallet 3.",
+      "Write down these 12 words in order and keep them somewhere safe.",
+    ]);
     button(phrase, "I wrote it down").click();
     expect(state.route).toBe("wallet_add_confirm");
     show(onboardingCreatePhraseView({ state, actions: acts, adding: true }));
@@ -223,8 +249,8 @@ describe("adding a wallet beside the ones here", () => {
     const acts = { ...actions(), send: vi.fn(async () => reply) };
     const body = show(onboardingCreateConfirmView({ state, actions: acts, adding: true }));
     expect(field(body, "Confirm password")).toBeUndefined();
-    const pwd = field(body, "Password");
-    expect(pwd.getAttribute("placeholder")).toBe("Your current password");
+    const pwd = field(body, SHARED_PASSWORD);
+    expectSharedPassword(pwd);
 
     typeInto(field(body, "Word 1"), MNEMONIC);
     button(body, "Add wallet").click();
@@ -238,6 +264,8 @@ describe("adding a wallet beside the ones here", () => {
     // A phrase made here: the wallet sets its shielded checkpoint as it adds it.
     expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_ADD_WALLET", mnemonic: MNEMONIC, password: "password123", fresh: true });
     expect([errorOf(pwd), pwd.value]).toEqual(["Incorrect password", ""]);
+    // The line under it stays, after the error.
+    expect(describedBy(pwd).map((n) => n.textContent)).toEqual(["Incorrect password", ONE_PASSWORD]);
 
     reply = { ok: true };
     typeInto(pwd, "password123");
@@ -252,10 +280,13 @@ describe("adding a wallet beside the ones here", () => {
   it("imports a phrase with the password, and refuses one that's here with one sentence under it", async () => {
     const state = { route: "wallet_add_import", onboard: { adding: true } };
     const acts = actions({ error: { message: DUP } });
-    const body = show(onboardingImportView({ state, actions: acts, adding: true }));
+    const body = show(onboardingImportView({ state, actions: acts, adding: true, ov: GAP }));
     expect(body.querySelector("h1").textContent).toBe("Import wallet");
+    // Under the title: the wallet it becomes, by the next number, past a removed one.
+    expect(body.querySelector(".row").children[0].textContent).toBe("This becomes Wallet 4.");
+    expectSharedPassword(field(body, SHARED_PASSWORD));
     typeInto(field(body, "Word 1"), MNEMONIC);
-    typeInto(field(body, "Password"), "password123");
+    typeInto(field(body, SHARED_PASSWORD), "password123");
     button(body, "Import wallet").click();
     await settle();
     expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_ADD_WALLET", mnemonic: MNEMONIC, password: "password123" });
@@ -284,7 +315,8 @@ describe("removing a wallet, and a new password", () => {
     expect(visibleText(body.querySelector(".auth-lead"))).toBe(
       "This removes Savings from this device: its recovery phrase, contacts, activity and connected sites. Your other wallets stay as they are."
     );
-    const pwd = field(body, "Password");
+    const pwd = field(body, SHARED_PASSWORD);
+    expectSharedPassword(pwd);
     button(body, "Remove wallet").click();
     await settle();
     expect(errorOf(pwd)).toBe("Enter your password.");

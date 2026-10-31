@@ -23,6 +23,15 @@ export function walletLabel(wallet) {
   return normalizeWalletName(wallet?.name) || `Wallet ${Number(wallet?.n) || 1}`;
 }
 
+/**
+ * The number the next wallet added gets: one past the highest here, so a
+ * removed wallet's number isn't given again.
+ * @param {Array<{ n?: number }>} wallets
+ */
+export function nextWalletNumber(wallets) {
+  return Math.max(0, ...(Array.isArray(wallets) ? wallets : []).map((w) => Number(w?.n) || 0)) + 1;
+}
+
 /** @returns {Promise<{ active: string, wallets: Record<string, { walletId?: string, accounts?: string[], name?: string }> }>} */
 export async function getWalletDirectory() {
   const stored = (await storage.get(KEY))?.[KEY];

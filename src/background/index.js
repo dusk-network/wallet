@@ -56,7 +56,7 @@ import {
 import { submittedTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { assertScreenWallet, engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
-import { handleWalletCommand, keepWalletShown, walletsShown } from "../wallet/walletCommands.js";
+import { handleWalletCommand, keepWalletShown, openWalletName, walletsShown } from "../wallet/walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
 import {
   getNetworkStatus,
@@ -806,6 +806,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             perm && perm.accountIndex !== undefined && perm.accountIndex !== null
               ? Number(perm.accountIndex) || 0
               : null,
+          // With more than one wallet, the name of the one the request is
+          // bound to (bindPendingWallet, above), shown beside its profiles.
+          walletName: await openWalletName(status),
         });
         return;
       }

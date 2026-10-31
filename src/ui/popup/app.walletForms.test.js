@@ -8,7 +8,8 @@ const ACCOUNT =
   "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
 const OTHER =
   "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
-// Two wallets, the first one open.
+// Two wallets, the first one open; a test may add one, as another window would.
+let overview;
 const OVERVIEW = {
   hasVault: true,
   isUnlocked: true,
@@ -52,7 +53,8 @@ async function popupAt(route, extra = {}, answer = async () => ({})) {
   vi.resetModules();
   const { send } = await import("../../wallet/bus.js");
   send.mockReset();
-  send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? OVERVIEW : answer(message)));
+  overview = OVERVIEW;
+  send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? overview : answer(message)));
   const { state } = await import("./state.js");
   Object.assign(state, { route, ...extra });
   const { render } = await import("./app.js");
@@ -72,14 +74,15 @@ async function popupAt(route, extra = {}, answer = async () => ({})) {
 // The form's fields, by their names, and what each holds.
 const fieldsOf = (app, names) => app.querySelectorAll("input").filter((i) => names.includes(accessibleName(i)));
 const typeAll = (fields) => fields.forEach((f, i) => typeInto(f, accessibleName(f).startsWith("Word") ? WORDS[i] : "typed password"));
+const SHARED_PASSWORD = "Password you unlock with";
 const button = (app, text) => app.querySelectorAll("button").find((b) => b.textContent === text);
 
 // Each wallet form, with the fields it's filled in by.
 const FORMS = [
   ["Change password", "change_password", {}, ["Current password", "New password", "Confirm password"]],
-  ["Remove wallet", "wallet_remove", { walletRemove: "w2" }, ["Password"]],
-  ["Add wallet's import", "wallet_add_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false, adding: true } }, ["Word 1", "Word 2", "Password"]],
-  ["Add wallet's new phrase, confirmed", "wallet_add_confirm", { onboard: { mode: "create", mnemonic: WORDS.join(" "), password: "", reveal: false, adding: true } }, ["Word 1", "Word 2", "Password"]],
+  ["Remove wallet", "wallet_remove", { walletRemove: "w2" }, [SHARED_PASSWORD]],
+  ["Add wallet's import", "wallet_add_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false, adding: true } }, ["Word 1", "Word 2", SHARED_PASSWORD]],
+  ["Add wallet's new phrase, confirmed", "wallet_add_confirm", { onboard: { mode: "create", mnemonic: WORDS.join(" "), password: "", reveal: false, adding: true } }, ["Word 1", "Word 2", SHARED_PASSWORD]],
 ];
 
 describe("a wallet form being filled in", () => {
@@ -121,6 +124,21 @@ describe("a wallet form being filled in", () => {
     await t.deliver({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
     expect(t.state.route).toBe("home");
     expect(fieldsOf(t.app, names)).toEqual([]);
+  });
+
+  it("says on Add wallet's import which wallet the phrase becomes, by the wallets here as they change", async () => {
+    const t = await popupAt("wallet_add_import", FORMS[2][2]);
+    const landing = () => t.app.querySelector(".wallet-landing").textContent;
+    expect(landing()).toBe("This becomes Wallet 3.");
+    const fields = fieldsOf(t.app, FORMS[2][3]);
+    typeAll(fields);
+    const typed = fields.map((f) => f.value);
+
+    // Another window adds a wallet: the next one here is Wallet 4, and what's typed stays.
+    overview = { ...OVERVIEW, wallets: [...OVERVIEW.wallets, { key: "w3", n: 3, name: "", walletId: "", accounts: [], accountNames: {}, active: false }] };
+    await t.deliver({ type: "DUSK_UI_WALLETS_CHANGED" });
+    expect(landing()).toBe("This becomes Wallet 4.");
+    expect(fieldsOf(t.app, FORMS[2][3]).map((f) => f.value)).toEqual(typed);
   });
 
   it("keeps a submit under way through a wallet change, with what it says after", async () => {

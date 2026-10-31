@@ -1,10 +1,11 @@
 import "../../../shared/bufferGlobal.js";
-import { entropyToMnemonic, validateMnemonic } from "bip39";
+import { entropyToMnemonic } from "bip39";
 import { bytesToHex } from "../../../shared/bytes.js";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
-import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput } from "../../components/FormControls.js";
+import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
+import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -84,18 +85,12 @@ function newPasswordFields({ onDone, label = "Password" }) {
 }
 
 // The password that unlocks the wallets here, for adding another: one field,
-// its error under it.
+// a line under it, and its error under that.
 function currentPasswordField({ onDone }) {
-  const pwd = passwordInput({
-    placeholder: "Your current password",
-    autocomplete: "current-password",
-    onEnter: () => onDone?.(),
-  });
-  const error = fieldError(pwd);
-  pwd.addEventListener("input", () => error.show(""));
+  const { input: pwd, error, els } = unlockPasswordField({ onEnter: () => onDone?.() });
   return {
     pwd,
-    els: [fieldLabel(pwd, "Password"), pwd, error.el],
+    els,
     show: (text) => error.show(text),
     // The password, or null after saying it's missing.
     read() {
@@ -108,6 +103,20 @@ function currentPasswordField({ onDone }) {
       return pwd.value;
     },
   };
+}
+
+// Under Create's and Import's titles in Add wallet: the wallet the phrase
+// becomes, by the number the wallets here give the next one ("This becomes
+// Wallet 3."), and `update` to say it again for the wallets here now.
+function walletLanding(ov) {
+  const el = h("p", { class: "auth-lead wallet-landing" });
+  const update = (next) => {
+    const wallets = Array.isArray(next?.wallets) ? next.wallets : [];
+    el.textContent = wallets.length ? `This becomes ${walletLabel({ n: nextWalletNumber(wallets) })}.` : "";
+    el.hidden = !wallets.length;
+  };
+  update(ov);
+  return { el, update };
 }
 
 // A wallet couldn't be added: a wrong password, or one that has to wait, says
@@ -257,7 +266,7 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
   ];
 }
 
-export function onboardingCreatePhraseView({ state, actions, adding = false } = {}) {
+export function onboardingCreatePhraseView({ state, actions, adding = false, ov } = {}) {
   const mnemonic = state.onboard.mnemonic;
   if (!mnemonic) {
     if (adding) {
@@ -311,12 +320,13 @@ export function onboardingCreatePhraseView({ state, actions, adding = false } = 
       },
     }),
     h("div", { class: "row onboard-form" }, [
+      adding ? walletLanding(ov).el : null,
       h("p", { class: "auth-lead", text: "Write down these 12 words in order and keep them somewhere safe." }),
       h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
       srpGridEl(mnemonic, { blurred: !state.onboard.reveal }),
       h("div", { class: "phrase-tools" }, [toggle, copyBtn]),
       next,
-    ]),
+    ].filter(Boolean)),
   ];
 }
 
@@ -446,12 +456,16 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
 
 // A recovery phrase and a new password, for Import wallet and for a restore
 // in place of the wallet here: what's wrong with the phrase under it, with
-// the password under each field, then one message to the wallet.
-function phraseForm({ state, actions, title, lead = "", passwordLabel, verb, busyVerb, type, onBack, adding = false }) {
+// the password under each field, then one message to the wallet. `landing`:
+// in Add wallet, the line that says which wallet the phrase becomes.
+function phraseForm({ state, actions, title, lead = "", landing = null, passwordLabel, verb, busyVerb, type, onBack, adding = false }) {
   const mnemonicInput = createMnemonicInput({
     wordCount: 12,
     allowWordCountToggle: true,
+    hint: "Paste the whole phrase into any box.",
     onComplete: () => fields.pwd.focus(),
+    // After a paste, and as the focus leaves the words: what's wrong with them.
+    onCheck: (text) => phraseError.show(text),
   });
   const phraseError = fieldError(mnemonicInput.el, { markInvalid: false });
   // Beside other wallets, the password they share; else a new one, twice.
@@ -484,14 +498,7 @@ function phraseForm({ state, actions, title, lead = "", passwordLabel, verb, bus
   const readPhrase = () => {
     phraseError.show("");
     const m = mnemonicInput.getMnemonic();
-    const words = m.split(" ").filter(Boolean);
-    const problem = !m || words.length === 0
-      ? "Enter your recovery phrase."
-      : words.length !== 12 && words.length !== 24
-      ? "A recovery phrase has 12 or 24 words."
-      : !validateMnemonic(m)
-      ? "That isn't a valid recovery phrase. Check each word."
-      : "";
+    const problem = m ? mnemonicInput.problem() : "Enter your recovery phrase.";
     if (problem) {
       phraseError.show(problem);
       return null;
@@ -542,10 +549,12 @@ function phraseForm({ state, actions, title, lead = "", passwordLabel, verb, bus
       }
     },
   });
-  // `busy`: the wallet being made, which the popup keeps the form through.
+  // `busy`: the wallet being made, which the popup keeps the form through;
+  // `landing`, to say again which wallet it becomes, as the form is kept.
   return Object.assign([
     nav,
     h("div", { class: "row onboard-form" }, [
+      landing?.el,
       lead ? h("p", { class: "auth-lead", text: lead }) : null,
       groupLabel(mnemonicInput.el, "Recovery phrase"),
       mnemonicInput.el,
@@ -555,14 +564,15 @@ function phraseForm({ state, actions, title, lead = "", passwordLabel, verb, bus
       btn,
       busyBody,
     ].filter(Boolean)),
-  ], { busy: () => busy });
+  ], { busy: () => busy, landing: (ov) => landing?.update(ov) });
 }
 
-export function onboardingImportView({ state, actions, adding = false } = {}) {
+export function onboardingImportView({ state, actions, adding = false, ov } = {}) {
   return phraseForm({
     state,
     actions,
     adding,
+    landing: adding ? walletLanding(ov) : null,
     title: "Import wallet",
     verb: "Import wallet",
     busyVerb: "Importing…",

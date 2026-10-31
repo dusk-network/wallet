@@ -35,6 +35,27 @@ export function groupLabel(group, text) {
   return label;
 }
 
+// `id` first among what describes `field` (on), or out of it; the others stay.
+function describedBy(field, id, on) {
+  const others = (field.getAttribute("aria-describedby") ?? "").split(/\s+/).filter((x) => x && x !== id);
+  const ids = on ? [id, ...others] : others;
+  if (ids.length) field.setAttribute("aria-describedby", ids.join(" "));
+  else field.removeAttribute("aria-describedby");
+}
+
+/**
+ * A short line under `field` that says more about it, always shown; the
+ * field is described by it, and by its error first while one shows.
+ * @param {HTMLElement} field
+ * @param {string} text
+ * @returns {HTMLParagraphElement}
+ */
+export function fieldHint(field, text) {
+  const el = h("p", { class: "field-hint", text });
+  describedBy(field, uniqueId(el), true);
+  return el;
+}
+
 /**
  * An error line under `field`, hidden until `show` gives it words; the field
  * is described by it, and marked invalid, while it shows. A group of fields
@@ -51,15 +72,25 @@ export function fieldError(field, { markInvalid = true } = {}) {
     show(text) {
       el.textContent = text || "";
       el.hidden = !text;
-      if (text) {
-        if (markInvalid) field.setAttribute("aria-invalid", "true");
-        field.setAttribute("aria-describedby", id);
-      } else {
-        field.removeAttribute("aria-invalid");
-        field.removeAttribute("aria-describedby");
-      }
+      if (!text) field.removeAttribute("aria-invalid");
+      else if (markInvalid) field.setAttribute("aria-invalid", "true");
+      describedBy(field, id, Boolean(text));
     },
   };
+}
+
+/**
+ * The password the wallets here share, for a change to them (adding one,
+ * removing one): named for what it is, with no placeholder, a line under it
+ * that says one password unlocks them all, and its error under that.
+ * @param {{ onEnter?: () => void }} [opts]
+ */
+export function unlockPasswordField({ onEnter } = {}) {
+  const input = passwordInput({ autocomplete: "current-password", onEnter });
+  const hint = fieldHint(input, "One password unlocks every wallet here.");
+  const error = fieldError(input);
+  input.addEventListener("input", () => error.show(""));
+  return { input, error, els: [fieldLabel(input, "Password you unlock with"), input, hint, error.el] };
 }
 
 export function textInput({ numericMode, onEnter, ...attrs } = {}) {
