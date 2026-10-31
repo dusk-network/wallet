@@ -20,10 +20,21 @@ vi.mock("../../shared/storage.js", () => ({
   },
 }));
 vi.mock("../../shared/txStore.js", async (importOriginal) => ({ ...(await importOriginal()), getTxEpoch: vi.fn(async () => epoch.now) }));
-// The archive, where the account sent nothing else to the bridge.
+// The archive, where the account sent nothing to the bridge but the deposits
+// in a block the tests' rows say it sent, all on one page.
+const listed = vi.hoisted(() => []);
 vi.mock("../../shared/activityHistory.js", async (importOriginal) => ({
   ...(await importOriginal()),
-  archiveAt: () => ({ query: async () => ({ out: null }) }),
+  archiveAt: () => ({
+    query: async (query) => {
+      const range = /fromBlock: (\d+)(?:, toBlock: (\d+))?/.exec(query);
+      const json =
+        range && !query.includes("pageCount")
+          ? listed.filter((entry) => entry.block_height >= Number(range[1]) && entry.block_height <= Number(range[2] ?? Infinity))
+          : [];
+      return { out: json.length ? { json } : null };
+    },
+  }),
 }));
 
 const evm = networks.testnet.duskEvm;
@@ -33,9 +44,10 @@ const L2 = (n) => `0x${String(n).repeat(64).slice(0, 64)}`;
 const NOW = Date.parse("2026-10-28T12:00:00Z");
 const HEAD = 3_952_000n;
 
-// Activity's row of a deposit of `lux` to TO this wallet sent, in a Dusk block `ago` ms before NOW.
-const deposit = (hash, { lux = "500000000", ago = 180_000, ...over } = {}) =>
-  rowOf({
+// Activity's row of a deposit of `lux` to TO this wallet sent, in a Dusk block `ago` ms before NOW; the
+// archive lists it once it's in a block.
+const deposit = (hash, { lux = "500000000", ago = 180_000, ...over } = {}) => {
+  const row = rowOf({
     hash: hash.repeat(64).slice(0, 64),
     kind: "contract_call",
     contractId: BRIDGE,
@@ -49,6 +61,15 @@ const deposit = (hash, { lux = "500000000", ago = 180_000, ...over } = {}) =>
     nodeUrl: TESTNET,
     ...over,
   });
+  if (row.status === "executed" && row.blockHeight) {
+    listed.push({
+      block_height: Number(row.blockHeight),
+      events: [{ data: { receiver: BRIDGE, sender: ACCOUNT, value: String(lux) }, reverted: false, target: networks.testnet.contracts.transfer, topic: "deposit" }],
+      origin: row.hash,
+    });
+  }
+  return row;
+};
 // The bridge's payment on DuskEVM of `lux` to TO, in `block`, from the DuskEVM address of ACCOUNT, or `from`.
 const payment = (hash, block, { lux = 500_000_000n, from = evmAddressOf(ACCOUNT) } = {}) => ({
   address: evm.predeploys.l2StandardBridge,
@@ -67,6 +88,7 @@ const look = (rows, at = NOW) => arrivals.checkArrivals(rows, { account: ACCOUNT
 beforeEach(async () => {
   vi.resetModules();
   for (const key of Object.keys(items)) delete items[key];
+  listed.length = 0;
   epoch.now = 1;
   // DuskEVM: a block every 2 seconds, its newest now.
   duskEvm = fakeChain({ blockMs: 2_000, head: HEAD, headAt: NOW, logs: [], url: evm.rpcUrl });

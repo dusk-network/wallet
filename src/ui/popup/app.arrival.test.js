@@ -44,6 +44,20 @@ const deposit = (over = {}) => ({
   nodeUrl: TESTNET,
   ...over,
 });
+// The deposit as the archive lists it in ACCOUNT's history.
+const sent = {
+  block_height: 4_697_290,
+  events: [
+    {
+      data: { receiver: duskEvm.contracts.l1_standard_bridge.contractId, sender: ACCOUNT, value: "500000000" },
+      reverted: false,
+      target: networks.testnet.contracts.transfer,
+      topic: "deposit",
+    },
+  ],
+  origin: "ee".repeat(32),
+};
+
 const overview = (over = {}) => ({
   hasVault: true,
   isUnlocked: true,
@@ -114,11 +128,14 @@ async function popup(ov, route = "activity", { arrived = true } = {}) {
     ],
     url: duskEvm.rpcUrl,
   });
-  // The archive answers the account's deposits before this one: none.
-  const archive = async (url, init) =>
-    String(url) === `${TESTNET}/on/graphql/query` && /^query \{ out: moonlightHistory\(sender: /.test(String(init?.body))
-      ? new Response(JSON.stringify({ data: { out: null } }))
-      : Promise.reject(new Error("offline"));
+  // The archive lists the deposit in ACCOUNT's history, and nothing else, on one page.
+  const archive = async (url, init) => {
+    const body = String(init?.body);
+    const range = /^query \{ out: moonlightHistory\(sender: "[^"]+", fromBlock: (\d+)(?:, toBlock: (\d+))?/.exec(body);
+    if (String(url) !== `${TESTNET}/on/graphql/query` || !range) return Promise.reject(new Error("offline"));
+    const listed = !body.includes("pageCount") && Number(range[1]) <= 4_697_290 && 4_697_290 <= Number(range[2] ?? Infinity);
+    return new Response(JSON.stringify({ data: { out: listed ? { json: [sent] } : null } }));
+  };
   vi.stubGlobal("fetch", vi.fn(async (url, init) => (chain.answers(url) ? chain.answer(url, init) : archive(url, init))));
   vi.resetModules();
   const { send } = await import("../../wallet/bus.js");
