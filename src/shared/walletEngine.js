@@ -67,18 +67,21 @@ const moonlightNonces = new Map();
 // Reads shared for a few seconds: the popup asks for the same public balance,
 // Sozu status and token balances many times as it opens and draws. Each is
 // kept by the unlock, the node and its chain, and what it reads, the account
-// among it (one wallet's one profile, never another wallet's). A send, a
-// transaction's result and a lock drop them all; a read that failed is made
-// again by the next caller.
+// among it (one wallet's one profile, never another wallet's). A read under
+// way is shared for 15 seconds at most: one that stalled is made again. A
+// send, a transaction's result and a lock drop them all; a read that failed
+// is made again by the next caller.
 const SHARE_MS = 5_000;
+const PENDING_MS = 15_000;
 const sharedReads = new Map();
 const forgetSharedReads = () => sharedReads.clear();
 
 function sharedRead(what, read) {
   const key = [unlockGeneration, engineConfig.nodeUrl, nodeChainId() ?? "", what].join("|");
   const kept = sharedReads.get(key);
-  if (kept && (kept.at === null || Date.now() - kept.at < SHARE_MS)) return kept.promise;
-  const entry = { at: null, promise: null };
+  const now = Date.now();
+  if (kept && (kept.at === null ? now - kept.started < PENDING_MS : now - kept.at < SHARE_MS)) return kept.promise;
+  const entry = { at: null, started: now, promise: null };
   entry.promise = Promise.resolve()
     .then(read)
     .then(

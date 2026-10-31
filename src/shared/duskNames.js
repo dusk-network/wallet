@@ -57,13 +57,16 @@ function bundledFetch(release, nodeUrl) {
   };
 }
 
-// The lens's binding and interface, asked once a session: a reader checks
-// them before its first read, and every reader built since, in another popup
-// or the background, checks the same replies, kept in the browser's session
-// storage (in this page's memory where there is none, as in the engine).
-// A lookup that found the lens's deployment wrong forgets them, and the next
-// reader asks the node again.
+// The lens's binding and interface, asked once a session. A reader checks
+// them before it answers its first lookup; once a lookup through it answered,
+// the replies it checked are kept in the browser's session storage (in this
+// page's memory where there is none, as in the engine), and every reader
+// built since, in another popup or the background, checks those. A reply no
+// lookup took, or one over the SDK's 32,768-byte limit, isn't kept; a lookup
+// that finds the deployment wrong, or a reply that doesn't decode, forgets
+// them, and the next reader asks the node again.
 const ONCE_A_SESSION = new Set(["binding", "lens_interface"]);
+const REPLY_MAX = 32_768;
 const sessionReplies = new Map();
 const replyKey = (release, method) => `dusk_names_lens_v1:${release.lens.contractId}:${method}`;
 
@@ -92,27 +95,75 @@ async function forgetReplies(release) {
   await storageSessionRemove(keys).catch(() => {});
 }
 
-// `fetch`, with the lens's binding and interface answered from the session
-// once a reader asked the node for them.
-function onceASession(release, nodeUrl, fetch) {
+// A copy of a reply's body, read as a stream no further than `max` bytes:
+// null past it, and the copy given up. The reply itself is left whole for
+// the SDK, which reads it to the same limit. A copy's cancel settles only
+// once the reply is given up too, so it isn't waited for.
+async function bodyUpTo(res, max) {
+  const copy = res.clone();
+  if (Number(copy.headers.get("content-length") ?? undefined) > max) {
+    copy.body?.cancel().catch(() => {});
+    return null;
+  }
+  if (!copy.body) return new Uint8Array();
+  const reader = copy.body.getReader();
+  const chunks = [];
+  let length = 0;
+  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+    length += chunk.value.length;
+    if (length > max) {
+      reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(chunk.value);
+  }
+  const bytes = new Uint8Array(length);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+  return bytes;
+}
+
+// One reader's `fetch`, with the lens's binding and interface answered from
+// the session once a reader's lookup took them; and `keep`, which keeps the
+// replies this reader read itself, once a lookup through it answered.
+function lensSession(release, nodeUrl, fetch) {
   const prefix = `${nodeUrl}/on/contracts:${release.lens.contractId}/`;
-  return async (input, init) => {
-    const url = String(input?.href ?? input?.url ?? input);
-    const method = url.startsWith(prefix) ? url.slice(prefix.length) : "";
-    if (!ONCE_A_SESSION.has(method)) return fetch(input, init);
-    const key = replyKey(release, method);
-    const kept = await keptReply(key);
-    if (kept !== null) return new Response(hexToBytes(kept), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
-    const res = await fetch(input, init);
-    if (res.ok) await keepReply(key, bytesToHex(new Uint8Array(await res.clone().arrayBuffer())));
-    return res;
+  const read = new Map();
+  return {
+    async fetch(input, init) {
+      const url = String(input?.href ?? input?.url ?? input);
+      const method = url.startsWith(prefix) ? url.slice(prefix.length) : "";
+      if (!ONCE_A_SESSION.has(method)) return fetch(input, init);
+      const key = replyKey(release, method);
+      const kept = await keptReply(key);
+      if (kept !== null) return new Response(hexToBytes(kept), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
+      const res = await fetch(input, init);
+      const bytes = res.ok ? await bodyUpTo(res, REPLY_MAX).catch(() => null) : null;
+      if (bytes) read.set(key, bytesToHex(bytes));
+      return res;
+    },
+    async keep() {
+      const replies = [...read];
+      read.clear();
+      for (const [key, hex] of replies) await keepReply(key, hex);
+    },
   };
 }
 
-// A lookup's failure: one that found the lens's deployment wrong forgets the
-// replies kept, so they are asked again.
+// Each reader's `keep` (lensSession), and what calls it: a lookup through
+// the reader that answered, so the SDK took the replies it checked.
+const keeps = new WeakMap();
+const took = (reader) => {
+  keeps.get(reader)?.().catch(() => {});
+};
+
+// A lookup's failure: one that found the lens's deployment wrong, or a reply
+// that didn't decode, forgets the replies kept, so they are asked again.
 function failed(release, error) {
-  if (error?.reason === "deployment") forgetReplies(release).catch(() => {});
+  if (error?.reason === "deployment" || error?.reason === "decode") forgetReplies(release).catch(() => {});
 }
 
 // The SDK's reader and account check, loaded on the first lookup.
@@ -144,14 +195,18 @@ function readerFor(createLensReader, network, nodeUrl, { batched = false } = {})
   const direct = bundledFetch(release, nodeUrl);
   // The multicall on the node's network, as its file has it.
   const multicallId = networkForNode(nodeUrl)?.contracts.multicall ?? null;
+  const session = lensSession(
+    release,
+    nodeUrl,
+    batched ? createMulticallFetch({ nodeUrl, multicallId, fetch: direct, gasFor: lensGas(release) }) : direct
+  );
   const promise = createLensReader(release, {
     nodeUrl,
     artifactBaseUrl: release.artifactBaseUrl,
-    fetch: onceASession(
-      release,
-      nodeUrl,
-      batched ? createMulticallFetch({ nodeUrl, multicallId, fetch: direct, gasFor: lensGas(release) }) : direct
-    ),
+    fetch: (input, init) => session.fetch(input, init),
+  }).then((reader) => {
+    if (reader && typeof reader === "object") keeps.set(reader, session.keep);
+    return reader;
   });
   const entry = { nodeUrl, promise };
   cache.set(network, entry);
@@ -190,6 +245,7 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
     const reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl));
     // The public account only when it's a valid key, the shielded address only when it's exactly one.
     const { status, account, address } = await sdk.resolveAccounts(reader, name);
+    took(reader);
     if (status === "Absent" || status === "Released") return fail("not_registered");
     if (status === "Grace" || status === "Expired") return fail("expired");
     if (status !== "Active") return fail("lookup_failed");
@@ -224,6 +280,7 @@ export async function resolvePrimaryName(account, { nodeUrl, batched = false } =
     const reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl), { batched });
     // The reader takes the 96-byte key as plain numbers.
     const verified = await reader.verifyPrimary(Array.from(sdk.decodeBase58(account)));
+    took(reader);
     const name = verified === null ? null : verified.primary.spelling;
     return name === null || typeof name === "string" ? { ok: true, name } : { ok: false, reason: "lookup_failed" };
   } catch (error) {
@@ -409,6 +466,7 @@ export async function lookupRecipientNames(accounts, { nodeUrl } = {}) {
   // Started in one task, so one aggregate takes them.
   const results = await Promise.allSettled(list.map((a) => reader.verifyPrimary(Array.from(sdk.decodeBase58(a)))));
   const again = [];
+  if (results.some((result) => result.status === "fulfilled")) took(reader);
   results.forEach((result, i) => {
     if (result.status === "fulfilled") {
       const name = result.value === null ? null : result.value?.primary?.spelling;

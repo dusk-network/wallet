@@ -332,58 +332,121 @@ describe("the lens's binding and interface", () => {
     names = await import("./duskNames.js");
   });
 
-  // What the node is asked, by method, through the fetch a reader was given.
-  async function readsThrough(call, methods) {
+  // The node: what it's asked, by method, and its replies, by method (two
+  // bytes each unless given).
+  function node(replies = {}) {
     const asked = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url) => {
-        asked.push(String(url).split("/").pop());
-        return new Response(new Uint8Array([7, 7]), { status: 200 });
+        const fn = String(url).split("/").pop();
+        asked.push(fn);
+        return replies[fn]?.() ?? new Response(new Uint8Array([7, 7]), { status: 200 });
       })
     );
-    const { fetch, nodeUrl: node } = lens.createLensReader.mock.calls[call][1];
-    const replies = [];
-    for (const fn of methods) {
-      const res = await fetch(`${node}/on/contracts:${LENS}/${fn}`, { method: "POST", headers: OCTETS, body: new Uint8Array([1]) });
-      replies.push([...new Uint8Array(await res.arrayBuffer())]);
-    }
-    return { asked, replies };
+    return asked;
+  }
+
+  // A reader as the SDK builds one: its first lookup asks for the lens's
+  // binding and interface through the fetch it was given, checks them
+  // (`check` reads what came back), and only then answers, or throws.
+  function sdkReader(answer, { check = (res) => res.arrayBuffer() } = {}) {
+    lens.createLensReader.mockImplementation(async (_release, { fetch, nodeUrl: url }) => {
+      let checked = null;
+      const deployment = () =>
+        (checked ??= (async () => {
+          for (const fn of ["binding", "lens_interface"]) {
+            await check(await fetch(`${url}/on/contracts:${LENS}/${fn}`, { method: "POST", headers: OCTETS, body: new Uint8Array([1]) }));
+          }
+        })());
+      const read = async () => {
+        await deployment();
+        if (answer instanceof Error) throw answer;
+        return answer;
+      };
+      return { resolve: vi.fn(read), verifyPrimary: vi.fn(read) };
+    });
+  }
+
+  // Another popup: its own modules, the same session.
+  async function anotherPopup() {
+    vi.resetModules();
+    names = await import("./duskNames.js");
   }
 
   it("are asked once a session: a later reader, a popup's or the background's, checks the replies kept", async () => {
-    useReader({ resolve: async () => active(moonlight(ACCOUNT), null) });
-    await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
-    const first = await readsThrough(0, ["binding", "lens_interface", "resolve"]);
-    expect(first.asked).toEqual(["binding", "lens_interface", "resolve"]);
+    sdkReader(active(moonlight(ACCOUNT), null));
+    const first = node();
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+    expect(first).toEqual(["binding", "lens_interface"]);
 
-    // Another popup: its own modules, the same session.
-    vi.resetModules();
-    names = await import("./duskNames.js");
-    await names.resolveDuskName("bob.dusk", { nodeUrl: TESTNET });
-    const later = await readsThrough(1, ["binding", "lens_interface", "resolve"]);
-    expect(later.asked).toEqual(["resolve"]);
-    expect(later.replies).toEqual(first.replies);
+    await anotherPopup();
+    const later = node();
+    await expect(names.resolveDuskName("bob.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+    expect(later).toEqual([]);
+  });
+
+  it("keeps no reply the reader didn't take: one that didn't decode is asked for again", async () => {
+    sdkReader(new lens.LensReaderError("decode", "Lens binding reply didn't decode"));
+    node();
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ reason: "lookup_failed" });
+
+    await anotherPopup();
+    sdkReader(active(moonlight(ACCOUNT), null));
+    const asked = node();
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+    expect(asked).toEqual(["binding", "lens_interface"]);
   });
 
   it("are asked again after a reader refused the lens's deployment", async () => {
-    useReader({ resolve: async () => active(moonlight(ACCOUNT), null) });
+    sdkReader(active(moonlight(ACCOUNT), null));
+    node();
     await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
-    await readsThrough(0, ["binding", "lens_interface"]);
 
-    vi.resetModules();
-    names = await import("./duskNames.js");
-    useReader({
-      resolve: async () => {
-        throw new lens.LensReaderError("deployment", "The deployed lens's binding isn't the release's");
+    // Kept, then refused: a later reader's check of them fails.
+    await anotherPopup();
+    sdkReader(new lens.LensReaderError("deployment", "The deployed lens's binding isn't the release's"));
+    expect(node()).toEqual([]);
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ reason: "lookup_failed" });
+
+    await anotherPopup();
+    sdkReader(active(moonlight(ACCOUNT), null));
+    const asked = node();
+    await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
+    expect(asked).toEqual(["binding", "lens_interface"]);
+  });
+
+  it("reads a reply no further than the SDK's 32,768 bytes, and keeps none over it", async () => {
+    // A megabyte, in 8 KiB chunks, as the node streams it.
+    let pulled = 0;
+    const huge = () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            pulled += 1;
+            if (pulled > 128) controller.close();
+            else controller.enqueue(new Uint8Array(8_192));
+          },
+        }),
+        { status: 200 }
+      );
+    // The SDK refuses a reply past its limit unread.
+    sdkReader(active(moonlight(ACCOUNT), null), {
+      check: async () => {
+        throw new lens.LensReaderError("read", "Contract reply exceeds wire envelope");
       },
     });
+    node({ binding: huge });
     await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ reason: "lookup_failed" });
-    vi.resetModules();
-    names = await import("./duskNames.js");
-    useReader({ resolve: async () => active(moonlight(ACCOUNT), null) });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Five chunks read, and the stream a chunk or two ahead: not the 128.
+    expect(pulled).toBeLessThanOrEqual(8);
+
+    await anotherPopup();
+    sdkReader(active(moonlight(ACCOUNT), null));
+    const asked = node();
     await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
-    expect((await readsThrough(2, ["binding", "lens_interface"])).asked).toEqual(["binding", "lens_interface"]);
+    expect(asked).toEqual(["binding", "lens_interface"]);
   });
 });
 

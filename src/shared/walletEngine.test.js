@@ -1686,6 +1686,34 @@ describe("walletEngine", () => {
     }
   });
 
+  it("asks again for a token balance whose read stalled past 15 s, rather than wait on it for good", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const TOKEN = "cd".repeat(32);
+    let stalled = true;
+    const node = vi.fn(async () => (stalled ? new Promise(() => {}) : new Response(new TextEncoder().encode('"42"'))));
+    vi.stubGlobal("fetch", node);
+    const reads = () => node.mock.calls.filter(([url]) => String(url).endsWith(`/on/contracts:${TOKEN}/balance_of`)).length;
+    const ran = () => new Promise((resolve) => setTimeout(resolve, 20));
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    try {
+      engine.getDrc20Balance({ contractId: TOKEN }).catch(() => {});
+      await vi.waitFor(() => expect(reads()).toBe(1));
+      // A draw a few seconds on shares the read under way.
+      now.mockReturnValue(1_005_000);
+      engine.getDrc20Balance({ contractId: TOKEN }).catch(() => {});
+      await ran();
+      expect(reads()).toBe(1);
+      // Past 15 s it's asked again.
+      stalled = false;
+      now.mockReturnValue(1_015_001);
+      await expect(engine.getDrc20Balance({ contractId: TOKEN })).resolves.toBe("42");
+      expect(reads()).toBe(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("reads the Sozu of the network a custom node says it's on, by the chain ID its settings keep", async () => {
     engine.configure({ nodeUrl: "https://my-node.example", chainId: 2, accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
