@@ -245,7 +245,9 @@ export async function sendFromReview({ state, actions, message, summary, backRou
   let res;
   if (!switched) {
     try {
-      res = await actions?.send?.(message);
+      // From the wallet the Review was on, or not at all.
+      const walletId = String(state.overview?.accounts?.[0] ?? "");
+      res = await actions?.send?.(walletId ? { ...message, walletId } : message);
     } catch (e) {
       res = { error: { message: e?.message ?? String(e) } };
     }

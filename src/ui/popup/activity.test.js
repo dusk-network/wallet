@@ -221,7 +221,8 @@ describe("the wallet's own sends", () => {
   const [commit, register] = fixture.accounts[A].sender.map((e) => e.origin);
   const TOKEN = "7e".repeat(32);
   const asToken = { ...fixture.details, [commit]: { ...fixture.details[commit], tx: { ...fixture.details[commit].tx, callData: { contractId: TOKEN, fnName: "transfer" } } } };
-  const sent = (over) => ({ origin: "Wallet", nodeUrl: NODE, kind: "contract_call", profileIndex: 0, submittedAt: Date.now() - 60_000, status: "executed", ...over });
+  // The wallet's own send, as it records it: of the wallet whose first account is A.
+  const sent = (over) => ({ walletId: A, origin: "Wallet", nodeUrl: NODE, kind: "contract_call", profileIndex: 0, submittedAt: Date.now() - 60_000, status: "executed", ...over });
   const registration = sent({ contractId: fixture.details[register].tx.callData.contractId, fnName: "register" });
   // Where the transaction store lives outside the extension.
   const memoryStorage = (store = new Map()) => ({
@@ -254,6 +255,14 @@ describe("the wallet's own sends", () => {
     // Forgotten for good: the watcher's last write, late, brings back none of it.
     await txs.patchTxMeta(register, { status: "executed", blockHeight: "4658012", finalizedAt: Date.now() });
     expect([await txs.getTxMeta(register), (await txs.listTxs()).map((tx) => tx.hash)]).toEqual([null, [commit]]);
+  });
+
+  it("are another wallet's own to settle: one of another wallet stays as it is", async () => {
+    fakeArchive();
+    await txs.putTxMeta(register, { ...registration, walletId: "another wallet" });
+    await popup();
+    await expect(txs.getTxMeta(register)).resolves.toMatchObject({ walletId: "another wallet", status: "executed" });
+    expect((await txs.getTxMeta(register)).settled).toBeUndefined();
   });
 
   it("leave the Sent screen its result when they're forgotten", async () => {

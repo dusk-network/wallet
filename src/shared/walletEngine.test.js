@@ -54,10 +54,12 @@ vi.mock("@dusk/w3sper", () => {
     #account;
     #address;
 
-    constructor(index) {
+    // `tag`, with __W3SPER_SEEDED_ACCOUNTS__: the seed's own, so each
+    // recovery phrase makes accounts of its own.
+    constructor(index, tag = "") {
       this.#index = index;
-      this.#address = new Key("addr", index, 64);
-      this.#account = new Key("acct", index, 96);
+      this.#address = new Key(`addr${tag}`, index, 64);
+      this.#account = new Key(`acct${tag}`, index, 96);
     }
 
     get account() {
@@ -76,14 +78,18 @@ vi.mock("@dusk/w3sper", () => {
 
   class ProfileGenerator {
     #profiles = [];
+    #seeder;
 
     constructor(seeder) {
+      this.#seeder = seeder;
       globalThis.__W3SPER_LAST_SEEDER__ = seeder;
     }
 
     async #nth(n) {
       await globalThis.__W3SPER_PROFILE_GATE__?.(n);
-      return new Profile(n);
+      if (!globalThis.__W3SPER_SEEDED_ACCOUNTS__) return new Profile(n);
+      const seed = await this.#seeder();
+      return new Profile(n, `-${Array.from(seed.slice(0, 3), (b) => b.toString(16).padStart(2, "0")).join("")}-`);
     }
 
     next() {
@@ -849,6 +855,134 @@ describe("walletEngine", () => {
     expect(engine.isUnlocked()).toBe(false);
     expect(engine.getAccounts()).toEqual([]);
     expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
+  });
+
+  describe("more than one recovery phrase", () => {
+    const OTHER = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const wallets = [
+      { id: "w1", n: 1, mnemonic: MNEMONIC },
+      { id: "w2", n: 2, mnemonic: OTHER },
+    ];
+
+    beforeEach(() => {
+      globalThis.__W3SPER_SEEDED_ACCOUNTS__ = true;
+    });
+    afterEach(() => {
+      delete globalThis.__W3SPER_SEEDED_ACCOUNTS__;
+    });
+
+    async function accountsOf(mnemonic) {
+      engine.lock();
+      await engine.unlockWithMnemonic(mnemonic);
+      const accounts = engine.getAccounts();
+      engine.lock();
+      return accounts;
+    }
+
+    it("unlocks one of them and switches to another without a password", async () => {
+      const [first, second] = [await accountsOf(MNEMONIC), await accountsOf(OTHER)];
+      expect(first).not.toEqual(second);
+
+      await engine.unlockWallets({ wallets, walletKey: "w2" });
+      expect(engine.getWalletKey()).toBe("w2");
+      expect(engine.getAccounts()).toEqual(second);
+      expect(engine.getWallets()).toEqual([{ key: "w1", n: 1 }, { key: "w2", n: 2 }]);
+
+      await engine.switchWallet({ walletKey: "w1" });
+      expect(engine.getWalletKey()).toBe("w1");
+      expect(engine.getAccounts()).toEqual(first);
+      await engine.switchWallet({ walletKey: "w2" });
+      expect(engine.getAccounts()).toEqual(second);
+
+      // Each wallet's contacts at their own place, with their own key.
+      const sealed = await engine.sealContactsRecord("{}");
+      await engine.switchWallet({ walletKey: "w1" });
+      await expect(engine.openContactsRecords({ [sealed.namespace]: sealed.record })).resolves.toMatchObject({ text: null });
+    });
+
+    it("gives a held wallet's accounts, as unlocking it makes them, without switching to it", async () => {
+      const second = await accountsOf(OTHER);
+      await engine.unlockWallets({ wallets, walletKey: "w1" });
+      const first = engine.getAccounts();
+
+      await expect(engine.walletAccountsOf({ walletKey: "w2" })).resolves.toEqual(second);
+      await expect(engine.walletAccountsOf({ walletKey: "w1" })).resolves.toEqual(first);
+      expect([engine.getWalletKey(), engine.getAccounts()]).toEqual(["w1", first]);
+      await expect(engine.walletAccountsOf({ walletKey: "gone" })).rejects.toThrow("That wallet isn't here.");
+      engine.lock();
+      await expect(engine.walletAccountsOf({ walletKey: "w2" })).rejects.toThrow("Wallet locked");
+    });
+
+    it("unlocks the first wallet when the one asked for isn't there", async () => {
+      await engine.unlockWallets({ wallets, walletKey: "gone" });
+      expect(engine.getWalletKey()).toBe("w1");
+    });
+
+    it("forgets every phrase on lock", async () => {
+      await engine.unlockWallets({ wallets, walletKey: "w1" });
+      engine.lock();
+      expect(engine.getWallets()).toEqual([]);
+      expect(engine.getWalletKey()).toBe("");
+      await expect(engine.switchWallet({ walletKey: "w2" })).rejects.toThrow("Wallet locked");
+
+      await engine.unlockWallets({ wallets: wallets.slice(0, 1) });
+      await expect(engine.switchWallet({ walletKey: "w2" })).rejects.toThrow("That wallet isn't here.");
+    });
+
+    it("lets a lock during a switch win: nothing is unlocked after it", async () => {
+      await engine.unlockWallets({ wallets, walletKey: "w1" });
+      let release;
+      let started;
+      const entered = new Promise((resolve) => { started = resolve; });
+      globalThis.__W3SPER_PROFILE_GATE__ = async (index) => {
+        if (index !== 0) return;
+        started();
+        await new Promise((resolve) => { release = resolve; });
+      };
+
+      const switching = engine.switchWallet({ walletKey: "w2" });
+      await entered;
+      engine.lock();
+      release();
+
+      await expect(switching).rejects.toThrow("Unlock superseded");
+      expect(engine.isUnlocked()).toBe(false);
+      expect(engine.getWallets()).toEqual([]);
+      expect(engine.getAccounts()).toEqual([]);
+    });
+
+    it("stays on its wallet when a switch fails", async () => {
+      await engine.unlockWallets({ wallets, walletKey: "w1" });
+      const before = engine.getAccounts();
+      globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = 1;
+
+      await expect(engine.switchWallet({ walletKey: "w2" })).rejects.toThrow("profile derivation failed");
+      expect(engine.isUnlocked()).toBe(true);
+      expect(engine.getWalletKey()).toBe("w1");
+      expect(engine.getAccounts()).toEqual(before);
+    });
+
+    it("keeps an added phrase, once, and forgets a removed one, never the one unlocked", async () => {
+      await engine.unlockWallets({ wallets: wallets.slice(0, 1) });
+      expect(() => engine.addWallet({ walletKey: "w2", n: 2, mnemonic: "" })).toThrow(/recovery phrase/);
+      expect(engine.addWallet({ walletKey: "w2", n: 2, mnemonic: OTHER })).toEqual([{ key: "w1", n: 1 }, { key: "w2", n: 2 }]);
+      // Asked twice, as a retried message may.
+      expect(engine.addWallet({ walletKey: "w2", n: 2, mnemonic: OTHER })).toHaveLength(2);
+      expect(() => engine.addWallet({ walletKey: "w2", n: 2, mnemonic: MNEMONIC })).toThrow(/here already/);
+
+      expect(() => engine.removeWallet({ walletKey: "w1" })).toThrow(/another wallet first/);
+      await engine.switchWallet({ walletKey: "w2" });
+      expect(engine.removeWallet({ walletKey: "w1" })).toEqual([{ key: "w2", n: 2 }]);
+      await expect(engine.switchWallet({ walletKey: "w1" })).rejects.toThrow("That wallet isn't here.");
+    });
+
+    it("refuses wallets without an ID, a number or a phrase", async () => {
+      for (const bad of [[{ n: 1, mnemonic: MNEMONIC }], [{ id: "w1", mnemonic: MNEMONIC }], [{ id: "w1", n: 1 }], [wallets[0], wallets[0]]]) {
+        await expect(engine.unlockWallets({ wallets: bad })).rejects.toThrow(/needs an ID/);
+      }
+      await expect(engine.unlockWallets({ wallets: [] })).rejects.toThrow(/No wallet/);
+      expect(engine.isUnlocked()).toBe(false);
+    });
   });
 
   it("keeps the contacts' key from the seed, here and only while unlocked: another seed's fails closed", async () => {

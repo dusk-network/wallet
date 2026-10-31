@@ -4,10 +4,11 @@
 // changes (as the web wallet's deposit tracking); kept once found, until a
 // wallet reset. A network without DuskEVM (Mainnet, for now) asks nothing.
 //
-// What's kept is tagged with the transaction store's reset count it was found
-// under (txStore.js), and every page reads it again as it draws: after a
-// reset, in this page or another, no page shows the old wallet's arrivals,
-// and a check that began before it keeps nothing.
+// What's kept is kept per wallet, by its wallet ID, and tagged with the
+// transaction store's reset count it was found under (txStore.js); every page
+// reads it again as it draws: after a reset, in this page or another, no page
+// shows the old wallet's arrivals, and a check that began before it keeps
+// nothing. Another wallet's are never read.
 
 import { networkForNode } from "./nodeNetwork.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
@@ -21,34 +22,60 @@ const KEEP = 200;
 
 const EVM_TX = /^0x[0-9a-fA-F]{64}$/;
 
+const V1 = STORAGE_KEYS.BRIDGE_ARRIVALS;
+const V2 = STORAGE_KEYS.BRIDGE_ARRIVALS_V2;
+
 /** @type {Map<string, { hash: string, at: number }>} by the deposit's hash: this wallet's, as last read */
 let kept = new Map();
+// The wallet `kept` is of, and the read under way for it.
+let keptFor = "";
 let loading = null;
+let loadingFor = "";
 // Bumped as this page keeps or clears arrivals: a read begun before is out of date.
 let version = 0;
 
 const validArrival = (a) => EVM_TX.test(String(a?.hash ?? "")) && Number.isFinite(a?.at);
+const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-// The arrivals kept under `epoch`, by the deposit's hash: none of another.
-async function readKept(epoch) {
-  const stored = (await storage.get(STORAGE_KEYS.BRIDGE_ARRIVALS))?.[STORAGE_KEYS.BRIDGE_ARRIVALS];
-  const items = stored?.epoch === epoch && stored.items && typeof stored.items === "object" ? stored.items : {};
+async function readStored() {
+  return (await storage.get(V2))?.[V2] ?? null;
+}
+
+// The wallet's arrivals kept under `epoch`, by the deposit's hash: none of another.
+async function readKept(epoch, walletId) {
+  const stored = await readStored();
+  const items = stored?.epoch === epoch && isObject(stored.wallets?.[walletId]) ? stored.wallets[walletId] : {};
   return Object.entries(items).filter(([, arrival]) => validArrival(arrival));
 }
 
-/** Reads the arrivals kept for this wallet: again each time, so a reset anywhere drops them here too. */
-export function loadArrivals() {
+/**
+ * Reads the arrivals kept for the wallet `walletId` (its first public
+ * account): again each time, so a reset anywhere drops them here too.
+ * @param {string} walletId
+ */
+export function loadArrivals(walletId) {
+  const id = String(walletId ?? "");
+  if (id !== keptFor) {
+    // Another wallet: none of the last one's show while its own are read.
+    version += 1;
+    kept = new Map();
+    keptFor = id;
+  }
+  if (!id) return Promise.resolve();
+  if (loading && loadingFor === id) return loading;
   const begun = version;
-  loading ??= getTxEpoch()
-    .then(readKept)
+  loadingFor = id;
+  const read = getTxEpoch()
+    .then((epoch) => readKept(epoch, id))
     .then((entries) => {
-      if (version === begun) kept = new Map(entries);
+      if (version === begun && keptFor === id) kept = new Map(entries);
     })
     .catch(() => {})
     .finally(() => {
-      loading = null;
+      if (loading === read) loading = null;
     });
-  return loading;
+  loading = read;
+  return read;
 }
 
 /**
@@ -96,36 +123,83 @@ export function awaitingArrival(row, nodeUrl, now = Date.now()) {
   return at > 0 && now - at < ARRIVAL_WINDOW_MS;
 }
 
+// The kept arrivals, every wallet's, under `epoch`, with `wallet`'s set to
+// `items` (gone for none).
+async function writeWallet(epoch, walletId, items) {
+  const stored = await readStored();
+  const wallets = stored?.epoch === epoch && isObject(stored.wallets) ? { ...stored.wallets } : {};
+  if (Object.keys(items).length) wallets[walletId] = items;
+  else delete wallets[walletId];
+  await storage.set({ [V2]: { epoch, wallets } });
+}
+
 /**
- * Keeps the arrivals found, by the deposit's hash, with the reset count the
- * check began under (`epoch`), unless a wallet reset came since: checked
- * again right before the write, in the lock a reset's clear takes too. One
- * that comes between that check and the write leaves arrivals under the old
- * count, which nothing reads.
+ * Keeps the arrivals found for the wallet `walletId`, by the deposit's hash,
+ * with the reset count the check began under (`epoch`), unless a wallet reset
+ * came since: checked again right before the write, in the lock a reset's
+ * clear takes too. One that comes between that check and the write leaves
+ * arrivals under the old count, which nothing reads.
  * @param {Record<string, { hash: string, at: number }>} found
  * @param {number | undefined} epoch
+ * @param {string} walletId
  * @returns {Promise<number>} how many of them are kept
  */
-export async function keepArrivals(found, epoch) {
-  if (epoch === undefined) return 0;
-  await withStorageLock(STORAGE_KEYS.BRIDGE_ARRIVALS, async () => {
-    const newest = Object.entries({ ...Object.fromEntries(await readKept(epoch)), ...found })
+export async function keepArrivals(found, epoch, walletId) {
+  const id = String(walletId ?? "");
+  if (epoch === undefined || !id) return 0;
+  await withStorageLock(V2, async () => {
+    const newest = Object.entries({ ...Object.fromEntries(await readKept(epoch, id)), ...found })
       .sort(([, a], [, b]) => b.at - a.at)
       .slice(0, KEEP);
     if ((await getTxEpoch()) !== epoch) return;
-    await storage.set({ [STORAGE_KEYS.BRIDGE_ARRIVALS]: { epoch, items: Object.fromEntries(newest) } });
+    await writeWallet(epoch, id, Object.fromEntries(newest));
     version += 1;
-    for (const [hash, arrival] of Object.entries(found)) kept.set(hash, arrival);
+    if (keptFor === id) for (const [hash, arrival] of Object.entries(found)) kept.set(hash, arrival);
   }).catch(() => {});
-  return Object.keys(found).filter((hash) => kept.has(hash)).length;
+  return keptFor === id ? Object.keys(found).filter((hash) => kept.has(hash)).length : 0;
 }
 
-/** Forgets every arrival kept: a wallet reset. In the lock a check's write takes. */
+/**
+ * The arrivals kept before each wallet's were kept apart, made the wallet's
+ * own: the one wallet's there was then, unlocked now. Under the reset count
+ * they were found under, or none.
+ * @param {string} walletId
+ */
+export async function adoptLegacyArrivals(walletId) {
+  const id = String(walletId ?? "");
+  if (!id) return;
+  await withStorageLock(V2, async () => {
+    const legacy = (await storage.get(V1))?.[V1];
+    if (!legacy) return;
+    const epoch = await getTxEpoch();
+    if (legacy.epoch === epoch && isObject(legacy.items)) {
+      const items = Object.fromEntries(Object.entries(legacy.items).filter(([, arrival]) => validArrival(arrival)));
+      await writeWallet(epoch, id, { ...items, ...Object.fromEntries(await readKept(epoch, id)) });
+    }
+    await storage.remove(V1);
+    version += 1;
+  });
+}
+
+/** Forgets one wallet's arrivals: a removed wallet's. In the lock a check's write takes. */
+export async function forgetWalletArrivals(walletId) {
+  const id = String(walletId ?? "");
+  if (!id) return;
+  await withStorageLock(V2, async () => {
+    const stored = await readStored();
+    if (!stored || !isObject(stored.wallets?.[id])) return;
+    await writeWallet(stored.epoch, id, {});
+    version += 1;
+    if (keptFor === id) kept = new Map();
+  });
+}
+
+/** Forgets every arrival kept, every wallet's: a wallet reset. In the lock a check's write takes. */
 export async function clearArrivals() {
-  await withStorageLock(STORAGE_KEYS.BRIDGE_ARRIVALS, async () => {
+  await withStorageLock(V2, async () => {
     version += 1;
     kept = new Map();
-    await storage.remove(STORAGE_KEYS.BRIDGE_ARRIVALS);
+    await storage.remove([V1, V2]);
   });
 }
 

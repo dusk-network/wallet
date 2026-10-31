@@ -107,6 +107,9 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
       accounts: Array.isArray(status?.accounts) ? status.accounts : [],
       addresses: Array.isArray(status?.addresses) ? status.addresses : [],
       selectedAccountIndex: Number(status?.selectedAccountIndex ?? 0) || 0,
+      // The wallet unlocked, by its vault ID, and every wallet held: { key, n }.
+      walletKey: String(status?.walletKey ?? ""),
+      wallets: Array.isArray(status?.wallets) ? status.wallets : [],
     };
   }
 
@@ -114,7 +117,7 @@ export function createEngineBridge({ ensureHost, noResponseMessage }) {
     try {
       return await getEngineStatusStrict();
     } catch {
-      return { isUnlocked: false, accounts: [], addresses: [], selectedAccountIndex: 0 };
+      return { isUnlocked: false, accounts: [], addresses: [], selectedAccountIndex: 0, walletKey: "", wallets: [] };
     }
   }
 

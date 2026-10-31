@@ -3,6 +3,7 @@
 import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import {
   approveOrigin,
+  clearAllPermissions,
   clearPermissions,
   getPermissionForOrigin,
   getPermissions,
@@ -31,10 +32,12 @@ import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNam
 import {
   broadcastChainChangedAll,
   broadcastProfilesChangedAll,
+  broadcastWalletChanged,
   bindPortsForSenderOrigin,
   registerDappPort,
   registerStorageChangeForwarder,
 } from "./dappEvents.js";
+import { siteWalletId } from "./siteWallet.js";
 
 import {
   notifyTxSubmitted,
@@ -53,6 +56,8 @@ import {
 import { submittedTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
+import { handleWalletCommand, keepWalletShown, walletsShown } from "../wallet/walletCommands.js";
+import { getWalletDirectory } from "../shared/wallets.js";
 import {
   getNetworkStatus,
   checkAllEndpoints,
@@ -175,11 +180,13 @@ async function lockWallet(reason) {
   emitUiLockState(false, reason).catch(() => {});
 }
 
-async function unlockEngine(mnemonic) {
+// Every wallet the vault opened: `walletKey`'s unlocked, the others kept in
+// the engine for a switch without the password.
+async function unlockEngine(wallets, walletKey) {
   try {
     return await engineCall(
       "engine_unlock",
-      { mnemonic },
+      { wallets, walletKey },
       { timeoutMs: 120_000 }
     );
   } catch (error) {
@@ -246,6 +253,15 @@ async function emitUiLockState(isUnlocked, reason = "") {
       isUnlocked: Boolean(isUnlocked),
       reason: String(reason ?? ""),
     });
+  } catch {
+    // ignore
+  }
+}
+
+// Another wallet unlocked, or one added or removed: pages draw again.
+async function emitUiWalletChanged() {
+  try {
+    await runtimeSendMessage({ type: "DUSK_UI_WALLET_CHANGED" });
   } catch {
     // ignore
   }
@@ -542,6 +558,24 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // Switch, add, remove and rename wallets, and change the password.
+      const walletAnswer = await handleWalletCommand(message, {
+        engineCall,
+        ensureEngineConfigured,
+        getEngineStatus: getEngineStatusStrict,
+        lock: () => lockWallet("remove"),
+        beforeSwitch: () => cancelPendingApprovals(null, "Wallet changed"),
+        afterSwitch: async ({ oldPerms, oldStatus }) => {
+          await updateActivity();
+          broadcastWalletChanged(oldPerms, oldStatus).catch(() => {});
+          emitUiWalletChanged().catch(() => {});
+        },
+      });
+      if (walletAnswer) {
+        sendResponse(walletAnswer);
+        return;
+      }
+
       // UI heartbeat to reset auto-lock timer.
       if (message?.type === "DUSK_UI_ACTIVITY") {
         const rid = String(message.rid ?? "");
@@ -712,7 +746,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const vault = await loadVault();
         const settings = await getSettings();
         const status = await getEngineStatus();
-        const perm = await getPermissionForOrigin(entry.origin);
+        const perm = await getPermissionForOrigin(entry.origin, await siteWalletId(status));
 
         let accountNames = {};
         try {
@@ -783,9 +817,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             return current.accounts ?? [];
           }
 
-          const mnemonic = await unlockVault(password);
+          // Every wallet the password opens (v1's vault moved over first),
+          // the one unlocked last unlocked again.
+          const { wallets } = await unlockVault(password);
           await ensureEngineConfigured();
-          const result = await unlockEngine(mnemonic);
+          const result = await unlockEngine(wallets, (await getWalletDirectory().catch(() => ({}))).active);
+          await keepWalletShown(result);
           // Contacts kept in plain text before they were encrypted move into
           // this wallet's record now. Unlocking doesn't wait on a failure:
           // the next read of the contacts moves them.
@@ -814,7 +851,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           await lockWallet("reset");
           await beginReset();
-          await clearPermissions();
+          await clearAllPermissions();
           await clearVault();
           // Nothing of the old wallet stays: its transactions, shielded notes
           // and history. A store that can't be cleared fails the reset and
@@ -854,7 +891,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             profileId: `account:${clamped}:${account}`,
             accountIndex: clamped,
             grants: { publicAccount: true, shieldedReceiveAddress: false },
-          });
+          }, String(status.accounts[0] ?? ""));
         });
         sendResponse({ ok: true });
         return;
@@ -892,7 +929,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             profileId: `account:${idx}:${account}`,
             accountIndex: idx,
             grants: { publicAccount: true, shieldedReceiveAddress: false },
-          });
+          }, String(accounts[0] ?? ""));
         });
         sendResponse({ ok: true });
         return;
@@ -907,16 +944,17 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           cancelPendingApprovals(origin, "Site disconnected");
-          await revokeOrigin(origin);
+          await revokeOrigin(origin, await siteWalletId());
         });
         sendResponse({ ok: true });
         return;
       }
 
       if (message?.type === "DUSK_UI_CLEAR_PERMISSIONS") {
+        // The wallet's own sites: another wallet's stay connected to it.
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           cancelPendingApprovals(null, "Sites disconnected");
-          await clearPermissions();
+          await clearPermissions(await siteWalletId());
         });
         sendResponse({ ok: true });
         return;
@@ -947,10 +985,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             await clearContacts();
           }
 
-          await createVault(mnemonic, password);
+          const wallet = await createVault(mnemonic, password);
           if (pending) await endReset();
           await ensureEngineConfigured();
-          const result = await unlockEngine(String(mnemonic));
+          const result = await unlockEngine([{ ...wallet, mnemonic: String(mnemonic) }], wallet.id);
+          await keepWalletShown(result);
           await updateActivity();
           setupAutoLockAlarm().catch(console.error);
           broadcastProfilesChangedAll().catch(() => {});
@@ -985,12 +1024,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           // short in between, the next wallet made here keeps those contacts
           // only if it's the same one.
           await beginReset({ keepContactsOf: walletId });
-          await clearPermissions();
+          await clearAllPermissions();
           await clearWalletData({ keepContactsOf: walletId });
           await clearVault();
-          await createVault(mnemonic, password);
+          const restored = await createVault(mnemonic, password);
           await endReset();
-          const result = await unlockEngine(String(mnemonic));
+          const result = await unlockEngine([{ ...restored, mnemonic: String(mnemonic) }], restored.id);
+          await keepWalletShown(result);
           await updateActivity();
           setupAutoLockAlarm().catch(console.error);
           broadcastProfilesChangedAll().catch(() => {});
@@ -1130,13 +1170,15 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const vault = await loadVault();
         const settings = await getSettings();
         const status = await getEngineStatus();
+        // The wallet the sites, transactions and arrivals shown are of.
+        const walletId = await siteWalletId(status);
 
         const activeOrigin =
           typeof message.origin === "string" && message.origin.length
             ? message.origin
             : null;
         const activeConnected = activeOrigin
-          ? Boolean(await getPermissionForOrigin(activeOrigin))
+          ? Boolean(await getPermissionForOrigin(activeOrigin, walletId))
           : null;
 
         let addresses = [];
@@ -1150,7 +1192,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // Connected sites (for settings UI)
         let permissions = null;
         try {
-          const perms = await getPermissions();
+          const perms = await getPermissions(walletId);
           permissions = Object.entries(perms ?? {})
             .map(([o, p]) => ({
               origin: o,
@@ -1167,7 +1209,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // ephemeral toasts.
         let txs = [];
         try {
-          txs = await listTxs({ nodeUrl: settings.nodeUrl });
+          txs = status?.isUnlocked ? await listTxs({ nodeUrl: settings.nodeUrl, walletId }) : [];
         } catch {
           txs = [];
         }
@@ -1295,6 +1337,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           activeConnected,
           txs,
           accountNames,
+          // Each wallet the switcher shows, and the one unlocked.
+          wallets: await walletsShown(status).catch(() => []),
+          walletKey: status.isUnlocked ? status.walletKey ?? "" : "",
         });
         return;
       }
@@ -1313,24 +1358,33 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI initiated transaction (from the wallet popup)
       if (message?.type === "DUSK_UI_SEND_TX") {
-        const status = await getEngineStatus();
-        if (!status.isUnlocked) {
-          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-        }
-        // What this send and its watcher keep is dropped after a reset meanwhile.
-        const txEpoch = await getTxEpoch();
-        await ensureEngineConfigured();
-        // Fetch live gas price from node (cached for 30s) to use as default.
-        let dynamicPrice;
-        try {
-          const gasData = await engineCall("dusk_getCachedGasPrice");
-          dynamicPrice = gasData?.median;
-        } catch {
-          // Ignore errors, will fall back to static default
-        }
-        // Apply standard gas defaults for wallet initiated transactions.
-        const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
-        const result = await engineCall("dusk_sendTransaction", { ...baseParams, txEpoch });
+        // Sent from the wallet unlocked as it goes, the one its Review was on
+        // (`walletId`): a switch, lock or reset waits for it, as for a site's.
+        const { status, txEpoch, baseParams, result } = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const status = await getEngineStatus();
+          if (!status.isUnlocked) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+          }
+          const expected = String(message.walletId ?? "");
+          if (expected && expected !== String(status.accounts?.[0] ?? "")) {
+            throw rpcError(ERROR_CODES.UNAUTHORIZED, "The wallet changed while you reviewed it.");
+          }
+          // What this send and its watcher keep is dropped after a reset meanwhile.
+          const txEpoch = await getTxEpoch();
+          await ensureEngineConfigured();
+          // Fetch live gas price from node (cached for 30s) to use as default.
+          let dynamicPrice;
+          try {
+            const gasData = await engineCall("dusk_getCachedGasPrice");
+            dynamicPrice = gasData?.median;
+          } catch {
+            // Ignore errors, will fall back to static default
+          }
+          // Apply standard gas defaults for wallet initiated transactions.
+          const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
+          const result = await engineCall("dusk_sendTransaction", { ...baseParams, txEpoch });
+          return { status, txEpoch, baseParams, result };
+        });
 
         // Persist metadata (see rpc.js comments).
         const hash = result?.hash ?? "";
@@ -1348,7 +1402,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
                 : Number(settings?.selectedAccountIndex ?? 0) || 0;
             await putTxMeta(
               hash,
-              submittedTxMeta(baseParams, { origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message)),
+              submittedTxMeta(baseParams, { walletId: String(status?.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message)),
               { epoch: txEpoch }
             );
           }

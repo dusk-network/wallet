@@ -16,6 +16,7 @@ export async function getTxEpoch() {
 
 /**
  * @typedef {Object} TxMeta
+ * @property {string=} walletId The wallet that sent it: its first public account. Each wallet lists its own.
  * @property {string} origin
  * @property {string} nodeUrl
  * @property {string} kind
@@ -69,17 +70,28 @@ async function setAll(next) {
   await storage.set({ [STORAGE_KEYS.TXS]: next });
 }
 
+// Each wallet keeps its newest `limit` (records of none, forgotten ones among
+// them, count as one wallet's).
 function prune(store, protectedHash = "", limit = 50) {
-  const entries = Object.entries(store);
-  if (entries.length <= limit) return store;
+  const wallets = new Map();
+  for (const entry of Object.entries(store)) {
+    const wallet = String(entry[1]?.walletId ?? "");
+    if (!wallets.has(wallet)) wallets.set(wallet, []);
+    wallets.get(wallet).push(entry);
+  }
+  if ([...wallets.values()].every((entries) => entries.length <= limit)) return store;
 
   const timestamp = (meta) => meta.submittedAt ?? meta.executedAt ?? meta.lastCheckedAt ?? 0;
-  entries.sort((a, b) => {
-    if (a[0] === protectedHash) return 1;
-    if (b[0] === protectedHash) return -1;
-    return timestamp(a[1]) - timestamp(b[1]);
-  });
-  return Object.fromEntries(entries.slice(-limit));
+  const kept = [];
+  for (const entries of wallets.values()) {
+    entries.sort((a, b) => {
+      if (a[0] === protectedHash) return 1;
+      if (b[0] === protectedHash) return -1;
+      return timestamp(a[1]) - timestamp(b[1]);
+    });
+    kept.push(...entries.slice(-limit));
+  }
+  return Object.fromEntries(kept);
 }
 
 /**
@@ -149,6 +161,39 @@ export async function forgetTxs(hashes, { epoch } = {}) {
   });
 }
 
+/**
+ * The records from before each wallet's were kept apart, made its own: the one
+ * wallet's there was then, unlocked now.
+ * @param {string} walletId
+ * @returns {Promise<number>} how many
+ */
+export async function adoptLegacyTxs(walletId) {
+  const id = String(walletId ?? "").trim();
+  if (!id) return 0;
+  return mutate(async () => {
+    const current = await getAll();
+    const legacy = Object.entries(current).filter(([, meta]) => !meta?.walletId && !isForgotten(meta) && meta?.submittedAt != null);
+    if (!legacy.length) return 0;
+    for (const [hash, meta] of legacy) current[hash] = { ...meta, walletId: id };
+    await setAll(current);
+    return legacy.length;
+  });
+}
+
+/**
+ * Forget one wallet's transactions: a removed wallet's. Others' stay, and so
+ * does the reset count, so their sends keep writing.
+ * @param {string} walletId
+ */
+export async function forgetWalletTxs(walletId) {
+  const id = String(walletId ?? "").trim();
+  if (!id) return;
+  return mutate(async () => {
+    const current = await getAll();
+    await setAll(Object.fromEntries(Object.entries(current).filter(([, meta]) => meta?.walletId !== id)));
+  });
+}
+
 /** Forget every transaction's metadata, for a wallet reset, and count the reset. */
 export async function clearTxs() {
   return mutate(async () => {
@@ -173,7 +218,8 @@ export async function getTxMeta(hash) {
  * NOTE: The store is pruned to a small fixed size (see `prune()`), so this
  * is safe to call frequently from UI rendering.
  *
- * @param {{ nodeUrl?: string, limit?: number }} [opts]
+ * @param {{ nodeUrl?: string, walletId?: string, limit?: number }} [opts] -
+ *   `walletId`: that wallet's only (a locked wallet's "" lists none)
  * @returns {Promise<Array<{hash: string} & TxMeta>>}
  */
 export async function listTxs(opts = {}) {
@@ -187,6 +233,9 @@ export async function listTxs(opts = {}) {
 
   if (nodeUrl) {
     entries = entries.filter((e) => String(e.nodeUrl ?? "") === nodeUrl);
+  }
+  if (typeof opts.walletId === "string") {
+    entries = entries.filter((e) => Boolean(opts.walletId) && e.walletId === opts.walletId);
   }
 
   entries.sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0));

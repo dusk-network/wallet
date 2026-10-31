@@ -1,9 +1,10 @@
 import { loadVault } from "../shared/vault.js";
 import {
+  adoptLegacyPermissions,
   approveOrigin,
   getPermissionForOrigin,
   permissionProfileState,
-  revokeOrigin,
+  revokeOriginEverywhere,
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -42,6 +43,7 @@ import {
   invalidateEngineConfig,
 } from "./engineHost.js";
 import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
+import { siteWalletId } from "./siteWallet.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { readCurrent, siteNames } from "./siteNames.js";
 import { getTxEpoch, putTxMeta } from "../shared/txStore.js";
@@ -73,6 +75,20 @@ export async function handleRpc(origin, request) {
   if (!DAPP_RPC_METHODS.includes(method) && !DAPP_TOMBSTONED_METHODS.includes(method)) {
     throw rpcError(ERROR_CODES.METHOD_NOT_FOUND, `Unknown method: ${method}`);
   }
+
+  // The site's connection to the wallet it's connected to now (siteWallet.js):
+  // none of another wallet's. One from before wallets were kept apart that the
+  // unlock didn't move yet moves now, when it's of this wallet's profiles.
+  const permissionFor = async (status) => {
+    const current = status ?? (await getEngineStatus());
+    const walletId = await siteWalletId(current);
+    const perm = await getPermissionForOrigin(origin, walletId);
+    if (perm || !current?.isUnlocked) return perm;
+    // Most sites asking have none from before: those cost no move.
+    if (!(await getPermissionForOrigin(origin, ""))) return null;
+    const moved = await adoptLegacyPermissions(walletId, current.accounts).catch(() => 0);
+    return moved ? getPermissionForOrigin(origin, walletId) : null;
+  };
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
   const MAX_U64 = 18446744073709551615n;
@@ -303,8 +319,8 @@ export async function handleRpc(origin, request) {
   // waits for a lookup.
   function siteProfiles() {
     return readCurrent(async () => {
-      const perm = await getPermissionForOrigin(origin);
-      const status = perm ? await getEngineStatus() : null;
+      const status = await getEngineStatus();
+      const perm = await permissionFor(status);
       const account = profileFromPermission(status, perm)?.account;
       const names = account ? await siteNames(String((await getSettings())?.nodeUrl ?? ""), [account]) : null;
       const profile = profileFromPermission(status, perm, hasShieldedGrant(perm), names);
@@ -332,7 +348,7 @@ export async function handleRpc(origin, request) {
   }
 
   async function assertApprovalContext(expected) {
-    const permission = await getPermissionForOrigin(origin);
+    const permission = await permissionFor();
     let current;
     try {
       current = await captureApprovalContext(permission);
@@ -375,8 +391,8 @@ export async function handleRpc(origin, request) {
     const requestedShieldedGrant = Boolean(options?.shieldedReceiveAddress);
     await ensureVaultForProfileRequest();
 
-    const existing = await getPermissionForOrigin(origin);
     const statusBeforePrompt = await getEngineStatus();
+    const existing = await permissionFor(statusBeforePrompt);
     const selectedProfile = profileFromStatus(
       statusBeforePrompt,
       statusBeforePrompt?.selectedAccountIndex ?? existing?.accountIndex ?? 0,
@@ -412,6 +428,7 @@ export async function handleRpc(origin, request) {
       if (!profile) throw rpcError(ERROR_CODES.UNAUTHORIZED, "No wallet profile is available");
       const sameProfile = sameProfilePermission(existing, profile);
       const effectiveGrant = requestedShieldedGrant || (sameProfile && hasShieldedGrant(existing));
+      // Connected to the wallet unlocked as it's approved: that wallet's alone.
       const perm = await approveOrigin(origin, {
         profileId: profile.profileId,
         accountIndex: idx,
@@ -419,7 +436,7 @@ export async function handleRpc(origin, request) {
           publicAccount: true,
           shieldedReceiveAddress: effectiveGrant,
         },
-      });
+      }, String(arr[0] ?? ""));
       return { perm, status };
     });
   }
@@ -497,8 +514,8 @@ export async function handleRpc(origin, request) {
 
     case "dusk_requestShieldedAddress": {
       const options = firstParamObject(params);
-      const existing = await getPermissionForOrigin(origin);
       const status0 = await getEngineStatus();
+      const existing = await permissionFor(status0);
       const existingProfile = existing && status0?.isUnlocked
         ? profileFromPermission(status0, existing, true)
         : null;
@@ -526,7 +543,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_switchNetwork": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       // Switching networks only makes sense if the wallet exists.
@@ -613,7 +630,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_getPublicBalance": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       const approvalContext = await captureApprovalContext(perm);
@@ -631,7 +648,7 @@ export async function handleRpc(origin, request) {
 
     case "dusk_estimateGas": {
       // Gas estimation is public info, but still require connection.
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       await ensureEngineConfigured();
@@ -639,7 +656,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_sendTransaction": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       if (!params || typeof params !== "object") {
@@ -756,7 +773,7 @@ export async function handleRpc(origin, request) {
         if (hash) {
           await putTxMeta(
             hash,
-            submittedTxMeta(finalParams, { origin, nodeUrl, profileIndex: idx, nullifiers: result?.nullifiers }, {
+            submittedTxMeta(finalParams, { walletId: executionContext.walletId, origin, nodeUrl, profileIndex: idx, nullifiers: result?.nullifiers }, {
               // Where a deposit to DuskEVM pays, the .dusk name a registration
               // registers, and a name's reservation, for Activity: the chain
               // keeps them in the call's bytes.
@@ -786,7 +803,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_watchAsset": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       // Normalize params: allow object or single-element array.
@@ -891,7 +908,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_signMessage": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       if (!params || typeof params !== "object") {
@@ -945,7 +962,7 @@ export async function handleRpc(origin, request) {
     case "dusk_signTypedData": {
       // Connection is required up front, same as the sibling sign_* methods -
       // an unconnected origin should not be able to trigger any of the work below.
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       // Reject a non-object params before touching its shape any further.
@@ -1072,7 +1089,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_signAuth": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       if (!params || typeof params !== "object") {
@@ -1126,10 +1143,11 @@ export async function handleRpc(origin, request) {
       });
     }
 
+    // The site disconnects itself: from every wallet, as it can't tell them apart.
     case "dusk_disconnect": {
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         cancelPendingApprovals(origin, "Site disconnected");
-        await revokeOrigin(origin);
+        await revokeOriginEverywhere(origin);
         return true;
       });
     }

@@ -188,4 +188,48 @@ describe("txStore", () => {
     await clearTxs();
     expect(await listTxs()).toEqual([]);
   });
+
+  it("lists each wallet's own transactions, and keeps the newest 50 of each", async () => {
+    const { listTxs, putTxMeta } = await import("./txStore.js");
+    for (let i = 0; i < 55; i++) await putTxMeta(`w1-${i}`, { walletId: "w1", nodeUrl: "n", submittedAt: 100 + i, status: "submitted" });
+    await putTxMeta("w2-0", { walletId: "w2", nodeUrl: "n", submittedAt: 1, status: "submitted" });
+
+    const one = await listTxs({ nodeUrl: "n", walletId: "w1" });
+    expect(one).toHaveLength(50);
+    expect(one.at(-1).hash).toBe("w1-5");
+    // The other wallet's oldest isn't pushed out by the first's newer ones.
+    await expect(listTxs({ walletId: "w2" })).resolves.toMatchObject([{ hash: "w2-0" }]);
+    // A locked wallet lists none.
+    await expect(listTxs({ walletId: "" })).resolves.toEqual([]);
+  });
+
+  it("makes the records from before its wallet's own, and nothing that's only part of one", async () => {
+    const { adoptLegacyTxs, forgetTxs, listTxs, patchTxMeta, putTxMeta } = await import("./txStore.js");
+    await putTxMeta("old-a", { nodeUrl: "n", kind: "transfer", submittedAt: 1, status: "executed" });
+    await putTxMeta("old-b", { nodeUrl: "n", kind: "transfer", submittedAt: 2, status: "submitted" });
+    await putTxMeta("w2-a", { walletId: "w2", nodeUrl: "n", submittedAt: 3, status: "submitted" });
+    await forgetTxs(["old-gone"]);
+    // A late watcher's write for a send no record holds.
+    await patchTxMeta("stray", { status: "executed" });
+
+    await expect(adoptLegacyTxs("w1")).resolves.toBe(2);
+    await expect(listTxs({ walletId: "w1" })).resolves.toMatchObject([{ hash: "old-b" }, { hash: "old-a" }]);
+    await expect(listTxs({ walletId: "w2" })).resolves.toMatchObject([{ hash: "w2-a" }]);
+    await expect(adoptLegacyTxs("w2")).resolves.toBe(0);
+  });
+
+  it("forgets a removed wallet's transactions and no other's, and keeps the reset count", async () => {
+    const { forgetWalletTxs, getTxEpoch, listTxs, putTxMeta } = await import("./txStore.js");
+    const epoch = await getTxEpoch();
+    await putTxMeta("w1-a", { walletId: "w1", submittedAt: 1, status: "submitted" });
+    await putTxMeta("w2-a", { walletId: "w2", submittedAt: 2, status: "submitted" });
+
+    await forgetWalletTxs("w1");
+    await expect(listTxs({ walletId: "w1" })).resolves.toEqual([]);
+    await expect(listTxs({ walletId: "w2" })).resolves.toMatchObject([{ hash: "w2-a" }]);
+    await expect(getTxEpoch()).resolves.toBe(epoch);
+    // The other wallet's send still writes.
+    await putTxMeta("w2-b", { walletId: "w2", submittedAt: 3, status: "submitted" }, { epoch });
+    await expect(listTxs({ walletId: "w2" })).resolves.toHaveLength(2);
+  });
 });

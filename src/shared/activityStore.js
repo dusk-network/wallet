@@ -357,6 +357,39 @@ export async function putArchiveRefusal(url, at = Date.now()) {
 }
 
 /**
+ * Forget one wallet's history: a removed wallet's. Its accounts' public
+ * history and sync states, and its profiles' shielded history, on every
+ * network; nothing of another wallet, and the reset count stays.
+ * @param {{ walletId: string, accounts: string[] }} wallet
+ */
+export async function forgetWalletActivity({ walletId, accounts }) {
+  const id = String(walletId ?? "");
+  const own = new Set((Array.isArray(accounts) ? accounts : []).map(String).filter(Boolean));
+  if (id) own.add(id);
+  if (!own.size) return;
+  const ofAccount = (key) => {
+    const at = String(key ?? "").lastIndexOf("::");
+    return at > 0 && own.has(String(key).slice(at + 2));
+  };
+  const ofWallet = (key) => Boolean(id) && String(key ?? "").includes(`::${id}::`);
+  const db = await openDb();
+  const tx = db.transaction([STORE_META, STORE_ENTRIES, STORE_SHIELDED], "readwrite");
+  const sweep = (name, match) => {
+    const req = tx.objectStore(name).openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) return;
+      if (match(cursor.value)) cursor.delete();
+      cursor.continue();
+    };
+  };
+  sweep(STORE_META, (row) => row?.ownerKey !== LIFECYCLE && ofAccount(row?.ownerKey));
+  sweep(STORE_ENTRIES, (row) => ofAccount(row?.ownerKey));
+  sweep(STORE_SHIELDED, (row) => ofWallet(row?.ownerKey));
+  await done(tx);
+}
+
+/**
  * Forget everything kept here, for a wallet reset, and count the reset: work
  * that began before it writes nothing after it (getActivityEpoch).
  */

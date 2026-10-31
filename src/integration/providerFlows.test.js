@@ -113,7 +113,7 @@ describe("integration: provider flows", () => {
     expect(profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
     expect(requestUserApproval).toHaveBeenCalledWith("connect", origin, expect.any(Object));
 
-    const perm = await getPermissionForOrigin(origin);
+    const perm = await getPermissionForOrigin(origin, "acct0");
     expect(perm).toMatchObject({
       profileId: "account:1:acct1",
       accountIndex: 1,
@@ -124,7 +124,57 @@ describe("integration: provider flows", () => {
     expect(profiles2).toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
 
     await handleRpc(origin, { method: "dusk_disconnect" });
-    expect(await getPermissionForOrigin(origin)).toBeNull();
+    expect(await getPermissionForOrigin(origin, "acct0")).toBeNull();
+  });
+
+  it("keeps a site's connection to its wallet: on another wallet it sees nothing until it's connected there too", async () => {
+    const { handleRpc } = await import("../background/rpc.js");
+    const { getPermissionForOrigin } = await import("../shared/permissions.js");
+    const origin = "https://dapp.example";
+    const wallet = (w) => ({ isUnlocked: true, accounts: [`${w}acct0`, `${w}acct1`], addresses: [`${w}addr0`, `${w}addr1`], selectedAccountIndex: 0 });
+    const profile = (w) => [{ profileId: `account:1:${w}acct1`, account: `${w}acct1` }];
+    const sign = { method: "dusk_signMessage", params: { message: "0x00" } };
+
+    engineStatus = wallet("w1");
+    await expect(handleRpc(origin, { method: "dusk_requestProfiles" })).resolves.toEqual(profile("w1"));
+
+    // Wallet 2 unlocked: nothing of it, nor of wallet 1.
+    engineStatus = wallet("w2");
+    await expect(handleRpc(origin, { method: "dusk_profiles" })).resolves.toEqual([]);
+    await expect(handleRpc(origin, { method: "dusk_requestShieldedAddress" })).resolves.toMatchObject({ account: "w2acct1" });
+    await handleRpc(origin, { method: "dusk_disconnect" });
+    await expect(handleRpc(origin, { method: "dusk_getPublicBalance" })).rejects.toThrow("Not connected");
+    await expect(handleRpc(origin, sign)).rejects.toThrow("Not connected");
+    await expect(handleRpc(origin, { method: "dusk_estimateGas" })).rejects.toThrow("Not connected");
+
+    // Back on wallet 1, its connection went with the site's own disconnect;
+    // connected again to each, each shows its own.
+    engineStatus = wallet("w1");
+    await expect(handleRpc(origin, { method: "dusk_profiles" })).resolves.toEqual([]);
+    await handleRpc(origin, { method: "dusk_requestProfiles" });
+    engineStatus = wallet("w2");
+    await expect(handleRpc(origin, { method: "dusk_profiles" })).resolves.toEqual([]);
+    await handleRpc(origin, { method: "dusk_requestProfiles" });
+    await expect(handleRpc(origin, { method: "dusk_profiles" })).resolves.toEqual(profile("w2"));
+    engineStatus = wallet("w1");
+    await expect(handleRpc(origin, { method: "dusk_profiles" })).resolves.toEqual(profile("w1"));
+    expect(await getPermissionForOrigin(origin, "w1acct0")).toMatchObject({ profileId: "account:1:w1acct1" });
+    expect(await getPermissionForOrigin(origin, "w2acct0")).toMatchObject({ profileId: "account:1:w2acct1" });
+  });
+
+  it("moves a site's connection from before wallets were kept apart when it asks, and nothing when another site asks", async () => {
+    const { handleRpc } = await import("../background/rpc.js");
+    const { getPermissions } = await import("../shared/permissions.js");
+    const old = "https://old.example";
+    const before = { profileId: "account:1:acct1", accountIndex: 1, grants: { publicAccount: true }, connectedAt: 1, updatedAt: 1 };
+    localStorage.setItem("dusk_permissions_v1", JSON.stringify({ [old]: before }));
+
+    await expect(handleRpc("https://new.example", { method: "dusk_profiles" })).resolves.toEqual([]);
+    await expect(getPermissions("")).resolves.toEqual({ [old]: before });
+
+    await expect(handleRpc(old, { method: "dusk_profiles" })).resolves.toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
+    await expect(getPermissions("")).resolves.toEqual({});
+    await expect(getPermissions("acct0")).resolves.toEqual({ [old]: before });
   });
 
   it("E2E-ish: connect -> sendTransaction -> tx meta recorded", async () => {

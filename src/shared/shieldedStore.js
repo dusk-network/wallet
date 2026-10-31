@@ -706,6 +706,32 @@ export async function unspendNullifiers(networkKey, walletId, profileIndex, null
   return hexes.length;
 }
 
+/**
+ * Forget one wallet's notes, cursors and reservations, on every network and
+ * profile: a removed wallet's. Nothing of another wallet.
+ * @param {string} walletId
+ */
+export async function forgetWalletNotes(walletId) {
+  const id = String(walletId ?? "").trim();
+  if (!id) return;
+  const ofWallet = (key) => String(key ?? "").includes(`::${id}::`);
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_META, STORE_NOTES, STORE_SPENT, STORE_PENDING], "readwrite");
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error("Failed to clear the wallet's shielded cache"));
+    for (const name of [STORE_META, STORE_NOTES, STORE_SPENT, STORE_PENDING]) {
+      const req = tx.objectStore(name).openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) return;
+        if (ofWallet(cursor.value?.ownerKey)) cursor.delete();
+        cursor.continue();
+      };
+    }
+  });
+}
+
 /** Forget every owner's notes, cursors and reservations, for a wallet reset. */
 export async function clearShieldedStore() {
   const db = await openDb();

@@ -89,7 +89,7 @@ const watched = (tx) => tx.status === "submitted" || tx.status === "mempool";
 // record where no watcher's event brought it (the desktop app's): it keeps
 // that first.
 async function settle(a, state) {
-  const own = (await listTxs({ nodeUrl: a.nodeUrl })).filter(
+  const own = (await listTxs({ nodeUrl: a.nodeUrl, walletId: a.walletId })).filter(
     (tx) => !watched(tx) && (tx.profileIndex == null || Number(tx.profileIndex) === a.profileIndex)
   );
   const { drop, keep } = settleSends({ public: a.entries, shielded: a.shielded, pending: own, keeps });
@@ -254,6 +254,8 @@ export function ensureActivity(ov, { state, render, send }) {
     key,
     account,
     profileIndex,
+    // The wallet the account is of: its own sends only.
+    walletId: String(ov.accounts?.[0] ?? ""),
     nodeUrl: String(ov.nodeUrl),
     archiverUrl: String(ov.archiverUrl ?? ""),
     entries: [],

@@ -486,7 +486,7 @@ function scheduleArrivalCheck(ov) {
   const timer = setTimeout(async () => {
     const now = state.overview;
     const found = current()
-      ? await checkArrivals(activityRows(now, state), { account: selected(now).account, archiverUrl: now?.archiverUrl, nodeUrl: now?.nodeUrl }).catch(() => 0)
+      ? await checkArrivals(activityRows(now, state), { walletId: now?.accounts?.[0], account: selected(now).account, archiverUrl: now?.archiverUrl, nodeUrl: now?.nodeUrl }).catch(() => 0)
       : 0;
     if (arrivalTimer !== timer) return;
     arrivalTimer = null;
@@ -553,6 +553,15 @@ function installTxStatusListener() {
             return;
           }
 
+          state.needsRefresh = true;
+          render({ forceRefresh: true }).catch(() => {});
+          return;
+        }
+
+        // Another wallet unlocked, here or in another window: whatever began
+        // on the one before is for nothing now.
+        if (msg?.type === "DUSK_UI_WALLET_CHANGED") {
+          switchContext(state);
           state.needsRefresh = true;
           render({ forceRefresh: true }).catch(() => {});
           return;
@@ -837,9 +846,9 @@ function keepContactsToTheirWallet(ov) {
 
 // --- Main render ----------------------------------------------------------
 export async function render({ forceRefresh = false } = {}) {
-  // Deposits to DuskEVM seen there before, for Activity's rows.
-  await loadArrivals();
   const overviewRefreshed = await refreshOverview(send, { force: forceRefresh });
+  // Deposits to DuskEVM seen there before, for Activity's rows: the wallet's own.
+  await loadArrivals(state.overview?.isUnlocked ? state.overview?.accounts?.[0] : "");
   if (overviewRefreshed && state.staking) {
     state.staking.loaded = false;
     state.staking.error = null;

@@ -10,12 +10,17 @@ import { ACCOUNT, rowOf, TESTNET } from "../../shared/fixtures/rows.js";
 const items = vi.hoisted(() => ({}));
 const epoch = vi.hoisted(() => ({ now: 1 }));
 vi.mock("../../shared/storage.js", () => ({
-  STORAGE_KEYS: { BRIDGE_ARRIVALS: "dusk_bridge_arrivals_v1", SETTINGS: "dusk_settings_v1", NETWORK_STATUS: "dusk_network_status_v1" },
+  STORAGE_KEYS: {
+    BRIDGE_ARRIVALS: "dusk_bridge_arrivals_v1",
+    BRIDGE_ARRIVALS_V2: "dusk_bridge_arrivals_v2",
+    SETTINGS: "dusk_settings_v1",
+    NETWORK_STATUS: "dusk_network_status_v1",
+  },
   storage: {
-    get: async (key) => ({ [key]: items[key] }),
+    get: async (key) => ({ [key]: structuredClone(items[key]) }),
     set: async (patch) => Object.assign(items, structuredClone(patch)),
-    remove: async (key) => {
-      delete items[key];
+    remove: async (keys) => {
+      for (const key of [keys].flat()) delete items[key];
     },
   },
 }));
@@ -83,7 +88,9 @@ let duskEvm;
 let fetch;
 let arrivals;
 let kept;
-const look = (rows, at = NOW) => arrivals.checkArrivals(rows, { account: ACCOUNT, nodeUrl: TESTNET, now: at });
+// The wallet the account is of: its first public account.
+const WALLET = "wallet-of-account";
+const look = (rows, at = NOW) => arrivals.checkArrivals(rows, { walletId: WALLET, account: ACCOUNT, nodeUrl: TESTNET, now: at });
 
 beforeEach(async () => {
   vi.resetModules();
@@ -112,13 +119,13 @@ describe("a deposit to DuskEVM on its way", () => {
     expect(duskEvm.methods()).toContain("eth_getLogs");
     expect(kept.keptArrivals().get(rows[0].hash)).toEqual({ hash: L2(2), at: NOW - 60_000 });
     // Kept under the reset count the look began with.
-    expect(items.dusk_bridge_arrivals_v1).toEqual({ epoch: 1, items: { [rows[0].hash]: { hash: L2(2), at: NOW - 60_000 } } });
+    expect(items.dusk_bridge_arrivals_v2).toEqual({ epoch: 1, wallets: { [WALLET]: { [rows[0].hash]: { hash: L2(2), at: NOW - 60_000 } } } });
 
     duskEvm.asked.length = 0;
     await expect(look(rows)).resolves.toBe(0);
     vi.resetModules();
     const page = await import("../../shared/bridgeArrival.js");
-    await page.loadArrivals();
+    await page.loadArrivals(WALLET);
     expect([duskEvm.methods(), page.keptArrivals().get(rows[0].hash)?.hash, page.awaitingArrival(rows[0], TESTNET, NOW)]).toEqual([[], L2(2), false]);
   });
 
@@ -144,7 +151,7 @@ describe("a deposit to DuskEVM on its way", () => {
     fetch.mockResolvedValue(new Response("", { status: 502 }));
 
     await expect(look([deposit("a")])).resolves.toBe(0);
-    expect([kept.keptArrivals().size, items.dusk_bridge_arrivals_v1]).toEqual([0, undefined]);
+    expect([kept.keptArrivals().size, items.dusk_bridge_arrivals_v2]).toEqual([0, undefined]);
   });
 
   it("takes a deposit's time from its Dusk block, never the wallet's clock: nothing is asked until the block's time is known", async () => {

@@ -39,7 +39,7 @@ describe("connected site status", () => {
     expect(background).toContain('message?.type === "DUSK_UI_CONNECT_ORIGIN"');
     expect(background).toContain('message?.type === "DUSK_UI_DISCONNECT_ORIGIN"');
     expect(background).toContain("approveOrigin(origin");
-    expect(background).toContain("revokeOrigin(origin)");
+    expect(background).toContain("revokeOrigin(origin, await siteWalletId())");
   });
 
   it("names the site in the popup's bar as its approval did: with its port, and http:// for a local site", async () => {

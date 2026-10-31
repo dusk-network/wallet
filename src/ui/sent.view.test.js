@@ -255,6 +255,18 @@ describe("after Confirm", () => {
     }
   );
 
+  it("sends from the wallet the review was on, and says nothing went out when another is unlocked now", async () => {
+    const ov = overview();
+    const state = { ...reviewState(), overview: ov };
+    const app = popup(state, ov);
+    await settle();
+    const reply = await app.confirm();
+    expect(app.actions.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_SEND_TX", walletId: ACCOUNT }));
+    reply.resolve({ error: { message: "The wallet changed while you reviewed it." } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", "The wallet changed while you reviewed it. No fee was charged."]);
+  });
+
   it("leaves a newer review's draft alone when an earlier send finishes", async () => {
     const state = reviewState();
     const app = popup(state);

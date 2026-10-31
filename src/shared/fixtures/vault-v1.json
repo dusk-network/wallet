@@ -1,0 +1,25 @@
+{
+  "madeBy": "dusk-network/wallet main fae81af, src/shared/vault.js createVault",
+  "twelve": {
+    "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    "password": "password123",
+    "storageKey": "dusk_vault_v1",
+    "vault": {
+      "data": "h2DPc6B5VCJuGSlzwhMzyHM6MAD0OajZiXHcYq0CCFUC8R84b/Gfc4xDSBq2KvUS90DY8k3grsnPmeBEiH9/CShvC55m7tVlePQDmP1IneFG8pJAFJl5anhyJ4zW12jV4DifOzJK8X8uy5B2iA==",
+      "iv": "Az6lFCnpt2mxv3Eg",
+      "salt": "fz/zvfvEGLO+BgiYCUIrG9S/Ug1skels0DKydwsCkqg=",
+      "iterations": 900000
+    }
+  },
+  "twentyfour": {
+    "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+    "password": " pässwörd é, with spaces ",
+    "storageKey": "dusk_vault_v1",
+    "vault": {
+      "data": "WSWHvrTTjc4KjlPZAhuR0CZI5VxPvfjhhsROaNNgcW8rE80hCsps6yxuglc9MKFczzPrgPiyp7zzppJBamCcpro60ULJKzP+sp7YBFbUqV7zFviG0W8agby9Wj8+J0oejU+cecU14VQkTieopTng1JiWkTjIPze/jbin+6RQghF57HMLdz8WvT1yavv59Ohlozbg7bmPe4UiIEK+lAY+j1JREji79TIdgJadH02tpR5YA68fZkCKJ8CayJiHHmDvi3nFmjmxS6brSP0=",
+      "iv": "5DTgc6iu+mw5qlIZ",
+      "salt": "+vIMznvIFTEfSzUNoJPvPYXK1uJ4NqQOLAifnl2en/A=",
+      "iterations": 900000
+    }
+  }
+}

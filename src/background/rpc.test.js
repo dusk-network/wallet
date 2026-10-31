@@ -59,7 +59,7 @@ const getPermissionForOrigin = vi.fn(async (origin) => {
     ...permission,
   };
 });
-const revokeOrigin = vi.fn(async (origin) => {
+const revokeOriginEverywhere = vi.fn(async (origin) => {
   delete perms[origin];
 });
 
@@ -130,7 +130,7 @@ vi.mock("../shared/permissions.js", async (importOriginal) => ({
   ...(await importOriginal()),
   approveOrigin,
   getPermissionForOrigin,
-  revokeOrigin,
+  revokeOriginEverywhere,
 }));
 vi.mock("../shared/settings.js", () => ({ getSettings, setSettings }));
 // A custom node's chain ID, as networkStatus.js reads it: Testnet's here, and nothing asked of the network.

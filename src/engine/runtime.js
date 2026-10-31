@@ -35,7 +35,13 @@ import {
   startShieldedSync,
   waitTxExecuted,
   waitTxRemoved,
-  unlockWithMnemonic,
+  unlockWallets,
+  switchWallet,
+  addWallet,
+  removeWallet,
+  getWallets,
+  getWalletKey,
+  walletAccountsOf,
   walletIdOf,
   preloadProtocolDriver,
   setEngineDebugHook,
@@ -198,24 +204,46 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
               accounts: isUnlocked() ? getAccounts() : [],
               addresses: isUnlocked() ? getAddresses() : [],
               selectedAccountIndex: isUnlocked() ? getSelectedAccountIndex() : 0,
+              walletKey: getWalletKey(),
+              wallets: getWallets(),
             },
           });
           return;
 
+        // Every wallet the vault opened: one unlocked, the others kept for a
+        // switch without the password.
         case "engine_unlock": {
-          const mnemonic = params?.mnemonic;
-          if (!mnemonic || typeof mnemonic !== "string") {
-            throw Object.assign(new Error("mnemonic is required"), {
+          if (!Array.isArray(params?.wallets) || !params.wallets.length) {
+            throw Object.assign(new Error("wallets are required"), {
               code: ERROR_CODES.INVALID_PARAMS,
             });
           }
-          await unlockWithMnemonic(mnemonic);
-          sendResponse({ id, result: { accounts: getAccounts() } });
+          await unlockWallets({ wallets: params.wallets, walletKey: params.walletKey });
+          sendResponse({ id, result: { accounts: getAccounts(), walletKey: getWalletKey(), wallets: getWallets() } });
 
           // Fire-and-forget: start shielded sync in the background.
           startShieldedSync().catch(() => {});
           return;
         }
+
+        case "engine_switchWallet": {
+          await switchWallet({ walletKey: params?.walletKey });
+          sendResponse({ id, result: { accounts: getAccounts(), walletKey: getWalletKey(), wallets: getWallets() } });
+          startShieldedSync().catch(() => {});
+          return;
+        }
+
+        case "engine_addWallet":
+          sendResponse({ id, result: addWallet(params ?? {}) });
+          return;
+
+        case "engine_removeWallet":
+          sendResponse({ id, result: removeWallet(params ?? {}) });
+          return;
+
+        case "engine_walletAccounts":
+          sendResponse({ id, result: await walletAccountsOf(params ?? {}) });
+          return;
 
         case "engine_lock":
           lock();

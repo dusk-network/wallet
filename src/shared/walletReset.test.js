@@ -126,4 +126,61 @@ describe("walletReset", () => {
     await expect(reset.finishPendingReset()).resolves.toEqual({ pending: false, keepContactsOf: null });
     expect(await txs.listTxs()).toHaveLength(1);
   });
+
+  it("forgets a removed wallet's data, and nothing of another's", async () => {
+    const { storage, STORAGE_KEYS } = await import("./storage.js");
+    const permissions = await import("./permissions.js");
+    const names = await import("./accountNames.js");
+    const assets = await import("./assetsStore.js");
+    const arrivals = await import("./bridgeArrival.js");
+    const notes = await import("./shieldedStore.js");
+    const { contactsNamespace } = await import("./contactsCrypto.js");
+    const wallets = { gone: ["gone0", "gone1"], kept: ["kept0", "kept1"] };
+    const epoch = await txs.getTxEpoch();
+    for (const [w, accounts] of Object.entries(wallets)) {
+      const id = accounts[0];
+      await permissions.approveOrigin("https://site.example", { profileId: `account:0:${id}`, accountIndex: 0 }, id);
+      await txs.putTxMeta(`${w}-tx`, { walletId: id, status: "executed", submittedAt: 1 });
+      await arrivals.keepArrivals({ [`${w}-deposit`]: { hash: `0x${"ab".repeat(32)}`, at: 1 } }, epoch, id);
+      await names.setAccountName(id, 0, `${w} label`);
+      await assets.watchToken(id, "https://testnet.nodes.dusk.network", 0, { contractId: `0x${"cd".repeat(32)}`, name: "T", symbol: "T", decimals: 0 });
+      await notes.putShieldedMeta("testnet", id, 1, { cursorBlock: "5" });
+      await activity.commitActivityStep(activity.activityOwnerKey("testnet", accounts[1]), [{ hash: `${w}`.padEnd(64, "0"), blockHeight: 1 }], () => ({ covered: [] }));
+      await activity.putShieldedHistoryRecord(`testnet::${id}::0`, { entries: [] });
+    }
+    const [gonePlace, keptPlace] = await Promise.all([contactsNamespace("gone0"), contactsNamespace("kept0")]);
+    await storage.set({ [STORAGE_KEYS.CONTACTS]: { [gonePlace]: { v: 1 }, [keptPlace]: { v: 1 } } });
+
+    await expect(reset.forgetWalletData({ walletId: "gone0", accounts: wallets.gone })).resolves.toBe(true);
+
+    await expect(permissions.getPermissions("gone0")).resolves.toEqual({});
+    await expect(permissions.getPermissions("kept0")).resolves.toHaveProperty(["https://site.example"]);
+    await expect(txs.listTxs({ walletId: "gone0" })).resolves.toEqual([]);
+    await expect(txs.listTxs({ walletId: "kept0" })).resolves.toHaveLength(1);
+    await arrivals.loadArrivals("kept0");
+    expect(arrivals.keptArrivals().has("kept-deposit")).toBe(true);
+    await arrivals.loadArrivals("gone0");
+    expect(arrivals.keptArrivals().size).toBe(0);
+    await expect(names.getAccountNames("gone0")).resolves.toEqual({});
+    await expect(names.getAccountNames("kept0")).resolves.toEqual({ 0: "kept label" });
+    await expect(assets.getWatchedAssets("gone0", "https://testnet.nodes.dusk.network", 0)).resolves.toEqual({ tokens: [], nfts: [] });
+    expect((await assets.getWatchedAssets("kept0", "https://testnet.nodes.dusk.network", 0)).tokens).toHaveLength(1);
+    expect((await storage.get(STORAGE_KEYS.CONTACTS))[STORAGE_KEYS.CONTACTS]).toEqual({ [keptPlace]: { v: 1 } });
+    await expect(notes.getShieldedMeta("testnet", "gone0", 1)).resolves.toBeNull();
+    await expect(notes.getShieldedMeta("testnet", "kept0", 1)).resolves.toMatchObject({ cursorBlock: "5" });
+    await expect(activity.listActivityEntries(activity.activityOwnerKey("testnet", "gone1"))).resolves.toEqual([]);
+    await expect(activity.listActivityEntries(activity.activityOwnerKey("testnet", "kept1"))).resolves.toHaveLength(1);
+    await expect(activity.getShieldedHistoryRecord("testnet::gone0::0")).resolves.toBeNull();
+    await expect(activity.getShieldedHistoryRecord("testnet::kept0::0")).resolves.toMatchObject({ entries: [] });
+    // Nothing of a reset: the stores' reset counts stay.
+    await expect(txs.getTxEpoch()).resolves.toBe(epoch);
+  });
+
+  it("forgets the wallets' names and the one unlocked last with a reset", async () => {
+    const wallets = await import("./wallets.js");
+    await wallets.noteActiveWallet("key-1", { walletId: "acct", accounts: ["acct", "acct1"] });
+    await wallets.setWalletName("key-1", "Savings");
+    await reset.finishReset();
+    await expect(wallets.getWalletDirectory()).resolves.toEqual({ active: "", wallets: {} });
+  });
 });

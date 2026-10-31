@@ -17,14 +17,14 @@ const scans = new Map();
 
 /**
  * Looks on DuskEVM for the deposits in `rows` on their way, which `account`
- * sent, and keeps those that arrived: each takes a payment of its own, in the
- * order they were sent.
+ * of the wallet `walletId` sent, and keeps those that arrived, with that
+ * wallet's: each takes a payment of its own, in the order they were sent.
  * @param {object[]} rows - Activity rows on the overview's network
- * @param {{ account: string, archiverUrl?: string, nodeUrl: string, now?: number }} opts
+ * @param {{ walletId: string, account: string, archiverUrl?: string, nodeUrl: string, now?: number }} opts
  * @returns {Promise<number>} how many arrived
  */
-export async function checkArrivals(rows, { account, archiverUrl, nodeUrl, now = Date.now() }) {
-  await loadArrivals();
+export async function checkArrivals(rows, { walletId, account, archiverUrl, nodeUrl, now = Date.now() }) {
+  await loadArrivals(walletId);
   const network = networkForNode(String(nodeUrl ?? ""));
   const waiting = (rows ?? []).filter((row) => awaitingArrival(row, nodeUrl, now));
   if (!network?.duskEvm || !waiting.length) return 0;
@@ -48,5 +48,5 @@ export async function checkArrivals(rows, { account, archiverUrl, nodeUrl, now =
   });
   for (const [hash, arrival] of arrivals) if (arrival.scan) scans.set(hash, arrival.scan);
   const found = Object.fromEntries(arrivalsOf(arrivals));
-  return Object.keys(found).length ? keepArrivals(found, epoch) : 0;
+  return Object.keys(found).length ? keepArrivals(found, epoch, walletId) : 0;
 }

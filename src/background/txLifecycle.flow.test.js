@@ -542,6 +542,44 @@ describe("background Phoenix tx lifecycle flow", () => {
     expect(mocks.requestUserApproval).not.toHaveBeenCalled();
   });
 
+  describe("a send from the popup", () => {
+    const params = { kind: "transfer", privacy: "public", to: "acct1", amount: "1" };
+
+    it("isn't sent from another wallet than the one it was reviewed on", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const response = await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct9", params });
+      expect(response).toMatchObject({ error: { message: "The wallet changed while you reviewed it." } });
+      expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+    });
+
+    it("goes from the wallet it was reviewed on, and a switch waits for it", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const { WALLET_LIFECYCLE_LOCK, withStorageLock } = await import("../shared/storageLock.js");
+      const { listTxs } = await import("../shared/txStore.js");
+      const sent = Promise.withResolvers();
+      const started = Promise.withResolvers();
+      engineCall.mockImplementation(async (method) => {
+        if (method !== "dusk_sendTransaction") return true;
+        started.resolve();
+        return sent.promise;
+      });
+
+      const response = sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params });
+      await started.promise;
+      let switched = false;
+      const switching = withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        switched = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(switched).toBe(false);
+      sent.resolve({ hash: "0xmine" });
+      await expect(response).resolves.toMatchObject({ ok: true });
+      await switching;
+      expect(switched).toBe(true);
+      await expect(listTxs({ walletId: "acct0" })).resolves.toEqual([expect.objectContaining({ hash: "0xmine" })]);
+    });
+  });
+
   describe("after a wallet reset", () => {
     // The reset's clear: every record goes, and the store counts it.
     async function reset() {
