@@ -189,6 +189,15 @@ describe("profile switcher", () => {
       expect(shownLines(groups()[1].querySelectorAll(".acct-menu-row")[0])[1]).toBe("w2acct…000000");
     });
 
+    it("labels each wallet's group with its name, for screen readers too", async () => {
+      menu.open(anchor, two);
+      expect(groups().map((g) => [g.getAttribute("role"), accessibleName(g)])).toEqual([
+        ["group", visibleText(groups()[0].querySelector(".acct-menu-wallet-title"))],
+        ["group", visibleText(groups()[1].querySelector(".acct-menu-wallet-title"))],
+      ]);
+      expect(accessibleName(groups()[0])).toMatch(/\S/);
+    });
+
     it("switches to another wallet's profile, and picks the open one's by its wallet too", async () => {
       menu.open(anchor, two);
       groups()[1].querySelectorAll(".net-menu-item")[1].click();

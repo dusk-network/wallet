@@ -12,7 +12,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added more than one recovery phrase, all unlocked with one password: Add wallet creates or imports another, and refuses one that's already here.
 - Grouped the profile switcher by wallet, as Wallet 1 and Wallet 2, and switched to another wallet's profile without the password.
 - Added Wallets to Settings, to rename a wallet or remove it with the password.
-- Added Change password to Settings.
+- Added Change password to Settings, for every wallet here.
+- Named the wallet of each site in Settings' Connected sites when there's more than one wallet.
 - Added a Bridge filter to Activity, which now holds bridge transfers instead of Sent and Received.
 - Said when a deposit to DuskEVM arrived, and added View in DuskEVM explorer to its details.
 - Said Arrived on a deposit to DuskEVM once it's there, and linked its transaction on DuskEVM's explorer.
@@ -63,6 +64,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Kept site connections, sends and DuskEVM arrivals per wallet: a site connected to one wallet sees nothing of another.
 - Said on Forgot your password? and Reset wallet that they remove every recovery phrase here.
+- Said Lock in Settings, and that auto-lock locks every wallet, when there's more than one wallet.
+- Called a profile's label its name in Settings.
 - Named a send's recipient in Activity by its verified `.dusk` name before the name typed when sending.
 - Showed a failed shield's details as a shield's, from the public balance to the shielded one.
 - Dropped Submitted and Shielded reservation from a send's Technical details once the chain's history has all of it.

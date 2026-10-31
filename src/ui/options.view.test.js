@@ -66,8 +66,8 @@ async function settings(over = {}, { app = false } = {}) {
   return { ov, state, actions, draw, section, shownButtons };
 }
 
-describe("profile labels", () => {
-  const label = (n) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === `Profile ${n} label`);
+describe("profile names", () => {
+  const label = (n) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === `Profile ${n} name`);
 
   it("keep a label being typed through a redraw, and save it when the field is left", async () => {
     setAccountName.mockClear();
@@ -85,7 +85,7 @@ describe("profile labels", () => {
     expect(view.ov.accountNames).toEqual({ 1: "Spending" });
     expect(view.actions.renderHeader).toHaveBeenCalledTimes(1);
     expect(view.actions.render).not.toHaveBeenCalled();
-    expect(view.actions.showToast).toHaveBeenCalledWith("Label saved.");
+    expect(view.actions.showToast).toHaveBeenCalledWith("Name saved.");
     view.draw();
     expect(label(2).value).toBe("Spending");
   });
@@ -139,22 +139,22 @@ describe("settings", () => {
     ]);
   });
 
-  it("names each profile by its verified name, as the header does, with labels for this device", async () => {
+  it("names each profile by its verified name, as the header does, with names for this device", async () => {
     const view = await settings();
     const profile = view.section("Profile");
     expect(profile.querySelectorAll("#account option").map((o) => o.textContent)).toEqual([
       "alice.dusk · 26FCH7…Tck927",
       "Profile 2 · 21n5nc…fMMLNz",
     ]);
-    expect(visibleText(profile.querySelector(".settings-subtitle"))).toBe("Labels on this device");
+    expect(visibleText(profile.querySelector(".settings-subtitle"))).toBe("Names on this device");
     expect(profile.querySelectorAll(".settings-profile-line").map(visibleText)).toEqual([
       "alice.dusk · 26FCH7…Tck927",
       "Profile 2 · 21n5nc…fMMLNz",
     ]);
     const inputs = profile.querySelectorAll("input");
     expect(inputs.map((i) => [i.getAttribute("aria-label"), i.getAttribute("placeholder")])).toEqual([
-      ["Profile 1 label", "Label, only on this device"],
-      ["Profile 2 label", "Label, only on this device"],
+      ["Profile 1 name", "Name, only on this device"],
+      ["Profile 2 name", "Name, only on this device"],
     ]);
   });
 
@@ -332,49 +332,127 @@ describe("about", () => {
 
 describe("wallets", () => {
   const W2 = ["w2acct0LongEnoughToShortenAtTheEnd000000", "w2acct1LongEnoughToShortenAtTheEnd111111"];
-  const wallets = [
-    { key: "k1", n: 1, name: "", accounts: ACCOUNTS, active: true },
-    { key: "k2", n: 2, name: "Savings", accounts: W2, active: false },
+  // Each test's own: a rename changes them.
+  const fresh = () => [
+    { key: "k1", n: 1, name: "", walletId: ACCOUNTS[0], accounts: ACCOUNTS, accountNames: {}, active: true },
+    { key: "k2", n: 2, name: "Savings", walletId: W2[0], accounts: W2, accountNames: { 1: "Rainy day" }, active: false },
   ];
-  const nameField = (n) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === `Wallet ${n} name`);
+  const nameField = (n) => dom.document.body.querySelectorAll("input").find((i) => i.id === `wallet-name-${n}`);
+  const button = (section, name) => section.querySelectorAll("button").find((b) => accessibleName(b) === name);
+  // Settings drawn again on render, as the popup does.
+  const drawn = async (over) => {
+    const view = await settings(over);
+    view.actions.render.mockImplementation(async () => view.draw());
+    return view;
+  };
 
-  it("lists each wallet with its name, Remove beside each, and Add wallet", async () => {
-    const view = await settings({ wallets });
+  it("lists each wallet by its name alone, Rename and Remove beside each, and Add wallet", async () => {
+    const view = await drawn({ wallets: fresh() });
     const section = view.section("Wallets");
-    expect(section.querySelectorAll(".settings-wallet__head .settings-profile-line").map(visibleText)).toEqual([
-      "Wallet 1 · 26FCH7…Tck927",
-      "Savings · w2acct…000000",
-    ]);
-    expect(view.shownButtons(section)).toEqual(["Remove", "Remove", expect.stringContaining("Add wallet")]);
-    expect([nameField(1).value, nameField(1).getAttribute("placeholder"), nameField(2).value]).toEqual(["", "Name, only on this device", "Savings"]);
+    expect(section.querySelectorAll(".settings-wallet__head .settings-profile-line").map(visibleText)).toEqual(["Wallet 1", "Savings"]);
+    expect(view.shownButtons(section)).toEqual(["Rename", "Remove", "Rename", "Remove", expect.stringContaining("Add wallet")]);
+    // One weight for both: neither is the louder.
+    expect(section.querySelectorAll(".settings-wallet__actions button").map((b) => b.className)).toEqual(Array(4).fill("mini-btn"));
+    expect(section.querySelectorAll("input")).toEqual([]);
 
-    section.querySelectorAll("button").find((b) => accessibleName(b) === "Remove Savings").click();
+    button(section, "Remove Savings").click();
     await settle();
     expect([view.state.route, view.state.walletRemove]).toEqual(["wallet_remove", "k2"]);
 
-    section.querySelectorAll("button").find((b) => b.textContent.includes("Add wallet")).click();
+    view.state.route = "options";
+    view.draw();
+    view.section("Wallets").querySelectorAll("button").find((b) => b.textContent.includes("Add wallet")).click();
     await settle();
     expect([view.state.route, view.state.onboard.adding]).toEqual(["wallet_add", true]);
   });
 
-  it("renames a wallet when its field is left, and keeps what's typed through a redraw", async () => {
-    const view = await settings({ wallets });
-    typeInto(nameField(1), "Everyday");
+  it("renames a wallet in the field Rename opens: Save or Enter keeps the name, Cancel or Escape leaves it", async () => {
+    const view = await drawn({ wallets: fresh() });
+    button(view.section("Wallets"), "Rename Wallet 1").click();
+    await settle();
+    // The field with its label, its hint, and the wallet's number for no name.
+    const field = nameField(1);
+    expect([accessibleName(field), field.value, field.getAttribute("placeholder")]).toEqual(["Wallet 1 name", "", "Wallet 1"]);
+    const row = field.closest(".settings-wallet");
+    expect(visibleText(row.querySelector("label"))).toBe("Name");
+    expect(dom.document.getElementById(field.getAttribute("aria-describedby")).textContent).toBe("Only on this device.");
+    expect(view.shownButtons(row)).toEqual(["Save", "Cancel"]);
+
+    // What's typed stays through a redraw; Enter saves it.
+    typeInto(field, "Everyday");
     view.draw();
     expect(nameField(1).value).toBe("Everyday");
-    nameField(1).dispatchEvent(fakeEvent("change"));
+    nameField(1).dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
     await settle();
     expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_RENAME_WALLET", walletKey: "k1", name: "Everyday" });
     expect(view.ov.wallets[0].name).toBe("Everyday");
-    expect(view.actions.renderHeader).toHaveBeenCalled();
+    expect(view.actions.showToast).toHaveBeenCalledWith("Name saved.");
+    expect(view.section("Wallets").querySelectorAll(".settings-profile-line").map(visibleText)).toEqual(["Everyday", "Savings"]);
+
+    // Escape and Cancel leave the name as it was.
+    view.actions.send.mockClear();
+    const cancel = () => view.section("Wallets").querySelectorAll("button").find((b) => b.textContent === "Cancel").click();
+    for (const leave of [(f) => f.dispatchEvent(fakeEvent("keydown", { key: "Escape" })), cancel]) {
+      button(view.section("Wallets"), "Rename Savings").click();
+      await settle();
+      expect(nameField(2).value).toBe("Savings");
+      typeInto(nameField(2), "Spent");
+      leave(nameField(2));
+      await settle();
+      expect(nameField(2)).toBeUndefined();
+    }
+    expect(view.actions.send).not.toHaveBeenCalled();
+    expect(view.section("Wallets").querySelectorAll(".settings-profile-line").map(visibleText)).toEqual(["Everyday", "Savings"]);
+
+    // Save, pressed.
+    button(view.section("Wallets"), "Rename Savings").click();
+    await settle();
+    typeInto(nameField(2), "Rainy day fund");
+    button(view.section("Wallets"), "Save Savings's name").click();
+    await settle();
+    expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_RENAME_WALLET", walletKey: "k2", name: "Rainy day fund" });
   });
 
-  it("offers no Remove for the only wallet, and Change password under Security", async () => {
-    const view = await settings({ wallets: wallets.slice(0, 1) });
-    expect(view.shownButtons(view.section("Wallets"))).toEqual([expect.stringContaining("Add wallet")]);
-    view.section("Security").querySelectorAll("button").find((b) => b.textContent === "Change password").click();
+  it("says Lock wallet for one wallet and Lock for more, and that a new password is every wallet's", async () => {
+    const one = await drawn({ wallets: fresh().slice(0, 1) });
+    expect(one.shownButtons(one.section("Wallets"))).toEqual(["Rename", expect.stringContaining("Add wallet")]);
+    const security = one.section("Security");
+    expect(security.querySelectorAll("p.settings-note").map(visibleText)).toEqual([
+      "Locks the wallet after this long without use.",
+      "Changes the password for every wallet here.",
+    ]);
+    expect(dom.document.body.querySelectorAll("button").map((b) => b.textContent)).toContain("Lock wallet");
+    security.querySelectorAll("button").find((b) => b.textContent === "Change password").click();
     await settle();
-    expect(view.state.route).toBe("change_password");
+    expect(one.state.route).toBe("change_password");
+
+    const two = await drawn({ wallets: fresh() });
+    expect(two.section("Security").querySelector("p.settings-note").textContent).toBe("Locks every wallet after this long without use.");
+    const buttons = dom.document.body.querySelectorAll("button").map((b) => b.textContent);
+    expect([buttons.includes("Lock"), buttons.includes("Lock wallet")]).toEqual([true, false]);
+  });
+
+  it("names each connected site's wallet, and disconnects a site from its own wallet", async () => {
+    const permissions = [
+      { origin: "https://app.example", walletId: ACCOUNTS[0], accountIndex: 0 },
+      { origin: "https://shop.example", walletId: W2[0], accountIndex: 1 },
+    ];
+    const view = await drawn({ wallets: fresh(), permissions });
+    const sites = view.section("Connected sites");
+    expect(sites.querySelectorAll(".settings-site__wallet").map(visibleText)).toEqual(["Wallet 1", "Savings · Rainy day"]);
+    // The open wallet's site changes profile here; another's doesn't.
+    expect(sites.querySelectorAll("select").map((sel) => sel.getAttribute("aria-label"))).toEqual(["Profile for app.example"]);
+
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    button(sites, "Disconnect shop.example from Savings").click();
+    await settle();
+    expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin: "https://shop.example", siteWallet: W2[0] });
+    button(sites, "Disconnect app.example from Wallet 1").click();
+    await settle();
+    expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin: "https://app.example" });
+    sites.querySelectorAll("button").find((b) => b.textContent === "Disconnect all sites").click();
+    await settle();
+    expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_CLEAR_PERMISSIONS", siteWallets: [ACCOUNTS[0], W2[0]] });
   });
 });
 

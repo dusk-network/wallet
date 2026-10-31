@@ -87,7 +87,7 @@ function newPasswordFields({ onDone, label = "Password" }) {
 // its error under it.
 function currentPasswordField({ onDone }) {
   const pwd = passwordInput({
-    placeholder: "The password you unlock with",
+    placeholder: "Your current password",
     autocomplete: "current-password",
     onEnter: () => onDone?.(),
   });

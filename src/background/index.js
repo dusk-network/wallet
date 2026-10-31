@@ -958,10 +958,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
 
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-          // From the wallet the page showed, or from none.
+          // From the wallet the page showed, or from none; from the wallet the
+          // site is connected to (`siteWallet`), another or the one open.
           assertScreenWallet(message, await getEngineStatus());
           cancelPendingApprovals(origin, "Site disconnected");
-          await revokeOrigin(origin, await siteWalletId());
+          await revokeOrigin(origin, String(message.siteWallet ?? "") || (await siteWalletId()));
         });
         sendResponse({ ok: true });
         return;
@@ -972,7 +973,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           assertScreenWallet(message, await getEngineStatus());
           cancelPendingApprovals(null, "Sites disconnected");
-          await clearPermissions(await siteWalletId());
+          // The sites listed: each wallet's (`siteWallets`), or the open one's.
+          const listed = Array.isArray(message.siteWallets) ? message.siteWallets.map(String).filter(Boolean) : [];
+          for (const owner of listed.length ? listed : [await siteWalletId()]) await clearPermissions(owner);
         });
         sendResponse({ ok: true });
         return;
@@ -1209,17 +1212,26 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         let shieldedSync = null;
         let shieldedError = null;
 
-        // Connected sites (for settings UI)
+        // The wallets the switcher shows: every one the engine holds.
+        const wallets = await walletsShown(status).catch(() => []);
+
+        // Connected sites (for settings UI): the wallet's, or with more than
+        // one wallet, each wallet's, by wallet.
         let permissions = null;
         try {
-          const perms = await getPermissions(walletId);
-          permissions = Object.entries(perms ?? {})
-            .map(([o, p]) => ({
-              origin: o,
-              accountIndex: Number(p?.accountIndex ?? 0) || 0,
-              connectedAt: Number(p?.connectedAt ?? 0) || 0,
-            }))
-            .sort((a, b) => a.origin.localeCompare(b.origin));
+          const owners = wallets.length > 1 ? wallets.map((w) => w.walletId).filter(Boolean) : [walletId];
+          permissions = [];
+          for (const owner of owners) {
+            const sites = Object.entries((await getPermissions(owner)) ?? {})
+              .map(([o, p]) => ({
+                origin: o,
+                walletId: owner,
+                accountIndex: Number(p?.accountIndex ?? 0) || 0,
+                connectedAt: Number(p?.connectedAt ?? 0) || 0,
+              }))
+              .sort((a, b) => a.origin.localeCompare(b.origin));
+            permissions.push(...sites);
+          }
         } catch {
           permissions = null;
         }
@@ -1358,7 +1370,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           txs,
           accountNames,
           // Each wallet the switcher shows, and the one unlocked.
-          wallets: await walletsShown(status).catch(() => []),
+          wallets,
           walletKey: status.isUnlocked ? status.walletKey ?? "" : "",
         });
         return;

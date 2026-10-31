@@ -224,7 +224,7 @@ describe("adding a wallet beside the ones here", () => {
     const body = show(onboardingCreateConfirmView({ state, actions: acts, adding: true }));
     expect(field(body, "Confirm password")).toBeUndefined();
     const pwd = field(body, "Password");
-    expect(pwd.getAttribute("placeholder")).toBe("The password you unlock with");
+    expect(pwd.getAttribute("placeholder")).toBe("Your current password");
 
     typeInto(field(body, "Word 1"), MNEMONIC);
     button(body, "Add wallet").click();

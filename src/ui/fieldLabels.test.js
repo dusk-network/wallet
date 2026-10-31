@@ -136,8 +136,8 @@ describe("field labels", () => {
     const body = await show(optionsView(ov, { state: { route: "options" }, actions: actions() }));
     expect(fieldNames(body)).toEqual([
       "Active profile",
-      "Profile 1 label",
-      "Profile 2 label",
+      "Profile 1 name",
+      "Profile 2 name",
       "Auto-lock",
       "Network",
       "Node URL",

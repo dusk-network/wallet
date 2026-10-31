@@ -4720,6 +4720,32 @@ p.settings-legal button.text-btn {
   white-space: nowrap;
 }
 
+/* Rename and Remove: one weight, a little apart */
+.settings-wallet__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* A wallet's name being changed: the field, then Save and Cancel */
+.settings-wallet__edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-wallet__edit input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The wallet a connected site is connected to */
+.settings-site__wallet {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 .settings-labels + .group {
   margin-top: 12px;
 }

@@ -4,6 +4,7 @@
 
 import { walletLabel } from "../../../shared/wallets.js";
 import { h } from "../../lib/dom.js";
+import { shortAddress } from "../../lib/strings.js";
 import { fieldError, fieldLabel, passwordInput } from "../../components/FormControls.js";
 import { subnav } from "../../components/Subnav.js";
 import { switchContext } from "../context.js";
@@ -11,7 +12,7 @@ import { switchContext } from "../context.js";
 // A wrong password, or one that has to wait, is said under the password.
 const passwordRefusal = (message) => /^Incorrect password$|^Too many attempts/.test(String(message ?? ""));
 
-function passwordField({ label = "Password", placeholder = "The password you unlock with", autocomplete = "current-password", onEnter }) {
+function passwordField({ label = "Password", placeholder = "Your current password", autocomplete = "current-password", onEnter }) {
   const input = passwordInput({ placeholder, autocomplete, onEnter });
   const error = fieldError(input);
   input.addEventListener("input", () => error.show(""));
@@ -48,6 +49,7 @@ export function removeWalletView(ov, { state, actions } = {}) {
     return [];
   }
   const name = walletLabel(wallet);
+  const account = String(wallet.accounts?.[0] ?? wallet.walletId ?? "");
   const pwd = passwordField({ onEnter: () => btn.click() });
   const err = formError();
 
@@ -94,6 +96,8 @@ export function removeWalletView(ov, { state, actions } = {}) {
   return Object.assign([
     subnav({ title: "Remove wallet", onBack: () => backToSettings(state, actions) }),
     h("div", { class: "row onboard-form" }, [
+      // Which wallet, by its first profile's account too: names can be alike.
+      account ? h("p", { class: "settings-profile-line", text: `${name} · ${shortAddress(account)}` }) : null,
       h("p", {
         class: "auth-lead",
         text: `This removes ${name} from this device: its recovery phrase, contacts, activity and connected sites. Your other wallets stay as they are.`,
