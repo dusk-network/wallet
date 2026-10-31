@@ -173,6 +173,7 @@ export async function localSend(message) {
       ensureEngineConfigured,
       getEngineStatus: async () => engineStatus(),
       lock: async () => lock(),
+      walletsChanged: () => tellPage({ type: "DUSK_UI_WALLETS_CHANGED" }),
     });
     if (wallets) return wallets;
     // Wallet lifecycle operations share one lock so persisted and in-memory
@@ -241,6 +242,8 @@ export async function localSend(message) {
         if (pending) await endReset();
         await ensureEngineConfigured();
         await unlockWallets({ wallets: [{ ...wallet, mnemonic: String(mnemonic) }], walletKey: wallet.id });
+        // A phrase made here has no history: its shielded sync starts now.
+        if (message.fresh === true) await setShieldedCheckpointNow({ profileIndex: 0 }).catch(() => {});
         await keepWalletShown(unlockedNow());
         return { ok: true, accounts: getAccounts() };
       });

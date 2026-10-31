@@ -130,3 +130,18 @@ describe("a screen's own actions, after another wallet opened", () => {
     expect(t.dom.document.body.querySelector(".acct-menu")).toBeNull();
   });
 });
+
+describe("a wallet removed in another window", () => {
+  it("leaves its Remove form for Settings, and the list is read again", async () => {
+    const t = await popupOn("wallet_remove", { walletRemove: "wb" });
+    expect(t.app.querySelector(".subnav")?.textContent ?? t.app.textContent).toContain("Remove wallet");
+    const reads = t.asked("DUSK_UI_OVERVIEW").length;
+    // Wallet B goes in another window: A stays open, so no switch is said.
+    t.open = { ...wallet(A, "wa"), wallets: [wallet(A, "wa").wallets[0]] };
+    t.deliver({ type: "DUSK_UI_WALLETS_CHANGED" });
+    await flush();
+    expect(t.asked("DUSK_UI_OVERVIEW").length).toBeGreaterThan(reads);
+    expect([t.state.route, t.state.walletRemove]).toEqual(["options", null]);
+    expect(t.app.querySelectorAll("button").map((b) => b.textContent)).not.toContain("Remove wallet");
+  });
+});

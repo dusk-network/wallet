@@ -3,7 +3,7 @@ import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { serializeStakeInfo } from "../shared/transport.js";
 import { nativeRewardRate } from "../shared/rewardRate.js";
-import { clearContacts, contactsStore } from "../shared/contactsStore.js";
+import { contactsStore, forgetWalletContacts } from "../shared/contactsStore.js";
 import {
   getWatchedAssets,
   watchToken,
@@ -134,11 +134,18 @@ export async function handleUiCommand(
   }
 
   // Contacts: read and changed only while the wallet is unlocked, as the
-  // engine holds their key; deleting them all needs none.
+  // engine holds their key. Deleting them all is one wallet's: the one its
+  // page showed (every wallet's go only with Reset).
   if (type === "DUSK_UI_CONTACTS") {
     if (message.op === "clear") {
-      await clearContacts();
-      return { ok: true, result: true };
+      return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        const status = await getEngineStatus();
+        const walletId = String(message.walletId ?? "");
+        if (!walletId || !status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        assertScreenWallet(message, status);
+        await forgetWalletContacts(walletId);
+        return { ok: true, result: true };
+      });
     }
     const op = Object.hasOwn(CONTACT_OPS, message.op) ? CONTACT_OPS[message.op] : null;
     if (!op) throw rpcError(ERROR_CODES.INVALID_PARAMS, "Unknown contacts operation");
@@ -153,7 +160,7 @@ export async function handleUiCommand(
 
   const engineCommand = ENGINE_COMMANDS[type];
   const assetCommand = ASSET_COMMANDS[type];
-  if (!engineCommand && !assetCommand && type !== "DUSK_UI_SET_ACCOUNT_INDEX" && type !== "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW") {
+  if (!engineCommand && !assetCommand && type !== "DUSK_UI_SET_ACCOUNT_INDEX") {
     return null;
   }
 
@@ -182,11 +189,6 @@ async function runCommand(message, { engineCall, ensureEngineConfigured, getEngi
     await setSettings({ selectedAccountIndex: clamped });
     await ensureEngineConfigured();
     return { ok: true, result: await engineCall("engine_selectAccount", { index: clamped }) };
-  }
-
-  if (type === "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW") {
-    await ensureEngineConfigured();
-    return { ok: true, result: await engineCall("dusk_setShieldedCheckpointNow", { profileIndex: 0 }) };
   }
 
   const index = profileIndex(message, status);

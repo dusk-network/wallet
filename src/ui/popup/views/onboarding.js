@@ -393,21 +393,16 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
         if (!password) throw new Error("Go back and set your password again.");
 
         setBusy(true, "Encrypting your wallet. Keep this window open.");
+        // A phrase made here (`fresh`): the wallet sets its shielded
+        // checkpoint to now as it makes it, so it syncs no notes from genesis.
         const res = await actions?.send?.({
           type: adding ? "DUSK_UI_ADD_WALLET" : "DUSK_UI_CREATE_WALLET",
           mnemonic: expected,
           password,
+          fresh: true,
         });
         if (adding) current.pwd.value = "";
         if (res?.error) throw new Error(res.error.message ?? "Failed to create wallet");
-
-        // Fresh wallet: set a shielded checkpoint to "now" so we don't have to
-        // sync shielded notes from genesis. This is best-effort.
-        try {
-          await actions?.send?.({ type: "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW" });
-        } catch {
-          // ignore
-        }
 
         if (adding) {
           await addedWallet(state, actions);

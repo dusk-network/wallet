@@ -128,6 +128,7 @@ vi.mock("../shared/walletReset.js", () => ({
   endReset: mocks.endReset,
   finishReset: mocks.finishReset,
   finishPendingReset: mocks.finishPendingReset,
+  forgetWalletData: vi.fn(async () => true),
 }));
 
 vi.mock("../shared/permissions.js", () => ({
@@ -545,6 +546,28 @@ describe("background auto-lock activity", () => {
     mocks.engineUnlocked = false;
     await expect(sendBackgroundMessage({ type: "DUSK_UI_SWITCH_WALLET", walletKey: "w2" })).resolves.toMatchObject({ error: { message: "Wallet locked" } });
     expect(mocks.engineCall.mock.calls.map(([method]) => method)).not.toContain("engine_switchWallet");
+  });
+
+  it("tells every page when a wallet goes or is renamed, the open one or another", async () => {
+    const wallets = [{ key: "w1", n: 1 }, { key: "w2", n: 2 }];
+    mocks.getEngineStatus.mockImplementation(async () => ({
+      isUnlocked: mocks.engineUnlocked,
+      accounts: ["acct0"],
+      addresses: ["addr0"],
+      selectedAccountIndex: 0,
+      walletKey: "w1",
+      wallets,
+    }));
+    mocks.engineCall.mockImplementation(async (method) => (method === "engine_walletAccounts" ? ["other0"] : true));
+
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_REMOVE_WALLET", walletKey: "w2", password: "pw" })).resolves.toEqual({ ok: true });
+    expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_WALLETS_CHANGED" });
+    // Another wallet's: the open one stays, so no switch is said.
+    expect(mocks.sentMessages).not.toContainEqual({ type: "DUSK_UI_WALLET_CHANGED" });
+
+    mocks.sentMessages.length = 0;
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_RENAME_WALLET", walletKey: "w1", name: "Savings" })).resolves.toMatchObject({ ok: true });
+    expect(mocks.sentMessages).toEqual([{ type: "DUSK_UI_WALLETS_CHANGED" }]);
   });
 
   it("locks the engine before returning an unlock timeout", async () => {

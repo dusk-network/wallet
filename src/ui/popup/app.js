@@ -614,6 +614,15 @@ function installTxStatusListener() {
           return;
         }
 
+        // A wallet removed or renamed, here or in another window: the list
+        // is read again, and a menu showing the old one goes.
+        if (msg?.type === "DUSK_UI_WALLETS_CHANGED") {
+          acctMenu.close();
+          state.needsRefresh = true;
+          render({ forceRefresh: true }).catch(() => {});
+          return;
+        }
+
         // The node's chain ID, read after the popup drew: its network's names,
         // explorer and bridge, from a fresh overview.
         if (msg?.type === "DUSK_UI_NETWORK_CHANGED") {
@@ -1048,8 +1057,11 @@ export async function render({ forceRefresh = false } = {}) {
     return;
   }
   if (state.route === "wallet_remove") {
-    // A wallet that went meanwhile, or the only one: Settings.
-    const view = keepForm(() => removeWalletView(ov, { state, actions }));
+    // A wallet that went meanwhile, here or in another window, or the only one: Settings.
+    const wallets = Array.isArray(ov.wallets) ? ov.wallets : [];
+    const there = wallets.length > 1 && wallets.some((w) => w.key === state.walletRemove);
+    const view = there ? keepForm(() => removeWalletView(ov, { state, actions })) : [];
+    if (!view.length) Object.assign(state, { route: "options", walletRemove: null });
     setApp(view.length ? view : optionsView(ov, { state, actions }));
     return;
   }

@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import vaults from "../shared/fixtures/vault-v1.json";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, checkpoints: [] }));
 
 // The engine's contacts key for the unlocked wallet, made as walletEngine.js
 // makes it: from its seed (here, a hash of its phrase), at its own place.
@@ -36,6 +36,11 @@ vi.mock("../shared/walletEngine.js", () => ({
     ].map((name) => [name, vi.fn()])
   ),
   configure: vi.fn(),
+  // A shielded checkpoint, on the wallet open as it's set.
+  setShieldedCheckpointNow: vi.fn(async () => {
+    engine.checkpoints.push(engine.wallet);
+    return { bookmark: "1", block: "1" };
+  }),
   isUnlocked: () => engine.unlocked,
   lock: () => {
     engine.unlocked = false;
@@ -126,6 +131,7 @@ beforeEach(() => {
   engine.key = "";
   engine.held = [];
   engine.addFails = false;
+  engine.checkpoints = [];
 });
 
 afterEach(() => {
@@ -592,6 +598,32 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     await ok({ type: "DUSK_UI_UNLOCK", password: twelve.password });
     expect(engine.held.map((w) => w.id)).toEqual([second.key]);
     await expect(txs.listTxs({ walletId: second.walletId })).resolves.toEqual([]);
+  });
+
+  it("sets a new phrase's shielded checkpoint as it adds that wallet, and never on another opened meanwhile", async () => {
+    await twoWallets();
+    // "wallet B" was imported: no checkpoint for it.
+    expect(engine.checkpoints).toEqual([]);
+    await ok({ type: "DUSK_UI_ADD_WALLET", mnemonic: "wallet C", password: twelve.password, fresh: true });
+    expect(engine.checkpoints).toEqual(["wallet C"]);
+
+    // Another window opens the first wallet; a checkpoint asked on its own after the add sets nothing.
+    await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: (await overview()).wallets[0].key, index: 0 });
+    await send({ type: "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW" });
+    expect(engine.checkpoints).toEqual(["wallet C"]);
+  });
+
+  it("deletes all contacts of the wallet its page showed, and leaves another wallet's", async () => {
+    const [first, second] = await twoWallets();
+    const contacts = (walletId, op, more = {}) => ok({ type: "DUSK_UI_CONTACTS", op, walletId, ...more });
+    await contacts(second.walletId, "upsert", { entry: { name: "Bea", address: ACCOUNT } });
+    await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: first.key, index: 0 });
+    await contacts(first.walletId, "upsert", { entry: { name: "Ann", address: ACCOUNT } });
+
+    await contacts(first.walletId, "clear");
+    expect((await contacts(first.walletId, "list")).result).toEqual([]);
+    await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: second.key, index: 0 });
+    expect((await contacts(second.walletId, "list")).result).toEqual([expect.objectContaining({ name: "Bea" })]);
   });
 
   it("renames a wallet, and gives it its number back", async () => {

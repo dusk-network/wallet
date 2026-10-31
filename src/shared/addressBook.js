@@ -1,7 +1,7 @@
 // The wallet's contacts, as its pages ask for them. The background keeps
 // them, encrypted with a key that only the unlocked wallet has
-// (contactsStore.js), so every call but clearAddressBook fails with "Wallet
-// locked" while it is locked.
+// (contactsStore.js), so every call fails with "Wallet locked" while it is
+// locked.
 
 import { send } from "../wallet/bus.js";
 
@@ -65,7 +65,11 @@ export async function removeAddressBookEntry(id, { walletId } = {}) {
   await contacts("remove", { id, ...forWallet(walletId) });
 }
 
-/** Delete every contact, locked or not. */
-export async function clearAddressBook() {
-  await contacts("clear");
+/**
+ * Delete every contact of one wallet, the one the page showed: the others'
+ * stay. It needs that wallet unlocked.
+ * @param {{ walletId: string }} opts
+ */
+export async function clearAddressBook({ walletId } = {}) {
+  await contacts("clear", forWallet(walletId));
 }

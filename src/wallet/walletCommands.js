@@ -83,6 +83,7 @@ export async function walletsShown(status) {
  *   lock: () => Promise<void>,
  *   beforeSwitch?: () => void,
  *   afterSwitch?: (change: { oldPerms: object, oldStatus: object }) => Promise<void>,
+ *   walletsChanged?: () => void,
  * }} host - the engine, its lock, and what the host does around a switch:
  *   the background cancels sites' pending approvals before, and tells sites
  *   and pages after
@@ -112,14 +113,20 @@ export function handleWalletCommand(message, host) {
       // Under the password the wallets here were unlocked with.
       const wallet = await addVaultWallet(mnemonic, password, { held: keys });
       // The vault holds it: the engine keeps it too, then switches to it, at its first profile.
+      let switched;
       try {
         await host.engineCall("engine_addWallet", { walletKey: wallet.id, n: wallet.n, mnemonic });
-        const switched = await switchTo(wallet.id, 0, host, await host.getEngineStatus());
-        return { ok: true, result: { ...switched, n: wallet.n } };
+        switched = await switchTo(wallet.id, 0, host, await host.getEngineStatus());
       } catch {
         // Kept all the same: the next unlock opens it with the others.
         throw rpcError(ERROR_CODES.INTERNAL, "The wallet was added. Lock and unlock to open it.");
       }
+      // A phrase made here has no history: its shielded sync starts now. In
+      // this same step, for this wallet alone, the one open as it's set.
+      if (message.fresh === true && (await host.getEngineStatus())?.walletKey === wallet.id) {
+        await host.engineCall("dusk_setShieldedCheckpointNow", { profileIndex: 0 }).catch(() => {});
+      }
+      return { ok: true, result: { ...switched, n: wallet.n } };
     }
 
     if (type === "DUSK_UI_REMOVE_WALLET") {
@@ -153,6 +160,8 @@ export function handleWalletCommand(message, host) {
       await forgetWallet(walletKey).catch(() => {});
       // Its data goes with it; another wallet's stays.
       if (walletId) await forgetWalletData({ walletId, accounts }).catch(() => false);
+      // Every page lists the wallets as they are now, the open one or not.
+      host.walletsChanged?.();
       return { ok: true };
     }
 
@@ -160,6 +169,7 @@ export function handleWalletCommand(message, host) {
       const walletKey = String(message.walletKey ?? "");
       if (!held(walletKey)) throw rpcError(ERROR_CODES.INVALID_PARAMS, "That wallet isn't here.");
       await setWalletName(walletKey, message.name);
+      host.walletsChanged?.();
       return { ok: true, result: { name: normalizeWalletName(message.name) } };
     }
 

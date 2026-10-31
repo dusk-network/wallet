@@ -235,7 +235,8 @@ describe("adding a wallet beside the ones here", () => {
     typeInto(pwd, "password123");
     button(body, "Add wallet").click();
     await settle();
-    expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_ADD_WALLET", mnemonic: MNEMONIC, password: "password123" });
+    // A phrase made here: the wallet sets its shielded checkpoint as it adds it.
+    expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_ADD_WALLET", mnemonic: MNEMONIC, password: "password123", fresh: true });
     expect([errorOf(pwd), pwd.value]).toEqual(["Incorrect password", ""]);
 
     reply = { ok: true };
@@ -245,6 +246,7 @@ describe("adding a wallet beside the ones here", () => {
     expect([state.route, state.onboard.mnemonic]).toEqual(["home", null]);
     expect(acts.showToast).toHaveBeenCalledWith("Wallet added.");
     expect(JSON.stringify(state)).not.toContain("password123");
+    expect(acts.send.mock.calls.map(([m]) => m.type)).toEqual(["DUSK_UI_ADD_WALLET", "DUSK_UI_ADD_WALLET"]);
   });
 
   it("imports a phrase with the password, and refuses one that's here with one sentence under it", async () => {

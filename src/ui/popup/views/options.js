@@ -514,7 +514,8 @@ export function optionsView(ov, { state, actions } = {}) {
     onclick: async () => {
       if (!confirm("Delete all saved contacts from this wallet? This can't be undone.")) return;
       try {
-        await clearAddressBook();
+        // This wallet's alone, as drawn: another wallet's contacts stay.
+        await clearAddressBook({ walletId });
         if (state.addressBook) Object.assign(state.addressBook, { loaded: false, items: null, query: "" });
         actions?.showToast?.("Deleted all contacts");
       } catch (e) {

@@ -267,6 +267,11 @@ async function emitUiWalletChanged() {
   }
 }
 
+// A wallet removed or renamed, the open one or not: pages list them again.
+function emitUiWalletsChanged() {
+  runtimeSendMessage({ type: "DUSK_UI_WALLETS_CHANGED" }).catch(() => {});
+}
+
 // The store's reset count an engine event carries: its send's (see engine/runtime.js).
 const eventEpoch = (message) => (Number.isInteger(message?.epoch) ? message.epoch : undefined);
 
@@ -570,6 +575,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           broadcastWalletChanged(oldPerms, oldStatus).catch(() => {});
           emitUiWalletChanged().catch(() => {});
         },
+        walletsChanged: emitUiWalletsChanged,
       });
       if (walletAnswer) {
         sendResponse(walletAnswer);
@@ -1001,6 +1007,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           if (pending) await endReset();
           await ensureEngineConfigured();
           const result = await unlockEngine([{ ...wallet, mnemonic: String(mnemonic) }], wallet.id);
+          // A phrase made here has no history: its shielded sync starts now.
+          if (message.fresh === true) await engineCall("dusk_setShieldedCheckpointNow", { profileIndex: 0 }).catch(() => {});
           await keepWalletShown(result);
           await updateActivity();
           setupAutoLockAlarm().catch(console.error);
