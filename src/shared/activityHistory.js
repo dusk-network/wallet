@@ -66,9 +66,13 @@ export function activityHistory({ nodeUrl, archiverUrl, account, epoch }) {
     store: {
       getState: () => store.getActivityMeta(ownerKey),
       commit: async (entries, update) => store.commitActivityStep(ownerKey, entries, update, await epoch),
-      patch: async (details) => store.patchActivityEntries(ownerKey, new Map([...details].map(([hash, found]) => [hash, toRow(found)])), await epoch),
+      // Details are kept, and another chain's history forgotten, only while
+      // `check` says in the write's own transaction that the history is still
+      // the one this run read: another page may have started it over since.
+      patch: async (details, check) =>
+        store.patchActivityEntries(ownerKey, new Map([...details].map(([hash, found]) => [hash, toRow(found)])), await epoch, check),
       list: async (options) => (await store.listActivityEntries(ownerKey, options)).map(toEntry),
-      clear: async () => store.clearActivity(ownerKey, await epoch),
+      clear: async (check) => store.clearActivity(ownerKey, await epoch, check),
     },
     // A .dusk name's reservation and registration, read once from their calls.
     callFacts: {

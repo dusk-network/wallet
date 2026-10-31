@@ -14,6 +14,8 @@ import { PINNED_RELEASES } from "@duskdomains/sdk/releases";
 import { createMulticallFetch } from "@hdauven/dusk-multicall";
 
 import { assetUrl } from "../platform/assets.js";
+import { storageSessionGet, storageSessionRemove, storageSessionSet } from "../platform/extensionApi.js";
+import { bytesToHex, hexToBytes } from "./bytes.js";
 import { classifyDuskIdentifier } from "./duskIdentifiers.js";
 import { networkForNode } from "./nodeNetwork.js";
 import { duskNamesNetwork, rememberVerifiedName } from "./verifiedNames.js";
@@ -55,6 +57,126 @@ function bundledFetch(release, nodeUrl) {
   };
 }
 
+// The lens's binding and interface, asked once a session. A reader checks
+// them before it answers its first lookup; once a lookup through it answered,
+// the replies it checked are kept in the browser's session storage (in this
+// page's memory where there is none, as in the engine), and every reader
+// built since, in another popup or the background, checks those. A reply no
+// lookup took, or one over the SDK's 32,768-byte limit, isn't kept; a lookup
+// that finds the deployment wrong, or a reply that doesn't decode, forgets
+// them, and the next reader asks the node again.
+const ONCE_A_SESSION = new Set(["binding", "lens_interface"]);
+const REPLY_MAX = 32_768;
+const sessionReplies = new Map();
+const replyKey = (release, method) => `dusk_names_lens_v1:${release.lens.contractId}:${method}`;
+
+async function keptReply(key) {
+  if (sessionReplies.has(key)) return sessionReplies.get(key);
+  try {
+    const hex = (await storageSessionGet(key))?.[key];
+    if (typeof hex === "string") {
+      sessionReplies.set(key, hex);
+      return hex;
+    }
+  } catch {
+    // No session storage here: this page's memory alone.
+  }
+  return null;
+}
+
+async function keepReply(key, hex) {
+  sessionReplies.set(key, hex);
+  await storageSessionSet({ [key]: hex }).catch(() => {});
+}
+
+async function forgetReplies(release) {
+  const keys = [...ONCE_A_SESSION].map((method) => replyKey(release, method));
+  for (const key of keys) sessionReplies.delete(key);
+  await storageSessionRemove(keys).catch(() => {});
+}
+
+// A copy of a reply's body, read as a stream no further than `max` bytes:
+// null past it, and the copy given up. The reply itself is left whole for
+// the SDK, which reads it to the same limit. A copy's cancel settles only
+// once the reply is given up too, so it isn't waited for.
+async function bodyUpTo(res, max) {
+  const copy = res.clone();
+  if (Number(copy.headers.get("content-length") ?? undefined) > max) {
+    copy.body?.cancel().catch(() => {});
+    return null;
+  }
+  if (!copy.body) return new Uint8Array();
+  const reader = copy.body.getReader();
+  const chunks = [];
+  let length = 0;
+  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+    length += chunk.value.length;
+    if (length > max) {
+      reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(chunk.value);
+  }
+  const bytes = new Uint8Array(length);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+  return bytes;
+}
+
+// One reader's `fetch`, with the lens's binding and interface answered from
+// the session once a reader's lookup took them; `keep`, which keeps the
+// replies this reader read itself, once a lookup through it answered; and
+// `drop`, which gives them up, once its check refused them. A reply answered
+// from the session gives up this reader's own of it: it checks that one now.
+function lensSession(release, nodeUrl, fetch) {
+  const prefix = `${nodeUrl}/on/contracts:${release.lens.contractId}/`;
+  const read = new Map();
+  return {
+    async fetch(input, init) {
+      const url = String(input?.href ?? input?.url ?? input);
+      const method = url.startsWith(prefix) ? url.slice(prefix.length) : "";
+      if (!ONCE_A_SESSION.has(method)) return fetch(input, init);
+      const key = replyKey(release, method);
+      const kept = await keptReply(key);
+      if (kept !== null) {
+        read.delete(key);
+        return new Response(hexToBytes(kept), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
+      }
+      const res = await fetch(input, init);
+      const bytes = res.ok ? await bodyUpTo(res, REPLY_MAX).catch(() => null) : null;
+      if (bytes) read.set(key, bytesToHex(bytes));
+      return res;
+    },
+    async keep() {
+      const replies = [...read];
+      read.clear();
+      for (const [key, hex] of replies) await keepReply(key, hex);
+    },
+    drop() {
+      read.clear();
+    },
+  };
+}
+
+// Each reader's lensSession: a lookup through the reader that answered keeps
+// the replies it checked (`took`); one that failed its check gives them up.
+const sessions = new WeakMap();
+const took = (reader) => {
+  sessions.get(reader)?.keep().catch(() => {});
+};
+
+// A lookup's failure: one that found the lens's deployment wrong, or a reply
+// that didn't decode, forgets the replies kept, and the reader's own, so
+// they are asked again.
+function failed(release, error, reader) {
+  if (error?.reason !== "deployment" && error?.reason !== "decode") return;
+  sessions.get(reader)?.drop();
+  forgetReplies(release).catch(() => {});
+}
+
 // The SDK's reader and account check, loaded on the first lookup.
 const loadSdk = () => import("./duskNamesSdk.js");
 
@@ -84,10 +206,18 @@ function readerFor(createLensReader, network, nodeUrl, { batched = false } = {})
   const direct = bundledFetch(release, nodeUrl);
   // The multicall on the node's network, as its file has it.
   const multicallId = networkForNode(nodeUrl)?.contracts.multicall ?? null;
+  const session = lensSession(
+    release,
+    nodeUrl,
+    batched ? createMulticallFetch({ nodeUrl, multicallId, fetch: direct, gasFor: lensGas(release) }) : direct
+  );
   const promise = createLensReader(release, {
     nodeUrl,
     artifactBaseUrl: release.artifactBaseUrl,
-    fetch: batched ? createMulticallFetch({ nodeUrl, multicallId, fetch: direct, gasFor: lensGas(release) }) : direct,
+    fetch: (input, init) => session.fetch(input, init),
+  }).then((reader) => {
+    if (reader && typeof reader === "object") sessions.set(reader, session);
+    return reader;
   });
   const entry = { nodeUrl, promise };
   cache.set(network, entry);
@@ -121,17 +251,20 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
   const fail = (reason) => ({ ok: false, name, reason });
 
   // The reader bounds its own build and reads; any LensReaderError is a failed lookup.
+  let reader;
   try {
     const sdk = await loadSdk();
-    const reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl));
+    reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl));
     // The public account only when it's a valid key, the shielded address only when it's exactly one.
     const { status, account, address } = await sdk.resolveAccounts(reader, name);
+    took(reader);
     if (status === "Absent" || status === "Released") return fail("not_registered");
     if (status === "Grace" || status === "Expired") return fail("expired");
     if (status !== "Active") return fail("lookup_failed");
     if (!account && !address) return fail("no_account");
     return { ok: true, name, ...(account ? { account } : {}), ...(address ? { address } : {}) };
-  } catch {
+  } catch (error) {
+    failed(PINNED_RELEASES[network], error, reader);
     return fail("lookup_failed");
   }
 }
@@ -154,15 +287,18 @@ export async function resolvePrimaryName(account, { nodeUrl, batched = false } =
   if (!network) return { ok: false, reason: "unsupported_network" };
   // Only a public account, a Moonlight key, can have a primary name.
   if (classifyDuskIdentifier(account) !== "account") return { ok: true, name: null };
+  let reader;
   try {
     const sdk = await loadSdk();
-    const reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl), { batched });
+    reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl), { batched });
     // The reader takes the 96-byte key as plain numbers.
     const verified = await reader.verifyPrimary(Array.from(sdk.decodeBase58(account)));
+    took(reader);
     const name = verified === null ? null : verified.primary.spelling;
     return name === null || typeof name === "string" ? { ok: true, name } : { ok: false, reason: "lookup_failed" };
   } catch (error) {
     if (batched && shortOfGas(error)) return resolvePrimaryName(account, { nodeUrl });
+    failed(PINNED_RELEASES[network], error, reader);
     return { ok: false, reason: "lookup_failed" };
   }
 }
@@ -336,18 +472,22 @@ export async function lookupRecipientNames(accounts, { nodeUrl } = {}) {
   try {
     sdk = await loadSdk();
     reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl), { batched: true });
-  } catch {
+  } catch (error) {
+    failed(PINNED_RELEASES[network], error);
     return out;
   }
   // Started in one task, so one aggregate takes them.
   const results = await Promise.allSettled(list.map((a) => reader.verifyPrimary(Array.from(sdk.decodeBase58(a)))));
   const again = [];
+  if (results.some((result) => result.status === "fulfilled")) took(reader);
   results.forEach((result, i) => {
     if (result.status === "fulfilled") {
       const name = result.value === null ? null : result.value?.primary?.spelling;
       if (name === null || typeof name === "string") out.set(list[i], name);
     } else if (shortOfGas(result.reason)) {
       again.push(list[i]);
+    } else {
+      failed(PINNED_RELEASES[network], result.reason, reader);
     }
   });
   for (const account of again) {

@@ -723,6 +723,41 @@ describe("background auto-lock activity", () => {
     mocks.isStatusStale.mockReturnValue(false);
   });
 
+  it("checks the endpoints at most every 5 minutes, and after 30 s while a read fails or the node was down", async () => {
+    const { isStatusStale } = await vi.importActual("../shared/networkStatus.js");
+    const status = await import("../shared/networkStatus.js");
+    mocks.isStatusStale.mockImplementation(isStatusStale);
+    // Testnet's node, its chain ID known.
+    mocks.settings = { ...mocks.settings, chainId: 2 };
+    await sendBackgroundMessage({ type: "DUSK_UI_UNLOCK", password: "pw" });
+    const checks = () => mocks.checkAllEndpoints.mock.calls.length;
+    const overview = async (ago, { node = "online", balance = true } = {}) => {
+      status.getNetworkStatus.mockResolvedValue({ nodeStatus: node, proverStatus: "online", archiverStatus: "online", lastChecked: mocks.now - ago });
+      mocks.engineCall.mockImplementation(async (method) => {
+        if (method === "dusk_getPublicBalance" && !balance) throw new Error("Balance request timed out");
+        return method === "engine_walletId" ? "acct0" : true;
+      });
+      await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+    };
+    try {
+      const before = checks();
+      // Checked a minute ago, all well: not again.
+      await overview(60_000);
+      expect(checks()).toBe(before);
+      await overview(5 * 60_000 + 1);
+      expect(checks()).toBe(before + 1);
+      // The node was down, or the balance can't be read: again after 30 s, not before.
+      await overview(31_000, { node: "offline" });
+      await overview(31_000, { balance: false });
+      expect(checks()).toBe(before + 3);
+      await overview(10_000, { node: "offline", balance: false });
+      expect(checks()).toBe(before + 3);
+    } finally {
+      mocks.isStatusStale.mockReturnValue(false);
+      status.getNetworkStatus.mockResolvedValue({ checkedAt: 0 });
+    }
+  });
+
   it("changing auto-lock setting restarts the alarm and keeps sane unlocked activity", async () => {
     mocks.now = 2_000_000;
 

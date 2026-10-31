@@ -310,6 +310,189 @@ describe("resolveDuskName", () => {
   });
 });
 
+describe("the lens's binding and interface", () => {
+  const LENS = releases.testnet.lens.contractId;
+  // Session storage, as the popups and the background share it.
+  let session;
+  beforeEach(async () => {
+    session = new Map();
+    const pick = (keys) => Object.fromEntries([keys].flat().filter((k) => session.has(k)).map((k) => [k, session.get(k)]));
+    vi.stubGlobal("chrome", {
+      runtime: { id: "wallet", sendMessage() {}, getURL: (p) => `chrome-extension://wallet/${p}` },
+      storage: {
+        session: {
+          get: (keys, done) => done(pick(keys)),
+          set: (items, done) => done(Object.entries(items).forEach(([k, v]) => session.set(k, v))),
+          remove: (keys, done) => done([keys].flat().forEach((k) => session.delete(k))),
+        },
+      },
+    });
+    // A popup that has session storage; the mocked SDK is shared.
+    vi.resetModules();
+    names = await import("./duskNames.js");
+  });
+
+  // The node: what it's asked, by method, and its replies, by method (two
+  // bytes each unless given).
+  function node(replies = {}) {
+    const asked = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        const fn = String(url).split("/").pop();
+        asked.push(fn);
+        return replies[fn]?.() ?? new Response(new Uint8Array([7, 7]), { status: 200 });
+      })
+    );
+    return asked;
+  }
+
+  // A reader as the SDK builds one: its first lookup asks for the lens's
+  // binding and interface through the fetch it was given, checks them
+  // (`check` reads what came back), and only then answers, or throws.
+  function sdkReader(answer, { check = (res) => res.arrayBuffer() } = {}) {
+    lens.createLensReader.mockImplementation(async (_release, { fetch, nodeUrl: url }) => {
+      let checked = null;
+      const deployment = () =>
+        (checked ??= (async () => {
+          for (const fn of ["binding", "lens_interface"]) {
+            await check(await fetch(`${url}/on/contracts:${LENS}/${fn}`, { method: "POST", headers: OCTETS, body: new Uint8Array([1]) }));
+          }
+        })());
+      const read = async () => {
+        await deployment();
+        if (answer instanceof Error) throw answer;
+        return answer;
+      };
+      return { resolve: vi.fn(read), verifyPrimary: vi.fn(read) };
+    });
+  }
+
+  // Another popup: its own modules, the same session.
+  async function anotherPopup() {
+    vi.resetModules();
+    names = await import("./duskNames.js");
+  }
+
+  it("are asked once a session: a later reader, a popup's or the background's, checks the replies kept", async () => {
+    sdkReader(active(moonlight(ACCOUNT), null));
+    const first = node();
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+    expect(first).toEqual(["binding", "lens_interface"]);
+
+    await anotherPopup();
+    const later = node();
+    await expect(names.resolveDuskName("bob.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+    expect(later).toEqual([]);
+  });
+
+  it("keeps no reply the reader didn't take: one that didn't decode is asked for again", async () => {
+    sdkReader(new lens.LensReaderError("decode", "Lens binding reply didn't decode"));
+    node();
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ reason: "lookup_failed" });
+
+    await anotherPopup();
+    sdkReader(active(moonlight(ACCOUNT), null));
+    const asked = node();
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+    expect(asked).toEqual(["binding", "lens_interface"]);
+  });
+
+  it("are asked again after a reader refused the lens's deployment", async () => {
+    sdkReader(active(moonlight(ACCOUNT), null));
+    node();
+    await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
+
+    // Kept, then refused: a later reader's check of them fails.
+    await anotherPopup();
+    sdkReader(new lens.LensReaderError("deployment", "The deployed lens's binding isn't the release's"));
+    expect(node()).toEqual([]);
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ reason: "lookup_failed" });
+
+    await anotherPopup();
+    sdkReader(active(moonlight(ACCOUNT), null));
+    const asked = node();
+    await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
+    expect(asked).toEqual(["binding", "lens_interface"]);
+  });
+
+  it("never keeps a reader's rejected replies over those another reader kept since", async () => {
+    // Readers that take the lens's replies only as the healthy node gives
+    // them; a check that failed is made again by the next lookup, as the
+    // SDK's is once its hold-off passes.
+    lens.createLensReader.mockImplementation(async (_release, { fetch, nodeUrl: url }) => {
+      let checking = null;
+      const deployment = () =>
+        (checking ??= (async () => {
+          for (const fn of ["binding", "lens_interface"]) {
+            const res = await fetch(`${url}/on/contracts:${LENS}/${fn}`, { method: "POST", headers: OCTETS, body: new Uint8Array([1]) });
+            const bytes = [...new Uint8Array(await res.arrayBuffer())];
+            if (bytes.join() !== "7,7") throw new lens.LensReaderError("deployment", `The deployed lens's ${fn} isn't the release's`);
+          }
+        })().catch((error) => {
+          checking = null;
+          throw error;
+        }));
+      const read = async () => {
+        await deployment();
+        return active(moonlight(ACCOUNT), null);
+      };
+      return { resolve: vi.fn(read), verifyPrimary: vi.fn(read) };
+    });
+    const rejected = () => new Response(new Uint8Array([6, 6]), { status: 200 });
+
+    // Popup A's reader is given replies its check rejects.
+    const popupA = names;
+    node({ binding: rejected, lens_interface: rejected });
+    await expect(popupA.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ reason: "lookup_failed" });
+    // Popup B's reader is given the healthy node's, and keeps them.
+    await anotherPopup();
+    node();
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+    // Popup A's reader tries again with the replies kept, and takes them.
+    expect(node()).toEqual([]);
+    await expect(popupA.resolveDuskName("bob.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+
+    // A later popup checks the healthy replies kept, not popup A's rejected ones.
+    await anotherPopup();
+    expect(node()).toEqual([]);
+    await expect(names.resolveDuskName("carol.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+  });
+
+  it("reads a reply no further than the SDK's 32,768 bytes, and keeps none over it", async () => {
+    // A megabyte, in 8 KiB chunks, as the node streams it.
+    let pulled = 0;
+    const huge = () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            pulled += 1;
+            if (pulled > 128) controller.close();
+            else controller.enqueue(new Uint8Array(8_192));
+          },
+        }),
+        { status: 200 }
+      );
+    // The SDK refuses a reply past its limit unread.
+    sdkReader(active(moonlight(ACCOUNT), null), {
+      check: async () => {
+        throw new lens.LensReaderError("read", "Contract reply exceeds wire envelope");
+      },
+    });
+    node({ binding: huge });
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ reason: "lookup_failed" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Five chunks read, and the stream a chunk or two ahead: not the 128.
+    expect(pulled).toBeLessThanOrEqual(8);
+
+    await anotherPopup();
+    sdkReader(active(moonlight(ACCOUNT), null));
+    const asked = node();
+    await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
+    expect(asked).toEqual(["binding", "lens_interface"]);
+  });
+});
+
 describe("lookupDuskName", () => {
   it("shares a running lookup and reuses its answer for a minute", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });

@@ -913,6 +913,45 @@ describe("walletEngine", () => {
       await expect(engine.walletAccountsOf({ walletKey: "w2" })).rejects.toThrow("Wallet locked");
     });
 
+    it("shares a public balance read for a few seconds per wallet, profile and network, never another wallet's, and reads again after a send", async () => {
+      const reads = [];
+      globalThis.__W3SPER_BALANCE__ = vi.fn(async (account) => {
+        reads.push(String(account));
+        return { nonce: 0n, value: BigInt(reads.length) };
+      });
+      globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => ({ hash: "0xsent", nonce: tx.nonceValue + 1n }));
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+      try {
+        engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+        await engine.unlockWallets({ wallets, walletKey: "w1" });
+        const first = await engine.getPublicBalance();
+        // The popup asks again as it draws: the same read.
+        await expect(Promise.all([engine.getPublicBalance(), engine.getPublicBalance({ profileIndex: 0 })])).resolves.toEqual([first, first]);
+        expect(reads).toHaveLength(1);
+
+        // Another profile, another wallet's same profile, another network: each its own read.
+        await engine.getPublicBalance({ profileIndex: 1 });
+        await engine.switchWallet({ walletKey: "w2" });
+        await expect(engine.getPublicBalance()).resolves.not.toEqual(first);
+        engine.configure({ nodeUrl: "https://testnet.nodes.dusk.network" });
+        await engine.getPublicBalance();
+        expect(reads).toHaveLength(4);
+        expect(new Set(reads.slice(0, 3)).size).toBe(3);
+
+        // A few seconds on, or after a send: read again.
+        now.mockReturnValue(1_000_000 + 5_001);
+        await engine.getPublicBalance();
+        await engine.getPublicBalance();
+        expect(reads).toHaveLength(5);
+        await engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
+        await engine.getPublicBalance();
+        expect(reads).toHaveLength(6);
+      } finally {
+        now.mockRestore();
+        delete globalThis.__W3SPER_EXECUTE_IMPL__;
+      }
+    });
+
     it("keeps a wallet's next nonce through a switch away and back, while its send is pending; not past its removal or a lock", async () => {
       const nonces = [];
       globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => {
@@ -1603,13 +1642,76 @@ describe("walletEngine", () => {
     // Only the pool's driver is loaded; the hub has none.
     expect([...new Set(globalThis.__W3SPER_DRIVER_GETS__)]).toEqual(["sozu_pool"]);
 
-    // The next refresh: one query again, the hub asked again in it, as it can name others.
+    // Asked again as the popup draws, and the public balance beside it: the same reads.
+    const balances = vi.fn(async () => ({ nonce: 0n, value: 0n }));
+    globalThis.__W3SPER_BALANCE__ = balances;
     await engine.getSozuStatus();
+    await engine.getPublicBalance();
+    expect(queries()).toHaveLength(1);
+    // The next refresh, a few seconds on: one query again, the hub asked again in it, as it can name others.
+    const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_001);
+    try {
+      await engine.getSozuStatus();
+      await engine.getPublicBalance();
+    } finally {
+      later.mockRestore();
+    }
     expect(queries()).toHaveLength(2);
+    expect(balances).toHaveBeenCalledTimes(1);
     expect(envelopeCalls(queries()[1][1].body).map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)).toEqual(
       calls.map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)
     );
     delete globalThis.__W3SPER_DRIVER_GETS__;
+  });
+
+  it("reads a token's balance once for a few seconds per profile, and again after a send", async () => {
+    engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const TOKEN = "cd".repeat(32);
+    const node = vi.fn(async () => new Response(new TextEncoder().encode('"42"')));
+    vi.stubGlobal("fetch", node);
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => ({ hash: "0xsent", nonce: tx.nonceValue + 1n }));
+    const reads = () => node.mock.calls.filter(([url]) => String(url).endsWith(`/on/contracts:${TOKEN}/balance_of`)).length;
+    try {
+      // The assets view asks on every draw until the answer comes.
+      await expect(Promise.all([engine.getDrc20Balance({ contractId: TOKEN }), engine.getDrc20Balance({ contractId: TOKEN })])).resolves.toEqual(["42", "42"]);
+      expect(reads()).toBe(1);
+      await engine.getDrc20Balance({ contractId: TOKEN, profileIndex: 1 });
+      expect(reads()).toBe(2);
+      await engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
+      await engine.getDrc20Balance({ contractId: TOKEN });
+      expect(reads()).toBe(3);
+    } finally {
+      delete globalThis.__W3SPER_EXECUTE_IMPL__;
+    }
+  });
+
+  it("asks again for a token balance whose read stalled past 15 s, rather than wait on it for good", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const TOKEN = "cd".repeat(32);
+    let stalled = true;
+    const node = vi.fn(async () => (stalled ? new Promise(() => {}) : new Response(new TextEncoder().encode('"42"'))));
+    vi.stubGlobal("fetch", node);
+    const reads = () => node.mock.calls.filter(([url]) => String(url).endsWith(`/on/contracts:${TOKEN}/balance_of`)).length;
+    const ran = () => new Promise((resolve) => setTimeout(resolve, 20));
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    try {
+      engine.getDrc20Balance({ contractId: TOKEN }).catch(() => {});
+      await vi.waitFor(() => expect(reads()).toBe(1));
+      // A draw a few seconds on shares the read under way.
+      now.mockReturnValue(1_005_000);
+      engine.getDrc20Balance({ contractId: TOKEN }).catch(() => {});
+      await ran();
+      expect(reads()).toBe(1);
+      // Past 15 s it's asked again.
+      stalled = false;
+      now.mockReturnValue(1_015_001);
+      await expect(engine.getDrc20Balance({ contractId: TOKEN })).resolves.toBe("42");
+      expect(reads()).toBe(2);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("reads the Sozu of the network a custom node says it's on, by the chain ID its settings keep", async () => {
@@ -1937,7 +2039,8 @@ describe("walletEngine", () => {
         timestamp: 1_782_131_528_000,
         blockHeight: 3602438,
       }),
-      row({ hash: madeBy(226951, "phoenix"), kind: "shield", amount: "500000000", timestamp: 1_747_065_974_000, blockHeight: 226951 }),
+      // An unshield as its event says, to a profile that only got its change.
+      row({ hash: madeBy(226951, "phoenix"), kind: "unshield", amount: "500000000", timestamp: 1_747_065_974_000, blockHeight: 226951 }),
       row({ hash: madeBy(184423, "convert"), kind: "shield", amount: "10000000000", timestamp: 1_746_640_694_000, blockHeight: 184423 }),
     ];
     // A kept row as the entry it was, as the popup is given it.
@@ -2078,19 +2181,49 @@ describe("walletEngine", () => {
       await profileNotes();
       await growTree(leavesFromPos);
       archive();
-      const keep = activity.putShieldedHistoryRecord;
+      const keep = activity.updateShieldedHistoryRecord;
       // The store has room for the decoys, not for the history.
-      const put = vi.spyOn(activity, "putShieldedHistoryRecord").mockImplementation(async (key, record, epoch) => {
-        if (record.entries.length) throw new DOMException("The store is full", "QuotaExceededError");
-        return keep(key, record, epoch);
+      const update = vi.spyOn(activity, "updateShieldedHistoryRecord").mockImplementation(async (key, change, epoch) => {
+        const next = change(await activity.getShieldedHistoryRecord(key));
+        if (next.entries.length) throw new DOMException("The store is full", "QuotaExceededError");
+        return keep(key, () => next, epoch);
       });
       try {
         await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: ENTRIES });
       } finally {
-        put.mockRestore();
+        update.mockRestore();
       }
       const record = await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`);
       expect(record?.entries ?? []).toEqual([]);
+    });
+
+    it("asks among the decoys another read of the profile kept meanwhile, and keeps them", async () => {
+      const activity = await import("./activityStore.js");
+      await activity.clearActivityStore();
+      const { leavesFromPos } = await scanTree();
+      await profileNotes();
+      // Hundreds of heights to draw decoys from: two draws all but never match.
+      await growTree(leavesFromPos, { distinct: true });
+      const queries = archive();
+      const key = `mainnet::${WALLET_ID}::0`;
+      // The four real heights' sixteen decoys, as another read of the profile
+      // drew and kept them while this one valued its notes.
+      const OTHER = Array.from({ length: 16 }, (_, i) => GROWN + 10 + i);
+      const value = globalThis.__W3SPER_BALANCE__;
+      let other = true;
+      globalThis.__W3SPER_BALANCE__ = async (...args) => {
+        if (other) {
+          other = false;
+          await activity.putShieldedHistoryRecord(key, { fingerprint: "", entries: [], decoys: OTHER });
+        }
+        return value(...args);
+      };
+
+      await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: ENTRIES });
+      const real = new Set([184423, 226951, 3602438, 3861643]);
+      const asked = queries.flatMap((q) => [...q.matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h))).filter((h) => !real.has(h));
+      expect(new Set(asked)).toEqual(new Set(OTHER));
+      expect((await activity.getShieldedHistoryRecord(key)).decoys).toEqual(OTHER);
     });
 
     it("forgets the tree's heights and the histories kept on a chain the sync finds replaced", async () => {
