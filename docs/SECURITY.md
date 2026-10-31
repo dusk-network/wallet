@@ -153,6 +153,12 @@ All `dusk_sendTransaction` calls require explicit user approval via a popup wind
 - Adjust gas settings
 - Approve or reject
 
+Every approval is for one wallet: the one unlocked when the site asked, or,
+asked while locked, the one its window shows first. Its window shows no other,
+and what it approves is granted, signed or sent only while that wallet is the
+one unlocked. A send from the wallet's own screens goes only from the wallet
+its Review showed.
+
 ### 4. Content Security Policy
 
 #### Extension

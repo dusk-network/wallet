@@ -10,6 +10,15 @@ const PUBLIC_ACCOUNT =
 const SHIELDED_ADDRESS =
   "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
 
+// The wallet a prompt is for, as rpc.js binds it (pending.js): the one
+// unlocked as the site asks.
+const SHOWN = { walletId: "acct0" };
+// A prompt's window that showed the wallet unlocked now, as one asked while
+// locked binds it (bindPendingWallet).
+const showsWallet = (shown) => {
+  if (shown && !shown.walletId) shown.walletId = String(engineStatus.accounts?.[0] ?? "");
+};
+
 // ---------------------------------------------------------------------------
 // Shared mutable state for mocks
 // ---------------------------------------------------------------------------
@@ -383,13 +392,14 @@ describe("background rpc handler", () => {
       addresses: ["addr0"],
       selectedAccountIndex: 0,
     };
-    requestUserApproval.mockImplementationOnce(async () => {
+    requestUserApproval.mockImplementationOnce(async (_kind, _origin, _params, shown) => {
       engineStatus = {
         isUnlocked: true,
         accounts: ["acct0"],
         addresses: ["addr0"],
         selectedAccountIndex: 0,
       };
+      showsWallet(shown);
       return { accountIndex: 0 };
     });
 
@@ -402,7 +412,8 @@ describe("background rpc handler", () => {
         requestedProfiles: true,
         currentProfileId: "account:0:acct0",
         currentAccountIndex: 0,
-      })
+      }),
+      SHOWN
     );
     expect(profiles).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
   });
@@ -445,7 +456,8 @@ describe("background rpc handler", () => {
         shieldedReceiveAddress: true,
         effectiveShieldedReceiveAddress: true,
         reason: "payment_request",
-      })
+      }),
+      SHOWN
     );
     expect(profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1", shieldedAddress: "addr1" }]);
   });
@@ -758,7 +770,8 @@ describe("background rpc handler", () => {
       expect.objectContaining({
         shieldedReceiveAddress: false,
         effectiveShieldedReceiveAddress: true,
-      })
+      }),
+      SHOWN
     );
     expect(profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1", shieldedAddress: "addr1" }]);
   });
@@ -786,7 +799,8 @@ describe("background rpc handler", () => {
       expect.objectContaining({
         shieldedReceiveAddress: false,
         effectiveShieldedReceiveAddress: false,
-      })
+      }),
+      SHOWN
     );
     expect(profiles).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
     expect(perms["https://dapp.example"].grants.shieldedReceiveAddress).toBe(false);
@@ -887,7 +901,8 @@ describe("background rpc handler", () => {
         networkName: "Testnet",
         nodeUrl: "https://testnet.nodes.dusk.network",
         gas: { limit: "2500000", price: "1" },
-      })
+      }),
+      SHOWN
     );
 
     const call = engineCall.mock.calls.find(([m]) => m === "dusk_sendTransaction");
@@ -935,7 +950,8 @@ describe("background rpc handler", () => {
         privacy: "shielded",
         to: SHIELDED_ADDRESS,
         gas: { limit: "50000000", price: "1" },
-      })
+      }),
+      SHOWN
     );
     expect(putTxMeta).toHaveBeenCalledWith(
       "0xhash",
@@ -1003,7 +1019,8 @@ describe("background rpc handler", () => {
     expect(requestUserApproval).toHaveBeenCalledWith(
       "send_tx",
       "https://dapp.example",
-      expect.objectContaining({ gas: { limit: "50000000", price: "1" } })
+      expect.objectContaining({ gas: { limit: "50000000", price: "1" } }),
+      SHOWN
     );
     expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
   });
@@ -1030,7 +1047,7 @@ describe("background rpc handler", () => {
     });
 
     const gas = { limit, price: "3" };
-    expect(requestUserApproval).toHaveBeenCalledWith("send_tx", "https://dapp.example", expect.objectContaining({ gas }));
+    expect(requestUserApproval).toHaveBeenCalledWith("send_tx", "https://dapp.example", expect.objectContaining({ gas }), SHOWN);
     expect(engineCall).toHaveBeenCalledWith("dusk_sendTransaction", expect.objectContaining({ gas }));
   });
 
@@ -1040,8 +1057,9 @@ describe("background rpc handler", () => {
 
     perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
     engineStatus = { isUnlocked: false, accounts: [] };
-    requestUserApproval.mockImplementationOnce(async () => {
+    requestUserApproval.mockImplementationOnce(async (_kind, _origin, _params, shown) => {
       engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+      showsWallet(shown);
       return null;
     });
 
@@ -1241,7 +1259,8 @@ describe("background rpc handler", () => {
           byteLength: message.length,
           truncated: false,
         }),
-      })
+      }),
+      SHOWN
     );
 
     const approvalPayload = requestUserApproval.mock.calls.find(([kind]) => kind === "sign_message")?.[2];
@@ -1283,7 +1302,8 @@ describe("background rpc handler", () => {
           reason: "invalid_utf8",
           label: "Opaque bytes",
         }),
-      })
+      }),
+      SHOWN
     );
   });
 
@@ -1513,7 +1533,8 @@ describe("background rpc handler", () => {
         chainId: "dusk:2",
         networkName: "Testnet",
         nodeUrl: "https://testnet.nodes.dusk.network",
-      })
+      }),
+      SHOWN
     );
   });
 
@@ -1761,7 +1782,8 @@ describe("background rpc handler", () => {
       "https://dapp.example",
       expect.objectContaining({
         to: expect.objectContaining({ nodeUrl }),
-      })
+      }),
+      SHOWN
     );
     // Saved with the chain ID the node gave, asked only once the user agreed.
     expect(setSettings).toHaveBeenCalledWith({ nodeUrl, chainId: 2 });
@@ -1896,7 +1918,8 @@ describe("background rpc handler", () => {
         messageHash: `0x${await sha256Hex(bytes)}`,
         messageLen: 12,
         messagePreview: expect.objectContaining({ kind: "text", text: "Hello, Dusk!" }),
-      })
+      }),
+      SHOWN
     );
   });
 
@@ -1978,7 +2001,8 @@ describe("background rpc handler", () => {
         nonce: "nonce-1",
         statement: "Sign in",
         expiresAt: "2026-05-11T12:00:00.000Z",
-      })
+      }),
+      SHOWN
     );
     expect(engineCall).toHaveBeenCalledWith(
       "dusk_signAuth",
@@ -2085,7 +2109,8 @@ describe("background rpc handler", () => {
         message: TYPED_DATA_MESSAGE,
         chainId: "dusk:2",
         digestHex: expectedDigest,
-      })
+      }),
+      SHOWN
     );
   });
 

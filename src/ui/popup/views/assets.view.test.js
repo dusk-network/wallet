@@ -21,13 +21,12 @@ describe("tokens and NFTs on Home", () => {
     const { installFakeDom, screenReaderText, visibleText } = await import("../../testing/fakeDom.js");
     const { vi } = await import("vitest");
     const { document } = installFakeDom();
-    const { assetsSectionsView } = await import("./assets.js");
+    const { assetsOwner, assetsSectionsView } = await import("./assets.js");
     const TOKEN = `0x${"cd".repeat(32)}`;
     const assets = (tokens, nfts = []) => ({
       loaded: true,
       loading: false,
-      networkKey: "https://testnet.nodes.dusk.network",
-      profileIndex: 0,
+      owner: assetsOwner(ov),
       updatedAt: Date.now(),
       tokens,
       nfts,
@@ -53,5 +52,52 @@ describe("tokens and NFTs on Home", () => {
     expect(section().querySelectorAll(".asset-row").map(visibleText)).toEqual(["TTKNToken123.45 TKN", "ART #7Art"]);
     section().querySelectorAll(".section-actions button")[1].click();
     expect(state.route).toBe("asset_add_nft");
+  });
+});
+
+describe("tokens and NFTs after a switch to another wallet, on the same network and profile", () => {
+  it("shows none of the last wallet's, and what was being read for it lands nowhere", async () => {
+    const { installFakeDom, settle, visibleText } = await import("../../testing/fakeDom.js");
+    const { vi } = await import("vitest");
+    const { document } = installFakeDom();
+    const { assetsSectionsView } = await import("./assets.js");
+    const TOKEN = `0x${"cd".repeat(32)}`;
+    const walletA = { tokens: [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }], nfts: [] };
+    // The watched assets each read answers, when the test says.
+    const reads = [];
+    const actions = {
+      send: vi.fn((message) => {
+        if (message.type !== "DUSK_UI_ASSETS_GET") return Promise.resolve({ result: "12345" });
+        const read = Promise.withResolvers();
+        reads.push(read);
+        return read.promise;
+      }),
+      render: vi.fn(async () => {}),
+    };
+    const ov = (wallet) => ({ isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [wallet], selectedAccountIndex: 0 });
+    const rows = (state, wallet) => {
+      document.body.replaceChildren(...assetsSectionsView(ov(wallet), { state, actions }));
+      return document.body.querySelectorAll(".asset-row").map(visibleText);
+    };
+
+    // Wallet A's token, read and shown; then wallet B's screen shows none of it.
+    let state = { route: "home" };
+    rows(state, "wallet-a");
+    reads.shift().resolve({ result: walletA });
+    await settle();
+    // Its balance, read as the row shows.
+    rows(state, "wallet-a");
+    await settle();
+    expect(rows(state, "wallet-a")).toEqual(["TTKNToken123.45 TKN"]);
+    expect(rows(state, "wallet-b")).toEqual([]);
+
+    // A read for wallet A still on its way when wallet B opens.
+    state = { route: "home" };
+    reads.length = 0;
+    rows(state, "wallet-a");
+    rows(state, "wallet-b");
+    reads[0].resolve({ result: walletA });
+    await settle();
+    expect(rows(state, "wallet-b")).toEqual([]);
   });
 });

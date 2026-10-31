@@ -28,7 +28,7 @@ const REFUSED =
   /wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed/i;
 
 // Why a send stopped before it went to the wallet: a switch started meanwhile.
-const SWITCHED = "The network or profile changed meanwhile.";
+const SWITCHED = "The network, profile or wallet changed meanwhile.";
 
 /**
  * Whether a send's error says it was refused before it ran (true), rather
@@ -210,11 +210,16 @@ export function sentAnnouncement(sent, ov) {
  * @param {string} [opts.doneRoute] - where Done goes
  * @param {(hash: string) => void} [opts.onSent] - once the network took it
  * @param {() => boolean} [opts.unchanged] - asked just before the transaction
- *   goes to the wallet: false when the network or profile changed since the
- *   review, and then it isn't sent
+ *   goes to the wallet: false when what it was reviewed for changed, and then
+ *   it isn't sent
  * @returns {Promise<object>} the Sent screen's state
  */
 export async function sendFromReview({ state, actions, message, summary, backRoute, doneRoute = "home", onSent, unchanged }) {
+  // The Review's wallet and context, before anything waits: a switch of
+  // network, profile or wallet, here or in another window, gives the popup
+  // another context, and the wallet sends only from the wallet named here.
+  const context = state.context;
+  const walletId = String(state.overview?.accounts?.[0] ?? "");
   const sent = {
     id: ++sentSeq,
     ...summary,
@@ -241,12 +246,10 @@ export async function sendFromReview({ state, actions, message, summary, backRou
   }
 
   // The Sent screen was drawn first: a switch begun meanwhile stops it here.
-  const switched = typeof unchanged === "function" && !unchanged();
+  const switched = state.context !== context || (typeof unchanged === "function" && !unchanged());
   let res;
   if (!switched) {
     try {
-      // From the wallet the Review was on, or not at all.
-      const walletId = String(state.overview?.accounts?.[0] ?? "");
       res = await actions?.send?.(walletId ? { ...message, walletId } : message);
     } catch (e) {
       res = { error: { message: e?.message ?? String(e) } };

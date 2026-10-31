@@ -433,7 +433,8 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
     },
   });
 
-  return [
+  // `busy`: the wallet being made, which the popup keeps the form through.
+  return Object.assign([
     nav,
     h("div", { class: "row onboard-form" }, [
       h("p", { class: "auth-lead", text: "Enter the words you wrote down." }),
@@ -445,7 +446,7 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
       createBtn,
       busyBody,
     ]),
-  ];
+  ], { busy: () => busy });
 }
 
 // A recovery phrase and a new password, for Import wallet and for a restore
@@ -546,7 +547,8 @@ function phraseForm({ state, actions, title, lead = "", passwordLabel, verb, bus
       }
     },
   });
-  return [
+  // `busy`: the wallet being made, which the popup keeps the form through.
+  return Object.assign([
     nav,
     h("div", { class: "row onboard-form" }, [
       lead ? h("p", { class: "auth-lead", text: lead }) : null,
@@ -558,7 +560,7 @@ function phraseForm({ state, actions, title, lead = "", passwordLabel, verb, bus
       btn,
       busyBody,
     ].filter(Boolean)),
-  ];
+  ], { busy: () => busy });
 }
 
 export function onboardingImportView({ state, actions, adding = false } = {}) {

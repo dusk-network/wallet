@@ -80,6 +80,28 @@ describe("pending approvals", () => {
     ridSpy.mockRestore();
   });
 
+  it("keeps a request to one wallet: the one it was asked on, or the first its window shows; another ends it", async () => {
+    vi.resetModules();
+    const pending = await import("./pending.js");
+    const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValueOnce("rid-w1").mockReturnValueOnce("rid-locked");
+
+    const asked = pending.requestUserApproval("connect", "https://a.example", {}, { walletId: "w1" });
+    expect(pending.bindPendingWallet("rid-w1", "w1")).toBe(true);
+    expect(pending.bindPendingWallet("rid-w1", "w2")).toBe(false);
+    await expect(asked).rejects.toMatchObject({ code: 4001, message: "Wallet changed while awaiting approval" });
+    expect(pending.getPending("rid-w1")).toBeNull();
+
+    // Asked while locked: still locked, nothing is shown; then the first wallet shown.
+    const shown = { walletId: "" };
+    const lockedAsk = pending.requestUserApproval("sign_message", "https://b.example", {}, shown);
+    expect(pending.bindPendingWallet("rid-locked", "")).toBe(true);
+    expect(pending.bindPendingWallet("rid-locked", "w2")).toBe(true);
+    expect(shown.walletId).toBe("w2");
+    expect(pending.bindPendingWallet("rid-locked", "w1")).toBe(false);
+    await expect(lockedAsk).rejects.toMatchObject({ message: "Wallet changed while awaiting approval" });
+    ridSpy.mockRestore();
+  });
+
   it("bounds approvals per origin and supports targeted cancellation", async () => {
     vi.resetModules();
     const pending = await import("./pending.js");

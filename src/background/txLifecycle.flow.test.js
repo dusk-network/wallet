@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   classifyTxPresence: vi.fn(),
   notifyTxExecuted: vi.fn(async () => true),
   requestUserApproval: vi.fn(async () => null),
+  bindPendingWallet: vi.fn(() => true),
 }));
 
 function makeLocalStorage() {
@@ -62,6 +63,7 @@ vi.mock("../background/engineHost.js", () => ({
 }));
 
 vi.mock("../background/pending.js", () => ({
+  bindPendingWallet: mocks.bindPendingWallet,
   cancelPendingApprovals: vi.fn(),
   getPending: vi.fn(() => null),
   requestUserApproval: mocks.requestUserApproval,
@@ -540,6 +542,14 @@ describe("background Phoenix tx lifecycle flow", () => {
       },
     });
     expect(mocks.requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("shows a site's request only on its own wallet: on another, there's nothing to show", async () => {
+    const { getPending } = await import("../background/pending.js");
+    getPending.mockReturnValueOnce({ kind: "connect", origin: "https://dapp.example", params: {}, shown: { walletId: "acct9" } });
+    mocks.bindPendingWallet.mockReturnValueOnce(false);
+    await expect(sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" })).resolves.toBeNull();
+    expect(mocks.bindPendingWallet).toHaveBeenCalledWith("rid-1", "acct0");
   });
 
   describe("a send from the popup", () => {

@@ -111,7 +111,7 @@ describe("integration: provider flows", () => {
 
     const profiles = await handleRpc(origin, { method: "dusk_requestProfiles" });
     expect(profiles).toEqual([{ profileId: "account:1:acct1", account: "acct1" }]);
-    expect(requestUserApproval).toHaveBeenCalledWith("connect", origin, expect.any(Object));
+    expect(requestUserApproval).toHaveBeenCalledWith("connect", origin, expect.any(Object), { walletId: "acct0" });
 
     const perm = await getPermissionForOrigin(origin, "acct0");
     expect(perm).toMatchObject({
@@ -160,6 +160,48 @@ describe("integration: provider flows", () => {
     await expect(handleRpc(origin, { method: "dusk_profiles" })).resolves.toEqual(profile("w1"));
     expect(await getPermissionForOrigin(origin, "w1acct0")).toMatchObject({ profileId: "account:1:w1acct1" });
     expect(await getPermissionForOrigin(origin, "w2acct0")).toMatchObject({ profileId: "account:1:w2acct1" });
+  });
+
+  it("grants nothing to a wallet other than the one its prompt showed, and discloses nothing of it", async () => {
+    const { handleRpc } = await import("../background/rpc.js");
+    const { getPermissions } = await import("../shared/permissions.js");
+    const origin = "https://dapp.example";
+    const wallet = (w) => ({ isUnlocked: true, accounts: [`${w}acct0`, `${w}acct1`], addresses: [`${w}addr0`, `${w}addr1`], selectedAccountIndex: 0 });
+    // Asked on wallet 1; wallet 2 is open by the time the prompt is approved.
+    const switchesWhileOpen = (decision) =>
+      requestUserApproval.mockImplementationOnce(async () => {
+        engineStatus = wallet("w2");
+        return decision;
+      });
+
+    for (const [method, decision] of [
+      ["dusk_requestProfiles", { accountIndex: 1 }],
+      ["dusk_requestShieldedAddress", { accountIndex: 1, shieldedReceiveAddress: true }],
+    ]) {
+      engineStatus = wallet("w1");
+      switchesWhileOpen(decision);
+      await expect(handleRpc(origin, { method })).rejects.toThrow("Wallet changed while awaiting approval");
+    }
+    await expect(getPermissions("w1acct0")).resolves.toEqual({});
+    await expect(getPermissions("w2acct0")).resolves.toEqual({});
+  });
+
+  it("refuses a signature or a send approved on another wallet than the one its prompt showed", async () => {
+    const { handleRpc } = await import("../background/rpc.js");
+    const origin = "https://dapp.example";
+    await handleRpc(origin, { method: "dusk_requestProfiles" });
+    for (const request of [
+      { method: "dusk_signMessage", params: { message: "0x00" } },
+      { method: "dusk_sendTransaction", params: { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1" } },
+    ]) {
+      requestUserApproval.mockImplementationOnce(async () => {
+        engineStatus = { ...engineStatus, accounts: ["other-wallet", "acct1"] };
+        return null;
+      });
+      await expect(handleRpc(origin, request)).rejects.toThrow("Wallet changed while awaiting approval");
+      engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 };
+    }
+    expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
   });
 
   it("moves a site's connection from before wallets were kept apart when it asks, and nothing when another site asks", async () => {

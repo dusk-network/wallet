@@ -9,6 +9,7 @@ import { isExtensionRuntime } from "../platform/runtime.js";
 import { convertConfirmView } from "./popup/views/convert.js";
 import { sendConfirmView } from "./popup/views/send.js";
 import { noteTxStatus, sentSteps, sentView } from "./popup/views/sent.js";
+import { switchContext } from "./popup/context.js";
 
 vi.mock("../shared/addressBook.js", () => ({ listAddressBook: vi.fn(async () => []) }));
 vi.mock("../platform/runtime.js", async (importOriginal) => ({
@@ -265,6 +266,36 @@ describe("after Confirm", () => {
     reply.resolve({ error: { message: "The wallet changed while you reviewed it." } });
     await settle();
     expect(steps()[0]).toEqual(["failed", "Not sent", "The wallet changed while you reviewed it. No fee was charged."]);
+  });
+
+  describe("when another window switches wallet as the Sent screen is drawn", () => {
+    // The popup draws the Sent screen; meanwhile the overview comes to name
+    // the other wallet, with the switch's new context (`switching`) or ahead of it.
+    async function confirmWhile(switching) {
+      const ov = overview();
+      const state = { ...reviewState(), overview: ov };
+      const app = popup(state, ov);
+      await settle();
+      const draw = app.actions.render.getMockImplementation();
+      app.actions.render.mockImplementation(async () => {
+        if (state.route === "sent" && state.overview === ov) {
+          if (switching) switchContext(state);
+          state.overview = overview({ accounts: [OTHER] });
+        }
+        return draw();
+      });
+      await app.confirm();
+      return app.actions.send.mock.calls.map(([m]) => m).filter((m) => m.type === "DUSK_UI_SEND_TX");
+    }
+
+    it("sends nothing once the switch has begun, and says so", async () => {
+      await expect(confirmWhile(true)).resolves.toEqual([]);
+      expect(steps()[0]).toEqual(["failed", "Not sent", "The network, profile or wallet changed meanwhile. No fee was charged."]);
+    });
+
+    it("sends only from the wallet reviewed, which the wallet refuses once another is open", async () => {
+      await expect(confirmWhile(false)).resolves.toEqual([expect.objectContaining({ walletId: ACCOUNT })]);
+    });
   });
 
   it("leaves a newer review's draft alone when an earlier send finishes", async () => {

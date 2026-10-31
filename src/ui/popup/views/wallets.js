@@ -90,7 +90,8 @@ export function removeWalletView(ov, { state, actions } = {}) {
     },
   });
 
-  return [
+  // `busy`: a removal under way, which the popup keeps the form through.
+  return Object.assign([
     subnav({ title: "Remove wallet", onBack: () => backToSettings(state, actions) }),
     h("div", { class: "row onboard-form" }, [
       h("p", {
@@ -102,7 +103,7 @@ export function removeWalletView(ov, { state, actions } = {}) {
       err.el,
       btn,
     ]),
-  ];
+  ], { busy: () => busy });
 }
 
 /** A new password for every wallet here: the current one, then the new one twice. */
@@ -159,7 +160,7 @@ export function changePasswordView(ov, { state, actions } = {}) {
     },
   });
 
-  return [
+  return Object.assign([
     subnav({ title: "Change password", onBack: () => backToSettings(state, actions) }),
     h("div", { class: "row onboard-form" }, [
       h("p", { class: "auth-lead", text: "Every recovery phrase here is encrypted again with the new password." }),
@@ -167,5 +168,5 @@ export function changePasswordView(ov, { state, actions } = {}) {
       err.el,
       btn,
     ]),
-  ];
+  ], { busy: () => busy });
 }

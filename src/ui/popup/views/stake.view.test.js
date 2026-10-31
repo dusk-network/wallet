@@ -881,7 +881,7 @@ describe("liquid staking", () => {
       const step = body.querySelector(".step");
       expect([visibleText(step.querySelector(".step-title")), visibleText(step.querySelector(".step-sub"))]).toEqual([
         "Not sent",
-        "The network or profile changed meanwhile. No fee was charged.",
+        "The network, profile or wallet changed meanwhile. No fee was charged.",
       ]);
     });
 

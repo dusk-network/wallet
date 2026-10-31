@@ -204,6 +204,34 @@ let activeLockedView = null;
 let activeLockedScreen = "";
 // The screen last drawn, to start a new one at its top.
 let lastScreen = "";
+// The nodes #app shows: drawn again as the same nodes (the unlock form, a
+// kept wallet form), a screen stays as it is.
+let mounted = null;
+
+// A wallet form being filled in (Add wallet's words and password, Remove
+// wallet, Change password) stays mounted through redraws that aren't about
+// it, as the unlock form does: what's typed, and a submit under way, stay.
+// Another screen, another wallet or a lock drops it, with what was typed;
+// but not while its own submit runs (`busy`), whose doing a wallet change
+// may be.
+let keptForm = null;
+
+function wipeForm(form) {
+  for (const node of form?.children ?? []) {
+    for (const field of node.querySelectorAll?.("input, textarea") ?? []) field.value = "";
+  }
+}
+
+function keepForm(build) {
+  const kept = keptForm;
+  if (kept && kept.route === state.route) {
+    if (kept.children.busy?.()) kept.context = state.context;
+    if (kept.context === state.context) return kept.children;
+  }
+  wipeForm(kept);
+  keptForm = { route: state.route, context: state.context, children: build() };
+  return keptForm.children;
+}
 
 function setApp(children) {
   if (!app) return;
@@ -242,17 +270,22 @@ function setApp(children) {
     // ignore
   }
 
-  if (children !== activeLockedView) {
+  if (children !== mounted) {
     // Redrawn in place (a watcher event, a refresh), the screen keeps the
     // focus on the same button or field, and a field its caret.
     const focused = sameScreen ? focusedControl() : null;
     const password = app.querySelector("#unlock-password");
     if (password) password.value = "";
     activeLockedView = null;
+    if (keptForm && keptForm.children !== children) {
+      wipeForm(keptForm);
+      keptForm = null;
+    }
     app.innerHTML = "";
     const siteBar = activeSiteBar(state.overview);
     if (siteBar) app.appendChild(siteBar);
     for (const child of children) app.appendChild(child);
+    mounted = children;
     if (focused) refocusControl(focused);
   }
 }
@@ -988,21 +1021,21 @@ export async function render({ forceRefresh = false } = {}) {
     return;
   }
   if (state.route === "wallet_add_confirm") {
-    setApp(onboardingCreateConfirmView({ state, actions, adding: true }));
+    setApp(keepForm(() => onboardingCreateConfirmView({ state, actions, adding: true })));
     return;
   }
   if (state.route === "wallet_add_import") {
-    setApp(onboardingImportView({ state, actions, adding: true }));
+    setApp(keepForm(() => onboardingImportView({ state, actions, adding: true })));
     return;
   }
   if (state.route === "wallet_remove") {
     // A wallet that went meanwhile, or the only one: Settings.
-    const view = removeWalletView(ov, { state, actions });
+    const view = keepForm(() => removeWalletView(ov, { state, actions }));
     setApp(view.length ? view : optionsView(ov, { state, actions }));
     return;
   }
   if (state.route === "change_password") {
-    setApp(changePasswordView(ov, { state, actions }));
+    setApp(keepForm(() => changePasswordView(ov, { state, actions })));
     return;
   }
   // After Confirm: the transaction's steps. Without one (a new popup), home.

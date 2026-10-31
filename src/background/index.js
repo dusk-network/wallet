@@ -27,7 +27,7 @@ import {
   handleEngineReady,
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
-import { cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
+import { bindPendingWallet, cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
 import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNames.js";
 import {
   broadcastChainChangedAll,
@@ -746,6 +746,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const vault = await loadVault();
         const settings = await getSettings();
         const status = await getEngineStatus();
+        // The request's wallet, or none: its window never shows another.
+        if (status.isUnlocked && !bindPendingWallet(message.rid, String(status.accounts?.[0] ?? ""))) {
+          sendResponse(null);
+          return;
+        }
         const perm = await getPermissionForOrigin(entry.origin, await siteWalletId(status));
 
         let accountNames = {};
