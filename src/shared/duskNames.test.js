@@ -416,6 +416,49 @@ describe("the lens's binding and interface", () => {
     expect(asked).toEqual(["binding", "lens_interface"]);
   });
 
+  it("never keeps a reader's rejected replies over those another reader kept since", async () => {
+    // Readers that take the lens's replies only as the healthy node gives
+    // them; a check that failed is made again by the next lookup, as the
+    // SDK's is once its hold-off passes.
+    lens.createLensReader.mockImplementation(async (_release, { fetch, nodeUrl: url }) => {
+      let checking = null;
+      const deployment = () =>
+        (checking ??= (async () => {
+          for (const fn of ["binding", "lens_interface"]) {
+            const res = await fetch(`${url}/on/contracts:${LENS}/${fn}`, { method: "POST", headers: OCTETS, body: new Uint8Array([1]) });
+            const bytes = [...new Uint8Array(await res.arrayBuffer())];
+            if (bytes.join() !== "7,7") throw new lens.LensReaderError("deployment", `The deployed lens's ${fn} isn't the release's`);
+          }
+        })().catch((error) => {
+          checking = null;
+          throw error;
+        }));
+      const read = async () => {
+        await deployment();
+        return active(moonlight(ACCOUNT), null);
+      };
+      return { resolve: vi.fn(read), verifyPrimary: vi.fn(read) };
+    });
+    const rejected = () => new Response(new Uint8Array([6, 6]), { status: 200 });
+
+    // Popup A's reader is given replies its check rejects.
+    const popupA = names;
+    node({ binding: rejected, lens_interface: rejected });
+    await expect(popupA.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ reason: "lookup_failed" });
+    // Popup B's reader is given the healthy node's, and keeps them.
+    await anotherPopup();
+    node();
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+    // Popup A's reader tries again with the replies kept, and takes them.
+    expect(node()).toEqual([]);
+    await expect(popupA.resolveDuskName("bob.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+
+    // A later popup checks the healthy replies kept, not popup A's rejected ones.
+    await anotherPopup();
+    expect(node()).toEqual([]);
+    await expect(names.resolveDuskName("carol.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ ok: true });
+  });
+
   it("reads a reply no further than the SDK's 32,768 bytes, and keeps none over it", async () => {
     // A megabyte, in 8 KiB chunks, as the node streams it.
     let pulled = 0;

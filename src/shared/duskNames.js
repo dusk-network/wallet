@@ -127,8 +127,10 @@ async function bodyUpTo(res, max) {
 }
 
 // One reader's `fetch`, with the lens's binding and interface answered from
-// the session once a reader's lookup took them; and `keep`, which keeps the
-// replies this reader read itself, once a lookup through it answered.
+// the session once a reader's lookup took them; `keep`, which keeps the
+// replies this reader read itself, once a lookup through it answered; and
+// `drop`, which gives them up, once its check refused them. A reply answered
+// from the session gives up this reader's own of it: it checks that one now.
 function lensSession(release, nodeUrl, fetch) {
   const prefix = `${nodeUrl}/on/contracts:${release.lens.contractId}/`;
   const read = new Map();
@@ -139,7 +141,10 @@ function lensSession(release, nodeUrl, fetch) {
       if (!ONCE_A_SESSION.has(method)) return fetch(input, init);
       const key = replyKey(release, method);
       const kept = await keptReply(key);
-      if (kept !== null) return new Response(hexToBytes(kept), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
+      if (kept !== null) {
+        read.delete(key);
+        return new Response(hexToBytes(kept), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
+      }
       const res = await fetch(input, init);
       const bytes = res.ok ? await bodyUpTo(res, REPLY_MAX).catch(() => null) : null;
       if (bytes) read.set(key, bytesToHex(bytes));
@@ -150,20 +155,26 @@ function lensSession(release, nodeUrl, fetch) {
       read.clear();
       for (const [key, hex] of replies) await keepReply(key, hex);
     },
+    drop() {
+      read.clear();
+    },
   };
 }
 
-// Each reader's `keep` (lensSession), and what calls it: a lookup through
-// the reader that answered, so the SDK took the replies it checked.
-const keeps = new WeakMap();
+// Each reader's lensSession: a lookup through the reader that answered keeps
+// the replies it checked (`took`); one that failed its check gives them up.
+const sessions = new WeakMap();
 const took = (reader) => {
-  keeps.get(reader)?.().catch(() => {});
+  sessions.get(reader)?.keep().catch(() => {});
 };
 
 // A lookup's failure: one that found the lens's deployment wrong, or a reply
-// that didn't decode, forgets the replies kept, so they are asked again.
-function failed(release, error) {
-  if (error?.reason === "deployment" || error?.reason === "decode") forgetReplies(release).catch(() => {});
+// that didn't decode, forgets the replies kept, and the reader's own, so
+// they are asked again.
+function failed(release, error, reader) {
+  if (error?.reason !== "deployment" && error?.reason !== "decode") return;
+  sessions.get(reader)?.drop();
+  forgetReplies(release).catch(() => {});
 }
 
 // The SDK's reader and account check, loaded on the first lookup.
@@ -205,7 +216,7 @@ function readerFor(createLensReader, network, nodeUrl, { batched = false } = {})
     artifactBaseUrl: release.artifactBaseUrl,
     fetch: (input, init) => session.fetch(input, init),
   }).then((reader) => {
-    if (reader && typeof reader === "object") keeps.set(reader, session.keep);
+    if (reader && typeof reader === "object") sessions.set(reader, session);
     return reader;
   });
   const entry = { nodeUrl, promise };
@@ -240,9 +251,10 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
   const fail = (reason) => ({ ok: false, name, reason });
 
   // The reader bounds its own build and reads; any LensReaderError is a failed lookup.
+  let reader;
   try {
     const sdk = await loadSdk();
-    const reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl));
+    reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl));
     // The public account only when it's a valid key, the shielded address only when it's exactly one.
     const { status, account, address } = await sdk.resolveAccounts(reader, name);
     took(reader);
@@ -252,7 +264,7 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
     if (!account && !address) return fail("no_account");
     return { ok: true, name, ...(account ? { account } : {}), ...(address ? { address } : {}) };
   } catch (error) {
-    failed(PINNED_RELEASES[network], error);
+    failed(PINNED_RELEASES[network], error, reader);
     return fail("lookup_failed");
   }
 }
@@ -275,9 +287,10 @@ export async function resolvePrimaryName(account, { nodeUrl, batched = false } =
   if (!network) return { ok: false, reason: "unsupported_network" };
   // Only a public account, a Moonlight key, can have a primary name.
   if (classifyDuskIdentifier(account) !== "account") return { ok: true, name: null };
+  let reader;
   try {
     const sdk = await loadSdk();
-    const reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl), { batched });
+    reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl), { batched });
     // The reader takes the 96-byte key as plain numbers.
     const verified = await reader.verifyPrimary(Array.from(sdk.decodeBase58(account)));
     took(reader);
@@ -285,7 +298,7 @@ export async function resolvePrimaryName(account, { nodeUrl, batched = false } =
     return name === null || typeof name === "string" ? { ok: true, name } : { ok: false, reason: "lookup_failed" };
   } catch (error) {
     if (batched && shortOfGas(error)) return resolvePrimaryName(account, { nodeUrl });
-    failed(PINNED_RELEASES[network], error);
+    failed(PINNED_RELEASES[network], error, reader);
     return { ok: false, reason: "lookup_failed" };
   }
 }
@@ -474,7 +487,7 @@ export async function lookupRecipientNames(accounts, { nodeUrl } = {}) {
     } else if (shortOfGas(result.reason)) {
       again.push(list[i]);
     } else {
-      failed(PINNED_RELEASES[network], result.reason);
+      failed(PINNED_RELEASES[network], result.reason, reader);
     }
   });
   for (const account of again) {
