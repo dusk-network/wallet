@@ -2457,6 +2457,29 @@ button.net-menu-item--active {
   }
 }
 
+/* The switcher scrolls when its wallets don't fit the window */
+.acct-menu {
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+/* Each wallet's profiles under its name, in the ledger's type, as WALLET 2 */
+.acct-menu-wallet + .acct-menu-wallet {
+  margin-top: 6px;
+}
+
+.acct-menu-wallet-title {
+  padding: 8px 10px 4px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--ledger-size);
+  letter-spacing: var(--ledger-tracking);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .acct-menu-row {
   display: flex;
   align-items: center;
@@ -4679,6 +4702,30 @@ p.settings-legal button.text-btn {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+/* A wallet's line, its name and short account, with Remove at its end */
+.settings-wallet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-wallet__head .settings-profile-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-labels + .group {
+  margin-top: 12px;
+}
+
+.settings-change-password {
+  margin-top: 12px;
 }
 
 .settings-site__host {

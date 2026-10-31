@@ -7,6 +7,7 @@ import { isExtensionRuntime } from "../../platform/runtime.js";
 import { platform } from "../../platform/index.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
 import { profileLabelOf } from "../components/ProfileName.js";
+import { walletLabel } from "../../shared/wallets.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
 
 /**
@@ -146,8 +147,11 @@ export function createHeaderRenderer({
 
       // The switcher's rows copy each account.
       const canOpenProfiles = Boolean(walletReady && acctMenu);
-      // Without a verified name, the chip shows the profile's label.
-      const label = profileLabelOf(ov, idx);
+      // Without a verified name, the chip shows the profile's label, after
+      // its wallet's name when there's more than one: "Wallet 2 · Profile 1".
+      const wallets = Array.isArray(ov?.wallets) ? ov.wallets : [];
+      const wallet = wallets.length > 1 ? wallets.find((w) => w.active) : null;
+      const label = wallet ? `${walletLabel(wallet)} · ${profileLabelOf(ov, idx)}` : profileLabelOf(ov, idx);
       const key = [account, label, host, connected, ov?.nodeUrl, canOpenProfiles].join("\n");
       if (!chip || chipFor !== key || !acctMenu?.isOpen) {
         // A redrawn chip keeps the keyboard where it was.

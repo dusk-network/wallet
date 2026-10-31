@@ -4,10 +4,12 @@ import { accessibleName, installFakeDom, isShown, settle, typeInto, visibleText 
 import {
   onboardingCreateConfirmView,
   onboardingCreatePasswordView,
+  onboardingCreatePhraseView,
   onboardingImportView,
   onboardingWelcomeView,
   restoreWalletView,
 } from "./popup/views/onboarding.js";
+import { changePasswordView, removeWalletView } from "./popup/views/wallets.js";
 import { lockedView } from "./popup/views/locked.js";
 
 vi.mock("../wallet/bus.js", () => ({ send: vi.fn() }));
@@ -151,7 +153,7 @@ describe("setting up and unlocking", () => {
     const body = show(restoreWalletView({ state, actions: acts }));
     expect(body.querySelector("h1").textContent).toBe("Restore wallet");
     expect(body.querySelector(".auth-lead").textContent).toBe(
-      "This removes the wallet from this browser and sets it up again with a new password. Contacts stay if it's the same wallet."
+      "This removes every recovery phrase on this device, then sets up this one with a new password. If it was here before, its contacts stay."
     );
     const group = body.querySelector("[role=group]");
     typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
@@ -191,3 +193,145 @@ describe("setting up and unlocking", () => {
     expect(app.querySelector("h1").textContent).toBe("Unlock your wallet");
   });
 });
+
+describe("adding a wallet beside the ones here", () => {
+  const actions = (reply = {}) => ({ send: vi.fn(async () => reply), render: vi.fn(async () => {}), showToast: vi.fn() });
+  const DUP = "This recovery phrase is already in your wallet.";
+
+  it("offers create or import under Add wallet, and a new phrase skips the password", () => {
+    const state = { route: "wallet_add", onboard: { adding: true } };
+    const acts = actions();
+    const body = show(onboardingWelcomeView({ state, actions: acts, adding: true }));
+    expect(body.querySelector("h1").textContent).toBe("Add wallet");
+    expect(body.querySelector(".auth-lead").textContent).toBe("Your password unlocks every wallet here.");
+    body.querySelectorAll(".onboard-choice")[0].click();
+    expect(state.route).toBe("wallet_add_phrase");
+    expect(state.onboard.mnemonic.split(" ")).toHaveLength(12);
+
+    // Its words, then Back to the choice, not to a new password.
+    const phrase = show(onboardingCreatePhraseView({ state, actions: acts, adding: true }));
+    button(phrase, "I wrote it down").click();
+    expect(state.route).toBe("wallet_add_confirm");
+    show(onboardingCreatePhraseView({ state, actions: acts, adding: true }));
+    button(dom.document.body, "← Back").click();
+    expect(state.route).toBe("wallet_add");
+  });
+
+  it("asks for the words and the password the wallets share, and says under each what's wrong", async () => {
+    const state = { route: "wallet_add_confirm", onboard: { adding: true, mnemonic: MNEMONIC } };
+    let reply = { error: { message: "Incorrect password" } };
+    const acts = { ...actions(), send: vi.fn(async () => reply) };
+    const body = show(onboardingCreateConfirmView({ state, actions: acts, adding: true }));
+    expect(field(body, "Confirm password")).toBeUndefined();
+    const pwd = field(body, "Password");
+    expect(pwd.getAttribute("placeholder")).toBe("The password you unlock with");
+
+    typeInto(field(body, "Word 1"), MNEMONIC);
+    button(body, "Add wallet").click();
+    await settle();
+    expect(errorOf(pwd)).toBe("Enter your password.");
+    expect(acts.send).not.toHaveBeenCalled();
+
+    typeInto(pwd, "password123");
+    button(body, "Add wallet").click();
+    await settle();
+    expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_ADD_WALLET", mnemonic: MNEMONIC, password: "password123" });
+    expect([errorOf(pwd), pwd.value]).toEqual(["Incorrect password", ""]);
+
+    reply = { ok: true };
+    typeInto(pwd, "password123");
+    button(body, "Add wallet").click();
+    await settle();
+    expect([state.route, state.onboard.mnemonic]).toEqual(["home", null]);
+    expect(acts.showToast).toHaveBeenCalledWith("Wallet added.");
+    expect(JSON.stringify(state)).not.toContain("password123");
+  });
+
+  it("imports a phrase with the password, and refuses one that's here with one sentence under it", async () => {
+    const state = { route: "wallet_add_import", onboard: { adding: true } };
+    const acts = actions({ error: { message: DUP } });
+    const body = show(onboardingImportView({ state, actions: acts, adding: true }));
+    expect(body.querySelector("h1").textContent).toBe("Import wallet");
+    typeInto(field(body, "Word 1"), MNEMONIC);
+    typeInto(field(body, "Password"), "password123");
+    button(body, "Import wallet").click();
+    await settle();
+    expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_ADD_WALLET", mnemonic: MNEMONIC, password: "password123" });
+    expect(errorOf(body.querySelector("[role=group]"))).toBe(DUP);
+    expect(state.route).toBe("wallet_add_import");
+    button(body, "← Back").click();
+    expect(state.route).toBe("wallet_add");
+  });
+});
+
+describe("removing a wallet, and a new password", () => {
+  const ov = {
+    isUnlocked: true,
+    wallets: [
+      { key: "k1", n: 1, name: "", accounts: ["acct1"], active: true },
+      { key: "k2", n: 2, name: "Savings", accounts: ["acct2"], active: false },
+    ],
+  };
+  const actions = (replies) => ({ send: vi.fn(async () => replies.shift() ?? {}), render: vi.fn(async () => {}), showToast: vi.fn() });
+
+  it("says what removing a wallet takes, asks for the password, and goes back to Settings", async () => {
+    const state = { route: "wallet_remove", walletRemove: "k2" };
+    const acts = actions([{ error: { message: "Incorrect password" } }, { ok: true }]);
+    const body = show(removeWalletView(ov, { state, actions: acts }));
+    expect(body.querySelector("h1").textContent).toBe("Remove wallet");
+    expect(visibleText(body.querySelector(".auth-lead"))).toBe(
+      "This removes Savings from this device: its recovery phrase, contacts, activity and connected sites. Your other wallets stay as they are."
+    );
+    const pwd = field(body, "Password");
+    button(body, "Remove wallet").click();
+    await settle();
+    expect(errorOf(pwd)).toBe("Enter your password.");
+
+    typeInto(pwd, "wrong one");
+    button(body, "Remove wallet").click();
+    await settle();
+    expect(errorOf(pwd)).toBe("Incorrect password");
+    typeInto(pwd, "password123");
+    button(body, "Remove wallet").click();
+    await settle();
+    expect(acts.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_REMOVE_WALLET", walletKey: "k2", password: "password123" });
+    expect([state.route, state.walletRemove]).toEqual(["options", null]);
+    expect(acts.showToast).toHaveBeenCalledWith("Savings removed.");
+  });
+
+  it("never offers to remove the only wallet", () => {
+    const state = { route: "wallet_remove", walletRemove: "k1" };
+    expect(removeWalletView({ ...ov, wallets: ov.wallets.slice(0, 1) }, { state, actions: actions([]) })).toEqual([]);
+    expect(state.route).toBe("options");
+  });
+
+  it("changes the password of every phrase, with the current one, and the new one twice", async () => {
+    const state = { route: "change_password" };
+    const acts = actions([{ error: { message: "Incorrect password" } }, { ok: true }]);
+    const body = show(changePasswordView(ov, { state, actions: acts }));
+    expect(body.querySelector(".auth-lead").textContent).toBe("Every recovery phrase here is encrypted again with the new password.");
+    const [current, next, again] = ["Current password", "New password", "Confirm password"].map((name) => field(body, name));
+    typeInto(current, "password123");
+    typeInto(next, "short");
+    button(body, "Change password").click();
+    await settle();
+    expect(errorOf(next)).toBe("Use at least 8 characters.");
+    typeInto(next, "a new password");
+    typeInto(again, "another one");
+    button(body, "Change password").click();
+    await settle();
+    expect(errorOf(again)).toBe("The passwords don't match.");
+    expect(acts.send).not.toHaveBeenCalled();
+
+    typeInto(again, "a new password");
+    button(body, "Change password").click();
+    await settle();
+    expect(errorOf(current)).toBe("Incorrect password");
+    button(body, "Change password").click();
+    await settle();
+    expect(acts.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_CHANGE_PASSWORD", password: "password123", newPassword: "a new password" });
+    expect(state.route).toBe("options");
+    expect(JSON.stringify(state)).not.toContain("password");
+  });
+});
+

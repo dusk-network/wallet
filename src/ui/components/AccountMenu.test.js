@@ -155,4 +155,62 @@ describe("profile switcher", () => {
     expect(menu.isOpen).toBe(false);
     expect(anchor.getAttribute("aria-expanded")).toBe("false");
   });
+
+  describe("with more than one wallet", () => {
+    const OTHER = ["w2acct0LongEnoughToShortenAtTheEnd000000", "w2acct1LongEnoughToShortenAtTheEnd111111"];
+    const two = {
+      ...overview,
+      wallets: [
+        { key: "k2", n: 2, name: "Savings", walletId: OTHER[0], accounts: OTHER, accountNames: { 0: "Rainy day" }, active: false },
+        { key: "k1", n: 1, name: "", walletId: ACCOUNTS[0], accounts: ACCOUNTS, accountNames: {}, active: true },
+      ],
+    };
+    let onSelectWalletProfile;
+    let onAddWallet;
+
+    beforeEach(() => {
+      onSelectWalletProfile = vi.fn();
+      onAddWallet = vi.fn();
+      menu = createAccountMenuController({ onSelectAccountIndex, onSelectWalletProfile, onAddWallet, onOpenOptions: vi.fn(), onCopy });
+    });
+
+    const groups = () => dom.document.body.querySelectorAll(".acct-menu [role=group]");
+
+    it("puts each wallet's profiles under its name, by number, the profile open checked", () => {
+      menu.open(anchor, two);
+      expect(groups().map((g) => dom.document.getElementById(g.getAttribute("aria-labelledby")).textContent)).toEqual(["Wallet 1", "Savings"]);
+      expect(groups().map((g) => g.querySelectorAll(".net-menu-item-label").map((el) => el.textContent))).toEqual([
+        ["Profile 1", "Spending"],
+        ["Rainy day", "Profile 2"],
+      ]);
+      const checked = dom.document.body.querySelectorAll("[role=menuitemradio]").map((el) => el.getAttribute("aria-checked"));
+      expect(checked).toEqual(["true", "false", "false", "false"]);
+      // The other wallet's rows show its own accounts, and copy them.
+      expect(shownLines(groups()[1].querySelectorAll(".acct-menu-row")[0])[1]).toBe("w2acct…000000");
+    });
+
+    it("switches to another wallet's profile, and picks within the open one as before", async () => {
+      menu.open(anchor, two);
+      groups()[1].querySelectorAll(".net-menu-item")[1].click();
+      await settle();
+      expect(onSelectWalletProfile).toHaveBeenCalledWith("k2", 1, { ov: two });
+      expect(onSelectAccountIndex).not.toHaveBeenCalled();
+
+      menu.open(anchor, two);
+      groups()[0].querySelectorAll(".net-menu-item")[1].click();
+      await settle();
+      expect(onSelectAccountIndex).toHaveBeenCalledWith(1, { ov: two });
+    });
+
+    it("adds a wallet from the menu, after the wallets", async () => {
+      menu.open(anchor, two);
+      const items = dom.document.body.querySelectorAll(".acct-menu [role=menu] > [role=menuitem]");
+      expect(items.map(visibleText)).toEqual(["Add wallet", "Manage profilesSettings"]);
+      items[0].click();
+      await settle();
+      expect(onAddWallet).toHaveBeenCalledTimes(1);
+      expect(menu.isOpen).toBe(false);
+    });
+  });
 });
+

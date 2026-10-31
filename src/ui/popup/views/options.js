@@ -6,6 +6,7 @@ import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
 import { AUTO_LOCK_OPTIONS, normalizeCustomGas } from "../../../shared/settings.js";
 import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { setAccountName } from "../../../shared/accountNames.js";
+import { normalizeWalletName, walletLabel } from "../../../shared/wallets.js";
 import { clearAddressBook } from "../../../shared/addressBook.js";
 import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
 import { networkForNode } from "../../../shared/nodeNetwork.js";
@@ -20,9 +21,9 @@ import { fieldLabel, integerInput, textInput, urlInput } from "../../components/
 import { profileLabelOf } from "../../components/ProfileName.js";
 import { switchContext } from "../context.js";
 
-// Settings: the profile, security, connected sites, contacts and the network,
-// then Advanced (custom gas, Delete all contacts), Reset wallet on its own,
-// and About: the version, and the terms of use and privacy policy.
+// Settings: the wallets, the profile, security, connected sites, contacts and
+// the network, then Advanced (custom gas, Delete all contacts), Reset wallet
+// on its own, and About: the version, and the terms of use and privacy policy.
 
 const autoLockLabel = (minutes) =>
   AUTO_LOCK_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} minutes`;
@@ -155,6 +156,98 @@ export function optionsView(ov, { state, actions } = {}) {
             return h("div", { class: "settings-label" }, [line, input]);
           }),
         ])
+      : null;
+
+  // The wallets here, each with a name only this device knows, as the
+  // switcher shows them, and Remove beside each while there's another. A
+  // name being typed survives a redraw, and saves when it's left.
+  const wallets = ov?.isUnlocked && Array.isArray(ov?.wallets) ? ov.wallets : [];
+  const walletDrafts = (state.walletNameDrafts ??= {});
+  const walletRows = wallets.map((w) => {
+    let saved = normalizeWalletName(w.name);
+    const input = textInput({
+      placeholder: "Name, only on this device",
+      "aria-label": `Wallet ${w.n} name`,
+      value: walletDrafts[w.key] ?? saved,
+    });
+    input.addEventListener("input", () => {
+      walletDrafts[w.key] = input.value;
+    });
+    const save = async () => {
+      const value = input.value;
+      const name = normalizeWalletName(value);
+      if (name === saved) {
+        if (walletDrafts[w.key] === value) delete walletDrafts[w.key];
+        return;
+      }
+      const before = saved;
+      saved = name;
+      try {
+        const res = await actions?.send?.({ type: "DUSK_UI_RENAME_WALLET", walletKey: w.key, name: value });
+        if (res?.error) throw new Error(res.error.message ?? "Couldn't save the name");
+        if (walletDrafts[w.key] === value) delete walletDrafts[w.key];
+        for (const shown of [state.overview, ov]) {
+          const kept = shown?.wallets?.find?.((x) => x.key === w.key);
+          if (kept) kept.name = name;
+        }
+        actions?.showToast?.("Name saved.");
+        actions?.renderHeader?.();
+      } catch (e) {
+        saved = before;
+        actions?.showToast?.(e?.message ?? String(e), 2500);
+      }
+    };
+    input.addEventListener("change", save);
+    input.addEventListener("blur", save);
+    const account = String(w.accounts?.[0] ?? "");
+    const line = h("span", { class: "settings-profile-line", text: [walletLabel({ ...w, name: saved }), account ? shortAddress(account) : ""].filter(Boolean).join(" · ") });
+    const remove =
+      wallets.length > 1
+        ? h("button", {
+            class: "mini-btn",
+            type: "button",
+            text: "Remove",
+            "aria-label": `Remove ${walletLabel({ ...w, name: saved })}`,
+            onclick: async () => {
+              state.walletRemove = w.key;
+              state.route = "wallet_remove";
+              await actions?.render?.();
+            },
+          })
+        : null;
+    return h("div", { class: "settings-label settings-wallet" }, [h("div", { class: "settings-wallet__head" }, [line, remove]), input]);
+  });
+  const addWalletRow = h(
+    "button",
+    {
+      class: "list-row settings-row",
+      type: "button",
+      onclick: async () => {
+        state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true };
+        state.route = "wallet_add";
+        await actions?.render?.();
+      },
+    },
+    [
+      h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg("plus") }),
+      h("span", { class: "row-main" }, [h("span", { class: "row-title", text: "Add wallet" })]),
+      h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
+    ]
+  );
+
+  // A new password for every wallet: not in the desktop app, whose
+  // Stronghold can't be sealed again in place.
+  const changePasswordBtn =
+    ov?.isUnlocked && !platform.isTauri
+      ? h("button", {
+          class: "btn-outline settings-change-password",
+          type: "button",
+          text: "Change password",
+          onclick: async () => {
+            state.route = "change_password";
+            await actions?.render?.();
+          },
+        })
       : null;
 
   // Auto-lock. The choice shows at once: a redraw before the overview has it
@@ -481,7 +574,7 @@ export function optionsView(ov, { state, actions } = {}) {
     type: "button",
     text: "Reset wallet",
     onclick: async () => {
-      if (!confirm("This will remove the encrypted recovery phrase from this browser profile. Continue?")) return;
+      if (!confirm("This will remove every encrypted recovery phrase from this browser profile. Continue?")) return;
       try {
         switchContext(state);
         const res = await actions?.send?.({ type: "DUSK_UI_RESET_WALLET" });
@@ -518,6 +611,9 @@ export function optionsView(ov, { state, actions } = {}) {
 
   return [
     subnav({ actions: lockBtn ? [lockBtn] : [], title: "Settings", onBack: () => ((state.route = "home"), rerender()) }),
+    walletRows.length
+      ? section("Wallets", [h("div", { class: "settings-labels" }, walletRows), h("div", { class: "group" }, [addWalletRow])])
+      : null,
     ov?.isUnlocked
       ? section("Profile", [
           h("div", { class: "settings-field" }, [fieldLabel(accountSelect, "Active profile"), h("div", { class: "select-wrap" }, [accountSelect])]),
@@ -527,6 +623,7 @@ export function optionsView(ov, { state, actions } = {}) {
     section("Security", [
       h("div", { class: "settings-field" }, [fieldLabel(autoLockSelect, "Auto-lock"), h("div", { class: "select-wrap" }, [autoLockSelect])]),
       h("p", { class: "settings-note", text: "Locks the wallet after this long without use." }),
+      changePasswordBtn,
     ]),
     sitesSection ? section("Connected sites", sitesSection) : null,
     section("Contacts", [h("div", { class: "group" }, [contactsRow])]),
@@ -536,7 +633,7 @@ export function optionsView(ov, { state, actions } = {}) {
     section("Reset", [
       h("p", {
         class: "settings-note",
-        text: "Removes this wallet, its contacts, activity and connected sites from this browser. Your funds stay on Dusk. You need the recovery phrase to use it again.",
+        text: "Removes every wallet, with its contacts, activity and connected sites, from this browser. Your funds stay on Dusk. You need each recovery phrase to use them again.",
       }),
       resetBtn,
     ], "settings-section--danger"),

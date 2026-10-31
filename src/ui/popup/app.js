@@ -46,6 +46,7 @@ import {
   restoreWalletView,
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
+import { changePasswordView, removeWalletView } from "./views/wallets.js";
 import { getRuntimeKind, isExtensionRuntime } from "../../platform/runtime.js";
 import {
   getExtensionApi,
@@ -77,11 +78,17 @@ function isWalletLockedResponse(value) {
   return /wallet locked/i.test(message);
 }
 
+// The screens of a wallet being added, removed, or a new password: unlocked only.
+const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password"]);
+
 function applyLockedOverviewPatch() {
   try {
     // Locked here or elsewhere: whatever began unlocked is for nothing now.
     switchContext(state, "lock");
     stopArrivalChecks();
+    // A wallet being added keeps nothing of its new phrase through a lock.
+    if (state.onboard?.adding) state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
+    if (WALLET_ROUTES.has(state.route)) state.route = "home";
     state.overview = {
       ...(state.overview ?? {}),
       isUnlocked: false,
@@ -758,6 +765,32 @@ const acctMenu = createAccountMenuController({
       showToast(e?.message ?? String(e));
     }
   },
+  // A profile of another wallet: that wallet opens, without the password.
+  onSelectWalletProfile: async (walletKey, index) => {
+    try {
+      acctMenu.close();
+      switchContext(state);
+      const resp = await send({ type: "DUSK_UI_SWITCH_WALLET", walletKey, index });
+      if (isWalletLockedResponse(resp)) {
+        applyLockedOverviewPatch();
+        await render({ forceRefresh: true });
+        return;
+      }
+      if (resp?.error) throw new Error(resp.error.message ?? "Couldn't switch wallet");
+      showToast("Wallet switched.");
+      state.needsRefresh = true;
+      await render({ forceRefresh: true });
+    } catch (e) {
+      showToast(e?.message ?? String(e));
+    }
+  },
+  onAddWallet: async () => {
+    acctMenu.close();
+    netMenu.close();
+    state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true };
+    state.route = "wallet_add";
+    await render();
+  },
   onOpenOptions: async () => {
     acctMenu.close();
     netMenu.close();
@@ -945,6 +978,33 @@ export async function render({ forceRefresh = false } = {}) {
 
   // Unlocked routes. A restore that another window's unlock overtook goes home.
   if (state.route === "restore") state.route = "home";
+  // Another wallet: added with the same screens as the first, and the password.
+  if (state.route === "wallet_add") {
+    setApp(onboardingWelcomeView({ state, actions, adding: true }));
+    return;
+  }
+  if (state.route === "wallet_add_phrase") {
+    setApp(onboardingCreatePhraseView({ state, actions, adding: true }));
+    return;
+  }
+  if (state.route === "wallet_add_confirm") {
+    setApp(onboardingCreateConfirmView({ state, actions, adding: true }));
+    return;
+  }
+  if (state.route === "wallet_add_import") {
+    setApp(onboardingImportView({ state, actions, adding: true }));
+    return;
+  }
+  if (state.route === "wallet_remove") {
+    // A wallet that went meanwhile, or the only one: Settings.
+    const view = removeWalletView(ov, { state, actions });
+    setApp(view.length ? view : optionsView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "change_password") {
+    setApp(changePasswordView(ov, { state, actions }));
+    return;
+  }
   // After Confirm: the transaction's steps. Without one (a new popup), home.
   if (state.route === "sent") {
     if (state.sent) {

@@ -176,7 +176,7 @@ describe("settings", () => {
     expect(view.shownButtons(view.section("Reset"))).toEqual(["Reset wallet"]);
     // One line on what it removes, and that the funds stay on Dusk.
     expect(visibleText(view.section("Reset").querySelector(".settings-note"))).toBe(
-      "Removes this wallet, its contacts, activity and connected sites from this browser. Your funds stay on Dusk. You need the recovery phrase to use it again."
+      "Removes every wallet, with its contacts, activity and connected sites, from this browser. Your funds stay on Dusk. You need each recovery phrase to use them again."
     );
   });
 
@@ -316,3 +316,52 @@ describe("about", () => {
     expect(legal(app.section).map((b) => b.textContent)).toEqual(["Terms of use", "Privacy policy"]);
   });
 });
+
+describe("wallets", () => {
+  const W2 = ["w2acct0LongEnoughToShortenAtTheEnd000000", "w2acct1LongEnoughToShortenAtTheEnd111111"];
+  const wallets = [
+    { key: "k1", n: 1, name: "", accounts: ACCOUNTS, active: true },
+    { key: "k2", n: 2, name: "Savings", accounts: W2, active: false },
+  ];
+  const nameField = (n) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === `Wallet ${n} name`);
+
+  it("lists each wallet with its name, Remove beside each, and Add wallet", async () => {
+    const view = await settings({ wallets });
+    const section = view.section("Wallets");
+    expect(section.querySelectorAll(".settings-wallet__head .settings-profile-line").map(visibleText)).toEqual([
+      "Wallet 1 · 26FCH7…Tck927",
+      "Savings · w2acct…000000",
+    ]);
+    expect(view.shownButtons(section)).toEqual(["Remove", "Remove", expect.stringContaining("Add wallet")]);
+    expect([nameField(1).value, nameField(1).getAttribute("placeholder"), nameField(2).value]).toEqual(["", "Name, only on this device", "Savings"]);
+
+    section.querySelectorAll("button").find((b) => accessibleName(b) === "Remove Savings").click();
+    await settle();
+    expect([view.state.route, view.state.walletRemove]).toEqual(["wallet_remove", "k2"]);
+
+    section.querySelectorAll("button").find((b) => b.textContent.includes("Add wallet")).click();
+    await settle();
+    expect([view.state.route, view.state.onboard.adding]).toEqual(["wallet_add", true]);
+  });
+
+  it("renames a wallet when its field is left, and keeps what's typed through a redraw", async () => {
+    const view = await settings({ wallets });
+    typeInto(nameField(1), "Everyday");
+    view.draw();
+    expect(nameField(1).value).toBe("Everyday");
+    nameField(1).dispatchEvent(fakeEvent("change"));
+    await settle();
+    expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_RENAME_WALLET", walletKey: "k1", name: "Everyday" });
+    expect(view.ov.wallets[0].name).toBe("Everyday");
+    expect(view.actions.renderHeader).toHaveBeenCalled();
+  });
+
+  it("offers no Remove for the only wallet, and Change password under Security", async () => {
+    const view = await settings({ wallets: wallets.slice(0, 1) });
+    expect(view.shownButtons(view.section("Wallets"))).toEqual([expect.stringContaining("Add wallet")]);
+    view.section("Security").querySelectorAll("button").find((b) => b.textContent === "Change password").click();
+    await settle();
+    expect(view.state.route).toBe("change_password");
+  });
+});
+
