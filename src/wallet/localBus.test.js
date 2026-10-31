@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import vaults from "../shared/fixtures/vault-v1.json";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, checkpoints: [] }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [] }));
 
 // The engine's contacts key for the unlocked wallet, made as walletEngine.js
 // makes it: from its seed (here, a hash of its phrase), at its own place.
@@ -58,6 +58,7 @@ vi.mock("../shared/walletEngine.js", () => ({
     engine.unlocked = true;
   },
   switchWallet: async ({ walletKey }) => {
+    if (engine.switchFails) throw new Error("The engine stopped");
     const chosen = engine.held.find((w) => w.id === walletKey);
     if (!chosen) throw new Error("That wallet isn't here.");
     engine.key = chosen.id;
@@ -131,6 +132,7 @@ beforeEach(() => {
   engine.key = "";
   engine.held = [];
   engine.addFails = false;
+  engine.switchFails = false;
   engine.checkpoints = [];
 });
 
@@ -624,6 +626,39 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     expect((await contacts(first.walletId, "list")).result).toEqual([]);
     await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: second.key, index: 0 });
     expect((await contacts(second.walletId, "list")).result).toEqual([expect.objectContaining({ name: "Bea" })]);
+  });
+
+  it("shows the unlock form once a failed switch has locked the wallet", async () => {
+    const { installFakeDom, settle } = await import("../ui/testing/fakeDom.js");
+    await twoWallets();
+    const dom = installFakeDom({ pathname: "/popup.html" });
+    dom.document.body.innerHTML = "";
+    const header = dom.document.createElement("div");
+    header.id = "header-actions";
+    const page = dom.document.createElement("div");
+    page.id = "app";
+    dom.document.body.append(header, page);
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) {
+        await settle();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    };
+    const { render } = await import("../ui/popup/app.js");
+    await render();
+    await flush();
+    expect(page.textContent).not.toContain("Unlock your wallet");
+
+    // The first wallet's profile, picked from the menu; the engine fails the switch.
+    engine.switchFails = true;
+    header.querySelector(".account-chip").click();
+    await flush();
+    const rows = dom.document.body.querySelectorAll(".acct-menu-wallet")[0].querySelectorAll(".net-menu-item");
+    expect(rows.length).toBeGreaterThan(0);
+    rows[0].click();
+    await flush();
+    expect(engine.unlocked).toBe(false);
+    expect(page.textContent).toContain("Unlock your wallet");
   });
 
   it("renames a wallet, and gives it its number back", async () => {

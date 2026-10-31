@@ -172,7 +172,12 @@ export async function localSend(message) {
       engineCall: localEngineCall,
       ensureEngineConfigured,
       getEngineStatus: async () => engineStatus(),
-      lock: async () => lock(),
+      // Locked as the extension's background locks it: the page is told,
+      // and shows the unlock form (a switch that failed, a removal cut short).
+      lock: async (reason = "remove") => {
+        lock();
+        tellPage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason });
+      },
       walletsChanged: () => tellPage({ type: "DUSK_UI_WALLETS_CHANGED" }),
     });
     if (wallets) return wallets;

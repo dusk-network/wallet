@@ -554,6 +554,10 @@ export function installFakeDom({ elements, pathname = "/index.html", language = 
     removeEventListener(type, fn) {
       removeListener(this, type, fn);
     },
+    // The local wallet's own messages to the page come as window events.
+    dispatchEvent(event) {
+      return dispatch(this, event);
+    },
   };
   const clipboard = { writeText: vi.fn(async () => {}) };
   vi.stubGlobal("document", document);
