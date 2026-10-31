@@ -134,6 +134,7 @@ describe("a deposit to DuskEVM on its way", () => {
 
     await expect(look([row])).resolves.toBe(0);
     expect(kept.keptArrivals().size).toBe(0);
+    const began = duskEvm.asked.find(({ method }) => method === "eth_getLogs")?.params[0].fromBlock;
 
     // Twenty seconds on, the bridge paid it.
     duskEvm.chain.head += 10n;
@@ -142,7 +143,10 @@ describe("a deposit to DuskEVM on its way", () => {
     duskEvm.asked.length = 0;
 
     await expect(look([row], NOW + 20_000)).resolves.toBe(1);
-    expect(duskEvm.asked.find(({ method }) => method === "eth_getLogs")?.params[0].fromBlock).toBe(`0x${(HEAD + 1n).toString(16)}`);
+    // One search on to the new head, reading the newest blocks again, no
+    // further back than where the first look began.
+    const searches = duskEvm.asked.filter(({ method }) => method === "eth_getLogs").map(({ params }) => params[0]);
+    expect(searches).toEqual([expect.objectContaining({ fromBlock: began, toBlock: `0x${duskEvm.chain.head.toString(16)}` })]);
     expect(kept.keptArrivals().get(row.hash)).toEqual({ hash: L2(3), at: NOW + 12_000 });
   });
 
