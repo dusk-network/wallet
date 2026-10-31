@@ -62,9 +62,10 @@ vi.mock("../background/engineHost.js", () => ({
   handleEngineReady: vi.fn(() => {}),
 }));
 
-vi.mock("../background/pending.js", () => ({
+// The waiting requests themselves, and how they end, as pending.js keeps them.
+vi.mock("../background/pending.js", async (importOriginal) => ({
+  ...(await importOriginal()),
   bindPendingWallet: mocks.bindPendingWallet,
-  cancelPendingApprovals: vi.fn(),
   getPending: vi.fn(() => null),
   requestUserApproval: mocks.requestUserApproval,
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
@@ -616,6 +617,50 @@ describe("background Phoenix tx lifecycle flow", () => {
       getEngineStatus.mockReset();
       getEngineStatus.mockResolvedValue({ isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 });
     }
+  });
+
+  describe("a site connected to two wallets, with a request waiting on the open one", () => {
+    const origin = "https://shop.example";
+    // Waiting on wallet A (acct0, open); wallet B is acct9.
+    async function waiting() {
+      const { pendingApprovals } = await import("../background/pending.js");
+      const onA = { kind: "send_tx", origin, params: {}, shown: { walletId: "acct0" }, createdAt: Date.now(), resolve: vi.fn(), reject: vi.fn() };
+      // Asked while locked: its window will show the wallet open.
+      const unshown = { kind: "connect", origin: "https://other.example", params: {}, shown: { walletId: "" }, createdAt: Date.now(), resolve: vi.fn(), reject: vi.fn() };
+      pendingApprovals.set("rid-a", onA);
+      pendingApprovals.set("rid-unshown", unshown);
+      return { pendingApprovals, onA, unshown };
+    }
+
+    it("keeps it when the site's row for the other wallet is disconnected, and ends it with its own", async () => {
+      const { pendingApprovals, onA } = await waiting();
+      try {
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin, siteWallet: "acct9", walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+        expect(onA.reject).not.toHaveBeenCalled();
+        expect(pendingApprovals.has("rid-a")).toBe(true);
+
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin, walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+        expect(onA.reject).toHaveBeenCalledWith(expect.objectContaining({ message: "Site disconnected" }));
+        expect(pendingApprovals.has("rid-a")).toBe(false);
+      } finally {
+        pendingApprovals.clear();
+      }
+    });
+
+    it("keeps the open wallet's requests when only the other wallet's sites are disconnected, and ends them with its own", async () => {
+      const { pendingApprovals, onA, unshown } = await waiting();
+      try {
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_CLEAR_PERMISSIONS", siteWallets: ["acct9"], walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+        expect([onA.reject, unshown.reject].map((fn) => fn.mock.calls.length)).toEqual([0, 0]);
+        expect(pendingApprovals.size).toBe(2);
+
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_CLEAR_PERMISSIONS", siteWallets: ["acct0", "acct9"], walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+        for (const fn of [onA.reject, unshown.reject]) expect(fn).toHaveBeenCalledWith(expect.objectContaining({ message: "Sites disconnected" }));
+        expect(pendingApprovals.size).toBe(0);
+      } finally {
+        pendingApprovals.clear();
+      }
+    });
   });
 
   it("shows a site's request only on its own wallet: on another, there's nothing to show", async () => {

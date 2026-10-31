@@ -143,8 +143,19 @@ export function resolvePendingDecision(message) {
   return { ok: true };
 }
 
-export function cancelPendingApprovals(origin, reason = "Wallet state changed") {
+/**
+ * Ends the requests waiting for approval: every one, or `origin`'s. With
+ * `wallets` (wallet IDs), only those for one of them: a request is for the
+ * wallet its window shows (`shown`), and one not shown yet for `open`, the
+ * wallet open now, which its window would show. Another wallet's stay.
+ * @param {string|null} origin
+ * @param {string} [reason]
+ * @param {{ wallets?: string[], open?: string }} [opts]
+ */
+export function cancelPendingApprovals(origin, reason = "Wallet state changed", { wallets, open = "" } = {}) {
   for (const [rid, entry] of pendingApprovals) {
-    if (!origin || entry.origin === origin) rejectPending(rid, entry, reason);
+    if (origin && entry.origin !== origin) continue;
+    if (Array.isArray(wallets) && !wallets.includes(String(entry.shown?.walletId || open || ""))) continue;
+    rejectPending(rid, entry, reason);
   }
 }

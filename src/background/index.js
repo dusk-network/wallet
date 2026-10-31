@@ -962,10 +962,14 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           // From the wallet the page showed, or from none; from the wallet the
-          // site is connected to (`siteWallet`), another or the one open.
-          assertScreenWallet(message, await getEngineStatus());
-          cancelPendingApprovals(origin, "Site disconnected");
-          await revokeOrigin(origin, String(message.siteWallet ?? "") || (await siteWalletId()));
+          // site is connected to (`siteWallet`), another or the one open. The
+          // site's requests waiting for that wallet end; another wallet's stay.
+          const status = await getEngineStatus();
+          assertScreenWallet(message, status);
+          const open = await siteWalletId(status);
+          const owner = String(message.siteWallet ?? "") || open;
+          cancelPendingApprovals(origin, "Site disconnected", { wallets: [owner], open });
+          await revokeOrigin(origin, owner);
         });
         sendResponse({ ok: true });
         return;
@@ -974,11 +978,15 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       if (message?.type === "DUSK_UI_CLEAR_PERMISSIONS") {
         // The wallet's own sites: another wallet's stay connected to it.
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-          assertScreenWallet(message, await getEngineStatus());
-          cancelPendingApprovals(null, "Sites disconnected");
-          // The sites listed: each wallet's (`siteWallets`), or the open one's.
+          const status = await getEngineStatus();
+          assertScreenWallet(message, status);
+          // The sites listed: each wallet's (`siteWallets`), or the open one's;
+          // the requests waiting for those wallets end, another wallet's stay.
           const listed = Array.isArray(message.siteWallets) ? message.siteWallets.map(String).filter(Boolean) : [];
-          for (const owner of listed.length ? listed : [await siteWalletId()]) await clearPermissions(owner);
+          const open = await siteWalletId(status);
+          const owners = listed.length ? listed : [open];
+          cancelPendingApprovals(null, "Sites disconnected", { wallets: owners, open });
+          for (const owner of owners) await clearPermissions(owner);
         });
         sendResponse({ ok: true });
         return;

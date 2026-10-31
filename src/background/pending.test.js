@@ -102,6 +102,27 @@ describe("pending approvals", () => {
     ridSpy.mockRestore();
   });
 
+  it("ends only the requests for the wallets named, one not yet shown counting as the open wallet's", async () => {
+    vi.resetModules();
+    const pending = await import("./pending.js");
+    const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValueOnce("rid-a").mockReturnValueOnce("rid-new");
+    const onA = pending.requestUserApproval("send_tx", "https://shop.example", {}, { walletId: "wa" });
+    const unshown = pending.requestUserApproval("connect", "https://other.example", {}, { walletId: "" });
+    const ended = [];
+    onA.catch(() => ended.push("a"));
+    unshown.catch(() => ended.push("unshown"));
+
+    pending.cancelPendingApprovals("https://shop.example", "Site disconnected", { wallets: ["wb"], open: "wa" });
+    pending.cancelPendingApprovals(null, "Sites disconnected", { wallets: ["wb"], open: "wa" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect([ended, pending.pendingApprovals.size]).toEqual([[], 2]);
+
+    pending.cancelPendingApprovals(null, "Sites disconnected", { wallets: ["wa"], open: "wa" });
+    await expect(onA).rejects.toMatchObject({ message: "Sites disconnected" });
+    await expect(unshown).rejects.toMatchObject({ message: "Sites disconnected" });
+    ridSpy.mockRestore();
+  });
+
   it("bounds approvals per origin and supports targeted cancellation", async () => {
     vi.resetModules();
     const pending = await import("./pending.js");
