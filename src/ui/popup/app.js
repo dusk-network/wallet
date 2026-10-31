@@ -122,8 +122,11 @@ async function send(message) {
   return response;
 }
 
+// Whose stDUSK discovery it is: one wallet's (its first public account), on
+// one network, for one profile and pool token.
 function stDuskWatchKey(ov, profileIndex, contractId) {
   return [
+    String(ov?.accounts?.[0] ?? ""),
     String(ov?.nodeUrl ?? ""),
     String(profileIndex ?? 0),
     String(contractId ?? "").toLowerCase(),

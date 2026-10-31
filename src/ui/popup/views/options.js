@@ -107,7 +107,8 @@ export function optionsView(ov, { state, actions } = {}) {
   // shows at once in the header's pill; Settings doesn't redraw for it.
   const walletId = ov?.isUnlocked && accounts.length ? String(accounts[0] ?? "").trim() : "";
   const nameMap = ov?.accountNames && typeof ov.accountNames === "object" ? ov.accountNames : {};
-  const drafts = (state.labelDrafts ??= {});
+  // Each wallet's own: another wallet's fields start from its saved labels.
+  const drafts = ((state.labelDrafts ??= {})[walletId] ??= {});
   const labelOf = (s) => String(s ?? "").trim().replace(/\s+/g, " ").slice(0, 32);
   const labelsEditor =
     ov?.isUnlocked && walletId

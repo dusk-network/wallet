@@ -201,9 +201,18 @@ async function switchTo(walletKey, index, host, status) {
   let unlocked;
   try {
     await host.ensureEngineConfigured();
-    unlocked = await host.engineCall("engine_switchWallet", { walletKey }, { timeoutMs: UNLOCK_TIMEOUT_MS });
   } catch (error) {
     await setSettings({ selectedAccountIndex: previous }).catch(() => {});
+    throw error;
+  }
+  try {
+    unlocked = await host.engineCall("engine_switchWallet", { walletKey }, { timeoutMs: UNLOCK_TIMEOUT_MS });
+  } catch (error) {
+    // No answer, or none to trust: the engine may still switch after this
+    // step, with no wallet list or page told. Locked, it can't (an unlock
+    // since outruns it), and the next unlock opens the wallet listed open.
+    await setSettings({ selectedAccountIndex: previous }).catch(() => {});
+    await host.lock("switch").catch(() => {});
     throw error;
   }
   await keepWalletShown(unlocked);

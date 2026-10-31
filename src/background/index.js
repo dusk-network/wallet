@@ -568,7 +568,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         engineCall,
         ensureEngineConfigured,
         getEngineStatus: getEngineStatusStrict,
-        lock: () => lockWallet("remove"),
+        lock: (reason = "remove") => lockWallet(reason),
         beforeSwitch: () => cancelPendingApprovals(null, "Wallet changed"),
         afterSwitch: async ({ oldPerms, oldStatus }) => {
           await updateActivity();

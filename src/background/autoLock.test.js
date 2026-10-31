@@ -548,6 +548,45 @@ describe("background auto-lock activity", () => {
     expect(mocks.engineCall.mock.calls.map(([method]) => method)).not.toContain("engine_switchWallet");
   });
 
+  it("locks the engine when a switch gets no answer in time, so it can't open the other wallet later", async () => {
+    const wallets = [{ key: "w1", n: 1 }, { key: "w2", n: 2 }];
+    // The engine's wallet, which a switch the bridge gave up on still changes later, unless locked first.
+    let engineWallet = "w1";
+    const late = Promise.withResolvers();
+    const [engineCallBefore, statusBefore] = [mocks.engineCall.getMockImplementation(), mocks.getEngineStatus.getMockImplementation()];
+    mocks.getEngineStatus.mockImplementation(async () => ({
+      isUnlocked: mocks.engineUnlocked,
+      accounts: [`${engineWallet}acct0`],
+      addresses: ["addr0"],
+      selectedAccountIndex: 0,
+      walletKey: engineWallet,
+      wallets,
+    }));
+    mocks.engineCall.mockImplementation(async (method) => {
+      if (method === "engine_lock") mocks.engineUnlocked = false;
+      if (method !== "engine_switchWallet") return true;
+      late.promise.then(() => {
+        if (mocks.engineUnlocked) engineWallet = "w2";
+      });
+      throw new Error("Engine call timed out");
+    });
+    try {
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_SWITCH_WALLET", walletKey: "w2" })).resolves.toMatchObject({
+        error: { message: "Engine call timed out" },
+      });
+      late.resolve();
+      await late.promise;
+      await Promise.resolve();
+      // Locked: no wallet is open that the wallets list doesn't show, and pages are told.
+      expect([mocks.engineUnlocked, engineWallet]).toEqual([false, "w1"]);
+      expect(mocks.broadcastWalletChanged).not.toHaveBeenCalled();
+      expect(mocks.sentMessages).toContainEqual(expect.objectContaining({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false }));
+    } finally {
+      mocks.engineCall.mockImplementation(engineCallBefore);
+      mocks.getEngineStatus.mockImplementation(statusBefore);
+    }
+  });
+
   it("tells every page when a wallet goes or is renamed, the open one or another", async () => {
     const wallets = [{ key: "w1", n: 1 }, { key: "w2", n: 2 }];
     mocks.getEngineStatus.mockImplementation(async () => ({

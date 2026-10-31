@@ -90,6 +90,19 @@ describe("profile labels", () => {
     expect(label(2).value).toBe("Spending");
   });
 
+  it("keep a label typed for one wallet to that wallet: another opened meanwhile saves nothing of it", async () => {
+    setAccountName.mockClear();
+    const view = await settings();
+    typeInto(label(1), "Typed for A");
+    // Another window opens wallet B; Settings is drawn again for it.
+    Object.assign(view.ov, { accounts: ["B-account-0", "B-account-1"], accountNames: { 0: "Bob" } });
+    view.draw();
+    expect(label(1).value).toBe("Bob");
+    label(1).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(setAccountName).not.toHaveBeenCalled();
+  });
+
   it("save once when the field is left with both a change and a blur, and not when nothing changed", async () => {
     setAccountName.mockClear();
     await settings({ accountNames: { 0: "Main" } });

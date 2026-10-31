@@ -48,7 +48,7 @@ const flush = async () => {
 
 // The popup on `route` with wallet A open; `t.open` is what the wallet's
 // overview says, `t.deliver` the wallet's own messages to the popup.
-async function popupOn(route, extra = {}) {
+async function popupOn(route, extra = {}, answer = async () => undefined) {
   const dom = installFakeDom({ pathname: "/popup.html" });
   dom.document.body.innerHTML = "";
   const header = dom.document.createElement("div");
@@ -65,6 +65,8 @@ async function popupOn(route, extra = {}) {
   const t = { dom, app, send, open: wallet(A, "wa") };
   send.mockReset();
   send.mockImplementation(async (message) => {
+    const answered = await answer(message, t);
+    if (answered !== undefined) return answered;
     if (message.type === "DUSK_UI_OVERVIEW") return t.open;
     if (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE") return { ok: true, result: { min: "1", median: "1", max: "1" } };
     if (message.type === "DUSK_UI_SEND_TX") return { ok: true, result: { hash: "ab".repeat(32) } };
@@ -143,5 +145,26 @@ describe("a wallet removed in another window", () => {
     expect(t.asked("DUSK_UI_OVERVIEW").length).toBeGreaterThan(reads);
     expect([t.state.route, t.state.walletRemove]).toEqual(["options", null]);
     expect(t.app.querySelectorAll("button").map((b) => b.textContent)).not.toContain("Remove wallet");
+  });
+});
+
+describe("stDUSK, found on the dashboard", () => {
+  it("is found again for another wallet on the same network and profile", async () => {
+    const STDUSK = "5d".repeat(32);
+    // Each wallet holds stDUSK with Sozu, and watches no token yet.
+    const t = await popupOn("home", {}, async (message) => {
+      if (message.type === "DUSK_UI_GET_SOZU_STATUS") {
+        return { ok: true, result: { contracts: { "staked-dusk": STDUSK }, position: { stDuskBalanceLux: "5000000000" } } };
+      }
+      if (message.type === "DUSK_UI_ASSETS_GET") return { ok: true, result: { tokens: [], nfts: [] } };
+      return undefined;
+    });
+    await flush();
+    expect(t.asked("DUSK_UI_ASSETS_WATCH_TOKEN").map((m) => m.walletId)).toEqual([A]);
+
+    t.open = wallet(B, "wb");
+    t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
+    await flush();
+    expect(t.asked("DUSK_UI_ASSETS_WATCH_TOKEN").map((m) => m.walletId)).toEqual([A, B]);
   });
 });
