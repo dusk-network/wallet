@@ -172,6 +172,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept looking for a bridge transfer's payment after a search missed it, rather than waiting for it for good.
 - Said Arrived on an earlier deposit to DuskEVM also after a later one was sent, and waited for a deposit the archive doesn't list yet rather than taking another's payment.
 - Showed amounts under 0.01 DUSK to two significant digits, as the other Dusk apps do.
 - Sent nothing to a .dusk name whose public account isn't a valid key.
