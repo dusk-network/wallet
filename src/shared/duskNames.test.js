@@ -310,6 +310,83 @@ describe("resolveDuskName", () => {
   });
 });
 
+describe("the lens's binding and interface", () => {
+  const LENS = releases.testnet.lens.contractId;
+  // Session storage, as the popups and the background share it.
+  let session;
+  beforeEach(async () => {
+    session = new Map();
+    const pick = (keys) => Object.fromEntries([keys].flat().filter((k) => session.has(k)).map((k) => [k, session.get(k)]));
+    vi.stubGlobal("chrome", {
+      runtime: { id: "wallet", sendMessage() {}, getURL: (p) => `chrome-extension://wallet/${p}` },
+      storage: {
+        session: {
+          get: (keys, done) => done(pick(keys)),
+          set: (items, done) => done(Object.entries(items).forEach(([k, v]) => session.set(k, v))),
+          remove: (keys, done) => done([keys].flat().forEach((k) => session.delete(k))),
+        },
+      },
+    });
+    // A popup that has session storage; the mocked SDK is shared.
+    vi.resetModules();
+    names = await import("./duskNames.js");
+  });
+
+  // What the node is asked, by method, through the fetch a reader was given.
+  async function readsThrough(call, methods) {
+    const asked = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        asked.push(String(url).split("/").pop());
+        return new Response(new Uint8Array([7, 7]), { status: 200 });
+      })
+    );
+    const { fetch, nodeUrl: node } = lens.createLensReader.mock.calls[call][1];
+    const replies = [];
+    for (const fn of methods) {
+      const res = await fetch(`${node}/on/contracts:${LENS}/${fn}`, { method: "POST", headers: OCTETS, body: new Uint8Array([1]) });
+      replies.push([...new Uint8Array(await res.arrayBuffer())]);
+    }
+    return { asked, replies };
+  }
+
+  it("are asked once a session: a later reader, a popup's or the background's, checks the replies kept", async () => {
+    useReader({ resolve: async () => active(moonlight(ACCOUNT), null) });
+    await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
+    const first = await readsThrough(0, ["binding", "lens_interface", "resolve"]);
+    expect(first.asked).toEqual(["binding", "lens_interface", "resolve"]);
+
+    // Another popup: its own modules, the same session.
+    vi.resetModules();
+    names = await import("./duskNames.js");
+    await names.resolveDuskName("bob.dusk", { nodeUrl: TESTNET });
+    const later = await readsThrough(1, ["binding", "lens_interface", "resolve"]);
+    expect(later.asked).toEqual(["resolve"]);
+    expect(later.replies).toEqual(first.replies);
+  });
+
+  it("are asked again after a reader refused the lens's deployment", async () => {
+    useReader({ resolve: async () => active(moonlight(ACCOUNT), null) });
+    await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
+    await readsThrough(0, ["binding", "lens_interface"]);
+
+    vi.resetModules();
+    names = await import("./duskNames.js");
+    useReader({
+      resolve: async () => {
+        throw new lens.LensReaderError("deployment", "The deployed lens's binding isn't the release's");
+      },
+    });
+    await expect(names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET })).resolves.toMatchObject({ reason: "lookup_failed" });
+    vi.resetModules();
+    names = await import("./duskNames.js");
+    useReader({ resolve: async () => active(moonlight(ACCOUNT), null) });
+    await names.resolveDuskName("alice.dusk", { nodeUrl: TESTNET });
+    expect((await readsThrough(2, ["binding", "lens_interface"])).asked).toEqual(["binding", "lens_interface"]);
+  });
+});
+
 describe("lookupDuskName", () => {
   it("shares a running lookup and reuses its answer for a minute", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });

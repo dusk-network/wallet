@@ -1269,25 +1269,6 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // The node's network, by the chain ID kept with it (settings.js).
         const { chainId } = settings;
 
-        // Get network status and check if we need to refresh it
-        let networkStatus = await getNetworkStatus();
-        if (isStatusStale(networkStatus, 30000)) {
-          // Kick off a background check (don't await). A node whose chain ID
-          // wasn't read yet gets it there: the popup is told to draw again.
-          checkAllEndpoints({
-            nodeUrl: settings.nodeUrl,
-            proverUrl: settings.proverUrl,
-            archiverUrl: settings.archiverUrl,
-          })
-            .then(async () => {
-              const now = await getSettings();
-              if (now.nodeUrl === settings.nodeUrl && now.chainId !== chainId) {
-                await runtimeSendMessage({ type: "DUSK_UI_NETWORK_CHANGED" }).catch(() => {});
-              }
-            })
-            .catch(() => {});
-        }
-
         if (status.isUnlocked) {
           let publicBalanceAvailable = false;
 
@@ -1350,6 +1331,28 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           } else {
             shieldedError = balanceError;
           }
+        }
+
+        // The endpoints, checked at most every 5 minutes, and after 30 s
+        // while something fails: the balance read now, the node at the last
+        // check, or a node whose chain ID wasn't read yet. A check runs in
+        // the background; one that reads the chain ID tells the popup to
+        // draw again.
+        const networkStatus = await getNetworkStatus();
+        const failing = Boolean(balanceError) || networkStatus?.nodeStatus === "offline" || !Number.isInteger(chainId);
+        if (isStatusStale(networkStatus, failing ? 30_000 : 5 * 60_000)) {
+          checkAllEndpoints({
+            nodeUrl: settings.nodeUrl,
+            proverUrl: settings.proverUrl,
+            archiverUrl: settings.archiverUrl,
+          })
+            .then(async () => {
+              const now = await getSettings();
+              if (now.nodeUrl === settings.nodeUrl && now.chainId !== chainId) {
+                await runtimeSendMessage({ type: "DUSK_UI_NETWORK_CHANGED" }).catch(() => {});
+              }
+            })
+            .catch(() => {});
         }
 
         sendResponse({

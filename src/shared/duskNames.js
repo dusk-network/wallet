@@ -14,6 +14,8 @@ import { PINNED_RELEASES } from "@duskdomains/sdk/releases";
 import { createMulticallFetch } from "@hdauven/dusk-multicall";
 
 import { assetUrl } from "../platform/assets.js";
+import { storageSessionGet, storageSessionRemove, storageSessionSet } from "../platform/extensionApi.js";
+import { bytesToHex, hexToBytes } from "./bytes.js";
 import { classifyDuskIdentifier } from "./duskIdentifiers.js";
 import { networkForNode } from "./nodeNetwork.js";
 import { duskNamesNetwork, rememberVerifiedName } from "./verifiedNames.js";
@@ -55,6 +57,64 @@ function bundledFetch(release, nodeUrl) {
   };
 }
 
+// The lens's binding and interface, asked once a session: a reader checks
+// them before its first read, and every reader built since, in another popup
+// or the background, checks the same replies, kept in the browser's session
+// storage (in this page's memory where there is none, as in the engine).
+// A lookup that found the lens's deployment wrong forgets them, and the next
+// reader asks the node again.
+const ONCE_A_SESSION = new Set(["binding", "lens_interface"]);
+const sessionReplies = new Map();
+const replyKey = (release, method) => `dusk_names_lens_v1:${release.lens.contractId}:${method}`;
+
+async function keptReply(key) {
+  if (sessionReplies.has(key)) return sessionReplies.get(key);
+  try {
+    const hex = (await storageSessionGet(key))?.[key];
+    if (typeof hex === "string") {
+      sessionReplies.set(key, hex);
+      return hex;
+    }
+  } catch {
+    // No session storage here: this page's memory alone.
+  }
+  return null;
+}
+
+async function keepReply(key, hex) {
+  sessionReplies.set(key, hex);
+  await storageSessionSet({ [key]: hex }).catch(() => {});
+}
+
+async function forgetReplies(release) {
+  const keys = [...ONCE_A_SESSION].map((method) => replyKey(release, method));
+  for (const key of keys) sessionReplies.delete(key);
+  await storageSessionRemove(keys).catch(() => {});
+}
+
+// `fetch`, with the lens's binding and interface answered from the session
+// once a reader asked the node for them.
+function onceASession(release, nodeUrl, fetch) {
+  const prefix = `${nodeUrl}/on/contracts:${release.lens.contractId}/`;
+  return async (input, init) => {
+    const url = String(input?.href ?? input?.url ?? input);
+    const method = url.startsWith(prefix) ? url.slice(prefix.length) : "";
+    if (!ONCE_A_SESSION.has(method)) return fetch(input, init);
+    const key = replyKey(release, method);
+    const kept = await keptReply(key);
+    if (kept !== null) return new Response(hexToBytes(kept), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
+    const res = await fetch(input, init);
+    if (res.ok) await keepReply(key, bytesToHex(new Uint8Array(await res.clone().arrayBuffer())));
+    return res;
+  };
+}
+
+// A lookup's failure: one that found the lens's deployment wrong forgets the
+// replies kept, so they are asked again.
+function failed(release, error) {
+  if (error?.reason === "deployment") forgetReplies(release).catch(() => {});
+}
+
 // The SDK's reader and account check, loaded on the first lookup.
 const loadSdk = () => import("./duskNamesSdk.js");
 
@@ -87,7 +147,11 @@ function readerFor(createLensReader, network, nodeUrl, { batched = false } = {})
   const promise = createLensReader(release, {
     nodeUrl,
     artifactBaseUrl: release.artifactBaseUrl,
-    fetch: batched ? createMulticallFetch({ nodeUrl, multicallId, fetch: direct, gasFor: lensGas(release) }) : direct,
+    fetch: onceASession(
+      release,
+      nodeUrl,
+      batched ? createMulticallFetch({ nodeUrl, multicallId, fetch: direct, gasFor: lensGas(release) }) : direct
+    ),
   });
   const entry = { nodeUrl, promise };
   cache.set(network, entry);
@@ -131,7 +195,8 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
     if (status !== "Active") return fail("lookup_failed");
     if (!account && !address) return fail("no_account");
     return { ok: true, name, ...(account ? { account } : {}), ...(address ? { address } : {}) };
-  } catch {
+  } catch (error) {
+    failed(PINNED_RELEASES[network], error);
     return fail("lookup_failed");
   }
 }
@@ -163,6 +228,7 @@ export async function resolvePrimaryName(account, { nodeUrl, batched = false } =
     return name === null || typeof name === "string" ? { ok: true, name } : { ok: false, reason: "lookup_failed" };
   } catch (error) {
     if (batched && shortOfGas(error)) return resolvePrimaryName(account, { nodeUrl });
+    failed(PINNED_RELEASES[network], error);
     return { ok: false, reason: "lookup_failed" };
   }
 }
@@ -336,7 +402,8 @@ export async function lookupRecipientNames(accounts, { nodeUrl } = {}) {
   try {
     sdk = await loadSdk();
     reader = await readerFor(sdk.createLensReader, network, nodeHref(nodeUrl), { batched: true });
-  } catch {
+  } catch (error) {
+    failed(PINNED_RELEASES[network], error);
     return out;
   }
   // Started in one task, so one aggregate takes them.
@@ -348,6 +415,8 @@ export async function lookupRecipientNames(accounts, { nodeUrl } = {}) {
       if (name === null || typeof name === "string") out.set(list[i], name);
     } else if (shortOfGas(result.reason)) {
       again.push(list[i]);
+    } else {
+      failed(PINNED_RELEASES[network], result.reason);
     }
   });
   for (const account of again) {

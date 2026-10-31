@@ -63,6 +63,41 @@ const transactionLocks = new Map();
 // profile: kept through a switch to another wallet and back, while a send
 // may still be pending; gone on lock, and with the wallet it's for.
 const moonlightNonces = new Map();
+
+// Reads shared for a few seconds: the popup asks for the same public balance,
+// Sozu status and token balances many times as it opens and draws. Each is
+// kept by the unlock, the node and its chain, and what it reads, the account
+// among it (one wallet's one profile, never another wallet's). A send, a
+// transaction's result and a lock drop them all; a read that failed is made
+// again by the next caller.
+const SHARE_MS = 5_000;
+const sharedReads = new Map();
+const forgetSharedReads = () => sharedReads.clear();
+
+function sharedRead(what, read) {
+  const key = [unlockGeneration, engineConfig.nodeUrl, nodeChainId() ?? "", what].join("|");
+  const kept = sharedReads.get(key);
+  if (kept && (kept.at === null || Date.now() - kept.at < SHARE_MS)) return kept.promise;
+  const entry = { at: null, promise: null };
+  entry.promise = Promise.resolve()
+    .then(read)
+    .then(
+      (value) => {
+        entry.at = Date.now();
+        return value;
+      },
+      (error) => {
+        if (sharedReads.get(key) === entry) sharedReads.delete(key);
+        throw error;
+      }
+    );
+  sharedReads.set(key, entry);
+  return entry.promise;
+}
+
+// A profile's public balance, read once for a few seconds whoever asks.
+const publicBalanceOf = (profile) =>
+  sharedRead(`balance|${profile.account}`, () => withTimeout(state.bookkeeper.balance(profile.account), 12_000, "Balance request timed out"));
 // The wallet ID of each wallet held (by its vault ID) that was unlocked
 // since the unlock, for what's kept by wallet ID.
 const heldWalletIds = new Map();
@@ -807,6 +842,7 @@ function clearWalletState() {
 
 export function lock() {
   unlockGeneration += 1;
+  forgetSharedReads();
   clearWalletState();
   moonlightNonces.clear();
   heldWalletIds.clear();
@@ -1610,11 +1646,7 @@ export async function getPublicBalance(params = {}) {
   const profileIndex = resolveProfileIndex(params.profileIndex);
   const profile = await ensureProfileIndex(profileIndex);
   await assertApprovalContext(params, profileIndex);
-  return await withTimeout(
-    state.bookkeeper.balance(profile.account),
-    12_000,
-    "Balance request timed out"
-  );
+  return await publicBalanceOf(profile);
 }
 
 export async function getMinimumStake() {
@@ -1720,11 +1752,9 @@ async function loadStakePosition(profile, profileIndex) {
       12_000,
       "Stake owner request timed out"
     ).catch((error) => ({ __error: error?.message ?? String(error) })),
-    withTimeout(
-      state.bookkeeper.balance(profile.account),
-      12_000,
-      "Stake profile balance request timed out"
-    ).catch((error) => ({ __error: error?.message ?? String(error) })),
+    withTimeout(publicBalanceOf(profile), 12_000, "Stake profile balance request timed out").catch((error) => ({
+      __error: error?.message ?? String(error),
+    })),
   ]);
   const safeInfo = info?.__error ? null : info;
   const safeBalance = balance?.__error ? null : balance;
@@ -1883,17 +1913,19 @@ export async function getDrc20Balance(params = {}) {
 
   const network = await ensureNetwork();
   const driverKey = normalizeTokenDriver(params?.driver);
-  const driver = await getDriver(driverKey);
-  const c = new Contract({ contractId: contractIdBytes, driver, network });
+  return await sharedRead(`drc20|${bytesToHex(contractIdBytes)}|${driverKey}|${profile.account}`, async () => {
+    const driver = await getDriver(driverKey);
+    const c = new Contract({ contractId: contractIdBytes, driver, network });
 
-  const out = await c.call.balance_of(
-    driverKey === DRIVER_KEYS.SOZU_STAKED_DUSK
-      ? profile.account.toString()
-      : { account: { External: profile.account.toString() } }
-  );
+    const out = await c.call.balance_of(
+      driverKey === DRIVER_KEYS.SOZU_STAKED_DUSK
+        ? profile.account.toString()
+        : { account: { External: profile.account.toString() } }
+    );
 
-  // Data-driver returns bigints as strings.
-  return String(out ?? "0");
+    // Data-driver returns bigints as strings.
+    return String(out ?? "0");
+  });
 }
 
 /**
@@ -1994,6 +2026,12 @@ export async function getSozuStatus(params = {}) {
   const network = await ensureNetwork();
   const idx = resolveProfileIndex(params?.profileIndex);
   const profile = await ensureProfileIndex(idx);
+  return await sharedRead(`sozu|${idx}|${profile.account}`, () => readSozuOf(network, idx, profile));
+}
+
+// What getSozuStatus reads for one profile: the pool, its position and fees,
+// and the profile's public balance.
+async function readSozuOf(network, idx, profile) {
   const chainId = nodeChainId();
   const networkKey = networkKeyOf(chainId, engineConfig.nodeUrl);
   const sozu = networkOf(chainId)?.sozu ?? null;
@@ -2009,11 +2047,7 @@ export async function getSozuStatus(params = {}) {
   const { pool: poolId, stDusk, substrate } = sozu.fallbacks;
   const fallbackContracts = { hub: sozu.hub, pool: poolId, substrate, "staked-dusk": stDusk };
 
-  const balanceRead = withTimeout(
-    state.bookkeeper.balance(profile.account),
-    8_000,
-    "Timed out reading Sozu funding balance"
-  ).catch(() => null);
+  const balanceRead = withTimeout(publicBalanceOf(profile), 8_000, "Timed out reading Sozu funding balance").catch(() => null);
 
   let read = null;
   let reason = "";
@@ -3287,7 +3321,7 @@ export function sendTransaction(params) {
     }
     return sendTransactionUnlocked(
       params && typeof params === "object" ? { ...params, profileIndex } : params
-    );
+    ).finally(forgetSharedReads);
   });
 }
 
@@ -3561,11 +3595,14 @@ export async function waitTxExecuted(hash, opts = {}) {
     throw new Error("Transaction executed watcher not available");
   }
 
-  return await withTimeout(
+  const event = await withTimeout(
     Promise.resolve(executed()),
     timeoutMs,
     `Timed out waiting for transaction execution (${hash.slice(0, 12)}…)`
   );
+  // Its result changes balances: the next read asks the node.
+  forgetSharedReads();
+  return event;
 }
 
 /**

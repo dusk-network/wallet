@@ -63,6 +63,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Read a balance, Sozu's status or a token's balance once for a few seconds, checked the network's endpoints at most every 5 minutes unless one fails, and checked the .dusk lens once a session.
 - Found where a deposit to DuskEVM arrived in fewer requests.
 - Kept site connections, sends and DuskEVM arrivals per wallet: a site connected to one wallet sees nothing of another.
 - Filled every word box from a whole recovery phrase pasted into any of them, with 24 boxes for 24 words.

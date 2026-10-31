@@ -913,6 +913,45 @@ describe("walletEngine", () => {
       await expect(engine.walletAccountsOf({ walletKey: "w2" })).rejects.toThrow("Wallet locked");
     });
 
+    it("shares a public balance read for a few seconds per wallet, profile and network, never another wallet's, and reads again after a send", async () => {
+      const reads = [];
+      globalThis.__W3SPER_BALANCE__ = vi.fn(async (account) => {
+        reads.push(String(account));
+        return { nonce: 0n, value: BigInt(reads.length) };
+      });
+      globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => ({ hash: "0xsent", nonce: tx.nonceValue + 1n }));
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+      try {
+        engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+        await engine.unlockWallets({ wallets, walletKey: "w1" });
+        const first = await engine.getPublicBalance();
+        // The popup asks again as it draws: the same read.
+        await expect(Promise.all([engine.getPublicBalance(), engine.getPublicBalance({ profileIndex: 0 })])).resolves.toEqual([first, first]);
+        expect(reads).toHaveLength(1);
+
+        // Another profile, another wallet's same profile, another network: each its own read.
+        await engine.getPublicBalance({ profileIndex: 1 });
+        await engine.switchWallet({ walletKey: "w2" });
+        await expect(engine.getPublicBalance()).resolves.not.toEqual(first);
+        engine.configure({ nodeUrl: "https://testnet.nodes.dusk.network" });
+        await engine.getPublicBalance();
+        expect(reads).toHaveLength(4);
+        expect(new Set(reads.slice(0, 3)).size).toBe(3);
+
+        // A few seconds on, or after a send: read again.
+        now.mockReturnValue(1_000_000 + 5_001);
+        await engine.getPublicBalance();
+        await engine.getPublicBalance();
+        expect(reads).toHaveLength(5);
+        await engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
+        await engine.getPublicBalance();
+        expect(reads).toHaveLength(6);
+      } finally {
+        now.mockRestore();
+        delete globalThis.__W3SPER_EXECUTE_IMPL__;
+      }
+    });
+
     it("keeps a wallet's next nonce through a switch away and back, while its send is pending; not past its removal or a lock", async () => {
       const nonces = [];
       globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => {
@@ -1603,13 +1642,48 @@ describe("walletEngine", () => {
     // Only the pool's driver is loaded; the hub has none.
     expect([...new Set(globalThis.__W3SPER_DRIVER_GETS__)]).toEqual(["sozu_pool"]);
 
-    // The next refresh: one query again, the hub asked again in it, as it can name others.
+    // Asked again as the popup draws, and the public balance beside it: the same reads.
+    const balances = vi.fn(async () => ({ nonce: 0n, value: 0n }));
+    globalThis.__W3SPER_BALANCE__ = balances;
     await engine.getSozuStatus();
+    await engine.getPublicBalance();
+    expect(queries()).toHaveLength(1);
+    // The next refresh, a few seconds on: one query again, the hub asked again in it, as it can name others.
+    const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_001);
+    try {
+      await engine.getSozuStatus();
+      await engine.getPublicBalance();
+    } finally {
+      later.mockRestore();
+    }
     expect(queries()).toHaveLength(2);
+    expect(balances).toHaveBeenCalledTimes(1);
     expect(envelopeCalls(queries()[1][1].body).map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)).toEqual(
       calls.map((c) => `${c.contract.slice(0, 8)}.${c.fnName}`)
     );
     delete globalThis.__W3SPER_DRIVER_GETS__;
+  });
+
+  it("reads a token's balance once for a few seconds per profile, and again after a send", async () => {
+    engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const TOKEN = "cd".repeat(32);
+    const node = vi.fn(async () => new Response(new TextEncoder().encode('"42"')));
+    vi.stubGlobal("fetch", node);
+    globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => ({ hash: "0xsent", nonce: tx.nonceValue + 1n }));
+    const reads = () => node.mock.calls.filter(([url]) => String(url).endsWith(`/on/contracts:${TOKEN}/balance_of`)).length;
+    try {
+      // The assets view asks on every draw until the answer comes.
+      await expect(Promise.all([engine.getDrc20Balance({ contractId: TOKEN }), engine.getDrc20Balance({ contractId: TOKEN })])).resolves.toEqual(["42", "42"]);
+      expect(reads()).toBe(1);
+      await engine.getDrc20Balance({ contractId: TOKEN, profileIndex: 1 });
+      expect(reads()).toBe(2);
+      await engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
+      await engine.getDrc20Balance({ contractId: TOKEN });
+      expect(reads()).toBe(3);
+    } finally {
+      delete globalThis.__W3SPER_EXECUTE_IMPL__;
+    }
   });
 
   it("reads the Sozu of the network a custom node says it's on, by the chain ID its settings keep", async () => {
