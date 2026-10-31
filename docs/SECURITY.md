@@ -62,7 +62,7 @@ const key = await crypto.subtle.deriveKey(
 ```
 
 Every recovery phrase on the device is sealed under the same password, each
-with its own salt and IV (`dusk_vault_v2`, see [ARCHITECTURE.md](ARCHITECTURE.md#vault-encrypted-mnemonics)).
+with its own IV, wallets added with the salt of one already there (`dusk_vault_v2`, see [ARCHITECTURE.md](ARCHITECTURE.md#vault-encrypted-mnemonics)).
 Adding a wallet, removing one and changing the password each ask for the
 password the wallets were unlocked with, and every change is read back and
 checked before it's kept. Nothing

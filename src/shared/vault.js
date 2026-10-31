@@ -3,9 +3,13 @@ import { isTauriRuntime } from "../platform/runtime.js";
 import { withStorageLock } from "./storageLock.js";
 import { bytesToHex, sha256Hex } from "./bytes.js";
 import {
-  decryptMnemonic,
+  base64ToBytes,
+  bytesToBase64,
+  decryptMnemonicWithKey,
+  deriveVaultKey,
   deserializeEncryptInfo,
-  encryptMnemonic,
+  encryptMnemonicWithKey,
+  newKeySalt,
   serializeEncryptInfo,
   utf8ToBytes,
 } from "./crypto.js";
@@ -15,10 +19,12 @@ import {
 // - Extension/web: STORAGE_KEYS.VAULT_V2 holds
 //     { version: 2, wallets: [{ id, n, data, iv, salt, iterations }] }
 //   Each wallet's phrase is sealed as the first vault sealed its one
-//   (crypto.js: PBKDF2-SHA-256, 900,000 iterations, AES-GCM-256, a salt and an
-//   IV of its own), so v1's record moves over as it is. `id` names the wallet
-//   to the engine and the switcher; `n` is its number, "Wallet 2", which stays
-//   when another wallet goes.
+//   (crypto.js: PBKDF2-SHA-256, 900,000 iterations, AES-GCM-256), with an IV
+//   of its own, so v1's record moves over as it is, its salt with it. A wallet
+//   added reuses the salt and iterations of one already here, so an unlock
+//   derives the key once for all of them; a new password gives them all one
+//   new salt. `id` names the wallet to the engine and the switcher; `n` is its
+//   number, "Wallet 2", which stays when another wallet goes.
 // - Tauri: a Stronghold snapshot, encrypted with the password, keeps a key per
 //   wallet ("wallet:<id>") and their list ("wallets").
 //
@@ -158,14 +164,41 @@ const canonical = (value) =>
 const sameRecord = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 const sealedOf = ({ data, iv, salt, iterations }) => ({ data, iv, salt, iterations });
 
-async function seal(mnemonic, password) {
-  return serializeEncryptInfo(await encryptMnemonic(mnemonic, password));
+// The keys one password makes during one unlock or change of the vault: a
+// PBKDF2 per salt and iteration count, however many phrases share them.
+function keyring(password) {
+  const keys = new Map();
+  return (salt, iterations) => {
+    const id = `${salt}:${iterations}`;
+    if (!keys.has(id)) {
+      const key = Promise.resolve().then(() => deriveVaultKey(password, base64ToBytes(String(salt)), iterations));
+      // A salt that isn't one fails each phrase that has it, on its own.
+      key.catch(() => {});
+      keys.set(id, key);
+    }
+    return keys.get(id);
+  };
 }
 
-// The phrase `sealed` holds, or null when the password doesn't open it.
-async function openSealed(sealed, password) {
+// A salt of its own, for a new vault's phrase or a new password's.
+function freshSalt() {
+  const { salt, iterations } = newKeySalt();
+  return { salt: bytesToBase64(salt), iterations };
+}
+
+// `mnemonic` sealed with the keyring's password, under the salt and
+// iterations of `like` (a phrase here, or freshSalt()) and an IV of its own.
+async function seal(mnemonic, keys, like) {
+  const key = await keys(like.salt, like.iterations);
+  return serializeEncryptInfo(
+    await encryptMnemonicWithKey(mnemonic, key, { salt: base64ToBytes(like.salt), iterations: like.iterations })
+  );
+}
+
+// The phrase `sealed` holds, or null when the keyring's password doesn't open it.
+async function openSealed(sealed, keys) {
   try {
-    return await decryptMnemonic(deserializeEncryptInfo(sealed), password);
+    return await decryptMnemonicWithKey(deserializeEncryptInfo(sealed), await keys(sealed.salt, sealed.iterations));
   } catch {
     return null;
   }
@@ -187,7 +220,7 @@ async function readV2() {
 }
 
 // Write `next` as v2, read it back, and check it: the wallets in `changed`
-// open with their password to their phrase, every other wallet is as it was,
+// open with their keyring to their phrase, every other wallet is as it was,
 // and those in `gone` are gone. Otherwise, a read back that failed included,
 // v2 is put back as it was (`previous`, null for none), and it throws.
 async function writeV2(next, { previous, changed = [], gone = [] }) {
@@ -200,9 +233,9 @@ async function writeV2(next, { previous, changed = [], gone = [] }) {
       const got = back.wallets.find((w) => w.id === want.id);
       if (!got || !sameRecord(got, want)) return false;
     }
-    for (const { id, mnemonic, password } of changed) {
+    for (const { id, mnemonic, keys } of changed) {
       const got = back.wallets.find((w) => w.id === id);
-      if (!got || (await openSealed(got, password)) !== mnemonic) return false;
+      if (!got || (await openSealed(got, keys)) !== mnemonic) return false;
     }
     return true;
   })().catch(() => false);
@@ -215,14 +248,14 @@ async function writeV2(next, { previous, changed = [], gone = [] }) {
 // v2 opens to the phrase already (a move cut short after its write, or the
 // same phrase), then v2 read back and opened with the password, and only then
 // v1 removed. Returns the wallet that holds the phrase.
-async function moveV1(v1, mnemonic, password, opened) {
+async function moveV1(v1, mnemonic, keys, opened) {
   const v2 = await readV2();
   if (v2 !== null && !isVaultV2(v2)) throw new Error(UNSUPPORTED);
   const wallets = v2?.wallets ?? [];
   const same = opened.find((w) => samePhrase(w.mnemonic, mnemonic));
   if (same) {
     const back = (await readV2())?.wallets?.find((w) => w.id === same.id);
-    if (!back || !samePhrase(await openSealed(back, password), mnemonic)) throw new Error("The wallet vault couldn't be moved");
+    if (!back || !samePhrase(await openSealed(back, keys), mnemonic)) throw new Error("The wallet vault couldn't be moved");
     await storage.remove(STORAGE_KEYS.VAULT);
     return publicOf(same);
   }
@@ -231,7 +264,7 @@ async function moveV1(v1, mnemonic, password, opened) {
   const broken = wallets.find((w) => w.id === id);
   const holder = { id, n: broken?.n ?? nextNumber([...wallets, ...opened]), ...sealedOf(v1) };
   const next = { version: VAULT_VERSION, wallets: broken ? wallets.map((w) => (w.id === id ? holder : w)) : [...wallets, holder] };
-  await writeV2(next, { previous: v2, changed: [{ id, mnemonic, password }] });
+  await writeV2(next, { previous: v2, changed: [{ id, mnemonic, keys }] });
   await storage.remove(STORAGE_KEYS.VAULT);
   return publicOf(holder);
 }
@@ -239,7 +272,8 @@ async function moveV1(v1, mnemonic, password, opened) {
 // Every wallet the password opens, with v1's moved in when it opens: the
 // unlock's work, and what each change of the vault checks the password with.
 // `opened` is empty for a password that opens nothing; `v1Left` says v1 opened
-// but couldn't be moved this time, and stays.
+// but couldn't be moved this time, and stays. `keys` are the password's, for
+// a change to seal with.
 async function openVault(password) {
   const { v1, v2 } = await readStored();
   if (!v1 && !v2) throw new Error(NO_VAULT);
@@ -248,16 +282,17 @@ async function openVault(password) {
   if (!isVaultV2(v2) && !isSealed(v1)) throw new Error(UNSUPPORTED);
   await checkUnlockRateLimit();
 
+  const keys = keyring(password);
   const wallets = (isVaultV2(v2) ? v2.wallets : []).filter(isWallet);
   const opened = (
-    await Promise.all(wallets.map(async (w) => ({ ...publicOf(w), mnemonic: await openSealed(w, password) })))
+    await Promise.all(wallets.map(async (w) => ({ ...publicOf(w), mnemonic: await openSealed(w, keys) })))
   ).filter((w) => w.mnemonic !== null);
-  const fromV1 = isSealed(v1) ? await openSealed(v1, password) : null;
+  const fromV1 = isSealed(v1) ? await openSealed(v1, keys) : null;
   let v1Left = false;
   if (fromV1 !== null) {
     let moved;
     try {
-      moved = await moveV1(v1, fromV1, password, opened);
+      moved = await moveV1(v1, fromV1, keys, opened);
     } catch {
       // v1 stays, and opens this time as it did before: the next unlock moves it.
       v1Left = true;
@@ -266,7 +301,7 @@ async function openVault(password) {
     if (!opened.some((w) => w.id === moved.id || samePhrase(w.mnemonic, fromV1))) opened.push({ ...moved, mnemonic: fromV1 });
   }
   opened.sort(byNumber);
-  return { record: await readV2(), opened, v1Left };
+  return { record: await readV2(), opened, v1Left, keys };
 }
 
 // ---------------------------------------------------------------------------
@@ -532,9 +567,10 @@ export function createVault(mnemonic, password) {
 
     const { v1, v2 } = await readStored();
     if (v1 || v2) throw new Error("A wallet vault already exists. Reset it first.");
+    const keys = keyring(p);
     await writeV2(
-      { version: VAULT_VERSION, wallets: [{ ...wallet, ...(await seal(m, p)) }] },
-      { previous: null, changed: [{ id: wallet.id, mnemonic: m, password: p }] }
+      { version: VAULT_VERSION, wallets: [{ ...wallet, ...(await seal(m, keys, freshSalt())) }] },
+      { previous: null, changed: [{ id: wallet.id, mnemonic: m, keys }] }
     );
     await resetUnlockFailures();
     return wallet;
@@ -574,12 +610,12 @@ async function openForChange(password, held = []) {
     if (v1Left) throw new Error(NOT_SAVED);
     return { record: null, opened: wallets };
   }
-  const { record, opened, v1Left } = await openVault(password);
+  const { record, opened, v1Left, keys } = await openVault(password);
   if (!opened.length || !ofEvery(opened)) throw await incorrectPassword();
   await resetUnlockFailures();
   if (record !== null && !isVaultV2(record)) throw new Error(UNSUPPORTED);
   if (v1Left || !isVaultV2(record)) throw new Error(NOT_SAVED);
-  return { record, opened };
+  return { record, opened, keys };
 }
 
 /**
@@ -595,7 +631,7 @@ export function addVaultWallet(mnemonic, password, { held = [] } = {}) {
   return vaultLock(async () => {
     const m = String(mnemonic ?? "").trim();
     const p = String(password ?? "");
-    const { record, opened } = await openForChange(p, held);
+    const { record, opened, keys } = await openForChange(p, held);
     if (opened.some((w) => samePhrase(w.mnemonic, m))) throw new Error(DUPLICATE_PHRASE);
     const wallet = { id: newWalletId(), n: nextNumber([...(record?.wallets ?? []), ...opened]) };
 
@@ -608,9 +644,12 @@ export function addVaultWallet(mnemonic, password, { held = [] } = {}) {
       return wallet;
     }
 
+    // Sealed with the salt of a wallet here that the password opens: its key,
+    // derived as the vault opened, seals it, and opens them all next time.
+    const like = record.wallets.find((w) => opened.some((o) => o.id === w.id)) ?? freshSalt();
     await writeV2(
-      { version: VAULT_VERSION, wallets: [...record.wallets, { ...wallet, ...(await seal(m, p)) }] },
-      { previous: record, changed: [{ id: wallet.id, mnemonic: m, password: p }] }
+      { version: VAULT_VERSION, wallets: [...record.wallets, { ...wallet, ...(await seal(m, keys, like)) }] },
+      { previous: record, changed: [{ id: wallet.id, mnemonic: m, keys }] }
     );
     return wallet;
   });
@@ -670,14 +709,17 @@ export function changeVaultPassword(password, newPassword, { held = [] } = {}) {
 
     const { record, opened } = await openForChange(p, held);
     const phrases = new Map(opened.map((w) => [w.id, w.mnemonic]));
+    // One new salt for all of them: the new password's key, derived once.
+    const keys = keyring(np);
+    const like = freshSalt();
     const wallets = await Promise.all(
-      record.wallets.map(async (w) => (phrases.has(w.id) ? { ...publicOf(w), ...(await seal(phrases.get(w.id), np)) } : w))
+      record.wallets.map(async (w) => (phrases.has(w.id) ? { ...publicOf(w), ...(await seal(phrases.get(w.id), keys, like)) } : w))
     );
     await writeV2(
       { version: VAULT_VERSION, wallets },
       {
         previous: record,
-        changed: [...phrases].map(([id, mnemonic]) => ({ id, mnemonic, password: np })),
+        changed: [...phrases].map(([id, mnemonic]) => ({ id, mnemonic, keys })),
       }
     );
     return true;

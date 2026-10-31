@@ -78,18 +78,50 @@ async function getDerivedKey(pwd, salt, iterations = DEFAULT_PBKDF2_ITERATIONS) 
 }
 
 /**
+ * The key a password makes with a salt: PBKDF2-SHA-256 at `iterations`, never
+ * fewer than the default, to an AES-GCM-256 key. Every phrase sealed with
+ * that salt opens with it, so it's derived once for all of them.
+ * @param {string} pwd
+ * @param {Uint8Array} salt
+ * @param {number} [iterations]
+ */
+export async function deriveVaultKey(pwd, salt, iterations = DEFAULT_PBKDF2_ITERATIONS) {
+  const iterRaw = Number(iterations);
+  if (!Number.isFinite(iterRaw) || iterRaw < DEFAULT_PBKDF2_ITERATIONS) {
+    throw new Error("Vault format not supported");
+  }
+  return getDerivedKey(pwd, salt, iterRaw);
+}
+
+/** A new random salt, with the iterations a key for it is derived with. */
+export function newKeySalt() {
+  return { salt: crypto.getRandomValues(new Uint8Array(32)), iterations: DEFAULT_PBKDF2_ITERATIONS };
+}
+
+/**
+ * `buffer` sealed with a key derived for `salt` and `iterations`, under a
+ * fresh IV.
+ * @param {BufferSource} buffer
+ * @param {CryptoKey} key
+ * @param {{salt:Uint8Array, iterations:number}} derivedWith
+ * @returns {Promise<{data:Uint8Array, iv:Uint8Array, salt:Uint8Array, iterations:number}>}
+ */
+export async function encryptBufferWithKey(buffer, key, { salt, iterations }) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, buffer)
+  );
+  return { data, iv, salt, iterations };
+}
+
+/**
  * @param {BufferSource} buffer
  * @param {string} pwd
  * @returns {Promise<{data:Uint8Array, iv:Uint8Array, salt:Uint8Array, iterations:number}>}
  */
 export async function encryptBuffer(buffer, pwd) {
-  const salt = crypto.getRandomValues(new Uint8Array(32));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await getDerivedKey(pwd, salt, DEFAULT_PBKDF2_ITERATIONS);
-  const data = new Uint8Array(
-    await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, buffer)
-  );
-  return { data, iv, salt, iterations: DEFAULT_PBKDF2_ITERATIONS };
+  const derivedWith = newKeySalt();
+  return encryptBufferWithKey(buffer, await deriveVaultKey(pwd, derivedWith.salt, derivedWith.iterations), derivedWith);
 }
 
 /**
@@ -97,13 +129,21 @@ export async function encryptBuffer(buffer, pwd) {
  * @param {string} pwd
  */
 export async function decryptBuffer(encryptInfo, pwd) {
-  const { data, iv, salt } = encryptInfo;
-  const iterRaw = Number(encryptInfo?.iterations);
-  if (!Number.isFinite(iterRaw) || iterRaw < DEFAULT_PBKDF2_ITERATIONS) {
-    throw new Error("Vault format not supported");
+  const key = await deriveVaultKey(pwd, encryptInfo.salt, encryptInfo?.iterations);
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv: encryptInfo.iv }, key, encryptInfo.data);
+}
+
+// The phrase's bytes, wiped once `fn` is done with them.
+async function withPhraseBytes(bytes, fn) {
+  try {
+    return await fn(bytes);
+  } finally {
+    try {
+      bytes.fill(0);
+    } catch {
+      // ignore
+    }
   }
-  const key = await getDerivedKey(pwd, salt, iterRaw);
-  return crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
 }
 
 /**
@@ -111,16 +151,18 @@ export async function decryptBuffer(encryptInfo, pwd) {
  * @param {string} pwd
  */
 export async function encryptMnemonic(mnemonic, pwd) {
-  const bytes = utf8ToBytes(mnemonic);
-  try {
-    return await encryptBuffer(bytes, pwd);
-  } finally {
-    try {
-      bytes.fill(0);
-    } catch {
-      // ignore
-    }
-  }
+  return withPhraseBytes(utf8ToBytes(mnemonic), (bytes) => encryptBuffer(bytes, pwd));
+}
+
+/**
+ * `mnemonic` sealed with a key derived for `salt` and `iterations`
+ * (deriveVaultKey), under a fresh IV.
+ * @param {string} mnemonic
+ * @param {CryptoKey} key
+ * @param {{salt:Uint8Array, iterations:number}} derivedWith
+ */
+export async function encryptMnemonicWithKey(mnemonic, key, derivedWith) {
+  return withPhraseBytes(utf8ToBytes(mnemonic), (bytes) => encryptBufferWithKey(bytes, key, derivedWith));
 }
 
 /**
@@ -128,17 +170,17 @@ export async function encryptMnemonic(mnemonic, pwd) {
  * @param {string} pwd
  */
 export async function decryptMnemonic(encryptInfo, pwd) {
-  const buffer = await decryptBuffer(encryptInfo, pwd);
-  const bytes = new Uint8Array(buffer);
-  try {
-    return bytesToUtf8(bytes);
-  } finally {
-    try {
-      bytes.fill(0);
-    } catch {
-      // ignore
-    }
-  }
+  return withPhraseBytes(new Uint8Array(await decryptBuffer(encryptInfo, pwd)), bytesToUtf8);
+}
+
+/**
+ * The phrase `encryptInfo` holds, opened with the key derived for its salt.
+ * @param {{data:Uint8Array, iv:Uint8Array}} encryptInfo
+ * @param {CryptoKey} key
+ */
+export async function decryptMnemonicWithKey(encryptInfo, key) {
+  const buffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv: encryptInfo.iv }, key, encryptInfo.data);
+  return withPhraseBytes(new Uint8Array(buffer), bytesToUtf8);
 }
 
 /**

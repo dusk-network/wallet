@@ -523,6 +523,50 @@ const clearGuard = () => delete store[GUARD];
       expect(phrases(await vault.unlockVault("an older password"))).toEqual([OTHER]);
     });
 
+    it("derives the key once per salt: 1 derivation for 3 wallets added after the move, 2 beside a moved v1 record with a salt of its own", async () => {
+      const FIRST = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong";
+      const THIRD = "letter advice cage absurd amount doctor acoustic avoid letter advice cage above";
+      const added = [OTHER, twentyfour.mnemonic, THIRD];
+      const derivations = vi.spyOn(crypto.subtle, "deriveKey");
+      const cost = async (fn) => {
+        derivations.mockClear();
+        const out = await fn();
+        return [out, derivations.mock.calls.length];
+      };
+      const unlock = async (password) => cost(async () => phrases(await (await restart()).unlockVault(password)));
+      try {
+        // v1 moved, then 3 added: each with the moved record's salt and an IV of its own.
+        startWithV1(twelve);
+        let vault = await restart();
+        await vault.unlockVault(twelve.password);
+        await vault.addVaultWallet(added[0], twelve.password);
+        await vault.addVaultWallet(added[1], twelve.password);
+        await expect(cost(() => vault.addVaultWallet(added[2], twelve.password))).resolves.toEqual([expect.anything(), 1]);
+        expect(store[V2].wallets[0]).toMatchObject({ n: 1, ...twelve.vault });
+        expect(new Set(store[V2].wallets.map((w) => `${w.salt}:${w.iterations}`))).toEqual(new Set([`${twelve.vault.salt}:900000`]));
+        expect(new Set(store[V2].wallets.map((w) => w.iv)).size).toBe(4);
+        await expect(unlock(twelve.password)).resolves.toEqual([[twelve.mnemonic, ...added], 1]);
+
+        // A new vault and 3 added, then a v1 record moved in beside them with its own salt.
+        store = {};
+        vault = await restart();
+        await vault.createVault(FIRST, twelve.password);
+        for (const phrase of added) await vault.addVaultWallet(phrase, twelve.password);
+        store[V1] = structuredClone(twelve.vault);
+        await (await restart()).unlockVault(twelve.password);
+        expect(store[V2].wallets.at(-1)).toMatchObject({ n: 5, ...twelve.vault });
+        await expect(unlock(twelve.password)).resolves.toEqual([[FIRST, ...added, twelve.mnemonic], 2]);
+
+        // A new password: one new salt for all of them.
+        vault = await restart();
+        await expect(cost(() => vault.changeVaultPassword(twelve.password, "a new password"))).resolves.toEqual([true, 3]);
+        expect(new Set(store[V2].wallets.map((w) => w.salt)).size).toBe(1);
+        await expect(unlock("a new password")).resolves.toEqual([[FIRST, ...added, twelve.mnemonic], 1]);
+      } finally {
+        derivations.mockRestore();
+      }
+    });
+
     it("adds and changes only with the password that opens every wallet unlocked", async () => {
       // One wallet under another password (a vault set up again after a
       // downgrade), v1's under the password it was unlocked with.

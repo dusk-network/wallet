@@ -352,8 +352,10 @@ See [provider-api.md](provider-api.md) for full documentation.
 ### Vault (Encrypted Mnemonics)
 
 One password unlocks every recovery phrase on the device. Each phrase is
-sealed on its own, with its own salt and IV, under the same password and the
-same parameters (PBKDF2-SHA-256, 900,000 iterations, AES-GCM-256):
+sealed on its own, with an IV of its own, under the same password and the same
+parameters (PBKDF2-SHA-256, 900,000 iterations, AES-GCM-256). A wallet added
+reuses the salt of one already there, so an unlock derives the key once for
+all of them; a new password gives them all one new salt:
 
 ```js
 // Extension: chrome.storage.local
