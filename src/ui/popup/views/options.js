@@ -138,7 +138,8 @@ export function optionsView(ov, { state, actions } = {}) {
                 const names =
                   map && typeof map === "object" ? { ...map } : { ...(state.overview?.accountNames ?? {}), [String(i)]: label };
                 if (!label && !(map && typeof map === "object")) delete names[String(i)];
-                if (state.overview) state.overview.accountNames = names;
+                // On the wallet they were typed for: another opened meanwhile keeps its own.
+                if (state.overview?.accounts?.[0] === walletId) state.overview.accountNames = names;
                 if (ov && ov !== state.overview) ov.accountNames = names;
                 actions?.showToast?.("Label saved.");
                 actions?.renderHeader?.();

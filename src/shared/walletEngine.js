@@ -58,7 +58,22 @@ import { createLeafHeightTap, shieldedHistory } from "@dusk-network/app-core/shi
 
 const phoenixSpendLocks = new Map();
 const transactionLocks = new Map();
+// The next nonce of each public account sent from, by network, wallet and
+// profile: kept through a switch to another wallet and back, while a send
+// may still be pending; gone on lock, and with the wallet it's for.
 const moonlightNonces = new Map();
+// The wallet ID of each wallet held (by its vault ID) that was unlocked
+// since the unlock, for what's kept by wallet ID.
+const heldWalletIds = new Map();
+
+// Forget the nonces kept for a wallet: its ID is the key's second part from
+// the end, after the node URL.
+function forgetNonces(walletId) {
+  if (!walletId) return;
+  for (const key of [...moonlightNonces.keys()]) {
+    if (key.split("|").at(-2) === walletId) moonlightNonces.delete(key);
+  }
+}
 
 const isExtensionBackend =
   typeof __DUSK_BACKEND__ !== "undefined" && __DUSK_BACKEND__ === "extension";
@@ -785,7 +800,6 @@ function clearWalletState() {
   state.bookkeeper = null;
   state.treasuryAll = null;
   state.bookkeeperAll = null;
-  moonlightNonces.clear();
 
   // We keep the Network instance around; it holds no secrets and can stay connected.
 }
@@ -793,6 +807,8 @@ function clearWalletState() {
 export function lock() {
   unlockGeneration += 1;
   clearWalletState();
+  moonlightNonces.clear();
+  heldWalletIds.clear();
   state.vaultWallets.clear();
   state.vaultWallets = new Map();
   state.walletKey = "";
@@ -968,6 +984,7 @@ export async function unlockWithMnemonic(mnemonic, opts = {}) {
     state.walletId = walletId;
     state.walletKey = String(opts.walletKey ?? "");
     state.vaultWallets = opts.wallets instanceof Map ? opts.wallets : new Map();
+    if (state.walletKey) heldWalletIds.set(state.walletKey, walletId);
     state.profileGenerator = pg;
     state.profiles = profiles;
     state.currentIndex = currentIndex;
@@ -1089,6 +1106,8 @@ export function removeWallet({ walletKey } = {}) {
   const key = String(walletKey ?? "");
   if (key === state.walletKey) throw new Error("Switch to another wallet first.");
   state.vaultWallets.delete(key);
+  forgetNonces(heldWalletIds.get(key));
+  heldWalletIds.delete(key);
   return getWallets();
 }
 

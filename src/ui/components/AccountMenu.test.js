@@ -189,17 +189,18 @@ describe("profile switcher", () => {
       expect(shownLines(groups()[1].querySelectorAll(".acct-menu-row")[0])[1]).toBe("w2acct…000000");
     });
 
-    it("switches to another wallet's profile, and picks within the open one as before", async () => {
+    it("switches to another wallet's profile, and picks the open one's by its wallet too", async () => {
       menu.open(anchor, two);
       groups()[1].querySelectorAll(".net-menu-item")[1].click();
       await settle();
       expect(onSelectWalletProfile).toHaveBeenCalledWith("k2", 1, { ov: two });
-      expect(onSelectAccountIndex).not.toHaveBeenCalled();
 
+      // Another window may have opened another wallet by the click: the row names its own.
       menu.open(anchor, two);
       groups()[0].querySelectorAll(".net-menu-item")[1].click();
       await settle();
-      expect(onSelectAccountIndex).toHaveBeenCalledWith(1, { ov: two });
+      expect(onSelectWalletProfile).toHaveBeenLastCalledWith("k1", 1, { ov: two });
+      expect(onSelectAccountIndex).not.toHaveBeenCalled();
     });
 
     it("adds a wallet from the menu, after the wallets", async () => {

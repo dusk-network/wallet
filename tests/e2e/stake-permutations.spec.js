@@ -78,6 +78,7 @@ async function installStakeHarness(page, scenario) {
   await page.evaluate(
     async ({ minimumStakeLux, scenario }) => {
       const mod = await import("/src/ui/popup/views/stake.js");
+      const sentMod = await import("/src/ui/popup/views/sent.js");
       const root = document.createElement("main");
       root.id = "stake-harness";
       document.body.innerHTML = "";
@@ -105,7 +106,7 @@ async function installStakeHarness(page, scenario) {
           fundingMode: "account",
         },
       };
-      window.__stakeOv = { selectedAccountIndex: 0 };
+      window.__stakeOv = { isUnlocked: true, accounts: ["e2e-account-0", "e2e-account-1"], selectedAccountIndex: 0 };
       window.__stakeActions = {
         send: async (message) => {
           window.__stakeMessages.push(message);
@@ -125,14 +126,16 @@ async function installStakeHarness(page, scenario) {
       };
       window.__renderStake = () => {
         root.innerHTML = "";
+        // What the screen is drawn for, as the popup's render() gives it.
+        const actions = { ...window.__stakeActions, review: sentMod.reviewOf(window.__stakeOv, window.__stakeState) };
         const view = window.__stakeState.route === "stake_confirm"
           ? mod.stakeConfirmView(window.__stakeOv, {
               state: window.__stakeState,
-              actions: window.__stakeActions,
+              actions,
             })
           : mod.stakeFormView(window.__stakeOv, {
               state: window.__stakeState,
-              actions: window.__stakeActions,
+              actions,
             });
         for (const child of Array.isArray(view) ? view : [view]) {
           if (child) root.append(child);

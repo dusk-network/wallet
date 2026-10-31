@@ -913,6 +913,39 @@ describe("walletEngine", () => {
       await expect(engine.walletAccountsOf({ walletKey: "w2" })).rejects.toThrow("Wallet locked");
     });
 
+    it("keeps a wallet's next nonce through a switch away and back, while its send is pending; not past its removal or a lock", async () => {
+      const nonces = [];
+      globalThis.__W3SPER_EXECUTE_IMPL__ = vi.fn(async (tx) => {
+        nonces.push(tx.nonceValue);
+        return { hash: `0xhash${nonces.length}`, nonce: tx.nonceValue + 1n };
+      });
+      const send = () => engine.sendTransaction({ kind: "transfer", privacy: "public", to: "acct0", amount: "1" });
+      try {
+        // The node still has wallet 1's first send pending: its account's nonce reads 0.
+        await engine.unlockWallets({ wallets, walletKey: "w1" });
+        await send();
+        await engine.switchWallet({ walletKey: "w2" });
+        await engine.switchWallet({ walletKey: "w1" });
+        await send();
+        expect(nonces).toEqual([0n, 1n]);
+
+        // Wallet 2 removed and added again, or a lock: its nonce is read from the node again.
+        await engine.switchWallet({ walletKey: "w2" });
+        await send();
+        await engine.switchWallet({ walletKey: "w1" });
+        engine.removeWallet({ walletKey: "w2" });
+        engine.addWallet({ walletKey: "w2", n: 2, mnemonic: wallets[1].mnemonic });
+        await engine.switchWallet({ walletKey: "w2" });
+        await send();
+        engine.lock();
+        await engine.unlockWallets({ wallets, walletKey: "w1" });
+        await send();
+        expect(nonces).toEqual([0n, 1n, 0n, 0n, 0n]);
+      } finally {
+        delete globalThis.__W3SPER_EXECUTE_IMPL__;
+      }
+    });
+
     it("unlocks the first wallet when the one asked for isn't there", async () => {
       await engine.unlockWallets({ wallets, walletKey: "gone" });
       expect(engine.getWalletKey()).toBe("w1");

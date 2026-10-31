@@ -55,7 +55,7 @@ import {
 } from "../shared/txStore.js";
 import { submittedTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
-import { engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
+import { assertScreenWallet, engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "../wallet/walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
 import {
@@ -887,6 +887,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           if (!status.isUnlocked) {
             throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
           }
+          // For the wallet Settings showed it under, or for none.
+          assertScreenWallet(message, status);
           const account = Array.isArray(status.accounts) ? status.accounts[clamped] : "";
           if (!account) {
             throw rpcError(ERROR_CODES.INVALID_PARAMS, "Account is not available");
@@ -914,6 +916,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           if (!status.isUnlocked) {
             throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
           }
+          // For the wallet the page showed, or for none.
+          assertScreenWallet(message, status);
 
           const accounts = Array.isArray(status.accounts) ? status.accounts : [];
           const idxRaw =
@@ -948,6 +952,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
 
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          // From the wallet the page showed, or from none.
+          assertScreenWallet(message, await getEngineStatus());
           cancelPendingApprovals(origin, "Site disconnected");
           await revokeOrigin(origin, await siteWalletId());
         });
@@ -958,6 +964,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       if (message?.type === "DUSK_UI_CLEAR_PERMISSIONS") {
         // The wallet's own sites: another wallet's stay connected to it.
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          assertScreenWallet(message, await getEngineStatus());
           cancelPendingApprovals(null, "Sites disconnected");
           await clearPermissions(await siteWalletId());
         });

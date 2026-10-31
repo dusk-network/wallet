@@ -12,6 +12,7 @@ import { fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } fro
 import { iconSvg } from "./components/ActionIcon.js";
 import { parseDuskQrPayload } from "./components/QrScanModal.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
+import { reviewOf } from "./popup/views/sent.js";
 
 vi.mock("./components/QrScanModal.js", () => ({
   openQrScanModal: vi.fn(),
@@ -140,6 +141,8 @@ function mount(state, ov = overview(), send = async () => ({})) {
     send: vi.fn(send),
     render: vi.fn(async () => {}),
     showToast: vi.fn(),
+    // What the screen is drawn for, as render() gives it.
+    review: reviewOf(ov, state),
   };
   const view = state.route === "confirm" ? sendConfirmView : sendFormView;
   dom.document.body.replaceChildren(...view(ov, { state, actions }));
@@ -686,6 +689,7 @@ describe("review", () => {
     expect(view.actions.send).toHaveBeenLastCalledWith({
       type: "DUSK_UI_SEND_TX",
       params: expect.objectContaining({ to: ALICE.account, privacy: "public", gas: { limit: "2500000", price: "1" } }),
+      walletId: overview().accounts[0],
     });
   });
 
@@ -891,6 +895,7 @@ describe("a name and the recipient Contacts sets", () => {
     expect(review.actions.send).toHaveBeenCalledWith({
       type: "DUSK_UI_SEND_TX",
       params: expect.objectContaining({ privacy: "public", to: BOB.account }),
+      walletId: overview().accounts[0],
     });
   });
 });

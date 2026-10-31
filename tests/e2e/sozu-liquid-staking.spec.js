@@ -31,6 +31,7 @@ async function installStakeHarness(page, { networkName = "Testnet" } = {}) {
       const stakeMod = await import("/src/ui/popup/views/stake.js");
       const sozuMod = await import("/src/ui/popup/views/sozu.js");
       const assetsMod = await import("/src/ui/popup/views/assets.js");
+      const sentMod = await import("/src/ui/popup/views/sent.js");
       const root = document.createElement("main");
       document.body.innerHTML = "";
       document.body.append(root);
@@ -71,7 +72,7 @@ async function installStakeHarness(page, { networkName = "Testnet" } = {}) {
           position: { balance: positionBalanceLux },
         },
       };
-      window.__stakeOv = { selectedAccountIndex: 0, networkName };
+      window.__stakeOv = { isUnlocked: true, accounts: ["e2e-account-0", "e2e-account-1"], selectedAccountIndex: 0, networkName };
       window.__stakeActions = {
         send: async (message) => {
           window.__stakeMessages.push(message);
@@ -140,19 +141,21 @@ async function installStakeHarness(page, { networkName = "Testnet" } = {}) {
       };
       window.__renderStake = () => {
         root.innerHTML = "";
+        // What the screen is drawn for, as the popup's render() gives it.
+        const actions = { ...window.__stakeActions, review: sentMod.reviewOf(window.__stakeOv, window.__stakeState) };
         const view = window.__stakeState.route === "asset_token"
           ? assetsMod.assetTokenView(window.__stakeOv, {
               state: window.__stakeState,
-              actions: window.__stakeActions,
+              actions,
             })
           : window.__stakeState.route === "sozu_confirm"
           ? sozuMod.sozuConfirmView(window.__stakeOv, {
               state: window.__stakeState,
-              actions: window.__stakeActions,
+              actions,
             })
           : stakeMod.stakeFormView(window.__stakeOv, {
               state: window.__stakeState,
-              actions: window.__stakeActions,
+              actions,
             });
         for (const child of Array.isArray(view) ? view : [view]) {
           if (child) root.append(child);

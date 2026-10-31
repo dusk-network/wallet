@@ -11,8 +11,10 @@ import { menuKeys } from "./MenuKeys.js";
  * Uses the same base classes as the network menu so ui.css styling applies.
  * Each profile's row also copies its public account, reporting through `onCopy`.
  * With the overview's wallets, the profiles are under their wallet's name, as
- * "Wallet 1" and "Wallet 2": a profile of another wallet switches to that
- * wallet (`onSelectWalletProfile`), and Add wallet adds one (`onAddWallet`).
+ * "Wallet 1" and "Wallet 2", and each is picked by its wallet's key
+ * (`onSelectWalletProfile`): another wallet's opens that wallet, and the
+ * open one's is picked in it, whichever wallet is open by then. Add wallet
+ * adds one (`onAddWallet`).
  */
 export function createAccountMenuController({
   onSelectAccountIndex,
@@ -119,9 +121,16 @@ export function createAccountMenuController({
       return h("div", { class: "acct-menu-row", role: "none" }, [selectBtn, copy]);
     };
 
-    const ownRows = () =>
+    // The open wallet's profiles: by its key when the menu lists wallets.
+    const ownRows = (walletKey) =>
       displayAccounts.map((acct, i) =>
-        profileRow({ acct, i, names: nameMap, active: i === selIdx, select: () => onSelectAccountIndex?.(i, { ov }) })
+        profileRow({
+          acct,
+          i,
+          names: nameMap,
+          active: i === selIdx,
+          select: () => (walletKey ? onSelectWalletProfile?.(walletKey, i, { ov }) : onSelectAccountIndex?.(i, { ov })),
+        })
       );
 
     // Each wallet under its name: the unlocked one's profiles as the overview
@@ -132,7 +141,7 @@ export function createAccountMenuController({
       : wallets.map((w) => {
           const titleId = `acct-menu-wallet-${w.n}`;
           const rows = w.active
-            ? ownRows()
+            ? ownRows(w.key)
             : (Array.isArray(w.accounts) && w.accounts.length ? w.accounts : Array.from({ length: count }, () => "")).map((acct, i) =>
                 profileRow({ acct, i, names: w.accountNames, active: false, select: () => onSelectWalletProfile?.(w.key, i, { ov }) })
               );

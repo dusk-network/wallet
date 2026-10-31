@@ -26,7 +26,7 @@ import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { sozuConfirmView } from "./views/sozu.js";
-import { noteTxStatus, sentAnnouncement, sentView } from "./views/sent.js";
+import { noteTxStatus, reviewOf, sentAnnouncement, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -85,6 +85,7 @@ function applyLockedOverviewPatch() {
   try {
     // Locked here or elsewhere: whatever began unlocked is for nothing now.
     switchContext(state, "lock");
+    acctMenu.close();
     stopArrivalChecks();
     // A wallet being added keeps nothing of its new phrase through a lock.
     if (state.onboard?.adding) state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
@@ -161,6 +162,7 @@ async function maybeAutoWatchDashboardStDusk(ov) {
       type: "DUSK_UI_ASSETS_WATCH_TOKEN",
       profileIndex,
       token: makeSozuStDuskToken(contractId),
+      walletId: String(ov.accounts?.[0] ?? ""),
     });
     if (watchResp?.error) return;
 
@@ -401,10 +403,13 @@ function activeSiteBar(ov) {
     text: site.connected ? "Disconnect" : "Connect",
     onclick: async () => {
       try {
-        await send({
+        // For the wallet the bar was drawn for, or for none.
+        const res = await send({
           type: site.connected ? "DUSK_UI_DISCONNECT_ORIGIN" : "DUSK_UI_CONNECT_ORIGIN",
           origin: site.origin,
+          walletId: String(ov.accounts?.[0] ?? ""),
         });
+        if (res?.error) throw new Error(res.error.message ?? "Couldn't change the site's connection");
         showToast(site.connected ? "Site disconnected." : "Site connected.");
         state.needsRefresh = true;
         await render({ forceRefresh: true });
@@ -602,6 +607,8 @@ function installTxStatusListener() {
         // on the one before is for nothing now.
         if (msg?.type === "DUSK_UI_WALLET_CHANGED") {
           switchContext(state);
+          // A menu still open shows the wallet before: it goes.
+          acctMenu.close();
           state.needsRefresh = true;
           render({ forceRefresh: true }).catch(() => {});
           return;
@@ -773,11 +780,13 @@ const netMenu = createNetworkMenuController({
 
 // --- Account menu --------------------------------------------------------
 const acctMenu = createAccountMenuController({
-  onSelectAccountIndex: async (index) => {
+  // Without the wallets (none listed), a profile of the wallet the menu showed.
+  onSelectAccountIndex: async (index, { ov } = {}) => {
     try {
       acctMenu.close();
       switchContext(state);
-      const resp = await send({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index });
+      const walletId = ov?.isUnlocked ? String(ov.accounts?.[0] ?? "") : "";
+      const resp = await send({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index, ...(walletId ? { walletId } : {}) });
       if (isWalletLockedResponse(resp)) {
         applyLockedOverviewPatch();
         await render({ forceRefresh: true });
@@ -798,8 +807,10 @@ const acctMenu = createAccountMenuController({
       showToast(e?.message ?? String(e));
     }
   },
-  // A profile of another wallet: that wallet opens, without the password.
-  onSelectWalletProfile: async (walletKey, index) => {
+  // A profile by its wallet's key, as the menu showed it: another wallet's
+  // opens that wallet, without the password; the open one's is selected in
+  // it, whichever wallet another window opened meanwhile.
+  onSelectWalletProfile: async (walletKey, index, { ov } = {}) => {
     try {
       acctMenu.close();
       switchContext(state);
@@ -810,7 +821,7 @@ const acctMenu = createAccountMenuController({
         return;
       }
       if (resp?.error) throw new Error(resp.error.message ?? "Couldn't switch wallet");
-      showToast("Wallet switched.");
+      showToast(walletKey === ov?.walletKey ? "Profile selected." : "Wallet switched.");
       state.needsRefresh = true;
       await render({ forceRefresh: true });
     } catch (e) {
@@ -945,9 +956,17 @@ export async function render({ forceRefresh = false } = {}) {
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });
 
+  // What the screen drawn now is for (reviewOf): its wallet, profile and
+  // network, and the context. Its handlers act for that wallet alone, however
+  // late they run: every message they send names it (`walletId`), and the
+  // wallet refuses a change to another wallet's data, or a send from it.
+  const review = reviewOf(ov, state);
+  const forScreen = (message) =>
+    review.walletId && message && typeof message === "object" && !("walletId" in message) ? { ...message, walletId: review.walletId } : message;
   // `refresh` is the dashboard's Refresh, next to the balance.
   const actions = {
-    send,
+    send: (message) => send(forScreen(message)),
+    review,
     render,
     showToast,
     refresh: onRefresh,

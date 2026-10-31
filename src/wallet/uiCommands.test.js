@@ -226,6 +226,35 @@ describe("shared UI command dispatcher", () => {
     expect(adapters.engineCall).not.toHaveBeenCalled();
   });
 
+  it("changes one wallet's data only for the wallet its page showed", async () => {
+    const adapters = createAdapters();
+    const shown = { walletId: "another-wallet" };
+    for (const message of [
+      { type: "DUSK_UI_SET_ACCOUNT_INDEX", index: 0 },
+      { type: "DUSK_UI_ASSETS_WATCH_TOKEN", token: { contractId: "c" } },
+      { type: "DUSK_UI_ASSETS_UNWATCH_TOKEN", contractId: "c" },
+      { type: "DUSK_UI_ASSETS_WATCH_NFT", nft: { contractId: "c", tokenId: "1" } },
+      { type: "DUSK_UI_ASSETS_UNWATCH_NFT", contractId: "c", tokenId: "1" },
+      { type: "DUSK_UI_CONTACTS", op: "upsert", entry: { name: "A" } },
+      { type: "DUSK_UI_CONTACTS", op: "markChecked", entry: { name: "A" } },
+      { type: "DUSK_UI_CONTACTS", op: "remove", id: "1" },
+    ]) {
+      await expect(handleUiCommand({ ...message, ...shown }, adapters)).rejects.toMatchObject({
+        code: 4100,
+        message: "The wallet changed meanwhile.",
+      });
+    }
+    expect(mocks.setSettings).not.toHaveBeenCalled();
+    expect(adapters.engineCall).not.toHaveBeenCalled();
+    for (const change of [mocks.watchToken, mocks.unwatchToken, mocks.watchNft, mocks.unwatchNft, contacts.store.upsert, contacts.store.markChecked, contacts.store.remove]) {
+      expect(change).not.toHaveBeenCalled();
+    }
+
+    // Its own wallet, still open: made.
+    await handleUiCommand({ type: "DUSK_UI_ASSETS_UNWATCH_TOKEN", contractId: "c", walletId: " wallet-id " }, adapters);
+    expect(mocks.unwatchToken).toHaveBeenCalledWith("wallet-id", "https://nodes.example", 1, "c");
+  });
+
   it("rejects commands while the wallet is locked", async () => {
     const adapters = createAdapters();
     adapters.getEngineStatus.mockResolvedValue({ isUnlocked: false, accounts: [] });

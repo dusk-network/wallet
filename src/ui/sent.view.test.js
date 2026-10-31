@@ -8,7 +8,7 @@ import { installFakeDom, isShown, screenReaderText, settle, visibleText } from "
 import { isExtensionRuntime } from "../platform/runtime.js";
 import { convertConfirmView } from "./popup/views/convert.js";
 import { sendConfirmView } from "./popup/views/send.js";
-import { noteTxStatus, sentSteps, sentView } from "./popup/views/sent.js";
+import { noteTxStatus, reviewOf, sentSteps, sentView } from "./popup/views/sent.js";
 import { switchContext } from "./popup/context.js";
 
 vi.mock("../shared/addressBook.js", () => ({ listAddressBook: vi.fn(async () => []) }));
@@ -64,13 +64,15 @@ function popup(state, ov = overview(), reviewView = sendConfirmView) {
     showToast: vi.fn(),
     announce: vi.fn(),
   };
-  // Other routes (home) draw nothing here.
+  // Other routes (home) draw nothing here. Each screen gets what it's drawn
+  // for, as render() gives it (reviewOf).
   const draw = () => {
+    const screen = { state, actions: { ...actions, review: reviewOf(ov, state) } };
     const nodes =
       state.route === "sent"
-        ? sentView(ov, { state, actions })
+        ? sentView(ov, screen)
         : state.route === reviewRoute
-          ? reviewView(ov, { state, actions })
+          ? reviewView(ov, screen)
           : [];
     body.replaceChildren(...nodes);
   };
@@ -294,7 +296,13 @@ describe("after Confirm", () => {
     });
 
     it("sends only from the wallet reviewed, which the wallet refuses once another is open", async () => {
-      await expect(confirmWhile(false)).resolves.toEqual([expect.objectContaining({ walletId: ACCOUNT })]);
+      // The engine signs it only for the wallet, profile, account and network of the Review.
+      await expect(confirmWhile(false)).resolves.toEqual([
+        expect.objectContaining({
+          walletId: ACCOUNT,
+          params: expect.objectContaining({ _approvalContext: { walletId: ACCOUNT, profileIndex: 0, account: ACCOUNT, nodeUrl: NODE } }),
+        }),
+      ]);
     });
   });
 

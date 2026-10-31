@@ -544,6 +544,26 @@ describe("background Phoenix tx lifecycle flow", () => {
     expect(mocks.requestUserApproval).not.toHaveBeenCalled();
   });
 
+  it("changes a site's connection only for the wallet its page showed", async () => {
+    const { approveOrigin, getPermissions } = await import("../shared/permissions.js");
+    const origin = "https://dapp.example";
+    await approveOrigin(origin, { profileId: "account:0:acct0", accountIndex: 0, grants: { publicAccount: true } }, "acct0");
+    const before = await getPermissions("acct0");
+    for (const message of [
+      { type: "DUSK_UI_DISCONNECT_ORIGIN", origin },
+      { type: "DUSK_UI_CLEAR_PERMISSIONS" },
+      { type: "DUSK_UI_CONNECT_ORIGIN", origin },
+      { type: "DUSK_UI_SET_ORIGIN_ACCOUNT", origin, accountIndex: 0 },
+    ]) {
+      await expect(sendBackgroundMessage({ ...message, walletId: "acct9" })).resolves.toMatchObject({
+        error: { message: "The wallet changed meanwhile." },
+      });
+    }
+    await expect(getPermissions("acct0")).resolves.toEqual(before);
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin, walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+    await expect(getPermissions("acct0")).resolves.toEqual({});
+  });
+
   it("shows a site's request only on its own wallet: on another, there's nothing to show", async () => {
     const { getPending } = await import("../background/pending.js");
     getPending.mockReturnValueOnce({ kind: "connect", origin: "https://dapp.example", params: {}, shown: { walletId: "acct9" } });

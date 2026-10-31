@@ -8,7 +8,7 @@ import { lookupPrimaryName } from "../../../shared/duskNames.js";
 import { maxAmountLux } from "../../../shared/amount.js";
 import { stakeConfirmView, stakeFormView } from "./stake.js";
 import { sozuConfirmView } from "./sozu.js";
-import { sentView } from "./sent.js";
+import { reviewOf, sentView } from "./sent.js";
 import { switchContext } from "../context.js";
 
 // The profile's verified name, as the header shows it: none unless a test gives one.
@@ -90,7 +90,7 @@ const sozu = (over = {}) => ({
   ...over,
 });
 
-const ov = (over = {}) => ({ selectedAccountIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network", networkName: "Testnet", ...over });
+const ov = (over = {}) => ({ isUnlocked: true, accounts: [ACCOUNT], selectedAccountIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network", networkName: "Testnet", ...over });
 // What Liquid staking says after leaving a stake's Review the popup moved away from.
 const SWITCHED = "The network or profile changed, so nothing was sent. Check the stake again.";
 const LOCKED = "The wallet locked, so nothing was sent. Check the stake again.";
@@ -139,7 +139,8 @@ function popup(state, overview = ov(), { sozuStatus, rewardRate = null } = {}) {
             : state.route === "stake"
               ? stakeFormView
               : () => [];
-    body.replaceChildren(...view(overview, { state, actions }));
+    // What the screen is drawn for, as render() gives it (reviewOf).
+    body.replaceChildren(...view(overview, { state, actions: { ...actions, review: reviewOf(overview, state) } }));
   };
   draw();
   return { actions, draw };

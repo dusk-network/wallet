@@ -1,5 +1,6 @@
 import { getSettings, normalizeCustomGas, setSettings } from "../shared/settings.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
+import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { serializeStakeInfo } from "../shared/transport.js";
 import { nativeRewardRate } from "../shared/rewardRate.js";
 import { clearContacts, contactsStore } from "../shared/contactsStore.js";
@@ -51,6 +52,25 @@ export function engineContactsVault(engineCall) {
     open: (records) => engineCall("engine_contactsOpen", { records }),
     seal: (text) => engineCall("engine_contactsSeal", { text }),
   };
+}
+
+// What changes one wallet's data, besides its contacts: a profile chosen, a
+// token or an NFT watched or not.
+const ASSET_CHANGES = new Set(["DUSK_UI_ASSETS_WATCH_TOKEN", "DUSK_UI_ASSETS_UNWATCH_TOKEN", "DUSK_UI_ASSETS_WATCH_NFT", "DUSK_UI_ASSETS_UNWATCH_NFT"]);
+
+/**
+ * A page's change to one wallet's data is for the wallet its screen was
+ * drawn for (`message.walletId`, its first public account, which a page
+ * names): with another wallet unlocked now, it isn't made. Run it in the
+ * wallet lifecycle lock, with the status read there.
+ * @param {object} message
+ * @param {object} status - the engine's status
+ */
+export function assertScreenWallet(message, status) {
+  const shown = String(message?.walletId ?? "");
+  if (shown && shown !== (status?.isUnlocked ? String(status.accounts?.[0] ?? "") : "")) {
+    throw rpcError(ERROR_CODES.UNAUTHORIZED, "The wallet changed meanwhile.");
+  }
 }
 
 // The pages' contacts (shared/addressBook.js), by what they ask.
@@ -122,7 +142,13 @@ export async function handleUiCommand(
     }
     const op = Object.hasOwn(CONTACT_OPS, message.op) ? CONTACT_OPS[message.op] : null;
     if (!op) throw rpcError(ERROR_CODES.INVALID_PARAMS, "Unknown contacts operation");
-    return { ok: true, result: (await op(contactsStore(engineContactsVault(engineCall)), message)) ?? null };
+    const run = async () => ({ ok: true, result: (await op(contactsStore(engineContactsVault(engineCall)), message)) ?? null });
+    // A page's, for the wallet it showed: read or changed for that one alone.
+    if (!message.walletId) return run();
+    return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      assertScreenWallet(message, await getEngineStatus());
+      return run();
+    });
   }
 
   const engineCommand = ENGINE_COMMANDS[type];
@@ -131,8 +157,20 @@ export async function handleUiCommand(
     return null;
   }
 
+  // A change to one wallet's data runs in the wallet lifecycle lock, for the
+  // wallet its page showed.
+  const changes = type === "DUSK_UI_SET_ACCOUNT_INDEX" || ASSET_CHANGES.has(type);
+  if (changes) return withStorageLock(WALLET_LIFECYCLE_LOCK, () => runCommand(message, { engineCall, ensureEngineConfigured, getEngineStatus }));
+  return runCommand(message, { engineCall, ensureEngineConfigured, getEngineStatus });
+}
+
+async function runCommand(message, { engineCall, ensureEngineConfigured, getEngineStatus }) {
+  const type = message?.type;
+  const engineCommand = ENGINE_COMMANDS[type];
+  const assetCommand = ASSET_COMMANDS[type];
   const status = await getEngineStatus();
   if (!status.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+  if (type === "DUSK_UI_SET_ACCOUNT_INDEX" || ASSET_CHANGES.has(type)) assertScreenWallet(message, status);
 
   if (type === "DUSK_UI_SET_ACCOUNT_INDEX") {
     const index = Number(message.index);

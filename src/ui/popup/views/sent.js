@@ -195,13 +195,50 @@ export function sentAnnouncement(sent, ov) {
 }
 
 /**
+ * What a screen was drawn for: the wallet (by its first public account, with
+ * its profiles' accounts), the profile and the network of the overview it
+ * was built from, and the popup's context then. render() makes one for each
+ * screen it draws (`actions.review`): what the screen does, it does for that.
+ * @param {object} ov - the overview the screen is built from
+ * @param {object} state - the popup's state
+ */
+export function reviewOf(ov, state) {
+  const accounts = ov?.isUnlocked !== false && Array.isArray(ov?.accounts) ? ov.accounts.map(String) : [];
+  return Object.freeze({
+    walletId: String(accounts[0] ?? ""),
+    accounts: Object.freeze(accounts),
+    profileIndex: Number(ov?.selectedAccountIndex ?? 0) || 0,
+    nodeUrl: String(ov?.nodeUrl ?? ""),
+    context: state?.context,
+  });
+}
+
+// The transaction, for the wallet and the network its Review was drawn for
+// alone: the background refuses it from another wallet (`walletId`), and the
+// engine signs it only for that wallet, profile, account and network
+// (`_approvalContext`, the one a site's send carries too).
+function boundToReview(message, review) {
+  const params = message?.params && typeof message.params === "object" ? message.params : {};
+  const asked = Number(params.profileIndex);
+  const profileIndex = Number.isFinite(asked) && asked >= 0 ? Math.floor(asked) : review.profileIndex;
+  const _approvalContext = params._approvalContext ?? {
+    walletId: review.walletId,
+    profileIndex,
+    account: review.accounts[profileIndex] ?? "",
+    nodeUrl: review.nodeUrl,
+  };
+  return { ...message, walletId: review.walletId, params: { ...params, _approvalContext } };
+}
+
+/**
  * Sends a reviewed transaction and shows the Sent screen at once. A send the
  * network didn't take stays on the Sent screen with why, and Back returns to
- * the review with everything as it was.
+ * the review with everything as it was. It goes for what the Review was drawn
+ * for (`actions.review`, reviewOf), never for what the popup reads since.
  *
  * @param {object} opts
  * @param {object} opts.state
- * @param {object} opts.actions - send, render, announce
+ * @param {object} opts.actions - send, render, announce, and the Review's `review`
  * @param {object} opts.message - the DUSK_UI_SEND_TX message
  * @param {object} opts.summary - what the screen shows: title; amountLux (DUSK),
  *   amountDisplay and unit (a token), or amountText; to ({ name, address, short })
@@ -215,11 +252,9 @@ export function sentAnnouncement(sent, ov) {
  * @returns {Promise<object>} the Sent screen's state
  */
 export async function sendFromReview({ state, actions, message, summary, backRoute, doneRoute = "home", onSent, unchanged }) {
-  // The Review's wallet and context, before anything waits: a switch of
-  // network, profile or wallet, here or in another window, gives the popup
-  // another context, and the wallet sends only from the wallet named here.
-  const context = state.context;
-  const walletId = String(state.overview?.accounts?.[0] ?? "");
+  // A switch of network, profile or wallet since the Review was drawn, here
+  // or in another window, gave the popup another context.
+  const review = actions?.review;
   const sent = {
     id: ++sentSeq,
     ...summary,
@@ -232,7 +267,7 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     startedAt: Date.now(),
     sentAt: 0,
     // The explorer of the network it went to, whatever the popup switches to.
-    nodeUrl: String(state.overview?.nodeUrl ?? ""),
+    nodeUrl: String(review?.nodeUrl ?? ""),
     backRoute,
     doneRoute,
   };
@@ -246,11 +281,11 @@ export async function sendFromReview({ state, actions, message, summary, backRou
   }
 
   // The Sent screen was drawn first: a switch begun meanwhile stops it here.
-  const switched = state.context !== context || (typeof unchanged === "function" && !unchanged());
+  const switched = !review?.walletId || state.context !== review.context || (typeof unchanged === "function" && !unchanged());
   let res;
   if (!switched) {
     try {
-      res = await actions?.send?.(walletId ? { ...message, walletId } : message);
+      res = await actions?.send?.(boundToReview(message, review));
     } catch (e) {
       res = { error: { message: e?.message ?? String(e) } };
     }
