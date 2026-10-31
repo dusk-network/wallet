@@ -349,18 +349,37 @@ See [provider-api.md](provider-api.md) for full documentation.
 }
 ```
 
-### Vault (Encrypted Mnemonic)
+### Vault (Encrypted Mnemonics)
+
+One password unlocks every recovery phrase on the device. Each phrase is
+sealed on its own, with an IV of its own, under the same password and the same
+parameters (PBKDF2-SHA-256, 900,000 iterations, AES-GCM-256). A wallet added
+reuses the salt of one already there, so an unlock derives the key once for
+all of them; a new password gives them all one new salt:
 
 ```js
 // Extension: chrome.storage.local
 {
-  dusk_vault: {
-    ciphertext: "...",   // AES-GCM encrypted
-    iv: "...",
-    salt: "...",
+  dusk_vault_v2: {
+    version: 2,
+    wallets: [
+      { id: "…", n: 1, data: "…", iv: "…", salt: "…", iterations: 900000 },
+      { id: "…", n: 2, data: "…", iv: "…", salt: "…", iterations: 900000 },
+    ],
   }
 }
 ```
+
+`n` is the wallet's number ("Wallet 2"), kept when another wallet goes. The
+single-phrase vault from before (`dusk_vault_v1`) moves into `dusk_vault_v2`
+on the first unlock with its password: its record is copied as it is, v2 is
+read back and opened with the password, and only then is v1 removed. A move
+cut short at any step leaves v1 or v2 holding the phrase, and the next unlock
+finishes it. The desktop build keeps one Stronghold key per wallet.
+
+While unlocked, the engine holds every phrase the password opened, so a switch
+of wallet needs no password; a lock clears them all. Names, and the accounts
+the switcher shows for each wallet, live in `dusk_wallets_v1` (no secrets).
 
 ### Shielded Notes (IndexedDB)
 
@@ -377,14 +396,24 @@ See [provider-api.md](provider-api.md) for full documentation.
 ### Permissions
 
 ```js
-// Per-origin permission records
+// dusk_permissions_v2: per wallet (its first public account), then per origin
 {
-  "https://dapp.example.com": {
-    accounts: ["2Z8m..."],
-    connectedAt: 1706400000000,
+  "2Z8m...": {
+    "https://dapp.example.com": {
+      profileId: "account:0:2Z8m...",
+      accountIndex: 0,
+      grants: { publicAccount: true, shieldedReceiveAddress: false },
+      connectedAt: 1706400000000,
+      updatedAt: 1706400000000,
+    }
   }
 }
 ```
+
+A site sees only the wallet unlocked now, and only when it's connected to it.
+Connections from before (`dusk_permissions_v1`) move under the wallet whose
+profile they name. The transaction list and the deposits' arrivals on DuskEVM
+are kept per wallet too.
 
 ---
 

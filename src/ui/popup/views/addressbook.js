@@ -95,6 +95,8 @@ const setFieldError = (input, error, text) => {
 let formSeq = 0;
 
 export function addressBookView(ov, { state, actions } = {}) {
+  // The wallet whose contacts these are, as drawn: a change is for it alone.
+  const shown = { walletId: ov?.isUnlocked ? String(ov.accounts?.[0] ?? "") : "" };
   const ab = (state.addressBook ??= {
     mode: "manage",
     fromRoute: null,
@@ -335,7 +337,7 @@ export function addressBookView(ov, { state, actions } = {}) {
           const now = duskNameRecipient(res, { shielded: typ === "address" });
           if (now === addr) {
             // On the contact as saved now: one edited or deleted meanwhile stays so.
-            if (await markAddressBookNameChecked(entry)) await refreshItems();
+            if (await markAddressBookNameChecked(entry, Date.now(), shown)) await refreshItems();
           } else {
             nameCheck.textContent = `${entry.duskName} now points to another address. Edit the contact before you send to it.`;
             nameCheck.hidden = false;
@@ -568,7 +570,7 @@ export function addressBookView(ov, { state, actions } = {}) {
             type: ProfileGenerator.typeOf(t.address),
             duskName: t.duskName ?? null,
             checkedAt: t.checkedAt ?? null,
-          });
+          }, shown);
           await refreshItems();
           ab.prefillName = "";
 
@@ -600,7 +602,7 @@ export function addressBookView(ov, { state, actions } = {}) {
           onclick: async () => {
             if (!confirm("Delete this contact?")) return;
             try {
-              await removeAddressBookEntry(ab.editId);
+              await removeAddressBookEntry(ab.editId, shown);
               await refreshItems();
               actions?.showToast?.("Deleted contact", 1600);
               ab.view = "list";

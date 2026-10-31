@@ -80,6 +80,49 @@ describe("pending approvals", () => {
     ridSpy.mockRestore();
   });
 
+  it("keeps a request to one wallet: the one it was asked on, or the first its window shows; another ends it", async () => {
+    vi.resetModules();
+    const pending = await import("./pending.js");
+    const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValueOnce("rid-w1").mockReturnValueOnce("rid-locked");
+
+    const asked = pending.requestUserApproval("connect", "https://a.example", {}, { walletId: "w1" });
+    expect(pending.bindPendingWallet("rid-w1", "w1")).toBe(true);
+    expect(pending.bindPendingWallet("rid-w1", "w2")).toBe(false);
+    await expect(asked).rejects.toMatchObject({ code: 4001, message: "Wallet changed while awaiting approval" });
+    expect(pending.getPending("rid-w1")).toBeNull();
+
+    // Asked while locked: still locked, nothing is shown; then the first wallet shown.
+    const shown = { walletId: "" };
+    const lockedAsk = pending.requestUserApproval("sign_message", "https://b.example", {}, shown);
+    expect(pending.bindPendingWallet("rid-locked", "")).toBe(true);
+    expect(pending.bindPendingWallet("rid-locked", "w2")).toBe(true);
+    expect(shown.walletId).toBe("w2");
+    expect(pending.bindPendingWallet("rid-locked", "w1")).toBe(false);
+    await expect(lockedAsk).rejects.toMatchObject({ message: "Wallet changed while awaiting approval" });
+    ridSpy.mockRestore();
+  });
+
+  it("ends only the requests for the wallets named, one not yet shown counting as the open wallet's", async () => {
+    vi.resetModules();
+    const pending = await import("./pending.js");
+    const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValueOnce("rid-a").mockReturnValueOnce("rid-new");
+    const onA = pending.requestUserApproval("send_tx", "https://shop.example", {}, { walletId: "wa" });
+    const unshown = pending.requestUserApproval("connect", "https://other.example", {}, { walletId: "" });
+    const ended = [];
+    onA.catch(() => ended.push("a"));
+    unshown.catch(() => ended.push("unshown"));
+
+    pending.cancelPendingApprovals("https://shop.example", "Site disconnected", { wallets: ["wb"], open: "wa" });
+    pending.cancelPendingApprovals(null, "Sites disconnected", { wallets: ["wb"], open: "wa" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect([ended, pending.pendingApprovals.size]).toEqual([[], 2]);
+
+    pending.cancelPendingApprovals(null, "Sites disconnected", { wallets: ["wa"], open: "wa" });
+    await expect(onA).rejects.toMatchObject({ message: "Sites disconnected" });
+    await expect(unshown).rejects.toMatchObject({ message: "Sites disconnected" });
+    ridSpy.mockRestore();
+  });
+
   it("bounds approvals per origin and supports targeted cancellation", async () => {
     vi.resetModules();
     const pending = await import("./pending.js");

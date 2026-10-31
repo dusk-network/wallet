@@ -251,3 +251,14 @@ export async function unwatchNft(walletId, networkKey, profileIndex, contractId,
   await setAll(nextAll);
   return { tokens: p.tokens, nfts: nextNfts };
 }
+
+/**
+ * Forget a removed wallet's tokens and NFTs, on every network.
+ * @param {string} walletId
+ */
+export async function forgetWalletAssets(walletId) {
+  const id = String(walletId ?? "").trim();
+  if (!id) return;
+  const { [id]: _gone, ...rest } = await getAll();
+  await setAll(rest);
+}

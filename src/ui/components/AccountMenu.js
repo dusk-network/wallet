@@ -1,6 +1,7 @@
 import { h } from "../lib/dom.js";
 import { copyToClipboard } from "../lib/clipboard.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
+import { walletLabel } from "../../shared/wallets.js";
 import { iconSvg } from "./ActionIcon.js";
 import { shortAddressEl } from "./ShortAddress.js";
 import { menuKeys } from "./MenuKeys.js";
@@ -9,9 +10,16 @@ import { menuKeys } from "./MenuKeys.js";
  * Small controller that renders the profile selection menu under an anchor.
  * Uses the same base classes as the network menu so ui.css styling applies.
  * Each profile's row also copies its public account, reporting through `onCopy`.
+ * With the overview's wallets, the profiles are under their wallet's name, as
+ * "Wallet 1" and "Wallet 2", and each is picked by its wallet's key
+ * (`onSelectWalletProfile`): another wallet's opens that wallet, and the
+ * open one's is picked in it, whichever wallet is open by then. Add wallet
+ * adds one (`onAddWallet`).
  */
 export function createAccountMenuController({
   onSelectAccountIndex,
+  onSelectWalletProfile,
+  onAddWallet,
   onOpenOptions,
   onCopy,
 } = {}) {
@@ -46,9 +54,9 @@ export function createAccountMenuController({
 
     const nameMap = ov?.accountNames && typeof ov.accountNames === "object" ? ov.accountNames : {};
 
-    const items = displayAccounts.map((acct, i) => {
-      const active = i === selIdx;
-      const name = String(nameMap?.[String(i)] ?? "").trim();
+    // One profile's row: it selects the profile, and copies its account beside.
+    const profileRow = ({ acct, i, names, active, select }) => {
+      const name = String(names?.[String(i)] ?? "").trim();
       const label = name || `Profile ${i + 1}`;
 
       // Two lines: the label, then the profile's short account, after its
@@ -70,7 +78,7 @@ export function createAccountMenuController({
 
       const check = h("span", { class: "net-menu-check", "aria-hidden": "true", html: active ? iconSvg("check") : "" });
 
-      const select = h(
+      const selectBtn = h(
         "button",
         {
           class: `net-menu-item ${active ? "net-menu-item--active" : ""}`,
@@ -82,7 +90,7 @@ export function createAccountMenuController({
               const from = anchor;
               close();
               from?.focus();
-              await onSelectAccountIndex?.(i, { ov });
+              await select();
             } catch (e) {
               alert(e?.message ?? String(e));
             }
@@ -110,8 +118,58 @@ export function createAccountMenuController({
           })
         : null;
 
-      return h("div", { class: "acct-menu-row", role: "none" }, [select, copy]);
-    });
+      return h("div", { class: "acct-menu-row", role: "none" }, [selectBtn, copy]);
+    };
+
+    // The open wallet's profiles: by its key when the menu lists wallets.
+    const ownRows = (walletKey) =>
+      displayAccounts.map((acct, i) =>
+        profileRow({
+          acct,
+          i,
+          names: nameMap,
+          active: i === selIdx,
+          select: () => (walletKey ? onSelectWalletProfile?.(walletKey, i, { ov }) : onSelectAccountIndex?.(i, { ov })),
+        })
+      );
+
+    // Each wallet under its name: the unlocked one's profiles as the overview
+    // has them, another's as they were last shown.
+    const wallets = Array.isArray(ov?.wallets) && ov.wallets.length ? [...ov.wallets].sort((a, b) => a.n - b.n) : null;
+    const items = !wallets
+      ? ownRows()
+      : wallets.map((w) => {
+          const titleId = `acct-menu-wallet-${w.n}`;
+          const rows = w.active
+            ? ownRows(w.key)
+            : (Array.isArray(w.accounts) && w.accounts.length ? w.accounts : Array.from({ length: count }, () => "")).map((acct, i) =>
+                profileRow({ acct, i, names: w.accountNames, active: false, select: () => onSelectWalletProfile?.(w.key, i, { ov }) })
+              );
+          return h("div", { class: "acct-menu-wallet", role: "group", "aria-labelledby": titleId }, [
+            h("div", { class: "acct-menu-wallet-title", id: titleId, role: "presentation", text: walletLabel(w) }),
+            ...rows,
+          ]);
+        });
+
+    const addWalletBtn =
+      !wallets || typeof onAddWallet !== "function"
+        ? null
+        : h("button", {
+            class: "net-menu-item",
+            type: "button",
+            role: "menuitem",
+            onclick: async () => {
+              try {
+                close();
+                await onAddWallet();
+              } catch (e) {
+                alert(e?.message ?? String(e));
+              }
+            },
+          }, [
+            h("div", { class: "net-menu-item-left" }, [h("div", { class: "net-menu-item-label", text: "Add wallet" })]),
+            h("span", { class: "net-menu-check", "aria-hidden": "true", html: iconSvg("plus") }),
+          ]);
 
     const manageAccountsBtn =
       typeof onOpenOptions !== "function"
@@ -140,7 +198,8 @@ export function createAccountMenuController({
       h("div", { class: "net-menu-title", id: "acct-menu-title", text: "Select profile" }),
       h("div", { class: "net-menu-items", role: "menu", "aria-labelledby": "acct-menu-title" }, [
         ...items,
-        manageAccountsBtn ? h("div", { class: "divider", role: "separator" }) : null,
+        addWalletBtn || manageAccountsBtn ? h("div", { class: "divider", role: "separator" }) : null,
+        addWalletBtn,
         manageAccountsBtn,
       ].filter(Boolean)),
     ]);

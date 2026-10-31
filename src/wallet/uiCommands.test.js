@@ -21,6 +21,7 @@ const contacts = vi.hoisted(() => ({
   store: { list: vi.fn(), upsert: vi.fn(), markChecked: vi.fn(), remove: vi.fn() },
   vault: null,
   clearContacts: vi.fn(async () => {}),
+  forgetWalletContacts: vi.fn(async () => {}),
 }));
 vi.mock("../shared/contactsStore.js", () => ({
   contactsStore: (vault) => {
@@ -28,6 +29,7 @@ vi.mock("../shared/contactsStore.js", () => ({
     return contacts.store;
   },
   clearContacts: contacts.clearContacts,
+  forgetWalletContacts: contacts.forgetWalletContacts,
 }));
 
 vi.mock("../shared/assetsStore.js", () => ({
@@ -175,19 +177,10 @@ describe("shared UI command dispatcher", () => {
     expect(adapters.engineCall).toHaveBeenCalledWith("engine_selectAccount", { index: 1 });
   });
 
-  it("sets the shielded checkpoint for the primary profile", async () => {
+  it("sets no shielded checkpoint of its own: a new phrase's comes with the wallet it makes", async () => {
     const adapters = createAdapters({ bookmark: "b", block: "c" });
-
-    await expect(handleUiCommand({
-      type: "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW",
-    }, adapters)).resolves.toEqual({
-      ok: true,
-      result: { bookmark: "b", block: "c" },
-    });
-    expect(adapters.engineCall).toHaveBeenCalledWith(
-      "dusk_setShieldedCheckpointNow",
-      { profileIndex: 0 }
-    );
+    await expect(handleUiCommand({ type: "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW" }, adapters)).resolves.toBeNull();
+    expect(adapters.engineCall).not.toHaveBeenCalled();
   });
 
   it("asks the contacts store for the pages' contacts, which the engine's key opens", async () => {
@@ -218,12 +211,48 @@ describe("shared UI command dispatcher", () => {
     await expect(ask({ op: "toString" })).rejects.toMatchObject({ message: "Unknown contacts operation" });
   });
 
-  it("deletes every contact without the engine, the wallet locked or not", async () => {
+  it("deletes one wallet's contacts, the one its page showed and still open, and never every wallet's", async () => {
     const adapters = createAdapters();
-    adapters.getEngineStatus.mockResolvedValue({ isUnlocked: false, accounts: [] });
-    await expect(handleUiCommand({ type: "DUSK_UI_CONTACTS", op: "clear" }, adapters)).resolves.toEqual({ ok: true, result: true });
-    expect(contacts.clearContacts).toHaveBeenCalledTimes(1);
+    const clear = (more) => handleUiCommand({ type: "DUSK_UI_CONTACTS", op: "clear", ...more }, adapters);
+    await expect(clear({})).rejects.toMatchObject({ code: 4100, message: "Wallet locked" });
+    await expect(clear({ walletId: "another-wallet" })).rejects.toMatchObject({ code: 4100, message: "The wallet changed meanwhile." });
+    adapters.getEngineStatus.mockResolvedValueOnce({ isUnlocked: false, accounts: [] });
+    await expect(clear({ walletId: " wallet-id " })).rejects.toMatchObject({ code: 4100, message: "Wallet locked" });
+    expect(contacts.forgetWalletContacts).not.toHaveBeenCalled();
+
+    await expect(clear({ walletId: " wallet-id " })).resolves.toEqual({ ok: true, result: true });
+    expect(contacts.forgetWalletContacts.mock.calls).toEqual([[" wallet-id "]]);
+    expect(contacts.clearContacts).not.toHaveBeenCalled();
     expect(adapters.engineCall).not.toHaveBeenCalled();
+  });
+
+  it("changes one wallet's data only for the wallet its page showed", async () => {
+    const adapters = createAdapters();
+    const shown = { walletId: "another-wallet" };
+    for (const message of [
+      { type: "DUSK_UI_SET_ACCOUNT_INDEX", index: 0 },
+      { type: "DUSK_UI_ASSETS_WATCH_TOKEN", token: { contractId: "c" } },
+      { type: "DUSK_UI_ASSETS_UNWATCH_TOKEN", contractId: "c" },
+      { type: "DUSK_UI_ASSETS_WATCH_NFT", nft: { contractId: "c", tokenId: "1" } },
+      { type: "DUSK_UI_ASSETS_UNWATCH_NFT", contractId: "c", tokenId: "1" },
+      { type: "DUSK_UI_CONTACTS", op: "upsert", entry: { name: "A" } },
+      { type: "DUSK_UI_CONTACTS", op: "markChecked", entry: { name: "A" } },
+      { type: "DUSK_UI_CONTACTS", op: "remove", id: "1" },
+    ]) {
+      await expect(handleUiCommand({ ...message, ...shown }, adapters)).rejects.toMatchObject({
+        code: 4100,
+        message: "The wallet changed meanwhile.",
+      });
+    }
+    expect(mocks.setSettings).not.toHaveBeenCalled();
+    expect(adapters.engineCall).not.toHaveBeenCalled();
+    for (const change of [mocks.watchToken, mocks.unwatchToken, mocks.watchNft, mocks.unwatchNft, contacts.store.upsert, contacts.store.markChecked, contacts.store.remove]) {
+      expect(change).not.toHaveBeenCalled();
+    }
+
+    // Its own wallet, still open: made.
+    await handleUiCommand({ type: "DUSK_UI_ASSETS_UNWATCH_TOKEN", contractId: "c", walletId: " wallet-id " }, adapters);
+    expect(mocks.unwatchToken).toHaveBeenCalledWith("wallet-id", "https://nodes.example", 1, "c");
   });
 
   it("rejects commands while the wallet is locked", async () => {

@@ -24,7 +24,7 @@ import { bracketTitle } from "../../components/BracketTitle.js";
 import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
-import { profileNameEl } from "../../components/ProfileName.js";
+import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { sozuLiquidStakingView } from "./sozu.js";
 import { sendFromReview } from "./sent.js";
 
@@ -941,9 +941,10 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
         h("div", { class: "review-line", text: line }),
       ]),
       h("div", { class: "group" }, [
-        // One line, "alice.dusk · Public", as on Send's Review.
+        // One line, "alice.dusk · Public", as on Send's Review, after the
+        // wallet's name with more than one wallet.
         kvRow(kind === TX_KIND.STAKE ? "From" : "To", [
-          h("span", {}, [stakeName, h("span", { class: "kv-muted", text: d.payment === FUNDING_SHIELDED ? " · Shielded" : " · Public" })]),
+          h("span", {}, [withReviewWallet(stakeName, actions?.review), h("span", { class: "kv-muted", text: d.payment === FUNDING_SHIELDED ? " · Shielded" : " · Public" })]),
         ]),
         severalProfiles ? kvRow("Owner", profileName(ov, d.ownerProfileIndex)) : null,
         kind === TX_KIND.STAKE && !severalProfiles && !d.hasStake ? kvRow("Rewards start", "In about 6 to 12 hours") : null,

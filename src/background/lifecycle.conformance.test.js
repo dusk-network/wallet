@@ -21,7 +21,7 @@ describe("background lock lifecycle conformance", () => {
     const source = await readFile(path.resolve(process.cwd(), "src/background/index.js"), "utf8");
 
     expect(source).toMatch(
-      /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockVault\(password\)[\s\S]*?unlockEngine\(mnemonic\)[\s\S]*?broadcastProfilesChangedAll/
+      /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockVault\(password\)[\s\S]*?unlockEngine\(wallets, [\s\S]*?broadcastProfilesChangedAll/
     );
   });
 
@@ -29,17 +29,17 @@ describe("background lock lifecycle conformance", () => {
     const source = await readFile(path.resolve(process.cwd(), "src/background/index.js"), "utf8");
 
     expect(source).toMatch(
-      /message\?\.type === "DUSK_UI_CREATE_WALLET"[\s\S]*?finishPendingReset\(\)[\s\S]*?keepOnlyContactsOf\([\s\S]*?clearContacts\(\)[\s\S]*?createVault\(mnemonic, password\);\s*if \(pending\) await endReset\(\)/
+      /message\?\.type === "DUSK_UI_CREATE_WALLET"[\s\S]*?finishPendingReset\(\)[\s\S]*?keepOnlyContactsOf\([\s\S]*?clearContacts\(\)[\s\S]*?const wallet = await createVault\(mnemonic, password\);\s*if \(pending\) await endReset\(\)/
     );
     // A restore stays noted, with its wallet, until that wallet's vault is made.
     for (const file of ["src/background/index.js", "src/wallet/localBus.js"]) {
       const code = await readFile(path.resolve(process.cwd(), file), "utf8");
       expect(code, file).toMatch(
-        /message\?\.type === "DUSK_UI_RESTORE_WALLET"[\s\S]*?beginReset\(\{ keepContactsOf: walletId \}\)[\s\S]*?clearWalletData\(\{ keepContactsOf: walletId \}\)[\s\S]*?clearVault\(\);\s*await createVault\(mnemonic, password\);\s*await endReset\(\)/
+        /message\?\.type === "DUSK_UI_RESTORE_WALLET"[\s\S]*?beginReset\(\{ keepContactsOf: walletId \}\)[\s\S]*?clearWalletData\(\{ keepContactsOf: walletId \}\)[\s\S]*?clearVault\(\);\s*const restored = await createVault\(mnemonic, password\);\s*await endReset\(\)/
       );
     }
     expect(source).toMatch(
-      /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockEngine\(mnemonic\)[\s\S]*?moveLegacyContacts\(engineContactsVault\(engineCall\)\)/
+      /message\?\.type === "DUSK_UI_UNLOCK"[\s\S]*?unlockEngine\(wallets, [\s\S]*?moveLegacyContacts\(engineContactsVault\(engineCall\)\)/
     );
     expect(source).toMatch(
       /entry\.kind === "send_tx" && status\.isUnlocked[\s\S]*?contactsStore\(engineContactsVault\(engineCall\)\)\.list\(\)/

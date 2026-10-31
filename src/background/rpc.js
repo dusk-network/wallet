@@ -1,9 +1,10 @@
 import { loadVault } from "../shared/vault.js";
 import {
+  adoptLegacyPermissions,
   approveOrigin,
   getPermissionForOrigin,
   permissionProfileState,
-  revokeOrigin,
+  revokeOriginEverywhere,
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -42,6 +43,7 @@ import {
   invalidateEngineConfig,
 } from "./engineHost.js";
 import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
+import { siteWalletId } from "./siteWallet.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { readCurrent, siteNames } from "./siteNames.js";
 import { getTxEpoch, putTxMeta } from "../shared/txStore.js";
@@ -73,6 +75,20 @@ export async function handleRpc(origin, request) {
   if (!DAPP_RPC_METHODS.includes(method) && !DAPP_TOMBSTONED_METHODS.includes(method)) {
     throw rpcError(ERROR_CODES.METHOD_NOT_FOUND, `Unknown method: ${method}`);
   }
+
+  // The site's connection to the wallet it's connected to now (siteWallet.js):
+  // none of another wallet's. One from before wallets were kept apart that the
+  // unlock didn't move yet moves now, when it's of this wallet's profiles.
+  const permissionFor = async (status) => {
+    const current = status ?? (await getEngineStatus());
+    const walletId = await siteWalletId(current);
+    const perm = await getPermissionForOrigin(origin, walletId);
+    if (perm || !current?.isUnlocked) return perm;
+    // Most sites asking have none from before: those cost no move.
+    if (!(await getPermissionForOrigin(origin, ""))) return null;
+    const moved = await adoptLegacyPermissions(walletId, current.accounts).catch(() => 0);
+    return moved ? getPermissionForOrigin(origin, walletId) : null;
+  };
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
   const MAX_U64 = 18446744073709551615n;
@@ -303,8 +319,8 @@ export async function handleRpc(origin, request) {
   // waits for a lookup.
   function siteProfiles() {
     return readCurrent(async () => {
-      const perm = await getPermissionForOrigin(origin);
-      const status = perm ? await getEngineStatus() : null;
+      const status = await getEngineStatus();
+      const perm = await permissionFor(status);
       const account = profileFromPermission(status, perm)?.account;
       const names = account ? await siteNames(String((await getSettings())?.nodeUrl ?? ""), [account]) : null;
       const profile = profileFromPermission(status, perm, hasShieldedGrant(perm), names);
@@ -331,8 +347,9 @@ export async function handleRpc(origin, request) {
     });
   }
 
-  async function assertApprovalContext(expected) {
-    const permission = await getPermissionForOrigin(origin);
+  // `shown`: the wallet the prompt was for (promptFor), when there was one.
+  async function assertApprovalContext(expected, shown = null) {
+    const permission = await permissionFor();
     let current;
     try {
       current = await captureApprovalContext(permission);
@@ -344,7 +361,24 @@ export async function handleRpc(origin, request) {
     if (!current.isUnlocked || !current.walletId || keys.some((key) => current[key] !== expected[key])) {
       throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet changed while awaiting approval");
     }
+    if (shown) assertShownWallet(shown, current.walletId);
     return current;
+  }
+
+  // A prompt is for one wallet (pending.js): the one unlocked as the site
+  // asks (`state`: an engine status or an approval context), or, asked while
+  // locked, the one its window shows first. Its window shows no other.
+  function promptFor(state) {
+    return { walletId: state?.isUnlocked ? String(state.walletId ?? state.accounts?.[0] ?? "") : "" };
+  }
+
+  // What a prompt approved acts for its wallet alone, the one unlocked now:
+  // checked under the wallet lifecycle lock, before anything is kept, signed
+  // or sent.
+  function assertShownWallet(shown, walletId) {
+    if (!shown?.walletId || shown.walletId !== String(walletId ?? "")) {
+      throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet changed while awaiting approval");
+    }
   }
 
   function hasShieldedGrant(perm) {
@@ -375,8 +409,8 @@ export async function handleRpc(origin, request) {
     const requestedShieldedGrant = Boolean(options?.shieldedReceiveAddress);
     await ensureVaultForProfileRequest();
 
-    const existing = await getPermissionForOrigin(origin);
     const statusBeforePrompt = await getEngineStatus();
+    const existing = await permissionFor(statusBeforePrompt);
     const selectedProfile = profileFromStatus(
       statusBeforePrompt,
       statusBeforePrompt?.selectedAccountIndex ?? existing?.accountIndex ?? 0,
@@ -386,6 +420,7 @@ export async function handleRpc(origin, request) {
       requestedShieldedGrant ||
       (sameProfilePermission(existing, selectedProfile) && hasShieldedGrant(existing));
 
+    const shown = promptFor(statusBeforePrompt);
     const approved = await requestUserApproval("connect", origin, {
       requestedProfiles: true,
       shieldedReceiveAddress: requestedShieldedGrant,
@@ -398,7 +433,7 @@ export async function handleRpc(origin, request) {
       currentGrants: existing?.grants ?? null,
       reason: options?.reason,
       label: options?.label,
-    });
+    }, shown);
 
     return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
       const status = await getEngineStatusStrict();
@@ -407,11 +442,14 @@ export async function handleRpc(origin, request) {
       }
 
       const arr = Array.isArray(status.accounts) ? status.accounts : [];
+      // Granted to the wallet the prompt showed, still the one unlocked, or to none.
+      assertShownWallet(shown, arr[0]);
       const idx = sanitizeAccountIndex(approved?.accountIndex, arr.length, 0);
       const profile = profileFromStatus(status, idx, false);
       if (!profile) throw rpcError(ERROR_CODES.UNAUTHORIZED, "No wallet profile is available");
       const sameProfile = sameProfilePermission(existing, profile);
       const effectiveGrant = requestedShieldedGrant || (sameProfile && hasShieldedGrant(existing));
+      // That wallet's alone.
       const perm = await approveOrigin(origin, {
         profileId: profile.profileId,
         accountIndex: idx,
@@ -419,7 +457,7 @@ export async function handleRpc(origin, request) {
           publicAccount: true,
           shieldedReceiveAddress: effectiveGrant,
         },
-      });
+      }, String(arr[0] ?? ""));
       return { perm, status };
     });
   }
@@ -497,8 +535,8 @@ export async function handleRpc(origin, request) {
 
     case "dusk_requestShieldedAddress": {
       const options = firstParamObject(params);
-      const existing = await getPermissionForOrigin(origin);
       const status0 = await getEngineStatus();
+      const existing = await permissionFor(status0);
       const existingProfile = existing && status0?.isUnlocked
         ? profileFromPermission(status0, existing, true)
         : null;
@@ -526,7 +564,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_switchNetwork": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       // Switching networks only makes sense if the wallet exists.
@@ -597,12 +635,13 @@ export async function handleRpc(origin, request) {
       };
 
       // Ask user approval.
-      await requestUserApproval("switch_network", origin, { from, to });
+      const shown = promptFor(approvalContext);
+      await requestUserApproval("switch_network", origin, { from, to }, shown);
       // Then the node's chain ID, kept with it as Settings keeps a chosen
       // node's: a site's node is asked nothing before the user agreed.
       const chainId = await readChainId(targetNodeUrl);
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-        await assertApprovalContext(approvalContext);
+        await assertApprovalContext(approvalContext, shown);
         cancelPendingApprovals(null, "Network changed");
         await setSettings({ nodeUrl: targetNodeUrl, chainId });
         invalidateEngineConfig();
@@ -613,7 +652,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_getPublicBalance": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       const approvalContext = await captureApprovalContext(perm);
@@ -631,7 +670,7 @@ export async function handleRpc(origin, request) {
 
     case "dusk_estimateGas": {
       // Gas estimation is public info, but still require connection.
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       await ensureEngineConfigured();
@@ -639,7 +678,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_sendTransaction": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       if (!params || typeof params !== "object") {
@@ -730,9 +769,10 @@ export async function handleRpc(origin, request) {
 
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
-      const overrides = await requestUserApproval("send_tx", origin, approvalParams);
+      const shown = promptFor(approvalContext);
+      const overrides = await requestUserApproval("send_tx", origin, approvalParams, shown);
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-      const executionContext = await assertApprovalContext(approvalContext);
+      const executionContext = await assertApprovalContext(approvalContext, shown);
       const finalParams = applyTxDefaultsForRpc(mergeTxParams(baseParams, overrides), { dynamicPrice });
       finalParams.gas = validateGasShape(finalParams.gas);
 
@@ -756,7 +796,7 @@ export async function handleRpc(origin, request) {
         if (hash) {
           await putTxMeta(
             hash,
-            submittedTxMeta(finalParams, { origin, nodeUrl, profileIndex: idx, nullifiers: result?.nullifiers }, {
+            submittedTxMeta(finalParams, { walletId: executionContext.walletId, origin, nodeUrl, profileIndex: idx, nullifiers: result?.nullifiers }, {
               // Where a deposit to DuskEVM pays, the .dusk name a registration
               // registers, and a name's reservation, for Activity: the chain
               // keeps them in the call's bytes.
@@ -786,7 +826,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_watchAsset": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       // Normalize params: allow object or single-element array.
@@ -837,6 +877,7 @@ export async function handleRpc(origin, request) {
 
       // Ask the user to approve adding this asset (approval UI includes unlock).
       const approvalContext = await captureApprovalContext(perm);
+      const shown = promptFor(approvalContext);
       await requestUserApproval("watch_asset", origin, {
         type,
         options: {
@@ -844,10 +885,10 @@ export async function handleRpc(origin, request) {
           contractId,
           ...(tokenId ? { tokenId } : {}),
         },
-      });
+      }, shown);
 
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-      const executionContext = await assertApprovalContext(approvalContext);
+      const executionContext = await assertApprovalContext(approvalContext, shown);
       await ensureEngineConfigured();
       const idx = executionContext.profileIndex;
       const nodeUrl = executionContext.nodeUrl;
@@ -891,7 +932,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_signMessage": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       if (!params || typeof params !== "object") {
@@ -922,15 +963,16 @@ export async function handleRpc(origin, request) {
       const approvalContext = await captureApprovalContext(perm);
       const chainId = chainIdFromNodeUrl(approvalContext.nodeUrl);
 
+      const shown = promptFor(approvalContext);
       await requestUserApproval("sign_message", origin, {
         chainId,
         messageHash: `0x${messageHash}`,
         messageLen,
         messagePreview,
-      });
+      }, shown);
 
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-        const executionContext = await assertApprovalContext(approvalContext);
+        const executionContext = await assertApprovalContext(approvalContext, shown);
         await ensureEngineConfigured();
         return engineCall("dusk_signMessage", {
           origin,
@@ -945,7 +987,7 @@ export async function handleRpc(origin, request) {
     case "dusk_signTypedData": {
       // Connection is required up front, same as the sibling sign_* methods -
       // an unconnected origin should not be able to trigger any of the work below.
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       // Reject a non-object params before touching its shape any further.
@@ -1030,6 +1072,7 @@ export async function handleRpc(origin, request) {
       const { domain, types, primaryType, message } = typedInput;
 
       // Ask the user to approve.
+      const shown = promptFor(approvalContext);
       await requestUserApproval("sign_typed_data", origin, {
         domain,
         types,
@@ -1037,17 +1080,17 @@ export async function handleRpc(origin, request) {
         message,
         chainId: activeChainId,
         digestHex,
-      });
+      }, shown);
 
       // Sign under the wallet lifecycle lock, re-verifying that nothing the
       // approval depended on changed while the popup was open. A user can
       // switch network, lock, or change the connected profile mid-approval, and
       // a signature must not outlive the context it was approved under.
       // `assertApprovalContext` covers node URL (hence chain), profile index,
-      // permission identity, wallet identity, and unlock state; the engine
-      // re-checks its own view via `_approvalContext`.
+      // permission identity, wallet identity (the prompt's too), and unlock
+      // state; the engine re-checks its own view via `_approvalContext`.
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-        const executionContext = await assertApprovalContext(approvalContext);
+        const executionContext = await assertApprovalContext(approvalContext, shown);
         await ensureEngineConfigured();
 
         // The engine wraps this digest with the shared typed-data signature tag.
@@ -1072,7 +1115,7 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_signAuth": {
-      const perm = await getPermissionForOrigin(origin);
+      const perm = await permissionFor();
       if (!perm) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Not connected");
 
       if (!params || typeof params !== "object") {
@@ -1104,15 +1147,16 @@ export async function handleRpc(origin, request) {
       const approvalContext = await captureApprovalContext(perm);
       const chainId = chainIdFromNodeUrl(approvalContext.nodeUrl);
 
+      const shown = promptFor(approvalContext);
       await requestUserApproval("sign_auth", origin, {
         chainId,
         nonce,
         statement,
         expiresAt,
-      });
+      }, shown);
 
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-        const executionContext = await assertApprovalContext(approvalContext);
+        const executionContext = await assertApprovalContext(approvalContext, shown);
         await ensureEngineConfigured();
         return engineCall("dusk_signAuth", {
           origin,
@@ -1126,10 +1170,11 @@ export async function handleRpc(origin, request) {
       });
     }
 
+    // The site disconnects itself: from every wallet, as it can't tell them apart.
     case "dusk_disconnect": {
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         cancelPendingApprovals(origin, "Site disconnected");
-        await revokeOrigin(origin);
+        await revokeOriginEverywhere(origin);
         return true;
       });
     }

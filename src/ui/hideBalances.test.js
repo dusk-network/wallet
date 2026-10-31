@@ -6,7 +6,7 @@ import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
 import { installFakeDom, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
-import { assetTokenView, assetsSectionsView } from "./popup/views/assets.js";
+import { assetTokenView, assetsOwner, assetsSectionsView } from "./popup/views/assets.js";
 import { convertConfirmView, convertFormView } from "./popup/views/convert.js";
 import { homeView } from "./popup/views/home.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
@@ -43,10 +43,9 @@ const HIDDEN = { hideBalances: true };
 
 // The watched token, 123.45 TKN, with its balance just read.
 const assets = () => ({
+  owner: assetsOwner(overview()),
   loaded: true,
   loading: false,
-  networkKey: NODE,
-  profileIndex: 0,
   updatedAt: Date.now(),
   tokens: [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }],
   nfts: [],

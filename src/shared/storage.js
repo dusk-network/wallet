@@ -9,11 +9,13 @@ import { kv } from "../platform/storage.js";
 export const storage = kv;
 
 export const STORAGE_KEYS = {
-  VAULT: "dusk_vault_v1", // encrypted mnemonic
+  VAULT: "dusk_vault_v1", // the one encrypted mnemonic from before VAULT_V2; moved there on unlock (vault.js)
+  VAULT_V2: "dusk_vault_v2", // { version: 2, wallets: [{ id, n, data, iv, salt, iterations }] }: every wallet's encrypted mnemonic
   UNLOCK_GUARD: "dusk_unlock_guard_v1", // { failures, nextAllowedAt }
   SETTINGS: "dusk_settings_v1",
-  PERMISSIONS: "dusk_permissions_v1", // { [origin]: { accountIndex, connectedAt } }
-  TXS: "dusk_txs_v1", // { [hash]: { origin, nodeUrl, kind, submittedAt, status, error? } }
+  PERMISSIONS: "dusk_permissions_v1", // { [origin]: { profileId, accountIndex, grants, connectedAt, updatedAt } }: one wallet's sites, from before PERMISSIONS_V2; moved there on unlock
+  PERMISSIONS_V2: "dusk_permissions_v2", // { [walletId]: { [origin]: { profileId, accountIndex, grants, connectedAt, updatedAt } } }: each wallet's sites (permissions.js)
+  TXS: "dusk_txs_v1", // { [hash]: { walletId, origin, nodeUrl, kind, submittedAt, status, error? } }
   TXS_EPOCH: "dusk_txs_epoch_v1", // number: how many times TXS was cleared for a wallet reset
   ACCOUNT_NAMES: "dusk_account_names_v1", // { [walletId]: { [profileIndex]: string } }
   ADDRESS_BOOK: "dusk_addressbook_v1", // contacts in plain text, from before CONTACTS; moved there on unlock
@@ -23,6 +25,8 @@ export const STORAGE_KEYS = {
   REWARD_RATES: "dusk_reward_rates_v1", // { [network]: { at, rate } }: native staking's estimate, read once a day (rewardRate.js)
   AUTO_LOCK_ACTIVITY: "dusk_auto_lock_activity_v1", // { lastActivityAt }
   VERIFIED_NAMES: "dusk_verified_names_v1", // { [network]: { [account]: { name: string|null, at } } }
-  BRIDGE_ARRIVALS: "dusk_bridge_arrivals_v1", // { epoch, items: { [depositHash]: { hash, at } } }: deposits to DuskEVM seen there, under TXS_EPOCH (bridgeArrival.js)
+  BRIDGE_ARRIVALS: "dusk_bridge_arrivals_v1", // { epoch, items: { [depositHash]: { hash, at } } }: one wallet's arrivals, from before BRIDGE_ARRIVALS_V2; moved there on unlock
+  BRIDGE_ARRIVALS_V2: "dusk_bridge_arrivals_v2", // { epoch, wallets: { [walletId]: { [depositHash]: { hash, at } } } }: deposits to DuskEVM seen there, per wallet, under TXS_EPOCH (bridgeArrival.js)
   RESET_PENDING: "dusk_reset_pending_v1", // { at }: a wallet reset that hasn't cleared all the old wallet's data
+  WALLETS: "dusk_wallets_v1", // { active: key, wallets: { [key]: { walletId, accounts, name? } } }: what the switcher shows of each wallet (wallets.js)
 };

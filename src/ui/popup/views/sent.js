@@ -9,6 +9,7 @@ import { txErrorText } from "./txDisplay.js";
 import { zonedClockText } from "../../lib/time.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
+import { walletNameOf } from "../../components/ProfileName.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
 // with a toast: Sending while the wallet signs it and hands it to the network,
@@ -28,7 +29,7 @@ const REFUSED =
   /wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed/i;
 
 // Why a send stopped before it went to the wallet: a switch started meanwhile.
-const SWITCHED = "The network or profile changed meanwhile.";
+const SWITCHED = "The network, profile or wallet changed meanwhile.";
 
 /**
  * Whether a send's error says it was refused before it ran (true), rather
@@ -195,13 +196,53 @@ export function sentAnnouncement(sent, ov) {
 }
 
 /**
+ * What a screen was drawn for: the wallet (by its first public account, with
+ * its profiles' accounts, and with more than one wallet its name as shown),
+ * the profile and the network of the overview it was built from, and the
+ * popup's context then. render() makes one for each screen it draws
+ * (`actions.review`): what the screen does, and the wallet a Review names, is
+ * for that.
+ * @param {object} ov - the overview the screen is built from
+ * @param {object} state - the popup's state
+ */
+export function reviewOf(ov, state) {
+  const accounts = ov?.isUnlocked !== false && Array.isArray(ov?.accounts) ? ov.accounts.map(String) : [];
+  return Object.freeze({
+    walletId: String(accounts[0] ?? ""),
+    walletName: accounts.length ? walletNameOf(ov) : "",
+    accounts: Object.freeze(accounts),
+    profileIndex: Number(ov?.selectedAccountIndex ?? 0) || 0,
+    nodeUrl: String(ov?.nodeUrl ?? ""),
+    context: state?.context,
+  });
+}
+
+// The transaction, for the wallet and the network its Review was drawn for
+// alone: the background refuses it from another wallet (`walletId`), and the
+// engine signs it only for that wallet, profile, account and network
+// (`_approvalContext`, the one a site's send carries too).
+function boundToReview(message, review) {
+  const params = message?.params && typeof message.params === "object" ? message.params : {};
+  const asked = Number(params.profileIndex);
+  const profileIndex = Number.isFinite(asked) && asked >= 0 ? Math.floor(asked) : review.profileIndex;
+  const _approvalContext = params._approvalContext ?? {
+    walletId: review.walletId,
+    profileIndex,
+    account: review.accounts[profileIndex] ?? "",
+    nodeUrl: review.nodeUrl,
+  };
+  return { ...message, walletId: review.walletId, params: { ...params, _approvalContext } };
+}
+
+/**
  * Sends a reviewed transaction and shows the Sent screen at once. A send the
  * network didn't take stays on the Sent screen with why, and Back returns to
- * the review with everything as it was.
+ * the review with everything as it was. It goes for what the Review was drawn
+ * for (`actions.review`, reviewOf), never for what the popup reads since.
  *
  * @param {object} opts
  * @param {object} opts.state
- * @param {object} opts.actions - send, render, announce
+ * @param {object} opts.actions - send, render, announce, and the Review's `review`
  * @param {object} opts.message - the DUSK_UI_SEND_TX message
  * @param {object} opts.summary - what the screen shows: title; amountLux (DUSK),
  *   amountDisplay and unit (a token), or amountText; to ({ name, address, short })
@@ -210,11 +251,14 @@ export function sentAnnouncement(sent, ov) {
  * @param {string} [opts.doneRoute] - where Done goes
  * @param {(hash: string) => void} [opts.onSent] - once the network took it
  * @param {() => boolean} [opts.unchanged] - asked just before the transaction
- *   goes to the wallet: false when the network or profile changed since the
- *   review, and then it isn't sent
+ *   goes to the wallet: false when what it was reviewed for changed, and then
+ *   it isn't sent
  * @returns {Promise<object>} the Sent screen's state
  */
 export async function sendFromReview({ state, actions, message, summary, backRoute, doneRoute = "home", onSent, unchanged }) {
+  // A switch of network, profile or wallet since the Review was drawn, here
+  // or in another window, gave the popup another context.
+  const review = actions?.review;
   const sent = {
     id: ++sentSeq,
     ...summary,
@@ -227,7 +271,7 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     startedAt: Date.now(),
     sentAt: 0,
     // The explorer of the network it went to, whatever the popup switches to.
-    nodeUrl: String(state.overview?.nodeUrl ?? ""),
+    nodeUrl: String(review?.nodeUrl ?? ""),
     backRoute,
     doneRoute,
   };
@@ -241,11 +285,11 @@ export async function sendFromReview({ state, actions, message, summary, backRou
   }
 
   // The Sent screen was drawn first: a switch begun meanwhile stops it here.
-  const switched = typeof unchanged === "function" && !unchanged();
+  const switched = !review?.walletId || state.context !== review.context || (typeof unchanged === "function" && !unchanged());
   let res;
   if (!switched) {
     try {
-      res = await actions?.send?.(message);
+      res = await actions?.send?.(boundToReview(message, review));
     } catch (e) {
       res = { error: { message: e?.message ?? String(e) } };
     }

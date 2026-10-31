@@ -244,3 +244,17 @@ export function keepOnlyContactsOf(walletId) {
     await storage.remove(own ? PLAIN : [RECORDS, PLAIN]);
   });
 }
+
+/**
+ * Delete a removed wallet's contacts: its record only. It needs no key.
+ * @param {string} walletId - the wallet's first public account
+ */
+export function forgetWalletContacts(walletId) {
+  return one(async () => {
+    const namespace = await contactsNamespace(walletId);
+    const records = (await storage.get(RECORDS))?.[RECORDS];
+    if (!isObject(records) || !Object.hasOwn(records, namespace)) return;
+    const { [namespace]: _gone, ...rest } = records;
+    await storage.set({ [RECORDS]: rest });
+  });
+}

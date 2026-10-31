@@ -97,7 +97,7 @@ beforeEach(async () => {
   });
   await setSettings({ nodeUrl });
   for (const [index, origin] of origins.entries()) {
-    await approveOrigin(origin, { accountIndex: index, profileId: `account:${index}:acct${index}` });
+    await approveOrigin(origin, { accountIndex: index, profileId: `account:${index}:acct${index}` }, "acct0");
   }
 });
 
@@ -175,9 +175,9 @@ describe("typed-data RPC with the real approval queue", () => {
       await vi.waitFor(() => expect(pendingApprovals.size).toBe(1));
       // Deliberately bypass UI cancellation to exercise the post-approval context guard itself.
       vi.setSystemTime(Date.now() + 1);
-      if (change === "profile") await approveOrigin(origins[0], { accountIndex: 1, profileId: "account:1:acct1" });
-      if (change === "permission") await approveOrigin(origins[0], { accountIndex: 0, profileId: "account:0:acct0", grants: { shieldedReceiveAddress: true } });
-      if (change === "revocation") await revokeOrigin(origins[0]);
+      if (change === "profile") await approveOrigin(origins[0], { accountIndex: 1, profileId: "account:1:acct1" }, "acct0");
+      if (change === "permission") await approveOrigin(origins[0], { accountIndex: 0, profileId: "account:0:acct0", grants: { shieldedReceiveAddress: true } }, "acct0");
+      if (change === "revocation") await revokeOrigin(origins[0], "acct0");
       if (change === "network") await setSettings({ nodeUrl: "https://devnet.nodes.dusk.network" });
       if (change === "lock") mocks.status.isUnlocked = false;
       if (change === "wallet") mocks.status.accounts = ["replacement-wallet"];
@@ -195,7 +195,7 @@ describe("typed-data RPC with the real approval queue", () => {
     const gate = new Promise(resolve => { release = resolve; });
     const change = withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
       await gate;
-      await approveOrigin(origins[0], { accountIndex: 1, profileId: "account:1:acct1" });
+      await approveOrigin(origins[0], { accountIndex: 1, profileId: "account:1:acct1" }, "acct0");
     });
     try {
       approve(origins[0]);

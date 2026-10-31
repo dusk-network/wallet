@@ -42,6 +42,7 @@
   --text-subtle: #8D8A94;          /* 4.6:1 or more on every surface */
   --line: rgba(242,240,235,0.08);
   --line-strong: rgba(242,240,235,0.16);
+  --field-edge: #6B6970;           /* 3:1 or more on the page and fields (WCAG 1.4.11) */
   --pending: #E8B96A;
   --danger: #E37A7A;
   --online: #3FB871;
@@ -1093,6 +1094,31 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* With more than one wallet: the profile's name over its wallet's, smaller
+   and muted, each line ending in one "…" when it has to shrink */
+.account-chip .chip-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  text-align: left;
+}
+
+.account-chip .chip-lines .chip-text {
+  line-height: 16px;
+}
+
+.account-chip .chip-wallet {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 14px;
+}
+
 /* A verified .dusk name, above the address it names */
 .dusk-name {
   min-width: 0;
@@ -2138,6 +2164,14 @@ button.toast__action:focus-visible {
 }
 
 /* A field's error, under it: red text with a mark */
+/* A short line under a field that says more about it */
+p.field-hint {
+  margin: -4px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .field-error {
   display: flex;
   align-items: flex-start;
@@ -2457,6 +2491,29 @@ button.net-menu-item--active {
   }
 }
 
+/* The switcher scrolls when its wallets don't fit the window */
+.acct-menu {
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+/* Each wallet's profiles under its name, in the ledger's type, as WALLET 2 */
+.acct-menu-wallet + .acct-menu-wallet {
+  margin-top: 6px;
+}
+
+.acct-menu-wallet-title {
+  padding: 8px 10px 4px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--ledger-size);
+  letter-spacing: var(--ledger-tracking);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .acct-menu-row {
   display: flex;
   align-items: center;
@@ -2609,6 +2666,11 @@ body.page--popup .account-chip {
   margin-right: 2px;
 }
 
+/* Two lines, the wallet's under the profile's, take a few pixels more */
+body.page--popup .account-chip.account-chip--wallet {
+  height: 38px;
+}
+
 /* Round icon buttons in the popup's header */
 body.page--popup .icon-btn {
   height: 32px;
@@ -2687,6 +2749,33 @@ body.page--popup .brand-mark {
 
 .srp-toggle .tab {
   flex: 1;
+}
+
+/* The line above the boxes that says how they take a phrase */
+.srp-hint {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Boxes to type words in each have an edge, so they read as boxes; the
+   words shown to write down have none. The box being typed in takes the
+   focus ring, not the field inside it. */
+.srp-grid--input .srp-word {
+  border-color: var(--field-edge);
+}
+
+.srp-grid--input .srp-word:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent);
+}
+
+.srp-grid--input .srp-word:focus-within:not(.is-invalid) {
+  border-color: color-mix(in oklab, var(--ring) 70%, transparent);
+}
+
+.srp-grid--input .srp-word-input input:focus {
+  box-shadow: none;
 }
 
 .srp-word-input {
@@ -4679,6 +4768,56 @@ p.settings-legal button.text-btn {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+/* A wallet's line, its name and short account, with Remove at its end */
+.settings-wallet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-wallet__head .settings-profile-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Rename and Remove: one weight, a little apart */
+.settings-wallet__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* A wallet's name being changed: the field, then Save and Cancel */
+.settings-wallet__edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-wallet__edit input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The wallet a connected site is connected to */
+.settings-site__wallet {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.settings-labels + .group {
+  margin-top: 12px;
+}
+
+.settings-change-password {
+  margin-top: 12px;
 }
 
 .settings-site__host {

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   classifyTxPresence: vi.fn(),
   notifyTxExecuted: vi.fn(async () => true),
   requestUserApproval: vi.fn(async () => null),
+  bindPendingWallet: vi.fn(() => true),
 }));
 
 function makeLocalStorage() {
@@ -61,8 +62,10 @@ vi.mock("../background/engineHost.js", () => ({
   handleEngineReady: vi.fn(() => {}),
 }));
 
-vi.mock("../background/pending.js", () => ({
-  cancelPendingApprovals: vi.fn(),
+// The waiting requests themselves, and how they end, as pending.js keeps them.
+vi.mock("../background/pending.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  bindPendingWallet: mocks.bindPendingWallet,
   getPending: vi.fn(() => null),
   requestUserApproval: mocks.requestUserApproval,
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
@@ -540,6 +543,170 @@ describe("background Phoenix tx lifecycle flow", () => {
       },
     });
     expect(mocks.requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it("changes a site's connection only for the wallet its page showed", async () => {
+    const { approveOrigin, getPermissions } = await import("../shared/permissions.js");
+    const origin = "https://dapp.example";
+    await approveOrigin(origin, { profileId: "account:0:acct0", accountIndex: 0, grants: { publicAccount: true } }, "acct0");
+    const before = await getPermissions("acct0");
+    for (const message of [
+      { type: "DUSK_UI_DISCONNECT_ORIGIN", origin },
+      { type: "DUSK_UI_CLEAR_PERMISSIONS" },
+      { type: "DUSK_UI_CONNECT_ORIGIN", origin },
+      { type: "DUSK_UI_SET_ORIGIN_ACCOUNT", origin, accountIndex: 0 },
+    ]) {
+      await expect(sendBackgroundMessage({ ...message, walletId: "acct9" })).resolves.toMatchObject({
+        error: { message: "The wallet changed meanwhile." },
+      });
+    }
+    await expect(getPermissions("acct0")).resolves.toEqual(before);
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin, walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+    await expect(getPermissions("acct0")).resolves.toEqual({});
+  });
+
+  it("lists every wallet's connected sites by wallet, and disconnects a site from its own", async () => {
+    const { getEngineStatus } = await import("../background/engineHost.js");
+    const { approveOrigin, getPermissions } = await import("../shared/permissions.js");
+    const { noteActiveWallet } = await import("../shared/wallets.js");
+    const two = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0, walletKey: "k1", wallets: [{ key: "k1", n: 1 }, { key: "k2", n: 2 }] };
+    getEngineStatus.mockResolvedValue(two);
+    await noteActiveWallet("k2", { walletId: "acct9", accounts: ["acct9"] });
+    await noteActiveWallet("k1", { walletId: "acct0", accounts: ["acct0"] });
+    const grant = (profileId) => ({ profileId, accountIndex: 0, grants: { publicAccount: true } });
+    await approveOrigin("https://shop.example", grant("account:0:acct0"), "acct0");
+    await approveOrigin("https://app.example", grant("account:0:acct9"), "acct9");
+    try {
+      const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+      expect(overview.permissions.map(({ origin, walletId }) => [origin, walletId])).toEqual([
+        ["https://shop.example", "acct0"],
+        ["https://app.example", "acct9"],
+      ]);
+
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin: "https://app.example", siteWallet: "acct9", walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+      await expect(getPermissions("acct9")).resolves.toEqual({});
+      expect(Object.keys(await getPermissions("acct0"))).toEqual(["https://shop.example"]);
+
+      await approveOrigin("https://app.example", grant("account:0:acct9"), "acct9");
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_CLEAR_PERMISSIONS", siteWallets: ["acct0", "acct9"], walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+      expect([await getPermissions("acct0"), await getPermissions("acct9")]).toEqual([{}, {}]);
+    } finally {
+      getEngineStatus.mockReset();
+      getEngineStatus.mockResolvedValue({ isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 });
+    }
+  });
+
+  it("names the wallet a site's request is bound to beside its profiles, with more than one wallet", async () => {
+    const { getEngineStatus } = await import("../background/engineHost.js");
+    const { getPending } = await import("../background/pending.js");
+    const { setWalletName } = await import("../shared/wallets.js");
+    const two = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0, walletKey: "k2", wallets: [{ key: "k1", n: 1 }, { key: "k2", n: 2 }] };
+    getEngineStatus.mockResolvedValue(two);
+    getPending.mockReturnValue({ kind: "connect", origin: "https://dapp.example", params: {}, shown: { walletId: "acct0" } });
+    const asked = async () => (await sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" }))?.walletName;
+    try {
+      await expect(asked()).resolves.toBe("Wallet 2");
+      await setWalletName("k2", "Savings");
+      await expect(asked()).resolves.toBe("Savings");
+      // One wallet: no name, as before.
+      getEngineStatus.mockResolvedValue({ ...two, wallets: [{ key: "k2", n: 2 }] });
+      await expect(asked()).resolves.toBe("");
+    } finally {
+      getPending.mockReset();
+      getPending.mockReturnValue(null);
+      getEngineStatus.mockReset();
+      getEngineStatus.mockResolvedValue({ isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 });
+    }
+  });
+
+  describe("a site connected to two wallets, with a request waiting on the open one", () => {
+    const origin = "https://shop.example";
+    // Waiting on wallet A (acct0, open); wallet B is acct9.
+    async function waiting() {
+      const { pendingApprovals } = await import("../background/pending.js");
+      const onA = { kind: "send_tx", origin, params: {}, shown: { walletId: "acct0" }, createdAt: Date.now(), resolve: vi.fn(), reject: vi.fn() };
+      // Asked while locked: its window will show the wallet open.
+      const unshown = { kind: "connect", origin: "https://other.example", params: {}, shown: { walletId: "" }, createdAt: Date.now(), resolve: vi.fn(), reject: vi.fn() };
+      pendingApprovals.set("rid-a", onA);
+      pendingApprovals.set("rid-unshown", unshown);
+      return { pendingApprovals, onA, unshown };
+    }
+
+    it("keeps it when the site's row for the other wallet is disconnected, and ends it with its own", async () => {
+      const { pendingApprovals, onA } = await waiting();
+      try {
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin, siteWallet: "acct9", walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+        expect(onA.reject).not.toHaveBeenCalled();
+        expect(pendingApprovals.has("rid-a")).toBe(true);
+
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_DISCONNECT_ORIGIN", origin, walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+        expect(onA.reject).toHaveBeenCalledWith(expect.objectContaining({ message: "Site disconnected" }));
+        expect(pendingApprovals.has("rid-a")).toBe(false);
+      } finally {
+        pendingApprovals.clear();
+      }
+    });
+
+    it("keeps the open wallet's requests when only the other wallet's sites are disconnected, and ends them with its own", async () => {
+      const { pendingApprovals, onA, unshown } = await waiting();
+      try {
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_CLEAR_PERMISSIONS", siteWallets: ["acct9"], walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+        expect([onA.reject, unshown.reject].map((fn) => fn.mock.calls.length)).toEqual([0, 0]);
+        expect(pendingApprovals.size).toBe(2);
+
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_CLEAR_PERMISSIONS", siteWallets: ["acct0", "acct9"], walletId: "acct0" })).resolves.toMatchObject({ ok: true });
+        for (const fn of [onA.reject, unshown.reject]) expect(fn).toHaveBeenCalledWith(expect.objectContaining({ message: "Sites disconnected" }));
+        expect(pendingApprovals.size).toBe(0);
+      } finally {
+        pendingApprovals.clear();
+      }
+    });
+  });
+
+  it("shows a site's request only on its own wallet: on another, there's nothing to show", async () => {
+    const { getPending } = await import("../background/pending.js");
+    getPending.mockReturnValueOnce({ kind: "connect", origin: "https://dapp.example", params: {}, shown: { walletId: "acct9" } });
+    mocks.bindPendingWallet.mockReturnValueOnce(false);
+    await expect(sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" })).resolves.toBeNull();
+    expect(mocks.bindPendingWallet).toHaveBeenCalledWith("rid-1", "acct0");
+  });
+
+  describe("a send from the popup", () => {
+    const params = { kind: "transfer", privacy: "public", to: "acct1", amount: "1" };
+
+    it("isn't sent from another wallet than the one it was reviewed on", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const response = await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct9", params });
+      expect(response).toMatchObject({ error: { message: "The wallet changed while you reviewed it." } });
+      expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+    });
+
+    it("goes from the wallet it was reviewed on, and a switch waits for it", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const { WALLET_LIFECYCLE_LOCK, withStorageLock } = await import("../shared/storageLock.js");
+      const { listTxs } = await import("../shared/txStore.js");
+      const sent = Promise.withResolvers();
+      const started = Promise.withResolvers();
+      engineCall.mockImplementation(async (method) => {
+        if (method !== "dusk_sendTransaction") return true;
+        started.resolve();
+        return sent.promise;
+      });
+
+      const response = sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params });
+      await started.promise;
+      let switched = false;
+      const switching = withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        switched = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(switched).toBe(false);
+      sent.resolve({ hash: "0xmine" });
+      await expect(response).resolves.toMatchObject({ ok: true });
+      await switching;
+      expect(switched).toBe(true);
+      await expect(listTxs({ walletId: "acct0" })).resolves.toEqual([expect.objectContaining({ hash: "0xmine" })]);
+    });
   });
 
   describe("after a wallet reset", () => {

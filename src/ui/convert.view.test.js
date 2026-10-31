@@ -4,6 +4,7 @@ import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
 import { accessibleName, installFakeDom, isShown, press, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { convertConfirmView, convertFormView } from "./popup/views/convert.js";
+import { reviewOf } from "./popup/views/sent.js";
 
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -120,5 +121,16 @@ describe("shield and unshield", () => {
     const shown = () => body().querySelectorAll("button").filter(isShown).map((b) => b.textContent);
     expect(shown()).toEqual(["← Back", "Confirm"]);
     expect(visibleText(body().querySelector("details.gas-custom summary"))).toBe("Custom fee");
+  });
+
+  it("names the wallet beside the profile with more than one wallet, as the Review was drawn for", async () => {
+    const state = { route: "convert_confirm", draft: { kind: TX_KIND.UNSHIELD, amountLux: "1000000000", amountDusk: "1" } };
+    const two = { ...ov, wallets: [{ key: "w1", n: 1, active: true }, { key: "w2", n: 2 }] };
+    dom.document.body.replaceChildren(...convertConfirmView(two, { state, actions: { ...actions(state), review: reviewOf(two, state) } }));
+    await settle();
+    expect(body().querySelectorAll(".convert-review > .group > .kv").map(visibleText)).toEqual([
+      "FromWallet 1 · alice.dusk · Shielded",
+      "ToWallet 1 · alice.dusk · Public",
+    ]);
   });
 });

@@ -17,6 +17,7 @@ import { readSozuStatus } from "@dusk-network/networks/sozu";
 import { bytesToHex, hexToBytes, messageBytes, sha256Hex, toBytes } from "./bytes.js";
 import { signProfileTypedDataDigest } from "./blsDigest.js";
 import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
+import { ERROR_CODES } from "./errors.js";
 import { createContractReads } from "./contractReads.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
@@ -57,7 +58,22 @@ import { createLeafHeightTap, shieldedHistory } from "@dusk-network/app-core/shi
 
 const phoenixSpendLocks = new Map();
 const transactionLocks = new Map();
+// The next nonce of each public account sent from, by network, wallet and
+// profile: kept through a switch to another wallet and back, while a send
+// may still be pending; gone on lock, and with the wallet it's for.
 const moonlightNonces = new Map();
+// The wallet ID of each wallet held (by its vault ID) that was unlocked
+// since the unlock, for what's kept by wallet ID.
+const heldWalletIds = new Map();
+
+// Forget the nonces kept for a wallet: its ID is the key's second part from
+// the end, after the node URL.
+function forgetNonces(walletId) {
+  if (!walletId) return;
+  for (const key of [...moonlightNonces.keys()]) {
+    if (key.split("|").at(-2) === walletId) moonlightNonces.delete(key);
+  }
+}
 
 const isExtensionBackend =
   typeof __DUSK_BACKEND__ !== "undefined" && __DUSK_BACKEND__ === "extension";
@@ -519,6 +535,11 @@ const state = {
   mnemonic: null,
   seed: null,
   walletId: "",
+  // Every recovery phrase the vault opened, by its wallet's vault ID, with the
+  // wallet's number: a switch to another needs no password. All gone on lock.
+  vaultWallets: new Map(),
+  // The vault ID of the wallet unlocked now.
+  walletKey: "",
   profiles: [],
   currentIndex: 0,
   profileGenerator: null,
@@ -779,7 +800,6 @@ function clearWalletState() {
   state.bookkeeper = null;
   state.treasuryAll = null;
   state.bookkeeperAll = null;
-  moonlightNonces.clear();
 
   // We keep the Network instance around; it holds no secrets and can stay connected.
 }
@@ -787,6 +807,11 @@ function clearWalletState() {
 export function lock() {
   unlockGeneration += 1;
   clearWalletState();
+  moonlightNonces.clear();
+  heldWalletIds.clear();
+  state.vaultWallets.clear();
+  state.vaultWallets = new Map();
+  state.walletKey = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -874,8 +899,11 @@ export async function walletIdOf(mnemonic) {
 /**
  * Unlock engine with mnemonic (already decrypted from vault)
  * @param {string} mnemonic
+ * @param {{ walletKey?: string, wallets?: Map<string, { n: number, mnemonic: string }> }} [opts] -
+ *   the wallet's vault ID, and every phrase the vault opened: kept with the
+ *   wallet once it's unlocked, and only then
  */
-export async function unlockWithMnemonic(mnemonic) {
+export async function unlockWithMnemonic(mnemonic, opts = {}) {
   const generation = ++unlockGeneration;
   const unlockStart = engineNow();
   debugEngine("unlock_start");
@@ -954,6 +982,9 @@ export async function unlockWithMnemonic(mnemonic) {
     state.mnemonic = mnemonic;
     state.seed = seed;
     state.walletId = walletId;
+    state.walletKey = String(opts.walletKey ?? "");
+    state.vaultWallets = opts.wallets instanceof Map ? opts.wallets : new Map();
+    if (state.walletKey) heldWalletIds.set(state.walletKey, walletId);
     state.profileGenerator = pg;
     state.profiles = profiles;
     state.currentIndex = currentIndex;
@@ -1005,6 +1036,115 @@ export async function unlockWithMnemonic(mnemonic) {
     });
 
   return p0;
+}
+
+// ---------------------------------------------------------------------------
+// Wallets: every recovery phrase the vault opened, one of them unlocked
+// ---------------------------------------------------------------------------
+
+function walletsFrom(list) {
+  const wallets = new Map();
+  for (const w of Array.isArray(list) ? list : []) {
+    const key = String(w?.id ?? "");
+    const phrase = typeof w?.mnemonic === "string" ? w.mnemonic : "";
+    const n = Number(w?.n);
+    if (!key || !phrase || !Number.isInteger(n) || n < 1 || wallets.has(key)) {
+      throw Object.assign(new Error("Each wallet needs an ID, a number and a recovery phrase"), { code: ERROR_CODES.INVALID_PARAMS });
+    }
+    wallets.set(key, { n, mnemonic: phrase });
+  }
+  return wallets;
+}
+
+/**
+ * Unlock with every wallet the vault opened: `walletKey`'s unlocked, the rest
+ * kept for a switch without the password.
+ * @param {{ wallets: Array<{ id: string, n: number, mnemonic: string }>, walletKey?: string }} params
+ */
+export async function unlockWallets({ wallets, walletKey } = {}) {
+  const held = walletsFrom(wallets);
+  if (!held.size) throw new Error("No wallet to unlock");
+  const key = held.has(String(walletKey ?? "")) ? String(walletKey) : [...held.keys()][0];
+  return unlockWithMnemonic(held.get(key).mnemonic, { walletKey: key, wallets: held });
+}
+
+/**
+ * Switch to another wallet the vault opened, at the profile the engine is
+ * configured with. A lock meanwhile wins: the switch then unlocks nothing.
+ * @param {{ walletKey: string }} params
+ */
+export async function switchWallet({ walletKey } = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const key = String(walletKey ?? "");
+  const wallet = state.vaultWallets.get(key);
+  if (!wallet) throw new Error("That wallet isn't here.");
+  if (key === state.walletKey) return state.profiles[0];
+  return unlockWithMnemonic(wallet.mnemonic, { walletKey: key, wallets: state.vaultWallets });
+}
+
+/**
+ * Keep another wallet's phrase, once the vault holds it, for a switch to it.
+ * @param {{ walletKey: string, n: number, mnemonic: string }} params
+ */
+export function addWallet({ walletKey, n, mnemonic } = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const [[key, wallet]] = walletsFrom([{ id: walletKey, n, mnemonic }]);
+  const held = state.vaultWallets.get(key);
+  // Asked again, as a retried message may: the same wallet is kept once.
+  if (held && held.mnemonic !== wallet.mnemonic) throw new Error("That wallet is here already.");
+  state.vaultWallets.set(key, wallet);
+  return getWallets();
+}
+
+/**
+ * Forget a wallet's phrase, once the vault doesn't hold it: never the one
+ * unlocked (switch away first).
+ * @param {{ walletKey: string }} params
+ */
+export function removeWallet({ walletKey } = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const key = String(walletKey ?? "");
+  if (key === state.walletKey) throw new Error("Switch to another wallet first.");
+  state.vaultWallets.delete(key);
+  forgetNonces(heldWalletIds.get(key));
+  heldWalletIds.delete(key);
+  return getWallets();
+}
+
+/** The wallets held, by number: `{ key, n }`. None while locked. */
+export function getWallets() {
+  if (!state.unlocked) return [];
+  return [...state.vaultWallets].map(([key, { n }]) => ({ key, n })).sort((a, b) => a.n - b.n);
+}
+
+/** The vault ID of the wallet unlocked now, "" while locked. */
+export function getWalletKey() {
+  return state.unlocked ? state.walletKey : "";
+}
+
+/**
+ * The public accounts of a held wallet's profiles, as many as the unlocked
+ * one has: what removing that wallet forgets, whichever wallet is unlocked.
+ * @param {{ walletKey: string }} params
+ * @returns {Promise<string[]>}
+ */
+export async function walletAccountsOf({ walletKey } = {}) {
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const key = String(walletKey ?? "");
+  if (key === state.walletKey) return getAccounts();
+  const wallet = state.vaultWallets.get(key);
+  if (!wallet) throw new Error("That wallet isn't here.");
+  const count = Math.max(1, state.profiles.length);
+  await withTimeout(ensureProtocolDriverLoaded(), 120_000, "Timed out loading protocol driver");
+  const seed = Uint8Array.from(mnemonicToSeedSync(wallet.mnemonic.trim().replace(/\s+/g, " ")));
+  try {
+    const pg = new ProfileGenerator(async () => seed.slice());
+    const profiles = [await pg.default];
+    while (profiles.length < count) profiles.push(await pg.next());
+    return profiles.map((p) => String(p?.account?.toString?.() ?? "")).filter(Boolean);
+  } finally {
+    seed.fill(0);
+  }
 }
 
 export function getCurrentProfile() {

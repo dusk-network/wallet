@@ -134,7 +134,8 @@ describe("contacts", () => {
     view.button("Save").click();
     await settle();
     expect(upsertAddressBookEntry).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Shop", address: ADDRESS, type: "address", duskName: "alice-shop.dusk", checkedAt: expect.any(Number) })
+      expect.objectContaining({ name: "Shop", address: ADDRESS, type: "address", duskName: "alice-shop.dusk", checkedAt: expect.any(Number) }),
+      expect.anything()
     );
   });
 
@@ -188,11 +189,21 @@ describe("contacts", () => {
     expect(visibleText(rows[0].querySelector(".tx-sub"))).toMatch(/^Approval · /);
   });
 
+  it("saves, checks and deletes a contact for the wallet the page was drawn for", async () => {
+    const shown = { walletId: OWN };
+    const view = mount({ view: "edit", editId: null, editReturnView: "list" }, { isUnlocked: true, nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs: [] });
+    typeInto(view.field("Name"), "Shop");
+    typeInto(view.field("Address"), ADDRESS);
+    view.button("Save").click();
+    await settle();
+    expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Shop", address: ADDRESS }), shown);
+  });
+
   it("marks an hour-old .dusk name checked on the contact as saved, never writing back the copy it showed", async () => {
     const shop = { id: "2", name: "Shop", address: ADDRESS, type: "address", duskName: "alice-shop.dusk", checkedAt: Date.now() - NAME_RECHECK_MS - 1 };
     mount({ view: "detail", detailId: "2", items: [shop] });
     await settle();
-    expect(markAddressBookNameChecked).toHaveBeenCalledWith(shop);
+    expect(markAddressBookNameChecked).toHaveBeenCalledWith(shop, expect.any(Number), expect.anything());
     expect(upsertAddressBookEntry).not.toHaveBeenCalled();
     expect(isShown(dom.document.body.querySelector(".contact-name-check"))).toBe(false);
   });

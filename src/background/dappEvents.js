@@ -12,6 +12,7 @@ import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { duskNamesNetwork } from "../shared/verifiedNames.js";
 import { listedChainId, noteChainId } from "../shared/nodeNetwork.js";
 import { getEngineStatus } from "./engineHost.js";
+import { siteWalletId } from "./siteWallet.js";
 import { profileVisibilityChanged, readCurrent, siteNames } from "./siteNames.js";
 import { getExtensionApi } from "../platform/extensionApi.js";
 
@@ -168,9 +169,9 @@ async function buildProviderState(origin) {
   const chainId = chainIdFromNodeUrl(nodeUrl);
   const networkName = networkNameFromNodeUrl(nodeUrl);
 
-  const perms = await getPermissions();
-  const perm = perms?.[origin];
   const status = await getEngineStatus();
+  const perms = await getPermissions(await siteWalletId(status));
+  const perm = perms?.[origin];
   const permission = permissionProfileState(
     perm,
     status,
@@ -314,8 +315,8 @@ export async function broadcastProfilesChangedAll() {
   // before this one are read again.
   profileVisibilityChanged();
   const { perms, status, names } = await readCurrent(async () => {
-    const perms = await getPermissions();
     const status = await getEngineStatus();
+    const perms = await getPermissions(await siteWalletId(status));
     const names = await namesForOrigins([...portsByOrigin.keys()], perms, status);
     return { perms, status, names };
   });
@@ -342,8 +343,8 @@ export async function broadcastProfilesChangedAll() {
  */
 export async function broadcastProfilesChangedForOrigin(origin) {
   const permission = await readCurrent(async () => {
-    const perms = await getPermissions();
     const status = await getEngineStatus();
+    const perms = await getPermissions(await siteWalletId(status));
     const perm = perms?.[origin];
     return permissionProfileState(
       perm,
@@ -371,8 +372,8 @@ export async function handleVerifiedNamesDiff(oldNames, newNames) {
   if (!portsByOrigin.size) return;
   const { nodeUrl, perms, status, names } = await readCurrent(async () => {
     const nodeUrl = String((await getSettings())?.nodeUrl ?? "");
-    const perms = await getPermissions();
     const status = await getEngineStatus();
+    const perms = await getPermissions(await siteWalletId(status));
     const names = await siteNames(nodeUrl);
     return { nodeUrl, perms, status, names };
   });
@@ -434,24 +435,17 @@ export async function broadcastChainChangedAll() {
   await _chainBroadcastQueue;
 }
 
-/**
- * Handle a permissions object update by emitting connect/disconnect for diffs.
- *
- * @param {Record<string, any>} oldPerms
- * @param {Record<string, any>} newPerms
- */
-export async function handlePermissionsDiff(oldPerms, newPerms) {
-  const oldP = oldPerms ?? {};
-  const newP = newPerms ?? {};
-
+// "connect" to each site `newPerms` connects that `oldPerms` didn't, and
+// "disconnect" to each the other way round, each map read with its engine
+// status. Whether any site's connection or profile changed.
+async function emitConnectionChanges(oldP, newP, before, status) {
   const removed = [];
   const added = [];
   const changed = [];
-  const status = await getEngineStatus();
   const origins = new Set([...Object.keys(oldP), ...Object.keys(newP)]);
 
   for (const origin of origins) {
-    const oldValid = permissionProfileState(oldP[origin], status).isValid;
+    const oldValid = permissionProfileState(oldP[origin], before).isValid;
     const newValid = permissionProfileState(newP[origin], status).isValid;
     if (oldValid && !newValid) removed.push(origin);
     else if (!oldValid && newValid) added.push(origin);
@@ -477,13 +471,38 @@ export async function handlePermissionsDiff(oldPerms, newPerms) {
       broadcastToOrigin(origin, "disconnect", { code: 4900, message: "Disconnected" });
     }
   }
+  return Boolean(added.length || removed.length || changed.length);
+}
 
+/**
+ * Handle a permissions object update by emitting connect/disconnect for diffs.
+ *
+ * @param {Record<string, any>} oldPerms
+ * @param {Record<string, any>} newPerms
+ */
+export async function handlePermissionsDiff(oldPerms, newPerms) {
+  const status = await getEngineStatus();
   // Always refresh profiles for any origin diff, so sites see [] when revoked
   // and profile fields when granted, or when their profile or grants change.
   // Every site gets it, as it drops the profile updates begun before it.
-  if (added.length || removed.length || changed.length) {
+  if (await emitConnectionChanges(oldPerms ?? {}, newPerms ?? {}, status, status)) {
     await broadcastProfilesChangedAll();
   }
+}
+
+/**
+ * After a switch of wallet: "disconnect" to each site connected to the wallet
+ * left only, "connect" to each connected to the one switched to, then every
+ * site its profile as it is now (none of another wallet's).
+ *
+ * @param {Record<string, any>} oldPerms - the wallet left's connections
+ * @param {object} oldStatus - the engine's status before the switch
+ */
+export async function broadcastWalletChanged(oldPerms, oldStatus) {
+  const status = await getEngineStatus();
+  const newPerms = await getPermissions(await siteWalletId(status));
+  await emitConnectionChanges(oldPerms ?? {}, newPerms, oldStatus, status);
+  await broadcastProfilesChangedAll();
 }
 
 function permissionProfileKey(perm) {
@@ -527,11 +546,16 @@ export function registerStorageChangeForwarder() {
   ext?.storage?.onChanged?.addListener((changes, areaName) => {
     if (areaName !== "local") return;
 
-    // Permissions updates
-    if (changes[STORAGE_KEYS.PERMISSIONS]) {
-      const oldPerms = changes[STORAGE_KEYS.PERMISSIONS].oldValue ?? {};
-      const newPerms = changes[STORAGE_KEYS.PERMISSIONS].newValue ?? {};
-      handlePermissionsDiff(oldPerms, newPerms).catch(() => {});
+    // Permissions updates: the wallet sites are connected to now, or the
+    // connections from before while no wallet was unlocked since.
+    if (changes[STORAGE_KEYS.PERMISSIONS_V2] || changes[STORAGE_KEYS.PERMISSIONS]) {
+      (async () => {
+        const walletId = await siteWalletId();
+        const change = walletId ? changes[STORAGE_KEYS.PERMISSIONS_V2] : changes[STORAGE_KEYS.PERMISSIONS];
+        if (!change) return;
+        const of = (value) => (walletId ? value?.[walletId] : value) ?? {};
+        await handlePermissionsDiff(of(change.oldValue), of(change.newValue));
+      })().catch(() => {});
     }
 
     // .dusk name checks, kept by lookups in the popup and the engine
@@ -549,9 +573,10 @@ export function registerStorageChangeForwarder() {
     }
 
     // Vault removed => profiles become unavailable everywhere
-    if (changes[STORAGE_KEYS.VAULT]) {
-      const oldV = changes[STORAGE_KEYS.VAULT].oldValue;
-      const newV = changes[STORAGE_KEYS.VAULT].newValue;
+    for (const key of [STORAGE_KEYS.VAULT_V2, STORAGE_KEYS.VAULT]) {
+      if (!changes[key]) continue;
+      const oldV = changes[key].oldValue;
+      const newV = changes[key].newValue;
       if (oldV && !newV) {
         // Vault deleted: effectively locked for dApps.
         broadcastProfilesChangedAll().catch(() => {});

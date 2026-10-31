@@ -39,7 +39,9 @@ describe("connected site status", () => {
     expect(background).toContain('message?.type === "DUSK_UI_CONNECT_ORIGIN"');
     expect(background).toContain('message?.type === "DUSK_UI_DISCONNECT_ORIGIN"');
     expect(background).toContain("approveOrigin(origin");
-    expect(background).toContain("revokeOrigin(origin)");
+    // From the wallet the site's row names, else the open one (txLifecycle.flow.test.js).
+    expect(background).toContain('const owner = String(message.siteWallet ?? "") || open;');
+    expect(background).toContain("revokeOrigin(origin, owner)");
   });
 
   it("names the site in the popup's bar as its approval did: with its port, and http:// for a local site", async () => {

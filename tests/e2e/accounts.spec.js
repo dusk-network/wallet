@@ -46,22 +46,22 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await expect(page.getByText("Settings")).toBeVisible();
   await expect(page.locator("select#account option")).toHaveCount(2);
 
-  // Set per-profile labels (saved on change/blur).
-  const name1 = page.getByLabel("Profile 1 label");
+  // Set per-profile names (saved on change/blur).
+  const name1 = page.getByLabel("Profile 1 name");
   await name1.fill("Main");
   await name1.press("Tab");
-  await expect(page.getByLabel("Profile 1 label")).toHaveValue("Main");
+  await expect(page.getByLabel("Profile 1 name")).toHaveValue("Main");
 
-  const name2 = page.getByLabel("Profile 2 label");
+  const name2 = page.getByLabel("Profile 2 name");
   await name2.fill("Spending");
   await name2.press("Tab");
-  await expect(page.getByLabel("Profile 2 label")).toHaveValue("Spending");
+  await expect(page.getByLabel("Profile 2 name")).toHaveValue("Spending");
 
   // Back to home so the header switcher is visible
   await page.getByRole("button", { name: "← Back" }).click();
   await expect(page.locator("#app").getByRole("button", { name: "Send" })).toBeVisible();
 
-  // Without a .dusk name, the chip shows the profile's label, not its account.
+  // Without a .dusk name, the chip shows the profile's name, not its account.
   await expect(page.locator("#header-actions .account-chip .chip-text")).toHaveText("Main");
 
   // Open the profile switcher from the account chip and switch

@@ -7,7 +7,7 @@
 import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import { getSettings, rememberNodeChain, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
-import { clearPermissions } from "../shared/permissions.js";
+import { clearAllPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
@@ -25,6 +25,8 @@ import {
 } from "../shared/txExecution.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { engineContactsVault, handleUiCommand } from "./uiCommands.js";
+import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
+import { getWalletDirectory } from "../shared/wallets.js";
 import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
   configure,
@@ -53,7 +55,13 @@ import {
   selectAccountIndex,
   setShieldedCheckpointNow,
   startShieldedSync,
-  unlockWithMnemonic,
+  unlockWallets,
+  switchWallet,
+  addWallet,
+  removeWallet,
+  walletAccountsOf,
+  getWallets,
+  getWalletKey,
   walletIdOf,
   waitTxExecuted,
   waitTxRemoved,
@@ -107,9 +115,15 @@ function engineStatus() {
   return {
     isUnlocked: isUnlocked(),
     accounts: isUnlocked() ? getAccounts() : [],
+    addresses: isUnlocked() ? getAddresses() : [],
     selectedAccountIndex: isUnlocked() ? getSelectedAccountIndex() : 0,
+    walletKey: getWalletKey(),
+    wallets: getWallets(),
   };
 }
+
+// The engine's answer to an unlock or a switch, as the extension's engine gives it.
+const unlockedNow = () => ({ accounts: getAccounts(), walletKey: getWalletKey(), wallets: getWallets() });
 
 const localEngineMethods = {
   dusk_getMinimumStake: getMinimumStake,
@@ -128,6 +142,14 @@ const localEngineMethods = {
   dusk_setShieldedCheckpointNow: setShieldedCheckpointNow,
   dusk_getShieldedHistory: getShieldedHistory,
   engine_selectAccount: selectAccountIndex,
+  engine_walletId: ({ mnemonic }) => walletIdOf(mnemonic),
+  engine_switchWallet: async (params) => {
+    await switchWallet(params);
+    return unlockedNow();
+  },
+  engine_addWallet: addWallet,
+  engine_removeWallet: removeWallet,
+  engine_walletAccounts: walletAccountsOf,
   engine_contactsOpen: ({ records }) => openContactsRecords(records),
   engine_contactsSeal: ({ text }) => sealContactsRecord(text),
 };
@@ -145,14 +167,30 @@ export async function localSend(message) {
       getEngineStatus: engineStatus,
     });
     if (common) return common;
+    // Switch, add, remove and rename wallets, and change the password.
+    const wallets = await handleWalletCommand(message, {
+      engineCall: localEngineCall,
+      ensureEngineConfigured,
+      getEngineStatus: async () => engineStatus(),
+      // Locked as the extension's background locks it: the page is told,
+      // and shows the unlock form (a switch that failed, a removal cut short).
+      lock: async (reason = "remove") => {
+        lock();
+        tellPage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason });
+      },
+      walletsChanged: () => tellPage({ type: "DUSK_UI_WALLETS_CHANGED" }),
+    });
+    if (wallets) return wallets;
     // Wallet lifecycle operations share one lock so persisted and in-memory
     // identities cannot be changed independently.
     if (message?.type === "DUSK_UI_UNLOCK") {
       return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         if (isUnlocked()) return { ok: true, accounts: getAccounts() };
-        const mnemonic = await unlockVault(message.password);
+        // Every wallet the password opens, the one unlocked last unlocked again.
+        const { wallets } = await unlockVault(message.password);
         await ensureEngineConfigured();
-        await unlockWithMnemonic(mnemonic);
+        await unlockWallets({ wallets, walletKey: (await getWalletDirectory().catch(() => ({}))).active });
+        await keepWalletShown(unlockedNow());
         // Contacts kept in plain text before they were encrypted move into
         // this wallet's record (background/index.js does the same).
         await moveLegacyContacts(engineContactsVault(localEngineCall)).catch(() => {});
@@ -173,7 +211,7 @@ export async function localSend(message) {
         lock();
         if (isUnlocked()) throw new Error("Wallet lock did not complete");
         await beginReset();
-        await clearPermissions();
+        await clearAllPermissions();
         await clearVault();
         // Nothing of the old wallet stays: its transactions, shielded notes
         // and history. A store that can't be cleared fails the reset and keeps
@@ -205,10 +243,13 @@ export async function localSend(message) {
           // A new wallet starts with no contacts: any kept here are another's.
           await clearContacts();
         }
-        await createVault(mnemonic, password);
+        const wallet = await createVault(mnemonic, password);
         if (pending) await endReset();
         await ensureEngineConfigured();
-        await unlockWithMnemonic(String(mnemonic));
+        await unlockWallets({ wallets: [{ ...wallet, mnemonic: String(mnemonic) }], walletKey: wallet.id });
+        // A phrase made here has no history: its shielded sync starts now.
+        if (message.fresh === true) await setShieldedCheckpointNow({ profileIndex: 0 }).catch(() => {});
+        await keepWalletShown(unlockedNow());
         return { ok: true, accounts: getAccounts() };
       });
     }
@@ -226,13 +267,14 @@ export async function localSend(message) {
         lock();
         // Noted with the wallet it makes until that wallet's vault is.
         await beginReset({ keepContactsOf: walletId });
-        await clearPermissions();
+        await clearAllPermissions();
         await clearWalletData({ keepContactsOf: walletId });
         await clearVault();
-        await createVault(mnemonic, password);
+        const restored = await createVault(mnemonic, password);
         await endReset();
         await ensureEngineConfigured();
-        await unlockWithMnemonic(String(mnemonic));
+        await unlockWallets({ wallets: [{ ...restored, mnemonic: String(mnemonic) }], walletKey: restored.id });
+        await keepWalletShown(unlockedNow());
         return { ok: true, accounts: getAccounts() };
       });
     }
@@ -326,10 +368,11 @@ export async function localSend(message) {
       let shieldedSync = null;
       let shieldedError = null;
 
-      // Recent activity (transaction list) scoped to the current node URL.
+      // Recent activity (transaction list) scoped to the current node URL
+      // and the wallet unlocked.
       let txs = [];
       try {
-        txs = await listTxs({ nodeUrl: settings.nodeUrl });
+        txs = status.isUnlocked ? await listTxs({ nodeUrl: settings.nodeUrl, walletId: String(status.accounts?.[0] ?? "") }) : [];
       } catch {
         txs = [];
       }
@@ -413,30 +456,41 @@ export async function localSend(message) {
         activeConnected,
         txs,
         accountNames,
+        // Each wallet the switcher shows, and the one unlocked.
+        wallets: await walletsShown(status).catch(() => []),
+        walletKey: status.walletKey,
       };
     }
 
     // UI initiated transaction (from the wallet popup)
     if (message?.type === "DUSK_UI_SEND_TX") {
-      const status = engineStatus();
-      if (!status.isUnlocked) {
-        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-      }
-      // What this send and its watcher keep is dropped after a reset meanwhile.
-      const txEpoch = await getTxEpoch();
+      // Sent from the wallet unlocked as it goes, the one its Review was on
+      // (`walletId`): a switch, lock or reset waits for it.
+      const { status, txEpoch, baseParams, result } = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        const status = engineStatus();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+        const expected = String(message.walletId ?? "");
+        if (expected && expected !== String(status.accounts?.[0] ?? "")) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "The wallet changed while you reviewed it.");
+        }
+        // What this send and its watcher keep is dropped after a reset meanwhile.
+        const txEpoch = await getTxEpoch();
+        await ensureEngineConfigured();
+        // Fetch live gas price from node (cached for 30s) to use as default.
+        let dynamicPrice;
+        try {
+          const gasData = await getCachedGasPrice();
+          dynamicPrice = gasData?.median;
+        } catch {
+          // Ignore errors, will fall back to static default
+        }
+        const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
+        const result = await sendTransaction(baseParams);
+        return { status, txEpoch, baseParams, result };
+      });
       const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });
-
-      await ensureEngineConfigured();
-      // Fetch live gas price from node (cached for 30s) to use as default.
-      let dynamicPrice;
-      try {
-        const gasData = await getCachedGasPrice();
-        dynamicPrice = gasData?.median;
-      } catch {
-        // Ignore errors, will fall back to static default
-      }
-      const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
-      const result = await sendTransaction(baseParams);
 
       // Persist metadata (see background/index.js comments).
       const hash = result?.hash ?? "";
@@ -450,7 +504,7 @@ export async function localSend(message) {
             baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
               ? Number(baseParams.profileIndex) || 0
               : Number(status.selectedAccountIndex ?? 0) || 0;
-          const record = submittedTxMeta(baseParams, { origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message));
+          const record = submittedTxMeta(baseParams, { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message));
           const { pendingNullifiers } = record;
           await putTxMeta(hash, record, { epoch: txEpoch });
 

@@ -12,7 +12,12 @@ import {
  * NOTE: The resolve value can carry user overrides (e.g. edited gas settings)
  * so the background can apply them before sending the transaction.
  *
- * @type {Map<string, { kind: string, origin: string, params: any, createdAt:number, windowId?: number, resolve: (v:any)=>void, reject:(e:any)=>void }>}
+ * Each is for one wallet, by its wallet ID (its first public account), in
+ * `shown`: the one unlocked as the site asked, or, asked while locked, the
+ * one its window shows first (bindPendingWallet). Its window shows no other,
+ * and what it approves acts for no other (rpc.js checks `shown` again).
+ *
+ * @type {Map<string, { kind: string, origin: string, params: any, shown: { walletId: string }, createdAt:number, windowId?: number, resolve: (v:any)=>void, reject:(e:any)=>void }>}
  */
 export const pendingApprovals = new Map();
 
@@ -29,8 +34,13 @@ function rejectPending(rid, entry, message) {
 
 /**
  * Open a small notification window and wait for the user's decision.
+ * @param {string} kind
+ * @param {string} origin
+ * @param {any} params
+ * @param {{ walletId: string }} [shown] - the wallet the request is for, ""
+ *   until its window shows one; kept by reference, so the caller sees it bound
  */
-export async function requestUserApproval(kind, origin, params) {
+export async function requestUserApproval(kind, origin, params, shown = { walletId: "" }) {
   if (
     pendingApprovals.size >= MAX_PENDING ||
     [...pendingApprovals.values()].some((entry) => entry.origin === origin)
@@ -40,7 +50,7 @@ export async function requestUserApproval(kind, origin, params) {
 
   const rid = crypto.randomUUID();
   const promise = new Promise((resolve, reject) => {
-    const entry = { kind, origin, params, createdAt: Date.now(), resolve, reject };
+    const entry = { kind, origin, params, shown, createdAt: Date.now(), resolve, reject };
     entry.timer = setTimeout(
       () => rejectPending(rid, entry, "Approval request expired"),
       APPROVAL_TTL_MS
@@ -90,6 +100,24 @@ export function getPending(rid) {
   return pendingApprovals.get(rid) ?? null;
 }
 
+/**
+ * The wallet a request's window is about to show, by its wallet ID: the
+ * request's own wallet, or the first one shown for a request made while
+ * locked. Another wallet ends the request instead. False when it's over.
+ * @param {string} rid
+ * @param {string} walletId
+ */
+export function bindPendingWallet(rid, walletId) {
+  const entry = pendingApprovals.get(rid);
+  if (!entry) return false;
+  const id = String(walletId ?? "");
+  if (!id) return true;
+  if (!entry.shown.walletId) entry.shown.walletId = id;
+  if (entry.shown.walletId === id) return true;
+  rejectPending(rid, entry, "Wallet changed while awaiting approval");
+  return false;
+}
+
 export function resolvePendingDecision(message) {
   const { rid, decision } = message || {};
   const entry = pendingApprovals.get(rid);
@@ -115,8 +143,19 @@ export function resolvePendingDecision(message) {
   return { ok: true };
 }
 
-export function cancelPendingApprovals(origin, reason = "Wallet state changed") {
+/**
+ * Ends the requests waiting for approval: every one, or `origin`'s. With
+ * `wallets` (wallet IDs), only those for one of them: a request is for the
+ * wallet its window shows (`shown`), and one not shown yet for `open`, the
+ * wallet open now, which its window would show. Another wallet's stay.
+ * @param {string|null} origin
+ * @param {string} [reason]
+ * @param {{ wallets?: string[], open?: string }} [opts]
+ */
+export function cancelPendingApprovals(origin, reason = "Wallet state changed", { wallets, open = "" } = {}) {
   for (const [rid, entry] of pendingApprovals) {
-    if (!origin || entry.origin === origin) rejectPending(rid, entry, reason);
+    if (origin && entry.origin !== origin) continue;
+    if (Array.isArray(wallets) && !wallets.includes(String(entry.shown?.walletId || open || ""))) continue;
+    rejectPending(rid, entry, reason);
   }
 }

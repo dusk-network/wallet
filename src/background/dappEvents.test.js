@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 let permissions = {};
+// Each wallet's sites, by wallet ID, where a test keeps them apart.
+let byWallet = null;
 let settings = { nodeUrl: "https://testnet.nodes.dusk.network" };
 let engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"] };
 // The .dusk name checks kept in verifiedNames.js.
@@ -13,7 +15,7 @@ vi.mock("../shared/settings.js", () => ({
 
 vi.mock("../shared/permissions.js", async (importOriginal) => ({
   ...(await importOriginal()),
-  getPermissions: vi.fn(async () => permissions),
+  getPermissions: vi.fn(async (walletId) => (byWallet ? byWallet[walletId] ?? {} : permissions)),
 }));
 
 vi.mock("./engineHost.js", () => ({
@@ -77,10 +79,38 @@ class FakePortWithoutSenderOrigin extends FakePort {
 describe("dappEvents", () => {
   beforeEach(() => {
     permissions = {};
+    byWallet = null;
     settings = { nodeUrl: "https://testnet.nodes.dusk.network" };
     engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"] };
     verifiedNames = {};
     vi.resetModules();
+  });
+
+  it("tells each site of a switch of wallet, and shows none of them the other wallet", async () => {
+    const W1 = { isUnlocked: true, accounts: ["w1a0", "w1a1"], addresses: ["w1s0", "w1s1"] };
+    const W2 = { isUnlocked: true, accounts: ["w2a0", "w2a1"], addresses: ["w2s0", "w2s1"] };
+    const perm = (wallet, i) => ({ profileId: `account:${i}:${wallet.accounts[i]}`, accountIndex: i, grants: { publicAccount: true }, updatedAt: 1 });
+    byWallet = {
+      w1a0: { "https://one.example": perm(W1, 0), "https://both.example": perm(W1, 1) },
+      w2a0: { "https://both.example": perm(W2, 0), "https://two.example": perm(W2, 1) },
+    };
+    engineStatus = W1;
+    const ev = await import("./dappEvents.js");
+    const ports = Object.fromEntries(["one", "both", "two", "none"].map((site, i) => [site, new FakePort(`https://${site}.example`, i + 1)]));
+    for (const port of Object.values(ports)) ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ports.two.messages.find((m) => m.type === "DUSK_PROVIDER_STATE").state).toMatchObject({ isConnected: false, profiles: [] });
+    for (const port of Object.values(ports)) port.messages.length = 0;
+
+    engineStatus = W2;
+    await ev.broadcastWalletChanged(byWallet.w1a0, W1);
+
+    const events = (port) => port.messages.filter((m) => m.type === "DUSK_PROVIDER_EVENT").map((m) => [m.name, m.data]);
+    expect(events(ports.one)).toEqual([["disconnect", { code: 4900, message: "Disconnected" }], ["profilesChanged", []]]);
+    expect(events(ports.both)).toEqual([["profilesChanged", [{ profileId: "account:0:w2a0", account: "w2a0" }]]]);
+    expect(events(ports.two)).toEqual([["connect", { chainId: "dusk:2" }], ["profilesChanged", [{ profileId: "account:1:w2a1", account: "w2a1" }]]]);
+    expect(events(ports.none)).toEqual([["profilesChanged", []]]);
+    expect(JSON.stringify(Object.values(ports).map((p) => p.messages))).not.toMatch(/w1a/);
   });
 
   it("does not leak all profiles when accountIndex is out of bounds", async () => {

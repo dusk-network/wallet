@@ -8,6 +8,7 @@ import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
+import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { fieldLabel, integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
 import { sendFromReview } from "./sent.js";
@@ -118,28 +119,31 @@ function parseTokenAmountHuman(raw, decimals) {
   return out.toString();
 }
 
-function ensureAssetsLoaded(ov, { state, actions } = {}) {
-  const st = (state.assets ??= {
-    loaded: false,
-    loading: false,
-    error: null,
-    updatedAt: 0,
-    networkKey: null,
-    profileIndex: null,
-    tokens: [],
-    nfts: [],
-    balances: {}, // { [contractId]: u64 string }
-    balancesAt: {}, // { [contractId]: number }
-  });
+// Whose tokens, NFTs and balances the popup holds: one wallet's (its first
+// public account), on one network, for one profile.
+export const assetsOwner = (ov) => [String(ov?.accounts?.[0] ?? ""), String(ov?.nodeUrl ?? "").trim(), Number(ov?.selectedAccountIndex ?? 0) || 0].join("|");
 
-  const net = String(ov?.nodeUrl ?? "").trim();
+function ensureAssetsLoaded(ov, { state, actions } = {}) {
+  // Another wallet, network or profile starts them over: nothing of the last
+  // one shows, and what was being read for it lands nowhere.
+  const owner = assetsOwner(ov);
+  if (state.assets?.owner !== owner) {
+    state.assets = {
+      owner,
+      loaded: false,
+      loading: false,
+      error: null,
+      updatedAt: 0,
+      tokens: [],
+      nfts: [],
+      balances: {}, // { [contractId]: u64 string }
+      balancesAt: {}, // { [contractId]: number }
+    };
+  }
+  const st = state.assets;
   const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
 
-  const stale =
-    !st.loaded ||
-    st.networkKey !== net ||
-    st.profileIndex !== idx ||
-    Date.now() - Number(st.updatedAt || 0) > 30_000;
+  const stale = !st.loaded || Date.now() - Number(st.updatedAt || 0) > 30_000;
 
   if (!stale || st.loading) return st;
 
@@ -149,18 +153,18 @@ function ensureAssetsLoaded(ov, { state, actions } = {}) {
   actions
     ?.send?.({ type: "DUSK_UI_ASSETS_GET", profileIndex: idx })
     .then((resp) => {
+      if (state.assets !== st) return;
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to load watched assets");
       const out = resp?.result ?? resp ?? {};
       st.tokens = Array.isArray(out?.tokens) ? out.tokens : [];
       st.nfts = Array.isArray(out?.nfts) ? out.nfts : [];
-      st.networkKey = net;
-      st.profileIndex = idx;
       st.loaded = true;
       st.loading = false;
       st.updatedAt = Date.now();
       actions?.render?.().catch(() => {});
     })
     .catch((e) => {
+      if (state.assets !== st) return;
       st.loading = false;
       st.loaded = false;
       st.error = e?.message ?? String(e);
@@ -198,6 +202,7 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
         driver: t?.driver,
       })
       .then((resp) => {
+        if (state.assets !== st) return;
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to fetch token balance");
         const v = String(resp?.result ?? resp ?? "0");
         st.balances[cid] = v;
@@ -936,6 +941,8 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
         ]),
       ].filter(Boolean)),
       h("div", { class: "group" }, [
+        // With more than one wallet, which one it goes from, and its profile.
+        actions?.review?.walletName ? kv("From", withReviewWallet(profileNameEl(ov), actions.review)) : null,
         counterpartyAddr
           ? kv(op === "approve" ? "Spender" : "To", h("span", { class: "mono review-to__address", text: counterpartyAddr }), "kv--wrap")
           : null,

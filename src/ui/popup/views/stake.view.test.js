@@ -8,7 +8,7 @@ import { lookupPrimaryName } from "../../../shared/duskNames.js";
 import { maxAmountLux } from "../../../shared/amount.js";
 import { stakeConfirmView, stakeFormView } from "./stake.js";
 import { sozuConfirmView } from "./sozu.js";
-import { sentView } from "./sent.js";
+import { reviewOf, sentView } from "./sent.js";
 import { switchContext } from "../context.js";
 
 // The profile's verified name, as the header shows it: none unless a test gives one.
@@ -90,7 +90,7 @@ const sozu = (over = {}) => ({
   ...over,
 });
 
-const ov = (over = {}) => ({ selectedAccountIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network", networkName: "Testnet", ...over });
+const ov = (over = {}) => ({ isUnlocked: true, accounts: [ACCOUNT], selectedAccountIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network", networkName: "Testnet", ...over });
 // What Liquid staking says after leaving a stake's Review the popup moved away from.
 const SWITCHED = "The network or profile changed, so nothing was sent. Check the stake again.";
 const LOCKED = "The wallet locked, so nothing was sent. Check the stake again.";
@@ -139,7 +139,8 @@ function popup(state, overview = ov(), { sozuStatus, rewardRate = null } = {}) {
             : state.route === "stake"
               ? stakeFormView
               : () => [];
-    body.replaceChildren(...view(overview, { state, actions }));
+    // What the screen is drawn for, as render() gives it (reviewOf).
+    body.replaceChildren(...view(overview, { state, actions: { ...actions, review: reviewOf(overview, state) } }));
   };
   draw();
   return { actions, draw };
@@ -568,6 +569,37 @@ describe("staking reviews", () => {
     expect(visibleText(body)).not.toContain("Profile 1");
   });
 
+  it("name the wallet beside the profile with more than one wallet", async () => {
+    lookupPrimaryName.mockImplementation(async (account) => (account === ACCOUNT ? "alice.dusk" : null));
+    const two = () => ov({ accounts: [ACCOUNT, OTHER], wallets: [{ key: "w1", n: 1, active: false }, { key: "w2", n: 2, name: "Savings", active: true }] });
+    const rows = () => body.querySelectorAll(".row > .group .kv").map(visibleText);
+
+    popup({ route: "stake", staking: staking(owner(), { screen: "native" }) }, two());
+    typeInto(field("Stake amount"), "1000");
+    button("Review stake").click();
+    await settle();
+    expect(rows()[0]).toBe("FromSavings · alice.dusk · Public");
+
+    popup({ route: "stake", staking: staking(owner({ relatedStakes: [related()] })) }, two());
+    button("Unstake").click();
+    await settle();
+    expect(rows()).toEqual(["ToSavings · Profile 2 · Public", "Owneralice.dusk"]);
+
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }) };
+    const app = popup(state, two());
+    typeInto(field("Stake amount"), "50");
+    button("Review stake").click();
+    await settle();
+    expect(rows().at(-1)).toBe("FromSavings · alice.dusk · Public");
+    state.route = "stake";
+    state.sozu.action = "withdraw";
+    app.draw();
+    typeInto(field("Unstake amount"), "5");
+    button("Review unstake").click();
+    await settle();
+    expect(rows()).toEqual(["ToSavings · alice.dusk · Public"]);
+  });
+
   it("name another owner", async () => {
     const state = { route: "stake", staking: staking(owner({ relatedStakes: [related()] })) };
     popup(state, named());
@@ -881,7 +913,7 @@ describe("liquid staking", () => {
       const step = body.querySelector(".step");
       expect([visibleText(step.querySelector(".step-title")), visibleText(step.querySelector(".step-sub"))]).toEqual([
         "Not sent",
-        "The network or profile changed meanwhile. No fee was charged.",
+        "The network, profile or wallet changed meanwhile. No fee was charged.",
       ]);
     });
 

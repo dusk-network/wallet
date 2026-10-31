@@ -12,6 +12,7 @@ import { fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } fro
 import { iconSvg } from "./components/ActionIcon.js";
 import { parseDuskQrPayload } from "./components/QrScanModal.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
+import { reviewOf } from "./popup/views/sent.js";
 
 vi.mock("./components/QrScanModal.js", () => ({
   openQrScanModal: vi.fn(),
@@ -140,6 +141,8 @@ function mount(state, ov = overview(), send = async () => ({})) {
     send: vi.fn(send),
     render: vi.fn(async () => {}),
     showToast: vi.fn(),
+    // What the screen is drawn for, as render() gives it.
+    review: reviewOf(ov, state),
   };
   const view = state.route === "confirm" ? sendConfirmView : sendFormView;
   dom.document.body.replaceChildren(...view(ov, { state, actions }));
@@ -492,6 +495,28 @@ describe("names on Send and Review", () => {
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
   });
 
+  it("names the wallet beside the profile with more than one wallet, the one the Review was drawn for", async () => {
+    lookupPrimaryName.mockImplementation(async (account) => (account === OWN.account ? "me.dusk" : null));
+    const draft = (to, privacy) => ({ to, privacy, amountDusk: "1", amountLux: "1000000000", memo: "" });
+    const wallets = [
+      { key: "w1", n: 1, name: "", active: false },
+      { key: "w2", n: 2, name: "", active: true },
+    ];
+    const from = () => visibleText(dom.document.body.querySelectorAll(".send-review > .group > .kv")[1]);
+    const state = { route: "confirm", addressBook: { loaded: true, items: [] }, draft: draft(BOB.account, "public") };
+    mount(state, overview({ wallets }));
+    await settle();
+    expect(from()).toBe("FromWallet 2 · me.dusk · Public");
+    // A name given to the wallet, on a shielded send.
+    mount({ ...state, draft: draft(BOB.address, "shielded") }, overview({ wallets: [wallets[0], { ...wallets[1], name: "Savings" }] }));
+    await settle();
+    expect(from()).toBe("FromSavings · me.dusk · Shielded");
+    // One wallet: the profile alone.
+    mount(state, overview({ wallets: [{ ...wallets[1], n: 1 }] }));
+    await settle();
+    expect(from()).toBe("Fromme.dusk · Public");
+  });
+
   it("offers no Save to Contacts for this wallet's own account or address", () => {
     for (const to of [OWN.account, OWN.address]) {
       mount({
@@ -686,6 +711,7 @@ describe("review", () => {
     expect(view.actions.send).toHaveBeenLastCalledWith({
       type: "DUSK_UI_SEND_TX",
       params: expect.objectContaining({ to: ALICE.account, privacy: "public", gas: { limit: "2500000", price: "1" } }),
+      walletId: overview().accounts[0],
     });
   });
 
@@ -891,6 +917,7 @@ describe("a name and the recipient Contacts sets", () => {
     expect(review.actions.send).toHaveBeenCalledWith({
       type: "DUSK_UI_SEND_TX",
       params: expect.objectContaining({ privacy: "public", to: BOB.account }),
+      walletId: overview().accounts[0],
     });
   });
 });

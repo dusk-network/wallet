@@ -61,10 +61,18 @@ const key = await crypto.subtle.deriveKey(
 );
 ```
 
+Every recovery phrase on the device is sealed under the same password, each
+with its own IV, wallets added with the salt of one already there (`dusk_vault_v2`, see [ARCHITECTURE.md](ARCHITECTURE.md#vault-encrypted-mnemonics)).
+Adding a wallet, removing one and changing the password each ask for the
+password the wallets were unlocked with, and every change is read back and
+checked before it's kept. Nothing
+the password doesn't open is changed or removed, except by Reset.
+
 #### Memory Lifecycle
 
-- Mnemonic held in JavaScript heap after unlock
-- Cleared on explicit lock or auto-lock timeout
+- Every unlocked wallet's mnemonic held in JavaScript heap after unlock, so a
+  switch of wallet needs no password
+- All cleared on explicit lock or auto-lock timeout
 - **Limitation**: Cannot guarantee memory zeroization in JavaScript
 
 #### Recommendations
@@ -92,19 +100,24 @@ service worker does not immediately lock an otherwise active unlocked wallet.
 
 - Each origin must explicitly request connection
 - User approves via popup before granting access
-- Permissions stored per-origin with the selected profile/account index and grants
+- Permissions stored per wallet, then per origin, with the selected profile/account index and grants
+- A site connected to one wallet sees nothing of another unless it's connected there too
+- A site that disconnects itself is disconnected from every wallet
 
 ```js
-// Permission record
+// Permission record, under its wallet's ID (its first public account)
 {
-  "https://dapp.example.com": {
-    profileId: "account:0:...",
-    accountIndex: 0,
-    grants: {
-      publicAccount: true,
-      shieldedReceiveAddress: false
-    },
-    connectedAt: 1706400000000,
+  "2Z8m...": {
+    "https://dapp.example.com": {
+      profileId: "account:0:...",
+      accountIndex: 0,
+      grants: {
+        publicAccount: true,
+        shieldedReceiveAddress: false
+      },
+      connectedAt: 1706400000000,
+      updatedAt: 1706400000000,
+    }
   }
 }
 ```
@@ -139,6 +152,14 @@ All `dusk_sendTransaction` calls require explicit user approval via a popup wind
 - Review transaction details
 - Adjust gas settings
 - Approve or reject
+
+Every approval is for one wallet: the one unlocked when the site asked, or,
+asked while locked, the one its window shows first. Its window shows no other,
+and what it approves is granted, signed or sent only while that wallet is the
+one unlocked. The wallet's own screens act for the wallet they were drawn
+for: a send goes only from its Review's wallet, profile and network, and a
+change to a wallet's profile, contacts, tokens or connected sites is refused
+once another wallet is open.
 
 ### 4. Content Security Policy
 

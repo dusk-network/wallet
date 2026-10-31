@@ -75,9 +75,11 @@ export async function saveHandedExport() {
 
 // The user's contact names for an export, read in full first: a list still
 // loading would leave their column blank. Throws when they can't be read.
-async function exportContactNames(state) {
+// The contact names of the wallet the rows are (`walletId`), and of no other.
+async function exportContactNames(state, walletId) {
   const ab = state?.addressBook;
-  const items = ab?.loaded && Array.isArray(ab.items) ? ab.items : await listAddressBook();
+  const own = ab?.loaded && Array.isArray(ab.items) && (!state?.contactsWallet || state.contactsWallet === walletId);
+  const items = own ? ab.items : await listAddressBook({ walletId });
   const byAddress = new Map();
   for (const entry of items ?? []) {
     const address = String(entry?.address ?? "").trim().toLowerCase();
@@ -119,7 +121,7 @@ export function activityExportPanel(ov, rows, { state, actions, nodeUrl }) {
         let contactName;
         if (withContacts) {
           try {
-            contactName = await exportContactNames(state);
+            contactName = await exportContactNames(state, String(ov?.accounts?.[0] ?? ""));
           } catch {
             actions?.showToast?.("Couldn't read your contacts, so nothing was saved. Try again.", 2500);
             return;

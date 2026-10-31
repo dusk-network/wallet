@@ -60,9 +60,10 @@ describe("own .dusk names in the popup", () => {
 
     // The name leads at full contrast, with no colour of its own; the address
     // after it is smaller and muted, on Receive one line ending in "…". The
-    // header chip has one line, the name or the short account.
+    // header chip's line is the name, never the account; with more than one
+    // wallet, the wallet's name goes under it, smaller and muted.
     expect(rule(".dusk-name")).toContain("color: var(--foreground);");
-    expect(css).not.toContain(".chip-lines");
+    expect(rule(".account-chip .chip-wallet")).toContain("color: var(--text-muted);");
     expect(rule(".receive-field__name")).toContain("font-size: 14px;");
     const oneMutedLine = ["font-size: 12px;", "color: var(--muted-foreground);", "white-space: nowrap;", "text-overflow: ellipsis;"];
     for (const decl of oneMutedLine) expect(rule(".receive-field__address")).toContain(decl);

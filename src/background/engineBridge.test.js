@@ -126,7 +126,14 @@ describe("engine bridge", () => {
   it("normalizes engine status and falls back to locked", async () => {
     const bridge = createEngineBridge({ ensureHost: async () => {}, noResponseMessage: "No engine" });
     mocks.runtimeSendMessage.mockResolvedValueOnce({
-      result: { isUnlocked: 1, accounts: ["account"], addresses: ["address"], selectedAccountIndex: "1" },
+      result: {
+        isUnlocked: 1,
+        accounts: ["account"],
+        addresses: ["address"],
+        selectedAccountIndex: "1",
+        walletKey: "w2",
+        wallets: [{ key: "w1", n: 1 }, { key: "w2", n: 2 }],
+      },
     });
 
     await expect(bridge.getEngineStatus()).resolves.toEqual({
@@ -134,6 +141,8 @@ describe("engine bridge", () => {
       accounts: ["account"],
       addresses: ["address"],
       selectedAccountIndex: 1,
+      walletKey: "w2",
+      wallets: [{ key: "w1", n: 1 }, { key: "w2", n: 2 }],
     });
 
     mocks.runtimeSendMessage.mockRejectedValueOnce(new Error("offline"));
@@ -142,6 +151,8 @@ describe("engine bridge", () => {
       accounts: [],
       addresses: [],
       selectedAccountIndex: 0,
+      walletKey: "",
+      wallets: [],
     });
 
     mocks.runtimeSendMessage.mockRejectedValueOnce(new Error("offline"));

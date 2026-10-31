@@ -6,7 +6,7 @@ import { isFullView, isPopupView } from "./env.js";
 import { isExtensionRuntime } from "../../platform/runtime.js";
 import { platform } from "../../platform/index.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
-import { profileLabelOf } from "../components/ProfileName.js";
+import { profileLabelOf, walletNameOf } from "../components/ProfileName.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
 
 /**
@@ -146,9 +146,11 @@ export function createHeaderRenderer({
 
       // The switcher's rows copy each account.
       const canOpenProfiles = Boolean(walletReady && acctMenu);
-      // Without a verified name, the chip shows the profile's label.
+      // The profile's verified name, else its label; with more than one
+      // wallet, the wallet's name under it.
       const label = profileLabelOf(ov, idx);
-      const key = [account, label, host, connected, ov?.nodeUrl, canOpenProfiles].join("\n");
+      const wallet = walletNameOf(ov);
+      const key = [account, label, wallet, host, connected, ov?.nodeUrl, canOpenProfiles].join("\n");
       if (!chip || chipFor !== key || !acctMenu?.isOpen) {
         // A redrawn chip keeps the keyboard where it was.
         refocusChip = Boolean(chip) && document.activeElement === chip;
@@ -159,6 +161,7 @@ export function createHeaderRenderer({
           // The chip only shows the name, so it keeps the last one while it is looked up again.
           name: lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true }),
           label,
+          wallet,
           expanded: canOpenProfiles && acctMenu.isOpen,
           onClick: canOpenProfiles
             ? (el) => {

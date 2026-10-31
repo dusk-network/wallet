@@ -1,5 +1,5 @@
 // A sent transaction's first record, as Activity and the watchers start from
-// it (txStore.js): who asked, on which node and network, the profile that paid, what
+// it (txStore.js): the wallet that sent it, who asked, on which node and network, the profile that paid, what
 // it sends and to whom, its gas, and the shielded notes it reserves. The
 // wallet's own sends add the stake's owner, how they were paid, the token and
 // the .dusk name typed for the recipient; a site's add what its call says.
@@ -23,15 +23,17 @@ export function typedRecipientName(value) {
 
 /**
  * @param {object} params - the transaction as it was sent
- * @param {{ origin: string, nodeUrl: string, profileIndex: number, nullifiers?: unknown }} sent
+ * @param {{ walletId?: string, origin: string, nodeUrl: string, profileIndex: number, nullifiers?: unknown }} sent
  * @param {object} [extras] - what only the caller knows
  */
-export function submittedTxMeta(params, { origin, nodeUrl, profileIndex, nullifiers }, extras = {}) {
+export function submittedTxMeta(params, { walletId, origin, nodeUrl, profileIndex, nullifiers }, extras = {}) {
   const kind = String(params?.kind ?? "");
   const call = kind === TX_KIND.CONTRACT_CALL;
   const pendingNullifiers = normalizeNullifiers(nullifiers);
   const now = Date.now();
   return {
+    // The wallet that sent it, whose Activity lists it.
+    walletId: walletId ? String(walletId) : undefined,
     origin,
     nodeUrl,
     // The network it was sent on, as the settings the sender just loaded name

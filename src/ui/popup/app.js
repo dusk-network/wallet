@@ -26,7 +26,7 @@ import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { sozuConfirmView } from "./views/sozu.js";
-import { noteTxStatus, sentAnnouncement, sentView } from "./views/sent.js";
+import { noteTxStatus, reviewOf, sentAnnouncement, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -46,6 +46,7 @@ import {
   restoreWalletView,
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
+import { changePasswordView, removeWalletView } from "./views/wallets.js";
 import { getRuntimeKind, isExtensionRuntime } from "../../platform/runtime.js";
 import {
   getExtensionApi,
@@ -77,11 +78,18 @@ function isWalletLockedResponse(value) {
   return /wallet locked/i.test(message);
 }
 
+// The screens of a wallet being added, removed, or a new password: unlocked only.
+const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password"]);
+
 function applyLockedOverviewPatch() {
   try {
     // Locked here or elsewhere: whatever began unlocked is for nothing now.
     switchContext(state, "lock");
+    acctMenu.close();
     stopArrivalChecks();
+    // A wallet being added keeps nothing of its new phrase through a lock.
+    if (state.onboard?.adding) state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
+    if (WALLET_ROUTES.has(state.route)) state.route = "home";
     state.overview = {
       ...(state.overview ?? {}),
       isUnlocked: false,
@@ -114,8 +122,11 @@ async function send(message) {
   return response;
 }
 
+// Whose stDUSK discovery it is: one wallet's (its first public account), on
+// one network, for one profile and pool token.
 function stDuskWatchKey(ov, profileIndex, contractId) {
   return [
+    String(ov?.accounts?.[0] ?? ""),
     String(ov?.nodeUrl ?? ""),
     String(profileIndex ?? 0),
     String(contractId ?? "").toLowerCase(),
@@ -154,6 +165,7 @@ async function maybeAutoWatchDashboardStDusk(ov) {
       type: "DUSK_UI_ASSETS_WATCH_TOKEN",
       profileIndex,
       token: makeSozuStDuskToken(contractId),
+      walletId: String(ov.accounts?.[0] ?? ""),
     });
     if (watchResp?.error) return;
 
@@ -197,6 +209,34 @@ let activeLockedView = null;
 let activeLockedScreen = "";
 // The screen last drawn, to start a new one at its top.
 let lastScreen = "";
+// The nodes #app shows: drawn again as the same nodes (the unlock form, a
+// kept wallet form), a screen stays as it is.
+let mounted = null;
+
+// A wallet form being filled in (Add wallet's words and password, Remove
+// wallet, Change password) stays mounted through redraws that aren't about
+// it, as the unlock form does: what's typed, and a submit under way, stay.
+// Another screen, another wallet or a lock drops it, with what was typed;
+// but not while its own submit runs (`busy`), whose doing a wallet change
+// may be.
+let keptForm = null;
+
+function wipeForm(form) {
+  for (const node of form?.children ?? []) {
+    for (const field of node.querySelectorAll?.("input, textarea") ?? []) field.value = "";
+  }
+}
+
+function keepForm(build) {
+  const kept = keptForm;
+  if (kept && kept.route === state.route) {
+    if (kept.children.busy?.()) kept.context = state.context;
+    if (kept.context === state.context) return kept.children;
+  }
+  wipeForm(kept);
+  keptForm = { route: state.route, context: state.context, children: build() };
+  return keptForm.children;
+}
 
 function setApp(children) {
   if (!app) return;
@@ -235,17 +275,22 @@ function setApp(children) {
     // ignore
   }
 
-  if (children !== activeLockedView) {
+  if (children !== mounted) {
     // Redrawn in place (a watcher event, a refresh), the screen keeps the
     // focus on the same button or field, and a field its caret.
     const focused = sameScreen ? focusedControl() : null;
     const password = app.querySelector("#unlock-password");
     if (password) password.value = "";
     activeLockedView = null;
+    if (keptForm && keptForm.children !== children) {
+      wipeForm(keptForm);
+      keptForm = null;
+    }
     app.innerHTML = "";
     const siteBar = activeSiteBar(state.overview);
     if (siteBar) app.appendChild(siteBar);
     for (const child of children) app.appendChild(child);
+    mounted = children;
     if (focused) refocusControl(focused);
   }
 }
@@ -361,10 +406,13 @@ function activeSiteBar(ov) {
     text: site.connected ? "Disconnect" : "Connect",
     onclick: async () => {
       try {
-        await send({
+        // For the wallet the bar was drawn for, or for none.
+        const res = await send({
           type: site.connected ? "DUSK_UI_DISCONNECT_ORIGIN" : "DUSK_UI_CONNECT_ORIGIN",
           origin: site.origin,
+          walletId: String(ov.accounts?.[0] ?? ""),
         });
+        if (res?.error) throw new Error(res.error.message ?? "Couldn't change the site's connection");
         showToast(site.connected ? "Site disconnected." : "Site connected.");
         state.needsRefresh = true;
         await render({ forceRefresh: true });
@@ -486,7 +534,7 @@ function scheduleArrivalCheck(ov) {
   const timer = setTimeout(async () => {
     const now = state.overview;
     const found = current()
-      ? await checkArrivals(activityRows(now, state), { account: selected(now).account, archiverUrl: now?.archiverUrl, nodeUrl: now?.nodeUrl }).catch(() => 0)
+      ? await checkArrivals(activityRows(now, state), { walletId: now?.accounts?.[0], account: selected(now).account, archiverUrl: now?.archiverUrl, nodeUrl: now?.nodeUrl }).catch(() => 0)
       : 0;
     if (arrivalTimer !== timer) return;
     arrivalTimer = null;
@@ -553,6 +601,26 @@ function installTxStatusListener() {
             return;
           }
 
+          state.needsRefresh = true;
+          render({ forceRefresh: true }).catch(() => {});
+          return;
+        }
+
+        // Another wallet unlocked, here or in another window: whatever began
+        // on the one before is for nothing now.
+        if (msg?.type === "DUSK_UI_WALLET_CHANGED") {
+          switchContext(state);
+          // A menu still open shows the wallet before: it goes.
+          acctMenu.close();
+          state.needsRefresh = true;
+          render({ forceRefresh: true }).catch(() => {});
+          return;
+        }
+
+        // A wallet removed or renamed, here or in another window: the list
+        // is read again, and a menu showing the old one goes.
+        if (msg?.type === "DUSK_UI_WALLETS_CHANGED") {
+          acctMenu.close();
           state.needsRefresh = true;
           render({ forceRefresh: true }).catch(() => {});
           return;
@@ -724,11 +792,13 @@ const netMenu = createNetworkMenuController({
 
 // --- Account menu --------------------------------------------------------
 const acctMenu = createAccountMenuController({
-  onSelectAccountIndex: async (index) => {
+  // Without the wallets (none listed), a profile of the wallet the menu showed.
+  onSelectAccountIndex: async (index, { ov } = {}) => {
     try {
       acctMenu.close();
       switchContext(state);
-      const resp = await send({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index });
+      const walletId = ov?.isUnlocked ? String(ov.accounts?.[0] ?? "") : "";
+      const resp = await send({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index, ...(walletId ? { walletId } : {}) });
       if (isWalletLockedResponse(resp)) {
         applyLockedOverviewPatch();
         await render({ forceRefresh: true });
@@ -748,6 +818,34 @@ const acctMenu = createAccountMenuController({
       }
       showToast(e?.message ?? String(e));
     }
+  },
+  // A profile by its wallet's key, as the menu showed it: another wallet's
+  // opens that wallet, without the password; the open one's is selected in
+  // it, whichever wallet another window opened meanwhile.
+  onSelectWalletProfile: async (walletKey, index, { ov } = {}) => {
+    try {
+      acctMenu.close();
+      switchContext(state);
+      const resp = await send({ type: "DUSK_UI_SWITCH_WALLET", walletKey, index });
+      if (isWalletLockedResponse(resp)) {
+        applyLockedOverviewPatch();
+        await render({ forceRefresh: true });
+        return;
+      }
+      if (resp?.error) throw new Error(resp.error.message ?? "Couldn't switch wallet");
+      showToast(walletKey === ov?.walletKey ? "Profile selected." : "Wallet switched.");
+      state.needsRefresh = true;
+      await render({ forceRefresh: true });
+    } catch (e) {
+      showToast(e?.message ?? String(e));
+    }
+  },
+  onAddWallet: async () => {
+    acctMenu.close();
+    netMenu.close();
+    state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true };
+    state.route = "wallet_add";
+    await render();
   },
   onOpenOptions: async () => {
     acctMenu.close();
@@ -837,9 +935,9 @@ function keepContactsToTheirWallet(ov) {
 
 // --- Main render ----------------------------------------------------------
 export async function render({ forceRefresh = false } = {}) {
-  // Deposits to DuskEVM seen there before, for Activity's rows.
-  await loadArrivals();
   const overviewRefreshed = await refreshOverview(send, { force: forceRefresh });
+  // Deposits to DuskEVM seen there before, for Activity's rows: the wallet's own.
+  await loadArrivals(state.overview?.isUnlocked ? state.overview?.accounts?.[0] : "");
   if (overviewRefreshed && state.staking) {
     state.staking.loaded = false;
     state.staking.error = null;
@@ -870,9 +968,17 @@ export async function render({ forceRefresh = false } = {}) {
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });
 
+  // What the screen drawn now is for (reviewOf): its wallet, profile and
+  // network, and the context. Its handlers act for that wallet alone, however
+  // late they run: every message they send names it (`walletId`), and the
+  // wallet refuses a change to another wallet's data, or a send from it.
+  const review = reviewOf(ov, state);
+  const forScreen = (message) =>
+    review.walletId && message && typeof message === "object" && !("walletId" in message) ? { ...message, walletId: review.walletId } : message;
   // `refresh` is the dashboard's Refresh, next to the balance.
   const actions = {
-    send,
+    send: (message) => send(forScreen(message)),
+    review,
     render,
     showToast,
     refresh: onRefresh,
@@ -936,6 +1042,39 @@ export async function render({ forceRefresh = false } = {}) {
 
   // Unlocked routes. A restore that another window's unlock overtook goes home.
   if (state.route === "restore") state.route = "home";
+  // Another wallet: added with the same screens as the first, and the password.
+  if (state.route === "wallet_add") {
+    setApp(onboardingWelcomeView({ state, actions, adding: true }));
+    return;
+  }
+  if (state.route === "wallet_add_phrase") {
+    setApp(onboardingCreatePhraseView({ state, actions, adding: true, ov }));
+    return;
+  }
+  if (state.route === "wallet_add_confirm") {
+    setApp(keepForm(() => onboardingCreateConfirmView({ state, actions, adding: true })));
+    return;
+  }
+  if (state.route === "wallet_add_import") {
+    const view = keepForm(() => onboardingImportView({ state, actions, adding: true, ov }));
+    // Kept, it says which wallet the phrase becomes by the wallets here now.
+    view.landing?.(ov);
+    setApp(view);
+    return;
+  }
+  if (state.route === "wallet_remove") {
+    // A wallet that went meanwhile, here or in another window, or the only one: Settings.
+    const wallets = Array.isArray(ov.wallets) ? ov.wallets : [];
+    const there = wallets.length > 1 && wallets.some((w) => w.key === state.walletRemove);
+    const view = there ? keepForm(() => removeWalletView(ov, { state, actions })) : [];
+    if (!view.length) Object.assign(state, { route: "options", walletRemove: null });
+    setApp(view.length ? view : optionsView(ov, { state, actions }));
+    return;
+  }
+  if (state.route === "change_password") {
+    setApp(keepForm(() => changePasswordView(ov, { state, actions })));
+    return;
+  }
   // After Confirm: the transaction's steps. Without one (a new popup), home.
   if (state.route === "sent") {
     if (state.sent) {

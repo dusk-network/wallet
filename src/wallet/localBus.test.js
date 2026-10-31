@@ -1,7 +1,8 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import vaults from "../shared/fixtures/vault-v1.json";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A" }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [] }));
 
 // The engine's contacts key for the unlocked wallet, made as walletEngine.js
 // makes it: from its seed (here, a hash of its phrase), at its own place.
@@ -35,6 +36,11 @@ vi.mock("../shared/walletEngine.js", () => ({
     ].map((name) => [name, vi.fn()])
   ),
   configure: vi.fn(),
+  // A shielded checkpoint, on the wallet open as it's set.
+  setShieldedCheckpointNow: vi.fn(async () => {
+    engine.checkpoints.push(engine.wallet);
+    return { bookmark: "1", block: "1" };
+  }),
   isUnlocked: () => engine.unlocked,
   lock: () => {
     engine.unlocked = false;
@@ -43,9 +49,40 @@ vi.mock("../shared/walletEngine.js", () => ({
     engine.wallet = mnemonic;
     engine.unlocked = true;
   },
-  // The wallet a phrase makes; here every phrase is "wallet …".
+  // Every wallet the vault opened, one unlocked, as walletEngine.js keeps them.
+  unlockWallets: async ({ wallets, walletKey }) => {
+    const chosen = wallets.find((w) => w.id === walletKey) ?? wallets[0];
+    engine.held = wallets.map(({ id, n, mnemonic }) => ({ id, n, mnemonic }));
+    engine.key = chosen.id;
+    engine.wallet = chosen.mnemonic;
+    engine.unlocked = true;
+  },
+  switchWallet: async ({ walletKey }) => {
+    if (engine.switchFails) throw new Error("The engine stopped");
+    const chosen = engine.held.find((w) => w.id === walletKey);
+    if (!chosen) throw new Error("That wallet isn't here.");
+    engine.key = chosen.id;
+    engine.wallet = chosen.mnemonic;
+  },
+  addWallet: ({ walletKey, n, mnemonic }) => {
+    if (engine.addFails) throw new Error("Engine restarted");
+    engine.held.push({ id: walletKey, n, mnemonic });
+  },
+  removeWallet: ({ walletKey }) => {
+    engine.held = engine.held.filter((w) => w.id !== walletKey);
+  },
+  getWallets: () => (engine.unlocked ? engine.held.map(({ id, n }) => ({ key: id, n })) : []),
+  getWalletKey: () => (engine.unlocked ? engine.key : ""),
+  // A held wallet's profiles' accounts, from its phrase.
+  walletAccountsOf: async ({ walletKey }) => {
+    const held = engine.held.find((w) => w.id === walletKey);
+    if (!held) throw new Error("That wallet isn't here.");
+    return [`account of ${held.mnemonic}`, `account 1 of ${held.mnemonic}`];
+  },
+  getAddresses: () => ["addr0"],
+  // The wallet a phrase makes; here every phrase is "wallet …", or a BIP39 test phrase.
   walletIdOf: async (mnemonic) => {
-    if (!String(mnemonic).startsWith("wallet ")) throw new Error("That isn't a valid recovery phrase.");
+    if (!/^(wallet |abandon )/.test(String(mnemonic))) throw new Error("That isn't a valid recovery phrase.");
     return `account of ${mnemonic}`;
   },
   openContactsRecords: async (records) => {
@@ -59,7 +96,8 @@ vi.mock("../shared/walletEngine.js", () => ({
     const { key, namespace } = await contactsKeys();
     return { namespace, record: await sealContacts(key, namespace, text) };
   },
-  getAccounts: () => ["acct0"],
+  // The wallet's accounts: its own for each phrase.
+  getAccounts: () => [`account of ${engine.wallet}`, `account 1 of ${engine.wallet}`],
   getSelectedAccountIndex: () => 0,
   getCachedGasPrice: vi.fn(async () => ({ median: "1" })),
   sendTransaction: engine.sendTransaction,
@@ -91,6 +129,11 @@ beforeEach(() => {
   engine.sendTransaction.mockReset();
   engine.unlocked = true;
   engine.wallet = "wallet A";
+  engine.key = "";
+  engine.held = [];
+  engine.addFails = false;
+  engine.switchFails = false;
+  engine.checkpoints = [];
 });
 
 afterEach(() => {
@@ -128,6 +171,39 @@ describe("local sends", () => {
     sent.resolve({ hash: "dd".repeat(32), nonce: 1n });
     await expect(response).resolves.toMatchObject({ ok: true });
     await expect(listTxs()).resolves.toEqual([]);
+  });
+
+  it("go from the wallet they were reviewed on, or not at all", async () => {
+    const { localSend } = await import("./localBus.js");
+    const params = { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1" };
+    await expect(localSend({ type: "DUSK_UI_SEND_TX", walletId: "account of wallet B", params })).resolves.toMatchObject({
+      error: { message: "The wallet changed while you reviewed it." },
+    });
+    expect(engine.sendTransaction).not.toHaveBeenCalled();
+    engine.sendTransaction.mockResolvedValueOnce({ hash: "ab".repeat(32), nonce: 1n });
+    await expect(localSend({ type: "DUSK_UI_SEND_TX", walletId: "account of wallet A", params })).resolves.toMatchObject({
+      ok: true,
+    });
+  });
+
+  it("keep a wallet switch waiting until they're out", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { WALLET_LIFECYCLE_LOCK, withStorageLock } = await import("../shared/storageLock.js");
+    const sent = Promise.withResolvers();
+    engine.sendTransaction.mockReturnValueOnce(sent.promise);
+    const params = { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1" };
+    const response = localSend({ type: "DUSK_UI_SEND_TX", walletId: "account of wallet A", params });
+    await vi.waitFor(() => expect(engine.sendTransaction).toHaveBeenCalled());
+    let switched = false;
+    const switching = withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      switched = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(switched).toBe(false);
+    sent.resolve({ hash: "ac".repeat(32), nonce: 1n });
+    await expect(response).resolves.toMatchObject({ ok: true });
+    await switching;
+    expect(switched).toBe(true);
   });
 
   it("keep the .dusk name the recipient was typed as, and nothing that isn't one", async () => {
@@ -275,7 +351,7 @@ describe("contacts", () => {
     const failNextVaultWrite = () => {
       const write = localStorage.setItem;
       localStorage.setItem = (key, value) => {
-        if (key === "dusk_vault_v1") {
+        if (key === "dusk_vault_v2") {
           localStorage.setItem = write;
           throw new Error("Storage is full");
         }
@@ -371,5 +447,250 @@ describe("a custom node's chain ID, on the desktop app", () => {
     expect([told.mock.calls[0][0].type, told.mock.calls[0][0].detail]).toEqual(["dusk-wallet-message", { type: "DUSK_UI_NETWORK_CHANGED" }]);
     await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ chainId: 2 });
     expect(infoReads(fetch)).toBe(3);
+  });
+});
+
+// The real vault, at 900,000 PBKDF2 iterations a phrase: slow under load.
+describe("more than one recovery phrase", { timeout: 30_000 }, () => {
+  const { twelve } = vaults;
+  const send = async (message) => (await import("./localBus.js")).localSend(message);
+  const ok = async (message) => {
+    const res = await send(message);
+    if (res?.error) throw new Error(res.error.message);
+    return res;
+  };
+  const overview = () => ok({ type: "DUSK_UI_OVERVIEW" });
+  const vault = () => JSON.parse(localStorage.getItem("dusk_vault_v2"));
+  const accountOf = (phrase) => `account of ${phrase}`;
+
+  // A vault main made, as the update finds it, then unlocked with a second
+  // wallet imported beside it.
+  async function twoWallets() {
+    engine.unlocked = false;
+    localStorage.setItem("dusk_vault_v1", JSON.stringify(twelve.vault));
+    await ok({ type: "DUSK_UI_UNLOCK", password: twelve.password });
+    await ok({ type: "DUSK_UI_ADD_WALLET", mnemonic: "wallet B", password: twelve.password });
+    return (await overview()).wallets;
+  }
+
+  it("moves main's vault on unlock, imports another phrase, and switches both ways without the password", async () => {
+    engine.unlocked = false;
+    localStorage.setItem("dusk_vault_v1", JSON.stringify(twelve.vault));
+    await ok({ type: "DUSK_UI_UNLOCK", password: twelve.password });
+    expect(localStorage.getItem("dusk_vault_v1")).toBeNull();
+    expect((await overview()).wallets).toMatchObject([{ n: 1, name: "", active: true, walletId: accountOf(twelve.mnemonic) }]);
+
+    await ok({ type: "DUSK_UI_ADD_WALLET", mnemonic: "wallet B", password: twelve.password });
+    const wallets = (await overview()).wallets;
+    expect(wallets.map(({ n, active, walletId }) => [n, active, walletId])).toEqual([
+      [1, false, accountOf(twelve.mnemonic)],
+      [2, true, accountOf("wallet B")],
+    ]);
+    // The other wallet's profiles show as they were last shown.
+    expect(wallets[0].accounts).toEqual([accountOf(twelve.mnemonic), `account 1 of ${twelve.mnemonic}`]);
+    expect(engine.wallet).toBe("wallet B");
+
+    // No password either way.
+    await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: wallets[0].key, index: 1 });
+    expect(engine.wallet).toBe(twelve.mnemonic);
+    expect(JSON.parse(localStorage.getItem("dusk_settings_v1")).selectedAccountIndex).toBe(1);
+    await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: wallets[1].key, index: 0 });
+    expect(engine.wallet).toBe("wallet B");
+
+    // A lock locks every wallet; the next unlock opens the one used last, with the other held.
+    await ok({ type: "DUSK_UI_LOCK" });
+    await expect(send({ type: "DUSK_UI_SWITCH_WALLET", walletKey: wallets[0].key })).resolves.toMatchObject({ error: { message: "Wallet locked" } });
+    await ok({ type: "DUSK_UI_UNLOCK", password: twelve.password });
+    expect(engine.wallet).toBe("wallet B");
+    expect(engine.held.map((w) => w.mnemonic)).toEqual([twelve.mnemonic, "wallet B"]);
+  });
+
+  it("refuses a phrase that's here already with one sentence, a wrong password, and one that isn't a phrase", async () => {
+    await twoWallets();
+    const before = localStorage.getItem("dusk_vault_v2");
+    await expect(send({ type: "DUSK_UI_ADD_WALLET", mnemonic: twelve.mnemonic, password: twelve.password })).resolves.toMatchObject({
+      error: { message: "This recovery phrase is already in your wallet." },
+    });
+    await expect(send({ type: "DUSK_UI_ADD_WALLET", mnemonic: "wallet C", password: "not the password" })).resolves.toMatchObject({
+      error: { message: "Incorrect password" },
+    });
+    localStorage.removeItem("dusk_unlock_guard_v1");
+    await expect(send({ type: "DUSK_UI_ADD_WALLET", mnemonic: "not a phrase", password: twelve.password })).resolves.toMatchObject({
+      error: { message: "That isn't a valid recovery phrase." },
+    });
+    expect(localStorage.getItem("dusk_vault_v2")).toBe(before);
+    expect(engine.held).toHaveLength(2);
+  });
+
+  it("removes a wallet with the password, its data with it, and touches nothing of the other", async () => {
+    const [first, second] = await twoWallets();
+    const txs = await import("../shared/txStore.js");
+    const names = await import("../shared/accountNames.js");
+    for (const w of [first, second]) {
+      await txs.putTxMeta(`${w.n}`.repeat(64), { walletId: w.walletId, nodeUrl: "n", status: "executed", submittedAt: w.n });
+      await names.setAccountName(w.walletId, 0, `label ${w.n}`);
+    }
+    const kept = JSON.stringify(vault().wallets.find((w) => w.id === first.key));
+
+    await expect(send({ type: "DUSK_UI_REMOVE_WALLET", walletKey: second.key, password: "wrong" })).resolves.toMatchObject({
+      error: { message: "Incorrect password" },
+    });
+    expect(vault().wallets).toHaveLength(2);
+    localStorage.removeItem("dusk_unlock_guard_v1");
+
+    // The wallet open now: the other one opens in its place.
+    await ok({ type: "DUSK_UI_REMOVE_WALLET", walletKey: second.key, password: twelve.password });
+    expect(engine.wallet).toBe(twelve.mnemonic);
+    expect(engine.held.map((w) => w.id)).toEqual([first.key]);
+    expect(vault().wallets.map((w) => JSON.stringify(w))).toEqual([kept]);
+    await expect(txs.listTxs({ walletId: second.walletId })).resolves.toEqual([]);
+    await expect(txs.listTxs({ walletId: first.walletId })).resolves.toHaveLength(1);
+    await expect(names.getAccountNames(second.walletId)).resolves.toEqual({});
+    await expect(names.getAccountNames(first.walletId)).resolves.toEqual({ 0: "label 1" });
+    expect((await overview()).wallets.map((w) => w.key)).toEqual([first.key]);
+
+    // The only wallet stays: Reset removes it.
+    await expect(send({ type: "DUSK_UI_REMOVE_WALLET", walletKey: first.key, password: twelve.password })).resolves.toMatchObject({
+      error: { message: "This is the only wallet here. Reset removes it." },
+    });
+  });
+
+  it("says a wallet the vault took opens on the next unlock, when the engine couldn't take it", async () => {
+    engine.unlocked = false;
+    localStorage.setItem("dusk_vault_v1", JSON.stringify(twelve.vault));
+    await ok({ type: "DUSK_UI_UNLOCK", password: twelve.password });
+    engine.addFails = true;
+    await expect(send({ type: "DUSK_UI_ADD_WALLET", mnemonic: "wallet B", password: twelve.password })).resolves.toMatchObject({
+      error: { message: "The wallet was added. Lock and unlock to open it." },
+    });
+    engine.addFails = false;
+    await ok({ type: "DUSK_UI_LOCK" });
+    await ok({ type: "DUSK_UI_UNLOCK", password: twelve.password });
+    expect(engine.held.map((w) => w.mnemonic)).toEqual([twelve.mnemonic, "wallet B"]);
+  });
+
+  it("forgets a removed wallet's data by its phrase, whatever the switcher last showed of it", async () => {
+    const [first, second] = await twoWallets();
+    await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: first.key, index: 0 });
+    const txs = await import("../shared/txStore.js");
+    const activity = await import("../shared/activityStore.js");
+    await txs.putTxMeta("b".repeat(64), { walletId: second.walletId, nodeUrl: "n", status: "executed", submittedAt: 1 });
+    const owner = activity.activityOwnerKey("testnet", "account 1 of wallet B");
+    await activity.commitActivityStep(owner, [{ hash: "c".repeat(64), blockHeight: 1 }], () => ({ synced: 1 }));
+    // Nothing kept of what the switcher showed of it.
+    const directory = JSON.parse(localStorage.getItem("dusk_wallets_v1"));
+    delete directory.wallets[second.key];
+    localStorage.setItem("dusk_wallets_v1", JSON.stringify(directory));
+
+    await ok({ type: "DUSK_UI_REMOVE_WALLET", walletKey: second.key, password: twelve.password });
+    await expect(txs.listTxs({ walletId: second.walletId })).resolves.toEqual([]);
+    await expect(activity.listActivityEntries(owner)).resolves.toEqual([]);
+  });
+
+  it("gives the sends kept before wallets were kept apart to the wallet moved from main's vault, and to no other", async () => {
+    const txs = await import("../shared/txStore.js");
+    await txs.putTxMeta("d".repeat(64), { nodeUrl: "n", status: "executed", submittedAt: 1 });
+    const [first, second] = await twoWallets();
+    await expect(txs.listTxs({ walletId: first.walletId })).resolves.toEqual([expect.objectContaining({ hash: "d".repeat(64) })]);
+
+    // One kept without a wallet since, and the moved wallet gone: the other doesn't take it.
+    await txs.putTxMeta("e".repeat(64), { nodeUrl: "n", status: "executed", submittedAt: 2 });
+    await ok({ type: "DUSK_UI_REMOVE_WALLET", walletKey: first.key, password: twelve.password });
+    await ok({ type: "DUSK_UI_LOCK" });
+    await ok({ type: "DUSK_UI_UNLOCK", password: twelve.password });
+    expect(engine.held.map((w) => w.id)).toEqual([second.key]);
+    await expect(txs.listTxs({ walletId: second.walletId })).resolves.toEqual([]);
+  });
+
+  it("sets a new phrase's shielded checkpoint as it adds that wallet, and never on another opened meanwhile", async () => {
+    await twoWallets();
+    // "wallet B" was imported: no checkpoint for it.
+    expect(engine.checkpoints).toEqual([]);
+    await ok({ type: "DUSK_UI_ADD_WALLET", mnemonic: "wallet C", password: twelve.password, fresh: true });
+    expect(engine.checkpoints).toEqual(["wallet C"]);
+
+    // Another window opens the first wallet; a checkpoint asked on its own after the add sets nothing.
+    await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: (await overview()).wallets[0].key, index: 0 });
+    await send({ type: "DUSK_UI_SET_SHIELDED_CHECKPOINT_NOW" });
+    expect(engine.checkpoints).toEqual(["wallet C"]);
+  });
+
+  it("deletes all contacts of the wallet its page showed, and leaves another wallet's", async () => {
+    const [first, second] = await twoWallets();
+    const contacts = (walletId, op, more = {}) => ok({ type: "DUSK_UI_CONTACTS", op, walletId, ...more });
+    await contacts(second.walletId, "upsert", { entry: { name: "Bea", address: ACCOUNT } });
+    await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: first.key, index: 0 });
+    await contacts(first.walletId, "upsert", { entry: { name: "Ann", address: ACCOUNT } });
+
+    await contacts(first.walletId, "clear");
+    expect((await contacts(first.walletId, "list")).result).toEqual([]);
+    await ok({ type: "DUSK_UI_SWITCH_WALLET", walletKey: second.key, index: 0 });
+    expect((await contacts(second.walletId, "list")).result).toEqual([expect.objectContaining({ name: "Bea" })]);
+  });
+
+  it("shows the unlock form once a failed switch has locked the wallet", async () => {
+    const { installFakeDom, settle } = await import("../ui/testing/fakeDom.js");
+    await twoWallets();
+    const dom = installFakeDom({ pathname: "/popup.html" });
+    dom.document.body.innerHTML = "";
+    const header = dom.document.createElement("div");
+    header.id = "header-actions";
+    const page = dom.document.createElement("div");
+    page.id = "app";
+    dom.document.body.append(header, page);
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) {
+        await settle();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    };
+    const { render } = await import("../ui/popup/app.js");
+    await render();
+    await flush();
+    expect(page.textContent).not.toContain("Unlock your wallet");
+
+    // The first wallet's profile, picked from the menu; the engine fails the switch.
+    engine.switchFails = true;
+    header.querySelector(".account-chip").click();
+    await flush();
+    const rows = dom.document.body.querySelectorAll(".acct-menu-wallet")[0].querySelectorAll(".net-menu-item");
+    expect(rows.length).toBeGreaterThan(0);
+    rows[0].click();
+    await flush();
+    expect(engine.unlocked).toBe(false);
+    expect(page.textContent).toContain("Unlock your wallet");
+  });
+
+  it("renames a wallet, and gives it its number back", async () => {
+    const [, second] = await twoWallets();
+    await ok({ type: "DUSK_UI_RENAME_WALLET", walletKey: second.key, name: "  Savings " });
+    expect((await overview()).wallets[1]).toMatchObject({ n: 2, name: "Savings" });
+    await ok({ type: "DUSK_UI_RENAME_WALLET", walletKey: second.key, name: "" });
+    expect((await overview()).wallets[1].name).toBe("");
+  });
+
+  it("changes the password of every phrase", async () => {
+    await twoWallets();
+    await expect(send({ type: "DUSK_UI_CHANGE_PASSWORD", password: twelve.password, newPassword: "short" })).resolves.toMatchObject({
+      error: { message: "Use at least 8 characters." },
+    });
+    await ok({ type: "DUSK_UI_CHANGE_PASSWORD", password: twelve.password, newPassword: "a new password" });
+    await ok({ type: "DUSK_UI_LOCK" });
+    await expect(send({ type: "DUSK_UI_UNLOCK", password: twelve.password })).resolves.toMatchObject({ error: { message: "Incorrect password" } });
+    localStorage.removeItem("dusk_unlock_guard_v1");
+    await ok({ type: "DUSK_UI_UNLOCK", password: "a new password" });
+    expect(engine.held.map((w) => w.mnemonic)).toEqual([twelve.mnemonic, "wallet B"]);
+  });
+
+  it("removes every wallet on Reset, and on a restore after a forgotten password", async () => {
+    await twoWallets();
+    await ok({ type: "DUSK_UI_LOCK" });
+    await ok({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet C", password: "password456" });
+    expect(vault().wallets).toHaveLength(1);
+    expect((await overview()).wallets).toMatchObject([{ n: 1, walletId: accountOf("wallet C") }]);
+
+    await ok({ type: "DUSK_UI_RESET_WALLET" });
+    for (const key of ["dusk_vault_v1", "dusk_vault_v2", "dusk_wallets_v1", "dusk_permissions_v2"]) expect(localStorage.getItem(key)).toBeNull();
+    await expect(send({ type: "DUSK_UI_STATUS" })).resolves.toMatchObject({ hasVault: false });
   });
 });

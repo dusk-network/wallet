@@ -82,3 +82,14 @@ export async function setAccountName(walletId, profileIndex, name) {
   return map;
 }
 
+
+/**
+ * Forget a removed wallet's profile labels.
+ * @param {string} walletId
+ */
+export async function forgetAccountNames(walletId) {
+  const id = String(walletId ?? "").trim();
+  if (!id) return;
+  const { [id]: _gone, ...rest } = await getAll();
+  await setAll(rest);
+}
