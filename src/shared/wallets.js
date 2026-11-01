@@ -24,8 +24,7 @@ export function walletLabel(wallet) {
 }
 
 /**
- * The number the next wallet added gets: one past the highest here, so a
- * removed wallet's number isn't given again.
+ * The number the next wallet gets: one past the highest here.
  * @param {Array<{ n?: number }>} wallets
  */
 export function nextWalletNumber(wallets) {

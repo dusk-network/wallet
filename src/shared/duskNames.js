@@ -70,18 +70,28 @@ const REPLY_MAX = 32_768;
 const sessionReplies = new Map();
 const replyKey = (release, method) => `dusk_names_lens_v1:${release.lens.contractId}:${method}`;
 
-async function keptReply(key) {
-  if (sessionReplies.has(key)) return sessionReplies.get(key);
-  try {
-    const hex = (await storageSessionGet(key))?.[key];
-    if (typeof hex === "string") {
-      sessionReplies.set(key, hex);
-      return hex;
-    }
-  } catch {
-    // No session storage here: this page's memory alone.
+// The replies kept in session storage, read into this page's memory before
+// any lens read goes on, once for the reads made together: they then go on
+// in one task, so a check's reads the session didn't keep go in the same
+// Multicall for Dusk query as the lookups'.
+const loading = new Map();
+function keptReplies(release) {
+  const keys = [...ONCE_A_SESSION].map((method) => replyKey(release, method));
+  const lens = release.lens.contractId;
+  if (keys.every((key) => sessionReplies.has(key))) return Promise.resolve();
+  if (!loading.has(lens)) {
+    const load = storageSessionGet(keys)
+      .then(
+        (items) => {
+          for (const key of keys) if (typeof items?.[key] === "string") sessionReplies.set(key, items[key]);
+        },
+        // No session storage here: this page's memory alone.
+        () => {}
+      )
+      .finally(() => loading.delete(lens));
+    loading.set(lens, load);
   }
-  return null;
+  return loading.get(lens);
 }
 
 async function keepReply(key, hex) {
@@ -137,11 +147,13 @@ function lensSession(release, nodeUrl, fetch) {
   return {
     async fetch(input, init) {
       const url = String(input?.href ?? input?.url ?? input);
-      const method = url.startsWith(prefix) ? url.slice(prefix.length) : "";
+      if (!url.startsWith(prefix)) return fetch(input, init);
+      await keptReplies(release);
+      const method = url.slice(prefix.length);
       if (!ONCE_A_SESSION.has(method)) return fetch(input, init);
       const key = replyKey(release, method);
-      const kept = await keptReply(key);
-      if (kept !== null) {
+      const kept = sessionReplies.get(key);
+      if (kept !== undefined) {
         read.delete(key);
         return new Response(hexToBytes(kept), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
       }

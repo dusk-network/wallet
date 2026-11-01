@@ -430,6 +430,11 @@ describe("wallets", () => {
     expect(two.section("Security").querySelector("p.settings-note").textContent).toBe("Locks every wallet after this long without use.");
     const buttons = dom.document.body.querySelectorAll("button").map((b) => b.textContent);
     expect([buttons.includes("Lock"), buttons.includes("Lock wallet")]).toEqual([true, false]);
+
+    // One wallet open, and another in the vault that another password opens.
+    const sealed = await drawn({ wallets: fresh().slice(0, 1), walletsHere: 2 });
+    expect(sealed.section("Security").querySelector("p.settings-note").textContent).toBe("Locks every wallet after this long without use.");
+    expect(dom.document.body.querySelectorAll("button").map((b) => b.textContent)).toContain("Lock");
   });
 
   it("names each connected site's wallet, and disconnects a site from its own wallet", async () => {

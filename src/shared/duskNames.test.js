@@ -907,6 +907,108 @@ describe("lookupRecipientNames", () => {
   });
 });
 
+describe("names looked up together", () => {
+  const LENS = releases.testnet.lens.contractId;
+  const THIRD_ACCOUNT =
+    "26brdzqNXEG1jTzCubJAPhks18bSSDY4n21ZW6VLYkCv6bBUdBAZZAbn1Coz1LPBYc4uEekBbzFnZvhL9untGCqRamhZS2cBV51fdZog3qkP3NbMEaqgNMcKEahAFV8t2Cke";
+  const spelled = new Map([[ACCOUNT, "alice.dusk"], [OTHER_ACCOUNT, "bob.dusk"]]);
+  // The queries the node is asked, each as the functions it carries, and
+  // the browser's session storage.
+  let asked;
+  let session;
+
+  // Each read's function in a query, as encodeAggregate lays them out: a
+  // name of up to 7 bytes in its call's slot, a longer one before the slots.
+  function functionsOf(body) {
+    const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+    const root = body.length - 8;
+    const slots = root + view.getInt32(root, true);
+    return Array.from({ length: view.getUint32(root + 4, true) }, (_, i) => {
+      const slot = slots + 56 * i;
+      const [at, length] =
+        body[slot + 39] < 0x80 ? [slot + 32, body[slot + 39]] : [slot + 32 + view.getInt32(slot + 36, true), view.getUint32(slot + 32, true)];
+      return new TextDecoder().decode(body.subarray(at, at + length));
+    });
+  }
+
+  // The multicall's reply of one byte for each read: the bytes, then their
+  // 16-byte slots from a 4-aligned offset, then the root, 8-aligned.
+  function reply(count) {
+    const slots = Math.ceil(count / 4) * 4;
+    const root = Math.ceil((slots + 16 * count) / 8) * 8;
+    const bytes = new Uint8Array(root + 16).fill(7, 0, count);
+    const view = new DataView(bytes.buffer);
+    for (let i = 0; i < count; i++) {
+      view.setInt32(slots + 16 * i + 4, i - (slots + 16 * i + 4), true);
+      view.setUint32(slots + 16 * i + 8, 1, true);
+    }
+    view.setBigUint64(root, 5n, true);
+    view.setInt32(root + 8, slots - (root + 8), true);
+    view.setUint32(root + 12, count, true);
+    return bytes;
+  }
+
+  beforeEach(async () => {
+    // Session storage as Chrome's, which answers a few milliseconds later.
+    session = new Map();
+    const later = (done, value) => setTimeout(() => done(value), 5);
+    vi.stubGlobal("chrome", {
+      runtime: { id: "wallet", sendMessage() {}, getURL: (p) => `chrome-extension://wallet/${p}` },
+      storage: {
+        session: {
+          get: (keys, done) => later(done, Object.fromEntries([keys].flat().filter((k) => session.has(k)).map((k) => [k, session.get(k)]))),
+          set: (items, done) => later(done, Object.entries(items).forEach(([k, v]) => session.set(k, v))),
+          remove: (keys, done) => later(done, [keys].flat().forEach((k) => session.delete(k))),
+        },
+      },
+    });
+    vi.resetModules();
+    names = await import("./duskNames.js");
+    asked = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init) => {
+        const fns = String(url).endsWith("/aggregate") ? functionsOf(new Uint8Array(init.body)) : [String(url).split("/").pop()];
+        asked.push(fns.sort());
+        return new Response(fns.length > 1 ? reply(fns.length) : new Uint8Array([7]), { status: 200 });
+      })
+    );
+    // A reader that reads as the SDK's: each lookup sends its lens query at
+    // once, and its first also starts the check of the lens's binding and
+    // interface, in the same task; each answers once the check read them.
+    lens.createLensReader.mockImplementation(async (_release, { fetch, nodeUrl: url }) => {
+      const read = (fn, body = new Uint8Array()) =>
+        fetch(`${url}/on/contracts:${LENS}/${fn}`, { method: "POST", headers: OCTETS, body }).then((res) => res.arrayBuffer());
+      let checking = null;
+      const verifyPrimary = async (key) => {
+        const reverse = read("reverse", new Uint8Array(key));
+        await (checking ??= Promise.all([read("binding"), read("lens_interface")]));
+        await reverse;
+        const account = [...spelled.keys()].find((a) => decodeBase58(a).every((b, i) => b === key[i]));
+        return account ? primary(spelled.get(account)) : null;
+      };
+      return { resolve: vi.fn(), verifyPrimary: vi.fn(verifyPrimary) };
+    });
+  });
+
+  it("go out as one Multicall for Dusk query, the lens's check with the first", async () => {
+    // A popup's first lookups of a session: the header's, its menu's or Settings'.
+    const accounts = [ACCOUNT, OTHER_ACCOUNT, THIRD_ACCOUNT];
+    await expect(Promise.all(accounts.map((a) => names.lookupPrimaryName(a, { nodeUrl: TESTNET })))).resolves.toEqual(["alice.dusk", "bob.dusk", null]);
+    expect(asked).toEqual([["binding", "lens_interface", "reverse", "reverse", "reverse"]]);
+
+    // Another popup's, as Activity names its counterparties: the check's replies were kept.
+    await vi.waitFor(() => expect(session.size).toBe(2));
+    vi.resetModules();
+    names = await import("./duskNames.js");
+    asked.length = 0;
+    await expect(names.lookupRecipientNames(accounts, { nodeUrl: TESTNET })).resolves.toEqual(
+      new Map([[ACCOUNT, "alice.dusk"], [OTHER_ACCOUNT, "bob.dusk"], [THIRD_ACCOUNT, null]])
+    );
+    expect(asked).toEqual([["reverse", "reverse", "reverse"]]);
+  });
+});
+
 describe("duskNameErrorText", () => {
   it("explains each failure", () => {
     const text = (reason) => names.duskNameErrorText({ name: "alice.dusk", reason });

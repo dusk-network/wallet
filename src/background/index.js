@@ -1,6 +1,6 @@
 // Background service worker entry.
 
-import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault.js";
+import { clearVault, countVaultWallets, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import {
   approveOrigin,
   clearAllPermissions,
@@ -1386,6 +1386,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           // Each wallet the switcher shows, and the one unlocked.
           wallets,
           walletKey: status.isUnlocked ? status.walletKey ?? "" : "",
+          // Every wallet the vault holds, those another password opens too.
+          walletsHere: await countVaultWallets().catch(() => null),
         });
         return;
       }

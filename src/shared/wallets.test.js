@@ -33,7 +33,7 @@ describe("wallets", () => {
 
   it("numbers the next wallet one past the highest here, as the vault does", () => {
     expect(wallets.nextWalletNumber([{ n: 1 }, { n: 2 }])).toBe(3);
-    // A removed wallet's number isn't given again.
+    // A gap a removed wallet left stays unused.
     expect(wallets.nextWalletNumber([{ n: 1 }, { n: 3 }])).toBe(4);
     expect(wallets.nextWalletNumber([])).toBe(1);
   });

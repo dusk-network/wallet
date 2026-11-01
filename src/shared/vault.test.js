@@ -302,6 +302,8 @@ const clearGuard = () => delete store[GUARD];
       expect(phrases(await vault.unlockVault(twelve.password))).toEqual([twelve.mnemonic]);
       expect(failing).toEqual([]);
       expect(store[V1]).toEqual(twelve.vault);
+      // One wallet here, however far its move got.
+      await expect(vault.countVaultWallets()).resolves.toBe(1);
 
       failAt();
       vault = await restart();
@@ -365,12 +367,15 @@ const clearGuard = () => delete store[GUARD];
       const first = await vault.createVault(OTHER, "an older password");
       const kept = structuredClone(store[V2].wallets[0]);
       store[V1] = structuredClone(twentyfour.vault);
+      // Two wallets here, whichever password opens each, before v1's move and after it.
+      await expect(vault.countVaultWallets()).resolves.toBe(2);
 
       vault = await restart();
       const { wallets } = await vault.unlockVault(twentyfour.password);
       expect(wallets).toEqual([{ id: expect.stringMatching(/^v1-/), n: 2, mnemonic: twentyfour.mnemonic }]);
       expect(store[V1]).toBeUndefined();
       expect(store[V2].wallets).toEqual([kept, { id: wallets[0].id, n: 2, ...twentyfour.vault }]);
+      await expect(vault.countVaultWallets()).resolves.toBe(2);
       // Each password still opens its own.
       await expect(vault.unlockVault("an older password")).resolves.toEqual({ wallets: [{ ...first, mnemonic: OTHER }] });
     });
