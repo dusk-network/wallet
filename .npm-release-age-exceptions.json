@@ -1,0 +1,4 @@
+{
+  "_comment": "Emergency exceptions require package, version, reason, and an ISO-8601 expires timestamp.",
+  "exceptions": []
+}

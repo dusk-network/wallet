@@ -13,6 +13,14 @@
   "bugs": {
     "url": "https://github.com/dusk-network/wallet/issues"
   },
+  "engines": {
+    "npm": "11.18.0"
+  },
+  "packageManager": "npm@11.18.0",
+  "allowScripts": {
+    "esbuild": false,
+    "fsevents": false
+  },
   "scripts": {
     "generate:shells": "node scripts/generate-shells.js",
     "generate:icons": "node scripts/generate-icons.js",
