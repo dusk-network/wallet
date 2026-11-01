@@ -2,8 +2,9 @@
 // RPC, by the bridge's event from the account's DuskEVM address, the
 // account's equal deposits before it paid first, as its history on the
 // archive says (@dusk-network/app-core/bridge). Those that arrived are kept
-// (bridgeArrival.js); where each search stopped, and DuskEVM's block times,
-// for this page only. The service worker loads none of this.
+// (bridgeArrival.js); where each search stopped, DuskEVM's block times, and
+// the calls of those equal deposits once their blocks are final, for this
+// page only. The service worker loads none of this.
 
 import { arrivalsOf, depositArrivals } from "@dusk-network/app-core/bridge";
 
@@ -14,6 +15,7 @@ import { getTxEpoch } from "../../shared/txStore.js";
 
 const blockTimes = new Map();
 const scans = new Map();
+const depositCalls = new Map();
 
 /**
  * Looks on DuskEVM for the deposits in `rows` on their way, which `account`
@@ -32,6 +34,7 @@ export async function checkArrivals(rows, { walletId, account, archiverUrl, node
   const { arrivals } = await depositArrivals({
     archive: archiveAt(historyArchiverUrl({ archiverUrl, nodeUrl })),
     blockTimes,
+    cache: depositCalls,
     deposits: waiting.map((row) => ({
       amount: depositLux(row),
       at: depositTime(row),
