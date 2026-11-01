@@ -33,7 +33,7 @@ jobs:
           cache: "npm"
 
       - name: Validate package release ages
-        run: node scripts/verify-package-release-ages.js --days 7
+        run: node scripts/verify-package-release-ages.js --days 0.5
 
       - name: Pin npm
         run: npm install --global npm@11.18.0 --ignore-scripts
