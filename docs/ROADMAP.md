@@ -158,7 +158,6 @@ Goal: make the discovered provider + the SDK (`@dusk/connect`, "Dusk Connect") f
 
 ### 5.2 Tooling
 - [x] Integration test node via Docker image (`dusknode/rusk`) instead of mocking
-- [x] Storybook for UI components
 - [x] E2E test harness (Playwright)
 
 ### 5.3 CI/CD

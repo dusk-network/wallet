@@ -178,8 +178,6 @@ npm run build:firefox     # Build Firefox extension → dist-firefox/
 npm run rusk:up
 npm run rusk:wait
 
-# UI component workbench
-npm run storybook
 
 # E2E (Playwright + Docker Rusk)
 npm run e2e:rusk
