@@ -1,6 +1,6 @@
 import { ETH_BRIDGE_FINALIZED_TOPIC } from "@dusk-network/app-core/bridge";
 import { networks } from "@dusk-network/networks";
-import { evmAddressOf } from "@dusk-network/networks/duskevm";
+import { encodeDepositArgs, evmAddressOf } from "@dusk-network/networks/duskevm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fakeChain, topicOf, wordOf } from "../../shared/fixtures/chain.js";
@@ -26,8 +26,11 @@ vi.mock("../../shared/storage.js", () => ({
 }));
 vi.mock("../../shared/txStore.js", async (importOriginal) => ({ ...(await importOriginal()), getTxEpoch: vi.fn(async () => epoch.now) }));
 // The archive, where the account sent nothing to the bridge but the deposits
-// in a block the tests' rows say it sent, all on one page.
+// in a block the tests' rows say it sent, all on one page; the transactions
+// in `archived.txs`, by hash, each one asked kept in `archived.asked`; and
+// the last finalized block, `archived.finalized`.
 const listed = vi.hoisted(() => []);
+const archived = vi.hoisted(() => ({ asked: [], finalized: null, txs: {} }));
 vi.mock("../../shared/activityHistory.js", async (importOriginal) => ({
   ...(await importOriginal()),
   archiveAt: () => ({
@@ -37,7 +40,13 @@ vi.mock("../../shared/activityHistory.js", async (importOriginal) => ({
         range && !query.includes("pageCount")
           ? listed.filter((entry) => entry.block_height >= Number(range[1]) && entry.block_height <= Number(range[2] ?? Infinity))
           : [];
-      return { out: json.length ? { json } : null };
+      const data = { out: json.length ? { json } : null };
+      for (const [, alias, hash] of query.matchAll(/(\w+): tx\(hash: "(\w+)"\)/g)) {
+        archived.asked.push(hash);
+        data[alias] = archived.txs[hash] ?? null;
+      }
+      if (query.includes("lastBlockPair") && archived.finalized !== null) data.pair = { json: { last_finalized_block: [archived.finalized, "bb".repeat(32)] } };
+      return data;
     },
   }),
 }));
@@ -96,6 +105,7 @@ beforeEach(async () => {
   vi.resetModules();
   for (const key of Object.keys(items)) delete items[key];
   listed.length = 0;
+  Object.assign(archived, { asked: [], finalized: null, txs: {} });
   epoch.now = 1;
   // DuskEVM: a block every 2 seconds, its newest now.
   duskEvm = fakeChain({ blockMs: 2_000, head: HEAD, headAt: NOW, logs: [], url: evm.rpcUrl });
@@ -171,5 +181,39 @@ describe("a deposit to DuskEVM on its way", () => {
     // Its block's time, from the node: its own payment, after it.
     await expect(look([deposit("a", clock)])).resolves.toBe(1);
     expect(kept.keptArrivals().get(sent.hash)?.hash).toBe(L2(2));
+  });
+
+  it("asks for the call of an equal deposit the account sent before it until that one's block is final, then no more", async () => {
+    // The account's equal deposit 10 blocks before this one's, which this wallet isn't waiting for.
+    const earlier = "c".repeat(64);
+    listed.push({
+      block_height: 4_697_280,
+      events: [{ data: { receiver: BRIDGE, sender: ACCOUNT, value: "500000000" }, reverted: false, target: networks.testnet.contracts.transfer, topic: "deposit" }],
+      origin: earlier,
+    });
+    archived.txs[earlier] = {
+      blockHeight: 4_697_280,
+      blockTimestamp: (NOW - 600_000) / 1000,
+      err: null,
+      tx: {
+        callData: {
+          contractId: BRIDGE,
+          data: Buffer.from(encodeDepositArgs({ amountLux: 500_000_000n, minGasLimit: 200_000, to: TO })).toString("hex"),
+          fnName: "depositETHToWithValue",
+        },
+      },
+    };
+    archived.finalized = 4_697_279;
+    const rows = [deposit("a")];
+    const asked = () => archived.asked.filter((hash) => hash === earlier).length;
+
+    // DuskEVM hasn't paid either yet. The earlier one's block isn't final: the next look asks again.
+    await expect(look(rows)).resolves.toBe(0);
+    await expect(look(rows)).resolves.toBe(0);
+    expect(asked()).toBe(2);
+
+    archived.finalized = 4_697_300;
+    for (let i = 0; i < 4; i += 1) await expect(look(rows)).resolves.toBe(0);
+    expect([asked(), kept.keptArrivals().size]).toEqual([3, 0]);
   });
 });
