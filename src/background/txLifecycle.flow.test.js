@@ -86,6 +86,8 @@ vi.mock("../background/txNotify.js", () => ({
 }));
 
 vi.mock("../shared/vault.js", () => ({
+  // Three wallets in the vault: the two the password opened, and one another opens.
+  countVaultWallets: vi.fn(async () => 3),
   createVault: vi.fn(async () => ({ ok: true })),
   loadVault: vi.fn(async () => ({ v: 1 })),
   unlockVault: vi.fn(async () => "mnemonic"),
@@ -578,6 +580,8 @@ describe("background Phoenix tx lifecycle flow", () => {
     await approveOrigin("https://app.example", grant("account:0:acct9"), "acct9");
     try {
       const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+      // Settings' Lock text counts the vault's wallets.
+      expect([overview.wallets.length, overview.walletsHere]).toEqual([2, 3]);
       expect(overview.permissions.map(({ origin, walletId }) => [origin, walletId])).toEqual([
         ["https://shop.example", "acct0"],
         ["https://app.example", "acct9"],

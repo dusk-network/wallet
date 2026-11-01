@@ -536,6 +536,21 @@ export async function loadVault() {
 }
 
 /**
+ * How many wallets the vault holds, whichever password opens each: v2's, and
+ * v1's phrase while its move is still to come. Null in the desktop app, whose
+ * snapshot opens whole with its one password.
+ * @returns {Promise<number|null>}
+ */
+export async function countVaultWallets() {
+  if (isTauriRuntime()) return null;
+  const { v1, v2 } = await readStored();
+  const wallets = isVaultV2(v2) ? v2.wallets.filter(isWallet) : [];
+  if (!isSealed(v1)) return wallets.length;
+  const moved = await v1WalletId(v1);
+  return wallets.length + (wallets.some((w) => w.id === moved) ? 0 : 1);
+}
+
+/**
  * A new vault with one wallet, where there is none.
  * @param {string} mnemonic
  * @param {string} password

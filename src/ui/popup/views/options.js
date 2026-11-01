@@ -35,14 +35,17 @@ export function optionsView(ov, { state, actions } = {}) {
   const currentAutoLock = Number(ov?.autoLockTimeoutMinutes ?? 15);
   const installedVersion = String(getExtensionApi()?.runtime?.getManifest?.()?.version ?? "").trim();
   const rerender = (opts) => actions?.render?.(opts)?.catch?.(() => {});
-  // More than one wallet here: Lock and auto-lock lock them all, and say so.
+  // More than one wallet open: each connected site is named by its wallet.
   const several = ov?.isUnlocked && Array.isArray(ov?.wallets) && ov.wallets.length > 1;
+  // More than one wallet in the vault, those another password opens too:
+  // Lock and auto-lock lock them all, and say so.
+  const lockAll = several || (ov?.isUnlocked && Number(ov?.walletsHere) > 1);
 
   const lockBtn = ov?.isUnlocked
     ? h("button", {
         class: "btn-outline",
         type: "button",
-        text: several ? "Lock" : "Lock wallet",
+        text: lockAll ? "Lock" : "Lock wallet",
         onclick: async () => {
           switchContext(state, "lock");
           await actions?.send?.({ type: "DUSK_UI_LOCK" });
@@ -692,7 +695,7 @@ export function optionsView(ov, { state, actions } = {}) {
       h("div", { class: "settings-field" }, [fieldLabel(autoLockSelect, "Auto-lock"), h("div", { class: "select-wrap" }, [autoLockSelect])]),
       h("p", {
         class: "settings-note",
-        text: several ? "Locks every wallet after this long without use." : "Locks the wallet after this long without use.",
+        text: lockAll ? "Locks every wallet after this long without use." : "Locks the wallet after this long without use.",
       }),
       changePasswordBtn,
       changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,

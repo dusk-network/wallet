@@ -4,7 +4,7 @@
 // This lets the same UI (popup/full) run without chrome.runtime messaging,
 // which is how we reuse it in Tauri desktop/mobile.
 
-import { clearVault, createVault, loadVault, unlockVault } from "../shared/vault.js";
+import { clearVault, countVaultWallets, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import { getSettings, rememberNodeChain, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearAllPermissions } from "../shared/permissions.js";
@@ -459,6 +459,8 @@ export async function localSend(message) {
         // Each wallet the switcher shows, and the one unlocked.
         wallets: await walletsShown(status).catch(() => []),
         walletKey: status.walletKey,
+        // Every wallet the vault holds, those another password opens too.
+        walletsHere: await countVaultWallets().catch(() => null),
       };
     }
 

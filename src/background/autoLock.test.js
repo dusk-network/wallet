@@ -116,6 +116,7 @@ vi.mock("../shared/vault.js", () => ({
   addVaultWallet: vi.fn(async () => ({ id: "w2", n: 2 })),
   changeVaultPassword: vi.fn(async () => true),
   clearVault: mocks.clearVault,
+  countVaultWallets: vi.fn(async () => null),
   createVault: mocks.createVault,
   loadVault: vi.fn(async () => mocks.vault),
   removeVaultWallet: vi.fn(async () => true),

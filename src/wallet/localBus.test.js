@@ -505,6 +505,16 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     expect(engine.held.map((w) => w.mnemonic)).toEqual([twelve.mnemonic, "wallet B"]);
   });
 
+  it("counts every wallet the vault holds for Settings, one another password opens included", async () => {
+    engine.unlocked = false;
+    // A wallet under another password, then main's vault beside it.
+    await (await import("../shared/vault.js")).createVault("wallet B", "another password");
+    localStorage.setItem("dusk_vault_v1", JSON.stringify(twelve.vault));
+    await ok({ type: "DUSK_UI_UNLOCK", password: twelve.password });
+    const { wallets, walletsHere } = await overview();
+    expect([wallets.length, walletsHere]).toEqual([1, 2]);
+  });
+
   it("refuses a phrase that's here already with one sentence, a wrong password, and one that isn't a phrase", async () => {
     await twoWallets();
     const before = localStorage.getItem("dusk_vault_v2");
