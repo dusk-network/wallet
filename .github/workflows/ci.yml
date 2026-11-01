@@ -40,8 +40,18 @@ jobs:
           node-version: "24"
           cache: "npm"
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Validate package release ages
+        run: node scripts/verify-package-release-ages.js --days 7
+
+      - name: Pin npm
+        run: npm install --global npm@11.18.0 --ignore-scripts
+        working-directory: ${{ runner.temp }}
+
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Verify registry signatures
+        run: npm audit signatures
 
       - name: Run tests (with coverage)
         run: npm run test:coverage
@@ -78,8 +88,18 @@ jobs:
           node-version: "24"
           cache: "npm"
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Validate package release ages
+        run: node scripts/verify-package-release-ages.js --days 7
+
+      - name: Pin npm
+        run: npm install --global npm@11.18.0 --ignore-scripts
+        working-directory: ${{ runner.temp }}
+
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Verify registry signatures
+        run: npm audit signatures
 
       - name: Run approval and unlock renderer tests
         run: |
