@@ -47,8 +47,9 @@ jobs:
       - name: Package artifacts
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          (cd dist && zip -r "../dusk-wallet-chrome-${VERSION}.zip" .)
-          (cd dist-firefox && zip -r "../dusk-wallet-firefox-${VERSION}.zip" .)
+          # Sourcemaps stay in the build, for debugging, but out of the zips.
+          (cd dist && zip -r "../dusk-wallet-chrome-${VERSION}.zip" . -x '*.map')
+          (cd dist-firefox && zip -r "../dusk-wallet-firefox-${VERSION}.zip" . -x '*.map')
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
