@@ -14,9 +14,8 @@
     "url": "https://github.com/dusk-network/wallet/issues"
   },
   "engines": {
-    "npm": "11.18.0"
+    "npm": ">=11.18.0"
   },
-  "packageManager": "npm@11.18.0",
   "allowScripts": {
     "esbuild": false,
     "fsevents": false
