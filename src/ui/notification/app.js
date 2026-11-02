@@ -1153,6 +1153,27 @@ export async function renderNotification() {
       ]);
     // What everyone sees of a send, as on Send's Review; other calls have no such line.
     const sendVisible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
+    // Reject and Approve, with the box to type MAX in: an allowance that is or
+    // may be unlimited waits for MAX, and any approval for gas that will do.
+    const maxGatedBar = (gated, approveText) => {
+      const bar = decisionBar({
+        approveText,
+        approveDisabled: gated,
+        approveTitle: gated ? "Type MAX to enable approval" : "",
+        getApprovedParams: () => gasEditor.readOverrideGas(gas),
+      });
+      const acknowledged = () => !gated || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
+      const ackInput = textInput({
+        placeholder: "Type MAX to confirm",
+        "aria-label": "Type MAX to confirm",
+        onEnter: () => bar.approveBtn.click(),
+        oninput: () => {
+          bar.approveBtn.disabled = !acknowledged() || Boolean(gasEditor.error);
+        },
+      });
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: acknowledged });
+      return { bar, ackInput };
+    };
 
     // A known DuskEVM bridge call: what it does, read from its arguments,
     // above the call and its bytes.
@@ -1221,9 +1242,9 @@ export async function renderNotification() {
 
     // A token call as the engine reads it with each token driver
     // (drc20Calls.js): the call, `unread` when a driver reads it but not as
-    // one the wallet can show, or null.
+    // one the wallet can show, or when the engine couldn't read it, or null.
     const tokenCall = wantsDrc20
-      ? await sendResult({ type: "DUSK_UI_DRC20_DECODE_INPUT", fnName: fnNameTrim, fnArgs: argsHex }).catch(() => null)
+      ? await sendResult({ type: "DUSK_UI_DRC20_DECODE_INPUT", fnName: fnNameTrim, fnArgs: argsHex }).catch(() => ({ unread: true }))
       : null;
     const drc20 = tokenCall?.fn ? tokenCall : null;
 
@@ -1270,23 +1291,7 @@ export async function renderNotification() {
       ];
       const partyTo = (party) => (kindOf(party) ? plainTo(party.value, "", { evm: false, prefix: `to ${kindOf(party)} ` }) : toLine(party.value));
 
-      const bar = decisionBar({
-        approveText: isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve",
-        approveDisabled: Boolean(isMax),
-        approveTitle: isMax ? "Type MAX to enable approval" : "",
-        getApprovedParams: () => gasEditor.readOverrideGas(gas),
-      });
-      // An unlimited allowance waits for MAX, and any approval for gas that will do.
-      const acknowledged = () => !isMax || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
-      const ackInput = textInput({
-        placeholder: "Type MAX to confirm",
-        "aria-label": "Type MAX to confirm",
-        onEnter: () => bar.approveBtn.click(),
-        oninput: () => {
-          bar.approveBtn.disabled = !acknowledged() || Boolean(gasEditor.error);
-        },
-      });
-      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: acknowledged });
+      const { bar, ackInput } = maxGatedBar(isMax, isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve");
 
       show(
         [
@@ -1381,9 +1386,10 @@ export async function renderNotification() {
     // Any other call: the wallet can't read its arguments, so it says so. One
     // to the bridge's contracts that isn't a transfer it knows, such as a
     // withdrawal off the bridge's route, gets a warning, as does a token call
-    // a driver reads but not as one the wallet can show.
-    const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
-    submitOnGasEnter(gasEditor, bar.approveBtn);
+    // a driver reads but not as one the wallet can show. Such a call that sets
+    // an allowance may be unlimited, so it waits for MAX.
+    const unreadAllowance = Boolean(tokenCall) && ["approve", "increase_allowance"].includes(fnNameLower);
+    const { bar, ackInput } = maxGatedBar(unreadAllowance);
     const summary = requestSummary("send_tx", params, { own });
     const unchecked = callsBridge({ nodeUrl: params?.nodeUrl, contractId: contractIdHex })
       ? warning(
@@ -1407,6 +1413,13 @@ export async function renderNotification() {
         }),
         callRows({ from: true }),
         unchecked,
+        unreadAllowance
+          ? warning(
+              "This may be an unlimited allowance",
+              "The wallet can't check how much this lets the spender move. It could be all of this token, now and later. Only continue if you trust the site.",
+              [ackInput]
+            )
+          : null,
         gasEditor,
         detailsBlock(),
       ],

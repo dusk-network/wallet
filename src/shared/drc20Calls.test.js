@@ -93,6 +93,29 @@ describe("reading a DRC20 call", () => {
     });
   });
 
+  it("reads a contract as a contract in every party of every driver's calls", () => {
+    // A contract ID with a 0, which base58 has no digit for: Sozu's driver writes it bare.
+    const id = "10".repeat(32);
+    const contract = { kind: "contract", value: id };
+    const calls = [
+      ["drc20_standard", "transfer", `{"to":{"Contract":"${id}"},"amount":5}`, { to: contract }],
+      ["drc20_standard", "approve", `{"spender":{"Contract":"${id}"},"amount":5}`, { spender: contract }],
+      ["drc20_standard", "transfer_from", `{"owner":{"Contract":"${id}"},"to":{"Contract":"${id}"},"amount":5}`, { owner: contract, to: contract }],
+      ["drc20_standard", "increase_allowance", `{"spender":{"Contract":"${id}"},"added_amount":5}`, { spender: contract }],
+      ["drc20_standard", "decrease_allowance", `{"spender":{"Contract":"${id}"},"subtracted_amount":5}`, { spender: contract }],
+      ["drc20", "transfer", `{"to":{"Contract":"${id}"},"value":"5"}`, { to: contract }],
+      ["drc20", "approve", `{"spender":{"Contract":"${id}"},"value":"5"}`, { spender: contract }],
+      ["drc20", "transfer_from", `{"owner":{"Contract":"${id}"},"to":{"Contract":"${id}"},"value":"5"}`, { owner: contract, to: contract }],
+      ["sozu_staked_dusk", "transfer", `["${id}","5"]`, { to: contract }],
+      ["sozu_staked_dusk", "approve", `["${id}","5"]`, { spender: contract }],
+      ["sozu_staked_dusk", "transfer_from", `["${id}","${id}","5"]`, { owner: contract, to: contract }],
+      ["sozu_staked_dusk", "transfer_from", `["${ALICE}","${id}","5"]`, { owner: account(ALICE), to: contract }],
+    ];
+    for (const [key, fn, json, parties] of calls) {
+      expect(read(fn, encode(key, fn, json))).toEqual({ driver: key, fn, ...parties, amount: "5" });
+    }
+  });
+
   it("shows a standard call as the standard's, though Sozu's driver takes its bytes as another", () => {
     const shop = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
     const bytes = encode("drc20_standard", "transfer", `{"to":{"Moonlight":"${shop}"},"amount":9007199254740993}`);

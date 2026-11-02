@@ -732,6 +732,53 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow less spending?", "0.000000005 TKN"]);
   });
 
+  it("shows a Sozu approval of the most there is for a contract, waiting for MAX", async () => {
+    // A contract ID with a 0, which Sozu's driver writes in hex.
+    const pool = "10".repeat(32);
+    await render("send_tx", tokenCall("sozu_staked_dusk", "approve", `["${pool}","18446744073709551615"]`));
+    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "18,446,744,073.709551615 TKN"]);
+    expect(visibleText(row("Spender"))).toBe(`A contract${pool}`);
+    expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Unlimited allowance");
+    expect(approve().disabled).toBe(true);
+    typeInto(app.querySelector(".callout.warn input"), "MAX");
+    expect(approve().disabled).toBe(false);
+
+    await render("send_tx", tokenCall("sozu_staked_dusk", "transfer", `["${pool}","5"]`));
+    expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to contract ${shortAddress(pool)}`);
+    expect(visibleText(row("To"))).toBe(`A contract${pool}`);
+  });
+
+  it.each([
+    // An older token's approval of the most there is, with a byte its driver
+    // reads past set: what the wallet showed before, waiting for MAX.
+    [
+      "a driver reads but not exactly",
+      async () => {
+        const params = tokenCall("drc20", "approve", `{"spender":{"External":"${SHOP}"},"value":"18446744073709551615"}`);
+        const bytes = toBytes(params.fnArgs);
+        bytes[3] = 1;
+        return { ...params, fnArgs: `0x${bytesToHex(bytes)}` };
+      },
+    ],
+    [
+      "the engine couldn't read",
+      async () => {
+        const params = tokenCall("drc20", "approve", `{"spender":{"External":"${SHOP}"},"value":"18446744073709551615"}`);
+        mocks.answers.DUSK_UI_DRC20_DECODE_INPUT = async () => ({ ok: false, error: "Engine call timed out" });
+        return params;
+      },
+    ],
+  ])("keeps an allowance waiting for MAX when %s", async (_label, request) => {
+    await render("send_tx", await request());
+    expect(app.querySelectorAll(".callout.warn .callout-title").map((t) => t.textContent)).toEqual([
+      "The wallet can't read this request",
+      "This may be an unlimited allowance",
+    ]);
+    expect(approve().disabled).toBe(true);
+    typeInto(app.querySelector(".callout.warn input"), "max");
+    expect(approve().disabled).toBe(false);
+  });
+
   it("shows an older token's transfer as before, every decimal the token has", async () => {
     await render("send_tx", tokenCall("drc20", "transfer", `{"to":{"External":"${SHOP}"},"value":"1234567891234"}`));
     expect([head().querySelector("h1").textContent, amount(), row("To").textContent]).toEqual(["Send tokens", "1,234.567891234 TKN", SHOP]);

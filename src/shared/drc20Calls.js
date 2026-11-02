@@ -7,7 +7,8 @@
 //   TransferCall { to, amount }, and name accounts as principals:
 //   {"Moonlight": "<base58>"}, {"Phoenix": "<base58>"} or {"Contract": "<hex>"}.
 // - drc20: older tokens, with { External } or { Contract } accounts and `value`.
-// - sozu_staked_dusk: Sozu's stDUSK, the same calls as tuples.
+// - sozu_staked_dusk: Sozu's stDUSK, the same calls as tuples, an account
+//   in base58 and a contract in hex.
 //
 // A reading counts only when it encodes back to exactly the call's bytes, so
 // it says all the call says, and a call shows only when exactly one driver
@@ -106,7 +107,7 @@ function readCall(key, driver, fn, decoded, bytes) {
   const [names, field] = CALLS[key][fn];
   if (key === "sozu_staked_dusk") {
     if (!Array.isArray(decoded) || decoded.length !== names.length + 1) return null;
-    const parties = names.map((name, i) => [name, typeof decoded[i] === "string" && BASE58.test(decoded[i]) ? { kind: "account", value: decoded[i] } : null]);
+    const parties = names.map((name, i) => [name, tupleParty(decoded[i])]);
     return known(parties, u64Text(decoded.at(-1)), () => encodesTo(driver, fn, JSON.stringify(decoded), bytes));
   }
   const struct = decoded && typeof decoded === "object" && !Array.isArray(decoded) && Object.keys(decoded).length === names.length + 1;
@@ -125,6 +126,14 @@ function readCall(key, driver, fn, decoded, bytes) {
 function known(parties, amount, encodesBack) {
   if (amount === null || !parties.every(([, party]) => party) || !encodesBack()) return null;
   return { ...Object.fromEntries(parties), amount };
+}
+
+// A tuple's party, which Sozu's driver writes untagged: a contract ID, 64
+// hex characters, or a public account, in base58.
+function tupleParty(value) {
+  if (typeof value !== "string") return null;
+  if (CONTRACT_ID.test(value)) return { kind: "contract", value };
+  return BASE58.test(value) ? { kind: "account", value } : null;
 }
 
 function principal(value, kinds) {
