@@ -53,19 +53,17 @@
     "@hdauven/dusk-multicall": "npm:@jsr/hdauven__dusk-multicall@0.1.0",
     "@noble/curves": "1.9.7",
     "@noble/hashes": "1.8.0",
+    "@scure/bip39": "1.6.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.0.0",
     "@tauri-apps/plugin-store": "^2.0.0",
     "@tauri-apps/plugin-stronghold": "^2.0.0",
-    "bip39": "3.1.0",
     "jsqr": "^1.4.0",
     "qrcode-generator": "^2.0.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",
-    "@rollup/plugin-inject": "^5.0.5",
     "@vitest/coverage-v8": "^4.1.12",
-    "buffer": "^5.7.1",
     "fake-indexeddb": "^6.2.5",
     "vite": "^6.4.3",
     "vitest": "^4.1.12"

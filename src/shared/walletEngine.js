@@ -1,5 +1,5 @@
-import "./bufferGlobal.js";
-import { mnemonicToSeedSync, validateMnemonic } from "bip39";
+import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english";
 import {
   Bookkeeper,
   Bookmark,
@@ -924,9 +924,9 @@ export async function sealContactsRecord(text) {
  */
 export async function walletIdOf(mnemonic) {
   const phrase = String(mnemonic ?? "").trim().replace(/\s+/g, " ");
-  if (!validateMnemonic(phrase)) throw new Error("That isn't a valid recovery phrase.");
+  if (!validateMnemonic(phrase, wordlist)) throw new Error("That isn't a valid recovery phrase.");
   await withTimeout(ensureProtocolDriverLoaded(), 120_000, "Timed out loading protocol driver");
-  const seed = Uint8Array.from(mnemonicToSeedSync(phrase));
+  const seed = mnemonicToSeedSync(phrase);
   try {
     const walletId = (await new ProfileGenerator(async () => seed.slice()).default)?.account?.toString?.() ?? "";
     if (!walletId) throw new Error("Derived profile has no wallet ID");
@@ -977,7 +977,7 @@ export async function unlockWithMnemonic(mnemonic, opts = {}) {
   let p0;
 
   try {
-    seed = Uint8Array.from(mnemonicToSeedSync(mnemonic));
+    seed = mnemonicToSeedSync(mnemonic);
     debugEngine("unlock_seed_ready", {
       ms: engineSince(seedStart),
       totalMs: engineSince(unlockStart),
@@ -1176,7 +1176,7 @@ export async function walletAccountsOf({ walletKey } = {}) {
   if (!wallet) throw new Error("That wallet isn't here.");
   const count = Math.max(1, state.profiles.length);
   await withTimeout(ensureProtocolDriverLoaded(), 120_000, "Timed out loading protocol driver");
-  const seed = Uint8Array.from(mnemonicToSeedSync(wallet.mnemonic.trim().replace(/\s+/g, " ")));
+  const seed = mnemonicToSeedSync(wallet.mnemonic.trim().replace(/\s+/g, " "));
   try {
     const pg = new ProfileGenerator(async () => seed.slice());
     const profiles = [await pg.default];

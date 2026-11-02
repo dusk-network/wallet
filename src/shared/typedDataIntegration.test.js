@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { mnemonicToSeedSync } from "bip39";
+import { mnemonicToSeedSync } from "@scure/bip39";
 import { bls12_381 } from "@noble/curves/bls12-381";
 import { hashTypedDataHex } from "@dusk/typed-data";
 import { verifyTypedDataSignature, verifyBlsDigest } from "@dusk/typed-data/bls";

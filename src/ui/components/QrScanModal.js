@@ -1,7 +1,14 @@
-import jsQR from "jsqr";
 import { h } from "../lib/dom.js";
 import { parseDuskUri } from "../../shared/duskUri.js";
 import { iconSvg } from "./ActionIcon.js";
+
+const DECODER_FAILED = "The QR scanner couldn't load. Close the wallet and open it again.";
+
+// The QR decoder loads with the first scan, not with the popup. A failed load
+// stays failed in this page, as the browser keeps it: the wallet opened again
+// loads it afresh.
+let decoderLoad = null;
+const loadDecoder = () => (decoderLoad ??= import("jsqr").then((mod) => mod.default));
 
 function clamp(n, a, b) {
   return Math.min(b, Math.max(a, n));
@@ -19,7 +26,7 @@ export function parseDuskQrPayload(input) {
   return parseDuskUri(input);
 }
 
-async function decodeFromImageEl(img) {
+async function decodeFromImageEl(img, jsQR) {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("Canvas not supported");
@@ -67,9 +74,13 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
     let stream = null;
     let raf = 0;
     let lastScan = 0;
+    const decoder = loadDecoder();
+    // Without the decoder nothing scans: its message stays.
+    let unavailable = false;
 
     const err = h("div", { class: "qrscan-hint", style: "display:none" });
     const setErr = (txt) => {
+      if (unavailable) return;
       if (!txt) {
         err.style.display = "none";
         err.textContent = "";
@@ -147,18 +158,32 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
       if (e.target === overlay) finish(null);
     });
 
+    decoder.catch(() => {
+      if (done) return;
+      setErr(DECODER_FAILED);
+      unavailable = true;
+      chooseBtn.disabled = true;
+      stopStream(stream);
+    });
+
     // Decode from uploaded/captured image
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files?.[0];
       if (!file) return;
 
       setErr("");
+      let jsQR;
+      try {
+        jsQR = await decoder;
+      } catch {
+        return;
+      }
       try {
         const url = URL.createObjectURL(file);
         const img = new Image();
         img.onload = async () => {
           try {
-            const data = await decodeFromImageEl(img);
+            const data = await decodeFromImageEl(img, jsQR);
             URL.revokeObjectURL(url);
             if (data) finish(data);
             else setErr("No QR code found in image");
@@ -211,6 +236,19 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
         await video.play();
       } catch {
         setErr("Camera permission denied or unavailable. You can still choose an image.");
+        return;
+      }
+
+      let jsQR;
+      try {
+        jsQR = await decoder;
+      } catch {
+        stopStream(stream);
+        return;
+      }
+      // Closed meanwhile: the camera goes with it.
+      if (done) {
+        stopStream(stream);
         return;
       }
 

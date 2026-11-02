@@ -150,8 +150,7 @@ polyfills in shipped Chrome/Firefox artifacts unless a concrete package
 requirement is proven and documented in the relevant Vite config.
 
 Prefer browser-native APIs such as WebCrypto, `fetch`, `URL`, `TextEncoder`, and
-`TextDecoder`. If a runtime shim is required, keep it as narrow as possible; the
-current Buffer injection exists for the `bip39@3.1.0` path.
+`TextDecoder`. If a runtime shim is required, keep it as narrow as possible.
 
 Do not import `@dusk/w3sper`, `@jsr/dusk__exu`, or wallet-engine modules into
 the MV3 background service worker. Keep w3sper/exu in offscreen, engine-page, or
@@ -219,10 +218,10 @@ transfers already require this field at the provider boundary.
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `@dusk/w3sper` | ^1.4.0 | Dusk SDK (Network, Bookkeeper, ProfileGenerator) |
-| `bip39` | 3.1.0 | Mnemonic generation/validation |
+| `@scure/bip39` | 1.6.0 | Mnemonic generation/validation (English wordlist only) |
 | `preact` | (via HTM) | UI framework |
 | `qrcode-generator` | ^2.0.4 | QR code generation |
-| `jsqr` | ^1.4.0 | QR code scanning |
+| `jsqr` | ^1.4.0 | QR code scanning (loaded when a scan opens) |
 
 ### Tauri Plugins
 

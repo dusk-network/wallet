@@ -63,6 +63,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Opened the popup faster.
 - Read a balance, Sozu's status or a token's balance once for a few seconds, checked the network's endpoints at most every 5 minutes unless one fails, and checked the .dusk lens once a session.
 - Found where a deposit to DuskEVM arrived in fewer requests.
 - Kept site connections, sends and DuskEVM arrivals per wallet: a site connected to one wallet sees nothing of another.
@@ -187,6 +188,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Turned the camera off when a scan is closed before the camera starts.
 - Showed an unshield as an unshield to a profile that only got its change, and two shielded payments one block made to one address as two transactions.
 - Showed a gas refund from another account's bridge call as received, not as a withdrawal from DuskEVM.
 - Kept syncing Activity when a transaction's time or outcome can't be read, and read it on the next sync.
