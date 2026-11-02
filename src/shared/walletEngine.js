@@ -735,7 +735,8 @@ function ensureDriverRegistry() {
   const reg = new dataDrivers.DataDriverRegistry(fetchAsset);
   reg.register(DRIVER_KEYS.DRC20, assetUrl("drivers/drc20_data_driver.wasm"));
   // The DRC20 standard's: dusk-network/contracts 18d7ac7, its
-  // drc20_roles_pausable example built with --features data-driver-js.
+  // drc20_roles_pausable example built with --features data-driver-js, for
+  // size (dataDrivers.conformance.test.js says how).
   reg.register(DRIVER_KEYS.DRC20_STANDARD, assetUrl("drivers/drc20_standard_data_driver.wasm"));
   reg.register(DRIVER_KEYS.DRC721, assetUrl("drivers/drc721_data_driver.wasm"));
   reg.register(STAKE, assetUrl("drivers/stake_data_driver.wasm"));

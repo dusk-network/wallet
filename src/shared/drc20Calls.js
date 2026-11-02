@@ -43,8 +43,8 @@ const CALLS = {
 };
 
 // How each driver writes an account, by the kind the approval names. The
-// standard's Phoenix principal is the 32-byte Schnorr key a shielded holder
-// signs with, not a shielded address.
+// approval calls the standard's Phoenix principal a shielded address; it is
+// the 32-byte Schnorr key a shielded holder signs with.
 const PRINCIPALS = {
   drc20_standard: new Map([
     ["Moonlight", "account"],

@@ -715,11 +715,11 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     expect(approve().disabled).toBe(true);
   });
 
-  it("names a shielded key and a contract as they are, and whose tokens a transfer_from moves", async () => {
+  it("names a shielded address and a contract as they are, and whose tokens a transfer_from moves", async () => {
     await render("send_tx", tokenCall("drc20_standard", "transfer_from", `{"owner":{"Moonlight":"${SAVINGS}"},"to":{"Phoenix":"${PHOENIX}"},"amount":7}`));
     expect(amount()).toBe("0.000000007 TKN");
-    expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to shielded key ${shortAddress(PHOENIX)}`);
-    expect([visibleText(row("To")), row("Owner").textContent]).toEqual([`A shielded key${PHOENIX}`, SAVINGS]);
+    expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to shielded address ${shortAddress(PHOENIX)}`);
+    expect([visibleText(row("To")), row("Owner").textContent]).toEqual([`A shielded address${PHOENIX}`, SAVINGS]);
 
     await render("send_tx", tokenCall("drc20_standard", "transfer", `{"to":{"Contract":"${ROUTER}"},"amount":7}`));
     expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to contract ${shortAddress(ROUTER)}`);

@@ -1283,8 +1283,8 @@ export async function renderNotification() {
       const isTransfer = drc20.fn === "transfer";
       const isMax = (isApprove || isIncrease) && safeBigInt(units, -1n) === MAX_U64;
       // Whom it names: a public account as a payment's recipient; a contract
-      // or a shielded key as it is, and which it is.
-      const kindOf = (party) => (party.kind === "contract" ? "contract" : party.kind === "shielded" ? "shielded key" : "");
+      // or a shielded address as it is, and which it is.
+      const kindOf = (party) => (party.kind === "contract" ? "contract" : party.kind === "shielded" ? "shielded address" : "");
       const partyValue = (party) => [
         kindOf(party) ? h("span", { class: "ap-kv-note", text: `A ${kindOf(party)}` }) : null,
         h("code", { class: "ap-address", text: party.value }),

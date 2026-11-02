@@ -73,11 +73,18 @@ describe("Canonical data-drivers conformance (DRC20 / DRC721)", () => {
   });
 
   it("DRC20 standard driver is the standard's own and takes its struct calls, writing a u64 as a bare integer", async () => {
-    // dusk-network/contracts 18d7ac7, standards/examples/drc20_roles_pausable, built with
-    // RUSTFLAGS="--remap-path-prefix $HOME=" cargo build --locked --release
-    // --target wasm32-unknown-unknown --features data-driver-js -p drc20-roles-pausable.
+    // dusk-network/contracts 18d7ac7, standards/examples/drc20_roles_pausable, built for size
+    // with nightly-2026-02-27 (rustc 1.95.0-nightly 6a979b3e3) and wasm-opt 0.116.1 (binaryen 116):
+    //   CARGO_PROFILE_RELEASE_OPT_LEVEL=z CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+    //   CARGO_PROFILE_RELEASE_PANIC=abort CARGO_PROFILE_RELEASE_STRIP=true RUSTFLAGS="--remap-path-prefix $HOME=" \
+    //   cargo build --locked --release --target wasm32-unknown-unknown --features data-driver-js -p drc20-roles-pausable
+    //   (sha256 645ac6c94924adddeee8738d090921938195801ce451b8bb808b64b1e0dc616e), then
+    //   wasm-opt -Oz --enable-bulk-memory --enable-multivalue --enable-mutable-globals \
+    //   --enable-nontrapping-float-to-int --enable-reference-types --enable-sign-ext.
+    // It reads and writes as the default release build does (sha256 8e414705…3bb3a0), which
+    // Dusk Connect 0.3.0 tests against.
     const wasm = await readFile(path.resolve(process.cwd(), "public", "drivers", "drc20_standard_data_driver.wasm"));
-    expect(createHash("sha256").update(wasm).digest("hex")).toBe("8e414705a13359da1954533dffdacfbb481f6119bc1089c8827f088d386bb3a0");
+    expect(createHash("sha256").update(wasm).digest("hex")).toBe("426eeef8217e1d48d2165b85f1906e4f84afb5e671fb85b74d21c53cee93b049");
     const driver = await loadDriverFromPublic("drc20_standard_data_driver.wasm");
 
     const calls = [
