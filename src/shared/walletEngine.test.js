@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 
 import { bytesToHex, sha256Hex, toBytes } from "./bytes.js";
+import bip39Vectors from "./fixtures/bip39-vectors.json";
 import phoenix from "./fixtures/phoenix-testnet.json";
 import { aggregateReply, envelopeCalls } from "./fixtures/multicallCodec.js";
 import { networks } from "@dusk-network/networks";
@@ -432,6 +433,8 @@ vi.mock("./shieldedStore.js", async (importOriginal) => {
 
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+// Another public BIP39 test phrase: a second wallet.
+const OTHER_MNEMONIC = "legal winner thank year wave sausage worth useful legal winner thank yellow";
 const NETWORK_KEY = "https://nodes.dusk.network";
 const WALLET_ID = "acct0";
 
@@ -809,7 +812,7 @@ describe("walletEngine", () => {
     globalThis.__W3SPER_FAIL_PROFILE_INDEX__ = index;
     engine.configure({ accountCount: 2 });
 
-    await expect(engine.unlockWithMnemonic("different mnemonic")).rejects.toThrow(
+    await expect(engine.unlockWithMnemonic(OTHER_MNEMONIC)).rejects.toThrow(
       "profile derivation failed"
     );
     expect(engine.isUnlocked()).toBe(true);
@@ -821,7 +824,7 @@ describe("walletEngine", () => {
     await engine.unlockWithMnemonic(MNEMONIC);
     globalThis.__W3SPER_FAIL_WALLET_ID__ = true;
 
-    await expect(engine.unlockWithMnemonic("different mnemonic")).rejects.toThrow("wallet ID failed");
+    await expect(engine.unlockWithMnemonic(OTHER_MNEMONIC)).rejects.toThrow("wallet ID failed");
 
     expect(engine.isUnlocked()).toBe(true);
     expect(engine.getAccounts()).toEqual(["acct0"]);
@@ -834,6 +837,23 @@ describe("walletEngine", () => {
     await expect(engine.walletIdOf(MNEMONIC)).resolves.toBe(WALLET_ID);
     expect(engine.isUnlocked()).toBe(false);
     expect((await globalThis.__W3SPER_LAST_SEEDER__()).every((byte) => byte === 0)).toBe(true);
+  });
+
+  // bip39-vectors.json: what bip39 3.1.0, the library before @scure/bip39,
+  // made of each phrase, so a phrase opens the wallet it always opened.
+  it("derives the seed bip39 3.1.0 derived from each recovery phrase, stray spaces and all", async () => {
+    for (const { phrase, seed, words } of bip39Vectors.seeds) {
+      await engine.unlockWithMnemonic(phrase);
+      expect(bytesToHex(await globalThis.__W3SPER_LAST_SEEDER__()), `${words} words`).toBe(seed);
+    }
+  });
+
+  it("accepts and refuses the recovery phrases bip39 3.1.0 did", async () => {
+    for (const { case: name, phrase, valid } of bip39Vectors.verdicts) {
+      const named = engine.walletIdOf(phrase);
+      if (valid) await expect(named, name).resolves.toBe(WALLET_ID);
+      else await expect(named, name).rejects.toThrow("That isn't a valid recovery phrase.");
+    }
   });
 
   it("does not let a superseded unlock commit after lock", async () => {
@@ -1076,7 +1096,7 @@ describe("walletEngine", () => {
 
     // Another recovery phrase at the same place (this mock's profiles don't
     // depend on the seed) can't read them.
-    await engine.unlockWithMnemonic("legal winner thank year wave sausage worth useful legal winner thank yellow");
+    await engine.unlockWithMnemonic(OTHER_MNEMONIC);
     await expect(engine.openContactsRecords(records)).rejects.toThrow("couldn't be read with this wallet's key");
     // The same one again can.
     await engine.unlockWithMnemonic(MNEMONIC);

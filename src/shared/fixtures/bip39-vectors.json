@@ -1,0 +1,193 @@
+{
+  "_comment": "Test phrases only, from random entropy. Made with bip39 3.1.0, the library before @scure/bip39, of each phrase as the wallet's engine reads it (trimmed, one space between words): seed is mnemonicToSeedSync with no passphrase, valid is validateMnemonic with the English wordlist.",
+  "seeds": [
+    {
+      "words": 12,
+      "phrase": "plastic trap symbol wealth random raven lamp health planet idea lounge direct",
+      "seed": "b87e9b45370021daf1c5b14980fee67ebffe86b756e2ca8a87dbab03455faca59f1b264b1b3d5e69c73ccf1c0f9334a28a0720e546ad78d455c52e771e0c8ef5"
+    },
+    {
+      "words": 12,
+      "phrase": "spot fantasy end family cliff when rent strong expose flag unfair machine",
+      "seed": "1d81e3513a5f61047b8eb46e6fe9534f329c18b59f459f109d75c39264f590db0fe87d2aa1c54d62a88b64d65a00be3c9a97de76921d907c49d4151ed71bcebd"
+    },
+    {
+      "words": 12,
+      "phrase": "reopen task awkward field bundle pact tired lab taste often diamond mango",
+      "seed": "af49fd767d00cb78fd0dc6938c1d666297338cfbddb09f448cf2c08bee8cb8b309c3d2d077978fd7f8082a7f23f9765999b93048d20a3c8d1dbafa54f7be4ab1"
+    },
+    {
+      "words": 12,
+      "phrase": "muffin coin nature chief vehicle embark match fashion lava top actress height",
+      "seed": "112638551a9f723829f56bcac515facd415d2ac27d1ad9847b3b2a31183c269105a1cbd7b15a633b0609ae72ee8d4a425390d374a15a15ebc1ef7da99c02d163"
+    },
+    {
+      "words": 12,
+      "phrase": "under indoor believe text nose hungry below protect century venture iron monitor",
+      "seed": "226d0e7cf90a88531079ccbb543af5992f45195cdb57ac4ab15996048e7aa1837fab3ff7f05d92f4f4a4026223fb70006ac79fd32bbf4aa9b6838a2e9a2b035b"
+    },
+    {
+      "words": 24,
+      "phrase": "achieve height ghost emerge merry adult enact menu because proud wonder extend attack couch eye fantasy poem produce pilot calm face stage collect prevent",
+      "seed": "e6fc4b16b3a308d605258caf4885ab7027ea36ae7f14bbc375e1843fbcb07946801163b48fc817c72895b8603a9ef62e492491bd23c890d3ad7f87530da3fcc3"
+    },
+    {
+      "words": 24,
+      "phrase": "laptop decade economy initial base use smart parade runway course adapt audit flee vault valley extend uncover broken senior fly unlock cloud describe aim",
+      "seed": "89c31d5a5faccf7df11907d32c719e3f84d14e367f57585d7220908da11f2161c6448a11c8affedd31e3e95f0739d8223cea53a045a10291cb15c414553f9d0b"
+    },
+    {
+      "words": 24,
+      "phrase": "pond noble impact umbrella subject dinosaur dolphin card pudding knock rely trash manage shoulder teach buzz laptop south acoustic before season about trip news",
+      "seed": "6cbac1d5667d33c33fb010960c1b7407f1b6781f8b40a561f027aed7cb42de8f7065e39b06f0b232a5a31aee52e0f0b345c31173ed320564fc6e3c8eb66b3ec2"
+    },
+    {
+      "words": 24,
+      "phrase": "carry voice smooth van world cactus safe ribbon off boat next wife advance believe beyond differ century bracket innocent apple ladder tape ship media",
+      "seed": "4233c0dc499d2fa4a57169e9832644085d625bf9b073cf5c1f70575541360646c1d1964ea7fae4f946b80820d1fa449a91180ca0aef0e6eecfc2ec76ffd3f5ce"
+    },
+    {
+      "words": 24,
+      "phrase": "drift mass toast essay prosper purse practice bundle notice badge deposit bounce hockey prison blame anchor title diary appear shiver random lock defy surround",
+      "seed": "0563e010bf8821fa91d927c3c9cb4d9344830acc0b0bbb664139f0333fe51b89a80e7cef120218da97970d6856f76ceb05f055253f1deeafca2388e7b7213953"
+    },
+    {
+      "words": 15,
+      "phrase": "slender awesome found balance network lawn execute chunk cousin spawn silent couple topic wrist dune",
+      "seed": "850abb1a84f7290840cb83ea3465dfd7e9ab9f04631e2cb75721e1368476ed3ae980615c50160645d7612e92a4f42bfb55406df0f0bd35147a436a34bea815e0"
+    },
+    {
+      "words": 18,
+      "phrase": "retire sausage grow gorilla move biology bird rubber capable fetch aerobic witness tent indoor upper pigeon bless shop",
+      "seed": "a637437bb096e163364cf8fd3f14340a7814c102d224b4d167e197691018ac00944c0c4217744e58a7949dcf77b47e73137639c1443ca28ccd185a756daf8779"
+    },
+    {
+      "words": 21,
+      "phrase": "you spoon canvas old purpose neutral winner approve result equal disease stadium enforce assume current truck program camp emotion daughter maximum",
+      "seed": "e475a7dd5cf50c72c349f99c7f3d546439a65bb58dac90fb918b26221a59d1aec0aad21c4b6707c6ac641bcf195cb9acf890afeaed34f60c0cb18b95e3ac9c8e"
+    },
+    {
+      "words": 12,
+      "phrase": "  spot fantasy end  \nfamily\tcliff when  \nrent strong\texpose  \nflag unfair machine \n",
+      "seed": "1d81e3513a5f61047b8eb46e6fe9534f329c18b59f459f109d75c39264f590db0fe87d2aa1c54d62a88b64d65a00be3c9a97de76921d907c49d4151ed71bcebd",
+      "note": "stray spaces, tabs and newlines"
+    }
+  ],
+  "verdicts": [
+    {
+      "case": "valid, 12 words",
+      "phrase": "million blanket anchor degree prize level situate hamster pelican matrix slam photo",
+      "valid": true
+    },
+    {
+      "case": "valid, 24 words",
+      "phrase": "venue burst october own sample captain flat horn fish remember album evil guitar split enrich ketchup supreme early style smooth refuse leg neglect word",
+      "valid": true
+    },
+    {
+      "case": "valid, 15 words",
+      "phrase": "museum gloom promote scare scene hard stereo airport glow robust pencil provide arctic brick laptop",
+      "valid": true
+    },
+    {
+      "case": "wrong checksum, 12 words",
+      "phrase": "ritual visual pave dinosaur globe flag swim filter initial learn monitor spoil",
+      "valid": false
+    },
+    {
+      "case": "wrong checksum, 24 words",
+      "phrase": "turtle label bind simple sister focus divide another help culture dream blanket post drastic lava magic palm critic version mixed pattern transfer much labor",
+      "valid": false
+    },
+    {
+      "case": "a word that isn't a recovery word",
+      "phrase": "violin nice disorder depend casx satoshi soup educate fire situate whip stem",
+      "valid": false
+    },
+    {
+      "case": "a French recovery word",
+      "phrase": "cinnamon cause purity junk pumpkin tornado opinion gibier tip swear voyage similar",
+      "valid": false
+    },
+    {
+      "case": "a whole Spanish phrase",
+      "phrase": "pálido tarro sur acento inicio premio amplio guitarra ser vecino alegre caspa",
+      "valid": false
+    },
+    {
+      "case": "11 words",
+      "phrase": "abstract win gold anxiety enough endless romance obvious duty limit oppose",
+      "valid": false
+    },
+    {
+      "case": "13 words",
+      "phrase": "inherit dolphin minute soldier dawn can sorry coil robust change slam border chicken",
+      "valid": false
+    },
+    {
+      "case": "23 words",
+      "phrase": "board token axis hotel orbit light rich quality grocery vast access gather dove soup cross kiss lemon brother tattoo solar parrot upper catch",
+      "valid": false
+    },
+    {
+      "case": "25 words",
+      "phrase": "shoot beyond disease genuine position before give man eager ugly wink midnight disease close birth fix process mechanic arm boil spray tag mouse material choice",
+      "valid": false
+    },
+    {
+      "case": "2 words",
+      "phrase": "kite also",
+      "valid": false
+    },
+    {
+      "case": "9 words",
+      "phrase": "brief kingdom pink april struggle mimic mix mule submit",
+      "valid": false
+    },
+    {
+      "case": "27 words",
+      "phrase": "diet slogan volume foster lonely point knock slight slogan inherit friend foam invest term alcohol alter neither nominee account across industry output bind power wagon enact claim",
+      "valid": false
+    },
+    {
+      "case": "empty",
+      "phrase": "",
+      "valid": false
+    },
+    {
+      "case": "spaces around",
+      "phrase": "  million blanket anchor degree prize level situate hamster pelican matrix slam photo ",
+      "valid": true
+    },
+    {
+      "case": "two spaces between words",
+      "phrase": "venue  burst  october  own  sample  captain  flat  horn  fish  remember  album  evil  guitar  split  enrich  ketchup  supreme  early  style  smooth  refuse  leg  neglect  word",
+      "valid": true
+    },
+    {
+      "case": "a tab and a newline between words",
+      "phrase": "million\tblanket\nanchor degree prize level situate hamster pelican matrix slam photo",
+      "valid": true
+    },
+    {
+      "case": "no-break spaces between words",
+      "phrase": "million blanket anchor degree prize level situate hamster pelican matrix slam photo",
+      "valid": true
+    },
+    {
+      "case": "a capital first letter",
+      "phrase": "Million blanket anchor degree prize level situate hamster pelican matrix slam photo",
+      "valid": false
+    },
+    {
+      "case": "capitals",
+      "phrase": "VENUE BURST OCTOBER OWN SAMPLE CAPTAIN FLAT HORN FISH REMEMBER ALBUM EVIL GUITAR SPLIT ENRICH KETCHUP SUPREME EARLY STYLE SMOOTH REFUSE LEG NEGLECT WORD",
+      "valid": false
+    },
+    {
+      "case": "full-width letters",
+      "phrase": "ｍｉｌｌｉｏｎ ｂｌａｎｋｅｔ ａｎｃｈｏｒ ｄｅｇｒｅｅ ｐｒｉｚｅ ｌｅｖｅｌ ｓｉｔｕａｔｅ ｈａｍｓｔｅｒ ｐｅｌｉｃａｎ ｍａｔｒｉｘ ｓｌａｍ ｐｈｏｔｏ",
+      "valid": true
+    }
+  ]
+}

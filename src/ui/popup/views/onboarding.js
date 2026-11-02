@@ -1,6 +1,5 @@
-import "../../../shared/bufferGlobal.js";
-import { entropyToMnemonic } from "bip39";
-import { bytesToHex } from "../../../shared/bytes.js";
+import { entropyToMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english";
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
@@ -13,7 +12,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 function generateMnemonic12() {
   const entropy = new Uint8Array(16);
   crypto.getRandomValues(entropy);
-  return entropyToMnemonic(bytesToHex(entropy));
+  return entropyToMnemonic(entropy, wordlist);
 }
 
 async function showPersistedVault(state, actions) {

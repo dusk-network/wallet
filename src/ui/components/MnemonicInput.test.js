@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import bip39Vectors from "../../shared/fixtures/bip39-vectors.json";
 import { fakeEvent, installFakeDom, isShown, typeInto } from "../testing/fakeDom.js";
 import { createMnemonicInput } from "./MnemonicInput.js";
 
@@ -76,6 +77,24 @@ describe("the recovery phrase's word boxes", () => {
     expect(onCheck).toHaveBeenLastCalledWith("That isn't a valid recovery phrase. Check each word.");
     paste(box(1), OTHER);
     expect(onCheck).toHaveBeenLastCalledWith("");
+  });
+
+  // bip39-vectors.json: test phrases and verdicts from bip39 3.1.0, the library before @scure/bip39.
+  it("takes each 12- or 24-word phrase it took before, however it's spaced or capitalised, and refuses each checksum it refused", () => {
+    const { box, onCheck } = mount();
+    const verdict = (name) => bip39Vectors.verdicts.find((v) => v.case === name).phrase;
+    const took = [
+      ...bip39Vectors.seeds.filter((v) => v.words === 12 || v.words === 24).map((v) => v.phrase),
+      ...["spaces around", "two spaces between words", "a tab and a newline between words", "no-break spaces between words", "a capital first letter", "capitals"].map(verdict),
+    ];
+    for (const phrase of took) {
+      paste(box(1), phrase);
+      expect(onCheck).toHaveBeenLastCalledWith("");
+    }
+    for (const name of ["wrong checksum, 12 words", "wrong checksum, 24 words"]) {
+      paste(box(1), verdict(name));
+      expect(onCheck, name).toHaveBeenLastCalledWith("That isn't a valid recovery phrase. Check each word.");
+    }
   });
 
   it("marks a typed word as its box is left, not while it's typed, and clears the mark once it's a word", () => {

@@ -1,5 +1,4 @@
 import { defineConfig } from "vite";
-import inject from "@rollup/plugin-inject";
 import { localW3sperAlias, w3sperStreamCompat } from "./vite.local-w3sper.js";
 import {
   exuSandboxWorkerPlugin,
@@ -27,11 +26,6 @@ export default defineConfig({
     sourcemap: true,
     // We use multiple JS entrypoints so the output file names are stable.
     rollupOptions: {
-      plugins: [
-        // bip39@3.1.0 is CommonJS and references the Node Buffer global.
-        // Keep this to Buffer only; do not pull the full node-stdlib-browser graph.
-        inject({ Buffer: ["buffer", "Buffer"] }),
-      ],
       input: {
         background: "src/background.js",
         contentScript: "src/contentScript.js",

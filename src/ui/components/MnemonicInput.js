@@ -1,10 +1,10 @@
-import "../../shared/bufferGlobal.js";
-import { validateMnemonic, wordlists } from "bip39";
+import { validateMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english";
 import { h } from "../lib/dom.js";
 import { normalizeMnemonic } from "../lib/strings.js";
 
 // We generate + validate mnemonics against the BIP39 English wordlist.
-const WORDSET = new Set(wordlists.english);
+const WORDSET = new Set(wordlist);
 
 let hintIds = 0;
 
@@ -47,7 +47,7 @@ function phraseProblem(words, { pasted = 0 } = {}) {
   if (missing.length) return `${wordsNamed(missing)} ${missing.length === 1 ? "is" : "are"} missing.`;
   const n = pasted > typed.length ? pasted : typed.length;
   if (n !== 12 && n !== 24) return `That's ${n} ${n === 1 ? "word" : "words"}. A recovery phrase has 12 or 24.`;
-  if (!validateMnemonic(typed.join(" "))) return "That isn't a valid recovery phrase. Check each word.";
+  if (!validateMnemonic(typed.join(" "), wordlist)) return "That isn't a valid recovery phrase. Check each word.";
   return "";
 }
 
