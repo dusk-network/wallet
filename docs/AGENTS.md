@@ -221,7 +221,7 @@ transfers already require this field at the provider boundary.
 | `@scure/bip39` | 1.6.0 | Mnemonic generation/validation (English wordlist only) |
 | `preact` | (via HTM) | UI framework |
 | `qrcode-generator` | ^2.0.4 | QR code generation |
-| `jsqr` | ^1.4.0 | QR code scanning |
+| `jsqr` | ^1.4.0 | QR code scanning (loaded when a scan opens) |
 
 ### Tauri Plugins
 
