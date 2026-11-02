@@ -357,6 +357,15 @@ messenger to Dusk's, relaying DuskEVM's bridge to Dusk's). It marks them
 encodes them stay opaque, with a warning on a call to the bridge's contracts,
 and so does every call on Mainnet until the bridge is configured there.
 
+The wallet also reads DRC20 token calls (`transfer`, `approve`,
+`transfer_from`, `increase_allowance` and `decrease_allowance`) in the form
+the DRC20 standard in dusk-network/contracts takes, as Dusk Connect's DRC20
+helper writes them from 0.3.0, and in the older tokens' form: whom the call
+pays or lets spend, and its exact amount in the token's decimals. Arguments
+that don't read back exactly as one such call stay opaque, with a warning when
+a token's driver reads them; an `approve` or `increase_allowance` among them
+waits for the user to type MAX, as an unlimited allowance does.
+
 ---
 
 ### `dusk_watchAsset`

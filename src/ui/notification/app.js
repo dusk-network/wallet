@@ -16,6 +16,7 @@ import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
 import { contractLabel } from "../../shared/knownCalls.js";
+import { DRC20_CALL_NAMES } from "../../shared/drc20Calls.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
 import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
@@ -1152,6 +1153,27 @@ export async function renderNotification() {
       ]);
     // What everyone sees of a send, as on Send's Review; other calls have no such line.
     const sendVisible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
+    // Reject and Approve, with the box to type MAX in: an allowance that is or
+    // may be unlimited waits for MAX, and any approval for gas that will do.
+    const maxGatedBar = (gated, approveText) => {
+      const bar = decisionBar({
+        approveText,
+        approveDisabled: gated,
+        approveTitle: gated ? "Type MAX to enable approval" : "",
+        getApprovedParams: () => gasEditor.readOverrideGas(gas),
+      });
+      const acknowledged = () => !gated || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
+      const ackInput = textInput({
+        placeholder: "Type MAX to confirm",
+        "aria-label": "Type MAX to confirm",
+        onEnter: () => bar.approveBtn.click(),
+        oninput: () => {
+          bar.approveBtn.disabled = !acknowledged() || Boolean(gasEditor.error);
+        },
+      });
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: acknowledged });
+      return { bar, ackInput };
+    };
 
     // A known DuskEVM bridge call: what it does, read from its arguments,
     // above the call and its bytes.
@@ -1215,35 +1237,21 @@ export async function renderNotification() {
       return;
     }
 
-    const wantsDrc20 = argsOk && ["transfer", "approve", "transfer_from"].includes(fnNameLower);
+    const wantsDrc20 = argsOk && DRC20_CALL_NAMES.includes(fnNameLower);
     const wantsDrc721 = argsOk && ["approve", "set_approval_for_all", "transfer_from"].includes(fnNameLower);
 
-    let drcKind = "";
-    let drcDriver = "";
+    // A token call as the engine reads it with each token driver
+    // (drc20Calls.js): the call, `unread` when a driver reads it but not as
+    // one the wallet can show, or when the engine couldn't read it, or null.
+    const tokenCall = wantsDrc20
+      ? await sendResult({ type: "DUSK_UI_DRC20_DECODE_INPUT", fnName: fnNameTrim, fnArgs: argsHex }).catch(() => ({ unread: true }))
+      : null;
+    const drc20 = tokenCall?.fn ? tokenCall : null;
+
+    let drcKind = drc20 ? "DRC20" : "";
     let decoded = null;
 
-    if (wantsDrc20) {
-      try {
-        decoded = await sendResult({ type: "DUSK_UI_DRC20_DECODE_INPUT", fnName: fnNameTrim, fnArgs: argsHex });
-        drcKind = "DRC20";
-        drcDriver = "drc20";
-      } catch {
-        try {
-          decoded = await sendResult({
-            type: "DUSK_UI_DRC20_DECODE_INPUT",
-            fnName: fnNameTrim,
-            fnArgs: argsHex,
-            driver: "sozu_staked_dusk",
-          });
-          drcKind = "DRC20";
-          drcDriver = "sozu_staked_dusk";
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    if (!drcKind && wantsDrc721) {
+    if (!tokenCall && wantsDrc721) {
       try {
         decoded = await sendResult({ type: "DUSK_UI_DRC721_DECODE_INPUT", fnName: fnNameTrim, fnArgs: argsHex });
         drcKind = "DRC721";
@@ -1254,65 +1262,61 @@ export async function renderNotification() {
 
     let drcMeta = null;
     if (drcKind === "DRC20") {
-      drcMeta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId: contractIdHex, driver: drcDriver }).catch(() => null);
+      drcMeta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId: contractIdHex, driver: drc20.driver }).catch(() => null);
     }
     if (drcKind === "DRC721") {
       drcMeta = await sendResult({ type: "DUSK_UI_DRC721_GET_METADATA", contractId: contractIdHex }).catch(() => null);
     }
 
     // Token standards: what the call moves or allows, in the token's units.
-    if (drcKind === "DRC20" && decoded && typeof decoded === "object") {
+    if (drc20) {
       const sym = String(drcMeta?.symbol ?? "").trim() || "TOKEN";
       const name = String(drcMeta?.name ?? "").trim() || "DRC20 token";
       const dec = Number(drcMeta?.decimals ?? 0) || 0;
 
-      const toStr = accountEnumToString(decoded?.to);
-      const spenderStr = accountEnumToString(decoded?.spender);
-      const ownerStr = accountEnumToString(decoded?.owner);
-      const valueUnitsStr = decoded?.value != null ? String(decoded.value) : "";
       // Exact, as an approval shows DUSK: every decimal the token has.
-      const valueHuman = valueUnitsStr ? groupThousands(formatTokenUnits(valueUnitsStr, dec, { maxFrac: dec })) : "—";
+      const units = drc20.amount;
+      const amount = groupThousands(formatTokenUnits(units, dec, { maxFrac: dec }));
 
-      const isApprove = fnNameLower === "approve";
-      const isTransfer = fnNameLower === "transfer";
-      const isTransferFrom = fnNameLower === "transfer_from";
-      const isMax = isApprove && safeBigInt(valueUnitsStr, -1n) === MAX_U64;
+      const isApprove = drc20.fn === "approve";
+      const isIncrease = drc20.fn === "increase_allowance";
+      const isTransfer = drc20.fn === "transfer";
+      const isMax = (isApprove || isIncrease) && safeBigInt(units, -1n) === MAX_U64;
+      // Whom it names: a public account as a payment's recipient; a contract
+      // or a shielded address as it is, and which it is.
+      const kindOf = (party) => (party.kind === "contract" ? "contract" : party.kind === "shielded" ? "shielded address" : "");
+      const partyValue = (party) => [
+        kindOf(party) ? h("span", { class: "ap-kv-note", text: `A ${kindOf(party)}` }) : null,
+        h("code", { class: "ap-address", text: party.value }),
+      ];
+      const partyTo = (party) => (kindOf(party) ? plainTo(party.value, "", { evm: false, prefix: `to ${kindOf(party)} ` }) : toLine(party.value));
 
-      const bar = decisionBar({
-        approveText: isTransfer ? "Approve transfer" : isApprove ? "Approve spending" : "Approve",
-        approveDisabled: Boolean(isMax),
-        approveTitle: isMax ? "Type MAX to enable approval" : "",
-        getApprovedParams: () => gasEditor.readOverrideGas(gas),
-      });
-      // An unlimited allowance waits for MAX, and any approval for gas that will do.
-      const acknowledged = () => !isMax || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
-      const ackInput = textInput({
-        placeholder: "Type MAX to confirm",
-        "aria-label": "Type MAX to confirm",
-        onEnter: () => bar.approveBtn.click(),
-        oninput: () => {
-          bar.approveBtn.disabled = !acknowledged() || Boolean(gasEditor.error);
-        },
-      });
-      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: acknowledged });
+      const { bar, ackInput } = maxGatedBar(isMax, isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve");
 
       show(
         [
           site,
           requestHead({
-            title: isApprove ? "Allow spending?" : "Send tokens",
-            amount: valueUnitsStr ? { value: valueHuman, unit: sym } : null,
-            to: (isTransfer || isTransferFrom) && toStr ? toLine(toStr) : null,
+            title: isApprove
+              ? "Allow spending?"
+              : isIncrease
+                ? "Allow more spending?"
+                : drc20.fn === "decrease_allowance"
+                  ? "Allow less spending?"
+                  : "Send tokens",
+            amount: { value: amount, unit: sym },
+            to: drc20.to ? partyTo(drc20.to) : null,
             sub: `${name} · DRC20`,
           }),
-          isApprove ? null : sendVisible("this call, the tokens it moves"),
+          // A transfer names whom it pays; an allowance moves nothing yet.
+          drc20.to ? sendVisible("this call, the tokens it moves") : null,
           group([
             kv("From", payerLine(rail)),
-            isTransfer || isTransferFrom ? kv("To", h("code", { class: "ap-address", text: toStr || "(missing)" }), { stack: true }) : null,
-            isApprove ? kv("Spender", h("code", { class: "ap-address", text: spenderStr || "(missing)" }), { stack: true }) : null,
-            isTransferFrom ? kv("Owner", h("code", { class: "ap-address", text: ownerStr || "(missing)" }), { stack: true }) : null,
+            drc20.to ? kv("To", partyValue(drc20.to), { stack: true }) : null,
+            drc20.spender ? kv("Spender", partyValue(drc20.spender), { stack: true }) : null,
+            drc20.owner ? kv("Owner", partyValue(drc20.owner), { stack: true }) : null,
             kv("Token", h("span", {}, [h("span", { text: `${name} (${sym}) ` }), shortMono(contractShown)])),
-            valueUnitsStr ? kv("Units", mono(valueUnitsStr)) : null,
+            kv("Units", mono(units)),
           ]),
           isMax
             ? warning("Unlimited allowance", "This lets the spender move all of this token from your account, now and later. Only continue if you trust it.", [ackInput])
@@ -1381,18 +1385,25 @@ export async function renderNotification() {
 
     // Any other call: the wallet can't read its arguments, so it says so. One
     // to the bridge's contracts that isn't a transfer it knows, such as a
-    // withdrawal off the bridge's route, gets a warning.
-    const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
-    submitOnGasEnter(gasEditor, bar.approveBtn);
+    // withdrawal off the bridge's route, gets a warning, as does a token call
+    // a driver reads but not as one the wallet can show. Such a call that sets
+    // an allowance may be unlimited, so it waits for MAX.
+    const unreadAllowance = Boolean(tokenCall) && ["approve", "increase_allowance"].includes(fnNameLower);
+    const { bar, ackInput } = maxGatedBar(unreadAllowance);
     const summary = requestSummary("send_tx", params, { own });
     const unchecked = callsBridge({ nodeUrl: params?.nodeUrl, contractId: contractIdHex })
       ? warning(
           "The wallet can't check this bridge call",
           "It goes to the DuskEVM bridge, but it isn't a transfer the wallet knows for this network. Reject it unless you know why the site sent it."
         )
-      : note("The wallet can't read this call's arguments. Check them on the site before you approve.", "alert", {
-          className: "ap-opaque",
-        });
+      : tokenCall
+        ? warning(
+            "The wallet can't read this request",
+            "It looks like a token call, but the wallet can't show its amount or the accounts it names. Reject it unless you know what the site sent."
+          )
+        : note("The wallet can't read this call's arguments. Check them on the site before you approve.", "alert", {
+            className: "ap-opaque",
+          });
     show(
       [
         site,
@@ -1402,6 +1413,13 @@ export async function renderNotification() {
         }),
         callRows({ from: true }),
         unchecked,
+        unreadAllowance
+          ? warning(
+              "This may be an unlimited allowance",
+              "The wallet can't check how much this lets the spender move. It could be all of this token, now and later. Only continue if you trust the site.",
+              [ackInput]
+            )
+          : null,
         gasEditor,
         detailsBlock(),
       ],

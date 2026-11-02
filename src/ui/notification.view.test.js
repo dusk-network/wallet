@@ -1,10 +1,15 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { hashTypedDataHex } from "@dusk/typed-data";
+import { dataDrivers } from "@dusk/w3sper";
 import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
 import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 
+import { bytesToHex, toBytes } from "../shared/bytes.js";
+import { readDrc20Call } from "../shared/drc20Calls.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
 import { fakeEvent, installFakeDom, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
@@ -628,23 +633,24 @@ describe("the recipient of a site's request to send", () => {
     expect(nameAsks()).toEqual([]);
   });
 
-  // A token or NFT contract call, decoded as the approval decodes it.
+  // A token or NFT contract call, read as the engine reads it (drc20Calls.js).
   const call = (fnName, decoded) => ({
     params: { kind: "contract_call", contractId: `0x${"11".repeat(32)}`, fnName, fnArgs: "0x00", chainId: "dusk:2", nodeUrl: TESTNET },
     answers: decoded.drc20
       ? {
-          DUSK_UI_DRC20_DECODE_INPUT: async () => ({ ok: true, result: decoded.drc20 }),
+          DUSK_UI_DRC20_DECODE_INPUT: async () => ({ ok: true, result: { driver: "drc20", fn: fnName, ...decoded.drc20 } }),
           DUSK_UI_DRC20_GET_METADATA: async () => ({ ok: true, result: { name: "Token", symbol: "TKN", decimals: 0 } }),
         }
       : {
-          DUSK_UI_DRC20_DECODE_INPUT: async () => ({ ok: false, error: "Not a DRC20 call" }),
+          DUSK_UI_DRC20_DECODE_INPUT: async () => ({ ok: true, result: null }),
           DUSK_UI_DRC721_DECODE_INPUT: async () => ({ ok: true, result: decoded.drc721 }),
           DUSK_UI_DRC721_GET_METADATA: async () => ({ ok: true, result: { name: "Art", symbol: "ART" } }),
         },
   });
+  const account = (value) => ({ kind: "account", value });
 
   it.each([
-    ["a DRC20 transfer", call("transfer", { drc20: { to: { External: CAROL }, value: "5" } })],
+    ["a DRC20 transfer", call("transfer", { drc20: { to: account(CAROL), amount: "5" } })],
     ["a DRC721 transfer", call("transfer_from", { drc721: { from: { External: MAIN }, to: { External: CAROL }, token_id: "7" } })],
   ])("names the recipient of %s the same way", async (_label, { params, answers }) => {
     Object.assign(mocks.answers, answers);
@@ -654,23 +660,140 @@ describe("the recipient of a site's request to send", () => {
     expect(row("To").textContent).toBe(CAROL);
   });
 
-  it("shows a token amount exactly, every decimal the token has", async () => {
-    Object.assign(mocks.answers, {
-      DUSK_UI_DRC20_DECODE_INPUT: async () => ({ ok: true, result: { to: { External: CAROL }, value: "1234567891234" } }),
-      DUSK_UI_DRC20_GET_METADATA: async () => ({ ok: true, result: { name: "Token", symbol: "TKN", decimals: 9 } }),
-    });
-    await render("send_tx", { kind: "contract_call", contractId: `0x${"11".repeat(32)}`, fnName: "transfer", fnArgs: "0x00", chainId: "dusk:2", nodeUrl: TESTNET });
-    expect(visibleText(head().querySelector(".ap-amount"))).toBe("1,234.567891234 TKN");
-  });
-
   it("asks for no name for a token spender, which receives nothing", async () => {
-    const { params, answers } = call("approve", { drc20: { spender: { External: CAROL }, value: "5" } });
+    const { params, answers } = call("approve", { drc20: { spender: account(CAROL), amount: "5" } });
     Object.assign(mocks.answers, answers);
     answerName("carol.dusk");
     await render("send_tx", params);
     await settle();
     expect(row("Spender").textContent).toBe(CAROL);
     expect(nameAsks()).toEqual([]);
+  });
+});
+
+describe("a site's token call, read with the wallet's token drivers", () => {
+  // The drivers the wallet ships, which read the call as the engine does
+  // (drc20Calls.js); the site writes it with its token's own driver.
+  const drivers = {};
+  beforeAll(async () => {
+    for (const key of ["drc20_standard", "drc20", "sozu_staked_dusk"]) {
+      drivers[key] = await dataDrivers.load(new Uint8Array(await readFile(path.resolve(process.cwd(), "public", "drivers", `${key}_data_driver.wasm`))));
+      drivers[key].init?.();
+    }
+  });
+  // An account and a Phoenix key as the DRC20 standard's tests make them, and a contract.
+  const SHOP = "sqrtP6LvrNqtDWn4cic3hCXZatjoW3U3V2NoCPKt7QMkS2J3Lt7LZ7LZ9YZ7Go7N63RJcSP89GBxDS1Sgg9Fqq17LsvX9FAnCbZcV1LyqSTGRg4fdi8aoq75jdomJEgsC4y";
+  const PHOENIX = "J3W3PD1aVTtUwf4N7mthhuKb4KVutxQuZgy5SAt8RmkL";
+  const ROUTER = "18".repeat(32);
+
+  // A site's call to a token of 9 decimals, as `key`'s driver writes it.
+  const tokenCall = (key, fnName, json) => {
+    Object.assign(mocks.answers, {
+      DUSK_UI_DRC20_DECODE_INPUT: async (m) => ({ ok: true, result: readDrc20Call(drivers, m.fnName, toBytes(m.fnArgs)) }),
+      DUSK_UI_DRC20_GET_METADATA: async () => ({ ok: true, result: { name: "Token", symbol: "TKN", decimals: 9 } }),
+    });
+    const fnArgs = `0x${bytesToHex(drivers[key].encodeInputFn(fnName, json))}`;
+    return { kind: "contract_call", privacy: "public", contractId: `0x${"11".repeat(32)}`, fnName, fnArgs, chainId: "dusk:2", nodeUrl: TESTNET };
+  };
+  const amount = () => visibleText(head().querySelector(".ap-amount"));
+
+  it("shows a standard transfer's amount exactly, above 2^53 too, and names its recipient", async () => {
+    mocks.answers.DUSK_UI_RECIPIENT_NAME = async () => ({ ok: true, result: "shop.dusk" });
+    await render("send_tx", tokenCall("drc20_standard", "transfer", `{"to":{"Moonlight":"${SHOP}"},"amount":9007199254740993}`), {
+      contacts: [{ name: "Shop", address: SHOP }],
+    });
+    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Send tokens", "9,007,199.254740993 TKN"]);
+    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "shop.dusk", tag: "Shop · saved contact" }));
+    expect([row("To").textContent, row("Units").textContent]).toEqual([SHOP, "9007199254740993"]);
+  });
+
+  it("shows a standard approval of the most there is exactly, with Approve waiting for MAX", async () => {
+    await render("send_tx", tokenCall("drc20_standard", "approve", `{"spender":{"Contract":"${ROUTER}"},"amount":18446744073709551615}`));
+    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "18,446,744,073.709551615 TKN"]);
+    expect([visibleText(row("Spender")), row("Units").textContent]).toEqual([`A contract${ROUTER}`, "18446744073709551615"]);
+    expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Unlimited allowance");
+    expect(approve().disabled).toBe(true);
+  });
+
+  it("names a shielded address and a contract as they are, and whose tokens a transfer_from moves", async () => {
+    await render("send_tx", tokenCall("drc20_standard", "transfer_from", `{"owner":{"Moonlight":"${SAVINGS}"},"to":{"Phoenix":"${PHOENIX}"},"amount":7}`));
+    expect(amount()).toBe("0.000000007 TKN");
+    expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to shielded address ${shortAddress(PHOENIX)}`);
+    expect([visibleText(row("To")), row("Owner").textContent]).toEqual([`A shielded address${PHOENIX}`, SAVINGS]);
+
+    await render("send_tx", tokenCall("drc20_standard", "transfer", `{"to":{"Contract":"${ROUTER}"},"amount":7}`));
+    expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to contract ${shortAddress(ROUTER)}`);
+  });
+
+  it("reads the standard's allowance changes", async () => {
+    await render("send_tx", tokenCall("drc20_standard", "increase_allowance", `{"spender":{"Moonlight":"${SHOP}"},"added_amount":1000000000000000001}`));
+    expect([head().querySelector("h1").textContent, amount(), row("Spender").textContent]).toEqual(["Allow more spending?", "1,000,000,000.000000001 TKN", SHOP]);
+    await render("send_tx", tokenCall("drc20_standard", "decrease_allowance", `{"spender":{"Moonlight":"${SHOP}"},"subtracted_amount":5}`));
+    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow less spending?", "0.000000005 TKN"]);
+  });
+
+  it("shows a Sozu approval of the most there is for a contract, waiting for MAX", async () => {
+    // A contract ID with a 0, which Sozu's driver writes in hex.
+    const pool = "10".repeat(32);
+    await render("send_tx", tokenCall("sozu_staked_dusk", "approve", `["${pool}","18446744073709551615"]`));
+    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "18,446,744,073.709551615 TKN"]);
+    expect(visibleText(row("Spender"))).toBe(`A contract${pool}`);
+    expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Unlimited allowance");
+    expect(approve().disabled).toBe(true);
+    typeInto(app.querySelector(".callout.warn input"), "MAX");
+    expect(approve().disabled).toBe(false);
+
+    await render("send_tx", tokenCall("sozu_staked_dusk", "transfer", `["${pool}","5"]`));
+    expect(visibleText(head().querySelector(".ap-recipient"))).toBe(`to contract ${shortAddress(pool)}`);
+    expect(visibleText(row("To"))).toBe(`A contract${pool}`);
+  });
+
+  it.each([
+    // An older token's approval of the most there is, with a byte its driver
+    // reads past set: what the wallet showed before, waiting for MAX.
+    [
+      "a driver reads but not exactly",
+      async () => {
+        const params = tokenCall("drc20", "approve", `{"spender":{"External":"${SHOP}"},"value":"18446744073709551615"}`);
+        const bytes = toBytes(params.fnArgs);
+        bytes[3] = 1;
+        return { ...params, fnArgs: `0x${bytesToHex(bytes)}` };
+      },
+    ],
+    [
+      "the engine couldn't read",
+      async () => {
+        const params = tokenCall("drc20", "approve", `{"spender":{"External":"${SHOP}"},"value":"18446744073709551615"}`);
+        mocks.answers.DUSK_UI_DRC20_DECODE_INPUT = async () => ({ ok: false, error: "Engine call timed out" });
+        return params;
+      },
+    ],
+  ])("keeps an allowance waiting for MAX when %s", async (_label, request) => {
+    await render("send_tx", await request());
+    expect(app.querySelectorAll(".callout.warn .callout-title").map((t) => t.textContent)).toEqual([
+      "The wallet can't read this request",
+      "This may be an unlimited allowance",
+    ]);
+    expect(approve().disabled).toBe(true);
+    typeInto(app.querySelector(".callout.warn input"), "max");
+    expect(approve().disabled).toBe(false);
+  });
+
+  it("shows an older token's transfer as before, every decimal the token has", async () => {
+    await render("send_tx", tokenCall("drc20", "transfer", `{"to":{"External":"${SHOP}"},"value":"1234567891234"}`));
+    expect([head().querySelector("h1").textContent, amount(), row("To").textContent]).toEqual(["Send tokens", "1,234.567891234 TKN", SHOP]);
+  });
+
+  it("says it can't read a token call in a form it doesn't know, rather than show a blank", async () => {
+    const params = tokenCall("drc20_standard", "transfer", `{"to":{"Moonlight":"${SHOP}"},"amount":5}`);
+    // A recipient that isn't a valid key, which the standard writes as InvalidMoonlight.
+    const bytes = toBytes(params.fnArgs);
+    bytes[20] ^= 0xff;
+    await render("send_tx", { ...params, fnArgs: `0x${bytesToHex(bytes)}` });
+    expect(visibleText(head())).toBe("Contract call");
+    expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("The wallet can't read this request");
+    expect([row("To"), row("Units"), app.querySelector(".ap-opaque")]).toEqual([undefined, undefined, null]);
+    expect(approve().disabled).toBe(false);
   });
 });
 
@@ -1002,7 +1125,7 @@ describe("the request's network", () => {
 
 describe("contract-call decoding", () => {
   it("asks the background to decode token calls with serializable 0x-hex arguments", async () => {
-    mocks.answers.DUSK_UI_DRC20_DECODE_INPUT = async () => ({ ok: false, error: "Not a DRC20 call" });
+    mocks.answers.DUSK_UI_DRC20_DECODE_INPUT = async () => ({ ok: true, result: null });
     mocks.answers.DUSK_UI_DRC721_DECODE_INPUT = async () => ({ ok: false, error: "Not a DRC721 call" });
     await renderShop("send_tx", {
       kind: "contract_call",
@@ -1013,9 +1136,9 @@ describe("contract-call decoding", () => {
       nodeUrl: TESTNET,
     });
     const asks = mocks.sent.filter((m) => /DECODE_INPUT$/.test(m.type));
+    // One read with every token driver, then the NFT driver's.
     expect(asks.map((m) => [m.type, m.fnArgs, m.driver ?? ""])).toEqual([
       ["DUSK_UI_DRC20_DECODE_INPUT", "0x0102ff", ""],
-      ["DUSK_UI_DRC20_DECODE_INPUT", "0x0102ff", "sozu_staked_dusk"],
       ["DUSK_UI_DRC721_DECODE_INPUT", "0x0102ff", ""],
     ]);
     expect(app.querySelector(".ap-opaque")).not.toBeNull();

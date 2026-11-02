@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -69,6 +70,38 @@ describe("Canonical data-drivers conformance (DRC20 / DRC721)", () => {
       expect(rkyv.byteLength).toBeGreaterThan(0);
       expect(driver.decodeInputFn("transfer_from", rkyv)).toEqual(args);
     }
+  });
+
+  it("DRC20 standard driver is the standard's own and takes its struct calls, writing a u64 as a bare integer", async () => {
+    // dusk-network/contracts 18d7ac7, standards/examples/drc20_roles_pausable, built for size
+    // with nightly-2026-02-27 (rustc 1.95.0-nightly 6a979b3e3) and wasm-opt 0.116.1 (binaryen 116):
+    //   CARGO_PROFILE_RELEASE_OPT_LEVEL=z CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+    //   CARGO_PROFILE_RELEASE_PANIC=abort CARGO_PROFILE_RELEASE_STRIP=true RUSTFLAGS="--remap-path-prefix $HOME=" \
+    //   cargo build --locked --release --target wasm32-unknown-unknown --features data-driver-js -p drc20-roles-pausable
+    //   (sha256 645ac6c94924adddeee8738d090921938195801ce451b8bb808b64b1e0dc616e), then
+    //   wasm-opt -Oz --enable-bulk-memory --enable-multivalue --enable-mutable-globals \
+    //   --enable-nontrapping-float-to-int --enable-reference-types --enable-sign-ext.
+    // It reads and writes as the default release build does (sha256 8e414705…3bb3a0), which
+    // Dusk Connect 0.3.0 tests against.
+    const wasm = await readFile(path.resolve(process.cwd(), "public", "drivers", "drc20_standard_data_driver.wasm"));
+    expect(createHash("sha256").update(wasm).digest("hex")).toBe("426eeef8217e1d48d2165b85f1906e4f84afb5e671fb85b74d21c53cee93b049");
+    const driver = await loadDriverFromPublic("drc20_standard_data_driver.wasm");
+
+    const calls = [
+      ["transfer", `{"to":{"Moonlight":"${EXAMPLE_PK}"},"amount":42}`],
+      ["approve", `{"spender":{"Contract":"${"18".repeat(32)}"},"amount":7}`],
+      ["transfer_from", `{"owner":{"Moonlight":"${EXAMPLE_PK}"},"to":{"Phoenix":"J3W3PD1aVTtUwf4N7mthhuKb4KVutxQuZgy5SAt8RmkL"},"amount":1}`],
+      ["increase_allowance", `{"spender":{"Moonlight":"${EXAMPLE_PK}"},"added_amount":3}`],
+      ["decrease_allowance", `{"spender":{"Moonlight":"${EXAMPLE_PK}"},"subtracted_amount":2}`],
+    ];
+    for (const [fn, json] of calls) {
+      expect(driver.decodeInputFn(fn, driver.encodeInputFn(fn, json))).toEqual(JSON.parse(json));
+    }
+    // An amount as a string isn't the standard's; one above 2^53 comes back from
+    // decodeInputFn's JSON.parse rounded, so the wallet reads it from the bytes (drc20Calls.js).
+    expect(() => driver.encodeInputFn("transfer", `{"to":{"Moonlight":"${EXAMPLE_PK}"},"amount":"42"}`)).toThrow();
+    const large = driver.encodeInputFn("transfer", `{"to":{"Moonlight":"${EXAMPLE_PK}"},"amount":9007199254740993}`);
+    expect(driver.decodeInputFn("transfer", large).amount).toBe(2 ** 53);
   });
 
   it("DRC721 driver can encode+decode standard inputs", async () => {
