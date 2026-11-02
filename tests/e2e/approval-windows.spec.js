@@ -1,10 +1,17 @@
 import { readFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
+import { dataDrivers } from "@dusk/w3sper";
 
 // Renderer-only checks of the site approval windows at the size the wallet
 // opens them: the real notification page and styles, with the background's
-// answers stubbed. No vault, keys, node or transactions.
+// answers stubbed, but for a token call, which the wallet's engine reads with
+// its own drivers. No vault, keys, node or transactions.
 const fixtures = JSON.parse(readFileSync(new URL("../../src/shared/fixtures/duskevm-bridge-calls.json", import.meta.url), "utf8"));
+// A call to a DRC20 standard token, as the standard's driver writes it for a site.
+const standard = dataDrivers
+  .load(new Uint8Array(readFileSync(new URL("../../public/drivers/drc20_standard_data_driver.wasm", import.meta.url))))
+  .then((driver) => (driver.init(), driver));
+const standardCall = async (fnName, json) => `0x${Buffer.from((await standard).encodeInputFn(fnName, json)).toString("hex")}`;
 const shell = readFileSync(new URL("../../public/notification.html", import.meta.url), "utf8")
   .replace(/href="(ui|notification)\.css"/g, 'href="/$1.css"')
   .replace(/src="icons\//g, 'src="/icons/')
@@ -46,6 +53,11 @@ async function open(page, pending) {
           if (msg.type === "DUSK_GET_PENDING") return pending;
           if (msg.type === "DUSK_PENDING_DECISION") window.decisions.push(msg);
           if (msg.type === "DUSK_UI_RECIPIENT_NAME") return { ok: true, result: "wallet-both.dusk" };
+          if (msg.type === "DUSK_UI_DRC20_DECODE_INPUT") {
+            const { decodeDrc20Input } = await import("/src/shared/walletEngine.js");
+            return { ok: true, result: await decodeDrc20Input(msg) };
+          }
+          if (msg.type === "DUSK_UI_DRC20_GET_METADATA") return { ok: true, result: { name: "Token", symbol: "TKN", decimals: 9 } };
           return { ok: true };
         },
       },
@@ -124,6 +136,32 @@ test("a DuskEVM deposit shows what it does on top, and its bytes' hash under Det
   ]).then((boxes) => boxes.map((b) => b.y));
   expect(recipientY).toBeLessThan(callY);
   expect(callY).toBeLessThan(rawY);
+});
+
+test("a DRC20 standard transfer shows its exact amount and its recipient without scrolling", async ({ page }) => {
+  await open(
+    page,
+    pendingFor("send_tx", {
+      kind: "contract_call",
+      privacy: "public",
+      contractId: `0x${"11".repeat(32)}`,
+      fnName: "transfer",
+      fnArgs: await standardCall("transfer", `{"to":{"Moonlight":"${SHOP}"},"amount":9007199254740993}`),
+      amount: "0",
+      deposit: "0",
+      gas: { limit: "5000000", price: "1" },
+      chainId: "dusk:2",
+      nodeUrl: TESTNET,
+      networkName: "Testnet",
+    })
+  );
+  await expect(page.locator(".ap-amount")).toHaveText("9,007,199.254740993 TKN");
+  await expect(page.locator(".ap-recipient__lead")).toHaveText("wallet-both.dusk");
+  await expect(page.locator(".ap-recipient__tag")).toHaveText("WB shop · saved contact");
+  await expect(page.getByText("9007199254740993", { exact: true })).toBeVisible();
+  for (const locator of [page.locator(".ap-amount"), page.locator(".ap-recipient__lead"), page.getByRole("button", { name: "Approve transfer", exact: true })]) {
+    expect(await inView(page, locator)).toBe(true);
+  }
 });
 
 test("a gas limit under the transaction's minimum, or a price of 0, keeps Approve off, saying why", async ({ page }) => {

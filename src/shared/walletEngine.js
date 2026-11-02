@@ -19,6 +19,7 @@ import { signProfileTypedDataDigest } from "./blsDigest.js";
 import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
 import { ERROR_CODES } from "./errors.js";
 import { createContractReads } from "./contractReads.js";
+import { readDrc20Call } from "./drc20Calls.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
@@ -683,6 +684,7 @@ async function persistPendingNullifiersForTx(result, profileIndex, session) {
 
 const DRIVER_KEYS = Object.freeze({
   DRC20: "drc20",
+  DRC20_STANDARD: "drc20_standard",
   DRC721: "drc721",
   SOZU_POOL: "sozu_pool",
   SOZU_STAKED_DUSK: "sozu_staked_dusk",
@@ -691,6 +693,7 @@ const DRIVER_KEYS = Object.freeze({
 function normalizeTokenDriver(driver) {
   const raw = String(driver ?? "").trim().toLowerCase();
   if (!raw || raw === DRIVER_KEYS.DRC20) return DRIVER_KEYS.DRC20;
+  if (raw === DRIVER_KEYS.DRC20_STANDARD) return DRIVER_KEYS.DRC20_STANDARD;
   if (raw === DRIVER_KEYS.SOZU_STAKED_DUSK) return DRIVER_KEYS.SOZU_STAKED_DUSK;
   throw new Error(`Unsupported token driver: ${raw}`);
 }
@@ -702,12 +705,6 @@ function accountEnumToTokenString(account) {
     if (typeof account.Contract === "string") return account.Contract;
   }
   return String(account ?? "");
-}
-
-function tokenStringToAccountEnum(account) {
-  const s = String(account ?? "").trim();
-  if (/^0x[0-9a-f]{64}$/i.test(s)) return { Contract: s.toLowerCase() };
-  return { External: s };
 }
 
 function encodeSozuStakedDuskArgs(fnName, args = {}) {
@@ -728,31 +725,6 @@ function encodeSozuStakedDuskArgs(fnName, args = {}) {
   return args;
 }
 
-function decodeSozuStakedDuskArgs(fnName, decoded) {
-  const fn = String(fnName ?? "").trim().toLowerCase();
-  const values = Array.isArray(decoded) ? decoded : [];
-  if (fn === "transfer") {
-    return {
-      to: tokenStringToAccountEnum(values[0]),
-      value: String(values[1] ?? "0"),
-    };
-  }
-  if (fn === "approve") {
-    return {
-      spender: tokenStringToAccountEnum(values[0]),
-      value: String(values[1] ?? "0"),
-    };
-  }
-  if (fn === "transfer_from") {
-    return {
-      owner: tokenStringToAccountEnum(values[0]),
-      to: tokenStringToAccountEnum(values[1]),
-      value: String(values[2] ?? "0"),
-    };
-  }
-  return decoded;
-}
-
 function ensureDriverRegistry() {
   if (state.drivers?.registry) return state.drivers.registry;
 
@@ -762,6 +734,9 @@ function ensureDriverRegistry() {
       : fetch;
   const reg = new dataDrivers.DataDriverRegistry(fetchAsset);
   reg.register(DRIVER_KEYS.DRC20, assetUrl("drivers/drc20_data_driver.wasm"));
+  // The DRC20 standard's: dusk-network/contracts 18d7ac7, its
+  // drc20_roles_pausable example built with --features data-driver-js.
+  reg.register(DRIVER_KEYS.DRC20_STANDARD, assetUrl("drivers/drc20_standard_data_driver.wasm"));
   reg.register(DRIVER_KEYS.DRC721, assetUrl("drivers/drc721_data_driver.wasm"));
   reg.register(STAKE, assetUrl("drivers/stake_data_driver.wasm"));
   reg.register(DRIVER_KEYS.SOZU_POOL, assetUrl("drivers/sozu_pool_data_driver.wasm"));
@@ -1833,21 +1808,20 @@ export async function encodeDrc20Input(params = {}) {
 }
 
 /**
- * Decode DRC20 contract input args using the canonical DRC20 data-driver.
+ * Read a DRC20 call's arguments, as its approval shows them, with every token
+ * driver: the DRC20 standard's, older tokens' and Sozu's stDUSK
+ * (drc20Calls.js).
  *
  * @param {{ fnName: string, fnArgs: any }} params
- * @returns {Promise<any>}
+ * @returns {Promise<import("./drc20Calls.js").Drc20Call | { unread: true } | null>}
  */
 export async function decodeDrc20Input(params = {}) {
   const fnName = String(params?.fnName ?? "").trim();
   if (!fnName) throw new Error("fnName is required");
   const bytes = toBytes(params?.fnArgs);
-  const driverKey = normalizeTokenDriver(params?.driver);
-  const driver = await getDriver(driverKey);
-  const decoded = driver.decodeInputFn(fnName, bytes);
-  return driverKey === DRIVER_KEYS.SOZU_STAKED_DUSK
-    ? decodeSozuStakedDuskArgs(fnName, decoded)
-    : decoded;
+  const keys = [DRIVER_KEYS.DRC20_STANDARD, DRIVER_KEYS.DRC20, DRIVER_KEYS.SOZU_STAKED_DUSK];
+  const drivers = Object.fromEntries(await Promise.all(keys.map(async (key) => [key, await getDriver(key)])));
+  return readDrc20Call(drivers, fnName, bytes);
 }
 
 /**

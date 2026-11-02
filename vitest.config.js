@@ -30,6 +30,7 @@ export default defineConfig({
         "src/shared/addressBook.js",
         "src/shared/contactsCrypto.js",
         "src/shared/contactsStore.js",
+        "src/shared/drc20Calls.js",
         "src/ui/lib/strings.js",
       ],
       exclude: [

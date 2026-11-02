@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -69,6 +70,31 @@ describe("Canonical data-drivers conformance (DRC20 / DRC721)", () => {
       expect(rkyv.byteLength).toBeGreaterThan(0);
       expect(driver.decodeInputFn("transfer_from", rkyv)).toEqual(args);
     }
+  });
+
+  it("DRC20 standard driver is the standard's own and takes its struct calls, writing a u64 as a bare integer", async () => {
+    // dusk-network/contracts 18d7ac7, standards/examples/drc20_roles_pausable, built with
+    // RUSTFLAGS="--remap-path-prefix $HOME=" cargo build --locked --release
+    // --target wasm32-unknown-unknown --features data-driver-js -p drc20-roles-pausable.
+    const wasm = await readFile(path.resolve(process.cwd(), "public", "drivers", "drc20_standard_data_driver.wasm"));
+    expect(createHash("sha256").update(wasm).digest("hex")).toBe("8e414705a13359da1954533dffdacfbb481f6119bc1089c8827f088d386bb3a0");
+    const driver = await loadDriverFromPublic("drc20_standard_data_driver.wasm");
+
+    const calls = [
+      ["transfer", `{"to":{"Moonlight":"${EXAMPLE_PK}"},"amount":42}`],
+      ["approve", `{"spender":{"Contract":"${"18".repeat(32)}"},"amount":7}`],
+      ["transfer_from", `{"owner":{"Moonlight":"${EXAMPLE_PK}"},"to":{"Phoenix":"J3W3PD1aVTtUwf4N7mthhuKb4KVutxQuZgy5SAt8RmkL"},"amount":1}`],
+      ["increase_allowance", `{"spender":{"Moonlight":"${EXAMPLE_PK}"},"added_amount":3}`],
+      ["decrease_allowance", `{"spender":{"Moonlight":"${EXAMPLE_PK}"},"subtracted_amount":2}`],
+    ];
+    for (const [fn, json] of calls) {
+      expect(driver.decodeInputFn(fn, driver.encodeInputFn(fn, json))).toEqual(JSON.parse(json));
+    }
+    // An amount as a string isn't the standard's; one above 2^53 comes back from
+    // decodeInputFn's JSON.parse rounded, so the wallet reads it from the bytes (drc20Calls.js).
+    expect(() => driver.encodeInputFn("transfer", `{"to":{"Moonlight":"${EXAMPLE_PK}"},"amount":"42"}`)).toThrow();
+    const large = driver.encodeInputFn("transfer", `{"to":{"Moonlight":"${EXAMPLE_PK}"},"amount":9007199254740993}`);
+    expect(driver.decodeInputFn("transfer", large).amount).toBe(2 ** 53);
   });
 
   it("DRC721 driver can encode+decode standard inputs", async () => {
