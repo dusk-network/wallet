@@ -1301,6 +1301,24 @@ describe("walletEngine", () => {
     expect(globalThis.__W3SPER_LAST_EXEC_TX__.profile.account.toString()).toBe("acct1");
   });
 
+  it("sends a shielded transfer only on the wallet, profile and node its review was for", async () => {
+    engine.configure({ nodeUrl: NETWORK_KEY, accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const store = await import("./shieldedStore.js");
+    await store.clearNotes(NETWORK_KEY, WALLET_ID, 0);
+    await store.putNotesMap(NETWORK_KEY, WALLET_ID, 0, new Map([[new Uint8Array([0xaa]), new Uint8Array([0x01])]]));
+    const send = { kind: "transfer", privacy: "shielded", to: "addr0", amount: "1", profileIndex: 0 };
+    const reviewed = { walletId: WALLET_ID, profileIndex: 0, account: "acct0", nodeUrl: NETWORK_KEY };
+
+    await expect(
+      engine.sendTransaction({ ...send, _approvalContext: { ...reviewed, nodeUrl: "https://testnet.nodes.dusk.network" } })
+    ).rejects.toThrow("Wallet changed while awaiting approval");
+    expect(globalThis.__W3SPER_LAST_EXEC_TX__).toBeNull();
+
+    await expect(engine.sendTransaction({ ...send, _approvalContext: reviewed })).resolves.toMatchObject({ hash: expect.any(String) });
+    expect(globalThis.__W3SPER_LAST_EXEC_TX__).not.toBeNull();
+  });
+
   it("signAuth returns the signed canonical login envelope", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);
