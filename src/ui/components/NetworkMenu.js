@@ -6,21 +6,24 @@ import { menuKeys } from "./MenuKeys.js";
 
 /**
  * Marks the network pill busy while the wallet moves to `label`'s network,
- * with a spinner in place of its status dot, or clears it with null.
+ * with a spinner in place of its status dot and "Mainnet…" beside it from
+ * the start, or clears it with null.
  * @param {HTMLElement} pill
  * @param {string|null} label
  */
 export function setNetworkSwitching(pill, label) {
   if (!pill) return;
   pill.classList.toggle("is-switching", Boolean(label));
+  const text = pill.querySelector(".network-pill__label");
   if (label) {
     pill.setAttribute("aria-busy", "true");
     pill.setAttribute("aria-label", `Switching to ${label}`);
-    const text = pill.querySelector(".network-pill__label");
-    if (text) text.textContent = label;
+    if (text) text.textContent = `${label}…`;
   } else {
     pill.removeAttribute("aria-busy");
     pill.removeAttribute("aria-label");
+    // There: the network's name alone.
+    if (text) text.textContent = text.textContent.replace(/…$/, "");
   }
 }
 

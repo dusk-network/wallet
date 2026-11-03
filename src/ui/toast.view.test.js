@@ -100,6 +100,36 @@ describe("toasts", () => {
     expect(toaster.current).toBeNull();
   });
 
+  it("fade out where they are when their time is up, then go; one replaced fades out under the next", () => {
+    vi.useFakeTimers();
+    popupPage();
+    const toaster = createToaster({ doc: dom.document });
+    const toasts = () => toaster.region.querySelectorAll(".toast").map((t) => [t.textContent, t.classList.contains("toast--leaving")]);
+
+    toaster.show("Name saved.");
+    const saved = toaster.current;
+    vi.advanceTimersByTime(TOAST_MIN_MS);
+    // Going: still there while it fades, out of reach of the pointer, the
+    // keyboard and screen readers.
+    expect(toaster.current).toBeNull();
+    expect(toasts()).toEqual([["Name saved.", true]]);
+    expect([saved.getAttribute("aria-hidden"), saved.hasAttribute("inert")]).toEqual(["true", true]);
+    vi.advanceTimersByTime(119);
+    expect(toasts()).toEqual([["Name saved.", true]]);
+    vi.advanceTimersByTime(1);
+    expect(toasts()).toEqual([]);
+
+    toaster.show("Name saved.");
+    toaster.show("Couldn't save the name");
+    expect(toasts()).toEqual([
+      ["Name saved.", true],
+      ["Couldn't save the name", false],
+    ]);
+    expect(toaster.current.textContent).toBe("Couldn't save the name");
+    vi.advanceTimersByTime(120);
+    expect(toasts()).toEqual([["Couldn't save the name", false]]);
+  });
+
   it("are mounted by the popup once, outside #app", async () => {
     const app = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "app.js"), "utf8");
     expect(app).toContain("const toaster = createToaster();");

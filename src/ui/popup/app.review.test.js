@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { accessibleName, fakeEvent, installFakeDom, settle } from "../testing/fakeDom.js";
+import { accessibleName, fakeEvent, installFakeDom, pastClickGuard, settle } from "../testing/fakeDom.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 // Deposits' arrivals, read as the popup draws: held for wallet B, to stop a
@@ -38,6 +38,7 @@ const wallet = (account, key) => ({
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   arrivals.gate = null;
 });
@@ -100,6 +101,7 @@ describe("a Review drawn for wallet A, with wallet B opened in another window", 
     expect(state.overview.accounts[0]).toBe(B);
     expect(app.contains(confirm)).toBe(true);
 
+    pastClickGuard();
     confirm.click();
     await flush();
     arrivals.gate.resolve();
@@ -107,6 +109,76 @@ describe("a Review drawn for wallet A, with wallet B opened in another window", 
 
     expect(send.mock.calls.map(([m]) => m).filter((m) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);
     expect([state.route, state.sent?.phase, state.sent?.error]).toEqual(["sent", "not_sent", "The network, profile or wallet changed meanwhile."]);
+  });
+});
+
+describe("a Review's Confirm, the moment the Review is up", () => {
+  const review = () => ({
+    addressBook: { loaded: true, items: [] },
+    draft: { to: TO, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+  });
+  const confirm = (t) => t.app.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+
+  it("ignores a click as a double-click on Review lands there, sends one a moment later, and a redraw doesn't hold it again", async () => {
+    const t = await popupOn("send", review());
+    // Review pressed: the Review comes up, and the second click lands on Confirm.
+    t.state.route = "confirm";
+    await t.render();
+    await flush();
+    confirm(t).click();
+    await flush();
+    expect([t.asked("DUSK_UI_SEND_TX"), t.state.route, confirm(t).disabled]).toEqual([[], "confirm", false]);
+
+    // A moment on, drawn again meanwhile (a poll), it's the same Review: Confirm sends.
+    pastClickGuard();
+    await t.render();
+    await flush();
+    confirm(t).click();
+    await flush();
+    expect(t.asked("DUSK_UI_SEND_TX")).toHaveLength(1);
+  });
+
+  it("ignores a click as the Review comes back after an unlock, where Unlock was", async () => {
+    const t = await popupOn("confirm", review());
+    pastClickGuard();
+    t.open = { ...wallet(A, "wa"), isUnlocked: false };
+    await t.render({ forceRefresh: true });
+    await flush();
+    expect(confirm(t)).toBeUndefined();
+
+    pastClickGuard();
+    t.open = wallet(A, "wa");
+    await t.render({ forceRefresh: true });
+    await flush();
+    confirm(t).click();
+    await flush();
+    expect(t.asked("DUSK_UI_SEND_TX")).toEqual([]);
+
+    pastClickGuard();
+    confirm(t).click();
+    await flush();
+    expect(t.asked("DUSK_UI_SEND_TX")).toHaveLength(1);
+  });
+});
+
+describe("a step to a Review", () => {
+  it("comes up at once, with no rise, even while the view before it is still rising", async () => {
+    const t = await popupOn("home", {
+      addressBook: { loaded: true, items: [] },
+      draft: { to: TO, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+    });
+    // Another view rises into place (ui.css: #app.view-animate).
+    t.state.route = "send";
+    await t.render();
+    expect(t.app.classList.contains("view-animate")).toBe(true);
+    // Review pressed before that rise is done: it's there at once.
+    t.state.route = "confirm";
+    await t.render();
+    expect(t.app.classList.contains("view-animate")).toBe(false);
+    // Back to the form: at once too.
+    t.state.route = "send";
+    await t.render();
+    expect(t.app.classList.contains("view-animate")).toBe(false);
   });
 });
 
@@ -124,6 +196,7 @@ describe("a Review's From line", () => {
     t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
     await flush();
     expect(from()).toBe("FromWallet 2 · Profile 1 · Public");
+    pastClickGuard();
     t.app.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
     await flush();
     expect(t.asked("DUSK_UI_SEND_TX")).toEqual([expect.objectContaining({ walletId: B })]);
@@ -186,5 +259,22 @@ describe("stDUSK, found on the dashboard", () => {
     t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
     await flush();
     expect(t.asked("DUSK_UI_ASSETS_WATCH_TOKEN").map((m) => m.walletId)).toEqual([A, B]);
+  });
+});
+
+describe("a Copy button that says Copied", () => {
+  it("keeps the focus when the popup is drawn again meanwhile", async () => {
+    const t = await popupOn("receive");
+    const copyAddress = () => t.app.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Copy address");
+    const pressed = copyAddress();
+    pressed.focus();
+    pressed.click();
+    await flush();
+    expect(pressed.getAttribute("aria-label")).toBe("Copied");
+
+    // A poll draws the popup again within the 1.5 s: the focus moves to the new Copy.
+    await t.render();
+    await flush();
+    expect(t.dom.document.activeElement).toBe(copyAddress());
   });
 });

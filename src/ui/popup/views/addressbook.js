@@ -4,10 +4,10 @@ import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { duskNameErrorText, duskNameRecipient, duskNamesNetwork, lookupDuskName } from "../../../shared/duskNames.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
-import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
+import { copyButton } from "../../components/CopyButton.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, searchInput, textInput } from "../../components/FormControls.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
@@ -346,17 +346,7 @@ export function addressBookView(ov, { state, actions } = {}) {
         .catch(() => {});
     }
 
-    const copyBtn = h("button", {
-      class: "copy-ico",
-      type: "button",
-      title: "Copy address",
-      "aria-label": "Copy address",
-      html: iconSvg("copy"),
-      onclick: async () => {
-        const ok = await copyToClipboard(addr);
-        actions?.showToast?.(ok ? "Address copied" : "Couldn't copy the address");
-      },
-    });
+    const copyBtn = copyButton({ value: addr, label: "Copy address", failText: "Couldn't copy the address", onFail: actions?.showToast });
 
     const hero = h("div", { class: "tx-hero contact-hero" }, [
       contactAvatar(String(entry?.name ?? ""), "row-icon tx-hero-icon contact-letter"),

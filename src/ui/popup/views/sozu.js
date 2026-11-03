@@ -23,6 +23,7 @@ import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { guarded, screenShown } from "../../lib/clickGuard.js";
 import { contractIdText } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
@@ -813,7 +814,8 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  confirmBtn.addEventListener("click", async () => {
+  // It ignores a click for a moment once Review is up (clickGuard.js).
+  confirmBtn.addEventListener("click", guarded(async () => {
     // One check at a time for this stake, whichever Confirm is pressed.
     if (rechecking.has(draft)) return;
     // The popup moved on since this Review was drawn.
@@ -863,6 +865,8 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         return;
       }
       if (applyStakeTerms({ st, draft, terms })) {
+        // New figures, for a Confirm of their own: one a moment ago is not for them.
+        screenShown();
         actions?.render?.().catch(() => {});
         return;
       }
@@ -903,7 +907,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       },
     });
     confirmBtn.disabled = submitDisabled;
-  });
+  }));
   submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !submitDisabled && !rechecking.has(draft) });
 
   const kv = (label, value) =>

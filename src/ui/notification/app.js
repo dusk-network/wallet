@@ -20,6 +20,7 @@ import { DRC20_CALL_NAMES } from "../../shared/drc20Calls.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
 import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
+import { guarded, screenShown } from "../lib/clickGuard.js";
 import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js";
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
@@ -70,7 +71,10 @@ function actionsHost() {
   return bar;
 }
 
+// Each screen the window shows starts its approve button's click guard: a
+// click that opened the window, or unlocked it, can't land on Approve.
 function show(body, actions = []) {
+  screenShown();
   setChildren(app, body.filter(Boolean));
   const bar = actionsHost();
   const kept = actions.filter(Boolean);
@@ -238,7 +242,8 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
     text: approveText,
     disabled: Boolean(approveDisabled),
     title: approveTitle || undefined,
-    onclick: async () => {
+    // It ignores a click for a moment once the window shows (clickGuard.js).
+    onclick: guarded(async () => {
       let approvedParams = null;
       try {
         approvedParams = typeof getApprovedParams === "function" ? getApprovedParams() : null;
@@ -249,7 +254,7 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
       }
       error.hidden = true;
       await answer("approve", approvedParams);
-    },
+    }),
   });
   return { nodes: [error, rejectBtn, approveBtn], approveBtn, rejectBtn, error };
 }

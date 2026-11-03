@@ -128,4 +128,47 @@ describe("a token send's Review", () => {
     expect(rows(ov([{ key: "w1", n: 1, active: true }, { key: "w2", n: 2 }]))[0]).toBe("FromWallet 1 · Profile 1");
     expect(rows(ov([{ key: "w1", n: 1, active: true }])).filter((r) => r.startsWith("From"))).toEqual([]);
   });
+
+  it("ignores a click on Confirm the moment it's up, and sends one a moment later", async () => {
+    const { installFakeDom, pastClickGuard, settle } = await import("../../testing/fakeDom.js");
+    const { vi } = await import("vitest");
+    const { document } = installFakeDom();
+    const { assetTokenConfirmView } = await import("./assets.js");
+    const { reviewOf } = await import("./sent.js");
+    const { screenShown } = await import("../../lib/clickGuard.js");
+    const TOKEN = `0x${"cd".repeat(32)}`;
+    const TO = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
+    const ov = { isUnlocked: true, nodeUrl: "http://127.0.0.1:8080", accounts: ["acct"], selectedAccountIndex: 0 };
+    const state = {
+      route: "asset_token_confirm",
+      assetTxDraft: {
+        op: "transfer",
+        token: { contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 },
+        params: { kind: "contract_call", privacy: "public", contractId: TOKEN, fnName: "transfer", fnArgs: "0x00", amount: "0", deposit: "0" },
+        asset: { type: "DRC20", op: "transfer", symbol: "TKN", name: "Token", decimals: 2, valueUnits: "150", to: TO },
+      },
+    };
+    const send = vi.fn(async (message) => (message.type === "DUSK_UI_SEND_TX" ? { ok: true, result: { hash: "ab".repeat(32) } } : {}));
+    const actions = { send, render: vi.fn(async () => {}), showToast: vi.fn(), announce: vi.fn(), review: reviewOf(ov, state) };
+    try {
+      document.body.replaceChildren(...assetTokenConfirmView(ov, { state, actions }));
+      // Up, as app.js marks a new screen.
+      screenShown();
+      const confirm = document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+      const sends = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX");
+
+      confirm.click();
+      await settle();
+      expect([sends(), state.route, confirm.disabled]).toEqual([[], "asset_token_confirm", false]);
+
+      pastClickGuard();
+      confirm.click();
+      await settle();
+      expect(sends()).toHaveLength(1);
+      expect(state.route).toBe("sent");
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
 });

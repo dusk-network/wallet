@@ -2,10 +2,11 @@ import { UI_DISPLAY_DECIMALS, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { reviewGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
+import { guarded } from "../../lib/clickGuard.js";
 import { contractIdText, shortAddress } from "../../lib/strings.js";
-import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
+import { copyContractButton } from "../../components/ContractValue.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
@@ -241,17 +242,7 @@ function contractValue(cid, actions) {
   const id = contractIdText(cid);
   return [
     h("span", { class: "mono", title: id, text: contractIdText(cid, { short: true }) }),
-    h("button", {
-      class: "copy-ico",
-      type: "button",
-      title: "Copy contract ID",
-      "aria-label": "Copy contract ID",
-      html: iconSvg("copy"),
-      onclick: async () => {
-        const ok = await copyToClipboard(id);
-        actions?.showToast?.(ok ? "Contract ID copied" : "Couldn't copy the contract ID");
-      },
-    }),
+    copyContractButton(id, actions?.showToast),
   ];
 }
 
@@ -888,7 +879,8 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   // Back returns to the token, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
-  confirmBtn.addEventListener("click", async () => {
+  // It ignores a click for a moment once Review is up (clickGuard.js).
+  confirmBtn.addEventListener("click", guarded(async () => {
     const gas = readGas();
     if (gas === false) return;
     confirmBtn.disabled = true;
@@ -926,7 +918,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
       },
     });
     confirmBtn.disabled = false;
-  });
+  }));
   submitOnGasEnter(gasEditor, confirmBtn);
 
   const counterpartyAddr = String(op === "approve" ? d?.asset?.spender ?? "" : d?.asset?.to ?? "");

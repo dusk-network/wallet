@@ -12,7 +12,7 @@ import { bytesToHex, toBytes } from "../shared/bytes.js";
 import { readDrc20Call } from "../shared/drc20Calls.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
-import { fakeEvent, installFakeDom, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { fakeEvent, installFakeDom, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 const mocks = vi.hoisted(() => ({ pending: null, sent: [], answers: {} }));
 
@@ -62,6 +62,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -192,6 +193,7 @@ describe("connect approval", () => {
     expect(cards.map((card) => card.classList.contains("is-checked"))).toEqual([true, false]);
     expect(visibleText(app.querySelector(".ap-facts"))).toContain(`alice.dusk · ${shortAddress(MAIN)}`);
 
+    pastClickGuard();
     approve().click();
     await vi.waitFor(() =>
       expect(mocks.sent).toContainEqual({
@@ -210,6 +212,7 @@ describe("connect approval", () => {
     const facts = () => app.querySelectorAll(".ap-facts .row-title").map((t) => t.textContent);
     expect(facts()).toEqual(["Gets your shielded address", "Can't move funds without your approval"]);
     expect(buttons()).toEqual(["Reject", "Share"]);
+    pastClickGuard();
     approve().click();
     await vi.waitFor(() => expect(decision("approve")?.approvedParams).toEqual({ accountIndex: 0, shieldedReceiveAddress: true }));
 
@@ -237,6 +240,7 @@ describe("connect approval", () => {
     radio.checked = true;
     radio.dispatchEvent(fakeEvent("change"));
     expect(facts()).not.toContain("Gets your shielded address");
+    pastClickGuard();
     approve().click();
     await vi.waitFor(() => expect(decision("approve")?.approvedParams).toEqual({ accountIndex: 0, shieldedReceiveAddress: false }));
   });
@@ -432,6 +436,7 @@ describe("a site's request to pay", () => {
     app.querySelector("dusk-gas-editor").readOverrideGas = () => {
       throw editorError;
     };
+    pastClickGuard();
     approve().click();
     await settle();
     const error = bar().querySelector(".field-error");
@@ -562,6 +567,7 @@ describe("the recipient of a site's request to send", () => {
     expect(recipient()).toEqual({ lead: shortAddress(CAROL), tag: null });
     expect(lead.classList.contains("mono")).toBe(true);
 
+    pastClickGuard();
     approve().click();
     await vi.waitFor(() => expect(decision("approve")).toBeTruthy());
 
@@ -1215,6 +1221,7 @@ describe("decisions", () => {
     const failed = "Couldn't send your answer to the wallet: Receiving end does not exist.";
     await renderShop("connect", { requestedProfiles: true });
     const error = () => bar().querySelector(".ap-actions__error");
+    pastClickGuard();
     button("Connect").click();
     await vi.waitFor(() => expect(error().hidden).toBe(false));
     expect(error().textContent).toBe(failed);
@@ -1232,6 +1239,7 @@ describe("decisions", () => {
 
   it("sends the approval with what the window collected, then closes", async () => {
     await renderShop("connect", { requestedProfiles: true });
+    pastClickGuard();
     button("Connect").click();
     await vi.waitFor(() =>
       expect(mocks.sent).toContainEqual({
@@ -1250,5 +1258,62 @@ describe("decisions", () => {
     await renderNotification();
     expect(app.querySelector(".err").textContent).toBe("This request is no longer waiting: it was handled or it expired. You can close this window.");
     expect(bar().hidden).toBe(true);
+  });
+});
+
+describe("an approval's button, the moment the window shows", () => {
+  const typed = {
+    origin: "https://dapp.example",
+    domain: { name: "Shop", version: "1", chainId: "dusk:2" },
+    types: {
+      DuskTypedDataDomain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "string" },
+        { name: "verifyingContract", type: "bytes32" },
+      ],
+      Order: [{ name: "item", type: "string" }],
+    },
+    primaryType: "Order",
+    message: { item: "Dusk hoodie" },
+  };
+  const { origin: _origin, ...typedParams } = typed;
+
+  it.each([
+    ["connect", { requestedProfiles: true }, "Connect"],
+    ["sign_message", { chainId: "dusk:2", messageLen: 2, messagePreview: { kind: "text", text: "hi", truncated: false } }, "Sign"],
+    ["sign_auth", { chainId: "dusk:2", nonce: "n-1" }, "Sign in"],
+    ["sign_typed_data", { ...typedParams, digestHex: hashTypedDataHex(typed) }, "Sign"],
+    ["send_tx", transfer(BOB), "Approve"],
+    ["switch_network", { to: { networkName: "Mainnet" } }, "Switch"],
+    ["watch_asset", { type: "DRC20", options: { contractId: `0x${"11".repeat(32)}` } }, "Add token"],
+  ])("ignores a click as it lands from the site that opened it, and takes one a moment later (%s)", async (kind, params, label) => {
+    await render(kind, params);
+    expect([approve().textContent, approve().disabled]).toEqual([label, false]);
+    approve().click();
+    await settle();
+    expect(decision("approve")).toBeUndefined();
+
+    pastClickGuard();
+    approve().click();
+    await vi.waitFor(() => expect(decision("approve")).toBeTruthy());
+  });
+
+  it("ignores a click as the request shows after an unlock, where Unlock was", async () => {
+    await render("send_tx", transfer(BOB), { isUnlocked: false, accounts: [], duskNames: {} });
+    mocks.answers.DUSK_UI_UNLOCK = async () => {
+      mocks.pending = { ...mocks.pending, isUnlocked: true, accounts: [MAIN, SAVINGS] };
+      return { ok: true };
+    };
+    typeInto(app.querySelector("input[type=password]"), "password");
+    bar().querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
+    await vi.waitFor(() => expect(approve().textContent).toBe("Approve"));
+    approve().click();
+    await settle();
+    expect(decision("approve")).toBeUndefined();
+
+    pastClickGuard();
+    approve().click();
+    await vi.waitFor(() => expect(decision("approve")).toBeTruthy());
   });
 });

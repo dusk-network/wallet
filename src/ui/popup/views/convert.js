@@ -9,6 +9,7 @@ import {
 import { TX_KIND } from "../../../shared/constants.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { h } from "../../lib/dom.js";
+import { guarded } from "../../lib/clickGuard.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
@@ -191,7 +192,8 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   // The network's gas price by default; Custom fee for gas of your own.
   const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({ kind, amountLux: d.amountLux, ov, actions, gas: d?.gas });
 
-  confirmBtn.addEventListener("click", async () => {
+  // It ignores a click for a moment once Review is up (clickGuard.js).
+  confirmBtn.addEventListener("click", guarded(async () => {
     const gas = readGas();
     if (gas === false) return;
     confirmBtn.disabled = true;
@@ -224,7 +226,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       },
     });
     confirmBtn.disabled = false;
-  });
+  }));
   submitOnGasEnter(gasEditor, confirmBtn);
 
   const kv = (label, rail) =>
