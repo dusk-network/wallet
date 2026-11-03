@@ -31,7 +31,7 @@ function memoryStorage() {
 }
 
 const HASH = "ab".repeat(32);
-const EXPLORER = `https://apps.testnet.dusk.network/explorer/transactions/transaction/?id=${HASH}`;
+const EXPLORER = `https://explorer.testnet.dusk.network/transactions/transaction/?id=${HASH}`;
 
 beforeEach(() => {
   vi.resetModules();

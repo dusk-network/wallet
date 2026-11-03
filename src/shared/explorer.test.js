@@ -5,12 +5,12 @@ import { noteChainId } from "./nodeNetwork.js";
 describe("explorerTxUrl", () => {
   it("returns mainnet explorer URL", () => {
     const url = explorerTxUrl("https://nodes.dusk.network", "abc123hash");
-    expect(url).toBe("https://apps.dusk.network/explorer/transactions/transaction/?id=abc123hash");
+    expect(url).toBe("https://explorer.dusk.network/transactions/transaction/?id=abc123hash");
   });
 
   it("returns testnet explorer URL", () => {
     const url = explorerTxUrl("https://testnet.nodes.dusk.network", "abc123");
-    expect(url).toBe("https://apps.testnet.dusk.network/explorer/transactions/transaction/?id=abc123");
+    expect(url).toBe("https://explorer.testnet.dusk.network/transactions/transaction/?id=abc123");
   });
 
   it("returns devnet explorer URL", () => {
@@ -31,7 +31,7 @@ describe("explorerTxUrl", () => {
     expect(explorerTxUrl("https://rusk.example.com", "abc123")).toBeNull();
     noteChainId("https://rusk.example.com", 2);
     expect(explorerTxUrl("https://rusk.example.com/", "abc123")).toBe(
-      "https://apps.testnet.dusk.network/explorer/transactions/transaction/?id=abc123"
+      "https://explorer.testnet.dusk.network/transactions/transaction/?id=abc123"
     );
   });
 
@@ -42,7 +42,7 @@ describe("explorerTxUrl", () => {
 
   it("encodes special characters in hash", () => {
     const url = explorerTxUrl("https://nodes.dusk.network", "hash/with/slashes");
-    expect(url).toBe("https://apps.dusk.network/explorer/transactions/transaction/?id=hash%2Fwith%2Fslashes");
+    expect(url).toBe("https://explorer.dusk.network/transactions/transaction/?id=hash%2Fwith%2Fslashes");
   });
 
   it("handles hash with 0x prefix", () => {
@@ -59,13 +59,13 @@ describe("explorerAccountUrl", () => {
     );
 
     expect(url).toBe(
-      "https://apps.dusk.network/explorer/accounts/?key=26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927"
+      "https://explorer.dusk.network/accounts/?key=26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927"
     );
   });
 
   it("returns testnet and devnet account history on the Dusk explorer, never DuskScan", () => {
     expect(explorerAccountUrl("https://testnet.nodes.dusk.network", "acct1")).toBe(
-      "https://apps.testnet.dusk.network/explorer/accounts/?key=acct1"
+      "https://explorer.testnet.dusk.network/accounts/?key=acct1"
     );
     expect(explorerAccountUrl("https://devnet.nodes.dusk.network", "acct1")).toBe(
       "https://apps.devnet.dusk.network/explorer/accounts/?key=acct1"
@@ -77,7 +77,7 @@ describe("explorerAccountUrl", () => {
 
   it("encodes reserved characters in accounts", () => {
     expect(explorerAccountUrl("https://nodes.dusk.network", "acct/1")).toBe(
-      "https://apps.dusk.network/explorer/accounts/?key=acct%2F1"
+      "https://explorer.dusk.network/accounts/?key=acct%2F1"
     );
   });
 

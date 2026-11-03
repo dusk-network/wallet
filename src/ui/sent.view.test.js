@@ -155,7 +155,7 @@ describe("after Confirm", () => {
     body.querySelectorAll("button").find((b) => b.textContent === "View in Dusk explorer").click();
     await settle();
     expect(dom.window.open).toHaveBeenCalledWith(
-      `https://apps.testnet.dusk.network/explorer/transactions/transaction/?id=${HASH}`,
+      `https://explorer.testnet.dusk.network/transactions/transaction/?id=${HASH}`,
       "_blank",
       "noopener,noreferrer"
     );
