@@ -64,6 +64,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 
 - Opened and closed sections the same way, said Copied on the copy button instead of a toast, faded messages in place, and had Confirm and Approve ignore a click for half a second as they appear.
+- Showed a turning ring beside the words while staking, Sozu, tokens, contacts or activity load.
 - Opened the popup faster.
 - Read a balance, Sozu's status or a token's balance once for a few seconds, checked the network's endpoints at most every 5 minutes unless one fails, and checked the .dusk lens once a session.
 - Found where a deposit to DuskEVM arrived in fewer requests.

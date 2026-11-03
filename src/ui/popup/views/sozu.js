@@ -23,6 +23,7 @@ import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { waiting } from "../../components/Waiting.js";
 import { guarded, screenShown } from "../../lib/clickGuard.js";
 import { contractIdText } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
@@ -685,7 +686,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       h("div", { class: "liquid-who" }, ["Sozu", h("span", { class: "tag", text: "third party" }), sozuLink]),
     ]),
     st.notice ? h("div", { class: "muted sozu-notice", role: "status", text: st.notice }) : null,
-    st.loading && !st.loaded ? h("div", { class: "muted", text: "Loading Sozu…" }) : null,
+    st.loading && !st.loaded ? waiting("Loading Sozu…") : null,
     st.error ? h("div", { class: "err", text: st.error }) : null,
     cfg && liveStatus?.reason ? h("div", { class: "muted", text: liveStatus.reason }) : null,
     syncing ? syncWarning() : null,
