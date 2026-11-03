@@ -1,4 +1,5 @@
 import { h } from "../lib/dom.js";
+import { MOTION } from "../lib/motion.js";
 import { iconSvg } from "./ActionIcon.js";
 
 // How long a toast stays at least: long enough to read it, and with an action
@@ -27,6 +28,15 @@ function normalize(spec) {
       ? { label: String(spec.action.label), onClick: spec.action.onClick }
       : null;
   return { text, parts, tone: spec.tone === "ok" || spec.tone === "bad" ? spec.tone : "info", action };
+}
+
+// A toast that goes fades out where it is, over --motion-fast, then leaves
+// the page. Meanwhile it takes no clicks or keys, and screen readers skip it.
+function leave(el) {
+  el.classList.add("toast--leaving");
+  el.setAttribute("aria-hidden", "true");
+  el.setAttribute("inert", "");
+  setTimeout(() => el.remove(), MOTION.fast);
 }
 
 /**
@@ -108,12 +118,14 @@ export function createToaster({ doc = globalThis.document, parent, before } = {}
 
   const clear = () => {
     stopTimer();
-    // The focus was in the toast: keep it in the page rather than losing it.
-    const hadFocus = current?.contains?.(doc.activeElement);
-    current?.remove();
+    const el = current;
     current = null;
     hovered = false;
     focused = false;
+    if (!el) return;
+    // The focus was in the toast: keep it in the page rather than losing it.
+    const hadFocus = el.contains?.(doc.activeElement);
+    leave(el);
     if (hadFocus) doc.body?.focus?.();
   };
 

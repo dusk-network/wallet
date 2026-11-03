@@ -13,6 +13,8 @@
 
 import { vi } from "vitest";
 
+import { CLICK_GUARD_MS } from "../lib/clickGuard.js";
+
 // Custom elements defined through the fake `customElements`, by tag. As in a
 // page, a definition lasts as long as the module.
 const definedElements = new Map();
@@ -584,8 +586,12 @@ function textWithout(node, skip) {
   return node.childNodes.map((child) => textWithout(child, skip)).join("");
 }
 
-/** The text `el` shows: without hidden parts and the screen-reader-only (.sr-only) ones. */
-export const visibleText = (el) => textWithout(el, (n) => n.classList.contains("sr-only"));
+// The face of a Copy button (.copy-swap) that ui.css shows at no opacity:
+// "Copied" at rest, "Copy" while the button says it copied.
+const unshownCopyFace = (n) => n.classList.contains(n.closest("[data-copied]") ? "copy-swap__from" : "copy-swap__to");
+
+/** The text `el` shows: without hidden parts, the screen-reader-only (.sr-only) ones and a Copy button's other face. */
+export const visibleText = (el) => textWithout(el, (n) => n.classList.contains("sr-only") || unshownCopyFace(n));
 
 /** The text screen readers get from `el`: without hidden and aria-hidden parts. */
 export const screenReaderText = (el) => textWithout(el, (n) => n.getAttribute("aria-hidden") === "true");
@@ -637,3 +643,12 @@ export function press(el, key) {
 
 /** Lets queued promise jobs and timers run, as they do before the next paint. */
 export const settle = () => new Promise((resolve) => setTimeout(resolve));
+
+/**
+ * Lets the moment pass that a confirm ignores clicks for once its screen is
+ * up (clickGuard.js), as a person's pause does: the clock moves on and stays
+ * there, timers don't run. vi.useRealTimers() puts the clock back.
+ */
+export function pastClickGuard() {
+  vi.setSystemTime(Date.now() + CLICK_GUARD_MS);
+}

@@ -1,6 +1,5 @@
 import { h } from "../lib/dom.js";
-import { copyToClipboard } from "../lib/clipboard.js";
-import { iconSvg } from "./ActionIcon.js";
+import { copyButton } from "./CopyButton.js";
 
 /**
  * A contract as a row's value: its name, then "· 2257e5…a1b31d" and what
@@ -20,20 +19,11 @@ export function contractValueEl(name, idEl, after = null) {
 }
 
 /**
- * Copy beside a contract's ID, as an icon.
+ * Copy beside a contract's ID, as an icon that says Copied; a copy that
+ * fails says so in a toast.
  * @param {string} id - the whole ID, as it's copied
  * @param {(text: string) => void} [showToast]
  */
 export function copyContractButton(id, showToast) {
-  return h("button", {
-    class: "copy-ico",
-    type: "button",
-    title: "Copy contract ID",
-    "aria-label": "Copy contract ID",
-    html: iconSvg("copy"),
-    onclick: async () => {
-      const ok = await copyToClipboard(id);
-      showToast?.(ok ? "Contract ID copied" : "Couldn't copy the contract ID");
-    },
-  });
+  return copyButton({ value: id, label: "Copy contract ID", failText: "Couldn't copy the contract ID", onFail: showToast });
 }

@@ -78,7 +78,7 @@ describe("network menu", () => {
     expect(dom.document.activeElement).toBe(pill);
   });
 
-  it("spins on the pill, named for the new network, until the switch is done", async () => {
+  it("spins on the pill with words from the start, the new network's name and …, until the switch is done", async () => {
     let done;
     onSelectPreset.mockImplementation(() => new Promise((resolve) => (done = resolve)));
     menu.open(pill, ov);
@@ -89,7 +89,7 @@ describe("network menu", () => {
       "network-pill is-switching",
       "true",
       "Switching to Mainnet",
-      "Mainnet",
+      "Mainnet…",
     ]);
     // One switch at a time.
     menu.open(pill, ov);
@@ -97,7 +97,12 @@ describe("network menu", () => {
 
     done();
     await settle();
-    expect([pill.className, pill.getAttribute("aria-busy"), pill.getAttribute("aria-label")]).toEqual(["network-pill", null, null]);
+    expect([pill.className, pill.getAttribute("aria-busy"), pill.getAttribute("aria-label"), pill.textContent]).toEqual([
+      "network-pill",
+      null,
+      null,
+      "Mainnet",
+    ]);
     expect(dom.document.activeElement).toBe(pill);
   });
 

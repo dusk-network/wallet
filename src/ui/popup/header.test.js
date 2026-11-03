@@ -200,8 +200,10 @@ describe("header", () => {
     setNetworkSwitching(pill, "Mainnet");
     // A render meanwhile, from a toast or a poll, still has the old network.
     renderHeader(overview);
-    expect(label.textContent).toBe("Mainnet");
+    expect(label.textContent).toBe("Mainnet…");
+    // There, it's the name alone, a render or not.
     setNetworkSwitching(pill, null);
+    expect([label.textContent, pill.className]).toEqual(["Mainnet", "network-pill"]);
     renderHeader({ ...overview, networkName: "Mainnet" });
     expect([label.textContent, pill.className]).toEqual(["Mainnet", "network-pill"]);
   });

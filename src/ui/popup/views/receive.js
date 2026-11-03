@@ -1,7 +1,7 @@
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
-import { iconSvg } from "../../components/ActionIcon.js";
+import { copyButton } from "../../components/CopyButton.js";
 import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
 import { duskNameEl } from "../../components/DuskName.js";
 import { shortAddressEl } from "../../components/ShortAddress.js";
@@ -82,7 +82,6 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // Current recipient string
   const recipient = tab === "public" ? account : address;
-  const recipientLabel = tab === "public" ? "account" : "address";
 
   // --- Public or shielded: a tab list that says which is picked -------
   const tabToggle = segmented({
@@ -105,21 +104,9 @@ export function receiveView(ov, { state, actions } = {}) {
   // --- QR, then the name and the address, each with a copy button -----
   const qrCard = h("div", { class: "box qr-box receive-qr-card" });
 
-  // An icon button that copies what `value` gives and says so in a toast.
-  const copyButton = (label, copied, value) =>
-    h("button", {
-      class: "receive-copy",
-      type: "button",
-      html: iconSvg("copy"),
-      title: label,
-      "aria-label": label,
-      onclick: async () => {
-        const text = value();
-        if (!text) return;
-        const ok = await copyToClipboard(text);
-        actions?.showToast?.(ok ? copied : "Copy failed");
-      },
-    });
+  // An icon button that copies what `value` gives and says Copied on itself.
+  const copyIcon = (label, value) =>
+    copyButton({ value, label, className: "receive-copy", failText: "Copy failed", onFail: actions?.showToast });
 
   // The account's verified .dusk name; beside the shielded address only when the name pays there too.
   const nameLookup =
@@ -137,7 +124,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
   const nameField = h("div", { class: "receive-field", hidden: true }, [
     duskNameEl(nameLookup, { className: "receive-field__name" }),
-    copyButton("Copy name", "Copied name", () => shownName),
+    copyIcon("Copy name", () => shownName),
   ]);
   nameLookup.then((name) => {
     if (!name) return;
@@ -150,7 +137,7 @@ export function receiveView(ov, { state, actions } = {}) {
     nameNote.hidden = false;
   });
 
-  const copyAddress = copyButton("Copy address", `Copied ${recipientLabel}`, () => recipient);
+  const copyAddress = copyIcon("Copy address", () => recipient);
   copyAddress.disabled = !recipient;
   const addressField = h("div", { class: "receive-field" }, [
     recipient
@@ -173,15 +160,13 @@ export function receiveView(ov, { state, actions } = {}) {
   const amountErr = h("div", { class: "err", style: "display:none" });
 
   // The request link's copy, which Enter in the memo presses; on once the QR holds a request.
-  const copyRequestBtn = h("button", {
-    class: "btn-outline",
-    type: "button",
+  const copyRequestBtn = copyButton({
+    value: () => (wantRequest ? curUri : ""),
+    label: "Copy request link",
     text: "Copy request link",
-    onclick: async () => {
-      if (!wantRequest || !curUri) return;
-      const ok = await copyToClipboard(curUri);
-      actions?.showToast?.(ok ? "Copied request link" : "Copy failed");
-    },
+    className: "btn-outline",
+    failText: "Copy failed",
+    onFail: actions?.showToast,
   });
 
   // What the QR asks for, once it holds a request.

@@ -41,10 +41,13 @@ const pendingFor = (kind, params, over = {}) => ({
 });
 const pay = { kind: "transfer", privacy: "public", to: SHOP, amount: "1000000000", memo: "Order 1042", gas: { limit: "2500000", price: "1" }, chainId: "dusk:2", nodeUrl: TESTNET, networkName: "Testnet" };
 
-async function open(page, pending) {
+// `held`: the page's clock stopped before the window draws, for the test to move.
+async function open(page, pending, { held = false } = {}) {
   await page.setViewportSize({ width: 380, height: 590 });
+  if (held) await page.clock.install();
   await page.route("**/approval-window?rid=r1", (route) => route.fulfill({ contentType: "text/html", body: shell }));
   await page.goto("/approval-window?rid=r1");
+  if (held) await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
   await page.evaluate(async (pending) => {
     window.decisions = [];
     window.browser = {
@@ -165,7 +168,7 @@ test("a DRC20 standard transfer shows its exact amount and its recipient without
 });
 
 test("a gas limit under the transaction's minimum, or a price of 0, keeps Approve off, saying why", async ({ page }) => {
-  await open(page, pendingFor("send_tx", pay));
+  await open(page, pendingFor("send_tx", pay), { held: true });
   await page.getByText("Custom fee", { exact: true }).click();
   const approve = page.getByRole("button", { name: "Approve", exact: true });
   await page.getByLabel("Gas limit", { exact: true }).fill("1500000");
@@ -178,10 +181,27 @@ test("a gas limit under the transaction's minimum, or a price of 0, keeps Approv
   expect(await page.evaluate(() => window.decisions)).toEqual([]);
   await page.getByLabel("Gas price (LUX)", { exact: true }).fill("1");
   await expect(page.getByText("At most 0.002 DUSK", { exact: true })).toBeVisible();
+  await page.clock.runFor(500);
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.decisions.map((d) => [d.decision, d.approvedParams?.gas?.limit]))).toEqual([
     ["approve", "2000000"],
   ]);
+});
+
+test("Approve ignores a click as the window shows, where a double-click on the site lands, and takes one half a second on", async ({ page }) => {
+  await open(page, pendingFor("send_tx", pay), { held: true });
+  const approve = page.getByRole("button", { name: "Approve", exact: true });
+  const decisions = () => page.evaluate(() => window.decisions.map((d) => d.decision));
+  // It looks as it always does meanwhile.
+  await expect(approve).toBeEnabled();
+  await approve.click();
+  await page.clock.runFor(499);
+  await approve.click();
+  expect(await decisions()).toEqual([]);
+
+  await page.clock.runFor(1);
+  await approve.click();
+  await expect.poll(decisions).toEqual(["approve"]);
 });
 
 test("a locked wallet shows what the site asks, with Reject beside Unlock", async ({ page }) => {

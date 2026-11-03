@@ -1,13 +1,13 @@
 import { entropyToMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import { h } from "../../lib/dom.js";
-import { copyToClipboard } from "../../lib/clipboard.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
 import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
+import { copyButton } from "../../components/CopyButton.js";
 
 function generateMnemonic12() {
   const entropy = new Uint8Array(16);
@@ -286,18 +286,15 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
     },
   });
 
-  // Copy waits for Reveal: it can't be pressed before.
-  const copyBtn = h("button", {
-    class: "mini-btn",
-    type: "button",
+  // Copy waits for Reveal: it can't be pressed before. It says Copied on itself.
+  const copyBtn = copyButton({
+    value: () => (state.onboard.reveal ? mnemonic : ""),
+    label: "Copy",
     text: "Copy",
-    disabled: !state.onboard.reveal,
-    title: state.onboard.reveal ? undefined : "Reveal the phrase first",
-    onclick: async () => {
-      if (!state.onboard.reveal) return;
-      const ok = await copyToClipboard(mnemonic);
-      actions?.showToast?.(ok ? "Copied recovery phrase" : "Copy failed");
-    },
+    className: "mini-btn",
+    failText: "Copy failed",
+    onFail: actions?.showToast,
+    attrs: { disabled: !state.onboard.reveal, title: state.onboard.reveal ? undefined : "Reveal the phrase first" },
   });
 
   const next = h("button", {

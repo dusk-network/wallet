@@ -12,6 +12,7 @@ import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { BLOCKED_TITLE, blockedRecipient } from "../../../shared/recipientBlocklist.js";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
+import { guarded } from "../../lib/clickGuard.js";
 import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
@@ -1064,7 +1065,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     gas: d?.gas,
   });
 
-  confirmBtn.addEventListener("click", async () => {
+  // It ignores a click for a moment once Review is up (clickGuard.js).
+  confirmBtn.addEventListener("click", guarded(async () => {
     if (nothingArrives) return;
     const gas = readGas();
     if (gas === false) return;
@@ -1106,7 +1108,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       },
     });
     confirmBtn.disabled = nothingArrives;
-  });
+  }));
   submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !nothingArrives });
 
   const kv = (label, value, className = "") =>

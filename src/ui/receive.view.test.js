@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { lookupPrimaryName, lookupShieldedName } from "../shared/duskNames.js";
 import { iconSvg } from "./components/ActionIcon.js";
-import { installFakeDom, isShown, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
+import { accessibleName, installFakeDom, isShown, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
 import { receiveView } from "./popup/views/receive.js";
 
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
@@ -57,13 +57,15 @@ async function receive(tab, { state = { receive: { tab } }, ov = overview } = {}
   const $ = (selector) => dom.document.body.querySelector(selector);
   const [nameField, addressField] = dom.document.body.querySelectorAll(".receive-fields > .receive-field");
   const note = $(".receive-name-note");
-  const button = (text) => dom.document.body.querySelectorAll("button").find((b) => b.textContent === text);
-  // Clicks the copy button labelled `label`; what it copied and the toast.
+  const button = (text) => dom.document.body.querySelectorAll("button").find((b) => visibleText(b) === text);
+  // Clicks the copy button labelled `label`: what it copied, what the button
+  // is called then, and the toast, if any.
   const copy = async (label) => {
     dom.clipboard.writeText.mockClear();
-    $(`button[aria-label="${label}"]`).click();
+    const pressed = $(`button[aria-label="${label}"]`);
+    pressed.click();
     await settle();
-    return [dom.clipboard.writeText.mock.calls.at(-1)?.[0], actions.showToast.mock.calls.at(-1)?.[0]];
+    return [dom.clipboard.writeText.mock.calls.at(-1)?.[0], accessibleName(pressed), actions.showToast.mock.calls.at(-1)?.[0]];
   };
   return {
     state,
@@ -111,8 +113,9 @@ describe("receive", () => {
     expect(visibleText(view.address)).toBe("26FCH7…Tck927");
     expect([view.address.title, screenReaderText(view.address)]).toEqual([ACCOUNT, ACCOUNT]);
 
-    expect(await view.copy("Copy name")).toEqual(["alice.dusk", "Copied name"]);
-    expect(await view.copy("Copy address")).toEqual([ACCOUNT, "Copied account"]);
+    // Each says Copied on itself, with no toast.
+    expect(await view.copy("Copy name")).toEqual(["alice.dusk", "Copied", undefined]);
+    expect(await view.copy("Copy address")).toEqual([ACCOUNT, "Copied", undefined]);
 
     // No big copy button: the fields copy, the row below downloads the QR.
     for (const text of ["Copy account", "Copy address"]) expect(view.button(text)).toBeUndefined();
@@ -125,12 +128,13 @@ describe("receive", () => {
     await receive("public");
     const icons = ["Copy name", "Copy address"].map((label) => {
       const button = dom.document.body.querySelector(`button[aria-label="${label}"]`);
-      return [button.innerHTML, button.textContent];
+      return [button.querySelectorAll(".copy-swap > span").map((face) => face.innerHTML), button.textContent];
     });
-    // No glyph text, which shows as an empty box without a font that has it.
+    // No glyph text, which shows as an empty box without a font that has it:
+    // the copy icon, and the check it turns into.
     expect(icons).toEqual([
-      [iconSvg("copy"), ""],
-      [iconSvg("copy"), ""],
+      [[iconSvg("copy"), iconSvg("check")], ""],
+      [[iconSvg("copy"), iconSvg("check")], ""],
     ]);
 
     // The button centers the icon, the switcher's copy buttons too.
@@ -155,13 +159,13 @@ describe("receive", () => {
     expect(lookupShieldedName).toHaveBeenCalledWith(ACCOUNT, ADDRESS, { nodeUrl: overview.nodeUrl });
     expect([view.name(), view.shownNote()]).toEqual(["", ""]);
     expect(visibleText(view.address)).toBe("2Ana1p…RbFj4T");
-    expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied address"]);
+    expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied", undefined]);
 
     lookupShieldedName.mockResolvedValue("alice.dusk");
     view = await receive("shielded");
     expect(view.name()).toBe("alice.dusk");
     expect(view.shownNote()).toBe(SHIELDED_NOTE);
-    expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied address"]);
+    expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied", undefined]);
   });
 
   it("shows and copies no name once a lookup a minute on finds it cleared", async () => {
@@ -182,7 +186,7 @@ describe("receive", () => {
     await vi.waitFor(() => expect(verifyPrimary).toHaveBeenCalledTimes(2));
     await settle();
     expect([view.name(), view.shownNote()]).toEqual(["", ""]);
-    expect(await view.copy("Copy name")).toEqual([undefined, undefined]);
+    expect(await view.copy("Copy name")).toEqual([undefined, "Copy name", undefined]);
   });
 
   it("shows the address alone without a name, and says when a copy fails", async () => {
@@ -190,8 +194,9 @@ describe("receive", () => {
     expect([view.name(), view.shownNote()]).toEqual(["", ""]);
     expect(isShown(view.addressField)).toBe(true);
 
+    // A copy that fails says so in a toast, and the button stays as it was.
     dom.clipboard.writeText.mockRejectedValueOnce(new Error("denied"));
-    expect((await view.copy("Copy address"))[1]).toBe("Copy failed");
+    expect((await view.copy("Copy address")).slice(1)).toEqual(["Copy address", "Copy failed"]);
 
     // Nothing to show or copy without an account.
     const empty = await receive("public", { ov: { ...overview, accounts: [] } });

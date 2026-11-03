@@ -15,6 +15,7 @@ import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { guarded } from "../../lib/clickGuard.js";
 import { ratePercent, shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
@@ -881,7 +882,8 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   const line =
     kind === TX_KIND.STAKE ? "Native staking" : kind === TX_KIND.UNSTAKE ? "Back to your public balance" : "To your public balance";
 
-  confirmBtn.addEventListener("click", async () => {
+  // It ignores a click for a moment once Review is up (clickGuard.js).
+  confirmBtn.addEventListener("click", guarded(async () => {
     const gas = readGas();
     if (gas === false) return;
     confirmBtn.disabled = true;
@@ -922,7 +924,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
       },
     });
     confirmBtn.disabled = false;
-  });
+  }));
   submitOnGasEnter(gasEditor, confirmBtn);
 
   const stakeIndex = d.stakeProfileIndex ?? d.profileIndex;

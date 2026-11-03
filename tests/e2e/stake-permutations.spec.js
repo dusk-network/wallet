@@ -166,6 +166,12 @@ async function stakeState(page) {
   }));
 }
 
+// The page's clock, for Confirm: it ignores a click for a moment once its
+// screen is up, and the tests move the clock on as a person pauses.
+test.beforeEach(async ({ page }) => {
+  await page.clock.install();
+});
+
 test.describe("owner-aware staking", () => {
   test("keeps unsupported owner-separated positions visible but not submittable", async ({ page }) => {
     await installStakeHarness(page, ownerStatusFor("local-no-gas"));
@@ -201,6 +207,7 @@ test.describe("owner-aware staking", () => {
       amountLux: null,
       amountMode: "all",
     });
+    await page.clock.fastForward(500);
     await clickEnabled(page, "Confirm");
     state = await stakeState(page);
     expect(state.messages.find((m) => m?.type === "DUSK_UI_SEND_TX").params).toMatchObject({

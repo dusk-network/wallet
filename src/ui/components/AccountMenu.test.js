@@ -59,9 +59,10 @@ describe("profile switcher", () => {
       expect(select.className).toContain("net-menu-item");
       expect(select.querySelector("button")).toBeNull();
       expect(copy.className).toBe("acct-menu-copy");
-      // An SVG icon rather than a glyph a font may lack, named for whose account it copies.
-      expect([copy.innerHTML, copy.textContent, copy.title, accessibleName(copy)]).toEqual([
-        iconSvg("copy"),
+      // An SVG icon rather than a glyph a font may lack, and the check it turns
+      // into, named for whose account it copies.
+      expect([copy.querySelectorAll(".copy-swap > span").map((face) => face.innerHTML), copy.textContent, copy.title, accessibleName(copy)]).toEqual([
+        [iconSvg("copy"), iconSvg("check")],
         "",
         "Copy public account",
         `Copy ${["Profile 1", "Spending"][i]}'s public account`,
@@ -128,14 +129,17 @@ describe("profile switcher", () => {
     expect(dom.clipboard.writeText).toHaveBeenCalledWith(ACCOUNTS[0]);
   });
 
-  it("copies the row's account, says so and closes, without switching profile", async () => {
+  it("copies the row's account and says Copied on its button, without switching profile or closing", async () => {
     menu.open(anchor, overview);
-    rows()[1].querySelector(".acct-menu-copy").click();
+    const copy = rows()[1].querySelector(".acct-menu-copy");
+    copy.click();
     await settle();
     expect(dom.clipboard.writeText).toHaveBeenCalledWith(ACCOUNTS[1]);
-    expect(onCopy).toHaveBeenCalledWith("Copied account");
+    // On the button, where the eye is, and not in a toast.
+    expect([accessibleName(copy), copy.hasAttribute("data-copied")]).toEqual(["Copied", true]);
+    expect(onCopy).not.toHaveBeenCalled();
     expect(onSelectAccountIndex).not.toHaveBeenCalled();
-    expect(menu.isOpen).toBe(false);
+    expect(menu.isOpen).toBe(true);
   });
 
   it("reports a failed copy", async () => {

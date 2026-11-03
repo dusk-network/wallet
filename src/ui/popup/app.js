@@ -5,6 +5,8 @@ import { switchContext } from "./context.js";
 import { refreshOverview, getActiveOrigin } from "./overview.js";
 import { h, setChildren } from "../lib/dom.js";
 import { siteName } from "../lib/strings.js";
+import { MOTION } from "../lib/motion.js";
+import { screenShown } from "../lib/clickGuard.js";
 import { createToaster } from "../components/Toast.js";
 import { balancesHidden } from "../components/Balance.js";
 import { txStatusToast } from "./txToast.js";
@@ -197,11 +199,26 @@ function pulseViewAnimation() {
       try {
         app.classList.remove("view-animate");
       } catch {}
-    }, 260);
+    }, MOTION.base + 50);
   } catch {
     // ignore
   }
 }
+
+// A view that comes up at once: no rise, not even one the screen before it
+// still had under way.
+function stopViewAnimation() {
+  if (viewAnimTimer) clearTimeout(viewAnimTimer);
+  viewAnimTimer = null;
+  app?.classList.remove("view-animate");
+}
+
+// The Reviews: they, and the steps either side of them, come up at once, as
+// Send's do, never half faded in, when a faded Confirm would read as off.
+const REVIEW_ROUTES = new Set(["confirm", "convert_confirm", "stake_confirm", "sozu_confirm", "asset_token_confirm"]);
+
+// The screen last shown, locked or not: a new one starts its confirm's click guard.
+let lastShown = "";
 
 // Retain the mounted unlock nodes, not a password copy in application state:
 // the unlock form's, or the restore's ("unlock" | "restore").
@@ -249,10 +266,14 @@ function setApp(children) {
       // Keep lastAnimatedRoute in sync even if we skip animation.
       lastAnimatedRoute = r;
 
-      // Home and its full Activity list move without the transition.
+      // Home and its full Activity list move without the transition, and so
+      // does a step to or from a Review.
       const isHomeTab = (x) => x === "home" || x === "activity";
-      if (!(isHomeTab(prev) && isHomeTab(r))) {
+      const isReviewStep = REVIEW_ROUTES.has(prev) || REVIEW_ROUTES.has(r);
+      if (!(isHomeTab(prev) && isHomeTab(r)) && !isReviewStep) {
         pulseViewAnimation();
+      } else {
+        stopViewAnimation();
       }
     }
   } catch {
@@ -263,6 +284,13 @@ function setApp(children) {
   let sameScreen = false;
   try {
     const screen = `${state?.route ?? ""}|${state?.route === "stake" ? state?.staking?.screen ?? "" : ""}`;
+    // A Review's Confirm ignores clicks for a moment once it's up, after an
+    // unlock too, whose button sits where Confirm does; never on a redraw.
+    const shown = `${state?.overview?.isUnlocked === false ? "locked" : ""}|${screen}`;
+    if (shown !== lastShown) {
+      lastShown = shown;
+      screenShown();
+    }
     sameScreen = screen === lastScreen;
     if (!sameScreen) {
       lastScreen = screen;
@@ -304,8 +332,9 @@ function focusedControl() {
   try {
     const el = document.activeElement;
     if (!el || !el.matches?.(FOCUS_KEPT) || !app.contains(el)) return null;
+    // A Copy button saying Copied is still called by its own name (data-label).
     const key = (b) =>
-      [b.tagName, b.textContent, ...["aria-label", "name", "placeholder", "type"].map((a) => b.getAttribute(a) ?? "")].join("\n");
+      [b.tagName, b.textContent, b.getAttribute("data-label") ?? b.getAttribute("aria-label") ?? "", ...["name", "placeholder", "type"].map((a) => b.getAttribute(a) ?? "")].join("\n");
     const same = [...app.querySelectorAll(FOCUS_KEPT)].filter((b) => key(b) === key(el));
     let caret = null;
     try {

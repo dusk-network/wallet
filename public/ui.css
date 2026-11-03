@@ -53,6 +53,16 @@
   --test-bg: #1B1830;
   --test-line: rgba(185,174,255,0.28);
 
+  /* Motion: feedback and every exit take --motion-fast, anything that
+     arrives or opens --motion-base, and nothing travels farther than
+     --motion-shift. src/ui/lib/motion.js keeps the same numbers for what
+     JavaScript times. */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --motion-ease-exit: cubic-bezier(0.32, 0, 0.67, 0);
+  --motion-shift: 4px;
+
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -118,6 +128,12 @@
 
   --panel-padding: 16px;
   --section-gap: 14px;
+}
+
+/* With reduced motion nothing moves or changes size; opacity and colour
+   still may. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-shift: 0px; }
 }
 
 * { box-sizing: border-box; }
@@ -2064,15 +2080,17 @@ button.balance-refresh:hover {
 }
 
 /* Toasts: a light bar fixed to the bottom of the popup, over the content
-   that scrolls. The region is outside #app and announces what comes in. */
+   that scrolls. The region is outside #app and announces what comes in. Its
+   toasts share one cell, so one on its way out fades where it is. */
 .toast-region {
   position: fixed;
   left: 12px;
   right: 12px;
   bottom: 12px;
   z-index: 9998;
-  display: flex;
-  justify-content: center;
+  display: grid;
+  justify-items: center;
+  align-items: end;
   pointer-events: none;
 }
 
@@ -2083,6 +2101,7 @@ button.balance-refresh:hover {
 }
 
 .toast {
+  grid-area: 1 / 1;
   pointer-events: auto;
   width: 100%;
   max-width: 560px;
@@ -2096,7 +2115,13 @@ button.balance-refresh:hover {
   font-size: 13px;
   line-height: 1.35;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-  animation: toastIn 180ms ease;
+  animation: toastIn var(--motion-base) var(--motion-ease);
+}
+
+/* Going: it fades out in place, and takes no clicks meanwhile. */
+.toast.toast--leaving {
+  pointer-events: none;
+  animation: toastOut var(--motion-fast) var(--motion-ease-exit) forwards;
 }
 
 .toast__icon {
@@ -2147,8 +2172,12 @@ button.toast__action:focus-visible {
 }
 
 @keyframes toastIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(var(--motion-shift)); }
   to   { opacity: 1; transform: none; }
+}
+
+@keyframes toastOut {
+  to { opacity: 0; }
 }
 
 /* ---- Alerts ---- */
@@ -2470,7 +2499,8 @@ button.net-menu-item--active {
   stroke-linejoin: round;
 }
 
-/* While the wallet moves to another network, the pill's dot turns */
+/* While the wallet moves to another network, the pill's dot turns beside
+   the network's name and "…"; with reduced motion the ring stands still. */
 .network-pill.is-switching {
   cursor: progress;
 }
@@ -2487,7 +2517,7 @@ button.net-menu-item--active {
 
 @media (prefers-reduced-motion: reduce) {
   .network-pill.is-switching .net-status-dot {
-    animation: statusPulse 1.6s ease-in-out infinite;
+    animation: none;
   }
 }
 
@@ -3136,11 +3166,54 @@ details.advanced > summary::after {
   background: currentColor;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
-  transition: transform 160ms ease;
+  transition: transform var(--motion-fast) var(--motion-ease-exit);
 }
 
 details.advanced[open] > summary::after {
   transform: rotate(180deg);
+  transition-duration: var(--motion-base);
+  transition-timing-function: var(--motion-ease);
+}
+
+/* A section opens over --motion-base, its height and opacity together, and
+   closes the same way over --motion-fast, its chevron turning with it.
+   Where a browser can't animate to the content's height (interpolate-size),
+   it opens and closes at once. The clip leaves room for a focus ring. */
+details.advanced {
+  interpolate-size: allow-keywords;
+}
+
+details.advanced::details-content {
+  block-size: 0;
+  opacity: 0;
+  overflow: clip;
+  overflow-clip-margin: 4px;
+  transition:
+    block-size var(--motion-fast) var(--motion-ease-exit),
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    content-visibility var(--motion-fast) allow-discrete;
+}
+
+details.advanced[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+  transition-duration: var(--motion-base);
+  transition-timing-function: var(--motion-ease);
+}
+
+/* With reduced motion it opens and closes at once, and its content fades in. */
+@media (prefers-reduced-motion: reduce) {
+  details.advanced::details-content {
+    transition: none;
+  }
+
+  details.advanced[open]::details-content {
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+
+  details.advanced > summary::after {
+    transition: none;
+  }
 }
 
 details.advanced > summary:focus-visible {
@@ -3537,20 +3610,20 @@ body[data-runtime="tauri"] .qrscan-overlay {
 @keyframes modalIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
 /* -------------------------------------------------------
-   Subtle view transitions
+   Subtle view transitions: a new view rises into place. A Review, and the
+   steps either side of it, change at once (app.js).
    ------------------------------------------------------- */
 #app.view-animate > * {
-  animation: viewIn 220ms ease both;
+  animation: viewIn var(--motion-base) var(--motion-ease) both;
 }
 
 @keyframes viewIn {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(var(--motion-shift)); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   #app.view-animate > * { animation: none !important; }
-  .toast { animation: none !important; }
   .net-menu { animation: none !important; }
   .qrscan-overlay { animation: none !important; }
   .qrscan-modal { animation: none !important; }
@@ -4147,7 +4220,8 @@ button.copy-ico.tx-copy {
 }
 
 .tx-row:hover button.tx-copy,
-.tx-row:focus-within button.tx-copy {
+.tx-row:focus-within button.tx-copy,
+button.copy-ico.tx-copy[data-copied] {
   opacity: 1;
 }
 
@@ -4155,6 +4229,34 @@ button.copy-ico.tx-copy {
   button.copy-ico.tx-copy {
     opacity: 1;
   }
+}
+
+/* Copy says it copied on itself (CopyButton.js): for 1.5 s its icon is a
+   check and its words say Copied, crossfading over --motion-fast. */
+.copy-swap {
+  display: inline-grid;
+}
+
+.copy-swap > * {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: opacity var(--motion-fast) var(--motion-ease-exit);
+}
+
+.copy-swap__to,
+[data-copied] .copy-swap__from {
+  opacity: 0;
+}
+
+[data-copied] .copy-swap__to {
+  opacity: 1;
+}
+
+[data-copied] .copy-swap > * {
+  transition-timing-function: var(--motion-ease);
 }
 
 .tx-right {

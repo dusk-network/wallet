@@ -177,6 +177,12 @@ async function state(page) {
   }));
 }
 
+// The page's clock, for Confirm: it ignores a click for a moment once its
+// screen is up, and the tests move the clock on as a person pauses.
+test.beforeEach(async ({ page }) => {
+  await page.clock.install();
+});
+
 test.describe("Sozu liquid staking", () => {
   test("is a choice of its own, names Sozu a third party with its site, and creates stake/unstake drafts", async ({ page }) => {
     await installStakeHarness(page, { networkName: "Testnet" });
@@ -256,6 +262,7 @@ test.describe("Sozu liquid staking", () => {
     // The contract it calls, in there to check before Confirm.
     await expect(page.locator("details.gas-custom .sozu-contract")).toContainText(/^Contract\s*Sozu pool · [0-9a-f]{6}…[0-9a-f]{6}/);
 
+    await page.clock.fastForward(500);
     await page.getByRole("button", { name: "Confirm" }).click();
     const submitted = await page.evaluate(() =>
       window.__stakeMessages.findLast((msg) => msg?.type === "DUSK_UI_SEND_TX")

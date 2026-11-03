@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
-import { installFakeDom, isShown, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
+import { installFakeDom, isShown, pastClickGuard, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
+import { screenShown } from "./lib/clickGuard.js";
 import { isExtensionRuntime } from "../platform/runtime.js";
 import { convertConfirmView } from "./popup/views/convert.js";
 import { sendConfirmView } from "./popup/views/send.js";
@@ -47,6 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -96,7 +98,7 @@ const steps = () =>
     visibleText(li.querySelector(".step-sub") ?? li).replace(visibleText(li.querySelector(".step-title")), ""),
   ]);
 const rows = () => body.querySelectorAll(".kv").map((row) => visibleText(row));
-const button = (text) => body.querySelectorAll("button").find((b) => isShown(b) && b.textContent === text);
+const button = (text) => body.querySelectorAll("button").find((b) => isShown(b) && visibleText(b) === text);
 const note = () => body.querySelector(".sent-note")?.textContent ?? null;
 
 const reviewState = () => ({
@@ -140,10 +142,14 @@ describe("after Confirm", () => {
     // The review's draft is done with.
     expect(state.draft).toBeNull();
 
-    button("Copy").click();
+    const copy = button("Copy");
+    expect(copy.getAttribute("aria-label")).toBe("Copy transaction ID");
+    copy.click();
     await settle();
     expect(dom.clipboard.writeText).toHaveBeenCalledWith(HASH);
-    expect(button("Copy").getAttribute("aria-label")).toBe("Copy transaction ID");
+    // It says so on itself, not in a toast.
+    expect([visibleText(copy), copy.getAttribute("aria-label")]).toEqual(["Copied", "Copied"]);
+    expect(app.actions.showToast).not.toHaveBeenCalled();
 
     // Dusk's explorer, never DuskScan.
     body.querySelectorAll("button").find((b) => b.textContent === "View in Dusk explorer").click();
@@ -383,6 +389,32 @@ describe("after Confirm", () => {
     expect(state.route).toBe("sent");
     expect(visibleText(body.querySelector(".sent-head"))).toBe("Shield2 DUSKPublic → Shielded");
     expect(rows().at(-1)).toBe("Network feeUp to 0.03 DUSK");
+  });
+});
+
+describe("a Review's Confirm, the moment the Review is up", () => {
+  it.each([
+    ["Send", "confirm", sendConfirmView, reviewState().draft],
+    ["Shield", "convert_confirm", convertConfirmView, { kind: TX_KIND.SHIELD, amountDusk: "2", amountLux: dusk(2) }],
+    ["Unshield", "convert_confirm", convertConfirmView, { kind: TX_KIND.UNSHIELD, amountDusk: "2", amountLux: dusk(2) }],
+  ])("ignores a click, as a double-click on Review lands there, and sends one a moment later (%s)", async (_, route, view, draft) => {
+    const state = { route, addressBook: { loaded: true, items: [] }, draft };
+    const ov = overview({ shieldedBalance: { value: dusk(10), spendable: dusk(10) } });
+    const app = popup(state, ov, view);
+    // Up, as app.js marks a new screen.
+    screenShown();
+    await settle();
+    const sends = () => app.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX");
+
+    await app.confirm();
+    expect([sends(), state.route]).toEqual([[], route]);
+    // It looked as it always does meanwhile: not turned off.
+    expect(button("Confirm").disabled).toBe(false);
+
+    pastClickGuard();
+    await app.confirm();
+    expect(sends()).toHaveLength(1);
+    expect(state.route).toBe("sent");
   });
 });
 

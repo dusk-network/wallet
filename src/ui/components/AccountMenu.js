@@ -1,15 +1,16 @@
 import { h } from "../lib/dom.js";
-import { copyToClipboard } from "../lib/clipboard.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
 import { walletLabel } from "../../shared/wallets.js";
 import { iconSvg } from "./ActionIcon.js";
+import { copyButton } from "./CopyButton.js";
 import { shortAddressEl } from "./ShortAddress.js";
 import { menuKeys } from "./MenuKeys.js";
 
 /**
  * Small controller that renders the profile selection menu under an anchor.
  * Uses the same base classes as the network menu so ui.css styling applies.
- * Each profile's row also copies its public account, reporting through `onCopy`.
+ * Each profile's row also copies its public account, saying Copied on its
+ * button; a copy that fails is reported through `onCopy`.
  * With the overview's wallets, the profiles are under their wallet's name, as
  * "Wallet 1" and "Wallet 2", and each is picked by its wallet's key
  * (`onSelectWalletProfile`): another wallet's opens that wallet, and the
@@ -100,21 +101,15 @@ export function createAccountMenuController({
       );
 
       // Beside the row rather than in it: a button can't hold another button.
+      // It says Copied on itself, so the menu stays open.
       const copy = acct
-        ? h("button", {
-            class: "acct-menu-copy",
-            type: "button",
-            role: "menuitem",
-            html: iconSvg("copy"),
-            title: "Copy public account",
-            "aria-label": `Copy ${label}'s public account`,
-            onclick: async () => {
-              const ok = await copyToClipboard(String(acct));
-              const from = anchor;
-              close();
-              from?.focus();
-              onCopy?.(ok ? "Copied account" : "Copy failed");
-            },
+        ? copyButton({
+            value: String(acct),
+            label: `Copy ${label}'s public account`,
+            className: "acct-menu-copy",
+            failText: "Copy failed",
+            onFail: onCopy,
+            attrs: { role: "menuitem", title: "Copy public account" },
           })
         : null;
 

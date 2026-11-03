@@ -6,12 +6,12 @@ import { networkNameFromNodeUrl } from "../../../shared/network.js";
 import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
-import { copyToClipboard } from "../../lib/clipboard.js";
 import { contractIdText, shortAddress, shortEvmHash, siteName } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { contractValueEl, copyContractButton } from "../../components/ContractValue.js";
+import { copyButton as copyWordsButton } from "../../components/CopyButton.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
 import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, txIconSvg } from "./txRow.js";
@@ -234,16 +234,10 @@ export function txDetailsView(ov, { state, actions } = {}) {
       if (!ok) showToast?.("Couldn't open the explorer");
     },
   });
-  const copyId = h("button", {
-    class: "mini-btn",
-    type: "button",
-    text: "Copy",
-    "aria-label": "Copy transaction ID",
-    onclick: async () => {
-      const ok = await copyToClipboard(hash);
-      showToast?.(ok ? "Transaction ID copied" : "Couldn't copy the transaction ID");
-    },
-  });
+  // Copy, in words, saying Copied on itself; a failed copy says so in a toast.
+  const copyWords = (value, label, failText) =>
+    copyWordsButton({ value, label, text: "Copy", className: "mini-btn", failText, onFail: showToast });
+  const copyId = copyWords(hash, "Copy transaction ID", "Couldn't copy the transaction ID");
 
   // Where a transfer to another chain went, in full, with Copy.
   const evmRow = desc.recipient
@@ -251,16 +245,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
         `${desc.evmChain} recipient`,
         [
           h("span", { class: "mono", text: desc.recipient }),
-          h("button", {
-            class: "mini-btn",
-            type: "button",
-            text: "Copy",
-            "aria-label": `Copy ${desc.evmChain} address`,
-            onclick: async () => {
-              const ok = await copyToClipboard(desc.recipient);
-              showToast?.(ok ? "Address copied" : "Couldn't copy the address");
-            },
-          }),
+          copyWords(desc.recipient, `Copy ${desc.evmChain} address`, "Couldn't copy the address"),
         ],
         { className: "kv--wrap tx-evm-recipient" }
       )
@@ -282,16 +267,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
             if (!ok) showToast?.("Couldn't open the explorer");
           },
         }),
-        h("button", {
-          class: "mini-btn",
-          type: "button",
-          text: "Copy",
-          "aria-label": "Copy DuskEVM transaction ID",
-          onclick: async () => {
-            const ok = await copyToClipboard(desc.arrival);
-            showToast?.(ok ? "Transaction ID copied" : "Couldn't copy the transaction ID");
-          },
-        }),
+        copyWords(desc.arrival, "Copy DuskEVM transaction ID", "Couldn't copy the transaction ID"),
       ])
     : null;
 

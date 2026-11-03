@@ -3,11 +3,12 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
-import { accessibleName, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "../../testing/fakeDom.js";
+import { accessibleName, installFakeDom, isShown, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "../../testing/fakeDom.js";
 import { lookupPrimaryName } from "../../../shared/duskNames.js";
 import { maxAmountLux } from "../../../shared/amount.js";
 import { stakeConfirmView, stakeFormView } from "./stake.js";
 import { sozuConfirmView } from "./sozu.js";
+import { screenShown } from "../../lib/clickGuard.js";
 import { reviewOf, sentView } from "./sent.js";
 import { switchContext } from "../context.js";
 
@@ -106,6 +107,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -788,7 +790,13 @@ describe("liquid staking", () => {
     expect(visibleText(body.querySelector(".sozu-changed"))).toBe("Sozu's terms changedThese are the figures now. Check them, then confirm again.");
     expect(rows()).toEqual(["You get about30.9251 stDUSK, worth about 95 DUSK now", "Deposit fee5% · 5 DUSK"]);
 
-    // Confirmed again on those terms: sent, and only the call goes.
+    // A Confirm pressed at once isn't for the new figures: it does nothing.
+    button("Confirm").click();
+    await settle();
+    expect(sent()).toEqual([]);
+
+    // Confirmed again on those terms, a moment on: sent, and only the call goes.
+    pastClickGuard();
     button("Confirm").click();
     await settle();
     expect(sent()).toHaveLength(1);
@@ -1143,6 +1151,43 @@ describe("liquid staking", () => {
     expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.4714 stDUSK, worth about 99.75 DUSK now.");
     expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25% · •••• DUSK");
     expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.005 DUSK");
+  });
+});
+
+describe("a staking Review's Confirm, the moment the Review is up", () => {
+  // Each Review, reached as a person does: from Staking, with what's pressed on the way.
+  const withStake = () => ({ route: "stake", staking: staking(owner({ relatedStakes: [related()] })) });
+  const liquid = (over) => ({ route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu(over) });
+  const amount = (name, value, review) => () => {
+    typeInto(field(name), value);
+    button(review).click();
+  };
+  it.each([
+    ["Stake", () => ({ route: "stake", staking: staking(owner(), { screen: "native" }) }), amount("Stake amount", "1000", "Review stake")],
+    ["Unstake", withStake, () => button("Unstake").click()],
+    ["Claim rewards", withStake, () => button("Claim rewards").click()],
+    ["Liquid staking", () => liquid(), amount("Stake amount", "100", "Review stake")],
+    ["Unstake from Sozu", () => liquid({ action: "withdraw", position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }), amount("Unstake amount", "5", "Review unstake")],
+  ])("ignores a click, as a double-click on the way lands there, and sends one a moment later (%s)", async (_, start, toReview) => {
+    const state = start();
+    const app = popup(state);
+    toReview();
+    await settle();
+    // Up, as app.js marks a new screen.
+    screenShown();
+    const review = state.route;
+    expect(["stake_confirm", "sozu_confirm"]).toContain(review);
+    const sends = () => app.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX");
+
+    button("Confirm").click();
+    await settle();
+    expect([sends(), state.route, button("Confirm").disabled]).toEqual([[], review, false]);
+
+    pastClickGuard();
+    button("Confirm").click();
+    await settle();
+    expect(sends()).toHaveLength(1);
+    expect(state.route).toBe("sent");
   });
 });
 

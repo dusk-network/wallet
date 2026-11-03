@@ -13,9 +13,9 @@ import { isEvmAddress } from "../../../shared/bridgeCalls.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { labelForNode } from "../../../shared/nodeNetwork.js";
 import { h } from "../../lib/dom.js";
-import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress, shortEvmAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
+import { copyButton as copyIconButton } from "../../components/CopyButton.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
 import { MONTHS, clockText, dateText } from "../../lib/time.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
@@ -389,22 +389,19 @@ function subEl(desc, when, hidden) {
 }
 
 /**
- * A copy button for an address: an icon with its name, at least 24 by 24.
+ * A copy button for an address: an icon with its name, at least 24 by 24,
+ * that says Copied on itself; a copy that fails says so in a toast.
  * @param {string} address
  * @param {{ label?: string, showToast?: Function, className?: string }} [opts]
  */
 export function copyButton(address, { label = "Copy address", showToast, className = "copy-ico" } = {}) {
-  return h("button", {
-    class: className,
-    type: "button",
-    title: label,
-    "aria-label": label,
-    html: iconSvg("copy"),
-    onclick: async (e) => {
-      e?.stopPropagation?.();
-      const ok = await copyToClipboard(address);
-      showToast?.(ok ? "Address copied" : "Couldn't copy the address");
-    },
+  return copyIconButton({
+    value: address,
+    label,
+    className,
+    failText: "Couldn't copy the address",
+    onFail: showToast,
+    stopPropagation: true,
   });
 }
 

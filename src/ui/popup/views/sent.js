@@ -3,11 +3,11 @@ import { explorerTxUrl } from "../../../shared/explorer.js";
 import { openUrl } from "../../../platform/index.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
-import { copyToClipboard } from "../../lib/clipboard.js";
 import { shortAddress } from "../../lib/strings.js";
 import { txErrorText } from "./txDisplay.js";
 import { zonedClockText } from "../../lib/time.js";
 import { iconSvg } from "../../components/ActionIcon.js";
+import { copyButton } from "../../components/CopyButton.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { walletNameOf } from "../../components/ProfileName.js";
 
@@ -413,15 +413,13 @@ export function sentView(ov, { state, actions } = {}) {
   );
 
   const copyBtn = sent.hash
-    ? h("button", {
-        class: "mini-btn",
-        type: "button",
+    ? copyButton({
+        value: sent.hash,
+        label: "Copy transaction ID",
         text: "Copy",
-        "aria-label": "Copy transaction ID",
-        onclick: async () => {
-          const ok = await copyToClipboard(sent.hash);
-          actions?.showToast?.(ok ? "Transaction ID copied" : "Couldn't copy the transaction ID");
-        },
+        className: "mini-btn",
+        failText: "Couldn't copy the transaction ID",
+        onFail: actions?.showToast,
       })
     : null;
 
