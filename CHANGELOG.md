@@ -63,6 +63,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Link to the explorer at its own domain
 - Opened and closed sections the same way, said Copied on the copy button instead of a toast, faded messages in place, and had Confirm and Approve ignore a click for half a second as they appear.
 - Showed a turning ring beside the words while staking, Sozu, tokens, contacts or activity load.
 - Opened the popup faster.

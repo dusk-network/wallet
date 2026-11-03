@@ -288,7 +288,7 @@ describe("the Activity view", () => {
     expect(button("Show more")).toBeUndefined();
     button("View in Dusk explorer").click();
     await settle();
-    expect(openUrl).toHaveBeenCalledWith(`https://apps.testnet.dusk.network/explorer/accounts/?key=${A}`);
+    expect(openUrl).toHaveBeenCalledWith(`https://explorer.testnet.dusk.network/accounts/?key=${A}`);
   });
 });
 
@@ -330,7 +330,7 @@ describe("a transaction's details", () => {
       "Transaction ID3e6a0e…ae84baCopy",
     ]);
     // The ID opens Dusk's explorer; Copy and the address's copy say what they copy.
-    const explorerUrl = `https://apps.testnet.dusk.network/explorer/transactions/transaction/?id=${sent.hash}`;
+    const explorerUrl = `https://explorer.testnet.dusk.network/transactions/transaction/?id=${sent.hash}`;
     button(`Transaction 3e6a0e…ae84ba, open in Dusk explorer`).click();
     await settle();
     expect(openUrl).toHaveBeenLastCalledWith(explorerUrl);
