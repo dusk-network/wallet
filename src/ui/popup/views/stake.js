@@ -15,6 +15,7 @@ import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
 import { getDefaultGas, getMinimumGas } from "../../../shared/txDefaults.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { waiting } from "../../components/Waiting.js";
 import { guarded } from "../../lib/clickGuard.js";
 import { ratePercent, shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
@@ -419,7 +420,7 @@ function advancedPanel(st, key, children) {
 }
 
 function statusLine(st) {
-  if (st?.loading && !st?.loaded) return h("div", { class: "muted", text: "Loading staking…" });
+  if (st?.loading && !st?.loaded) return waiting("Loading staking…");
   if (st?.error) return h("div", { class: "err", text: String(st.error) });
   return null;
 }
@@ -487,7 +488,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
     actions?.render?.().catch(() => {});
   };
   if (!pos) {
-    return [subnav({ title: "Staking", onBack }), statusLine(st) ?? h("div", { class: "muted", text: "Loading staking…" })];
+    return [subnav({ title: "Staking", onBack }), statusLine(st) ?? waiting("Loading staking…")];
   }
 
   const stakedLux = safeBigInt(pos.info?.amount?.total ?? 0, 0n);

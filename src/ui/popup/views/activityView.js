@@ -6,6 +6,7 @@
 import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { waiting } from "../../components/Waiting.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
@@ -26,10 +27,11 @@ function rowTime(row, state) {
   return meta.headAt - Math.max(0, Number(meta.finalized) - row.blockHeight) * 10_000;
 }
 
+const LOOKING = "Looking for your activity…";
 // Nothing to show yet: say whether the history is still being looked for.
 function emptyText(state, filter) {
   const a = state?.activity;
-  if (a && (!a.loaded || a.syncing) && !a.error) return "Looking for your activity…";
+  if (a && (!a.loaded || a.syncing) && !a.error) return LOOKING;
   if (filter === "sent") return "Nothing sent yet.";
   if (filter === "received") return "Nothing received yet.";
   if (filter === "staking") return "No staking yet.";
@@ -37,7 +39,8 @@ function emptyText(state, filter) {
   return "No activity yet.";
 }
 
-const empty = (text) => h("div", { class: "group" }, [h("p", { class: "tx-empty", text })]);
+const empty = (text) =>
+  h("div", { class: "group" }, [text === LOOKING ? waiting(text, { tag: "p", className: "tx-empty" }) : h("p", { class: "tx-empty", text })]);
 
 /**
  * Home's Activity: the newest rows, and See all.

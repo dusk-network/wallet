@@ -2,6 +2,7 @@ import { UI_DISPLAY_DECIMALS, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { reviewGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
+import { waiting } from "../../components/Waiting.js";
 import { guarded } from "../../lib/clickGuard.js";
 import { contractIdText, shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
@@ -333,7 +334,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
       st?.error ? h("div", { class: "err", text: String(st.error) }) : null,
       rows.length
         ? h("div", { class: "group" }, rows)
-        : h("div", { class: "group" }, [h("p", { class: "tx-empty", text: st?.loading ? "Loading…" : "No tokens or NFTs yet." })]),
+        : h("div", { class: "group" }, [st?.loading ? waiting("Loading…", { tag: "p", className: "tx-empty" }) : h("p", { class: "tx-empty", text: "No tokens or NFTs yet." })]),
     ].filter(Boolean)),
   ];
 }
@@ -599,7 +600,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
       return [
         subnav({ title: "Token", onBack }),
         h("div", { class: "row" }, [
-          h("div", { class: "muted", text: "Loading token…" }),
+          waiting("Loading token…"),
         ]),
       ];
     }

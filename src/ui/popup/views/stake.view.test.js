@@ -152,6 +152,20 @@ const button = (text) => body.querySelectorAll("button").find((b) => isShown(b) 
 const buttonStarting = (text) => body.querySelectorAll("button").find((b) => isShown(b) && visibleText(b).startsWith(text));
 const field = (name) => body.querySelectorAll("input").find((i) => accessibleName(i) === name);
 
+describe("staking while it loads", () => {
+  it("shows a turning ring beside its words from the first draw, and neither once it's loaded", async () => {
+    const state = { route: "stake" };
+    popup(state);
+    expect(visibleText(body.querySelector(".waiting"))).toBe("Loading staking…");
+    expect(body.querySelector(".waiting .waiting__ring")).toBeTruthy();
+
+    await settle();
+    await settle();
+    expect(state.staking.loaded).toBe(true);
+    expect(visibleText(body)).not.toContain("Loading staking…");
+  });
+});
+
 describe("staking overview", () => {
   it("says about what each choice pays a year, once read: native across the network lately, Sozu after its fee", async () => {
     const fifteen = sozu();

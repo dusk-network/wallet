@@ -2499,6 +2499,31 @@ button.net-menu-item--active {
   stroke-linejoin: round;
 }
 
+/* A wait in words: a small ring turns beside them from the first moment; with
+   reduced motion it stands still. */
+.waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.waiting__ring {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: stepTurn 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waiting__ring {
+    animation: none;
+  }
+}
+
 /* While the wallet moves to another network, the pill's dot turns beside
    the network's name and "…"; with reduced motion the ring stands still. */
 .network-pill.is-switching {

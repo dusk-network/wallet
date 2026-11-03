@@ -4,6 +4,7 @@ import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { duskNameErrorText, duskNameRecipient, duskNamesNetwork, lookupDuskName } from "../../../shared/duskNames.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { waiting } from "../../components/Waiting.js";
 import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -258,7 +259,7 @@ export function addressBookView(ov, { state, actions } = {}) {
     })();
 
     let listBody;
-    if (ab.loading && !ab.loaded) listBody = h("p", { class: "contacts-empty", text: "Loading…" });
+    if (ab.loading && !ab.loaded) listBody = waiting("Loading…", { tag: "p", className: "contacts-empty" });
     else if (ab.error) listBody = h("div", { class: "err", text: ab.error });
     else if (!filtered.length) listBody = h("p", { class: "contacts-empty", text: q ? "No matches." : "No contacts yet." });
     else {
