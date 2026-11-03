@@ -15,7 +15,7 @@ describe("explorerTxUrl", () => {
 
   it("returns devnet explorer URL", () => {
     const url = explorerTxUrl("https://devnet.nodes.dusk.network", "abc123");
-    expect(url).toBe("https://apps.devnet.dusk.network/explorer/transactions/transaction/?id=abc123");
+    expect(url).toBe("https://explorer.devnet.dusk.network/transactions/transaction/?id=abc123");
   });
 
   it("returns null for local network (no explorer)", () => {
@@ -68,7 +68,7 @@ describe("explorerAccountUrl", () => {
       "https://explorer.testnet.dusk.network/accounts/?key=acct1"
     );
     expect(explorerAccountUrl("https://devnet.nodes.dusk.network", "acct1")).toBe(
-      "https://apps.devnet.dusk.network/explorer/accounts/?key=acct1"
+      "https://explorer.devnet.dusk.network/accounts/?key=acct1"
     );
     for (const node of ["https://nodes.dusk.network", "https://testnet.nodes.dusk.network"]) {
       expect(explorerAccountUrl(node, "acct1")).not.toContain("duskscan");
