@@ -214,6 +214,11 @@ describe("transaction details", () => {
     expect(sent.rows).toContain(`BNB Smart Chain recipient${evm}Copy`);
     expect(sent.rows.filter((r) => r.startsWith("Memo"))).toEqual([]);
     const back = on({ kind: TX_KIND.TRANSFER, direction: "in", from: payouts, amount: "5000000000" });
+    // A payout's memo is the migration it pays: its transaction there, not a memo.
+    const migration = `0x${"5e".repeat(32)}`;
+    const paid = on({ kind: TX_KIND.TRANSFER, direction: "in", from: payouts, amount: "5000000000", memo: migration });
+    expect(paid.rows).toContain(`Ethereum transaction${migration.slice(0, 6)}…${migration.slice(-4)}Copy`);
+    expect(paid.rows.filter((r) => r.startsWith("Memo"))).toEqual([]);
     expect([back.lead, back.name, back.via]).toEqual(["Bridge", "From Ethereum", `Ethereum migration payouts · ${payouts.slice(0, 6)}…${payouts.slice(-6)}`]);
   });
 
