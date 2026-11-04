@@ -258,12 +258,19 @@ describe("transaction details", () => {
     await settle();
     expect(dom.window.open).toHaveBeenCalledWith(`${networks.mainnet.routes.chains.bsc.explorerUrl}/tx/${payout}`, "_blank", expect.anything());
 
-    // Nothing can arrive from what the bridge doesn't pay: no more than its fee, or no address.
+    // Past the week it's looked for, nothing says it's still on its way, or what it pays.
+    const old = on({ finalizedAt: Date.now() - 8 * 86_400_000 });
+    expect(old.status).toBe("Completed");
+    expect(old.rows.some((r) => r.startsWith("You receive"))).toBe(false);
+
+    // Nothing can arrive from what the bridge doesn't pay: no more than its fee, no address, or one that failed.
     for (const tx of [{ amount: "1000000000" }, { memo: "" }]) {
       const none = on({ finalizedAt: sentAt, ...tx });
       expect(none.status).toBe("Completed");
       expect(none.rows.some((r) => r.startsWith("You receive"))).toBe(false);
     }
+    const failed = on({ finalizedAt: sentAt, status: "failed" });
+    expect(failed.rows.some((r) => r.startsWith("You receive") || r.startsWith("Bridge fee"))).toBe(false);
   });
 
   it("leads with a saved contact's own name, its .dusk name beside the address", () => {

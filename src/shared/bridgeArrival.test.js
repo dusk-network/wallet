@@ -84,6 +84,15 @@ beforeEach(async () => {
 });
 
 describe("a transfer out to another chain", () => {
+  it("pays what reached the bridge less its fee: a gas refund paid elsewhere isn't part of it", () => {
+    const row = transferOut("a", { lux: "3500000000" });
+
+    expect(arrivals.payoutOf({ ...row, entry: { ...row.entry, refund: 500_000_000n } })).toEqual({
+      fee: BigInt(SERVICE.feeLux),
+      received: 2_000_000_000n,
+    });
+  });
+
   it("is waited for, on a network without DuskEVM too, until it's there or there's nothing to wait for", async () => {
     const { awaitingArrival, keepArrivals, loadArrivals } = arrivals;
 
@@ -93,6 +102,13 @@ describe("a transfer out to another chain", () => {
     expect(awaitingArrival(transferOut("c", { memo: "" }), MAINNET, NOW)).toBe(false);
     expect(awaitingArrival(transferOut("d", { status: "failed" }), MAINNET, NOW)).toBe(false);
     expect(awaitingArrival(transferOut("e", { ago: 8 * 86_400_000 }), MAINNET, NOW)).toBe(false);
+    // The bridge reads the memo as it is: padded, or bytes, it pays nothing.
+    expect(awaitingArrival(transferOut("f", { memo: ` ${TO}` }), MAINNET, NOW)).toBe(false);
+    expect(awaitingArrival({ ...transferOut("g"), entry: { memoBinary: true, timestamp: NOW - 1000 } }, MAINNET, NOW)).toBe(false);
+    // A route that isn't paying out.
+    const stopped = { ...transferOut("h"), route: { ...SERVICE, running: false } };
+    expect(awaitingArrival(stopped, MAINNET, NOW)).toBe(false);
+    expect(arrivals.payoutOf({ ...transferOut("i"), route: { ...SERVICE, payoutAddress: "" } })).toBeNull();
 
     await loadArrivals(W1);
     await keepArrivals({ [transferOut("a").hash]: { hash: L2(2), at: NOW } }, 1, W1);

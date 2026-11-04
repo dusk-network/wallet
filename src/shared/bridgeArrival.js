@@ -110,17 +110,20 @@ export const depositLux = (row) => {
 export const depositTime = (row) => Number(row?.entry?.timestamp ?? row?.sent?.finalizedAt) || 0;
 
 /**
- * What a transfer out to another chain pays: what was sent less the bridge's
+ * What a transfer out to another chain pays: what reached the bridge less its
  * fee, to the address its memo gives. Null for anything else, and for one the
- * bridge pays nothing for.
+ * bridge pays nothing for, on a route that isn't paying out too.
  * @param {object} row - an Activity row
  * @returns {{ fee: bigint, received: bigint } | null}
  */
 export function payoutOf(row) {
   const route = row?.route;
-  if (route?.kind !== "service" || !isEvmAddress(String(row?.memo ?? "").trim())) return null;
+  if (route?.kind !== "service" || route.running === false || !route.payoutAddress) return null;
+  // The address exactly as the bridge reads it: from text, as it was sent.
+  if (row?.entry?.memoBinary === true || !isEvmAddress(row?.memo)) return null;
   const fee = BigInt(route.feeLux ?? 0);
-  const sent = BigInt(row?.value ?? 0);
+  // What left the account holds a gas refund it paid another account.
+  const sent = BigInt(row?.value ?? 0) - BigInt(row?.entry?.refund ?? 0);
   return sent > fee ? { fee, received: sent - fee } : null;
 }
 

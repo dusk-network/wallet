@@ -10,7 +10,7 @@
 import { formatDusk, formatFee, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { isEvmAddress } from "../../../shared/bridgeCalls.js";
-import { depositTime, keptArrivals, payoutOf } from "../../../shared/bridgeArrival.js";
+import { ARRIVAL_WINDOW_MS, depositTime, keptArrivals, payoutOf } from "../../../shared/bridgeArrival.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { labelForNode } from "../../../shared/nodeNetwork.js";
 import { h } from "../../lib/dom.js";
@@ -299,12 +299,14 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const unsent = failed || Boolean(tx?.dropped);
   const amount = d.amount && unsent ? { ...d.amount, sign: "", muted: true } : d.amount;
   // A deposit to DuskEVM that arrived there: its transaction there, and when (bridgeArrival.js).
-  const payout = payoutOf(tx);
+  const payout = unsent ? null : payoutOf(tx);
   const arrival = d.evm ? tx.bridge.arrival : payout ? (keptArrivals().get(String(tx?.hash)) ?? null) : null;
-  // Gone through on Dusk, on its way to another chain: Completed isn't the end of it.
-  const onItsWay = Boolean(payout) && !arrival && status === "executed";
-  const sentAgo = Date.now() - depositTime(tx);
-  const isLate = onItsWay && depositTime(tx) > 0 && sentAgo > 2 * Number(tx.route.typicalSeconds ?? Infinity) * 1000;
+  const sentAt = depositTime(tx);
+  const sentAgo = Date.now() - sentAt;
+  // Gone through on Dusk, on its way to another chain: Completed isn't the end
+  // of it. Past the week it's looked for, nothing more is known.
+  const onItsWay = Boolean(payout) && !arrival && status === "executed" && (!sentAt || sentAgo < ARRIVAL_WINDOW_MS);
+  const isLate = onItsWay && sentAt > 0 && sentAgo > 2 * Number(tx.route.typicalSeconds ?? Infinity) * 1000;
   return {
     lead: "",
     alias: "",
@@ -330,7 +332,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
           : tone === "ok"
             ? null
             : txStatusWord(status, { final }),
-    payout,
+    payout: onItsWay || arrival ? payout : null,
     failed,
     unsent,
     fee: tx?.fee != null ? formatFee(tx.fee) : null,
