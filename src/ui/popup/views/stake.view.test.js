@@ -274,11 +274,23 @@ describe("staking overview", () => {
     expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("0.0318");
   });
 
+  it("reads Sozu again when a read from before a switch answers for the other network", async () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const held = sozu({ position });
+    const thisNetwork = { ...held.status, position, pool: held.pool };
+    held.status = { ...held.status, networkKey: "mainnet" };
+    const state = { route: "stake", staking: staking(), sozu: held };
+    popup(state, ov(), { sozuStatus: async () => thisNetwork });
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("Sozu");
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu");
+  });
+
   it("says nothing of Sozu for what another network read, or with nothing there", () => {
     const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
     const other = sozu({ position });
     other.status = { ...other.status, networkKey: "mainnet" };
-    popup({ route: "stake", staking: staking(), sozu: other });
+    popup({ route: "stake", staking: staking(), sozu: other }, ov(), { sozuStatus: async () => other.status });
     expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("Sozu");
 
     popup({ route: "stake", staking: staking(), sozu: sozu() });

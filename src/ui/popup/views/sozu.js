@@ -392,10 +392,16 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
  */
 export function sozuHolding(ov, { state, actions } = {}) {
   const st = sozuState(state);
-  if (!st.error) ensureSozuLoaded(ov, { state, actions });
   const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
+  // A read begun on another network can answer after the switch: asked again
+  // once, as a custom node's key may not match until its chain ID is read.
+  if (st.loaded && st.status?.networkKey !== networkKey && st.askedAgainFor !== networkKey) {
+    st.askedAgainFor = networkKey;
+    st.loaded = false;
+  }
+  if (!st.error) ensureSozuLoaded(ov, { state, actions });
   if (!st.position || st.profileIndex !== idx || st.status?.networkKey !== networkKey) return null;
   const position = parseSozuPosition(st.position);
   return { poolLux: safeBigInt(position.poolBalanceLux, 0n), stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n) };

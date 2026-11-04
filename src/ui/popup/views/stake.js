@@ -460,11 +460,14 @@ function rewardRates(ov, { state, actions }) {
     const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
     Promise.all([
       Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_REWARD_RATE" })).then(result, () => null),
+      // What the overview reads of Sozu has the fee too, once it answers.
       held ??
-        Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: idx })).then(
-          (res) => ofNetwork(result(res))?.fees?.reward ?? null,
-          () => null
-        ),
+        (state.sozu?.loading
+          ? null
+          : Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: idx })).then(
+              (res) => ofNetwork(result(res))?.fees?.reward ?? null,
+              () => null
+            )),
     ]).then(([native, sozuFee]) => {
       if (state.rewardRates !== rates) return;
       Object.assign(rates, { native: typeof native === "number" ? native : null, sozuFee });
