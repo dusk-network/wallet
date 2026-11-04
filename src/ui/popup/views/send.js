@@ -1,3 +1,4 @@
+import { isAccount } from "@dusk-network/networks/account";
 import {
   formatDusk,
   formatDuskExact,
@@ -47,6 +48,11 @@ import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
 
 // A pasted EVM address, which a Dusk transfer can't pay.
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+// Base58 of an account's length that isn't a key: a mistyped account.
+const NOT_AN_ADDRESS_TEXT = "Not a valid address. Check it and try again.";
+// What the network takes.
+const MAX_MEMO_BYTES = 512;
+const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
 export const EVM_ADDRESS_TEXT = "That's an EVM address, not a Dusk account.";
 
 /**
@@ -85,6 +91,13 @@ export function sendFormView(ov, { state, actions } = {}) {
     value: typeof draft.memo === "string" ? draft.memo : "",
     onEnter: () => nextBtn.click(),
   });
+  const memoError = h("div", { class: "field-error memo-error", role: "alert", hidden: true });
+  const checkMemo = () => {
+    const tooLong = new TextEncoder().encode(memo.value.trim()).length > MAX_MEMO_BYTES;
+    memoError.textContent = tooLong ? MEMO_TOO_LONG_TEXT : "";
+    memoError.hidden = !tooLong;
+    return !tooLong;
+  };
 
   // Assigned later (we want to pass it into components as a live closure).
   let syncDraft = () => {};
@@ -493,6 +506,31 @@ export function sendFormView(ov, { state, actions } = {}) {
       },
     });
 
+  // The contacts a typed name can mean, by the start of their name or of a word in it.
+  const contactsNamed = (typed) => {
+    const q = typed.toLowerCase();
+    const items = Array.isArray(state.addressBook?.items) ? state.addressBook.items : [];
+    return items
+      .filter((c) => {
+        const name = String(c?.name ?? "").trim().toLowerCase();
+        return Boolean(c?.address) && (name.startsWith(q) || name.split(/[^\p{L}\p{N}]+/u).some((word) => word && word.startsWith(q)));
+      })
+      .slice(0, 3);
+  };
+
+  // "Your contact Jan · 26FCH7…", which puts the contact's address in the field.
+  const contactButton = (contact) =>
+    h("button", {
+      class: "text-btn text-btn--inline name-suggestion",
+      type: "button",
+      text: `Your contact ${String(contact.name).trim()} · ${shortAddress(contact.address)}`,
+      onclick: () => {
+        to.value = contact.address;
+        onRecipientInput();
+        to.focus?.();
+      },
+    });
+
   // Shows a lookup result for `v` if the field still holds it; true when Review can go ahead.
   const applyNameResult = (v, result) => {
     if (String(to.value || "").trim() !== v) return false;
@@ -634,6 +672,16 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     const t = ProfileGenerator.typeOf(v);
 
+    if (t === "account" && !isAccount(v)) {
+      hideRecipientBadge(toTypePill);
+      showNameBox([h("div", { class: "err", text: NOT_AN_ADDRESS_TEXT })]);
+      detectedRecipientType = null;
+      nextBtn.disabled = true;
+      updateContactMatch("", null);
+      updateAmountHelpers();
+      return;
+    }
+
     if (t === "account" || t === "address") {
       setRecipientBadge(toTypePill, {
         ...recipientTypeBadgeOptions(t),
@@ -653,6 +701,18 @@ export function sendFormView(ov, { state, actions } = {}) {
       showNameBox([h("div", { class: "err", text: EVM_ADDRESS_TEXT })]);
       detectedRecipientType = null;
       nextBtn.disabled = true;
+      updateContactMatch("", null);
+      updateAmountHelpers();
+      return;
+    }
+
+    // A contact's name comes before any guess at a .dusk name, which would
+    // be somebody else's.
+    const named = contactsNamed(v);
+    if (named.length) {
+      hideRecipientBadge(toTypePill);
+      showNameBox(named.map(contactButton));
+      detectedRecipientType = null;
       updateContactMatch("", null);
       updateAmountHelpers();
       return;
@@ -707,7 +767,10 @@ export function sendFormView(ov, { state, actions } = {}) {
     if (state.draft) state.draft.requestChainId = undefined;
   }
   to.addEventListener("input", onRecipientInput);
-  memo.addEventListener("input", syncDraft);
+  memo.addEventListener("input", () => {
+    checkMemo();
+    syncDraft();
+  });
   to.addEventListener("paste", (e) => {
     try {
       const txt = e?.clipboardData?.getData?.("text") ?? "";
@@ -846,6 +909,10 @@ export function sendFormView(ov, { state, actions } = {}) {
           amount.focus();
           return;
         }
+        if (!checkMemo()) {
+          memo.focus();
+          return;
+        }
         const amtLux = amtLuxBig.toString();
         const memoVal = memo.value.trim();
 
@@ -896,6 +963,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       h("div", { class: "amount-entry send-amount" }, [field.el, field.error, available, feeNote]),
       fieldLabel(memo, "Memo"),
       memo,
+      memoError,
       errBox,
       h("div", { class: "btnrow" }, [nextBtn]),
     ]),

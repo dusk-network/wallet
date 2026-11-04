@@ -26,7 +26,7 @@ const FINAL = new Set(["executed", "failed", "removed"]);
 // "Wallet changed while …" is the engine finding another network, profile or
 // wallet than the one the transaction was reviewed on.
 const REFUSED =
-  /wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed/i;
+  /wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed|failed to (archive|unarchive|deserialize)|unknown error code/i;
 
 // Why a send stopped before it went to the wallet: a switch started meanwhile.
 const SWITCHED = "The network, profile or wallet changed meanwhile.";
@@ -52,6 +52,9 @@ function clock(ts) {
 export function reasonText(error) {
   const text = String(error ?? "").trim().replace(/\s+/g, " ");
   if (!text) return "";
+  // What the wallet's transaction builder says, in words.
+  if (/failed to deserialize/i.test(text)) return "The wallet couldn't read the address. Check it and try again.";
+  if (/failed to (archive|unarchive)|unknown error code/i.test(text)) return "The wallet couldn't build this transaction.";
   const short = text.length > 140 ? `${text.slice(0, 139)}…` : text;
   return /[.!?…]$/.test(short) ? short : `${short}.`;
 }

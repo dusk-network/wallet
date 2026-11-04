@@ -209,6 +209,18 @@ describe("after Confirm", () => {
     expect(rows().at(-1)).toBe("Network feeNone charged");
   });
 
+  it.each([
+    ["Failed to deserialize the buffer", "The wallet couldn't read the address. Check it and try again."],
+    ["Unknown error code: 251", "The wallet couldn't build this transaction."],
+  ])("says plainly that nothing went out when the wallet can't build it: %s", async (message, words) => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    (await app.confirm()).resolve({ error: { message } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", `${words} No fee was charged.`]);
+  });
+
   it("doesn't claim nothing went out when the reply was lost, and leads with Done", async () => {
     const state = reviewState();
     const app = popup(state);

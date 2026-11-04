@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
 import { TX_KIND } from "../shared/constants.js";
+import { isAccount } from "@dusk-network/networks/account";
 import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
@@ -19,6 +20,11 @@ vi.mock("./components/QrScanModal.js", () => ({
   parseDuskQrPayload: vi.fn(() => null),
 }));
 vi.mock("../shared/addressBook.js", () => ({ listAddressBook: vi.fn(async () => []) }));
+// The accounts here are made up, so none is a key: a test says when it matters.
+vi.mock("@dusk-network/networks/account", async (importOriginal) => ({
+  ...(await importOriginal()),
+  isAccount: vi.fn(() => true),
+}));
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupDuskName: vi.fn(),
@@ -118,6 +124,8 @@ beforeEach(() => {
   dom = installFakeDom();
   lookupPrimaryName.mockReset();
   lookupPrimaryName.mockImplementation(async () => null);
+  isAccount.mockReset();
+  isAccount.mockReturnValue(true);
   lookupDuskName.mockReset();
   lookupDuskName.mockImplementation((input) => {
     const key = String(input).trim().toLowerCase();
@@ -399,6 +407,78 @@ describe("send to a .dusk name with one address", () => {
     const review = mount(state, ov);
     expect(review.visibleLine()).toBe("Visible to everyone: amount and your account.");
     expect(review.reviewTo()).toBe(`dave.dusk${dave}`);
+  });
+});
+
+describe("what the To field says about what's typed", () => {
+  it("says a mistyped account isn't an address, and Review stays off", () => {
+    isAccount.mockReturnValue(false);
+    const form = mount(newState());
+    typeInto(form.to, ALICE.account);
+    expect(visibleText(form.nameBox())).toBe("Not a valid address. Check it and try again.");
+    expect(form.pill()).toBe("");
+    expect(form.review.disabled).toBe(true);
+
+    // Corrected, it's an account again.
+    isAccount.mockReturnValue(true);
+    typeInto(form.to, ALICE.account);
+    expect(visibleText(form.nameBox())).toBe("");
+    expect(form.pill()).toBe("Public");
+    expect(form.review.disabled).toBe(false);
+  });
+
+  it("offers a contact by name before any .dusk name, which would be somebody else's", () => {
+    const state = newState();
+    state.addressBook.items = [
+      { name: "Alice", address: BOB.account },
+      { name: "Jan (flour)", address: BOB.address },
+    ];
+    const form = mount(state);
+
+    typeInto(form.to, "alice");
+    expect(visibleText(form.nameBox())).toBe(`Your contact Alice · ${shortAddress(BOB.account)}`);
+
+    typeInto(form.to, "flour");
+    expect(visibleText(form.nameBox())).toBe(`Your contact Jan (flour) · ${shortAddress(BOB.address)}`);
+
+    // Nothing by that name in Contacts: the guess is still offered.
+    typeInto(form.to, "bob");
+    expect(visibleText(form.nameBox())).toBe("Did you mean bob.dusk?");
+
+    typeInto(form.to, "alice");
+    form.nameBox().querySelector("button").click();
+    expect(form.to.value).toBe(BOB.account);
+    expect(form.pill()).toBe("Public");
+  });
+});
+
+describe("a memo too long for the network", () => {
+  it("says so under the field and stays on the form, counting bytes", async () => {
+    const state = newState();
+    const form = mount(state);
+    const memo = dom.document.body.querySelectorAll("input").find((i) => i.getAttribute("placeholder") === "Optional");
+    const error = () => {
+      const el = dom.document.body.querySelector(".memo-error");
+      return isShown(el) ? el.textContent : "";
+    };
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "1");
+
+    typeInto(memo, "x".repeat(513));
+    expect(error()).toBe("That memo is too long: 512 bytes at most.");
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("send");
+
+    typeInto(memo, "€".repeat(171));
+    expect(error()).not.toBe("");
+
+    typeInto(memo, "x".repeat(512));
+    expect(error()).toBe("");
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
+    expect(state.draft.memo).toHaveLength(512);
   });
 });
 

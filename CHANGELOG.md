@@ -193,6 +193,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- A mistyped account is refused at the To field and in Contacts. A memo over the network's limit says so under the field.
+- Typing a contact's name offers that contact before any `.dusk` name.
+- A transaction the wallet can't build says nothing was sent, in plain words.
 - A decimal comma in an amount no longer disappears: 0,1 is 0.1, not 1. Input that is no amount gets an error instead of being changed.
 - Read balances and sent tokens built on the DRC20 standard from the token list, and took a contract as a token recipient or spender.
 - Restarted an old background worker left running after an update, which stopped the wallet unlocking.
