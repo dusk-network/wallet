@@ -104,9 +104,10 @@ export function useNetworkGas({ actions, gasEditor, defaultLimit, fallbackPrice,
  *   gas?: { limit: string, price: string } | null, fallbackPrice?: string,
  * }} opts
  */
-export function reviewGas({ kind, gasOpts, amountLux, ov, actions, gas, fallbackPrice = "" }) {
+export function reviewGas({ kind, gasOpts, amountLux, hideTotal = false, ov, actions, gas, fallbackPrice = "" }) {
   const defaultGas = getDefaultGas(kind, gasOpts);
   const editor = document.createElement("dusk-gas-editor");
+  editor.hideTotal = hideTotal;
   editor.amountLux = amountLux;
   editor.maxDecimals = UI_DISPLAY_DECIMALS;
   useNetworkGas({

@@ -14,6 +14,7 @@ import { BLOCKED_TITLE, blockedRecipient } from "../../../shared/recipientBlockl
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
 import { guarded } from "../../lib/clickGuard.js";
+import { joinedAddress } from "../../lib/recipient.js";
 import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
@@ -50,6 +51,8 @@ import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 // Base58 of an account's length that isn't a key: a mistyped account.
 const NOT_AN_ADDRESS_TEXT = "Not a valid address. Check it and try again.";
+// The longest a .dusk name can be, with .dusk.
+const LONGEST_NAME = 68;
 // What the network takes.
 const MAX_MEMO_BYTES = 512;
 const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
@@ -145,6 +148,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   const field = amountField({
     label: "Amount",
     value: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
+    masked: hidden && Boolean(draft.amountMasked),
     onInput: () => {
       checkAmount();
       syncDraft();
@@ -178,11 +182,11 @@ export function sendFormView(ov, { state, actions } = {}) {
     onclick: () => {
       const maxLux = getMaxAmountLux();
       if (maxLux == null || maxLux <= 0n) return;
-      // The real amount, with balances hidden too: it's what gets sent.
-      field.setValue(formatLuxToDusk(maxLux));
+      // The real amount, which gets sent, shown as dots with balances hidden.
+      field.setValue(formatLuxToDusk(maxLux), { masked: hidden });
       checkAmount();
       syncDraft();
-      amount.focus();
+      field.focus();
     },
   });
   const available = h("div", { class: "amount-avail", hidden: true }, [availText, maxBtn]);
@@ -245,6 +249,17 @@ export function sendFormView(ov, { state, actions } = {}) {
   // A request for another network says so under the recipient, and stays
   // until the recipient changes: its network is kept with the draft, so
   // Review and any redraw say it too.
+  const errBox = h("div", { class: "err", style: "display:none" });
+  const setErr = (txt) => {
+    if (!txt) {
+      errBox.style.display = "none";
+      errBox.textContent = "";
+      return;
+    }
+    errBox.style.display = "block";
+    errBox.textContent = txt;
+  };
+
   const chainNote = h("div", { class: "field-error", role: "alert", hidden: true });
   const warnChainMismatch = (reqChain) => {
     const text = chainMismatchText(reqChain, ov?.nodeUrl);
@@ -633,6 +648,9 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   const updateToType = () => {
+    // Whatever Review said was about what was here before.
+    setErr("");
+    to.value = joinedAddress(to.value || "");
     const v = String(to.value || "").trim();
     showSelfNote("");
     shownName = null;
@@ -730,6 +748,17 @@ export function sendFormView(ov, { state, actions } = {}) {
       return;
     }
 
+    // Too long for a name, and it isn't an address: not one in the making.
+    if (v.length > LONGEST_NAME) {
+      hideRecipientBadge(toTypePill);
+      showNameBox([h("div", { class: "err", text: NOT_AN_ADDRESS_TEXT })]);
+      detectedRecipientType = null;
+      nextBtn.disabled = true;
+      updateContactMatch("", null);
+      updateAmountHelpers();
+      return;
+    }
+
     // Fallback: unknown format
     setRecipientBadge(toTypePill, {
       kind: "unknown",
@@ -752,6 +781,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       duskName: undefined,
       nameChoices: { ...nameChoices },
       amountDusk: String(amount.value || ""),
+      amountMasked: field.isMasked(),
       memo: String(memo.value || ""),
       // preserve any gas edits the user may have made on the confirm screen
       gas: state.draft?.gas,
@@ -833,6 +863,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           // A new contact gets the address a shown name sends to, in full in its form.
           // A name still being looked up, or one that didn't resolve, gives no address.
           prefillAddress: shownName ? nameRecipient(shownName) : isDuskName(toVal) ? "" : toVal,
+          prefillName: "",
           view: "list",
           query: "",
           loaded: false,
@@ -853,17 +884,6 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
 
   const toRow = h("div", { class: "input-row" }, [toWrap, scanBtn, bookBtn]);
-
-  const errBox = h("div", { class: "err", style: "display:none" });
-  const setErr = (txt) => {
-    if (!txt) {
-      errBox.style.display = "none";
-      errBox.textContent = "";
-      return;
-    }
-    errBox.style.display = "block";
-    errBox.textContent = txt;
-  };
 
   const nextBtn = h("button", {
     class: "btn-primary",
@@ -897,7 +917,7 @@ export function sendFormView(ov, { state, actions } = {}) {
 
         const recType = ProfileGenerator.typeOf(recipient);
         if (recType !== "account" && recType !== "address") {
-          throw new Error("Invalid recipient: expected a Dusk account or shielded address");
+          throw new Error(contactsNamed(toVal).length ? "Tap the contact above to use it." : NOT_AN_ADDRESS_TEXT);
         }
         const blocked = blockedRecipient(recipient, ov?.chainId);
         if (blocked) throw new Error(blocked);
@@ -926,6 +946,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           privacy,
           amountLux: amtLux,
           amountDusk: amount.value.trim(),
+          amountMasked: field.isMasked(),
           memo: memoVal,
           gas: prevGas,
           // A request link's network, for Review to say so when it isn't this one.
@@ -988,6 +1009,9 @@ export function chainMismatchText(reqChain, nodeUrl) {
 }
 
 // Who pays and on which network, as a Review was asked for.
+// What leaving a Review for a switch of wallet, profile or network says.
+const notSentNotice = (actions) => actions?.showToast?.("The wallet, profile or network changed. Check the send again.", 3000);
+
 const reviewedFor = (ov) => `${ov?.accounts?.[0] ?? ""} ${Number(ov?.selectedAccountIndex ?? 0) || 0} ${ov?.nodeUrl ?? ""}`;
 
 /**
@@ -1014,7 +1038,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // the form, rather than a Review that quietly says something else.
   if (!d || (duskName && duskName.nodeUrl !== String(ov?.nodeUrl ?? "")) || (d.reviewedFor && d.reviewedFor !== reviewedFor(ov))) {
     state.route = "send";
-    return sendFormView(ov, { state, actions });
+    const form = sendFormView(ov, { state, actions });
+    if (d?.reviewedFor && d.reviewedFor !== reviewedFor(ov)) notSentNotice(actions);
+    return form;
   }
 
   const recType = ProfileGenerator.typeOf(String(d.to || "").trim());
@@ -1131,11 +1157,14 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // Back returns to Send with the draft, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm", disabled: nothingArrives });
 
+  // What Max filled in stays hidden with the balances; an amount typed shows.
+  const amountMasked = balancesHidden(ov) && Boolean(d.amountMasked);
   // The network's gas price by default; Custom fee for gas of your own.
   const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
     kind: TX_KIND.TRANSFER,
     gasOpts: { privacy },
     amountLux: d.amountLux,
+    hideTotal: amountMasked,
     ov,
     actions,
     gas: d?.gas,
@@ -1208,11 +1237,11 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           text: service ? `Bridge to ${service.chain}` : privacy === "shielded" ? "Shielded transfer" : "Public transfer",
         }),
         h("div", { class: "balance-amount" }, [
-          formatDuskExact(d.amountLux),
+          balance(amountMasked, formatDuskExact(d.amountLux)),
           h("span", { class: "balance-unit", text: " DUSK" }),
         ]),
         // To the bridge: what arrives on the other chain, once it takes its fee.
-        service ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) }) : null,
+        service && !amountMasked ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) }) : null,
         // What a public send shows everyone; a shielded one has no such line.
         privacy === "public" ? visibleLine : null,
       ].filter(Boolean)),

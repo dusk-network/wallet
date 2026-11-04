@@ -322,7 +322,7 @@ function stakingContext(ov, { state, actions } = {}) {
 }
 
 // Where Review's draft comes from: the action, its amount and the profiles.
-function makeDraft(pos, st, { state, actions, actionKind, amountLux = null, amountMode = "all" }) {
+function makeDraft(pos, st, { state, actions, actionKind, amountLux = null, amountMode = "all", amountMasked = false }) {
   const kind = actionToKind(actionKind);
   const stakeProfileIndex = Number(pos.stakeProfileIndex) || 0;
   const ownerProfileIndex =
@@ -336,6 +336,7 @@ function makeDraft(pos, st, { state, actions, actionKind, amountLux = null, amou
     ownerProfileIndex,
     amountLux,
     amountMode,
+    amountMasked,
     hasStake: Boolean(pos.hasStake),
     // What Unstake and Claim move, for Review and the Sent screen.
     displayLux:
@@ -484,6 +485,14 @@ function rewardRates(ov, { state, actions }) {
   };
 }
 
+// A Sozu stake or unstake of this profile's that isn't in a block yet.
+function sozuTxOnItsWay(ov) {
+  const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
+  return (Array.isArray(ov?.txs) ? ov.txs : []).find(
+    (tx) => tx?.asset?.kind === "sozu" && tx.profileIndex === idx && (tx.status === "submitted" || tx.status === "mempool")
+  );
+}
+
 function stakingOverview(ov, ctx, { state, actions }) {
   const { st, minLux, positions, pos, hidden, feeGas } = ctx;
   const onBack = () => {
@@ -509,16 +518,20 @@ function stakingOverview(ov, ctx, { state, actions }) {
   const hasLiquid = holding.known && (holding.poolLux > 0n || holding.stDuskLux > 0n);
   const hasNative = stakedLux > 0n || rewardLux > 0n;
   const showNativeActions = hasNative || !hasLiquid;
-  // Nothing natively staked says nothing of Sozu, until what's there is read.
-  const sozuUnread = (!holding.known || holding.failed) && !hasNative;
+  const sozuOnItsWay = sozuTxOnItsWay(ov);
+  // Nothing natively staked says nothing of Sozu, until what's there is read,
+  // with what's on its way in it.
+  const sozuUnread = (!holding.known || holding.failed || holding.reading || Boolean(sozuOnItsWay)) && !hasNative;
 
   // The reasons Unstake and Claim can't be pressed, said once each.
   const reasons = showNativeActions && !sozuUnread ? [...new Set([unstakeState, claimState].filter((s) => !s.ok).map((s) => s.reason))] : [];
-  const sozuNote = !holding.failed
-    ? null
-    : hasLiquid
-      ? "What's with Sozu couldn't be read again, so it may be out of date."
-      : "What's with Sozu couldn't be read.";
+  const sozuNote = sozuOnItsWay
+    ? `Your ${sozuOnItsWay.asset.action === "sozu_unstake" ? "unstake from" : "stake with"} Sozu is on its way.`
+    : !holding.failed
+      ? null
+      : hasLiquid
+        ? "What's with Sozu couldn't be read again, so it may be out of date."
+        : "What's with Sozu couldn't be read.";
 
   const figure = (label, lux, sub = null) =>
     h("div", {}, [
@@ -699,8 +712,10 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     label: isNew ? "Stake amount" : "Amount to add",
     value: st.stakeAmountDusk ?? "",
     disabled: !blocked.ok,
+    masked: hidden && Boolean(st.stakeMasked),
     onInput: () => {
       st.amountMode = "custom";
+      st.stakeMasked = false;
       check();
     },
     onEnter: () => review(),
@@ -769,15 +784,18 @@ function nativeStakeView(ov, ctx, { state, actions }) {
       actionKind: ACTION_TOPUP,
       amountLux: lux.toString(),
       amountMode: st.amountMode === "max" ? "max" : "custom",
+      amountMasked: field.isMasked(),
     });
     st.amountMode = "custom";
   }
 
   const fill = (lux, mode) => {
-    field.setValue(formatLuxToDusk(lux));
+    // What Max fills in shows as dots with balances hidden; the minimum isn't a balance.
+    st.stakeMasked = mode === "max";
+    field.setValue(formatLuxToDusk(lux), { masked: hidden && st.stakeMasked });
     st.amountMode = mode;
     check();
-    field.input.focus();
+    field.focus();
   };
 
   const useMin =
@@ -912,6 +930,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
     kind,
     gasOpts: { privacy: gasPrivacy },
     amountLux: kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0",
+    hideTotal: kind === TX_KIND.STAKE && balancesHidden(ov) && Boolean(d.amountMasked),
     ov,
     actions,
     gas: d?.gas,
@@ -919,10 +938,10 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
 
   // What moves: the amount staked, or all of the stake or the rewards. The
   // stake and the rewards are balances, hidden with Hide balances; an amount
-  // typed in for a stake shows, as on every Review.
+  // typed in for a stake shows, as on every Review; what Max filled in doesn't.
   const shownLux = kind === TX_KIND.STAKE ? d.amountLux : d.amountLux || d.displayLux;
   const allText = kind === TX_KIND.UNSTAKE ? "All stake" : kind === TX_KIND.WITHDRAW_REWARD ? "All rewards" : "—";
-  const hideAmount = kind !== TX_KIND.STAKE && balancesHidden(ov);
+  const hideAmount = (kind !== TX_KIND.STAKE || Boolean(d.amountMasked)) && balancesHidden(ov);
   const amountLine = () =>
     shownLux && safeBigInt(shownLux, 0n) > 0n ? [balance(hideAmount, fmtLux(shownLux)), " DUSK"] : [allText];
 

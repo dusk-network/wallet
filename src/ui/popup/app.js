@@ -743,11 +743,10 @@ function installTxStatusListener() {
         }, 2200);
 
         // Trigger a refresh so balances/state update soon after execution.
+        // Through render, which reads staking again along with the overview.
         state.needsRefresh = true;
         setTimeout(() => {
-          refreshOverview(send, { force: true })
-            .then(() => render())
-            .catch(() => {});
+          render({ forceRefresh: true }).catch(() => {});
         }, 500);
         // The archive has it once its block is final: ask once, a little later.
         if (status === "executed" || status === "failed") refreshActivitySoon({ state, render });

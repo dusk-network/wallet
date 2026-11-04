@@ -403,10 +403,11 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
  * What the selected profile holds with Sozu, for the Staking overview, as read
  * for this wallet on this network. `known` is false until that's read, or when
  * the read found the pool but not the position. `failed` says the last read
- * failed, so what's known may be out of date.
+ * failed, so what's known may be out of date, and `reading` that it's being
+ * read again.
  * @param {object} ov
  * @param {{ state: object, actions: object }} ctx
- * @returns {{ known: boolean, failed: boolean, poolLux: bigint, stDuskLux: bigint }}
+ * @returns {{ known: boolean, failed: boolean, reading: boolean, poolLux: bigint, stDuskLux: bigint }}
  */
 export function sozuHolding(ov, { state, actions } = {}) {
   const st = sozuState(state);
@@ -433,6 +434,7 @@ export function sozuHolding(ov, { state, actions } = {}) {
   return {
     known: answered && !noPosition,
     failed: Boolean(st.error) || noPosition,
+    reading: Boolean(st.loading),
     poolLux: safeBigInt(position.poolBalanceLux, 0n),
     stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n),
   };
@@ -497,11 +499,17 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     }
   };
 
+  // Whether Max filled this amount in: it shows as dots with balances hidden.
+  const maskedKey = isWithdraw ? "withdrawMasked" : "depositMasked";
   const field = amountField({
     label: isWithdraw ? "Unstake amount" : "Stake amount",
     value: isWithdraw ? st.withdrawAmountDusk : st.depositAmountDusk,
     disabled: !cfg || stakeOff,
-    onInput: () => check(),
+    masked: hidden && Boolean(st[maskedKey]),
+    onInput: () => {
+      st[maskedKey] = false;
+      check();
+    },
     onEnter: () => review(),
   });
 
@@ -580,10 +588,13 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     reviewBtn.disabled = false;
     // What it gets for what's left after the fee, then what stDUSK is.
     estimate.replaceChildren(
-      h("div", {
-        class: "stake-estimate__main",
-        text: `You get about ${stDuskText(quote.stDusk)} stDUSK, worth about ${formatDusk(quote.worth.toString())} DUSK now.`,
-      }),
+      h("div", { class: "stake-estimate__main" }, [
+        "You get about ",
+        balance(field.isMasked(), stDuskText(quote.stDusk)),
+        " stDUSK, worth about ",
+        balance(field.isMasked(), formatDusk(quote.worth.toString())),
+        " DUSK now.",
+      ]),
       h("div", { text: "stDUSK is Sozu's token for your share. Its DUSK value follows Sozu's pool, its rewards and its fees." })
     );
     estimate.hidden = false;
@@ -606,6 +617,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       profileIndex,
       fnArgsAmountLux: amountLux.toString(),
       quote: quote ? quoteJson(quote, depositFee) : null,
+      amountMasked: field.isMasked(),
       label: isWithdraw ? "Unstake from Sozu" : "Liquid staking",
       // Where it belongs, as this form was drawn: its Review checks the popup is still there.
       reviewed: reviewRecord(ov, profileIndex, formContext, liveStatus?.networkKey),
@@ -646,9 +658,10 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     title: isWithdraw ? "All you have staked with Sozu" : "All of it, less the network fee and the fee to unstake later",
     disabled: !cfg || stakeOff || maxActionLux <= 0n,
     onclick: () => {
-      field.setValue(formatLuxToDusk(maxActionLux));
+      st[maskedKey] = true;
+      field.setValue(formatLuxToDusk(maxActionLux), { masked: hidden });
       check();
-      field.input.focus();
+      field.focus();
     },
   });
   const available = h("div", { class: "amount-avail" }, [
@@ -820,9 +833,13 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
 
   // The call's own gas at the network's price; Custom fee for gas of your own.
   const gasOpts = { privacy: "public", fnName };
+  const hidden = balancesHidden(ov);
+  // What Max filled in stays hidden here; an amount typed shows, as on every Review.
+  const amountMasked = hidden && Boolean(draft.amountMasked);
   const ownGas = getDefaultGas(TX_KIND.CONTRACT_CALL, gasOpts);
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
+  gasEditor.hideTotal = amountMasked;
   gasEditor.amountLux = "0";
   gasEditor.extraLux = [String(draft.deposit ?? "0")];
   gasEditor.setGas(draft?.gas ?? null);
@@ -852,7 +869,6 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
 
   const title = isStake ? "Liquid staking" : "Unstake from Sozu";
   const line = isStake ? "With Sozu, a third party" : "From Sozu, back to your public balance";
-  const hidden = balancesHidden(ov);
   const profileName = profileNameEl(ov, { index: Number(draft.profileIndex ?? 0) || 0 });
 
   // Gas that won't do, or terms that couldn't be checked, say so above Confirm; nothing is sent.
@@ -976,7 +992,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     h("div", { class: "row" }, [
       h("div", { class: "review-head" }, [
         h("div", { class: "review-kind", text: title }),
-        h("div", { class: "balance-amount", text: `${fmtLux(draftNeeds.toString())} DUSK` }),
+        h("div", { class: "balance-amount" }, [balance(amountMasked, fmtLux(draftNeeds.toString())), " DUSK"]),
         h("div", { class: "review-line", text: line }),
       ]),
       draft.termsChanged
@@ -988,7 +1004,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       syncing ? syncWarning() : null,
       h("div", { class: "group" }, [
         quote
-          ? kv("You get about", `${stDuskText(quote.stDusk)} stDUSK, worth about ${fmtLux(quote.worth)} DUSK now`)
+          ? kv("You get about", h("span", {}, [balance(amountMasked, stDuskText(quote.stDusk)), " stDUSK, worth about ", balance(amountMasked, fmtLux(quote.worth)), " DUSK now"]))
           : null,
         quote && quoteRate ? kv("Deposit fee", h("span", {}, depositFeeParts(quoteRate, safeBigInt(quote.fee, 0n), hidden))) : null,
         kv(isStake ? "From" : "To", [h("span", {}, [withReviewWallet(profileName, actions?.review), h("span", { class: "kv-muted", text: " · Public" })])]),

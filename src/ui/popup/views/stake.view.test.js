@@ -345,6 +345,32 @@ describe("staking overview", () => {
     expect(text).not.toContain("Nothing staked yet");
   });
 
+  it("says a first Sozu stake is on its way, and not that nothing is staked", () => {
+    const txs = [{ hash: "ab".repeat(32), status: "submitted", profileIndex: 0, asset: { kind: "sozu", action: "sozu_stake" } }];
+    popup({ route: "stake", staking: staking(), sozu: sozu() }, ov({ txs }));
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("Your stake with Sozu is on its way.");
+    expect(text).not.toContain("Nothing staked yet");
+  });
+
+  it("goes by this profile's own Sozu transactions that are still on their way", () => {
+    const tx = { hash: "ab".repeat(32), asset: { kind: "sozu", action: "sozu_unstake" } };
+    const says = (txs, over) => {
+      popup({ route: "stake", staking: staking(), sozu: sozu() }, ov({ txs, ...over }));
+      return visibleText(body.querySelector(".stake-sum"));
+    };
+    expect(says([{ ...tx, status: "mempool", profileIndex: 0 }])).toContain("Your unstake from Sozu is on its way.");
+    expect(says([{ ...tx, status: "executed", profileIndex: 0 }])).toContain("Nothing staked yet");
+    expect(says([{ ...tx, status: "failed", profileIndex: 0 }])).toContain("Nothing staked yet");
+    expect(says([{ ...tx, status: "submitted", profileIndex: 1 }])).toContain("Nothing staked yet");
+    expect(says([{ hash: tx.hash, status: "submitted", profileIndex: 0 }])).toContain("Nothing staked yet");
+  });
+
+  it("doesn't say nothing is staked while Sozu is being read again", () => {
+    popup({ route: "stake", staking: staking(), sozu: sozu({ loaded: false, loading: true }) });
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("Nothing staked yet");
+  });
+
   it("says nothing is staked on a network without Sozu", () => {
     const status = { configured: false, networkKey: "testnet" };
     popup({ route: "stake", staking: staking(), sozu: sozu({ status, position: null }) });
@@ -1342,6 +1368,87 @@ describe("liquid staking", () => {
     expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.4714 stDUSK, worth about 99.75 DUSK now.");
     expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25% · •••• DUSK");
     expect(visibleText(body.querySelector(".group.info"))).toContain("Network fee up to 0.005 DUSK");
+  });
+});
+
+describe("what Max fills in, with Hide balances", () => {
+  const shownField = () => [...body.querySelectorAll(".amount-field input")].find((input) => !input.hidden);
+
+  it("hides a Sozu stake's amount and what it gets, on the form and on Review, and sends it all the same", async () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    popup(state, ov({ hideBalances: true }));
+    button("Max").click();
+    expect(shownField().value).toBe("••••");
+    expect(accessibleName(shownField())).toBe("Stake amount, hidden");
+    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about •••• stDUSK, worth about •••• DUSK now.");
+
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".balance-amount"))).toBe("•••• DUSK");
+    expect([...body.querySelectorAll(".kv")].map(visibleText).find((row) => row.startsWith("You get about"))).toBe("You get about•••• stDUSK, worth about •••• DUSK now");
+    expect(visibleText(body.querySelector(".gas-total-value"))).toBe("up to •••• DUSK");
+    expect(BigInt(state.sozuDraft.fnArgsAmountLux) > 0n).toBe(true);
+  });
+
+  it("shows an amount typed over it, and the form keeps it hidden when it's drawn again", () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    const app = popup(state, ov({ hideBalances: true }));
+    button("Max").click();
+    app.draw();
+    expect(shownField().value).toBe("••••");
+    expect(accessibleName(shownField())).toBe("Stake amount, hidden");
+
+    typeInto(shownField(), "100");
+    expect(shownField().value).toBe("100");
+    expect(accessibleName(shownField())).toBe("Stake amount");
+    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.4714 stDUSK");
+  });
+
+  it("hides a native stake's amount from Max on Review, and sends it all the same", async () => {
+    const state = { route: "stake", staking: staking(owner({ publicBalance: { value: dusk(2000) } }), { screen: "native" }) };
+    popup(state, ov({ hideBalances: true }));
+    button("Max").click();
+    expect(shownField().value).toBe("••••");
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".balance-amount"))).toBe("•••• DUSK");
+    expect(visibleText(body.querySelector(".gas-total-value"))).toBe("up to •••• DUSK");
+    expect(BigInt(state.stakeDraft.amountLux) > 0n).toBe(true);
+
+    // And through Back to the form and Review again.
+    button("← Back").click();
+    await settle();
+    expect(shownField().value).toBe("••••");
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".balance-amount"))).toBe("•••• DUSK");
+  });
+
+  it("clears the amount when the dots are deleted, and Review stays off", () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    popup(state, ov({ hideBalances: true }));
+    button("Max").click();
+    expect(button("Review stake").disabled).toBe(false);
+    typeInto(shownField(), "•••");
+    expect(shownField().value).toBe("");
+    expect(accessibleName(shownField())).toBe("Stake amount");
+    expect(button("Review stake").disabled).toBe(true);
+    expect(state.sozu.depositAmountDusk).toBe("");
+  });
+
+  it("says what's wrong with a hidden amount on the field that shows", () => {
+    const state = { route: "stake", staking: staking(owner({ publicBalance: { value: dusk(500) } }), { screen: "native" }) };
+    popup(state, ov({ hideBalances: true }));
+    button("Max").click();
+    expect(shownField().getAttribute("aria-invalid")).toBe("true");
+    expect(shownField().getAttribute("aria-describedby")).toBeTruthy();
+  });
+
+  it("shows the minimum it can fill in, as it isn't a balance", () => {
+    const state = { route: "stake", staking: staking(owner({ publicBalance: { value: dusk(2000) } }), { screen: "native" }) };
+    popup(state, ov({ hideBalances: true }));
+    button("Use 1,000").click();
+    expect(shownField().value).toBe("1000");
   });
 });
 

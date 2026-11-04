@@ -5,6 +5,7 @@ import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { duskNameErrorText, duskNameRecipient, duskNamesNetwork, lookupDuskName } from "../../../shared/duskNames.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { joinedAddress, passesForDuskName } from "../../lib/recipient.js";
 import { waiting } from "../../components/Waiting.js";
 import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
@@ -44,7 +45,7 @@ function typeLabel(t) {
 function normalizeRecipient(raw) {
   const s = String(raw ?? "").trim();
   if (!s) return "";
-  if (!/^dusk:/i.test(s)) return s;
+  if (!/^dusk:/i.test(s)) return joinedAddress(s);
   const req = parseDuskQrPayload(s);
   if (req?.to) return String(req.to).trim();
   return s;
@@ -162,7 +163,7 @@ export function addressBookView(ov, { state, actions } = {}) {
     }
   };
 
-  const startEdit = (entry = null, returnView = "list") => {
+  const startEdit = (entry = null, returnView = "list", shielded = false) => {
     ab.view = "edit";
     ab.error = null;
     ab.editId = entry?.id ?? null;
@@ -170,7 +171,7 @@ export function addressBookView(ov, { state, actions } = {}) {
     ab.editName = entry?.name ?? String(ab.prefillName ?? "");
     // A contact saved from a .dusk name is edited by its name.
     ab.editAddress = entry ? entry.duskName || entry.address || "" : normalizeRecipient(ab.prefillAddress ?? "");
-    ab.editShielded = entry?.duskName ? entry.type === "address" : false;
+    ab.editShielded = entry?.duskName ? entry.type === "address" : shielded;
     rerender();
   };
 
@@ -248,9 +249,11 @@ export function addressBookView(ov, { state, actions } = {}) {
                 text: "Save",
                 "aria-label": `Save ${d.name} to Contacts`,
                 onclick: () => {
-                  ab.prefillAddress = d.address;
+                  // Named after a .dusk name, it's saved from that name.
+                  const fromName = !d.isAddress && isDuskName(d.name);
+                  ab.prefillAddress = fromName ? d.name : d.address;
                   ab.prefillName = d.isAddress ? "" : d.name;
-                  startEdit(null);
+                  startEdit(null, "list", fromName && ProfileGenerator.typeOf(d.address) === "address");
                 },
               }),
             ])
@@ -552,9 +555,20 @@ export function addressBookView(ov, { state, actions } = {}) {
             addrInput.focus();
             return;
           }
+          if (passesForDuskName(name, t.duskName)) {
+            setFieldError(nameInput, nameError, "That looks like a .dusk name. Enter it as the address below, or choose another name.");
+            nameInput.focus();
+            return;
+          }
           const own = ownText(ov, t.address);
           if (own) {
             setFieldError(addrInput, addrError, own);
+            addrInput.focus();
+            return;
+          }
+          const other = (Array.isArray(ab.items) ? ab.items : []).find((e) => e?.address === t.address && e?.id !== ab.editId);
+          if (other) {
+            setFieldError(addrInput, addrError, `This address is already saved as ${other.name}.`);
             addrInput.focus();
             return;
           }

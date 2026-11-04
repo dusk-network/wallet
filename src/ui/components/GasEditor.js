@@ -1,5 +1,6 @@
 import { UI_DISPLAY_DECIMALS, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { h, setChildren } from "../lib/dom.js";
+import { balance } from "./Balance.js";
 import { fieldLabel, integerInput } from "./FormControls.js";
 
 // The one fee editor, on every Review and in the approval windows: the
@@ -43,6 +44,7 @@ export class DuskGasEditor extends HTMLElement {
   #initialized = false;
 
   #amountLux = 0n;
+  #hideTotal = false;
   #extraLux = [];
   #maxDecimals = UI_DISPLAY_DECIMALS;
   #helpText = "Max fee = gas limit × gas price. Clear both to use the wallet's defaults.";
@@ -72,6 +74,12 @@ export class DuskGasEditor extends HTMLElement {
     this.#initialized = true;
     this.style.display = "block";
     this.render();
+  }
+
+  // An amount Max filled in stays hidden with the balances, and the total
+  // gives it away.
+  set hideTotal(v) {
+    this.#hideTotal = Boolean(v);
   }
 
   set amountLux(v) {
@@ -333,7 +341,8 @@ export class DuskGasEditor extends HTMLElement {
     for (const x of this.#extraLux) totalLux += x;
 
     // A maximum too, so it rounds up as the fee does.
-    this.#totalValue.textContent = `up to ${formatFee(totalLux, { max: true })} DUSK`;
+    if (this.#hideTotal) setChildren(this.#totalValue, [h("span", {}, ["up to ", balance(true, ""), " DUSK"])]);
+    else this.#totalValue.textContent = `up to ${formatFee(totalLux, { max: true })} DUSK`;
     this.#totalValue.title = "";
   }
 

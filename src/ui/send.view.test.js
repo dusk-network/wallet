@@ -431,6 +431,49 @@ describe("a Review when who pays changes", () => {
   });
 });
 
+describe("what Max fills in, with Hide balances", () => {
+  const shown = () => [...dom.document.body.querySelectorAll(".amount-field input")].find((input) => !input.hidden);
+
+  it("shows as dots on the form and on Review, and is what gets sent", async () => {
+    const state = newState();
+    const ov = overview({ hideBalances: true });
+    const form = mount(state, ov);
+    typeInto(form.to, ALICE.account);
+    dom.document.body.querySelector(".amount-avail .mini-btn").click();
+    expect(shown().value).toBe("••••");
+    expect(form.amount.value).not.toBe("");
+
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
+    expect(BigInt(state.draft.amountLux) > 0n).toBe(true);
+    mount(state, ov);
+    expect(visibleText(dom.document.body.querySelector(".balance-amount"))).toBe("•••• DUSK");
+    expect(visibleText(dom.document.body.querySelector(".gas-total-value"))).toBe("up to •••• DUSK");
+  });
+
+  it("shows what's typed over it", () => {
+    const state = newState();
+    const form = mount(state, overview({ hideBalances: true }));
+    typeInto(form.to, ALICE.account);
+    dom.document.body.querySelector(".amount-avail .mini-btn").click();
+    typeInto(shown(), "1");
+    expect(shown().value).toBe("1");
+    expect(state.draft.amountMasked).toBe(false);
+    expect(state.draft.amountDusk).toBe("1");
+  });
+
+  it("clears the amount when the dots are deleted", () => {
+    const state = newState();
+    const form = mount(state, overview({ hideBalances: true }));
+    typeInto(form.to, ALICE.account);
+    dom.document.body.querySelector(".amount-avail .mini-btn").click();
+    typeInto(shown(), "•••");
+    expect(shown().value).toBe("");
+    expect(state.draft.amountDusk).toBe("");
+  });
+});
+
 describe("what the To field says about what's typed", () => {
   it("says a mistyped account isn't an address, and Review stays off", () => {
     isAccount.mockReturnValue(false);
@@ -444,6 +487,35 @@ describe("what the To field says about what's typed", () => {
     isAccount.mockReturnValue(true);
     typeInto(form.to, ALICE.account);
     expect(visibleText(form.nameBox())).toBe("");
+    expect(form.pill()).toBe("Public");
+    expect(form.review.disabled).toBe(false);
+  });
+
+  it("says the same of what's too long to be a name and is no address either", () => {
+    const form = mount(newState());
+    for (const typo of [`${ALICE.account}x`, ALICE.account.slice(0, 70), `${ALICE.account.slice(0, 60)}0${ALICE.account.slice(61)}`]) {
+      typeInto(form.to, typo);
+      expect(visibleText(form.nameBox())).toBe("Not a valid address. Check it and try again.");
+      expect(form.pill()).toBe("");
+      expect(form.review.disabled).toBe(true);
+    }
+  });
+
+  it("drops what Review said once the recipient changes, in plain words", async () => {
+    const form = mount(newState());
+    typeInto(form.amount, "1");
+    typeInto(form.to, "someone new");
+    form.review.click();
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".err"))).toBe("Not a valid address. Check it and try again.");
+    typeInto(form.to, ALICE.account);
+    expect(dom.document.body.querySelector(".err").textContent).toBe("");
+  });
+
+  it("joins up an address that a chat app broke with spaces", () => {
+    const form = mount(newState());
+    typeInto(form.to, `${ALICE.account.slice(0, 40)} ${ALICE.account.slice(40, 80)}\n${ALICE.account.slice(80)}`);
+    expect(form.to.value).toBe(ALICE.account);
     expect(form.pill()).toBe("Public");
     expect(form.review.disabled).toBe(false);
   });
