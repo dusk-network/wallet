@@ -373,10 +373,12 @@ describe("a transaction's details", () => {
     expect(tech()).not.toContain(checked);
   });
 
-  it("hides the amount with Hide balances, but not the fee", () => {
+  it("hides the amount and the fee with Hide balances", () => {
     open({ local: [sent], hidden: true }, sent.hash);
     expect(visibleText(body())).not.toContain("25 DUSK");
-    expect(visibleText(body())).toContain("Network fee0.0037 DUSK");
+    expect(visibleText(body())).toContain("Network fee•••• DUSK");
+    expect(visibleText(body())).not.toContain("0.0037");
+    expect(visibleText(body())).not.toContain("0.00");
     expect([visibleText(body().querySelector(".tx-hero-amount")), screenReaderText(body().querySelector(".tx-hero-amount"))]).toEqual([
       "•••• DUSK",
       "hidden DUSK",

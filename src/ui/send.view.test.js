@@ -405,8 +405,29 @@ describe("send to a .dusk name with one address", () => {
     await settle();
     expect(state.draft).toMatchObject({ to: dave, privacy: "public", duskName: { name: "dave.dusk" } });
     const review = mount(state, ov);
-    expect(review.visibleLine()).toBe("Visible to everyone: amount and your account.");
+    expect(review.visibleLine()).toBe("Visible to everyone: amount, your account, and the recipient's account.");
     expect(review.reviewTo()).toBe(`dave.dusk${dave}`);
+  });
+});
+
+describe("a Review when who pays changes", () => {
+  it("goes back to the filled form on another wallet or profile, and stays through a redraw of the same", async () => {
+    const state = newState();
+    const ov = overview();
+    const form = mount(state, ov);
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "1");
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
+
+    mount(state, ov);
+    expect(state.route).toBe("confirm");
+
+    const again = mount(state, { ...ov, selectedAccountIndex: 1 });
+    expect(state.route).toBe("send");
+    expect(again.to.value).toBe(ALICE.account);
+    expect(again.amount.value).toBe("1");
   });
 });
 
@@ -592,7 +613,7 @@ describe("names on Send and Review", () => {
     await settle();
     const rows = () => dom.document.body.querySelectorAll(".send-review > .group > .kv").map(visibleText);
     expect(rows()).toEqual([`ToBobby · bob.dusk${BOB.account}`, "Fromme.dusk · Public"]);
-    expect(view.visibleLine()).toBe("Visible to everyone: amount and your name me.dusk.");
+    expect(view.visibleLine()).toBe("Visible to everyone: amount, your name me.dusk, and the recipient's account.");
     // Saved already: no Save to Contacts.
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
   });
@@ -838,13 +859,13 @@ describe("review", () => {
 
   it("says what a public send shows everyone, with only the parts that apply, and nothing for a shielded one", async () => {
     let view = review({ to: ALICE.account, privacy: "public" });
-    expect([view.kind(), view.visibleLine()]).toEqual(["Public transfer", "Visible to everyone: amount and your account."]);
+    expect([view.kind(), view.visibleLine()]).toEqual(["Public transfer", "Visible to everyone: amount, your account, and the recipient's account."]);
 
     // With a memo, and the profile's verified name.
     lookupPrimaryName.mockImplementation(async (account) => (account === OWN.account ? "me.dusk" : null));
     view = review({ to: ALICE.account, privacy: "public", memo: "Lunch" });
     await settle();
-    expect(view.visibleLine()).toBe("Visible to everyone: amount, memo, and your name me.dusk.");
+    expect(view.visibleLine()).toBe("Visible to everyone: amount, memo, your name me.dusk, and the recipient's account.");
 
     view = review({ to: ALICE.address, privacy: "shielded", memo: "Lunch" });
     await settle();
@@ -1012,7 +1033,7 @@ describe("a name and the recipient Contacts sets", () => {
     // Save to Contacts, with the address edited to a public account.
     setFromContacts(state, BOB.account);
     const review = mount(state);
-    expect([review.kind(), review.visibleLine()]).toEqual(["Public transfer", "Visible to everyone: amount and your account."]);
+    expect([review.kind(), review.visibleLine()]).toEqual(["Public transfer", "Visible to everyone: amount, your account, and the recipient's account."]);
 
     dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
     await settle();

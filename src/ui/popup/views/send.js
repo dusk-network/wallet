@@ -930,6 +930,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           gas: prevGas,
           // A request link's network, for Review to say so when it isn't this one.
           requestChainId: state.draft?.requestChainId,
+          reviewedFor: reviewedFor(ov),
         };
         state.route = "confirm";
         await actions?.render?.();
@@ -986,16 +987,21 @@ export function chainMismatchText(reqChain, nodeUrl) {
   return `This request is for ${chainLabel(reqChain) || `Chain ${want}`}. You are on ${chainLabel(current) || `Chain ${have}`}.`;
 }
 
+// Who pays and on which network, as a Review was asked for.
+const reviewedFor = (ov) => `${ov?.accounts?.[0] ?? ""} ${Number(ov?.selectedAccountIndex ?? 0) || 0} ${ov?.nodeUrl ?? ""}`;
+
 /**
  * What a public send shows everyone, for Review: "Visible to everyone:
- * amount, memo, and your name alice.dusk." Without a memo it leaves memo
+ * amount, memo, your name alice.dusk, and the recipient's account." Without a memo it leaves memo
  * out, and without a verified name it says "your account". `memoAs` names
  * the memo by what it is, as the recipient on another chain a bridge pays.
  * @param {{ memo?: string, name?: string|null, memoAs?: string }} parts
  * @returns {string}
  */
 export function publicSendLine({ memo, name, memoAs = "memo" } = {}) {
-  const items = ["amount", memo ? memoAs : "", name ? `your name ${name}` : "your account"].filter(Boolean);
+  // Sent to the bridge, what shows of the recipient is the memo.
+  const to = memoAs === "memo" ? "the recipient's account" : "";
+  const items = ["amount", memo ? memoAs : "", name ? `your name ${name}` : "your account", to].filter(Boolean);
   const list = items.length > 2 ? `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}` : items.join(" and ");
   return `Visible to everyone: ${list}.`;
 }
@@ -1003,8 +1009,10 @@ export function publicSendLine({ memo, name, memoAs = "memo" } = {}) {
 export function sendConfirmView(ov, { state, actions } = {}) {
   const d = state.draft;
   const duskName = draftDuskName(d);
-  // A .dusk name resolved through another node is looked up again first.
-  if (!d || (duskName && duskName.nodeUrl !== String(ov?.nodeUrl ?? ""))) {
+  // A .dusk name resolved through another node is looked up again first, and
+  // a switch of wallet, profile or network means who pays changed: back to
+  // the form, rather than a Review that quietly says something else.
+  if (!d || (duskName && duskName.nodeUrl !== String(ov?.nodeUrl ?? "")) || (d.reviewedFor && d.reviewedFor !== reviewedFor(ov))) {
     state.route = "send";
     return sendFormView(ov, { state, actions });
   }

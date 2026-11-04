@@ -375,10 +375,10 @@ describe("a site's request to pay", () => {
   // What a public transfer makes visible to everyone: only what applies, under
   // the profile's verified name or else its account. A shielded one: nothing.
   it.each([
-    ["with a memo, under its verified name", transfer(BOB, { memo: "Order 1042" }), {}, "Visible to everyone: amount, memo, and your name alice.dusk."],
-    ["without a memo, under its verified name", transfer(BOB), {}, "Visible to everyone: amount and your name alice.dusk."],
-    ["with a memo, for a profile without a name", transfer(BOB, { memo: "Order 1042" }), { duskNames: {} }, "Visible to everyone: amount, memo, and your account."],
-    ["without a memo, for a profile without a name", transfer(BOB), { duskNames: {} }, "Visible to everyone: amount and your account."],
+    ["with a memo, under its verified name", transfer(BOB, { memo: "Order 1042" }), {}, "Visible to everyone: amount, memo, your name alice.dusk, and the recipient's account."],
+    ["without a memo, under its verified name", transfer(BOB), {}, "Visible to everyone: amount, your name alice.dusk, and the recipient's account."],
+    ["with a memo, for a profile without a name", transfer(BOB, { memo: "Order 1042" }), { duskNames: {} }, "Visible to everyone: amount, memo, your account, and the recipient's account."],
+    ["without a memo, for a profile without a name", transfer(BOB), { duskNames: {} }, "Visible to everyone: amount, your account, and the recipient's account."],
     ["for a shielded transfer", transfer(ADDRESS, { privacy: "shielded", memo: "Order 1042" }), {}, null],
   ])("says what becomes visible to everyone %s", async (_label, params, over, line) => {
     await render("send_tx", params, over);

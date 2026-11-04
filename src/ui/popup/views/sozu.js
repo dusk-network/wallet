@@ -49,7 +49,7 @@ function fmtLux(value) {
 const SOZU_URL = "https://sozu.fi/";
 
 /** How an unstake from Sozu comes back: its pool pays it out in the same call. */
-export const SOZU_UNSTAKE_LINE = "The DUSK comes back in the same transaction. No fee, no waiting.";
+export const SOZU_UNSTAKE_LINE = "The DUSK comes back in the same transaction. No Sozu fee, no waiting.";
 
 // Sozu's switches, as its substrate reads them: deposits paused, or not known.
 const PAUSED_TITLE = "Sozu has paused deposits";

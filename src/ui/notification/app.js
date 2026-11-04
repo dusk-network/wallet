@@ -1038,8 +1038,8 @@ export async function renderNotification() {
       const visible = service
         ? `Visible to everyone: amount, the recipient on ${service.chain}, and ${me}.`
         : memo
-          ? `Visible to everyone: amount, memo, and ${me}.`
-          : `Visible to everyone: amount and ${me}.`;
+          ? `Visible to everyone: amount, memo, ${me}, and the recipient's account.`
+          : `Visible to everyone: amount, ${me}, and the recipient's account.`;
       const amount = { value: formatDuskExact(amountLux), unit: "DUSK" };
       const head = service
         ? requestHead({
