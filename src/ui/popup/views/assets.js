@@ -108,7 +108,7 @@ function parseTokenAmountHuman(raw, decimals) {
   }
 
   const [intRaw, fracRaw = "", ...rest] = s.split(".");
-  if (rest.length) throw new Error("Enter an amount such as 1 or 0.5.");
+  if (rest.length || (!intRaw && !fracRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
   if (intRaw && !/^[0-9]+$/.test(intRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
   if (fracRaw && !/^[0-9]+$/.test(fracRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
 

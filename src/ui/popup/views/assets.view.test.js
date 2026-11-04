@@ -158,9 +158,10 @@ describe("sending a token from its page", () => {
     await first.press("Review transfer");
     expect(first.send.mock.calls.at(-1)[0].args.value).toBe("150");
 
-    for (const amount of ["1.2.3", "1,2,3", "1.foo", "-1", "1e1"]) {
-      const { press, send, state } = await open({ to: TO, amount, spender: "", approveAmount: "" });
+    for (const amount of ["1.2.3", "1,2,3", "1.foo", "-1", "1e1", ",", "."]) {
+      const { press, send, state } = await open({ to: TO, amount, spender: TO, approveAmount: amount });
       await press("Review transfer");
+      await press("Review approval");
       expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_DRC20_ENCODE_INPUT" }));
       expect(state.route).toBe("asset_token");
     }
