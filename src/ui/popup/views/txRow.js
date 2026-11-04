@@ -344,7 +344,10 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
 /** Whether a row shows under an Activity filter: All, or its own. */
 export function inFilter(desc, filter) {
   if (!filter || filter === "all") return true;
-  return desc.category === filter;
+  if (desc.category === filter) return true;
+  // What's bridged was sent or received too, so Sent never looks as if it's gone.
+  if (desc.category !== "bridge") return false;
+  return filter === "sent" ? desc.amount?.sign === MINUS : filter === "received" && desc.amount?.sign === "+";
 }
 
 /**

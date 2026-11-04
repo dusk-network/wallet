@@ -262,23 +262,28 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const arrivalLink = desc.arrival ? arrivalUrl(nodeUrl, desc.arrival, tx?.route) : null;
   const arrivalChain = desc.evmChain || "DuskEVM";
   const lux = (value) => h("span", {}, [balance(hidden, formatDuskExact(value)), " DUSK"]);
-  const arrivalRow = desc.arrival
-    ? kv(`${arrivalChain} transaction`, [
-        h("button", {
-          class: "text-btn tx-id chain-link",
-          type: "button",
-          title: arrivalLink ? `Open in ${arrivalChain} explorer` : desc.arrival,
-          "aria-label": arrivalLink ? `${arrivalChain} transaction ${shortEvmHash(desc.arrival)}, open in ${arrivalChain} explorer` : undefined,
-          disabled: !arrivalLink,
-          text: shortEvmHash(desc.arrival),
-          onclick: async () => {
-            const ok = arrivalLink ? await openUrl(arrivalLink) : false;
-            if (!ok) showToast?.("Couldn't open the explorer");
-          },
-        }),
-        copyWords(desc.arrival, `Copy ${arrivalChain} transaction ID`, "Couldn't copy the transaction ID"),
-      ])
-    : null;
+  // A transaction on another chain, which opens that chain's explorer.
+  const chainTxRow = (chain, hash, link) =>
+    kv(`${chain} transaction`, [
+      h("button", {
+        class: "text-btn tx-id chain-link",
+        type: "button",
+        title: link ? `Open in ${chain} explorer` : hash,
+        "aria-label": link ? `${chain} transaction ${shortEvmHash(hash)}, open in ${chain} explorer` : `${chain} transaction ${shortEvmHash(hash)}`,
+        disabled: !link,
+        text: shortEvmHash(hash),
+        onclick: async () => {
+          const ok = link ? await openUrl(link) : false;
+          if (!ok) showToast?.("Couldn't open the explorer");
+        },
+      }),
+      copyWords(hash, `Copy ${chain} transaction ID`, "Couldn't copy the transaction ID"),
+    ]);
+  const arrivalRow = desc.arrival ? chainTxRow(arrivalChain, desc.arrival, arrivalLink) : null;
+  // A migration's payout names the migration in its memo: its transaction there.
+  const memo = String(tx?.memo ?? "").trim();
+  const migrated = tx?.route && tx.route.kind !== "service" && /^0x[0-9a-fA-F]{64}$/.test(memo);
+  const migratedRow = migrated ? chainTxRow(tx.route.chain.name, memo, `${String(tx.route.chain.explorerUrl ?? "").replace(/\/+$/, "")}/tx/${memo}`) : null;
 
   const rows = h("div", { class: "group" }, [
     when ? kv("Date", dateText(when)) : null,
@@ -287,7 +292,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
     desc.payout ? kv("Bridge fee", lux(desc.payout.fee)) : null,
     desc.payout ? kv(desc.arrival ? "Received" : "You receive", lux(desc.payout.received)) : null,
     // A memo that is the recipient on another chain shows as that.
-    tx?.memo && String(tx.memo).trim() !== desc.recipient ? kv("Memo", String(tx.memo).replace(BIDI_CONTROLS, ""), { className: "kv--wrap" }) : null,
+    migratedRow,
+    tx?.memo && !migrated && String(tx.memo).trim() !== desc.recipient ? kv("Memo", String(tx.memo).replace(BIDI_CONTROLS, ""), { className: "kv--wrap" }) : null,
     feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,

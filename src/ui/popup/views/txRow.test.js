@@ -212,7 +212,7 @@ describe("what a row says", () => {
     expect(describeRecord({ kind: TX_KIND.CONTRACT_CALL, contractId: hub, fnName: "contract" }, { nodeUrl: TESTNET }).lead).toBe("");
   });
 
-  it("puts each under one filter: DUSK bridged to DuskEVM, back from it and a proof under Bridge, not Sent or Received", () => {
+  it("puts each under its filter: DUSK bridged to DuskEVM and back under Bridge and Sent or Received, a proof under Bridge alone", () => {
     const BRIDGE = "2257e5f8ff49cf7c9704a14ca35acbf48eb7ade11a079d98d5cd5655eea1b31d";
     const PORTAL = "14eeb3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9";
     const kinds = [
@@ -221,18 +221,18 @@ describe("what a row says", () => {
       [{ kind: TX_KIND.STAKE }, "staking"],
       [{ kind: TX_KIND.WITHDRAW_REWARD }, "staking"],
       [{ kind: TX_KIND.SHIELD }, "all"],
-      [{ kind: TX_KIND.CONTRACT_CALL, contractId: BRIDGE, fnName: "depositETHToWithValue", deposit: "500000000" }, "bridge"],
-      [{ kind: TX_KIND.CONTRACT_CALL, direction: "in", contractId: PORTAL, amount: "500000000" }, "bridge"],
+      [{ kind: TX_KIND.CONTRACT_CALL, contractId: BRIDGE, fnName: "depositETHToWithValue", deposit: "500000000" }, ["sent", "bridge"]],
+      [{ kind: TX_KIND.CONTRACT_CALL, direction: "in", contractId: PORTAL, amount: "500000000" }, ["received", "bridge"]],
       [{ kind: TX_KIND.CONTRACT_CALL, contractId: PORTAL, fnName: "proveWithdrawalTransaction" }, "bridge"],
     ];
     expect(ACTIVITY_FILTERS.map((f) => f.label)).toEqual(["All", "Sent", "Received", "Staking", "Bridge"]);
     for (const [tx, only] of kinds) {
       const d = describeRecord({ nodeUrl: TESTNET, ...tx });
-      expect(ACTIVITY_FILTERS.map((f) => f.id).filter((f) => inFilter(d, f))).toEqual(only === "all" ? ["all"] : ["all", only]);
+      expect(ACTIVITY_FILTERS.map((f) => f.id).filter((f) => inFilter(d, f))).toEqual(only === "all" ? ["all"] : ["all", only].flat());
     }
   });
 
-  it("puts DUSK bridged to and from BNB Smart Chain and Ethereum under Bridge, named by their routes, not under Sent or Received", () => {
+  it("puts DUSK bridged to and from BNB Smart Chain and Ethereum under Bridge as well as Sent or Received, named by their routes", () => {
     const MAINNET = "https://nodes.dusk.network";
     const [bscOut, bscIn, ethIn] = [
       routes(networks.mainnet).find((route) => route.kind === "service").account,
@@ -251,7 +251,7 @@ describe("what a row says", () => {
       evm,
       "BNB Smart Chain",
       "BSC bridge",
-      ["all", "bridge"],
+      ["all", "sent", "bridge"],
     ]);
     // The wallet's own send, which has no direction, too; one to yourself isn't one.
     expect(describeRecord({ kind: TX_KIND.TRANSFER, to: bscOut, memo: evm, amount: "2000000000" }, { nodeUrl: MAINNET }).lead).toBe("Bridge to BNB Smart Chain");
@@ -268,7 +268,7 @@ describe("what a row says", () => {
         "Bridge · 17:19",
         "+5 DUSK",
         payer,
-        ["all", "bridge"],
+        ["all", "received", "bridge"],
       ]);
     }
     // Testnet's route to Sepolia, by the chain it names; any other account is a send or a receipt.

@@ -143,8 +143,9 @@ describe("Activity's Export", () => {
     await settle();
     const [head2, ...sent] = await csvLines(1);
     expect(head2.endsWith(",Your contact name")).toBe(true);
-    expect(sent).toHaveLength(1);
-    expect(sent[0].endsWith(",Faucet (test)")).toBe(true);
+    // What was bridged out was sent too.
+    expect(sent).toHaveLength(2);
+    expect(sent.filter((row) => row.endsWith(",Faucet (test)"))).toHaveLength(1);
   });
 
   it("is off with no rows listed, and says which rows aren't looked up yet", () => {
@@ -286,12 +287,14 @@ describe("Activity's Export", () => {
 });
 
 describe("DUSK bridged to DuskEVM in Activity", () => {
-  it("shows under Bridge, not Sent, To its DuskEVM address, with Copy", async () => {
+  it("shows under Bridge and Sent, To its DuskEVM address, with Copy", async () => {
     page("/full.html");
     const { state } = setup();
     button("Sent").click();
     expect(state.activityFilter).toBe("sent");
-    expect(body().querySelectorAll(".tx-row").map(visibleText)).toEqual(["faucet.duskSent · 07:00−5 DUSK"]);
+    expect(body().querySelectorAll(".tx-row").map(visibleText).sort()).toEqual(
+      ["To 0xAB84…C86FBridge to DuskEVM · 07:00−0.5 DUSK", "faucet.duskSent · 07:00−5 DUSK"].sort()
+    );
     button("Bridge").click();
     expect(state.activityFilter).toBe("bridge");
     const rows = body().querySelectorAll(".tx-row");
