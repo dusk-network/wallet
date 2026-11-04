@@ -506,21 +506,19 @@ function stakingOverview(ov, ctx, { state, actions }) {
   // staked beside Sozu, the native figure says there's nothing to unstake or
   // claim, away from Unstake from Sozu.
   const holding = sozuHolding(ov, { state, actions });
-  const hasLiquid = Boolean(holding && (holding.poolLux > 0n || holding.stDuskLux > 0n));
+  const hasLiquid = holding.known && (holding.poolLux > 0n || holding.stDuskLux > 0n);
   const hasNative = stakedLux > 0n || rewardLux > 0n;
   const showNativeActions = hasNative || !hasLiquid;
   // Nothing natively staked says nothing of Sozu, until what's there is read.
-  const sozuUnread = !holding && !hasNative;
+  const sozuUnread = (!holding.known || holding.failed) && !hasNative;
 
   // The reasons Unstake and Claim can't be pressed, said once each.
   const reasons = showNativeActions && !sozuUnread ? [...new Set([unstakeState, claimState].filter((s) => !s.ok).map((s) => s.reason))] : [];
-  const sozuNote = !state.sozu?.error
+  const sozuNote = !holding.failed
     ? null
     : hasLiquid
       ? "What's with Sozu couldn't be read again, so it may be out of date."
-      : holding
-        ? null
-        : "What's with Sozu couldn't be read.";
+      : "What's with Sozu couldn't be read.";
 
   const figure = (label, lux, sub = null) =>
     h("div", {}, [

@@ -400,12 +400,13 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
 }
 
 /**
- * What the selected profile holds with Sozu, as read for this wallet on this
- * network, for the Staking overview: null until that's read. `stale` says a
- * read of it again failed, so it may be out of date.
+ * What the selected profile holds with Sozu, for the Staking overview, as read
+ * for this wallet on this network. `known` is false until that's read, or when
+ * the read found the pool but not the position. `failed` says the last read
+ * failed, so what's known may be out of date.
  * @param {object} ov
  * @param {{ state: object, actions: object }} ctx
- * @returns {{ poolLux: bigint, stDuskLux: bigint, stale: boolean } | null}
+ * @returns {{ known: boolean, failed: boolean, poolLux: bigint, stDuskLux: bigint }}
  */
 export function sozuHolding(ov, { state, actions } = {}) {
   const st = sozuState(state);
@@ -424,12 +425,16 @@ export function sozuHolding(ov, { state, actions } = {}) {
     st.loaded = false;
   }
   if (!st.error) ensureSozuLoaded(ov, { state, actions });
-  if (!current || st.profileIndex !== idx || st.status?.networkKey !== networkKey) return null;
-  const position = parseSozuPosition(st.position ?? {});
+  const answered = current && st.profileIndex === idx && st.status?.networkKey === networkKey;
+  // A network without Sozu has no position, which is nothing held there. On one
+  // with Sozu, no position is a read that failed, not nothing held.
+  const noPosition = answered && !st.position && st.status?.configured === true;
+  const position = parseSozuPosition((answered && st.position) || {});
   return {
+    known: answered && !noPosition,
+    failed: Boolean(st.error) || noPosition,
     poolLux: safeBigInt(position.poolBalanceLux, 0n),
     stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n),
-    stale: Boolean(st.error),
   };
 }
 

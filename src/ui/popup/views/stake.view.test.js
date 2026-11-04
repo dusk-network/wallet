@@ -324,6 +324,33 @@ describe("staking overview", () => {
     expect(text).not.toContain("Nothing staked yet");
   });
 
+  it("says it couldn't read Sozu when the status has the pool but no position", async () => {
+    const state = { route: "stake", staking: staking(), sozu: sozu({ position: null }) };
+    popup(state);
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("What's with Sozu couldn't be read.");
+    expect(text).not.toContain("Nothing staked yet");
+  });
+
+  it("doesn't say nothing is staked on an old zero when reading it again fails", async () => {
+    const state = { route: "stake", staking: staking(), sozu: sozu({ loaded: false }) };
+    popup(state, ov(), {
+      sozuStatus: async () => {
+        throw new Error("node down");
+      },
+    });
+    await settle();
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("What's with Sozu couldn't be read.");
+    expect(text).not.toContain("Nothing staked yet");
+  });
+
+  it("says nothing is staked on a network without Sozu", () => {
+    const status = { configured: false, networkKey: "testnet" };
+    popup({ route: "stake", staking: staking(), sozu: sozu({ status, position: null }) });
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("Nothing staked yet");
+  });
+
   it("keeps what was read when reading it again fails, and says it may be out of date", async () => {
     const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
     const state = { route: "stake", staking: staking(), sozu: sozu({ position, loaded: false }) };
