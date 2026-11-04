@@ -429,6 +429,28 @@ describe("send's amount", () => {
     expect(state.route).toBe("send");
   });
 
+  it("reads a decimal comma, and says when what's typed isn't an amount instead of changing it", async () => {
+    const state = newState();
+    const form = mount(state);
+    typeInto(form.to, ALICE.account);
+
+    typeInto(form.amount, "0,1");
+    expect(form.amount.value).toBe("0,1");
+    expect(form.amountError()).toBe("");
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
+    expect(state.draft.amountLux).toBe("100000000");
+
+    for (const bad of ["-1", "1e1", "0.25.1", "1,2,3", "0.0000000001", "1 DUSK"]) {
+      const next = mount(newState());
+      typeInto(next.to, ALICE.account);
+      typeInto(next.amount, bad);
+      expect(next.amount.value).toBe(bad);
+      expect(next.amountError()).toBe("Enter an amount such as 1 or 0.5.");
+    }
+  });
+
   it("sets aside the fee Review starts from, with custom gas from Settings", async () => {
     // Price 3: a public transfer keeps the custom 2.5M limit; a shielded one
     // its own 50M, as 2.5M is under its minimum.

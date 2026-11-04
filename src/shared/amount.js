@@ -121,15 +121,45 @@ export function maxAmountLux(availableLux, keepLux = 0n) {
 }
 
 /**
- * Parse a user-entered DUSK decimal string into Lux (atomic units) string.
+ * An amount as typed, in the form parseDuskToLux reads: a decimal comma made
+ * a point, and digit grouping left out where it can't be decimals. "1,5" is
+ * 1.5, "1.000,5" and "1,000.5" are 1000.5, and "1,000,000" is a million. A
+ * lone comma before three digits groups them, unless the language writes
+ * decimals with a comma. Anything else stays as typed. The web wallet reads
+ * amounts the same way.
+ * @param {string} text
+ * @param {string} [decimalSeparator] - the language's: "." or ","
+ * @returns {string}
+ */
+export function normalizeDuskInput(text, decimalSeparator = (0.1).toLocaleString().slice(1, 2)) {
+  const value = String(text ?? "").trim();
+
+  // Groups of three after a first group that doesn't start with a zero.
+  if (/^[1-9]\d{0,2}(,\d{3})+\.\d*$/.test(value)) return value.replaceAll(",", "");
+  if (/^[1-9]\d{0,2}(\.\d{3})+,\d*$/.test(value)) return value.replaceAll(".", "").replace(",", ".");
+  if (/^[1-9]\d{0,2}(,\d{3}){2,}$/.test(value)) return value.replaceAll(",", "");
+
+  if (/^\d*,\d*$/.test(value)) {
+    const grouping = decimalSeparator !== "," && /^[1-9]\d{0,2},\d{3}$/.test(value);
+    return grouping ? value.replace(",", "") : value.replace(",", ".");
+  }
+
+  return value;
+}
+
+/**
+ * Parse a user-entered DUSK amount into a Lux (atomic units) string. It's
+ * refused rather than rounded when it has more decimals than DUSK does.
  * @param {string} duskStr
  */
 export function parseDuskToLux(duskStr) {
-  const s = String(duskStr ?? "").trim();
-  if (!/^\d+(\.\d+)?$/.test(s)) {
+  const s = normalizeDuskInput(duskStr);
+  if (!/^(\d+(\.\d*)?|\.\d+)$/.test(s)) {
     throw new Error("Invalid amount. Use a number like 1 or 0.123");
   }
   const [u, d = ""] = s.split(".");
-  const dec = (d + "0".repeat(LUX_DECIMALS)).slice(0, LUX_DECIMALS);
-  return (BigInt(u) * LUX_SCALE + BigInt(dec)).toString();
+  if (d.length > LUX_DECIMALS) {
+    throw new Error(`Invalid amount. DUSK has ${LUX_DECIMALS} decimals at most`);
+  }
+  return (BigInt(u || "0") * LUX_SCALE + BigInt(d.padEnd(LUX_DECIMALS, "0"))).toString();
 }

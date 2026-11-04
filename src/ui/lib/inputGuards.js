@@ -1,26 +1,5 @@
-const DECIMAL_SEP = ".";
-
 export function sanitizeIntegerInput(value) {
   return String(value ?? "").replace(/\D/g, "");
-}
-
-export function sanitizeDecimalInput(value) {
-  const raw = String(value ?? "");
-  let out = "";
-  let seenSep = false;
-
-  for (const ch of raw) {
-    if (ch >= "0" && ch <= "9") {
-      out += ch;
-      continue;
-    }
-    if (ch === DECIMAL_SEP && !seenSep) {
-      out += ch;
-      seenSep = true;
-    }
-  }
-
-  return out;
 }
 
 function sanitizeWithCaret(input, sanitizer) {
@@ -44,30 +23,23 @@ function sanitizeWithCaret(input, sanitizer) {
 
 export function installNumericInputGuard(input, { mode = "decimal" } = {}) {
   if (!input) return input;
-  const sanitizer = mode === "integer" ? sanitizeIntegerInput : sanitizeDecimalInput;
 
   input.setAttribute("inputmode", mode === "integer" ? "numeric" : "decimal");
   input.setAttribute("autocomplete", "off");
   input.setAttribute("spellcheck", "false");
 
+  // A decimal field keeps what's typed, and what reads it says if it's no
+  // amount: taking out a comma would turn 0,1 into 1.
+  if (mode !== "integer") return input;
+
   input.addEventListener("beforeinput", (e) => {
     if (e.inputType !== "insertText") return;
     const data = String(e.data ?? "");
-    if (!data) return;
-
-    if (mode === "integer") {
-      if (!/^\d+$/.test(data)) e.preventDefault();
-      return;
-    }
-
-    const start = Number(input.selectionStart ?? input.value.length);
-    const end = Number(input.selectionEnd ?? start);
-    const next = `${input.value.slice(0, start)}${data}${input.value.slice(end)}`;
-    if (sanitizeDecimalInput(next) !== next) e.preventDefault();
+    if (data && !/^\d+$/.test(data)) e.preventDefault();
   });
 
-  input.addEventListener("input", () => sanitizeWithCaret(input, sanitizer), { capture: true });
-  sanitizeWithCaret(input, sanitizer);
+  input.addEventListener("input", () => sanitizeWithCaret(input, sanitizeIntegerInput), { capture: true });
+  sanitizeWithCaret(input, sanitizeIntegerInput);
   return input;
 }
 
