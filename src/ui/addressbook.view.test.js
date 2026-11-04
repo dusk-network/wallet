@@ -64,6 +64,9 @@ function mount(addressBook = {}, ov = { nodeUrl: NODE, accounts: [OWN], selected
   return { state, actions, buttons, button, field, error, draw };
 }
 
+// A real account with one character changed: the right length, but no key.
+const MISTYPED = "2131Xe28JCogeQqgK4VTjtDwY5GJ5oFSUQgQobAiFbUKcXK2BzpJdoj4iGam2HGgkbnbykjqPVWmy3S83TDgqfPmtLgBv56ZzeuhHbuFy9bCerhU4JTwEi2oCxxPKSx5983T";
+
 describe("contacts", () => {
   it("reads the list once a visit: one that failed says why, and a locked wallet shows its unlock form", async () => {
     listAddressBook.mockRejectedValueOnce(new Error("Couldn't read your contacts"));
@@ -137,6 +140,17 @@ describe("contacts", () => {
       expect.objectContaining({ name: "Shop", address: ADDRESS, type: "address", duskName: "alice-shop.dusk", checkedAt: expect.any(Number) }),
       expect.anything()
     );
+  });
+
+  it("won't save a mistyped account", async () => {
+    const view = mount({ view: "edit", editId: null, editReturnView: "list" });
+    typeInto(view.field("Name"), "Typo");
+    typeInto(view.field("Address"), MISTYPED);
+    expect(view.error("Address")).toBe("Not a valid address. Check it and try again.");
+    view.button("Save").click();
+    await settle();
+    expect(view.error("Address")).toBe("Not a valid address. Check it and try again.");
+    expect(upsertAddressBookEntry).not.toHaveBeenCalled();
   });
 
   it("says under the field what can't be saved: no name, an unknown name, this profile's own account", async () => {
