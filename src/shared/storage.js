@@ -28,5 +28,6 @@ export const STORAGE_KEYS = {
   BRIDGE_ARRIVALS: "dusk_bridge_arrivals_v1", // { epoch, items: { [depositHash]: { hash, at } } }: one wallet's arrivals, from before BRIDGE_ARRIVALS_V2; moved there on unlock
   BRIDGE_ARRIVALS_V2: "dusk_bridge_arrivals_v2", // { epoch, wallets: { [walletId]: { [depositHash]: { hash, at } } } }: deposits to DuskEVM seen there, per wallet, under TXS_EPOCH (bridgeArrival.js)
   RESET_PENDING: "dusk_reset_pending_v1", // { at }: a wallet reset that hasn't cleared all the old wallet's data
+  WORKER_RELOAD: "dusk_worker_reload_v1", // version: the last one the pages reloaded for an old worker
   WALLETS: "dusk_wallets_v1", // { active: key, wallets: { [key]: { walletId, accounts, name? } } }: what the switcher shows of each wallet (wallets.js)
 };

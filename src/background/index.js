@@ -1,5 +1,6 @@
 // Background service worker entry.
 
+import { version as WORKER_VERSION } from "../../package.json";
 import { clearVault, countVaultWallets, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import {
   approveOrigin,
@@ -548,6 +549,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "DUSK_ENGINE_PING") {
+    return false;
+  }
+
+  // The pages ask, to catch a worker of the version before after an update.
+  if (message?.type === "DUSK_UI_WORKER_VERSION") {
+    sendResponse({ ok: true, version: WORKER_VERSION });
     return false;
   }
 
