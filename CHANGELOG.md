@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-04
+
 ### Added
 
 - Added more than one recovery phrase, all unlocked with one password: Add wallet creates or imports another, says which wallet it becomes, and refuses one that's already here.
@@ -349,7 +351,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Prevented Phoenix pending-nullifier reservations from being automatically released on timeout, unknown status, removed status, or a single missing mempool poll.
 - Prevented provider responses from leaking local pending nullifiers.
 
-[Unreleased]: https://github.com/dusk-network/wallet/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/dusk-network/wallet/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/dusk-network/wallet/compare/v0.3.0...v0.4.0
 [#79]: https://github.com/dusk-network/wallet/issues/79
 [#80]: https://github.com/dusk-network/wallet/issues/80
 [0.3.0]: https://github.com/dusk-network/wallet/compare/v0.2.0...v0.3.0
