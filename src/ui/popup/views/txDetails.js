@@ -20,7 +20,7 @@ import { activityRows, loadActivityDetail } from "../activity.js";
 
 // A transaction's details: a centred summary (who, how much, its status),
 // then its date, memo, fee, the profile it left or reached, and its ID, which
-// opens Dusk's explorer; a deposit to DuskEVM that arrived adds when, and its
+// opens Dusk's explorer; a transfer to another chain that arrived adds when, and its
 // transaction there. Block, gas, finality and a call's contract sit under
 // Technical details, labelled as in every Dusk app. Hide balances hides the
 // amount; the fee stays.
@@ -258,15 +258,17 @@ export function txDetailsView(ov, { state, actions } = {}) {
       )
     : null;
 
-  // Where a deposit to DuskEVM arrived: its transaction there, which opens DuskEVM's explorer.
-  const arrivalLink = desc.arrival ? arrivalUrl(nodeUrl, desc.arrival) : null;
+  // Where it arrived: its transaction there, which opens that chain's explorer.
+  const arrivalLink = desc.arrival ? arrivalUrl(nodeUrl, desc.arrival, tx?.route) : null;
+  const arrivalChain = desc.evmChain || "DuskEVM";
+  const lux = (value) => h("span", {}, [balance(hidden, formatDuskExact(value)), " DUSK"]);
   const arrivalRow = desc.arrival
-    ? kv("DuskEVM transaction", [
+    ? kv(`${arrivalChain} transaction`, [
         h("button", {
           class: "text-btn tx-id chain-link",
           type: "button",
-          title: arrivalLink ? "Open in DuskEVM explorer" : desc.arrival,
-          "aria-label": arrivalLink ? `DuskEVM transaction ${shortEvmHash(desc.arrival)}, open in DuskEVM explorer` : undefined,
+          title: arrivalLink ? `Open in ${arrivalChain} explorer` : desc.arrival,
+          "aria-label": arrivalLink ? `${arrivalChain} transaction ${shortEvmHash(desc.arrival)}, open in ${arrivalChain} explorer` : undefined,
           disabled: !arrivalLink,
           text: shortEvmHash(desc.arrival),
           onclick: async () => {
@@ -274,7 +276,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
             if (!ok) showToast?.("Couldn't open the explorer");
           },
         }),
-        copyWords(desc.arrival, "Copy DuskEVM transaction ID", "Couldn't copy the transaction ID"),
+        copyWords(desc.arrival, `Copy ${arrivalChain} transaction ID`, "Couldn't copy the transaction ID"),
       ])
     : null;
 
@@ -282,6 +284,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
     when ? kv("Date", dateText(when)) : null,
     desc.arrivedAt ? kv("Arrived", dateText(desc.arrivedAt)) : null,
     evmRow,
+    desc.payout ? kv("Bridge fee", lux(desc.payout.fee)) : null,
+    desc.payout ? kv(desc.arrival ? "Received" : "You receive", lux(desc.payout.received)) : null,
     // A memo that is the recipient on another chain shows as that.
     tx?.memo && String(tx.memo).trim() !== desc.recipient ? kv("Memo", String(tx.memo).replace(BIDI_CONTROLS, ""), { className: "kv--wrap" }) : null,
     feeRow(tx, desc, hidden),
@@ -308,7 +312,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
       rows,
       tech,
       explorerButton(explorerUrl, actions),
-      explorerButton(arrivalLink, actions, "View in DuskEVM explorer"),
+      explorerButton(arrivalLink, actions, `View in ${arrivalChain} explorer`),
     ].filter(Boolean)),
   ];
 }

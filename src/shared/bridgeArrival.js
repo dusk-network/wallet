@@ -1,8 +1,8 @@
-// A deposit to DuskEVM, once it's there: the DuskEVM transaction that paid it,
-// and when, as the popup finds it on DuskEVM (ui/popup/arrivals.js). Looked
-// for only while a deposit is on its way, less often the longer nothing
-// changes (as the web wallet's deposit tracking); kept once found, until a
-// wallet reset. A network without DuskEVM (Mainnet, for now) asks nothing.
+// A deposit to DuskEVM, or a transfer out to another chain, once it's there:
+// the transaction that paid it there, and when, as the popup finds it on that
+// chain (ui/popup/arrivals.js). Looked for only while one is on its way, less
+// often the longer nothing changes (as the web wallet's deposit tracking);
+// kept once found, until a wallet reset. A network with neither asks nothing.
 //
 // What's kept is kept per wallet, by its wallet ID, and tagged with the
 // transaction store's reset count it was found under (txStore.js); every page
@@ -21,6 +21,8 @@ export const ARRIVAL_WINDOW_MS = 7 * 24 * 60 * 60_000;
 const KEEP = 200;
 
 const EVM_TX = /^0x[0-9a-fA-F]{64}$/;
+// What the bridge pays to: any capitals, as it doesn't check their checksum.
+const PAYABLE_MEMO = /^0x[0-9a-fA-F]{40}$/;
 
 const V1 = STORAGE_KEYS.BRIDGE_ARRIVALS;
 const V2 = STORAGE_KEYS.BRIDGE_ARRIVALS_V2;
@@ -91,8 +93,8 @@ export const keptArrivals = () => kept;
  * @param {string} evmHash
  * @returns {string | null}
  */
-export function arrivalUrl(nodeUrl, evmHash) {
-  const base = networkForNode(String(nodeUrl ?? ""))?.duskEvm?.explorerUrl;
+export function arrivalUrl(nodeUrl, evmHash, route = null) {
+  const base = route?.chain?.explorerUrl ?? networkForNode(String(nodeUrl ?? ""))?.duskEvm?.explorerUrl;
   return base && EVM_TX.test(String(evmHash ?? "")) ? `${base.replace(/\/+$/, "")}/tx/${evmHash}` : null;
 }
 
@@ -109,16 +111,35 @@ export const depositLux = (row) => {
 export const depositTime = (row) => Number(row?.entry?.timestamp ?? row?.sent?.finalizedAt) || 0;
 
 /**
- * Whether an Activity row is a deposit to DuskEVM on its way: gone through on
- * Dusk this week, its block's time known, to a DuskEVM address, on a network
- * with DuskEVM, and not seen there yet.
+ * What a transfer out to another chain pays: what reached the bridge less its
+ * fee, to the address its memo gives. Null for anything else, and for one the
+ * bridge pays nothing for, on a route that isn't paying out too.
+ * @param {object} row - an Activity row
+ * @returns {{ fee: bigint, received: bigint } | null}
+ */
+export function payoutOf(row) {
+  const route = row?.route;
+  if (route?.kind !== "service" || route.running === false || !route.payoutAddress) return null;
+  // The address exactly as the bridge reads it: from text, as it was sent.
+  if (row?.entry?.memoBinary === true || !PAYABLE_MEMO.test(String(row?.memo ?? ""))) return null;
+  const fee = BigInt(route.feeLux ?? 0);
+  // What left the account holds a gas refund it paid another account.
+  const sent = BigInt(row?.value ?? 0) - BigInt(row?.entry?.refund ?? 0);
+  return sent > fee ? { fee, received: sent - fee } : null;
+}
+
+/**
+ * Whether an Activity row is on its way: gone through on Dusk this week, its
+ * block's time known, and not seen at the other end yet. Either a deposit to a
+ * DuskEVM address, on a network with DuskEVM, or a transfer out the bridge pays.
  * @param {object} row - an Activity row (activity.js activityRows)
  * @param {string} nodeUrl - the overview's network
  * @param {number} [now]
  */
 export function awaitingArrival(row, nodeUrl, now = Date.now()) {
-  if (!networkForNode(String(nodeUrl ?? ""))?.duskEvm || row?.bridge?.step !== "deposit" || !row.bridge.to) return false;
-  if (row.status !== "executed" || !depositLux(row) || kept.has(String(row.hash))) return false;
+  const deposit = networkForNode(String(nodeUrl ?? ""))?.duskEvm && row?.bridge?.step === "deposit" && row.bridge.to && depositLux(row);
+  if (!deposit && !payoutOf(row)) return false;
+  if (row.status !== "executed" || kept.has(String(row.hash))) return false;
   const at = depositTime(row);
   return at > 0 && now - at < ARRIVAL_WINDOW_MS;
 }

@@ -65,9 +65,10 @@ export function txSummaryParts(tx, { hidden = false, contactName } = {}) {
  * @param {string} status - executed | failed | removed | mempool | unknown
  * @param {{ hidden?: boolean, contactName?: Function, onView?: Function }} [opts]
  */
-export function txStatusToast(tx, status, { hidden = false, contactName, onView } = {}) {
+export function txStatusToast(tx, status, { hidden = false, contactName, onItsWayTo = "", onView } = {}) {
+  const word = status === "executed" && onItsWayTo ? `on its way to ${onItsWayTo}` : statusWord(status);
   return {
-    parts: [...txSummaryParts(tx, { hidden, contactName }), ` ${statusWord(status)}`],
+    parts: [...txSummaryParts(tx, { hidden, contactName }), ` ${word}`],
     tone: tone(status),
     action: onView ? { label: "View", onClick: onView } : null,
   };

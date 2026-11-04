@@ -45,6 +45,8 @@ export function submittedTxMeta(params, { walletId, origin, nodeUrl, profileInde
     to: params?.to ? String(params.to) : undefined,
     amount: text(params?.amount),
     deposit: text(params?.deposit),
+    // On the chain for all to see: where the bridge pays, until the chain's row comes.
+    memo: kind === TX_KIND.TRANSFER && params?.privacy === "public" && params?.memo ? String(params.memo) : undefined,
     contractId: call && params?.contractId ? String(params.contractId) : undefined,
     fnName: call && params?.fnName ? String(params.fnName) : undefined,
     gasLimit: text(params?.gas?.limit),

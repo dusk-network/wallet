@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Followed DUSK bridged to BNB Smart Chain or Ethereum to its end: On its way, then Arrived, with the bridge fee, what was received and its transaction there
+
 ## [0.4.0] - 2026-11-04
 
 ### Added

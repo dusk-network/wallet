@@ -1,4 +1,4 @@
-import { networks } from "@dusk-network/networks";
+import { networks, routes } from "@dusk-network/networks";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { rowOf, rowsOf } from "./fixtures/rows.js";
@@ -56,6 +56,21 @@ const FOUND = { [deposit("a").hash]: { hash: L2(2), at: NOW - 60_000 } };
 const W1 = "wallet-one";
 const W2 = "wallet-two";
 
+// Activity's row of a transfer out to BNB Smart Chain.
+const SERVICE = routes(networks.mainnet).find((r) => r.id === "dusk-to-bsc");
+const transferOut = (hash, { lux = "3000000000", ago = 180_000, memo = TO, ...over } = {}) =>
+  rowOf({
+    hash: hash.repeat(64).slice(0, 64),
+    kind: "transfer",
+    to: SERVICE.account,
+    memo,
+    amount: lux,
+    status: "executed",
+    finalizedAt: NOW - ago,
+    nodeUrl: MAINNET,
+    ...over,
+  });
+
 let arrivals;
 // The arrival kept for a deposit, or null.
 const arrivalOf = (hash, from = arrivals) => from.keptArrivals().get(hash) ?? null;
@@ -66,6 +81,43 @@ beforeEach(async () => {
   hooks.beforeSet = null;
   epoch.now = 1;
   arrivals = await import("./bridgeArrival.js");
+});
+
+describe("a transfer out to another chain", () => {
+  it("pays what reached the bridge less its fee: a gas refund paid elsewhere isn't part of it", () => {
+    const row = transferOut("a", { lux: "3500000000" });
+
+    expect(arrivals.payoutOf({ ...row, entry: { ...row.entry, refund: 500_000_000n } })).toEqual({
+      fee: BigInt(SERVICE.feeLux),
+      received: 2_000_000_000n,
+    });
+  });
+
+  it("is waited for, on a network without DuskEVM too, until it's there or there's nothing to wait for", async () => {
+    const { awaitingArrival, keepArrivals, loadArrivals } = arrivals;
+
+    expect(awaitingArrival(transferOut("a"), MAINNET, NOW)).toBe(true);
+    // No more than the bridge's fee, no address to pay, failed, or a week gone.
+    expect(awaitingArrival(transferOut("b", { lux: SERVICE.feeLux }), MAINNET, NOW)).toBe(false);
+    expect(awaitingArrival(transferOut("c", { memo: "" }), MAINNET, NOW)).toBe(false);
+    expect(awaitingArrival(transferOut("d", { status: "failed" }), MAINNET, NOW)).toBe(false);
+    expect(awaitingArrival(transferOut("e", { ago: 8 * 86_400_000 }), MAINNET, NOW)).toBe(false);
+    // The bridge reads the memo as it is: padded, or bytes, it pays nothing.
+    expect(awaitingArrival(transferOut("f", { memo: ` ${TO}` }), MAINNET, NOW)).toBe(false);
+    expect(awaitingArrival({ ...transferOut("g"), entry: { memoBinary: true, timestamp: NOW - 1000 } }, MAINNET, NOW)).toBe(false);
+    // Any capitals the bridge reads as an address, checksum or not, it pays.
+    const offChecksum = `0x${TO.slice(2, 4).toLowerCase()}${TO.slice(4, 8).toUpperCase()}${TO.slice(8)}`;
+    expect(awaitingArrival(transferOut("j", { memo: offChecksum }), MAINNET, NOW)).toBe(true);
+    // A route that isn't paying out.
+    const stopped = { ...transferOut("h"), route: { ...SERVICE, running: false } };
+    expect(awaitingArrival(stopped, MAINNET, NOW)).toBe(false);
+    expect(arrivals.payoutOf({ ...transferOut("i"), route: { ...SERVICE, payoutAddress: "" } })).toBeNull();
+
+    await loadArrivals(W1);
+    await keepArrivals({ [transferOut("a").hash]: { hash: L2(2), at: NOW } }, 1, W1);
+
+    expect(awaitingArrival(transferOut("a"), MAINNET, NOW)).toBe(false);
+  });
 });
 
 describe("a deposit to DuskEVM's arrival", () => {

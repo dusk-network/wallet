@@ -162,6 +162,12 @@ describe("toasts", () => {
     expect(visibleText(el)).toBe("1,500 DUSK to Bob is still pending");
     el = show(txStatusToast(null, "executed"));
     expect(visibleText(el)).toBe("Transaction completed");
+
+    // Bridged to another chain, going through on Dusk isn't the end of it.
+    el = show(txStatusToast(tx, "executed", { onItsWayTo: "BNB Smart Chain" }));
+    expect(visibleText(el)).toBe("1,500 DUSK to 21n5nc…fMMLNz on its way to BNB Smart Chain");
+    el = show(txStatusToast(tx, "failed", { onItsWayTo: "BNB Smart Chain" }));
+    expect(visibleText(el)).toBe("1,500 DUSK to 21n5nc…fMMLNz failed");
   });
 });
 
