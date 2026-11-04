@@ -253,6 +253,8 @@ describe("what a row says", () => {
       "BSC bridge",
       ["all", "sent", "bridge"],
     ]);
+    // One that failed stays where it was: its fee was paid all the same.
+    expect(filters(describeRecord({ kind: TX_KIND.TRANSFER, direction: "out", to: bscOut, memo: evm, amount: "2000000000", status: "failed" }, { nodeUrl: MAINNET }))).toEqual(["all", "sent", "bridge"]);
     // The wallet's own send, which has no direction, too; one to yourself isn't one.
     expect(describeRecord({ kind: TX_KIND.TRANSFER, to: bscOut, memo: evm, amount: "2000000000" }, { nodeUrl: MAINNET }).lead).toBe("Bridge to BNB Smart Chain");
     expect(describeRecord({ kind: TX_KIND.TRANSFER, direction: "self", to: bscOut, amount: "1" }, { nodeUrl: MAINNET }).name).toBe("To yourself");

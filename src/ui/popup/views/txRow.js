@@ -333,6 +333,8 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
             ? null
             : txStatusWord(status, { final }),
     payout: onItsWay || arrival ? payout : null,
+    // Whichever way it moved, as its amount says before a failure mutes it.
+    flow: d.amount?.sign === MINUS ? "out" : d.amount?.sign === "+" ? "in" : null,
     failed,
     unsent,
     fee: tx?.fee != null ? formatFee(tx.fee) : null,
@@ -347,7 +349,7 @@ export function inFilter(desc, filter) {
   if (desc.category === filter) return true;
   // What's bridged was sent or received too, so Sent never looks as if it's gone.
   if (desc.category !== "bridge") return false;
-  return filter === "sent" ? desc.amount?.sign === MINUS : filter === "received" && desc.amount?.sign === "+";
+  return filter === "sent" ? desc.flow === "out" : filter === "received" && desc.flow === "in";
 }
 
 /**
