@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
 import { TX_KIND } from "../shared/constants.js";
-import { isAccountKey } from "../shared/accountKey.js";
+import { isAccount } from "@dusk-network/networks/account";
 import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
@@ -21,7 +21,10 @@ vi.mock("./components/QrScanModal.js", () => ({
 }));
 vi.mock("../shared/addressBook.js", () => ({ listAddressBook: vi.fn(async () => []) }));
 // The accounts here are made up, so none is a key: a test says when it matters.
-vi.mock("../shared/accountKey.js", () => ({ isAccountKey: vi.fn(() => true) }));
+vi.mock("@dusk-network/networks/account", async (importOriginal) => ({
+  ...(await importOriginal()),
+  isAccount: vi.fn(() => true),
+}));
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupDuskName: vi.fn(),
@@ -121,8 +124,8 @@ beforeEach(() => {
   dom = installFakeDom();
   lookupPrimaryName.mockReset();
   lookupPrimaryName.mockImplementation(async () => null);
-  isAccountKey.mockReset();
-  isAccountKey.mockReturnValue(true);
+  isAccount.mockReset();
+  isAccount.mockReturnValue(true);
   lookupDuskName.mockReset();
   lookupDuskName.mockImplementation((input) => {
     const key = String(input).trim().toLowerCase();
@@ -409,7 +412,7 @@ describe("send to a .dusk name with one address", () => {
 
 describe("what the To field says about what's typed", () => {
   it("says a mistyped account isn't an address, and Review stays off", () => {
-    isAccountKey.mockReturnValue(false);
+    isAccount.mockReturnValue(false);
     const form = mount(newState());
     typeInto(form.to, ALICE.account);
     expect(visibleText(form.nameBox())).toBe("Not a valid address. Check it and try again.");
@@ -417,7 +420,7 @@ describe("what the To field says about what's typed", () => {
     expect(form.review.disabled).toBe(true);
 
     // Corrected, it's an account again.
-    isAccountKey.mockReturnValue(true);
+    isAccount.mockReturnValue(true);
     typeInto(form.to, ALICE.account);
     expect(visibleText(form.nameBox())).toBe("");
     expect(form.pill()).toBe("Public");
@@ -462,7 +465,7 @@ describe("a memo too long for the network", () => {
     typeInto(form.amount, "1");
 
     typeInto(memo, "x".repeat(513));
-    expect(error()).toBe("That memo is too long: 512 characters at most.");
+    expect(error()).toBe("That memo is too long: 512 bytes at most.");
     form.review.click();
     await settle();
     expect(state.route).toBe("send");

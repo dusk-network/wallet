@@ -1,3 +1,4 @@
+import { isAccount } from "@dusk-network/networks/account";
 import {
   formatDusk,
   formatDuskExact,
@@ -30,7 +31,6 @@ import {
   setRecipientBadge,
 } from "../../components/RecipientBadge.js";
 
-import { isAccountKey } from "../../../shared/accountKey.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { asDuskName, closeDuskName, isDuskName } from "@duskdomains/sdk/names";
 import {
@@ -52,7 +52,7 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const NOT_AN_ADDRESS_TEXT = "Not a valid address. Check it and try again.";
 // What the network takes.
 const MAX_MEMO_BYTES = 512;
-const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} characters at most.`;
+const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
 export const EVM_ADDRESS_TEXT = "That's an EVM address, not a Dusk account.";
 
 /**
@@ -672,7 +672,7 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     const t = ProfileGenerator.typeOf(v);
 
-    if (t === "account" && !isAccountKey(v)) {
+    if (t === "account" && !isAccount(v)) {
       hideRecipientBadge(toTypePill);
       showNameBox([h("div", { class: "err", text: NOT_AN_ADDRESS_TEXT })]);
       detectedRecipientType = null;

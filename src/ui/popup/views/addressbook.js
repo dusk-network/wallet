@@ -1,4 +1,4 @@
-import { isAccountKey } from "../../../shared/accountKey.js";
+import { isAccount } from "@dusk-network/networks/account";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { isDuskName } from "@duskdomains/sdk/names";
 import { explorerAccountUrl } from "../../../shared/explorer.js";
@@ -500,7 +500,7 @@ export function addressBookView(ov, { state, actions } = {}) {
         return;
       }
       const t = ProfileGenerator.typeOf(text);
-      if (t === "account" && !isAccountKey(text)) {
+      if (t === "account" && !isAccount(text)) {
         addrBox.replaceChildren();
         setFieldError(addrInput, addrError, "Not a valid address. Check it and try again.");
         return;
@@ -528,7 +528,7 @@ export function addressBookView(ov, { state, actions } = {}) {
         return { address, duskName: result.name, checkedAt: Date.now() };
       }
       const t = ProfileGenerator.typeOf(text);
-      if (t === "account" && !isAccountKey(text)) return { error: "Not a valid address. Check it and try again." };
+      if (t === "account" && !isAccount(text)) return { error: "Not a valid address. Check it and try again." };
       if (t !== "account" && t !== "address") return { error: "That isn't an account, a shielded address or a .dusk name." };
       return { address: text };
     };
