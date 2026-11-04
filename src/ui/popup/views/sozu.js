@@ -8,6 +8,7 @@ import {
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
+import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
 import { SOZU_FN, feePercent, leastSozuStake, parsePool, sozuStake, sozuUnstakeAllowed } from "@dusk-network/networks/sozu";
 
 import {
@@ -352,6 +353,8 @@ function maybeAutoWatchStDusk({ state, actions, st, status, profileIndex }) {
     });
 }
 
+const accountOf = (ov, idx) => String(ov?.accounts?.[idx] ?? "");
+
 function ensureSozuLoaded(ov, { state, actions } = {}) {
   const st = sozuState(state);
   const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
@@ -360,9 +363,23 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
 
   st.loading = true;
   st.error = null;
+  // An answer from before a switch is for what was switched from: asked again.
+  // The context changes as a switch starts, the overview's account once it's done.
+  const context = state.context;
+  const account = accountOf(ov, idx);
+  const switched = () => {
+    if (state.context === context && accountOf(state.overview ?? ov, idx) === account) return false;
+    st.loading = false;
+    st.loaded = false;
+    actions?.render?.().catch(() => {});
+    return true;
+  };
   actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: idx })
     ?.then((resp) => {
+      if (switched()) return;
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to load Sozu status");
+      st.readContext = context;
+      st.readAccount = account;
       st.status = resp?.result ?? resp ?? null;
       st.pool = st.status?.pool ?? null;
       st.position = st.status?.position ?? null;
@@ -373,12 +390,52 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
       actions?.render?.().catch(() => {});
     })
     ?.catch((e) => {
+      if (switched()) return;
       st.error = e?.message ?? String(e);
       st.loaded = false;
       st.loading = false;
       actions?.render?.().catch(() => {});
     });
   return st;
+}
+
+/**
+ * What the selected profile holds with Sozu, for the Staking overview, as read
+ * for this wallet on this network. `known` is false until that's read, or when
+ * the read found the pool but not the position. `failed` says the last read
+ * failed, so what's known may be out of date.
+ * @param {object} ov
+ * @param {{ state: object, actions: object }} ctx
+ * @returns {{ known: boolean, failed: boolean, poolLux: bigint, stDuskLux: bigint }}
+ */
+export function sozuHolding(ov, { state, actions } = {}) {
+  const st = sozuState(state);
+  const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
+  const nodeUrl = String(ov?.nodeUrl ?? "");
+  const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
+  // Read before a switch of wallet, profile or network: not this one's.
+  const current = st.readContext === state.context && st.readAccount === accountOf(ov, idx);
+  if (st.loaded && !current) st.loaded = false;
+  // A custom node's network can come to be known after the read, with no
+  // switch: asked again once, as its key may not match until its chain ID is read.
+  if (st.status?.networkKey === networkKey) {
+    st.askedAgainFor = null;
+  } else if (st.loaded && st.askedAgainFor !== networkKey) {
+    st.askedAgainFor = networkKey;
+    st.loaded = false;
+  }
+  if (!st.error) ensureSozuLoaded(ov, { state, actions });
+  const answered = current && st.profileIndex === idx && st.status?.networkKey === networkKey;
+  // A network without Sozu has no position, which is nothing held there. On one
+  // with Sozu, no position is a read that failed, not nothing held.
+  const noPosition = answered && !st.position && st.status?.configured === true;
+  const position = parseSozuPosition((answered && st.position) || {});
+  return {
+    known: answered && !noPosition,
+    failed: Boolean(st.error) || noPosition,
+    poolLux: safeBigInt(position.poolBalanceLux, 0n),
+    stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n),
+  };
 }
 
 // Sozu's switches as the screens say them: deposits paused, or a pool being

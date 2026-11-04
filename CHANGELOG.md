@@ -193,6 +193,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- The Staking page shows what is staked with Sozu and how to unstake it, instead of saying nothing is staked.
 - Review goes back to the form when the wallet, profile or network changes.
 - A public send's Review says the recipient's account shows too.
 - Hide balances also hides the fee on a transaction's page.

@@ -78,6 +78,7 @@ const sozu = (over = {}) => ({
   loading: false,
   error: null,
   profileIndex: 0,
+  readAccount: ACCOUNT,
   status: {
     configured: true,
     networkKey: "testnet",
@@ -223,6 +224,178 @@ describe("staking overview", () => {
     expect(statusReads(next.actions)).toBe(1);
   });
 
+  it("shows what's staked with Sozu, and how to get it back, where it would say nothing is staked", async () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const state = { route: "stake", staking: staking(), sozu: sozu({ position }) };
+    popup(state);
+
+    const figures = () => [...body.querySelectorAll(".stake-sum__two > div")].map(visibleText);
+    expect(figures()).toEqual([
+      "Staked natively0 DUSKNothing to unstake or claim",
+      "With Sozu0.0997 DUSK0.0318 stDUSK, rewards included",
+      "Native rewards0 DUSK",
+    ]);
+    expect(visibleText(body)).not.toContain("Nothing staked yet");
+    const buttons = () => [...body.querySelectorAll(".stake-sum button")].map(visibleText);
+    expect(buttons()).toEqual(["Unstake from Sozu"]);
+
+    body.querySelector(".stake-sum button").click();
+    await settle();
+    expect(state.staking.screen).toBe("liquid");
+    expect(state.sozu.action).toBe("withdraw");
+  });
+
+  it("keeps a native stake's buttons beside Sozu's", () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const state = {
+      route: "stake",
+      staking: staking(
+        owner({
+          hasStake: true,
+          ownerKind: "self",
+          info: { amount: { value: dusk(2000), locked: "0", eligibility: "0", total: dusk(2000) }, reward: dusk(3), faults: 0, hardFaults: 0 },
+        })
+      ),
+      sozu: sozu({ position }),
+    };
+    popup(state);
+
+    expect([...body.querySelectorAll(".stake-sum__two > div")].map(visibleText)).toEqual([
+      "Staked natively2,000 DUSK",
+      "With Sozu0.0997 DUSK0.0318 stDUSK, rewards included",
+      "Native rewards3 DUSK",
+    ]);
+    expect([...body.querySelectorAll(".stake-sum button")].map(visibleText)).toEqual(["Unstake", "Claim rewards", "Unstake from Sozu"]);
+  });
+
+  it("hides what's with Sozu with the other balances", () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    popup({ route: "stake", staking: staking(), sozu: sozu({ position }) }, ov({ hideBalances: true }));
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("0.0997");
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("0.0318");
+  });
+
+  it("reads Sozu again for what was read before a switch of wallet, and doesn't show the old figure", async () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const held = sozu({ position: { poolBalanceLux: "5000000000", stDuskBalanceLux: "1600000000" }, readContext: {} });
+    const thisWallet = { ...held.status, position, pool: held.pool };
+    const state = { route: "stake", staking: staking(), sozu: held, context: {} };
+    popup(state, ov(), { sozuStatus: async () => thisWallet });
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("Sozu");
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu0.0997 DUSK");
+  });
+
+  it("reads Sozu again when the network came to be known after the read, with no switch", async () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const held = sozu({ position });
+    const thisNetwork = { ...held.status, position, pool: held.pool };
+    held.status = { ...held.status, networkKey: "mainnet" };
+    popup({ route: "stake", staking: staking(), sozu: held }, ov(), { sozuStatus: async () => thisNetwork });
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu0.0997 DUSK");
+  });
+
+  it("leaves out an answer for the wallet switched from, though it came under the new context", async () => {
+    const theirs = { ...sozu().status, position: { poolBalanceLux: "5000000000", stDuskBalanceLux: "1600000000" }, pool: sozu().pool };
+    const answers = [];
+    const state = { route: "stake", staking: staking(), sozu: sozu({ loaded: false, position: null }), overview: ov() };
+    popup(state, ov(), { sozuStatus: () => new Promise((resolve) => answers.push(resolve)) });
+
+    // The overview has moved on to the new wallet by the time the answer comes.
+    state.overview = ov({ accounts: [OTHER] });
+    answers[0](theirs);
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("With Sozu");
+    expect(state.sozu.position).toBeNull();
+    expect(answers).toHaveLength(2);
+  });
+
+  it("says when what's with Sozu couldn't be read, rather than that nothing is staked", async () => {
+    const state = { route: "stake", staking: staking(), sozu: sozu({ loaded: false, position: null, readAccount: undefined }) };
+    popup(state, ov(), {
+      sozuStatus: async () => {
+        throw new Error("node down");
+      },
+    });
+    await settle();
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("What's with Sozu couldn't be read.");
+    expect(text).not.toContain("Nothing staked yet");
+  });
+
+  it("says it couldn't read Sozu when the status has the pool but no position", async () => {
+    const state = { route: "stake", staking: staking(), sozu: sozu({ position: null }) };
+    popup(state);
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("What's with Sozu couldn't be read.");
+    expect(text).not.toContain("Nothing staked yet");
+  });
+
+  it("doesn't say nothing is staked on an old zero when reading it again fails", async () => {
+    const state = { route: "stake", staking: staking(), sozu: sozu({ loaded: false }) };
+    popup(state, ov(), {
+      sozuStatus: async () => {
+        throw new Error("node down");
+      },
+    });
+    await settle();
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("What's with Sozu couldn't be read.");
+    expect(text).not.toContain("Nothing staked yet");
+  });
+
+  it("says nothing is staked on a network without Sozu", () => {
+    const status = { configured: false, networkKey: "testnet" };
+    popup({ route: "stake", staking: staking(), sozu: sozu({ status, position: null }) });
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("Nothing staked yet");
+  });
+
+  it("keeps what was read when reading it again fails, and says it may be out of date", async () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const state = { route: "stake", staking: staking(), sozu: sozu({ position, loaded: false }) };
+    popup(state, ov(), {
+      sozuStatus: async () => {
+        throw new Error("node down");
+      },
+    });
+    await settle();
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("With Sozu0.0997 DUSK");
+    expect(text).toContain("What's with Sozu couldn't be read again, so it may be out of date.");
+  });
+
+  it("leaves out an answer from before a switch of wallet, and asks again", async () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const theirs = { ...sozu().status, position: { poolBalanceLux: "5000000000", stDuskBalanceLux: "1600000000" }, pool: sozu().pool };
+    const ours = { ...sozu().status, position, pool: sozu().pool };
+    const answers = [];
+    const state = { route: "stake", staking: staking(), sozu: sozu({ loaded: false, position: null }), context: {} };
+    popup(state, ov(), { sozuStatus: () => new Promise((resolve) => answers.push(resolve)) });
+
+    switchContext(state);
+    answers[0](theirs);
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("With Sozu");
+    expect(answers).toHaveLength(2);
+
+    answers[1](ours);
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu0.0997 DUSK");
+  });
+
+  it("says nothing of Sozu for what another network read, or with nothing there", () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const other = sozu({ position });
+    other.status = { ...other.status, networkKey: "mainnet" };
+    popup({ route: "stake", staking: staking(), sozu: other }, ov(), { sozuStatus: async () => other.status });
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("Sozu");
+
+    popup({ route: "stake", staking: staking(), sozu: sozu() });
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("Sozu");
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("Nothing staked yet");
+  });
+
   it("offers native and liquid staking as two equal choices, neither picked", () => {
     const state = { route: "stake", staking: staking() };
     popup(state);
@@ -254,7 +427,11 @@ describe("staking overview", () => {
   });
 
   it("says why Unstake and Claim rewards can't be pressed", () => {
+    // Until Sozu is read, nothing natively staked doesn't say nothing is staked.
     popup({ route: "stake", staking: staking() });
+    expect(body.querySelector(".stake-sum").querySelectorAll(".stake-cap")).toHaveLength(0);
+
+    popup({ route: "stake", staking: staking(), sozu: sozu() });
     const sum = body.querySelector(".stake-sum");
     expect(sum.querySelectorAll(".stake-big").map(visibleText)).toEqual(["0 DUSK", "0 DUSK"]);
     expect([button("Unstake").disabled, button("Claim rewards").disabled]).toEqual([true, true]);
