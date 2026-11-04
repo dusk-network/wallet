@@ -153,6 +153,19 @@ describe("sending a token from its page", () => {
     expect(state.assetTxDraft.asset.spender).toBe(contract);
   });
 
+  it("reads a decimal comma, and refuses what isn't an amount instead of cutting it short", async () => {
+    const first = await open({ to: TO, amount: "1,5", spender: "", approveAmount: "" });
+    await first.press("Review transfer");
+    expect(first.send.mock.calls.at(-1)[0].args.value).toBe("150");
+
+    for (const amount of ["1.2.3", "1,2,3", "1.foo", "-1", "1e1"]) {
+      const { press, send, state } = await open({ to: TO, amount, spender: "", approveAmount: "" });
+      await press("Review transfer");
+      expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_DRC20_ENCODE_INPUT" }));
+      expect(state.route).toBe("asset_token");
+    }
+  });
+
   it("doesn't go to Review when the engine won't write the call", async () => {
     const { press, send, state } = await open({ to: TO, amount: "1", spender: "", approveAmount: "" });
     send.mockImplementation(async () => ({ error: { message: "The call wasn't written as asked, so it wasn't sent." } }));
