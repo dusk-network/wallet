@@ -285,6 +285,12 @@ describe("amounts in the browser's language", () => {
     }
   });
 
+  it("say their examples in the language's separators", () => {
+    inLanguage("nl-NL");
+
+    expect(() => parseDuskToLux("abc")).toThrow("0,123");
+  });
+
   it("stay in the plain form everywhere a machine reads them", () => {
     inLanguage("nl-NL");
 

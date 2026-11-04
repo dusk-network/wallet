@@ -185,7 +185,7 @@ export function normalizeDuskInput(text) {
 export function parseDuskToLux(duskStr) {
   const s = normalizeDuskInput(duskStr);
   if (!/^(\d+(\.\d*)?|\.\d+)$/.test(s)) {
-    throw new Error("Invalid amount. Use a number like 1 or 0.123");
+    throw new Error(`Invalid amount. Use a number like 1 or ${amountForInput("0.123")}`);
   }
   const [u, d = ""] = s.split(".");
   if (d.length > LUX_DECIMALS) {

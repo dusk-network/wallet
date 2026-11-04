@@ -4,6 +4,7 @@ import { feePercent } from "@dusk-network/networks/sozu";
 import {
   formatDusk,
   formatFee,
+  amountForInput,
   formatLuxForInput,
   formatLuxToDusk,
   groupThousands,
@@ -763,7 +764,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError("Enter an amount such as 1000 or 1000.5.");
+      field.setError(`Enter an amount such as 1000 or ${amountForInput("1000.5")}.`);
       reviewBtn.disabled = true;
       return null;
     }

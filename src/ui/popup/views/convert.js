@@ -2,6 +2,7 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
+  amountForInput,
   formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
@@ -80,7 +81,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError("Enter an amount such as 1 or 0.5.");
+      field.setError(`Enter an amount such as 1 or ${amountForInput("0.5")}.`);
       return null;
     }
     if (lux <= 0n) {

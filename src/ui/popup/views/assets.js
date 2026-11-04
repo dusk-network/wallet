@@ -1,4 +1,4 @@
-import { UI_DISPLAY_DECIMALS, normalizeDuskInput, safeBigInt } from "../../../shared/amount.js";
+import { amountForInput, UI_DISPLAY_DECIMALS, normalizeDuskInput, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { reviewGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
@@ -100,7 +100,7 @@ function parseTokenAmountHuman(raw, decimals) {
 
   if (!s.includes(".")) {
     // Integer amount in human units.
-    if (!/^[0-9]+$/.test(s)) throw new Error("Enter an amount such as 1 or 0.5.");
+    if (!/^[0-9]+$/.test(s)) throw new Error(`Enter an amount such as 1 or ${amountForInput("0.5")}.`);
     const n = BigInt(s);
     const out = n * 10n ** BigInt(d);
     if (out > MAX_U64) throw new Error("That amount is too large.");
@@ -108,9 +108,9 @@ function parseTokenAmountHuman(raw, decimals) {
   }
 
   const [intRaw, fracRaw = "", ...rest] = s.split(".");
-  if (rest.length || (!intRaw && !fracRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
-  if (intRaw && !/^[0-9]+$/.test(intRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
-  if (fracRaw && !/^[0-9]+$/.test(fracRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
+  if (rest.length || (!intRaw && !fracRaw)) throw new Error(`Enter an amount such as 1 or ${amountForInput("0.5")}.`);
+  if (intRaw && !/^[0-9]+$/.test(intRaw)) throw new Error(`Enter an amount such as 1 or ${amountForInput("0.5")}.`);
+  if (fracRaw && !/^[0-9]+$/.test(fracRaw)) throw new Error(`Enter an amount such as 1 or ${amountForInput("0.5")}.`);
 
   const intPart = intRaw ? BigInt(intRaw) : 0n;
   const fracDigits = fracRaw;
