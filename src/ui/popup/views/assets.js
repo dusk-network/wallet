@@ -1,4 +1,4 @@
-import { UI_DISPLAY_DECIMALS, safeBigInt } from "../../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, normalizeDuskInput, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { reviewGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
@@ -90,7 +90,7 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
 }
 
 function parseTokenAmountHuman(raw, decimals) {
-  const s = String(raw ?? "").trim();
+  const s = normalizeDuskInput(raw);
   if (!s) throw new Error("Enter an amount.");
   if (s.startsWith("-")) throw new Error("Enter an amount of 0 or more.");
 
@@ -107,7 +107,8 @@ function parseTokenAmountHuman(raw, decimals) {
     return out.toString();
   }
 
-  const [intRaw, fracRaw = ""] = s.split(".");
+  const [intRaw, fracRaw = "", ...rest] = s.split(".");
+  if (rest.length || (!intRaw && !fracRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
   if (intRaw && !/^[0-9]+$/.test(intRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
   if (fracRaw && !/^[0-9]+$/.test(fracRaw)) throw new Error("Enter an amount such as 1 or 0.5.");
 
@@ -760,7 +761,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     name: "assetTokenAmount",
     placeholder: sym,
     value: String(form.amount ?? ""),
-    numericMode: dec > 0 ? "decimal" : "integer",
+    numericMode: "decimal",
     onEnter: () => reviewTransferBtn.click(),
     oninput: (e) => {
       form.amount = String(e?.target?.value ?? "");
@@ -800,7 +801,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     name: "assetTokenApproveAmount",
     placeholder: sym,
     value: String(form.approveAmount ?? ""),
-    numericMode: dec > 0 ? "decimal" : "integer",
+    numericMode: "decimal",
     onEnter: () => reviewApproveBtn.click(),
     oninput: (e) => {
       form.approveAmount = String(e?.target?.value ?? "");

@@ -4,6 +4,7 @@ import {
   LUX_SCALE,
   safeBigInt,
   formatLuxToDusk,
+  normalizeDuskInput,
   parseDuskToLux,
   groupThousands,
   formatDusk,
@@ -101,9 +102,31 @@ describe("parseDuskToLux", () => {
     expect(parseDuskToLux("1.1")).toBe("1100000000");
   });
 
-  it("truncates excess precision", () => {
-    // More than 9 decimals - should truncate
-    expect(parseDuskToLux("1.1234567899999")).toBe("1123456789");
+  it("refuses more decimals than DUSK has", () => {
+    expect(() => parseDuskToLux("1.1234567899999")).toThrow("Invalid amount");
+    expect(() => parseDuskToLux("0.0000000001")).toThrow("Invalid amount");
+  });
+
+  it("takes a point at either end, as the web wallet does", () => {
+    expect(parseDuskToLux("1.")).toBe("1000000000");
+    expect(parseDuskToLux(".5")).toBe("500000000");
+    expect(() => parseDuskToLux(".")).toThrow("Invalid amount");
+  });
+
+  it("reads a decimal comma as what it is, whatever the language", () => {
+    expect(parseDuskToLux("0,1")).toBe("100000000");
+    expect(parseDuskToLux("1,5")).toBe("1500000000");
+    expect(parseDuskToLux("12,50")).toBe("12500000000");
+    expect(parseDuskToLux("1.000,5")).toBe("1000500000000");
+    expect(parseDuskToLux("1,000.5")).toBe("1000500000000");
+    expect(parseDuskToLux("1,000,000")).toBe("1000000000000000");
+  });
+
+  it("refuses a lone comma before three digits, which could be either", () => {
+    expect(() => parseDuskToLux("1,000")).toThrow("Invalid amount");
+    expect(() => parseDuskToLux("12,500")).toThrow("Invalid amount");
+    expect(parseDuskToLux("0,125")).toBe("125000000");
+    expect(parseDuskToLux("1,5000")).toBe("1500000000");
   });
 
   it("throws on invalid input", () => {

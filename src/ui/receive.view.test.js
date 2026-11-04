@@ -219,6 +219,15 @@ describe("receive", () => {
     expect(link).toContain(ACCOUNT);
   });
 
+  it("asks for the amount a decimal comma writes", async () => {
+    const state = { receive: { tab: "public", requestOpen: true, amountDusk: "1,5", memo: "" } };
+    const view = await receive("public", { state });
+    view.button("Copy request link").click();
+    await settle();
+    const [link] = dom.clipboard.writeText.mock.calls.at(-1);
+    expect(link).toContain("amount=1.5");
+  });
+
   it("says no more than the QR, the fields and Request payment show", async () => {
     const state = { receive: { tab: "public", requestOpen: false, amountDusk: "", memo: "" } };
     await receive("public", { state });

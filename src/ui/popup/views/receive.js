@@ -7,7 +7,7 @@ import { duskNameEl } from "../../components/DuskName.js";
 import { shortAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
 import { segmented } from "../../components/Segmented.js";
-import { parseDuskToLux } from "../../../shared/amount.js";
+import { normalizeDuskInput, parseDuskToLux } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
 import {
@@ -19,7 +19,7 @@ function normalizeRequestAmount(amountStr) {
   if (!raw) return "";
 
   // Allow users to type a trailing '.' (e.g. "1.") without marking it invalid.
-  let s = raw;
+  let s = normalizeDuskInput(raw);
   if (s.endsWith(".")) s = s.slice(0, -1);
 
   // "." becomes empty after trimming '.' -> treat as invalid.
