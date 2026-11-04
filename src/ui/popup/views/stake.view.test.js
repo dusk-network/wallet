@@ -274,16 +274,34 @@ describe("staking overview", () => {
     expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("0.0318");
   });
 
-  it("reads Sozu again when a read from before a switch answers for the other network", async () => {
+  it("reads Sozu again for what was read before a switch of wallet, and doesn't show the old figure", async () => {
     const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
-    const held = sozu({ position });
-    const thisNetwork = { ...held.status, position, pool: held.pool };
-    held.status = { ...held.status, networkKey: "mainnet" };
-    const state = { route: "stake", staking: staking(), sozu: held };
-    popup(state, ov(), { sozuStatus: async () => thisNetwork });
+    const held = sozu({ position: { poolBalanceLux: "5000000000", stDuskBalanceLux: "1600000000" }, readContext: {} });
+    const thisWallet = { ...held.status, position, pool: held.pool };
+    const state = { route: "stake", staking: staking(), sozu: held, context: {} };
+    popup(state, ov(), { sozuStatus: async () => thisWallet });
     expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("Sozu");
     await settle();
-    expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu");
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu0.0997 DUSK");
+  });
+
+  it("leaves out an answer from before a switch of wallet, and asks again", async () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const theirs = { ...sozu().status, position: { poolBalanceLux: "5000000000", stDuskBalanceLux: "1600000000" }, pool: sozu().pool };
+    const ours = { ...sozu().status, position, pool: sozu().pool };
+    const answers = [];
+    const state = { route: "stake", staking: staking(), sozu: sozu({ loaded: false, position: null }), context: {} };
+    popup(state, ov(), { sozuStatus: () => new Promise((resolve) => answers.push(resolve)) });
+
+    switchContext(state);
+    answers[0](theirs);
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("With Sozu");
+    expect(answers).toHaveLength(2);
+
+    answers[1](ours);
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu0.0997 DUSK");
   });
 
   it("says nothing of Sozu for what another network read, or with nothing there", () => {

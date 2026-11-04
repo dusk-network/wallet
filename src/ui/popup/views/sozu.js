@@ -361,9 +361,20 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
 
   st.loading = true;
   st.error = null;
+  // An answer from before a switch is for what was switched from: asked again.
+  const context = state.context;
+  const switched = () => {
+    if (state.context === context) return false;
+    st.loading = false;
+    st.loaded = false;
+    actions?.render?.().catch(() => {});
+    return true;
+  };
   actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: idx })
     ?.then((resp) => {
+      if (switched()) return;
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to load Sozu status");
+      st.readContext = context;
       st.status = resp?.result ?? resp ?? null;
       st.pool = st.status?.pool ?? null;
       st.position = st.status?.position ?? null;
@@ -374,6 +385,7 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
       actions?.render?.().catch(() => {});
     })
     ?.catch((e) => {
+      if (switched()) return;
       st.error = e?.message ?? String(e);
       st.loaded = false;
       st.loading = false;
@@ -395,14 +407,11 @@ export function sozuHolding(ov, { state, actions } = {}) {
   const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
-  // A read begun on another network can answer after the switch: asked again
-  // once, as a custom node's key may not match until its chain ID is read.
-  if (st.loaded && st.status?.networkKey !== networkKey && st.askedAgainFor !== networkKey) {
-    st.askedAgainFor = networkKey;
-    st.loaded = false;
-  }
+  // Read before a switch of wallet, profile or network: not this one's.
+  const current = st.readContext === state.context;
+  if (st.loaded && !current) st.loaded = false;
   if (!st.error) ensureSozuLoaded(ov, { state, actions });
-  if (!st.position || st.profileIndex !== idx || st.status?.networkKey !== networkKey) return null;
+  if (!current || !st.position || st.profileIndex !== idx || st.status?.networkKey !== networkKey) return null;
   const position = parseSozuPosition(st.position);
   return { poolLux: safeBigInt(position.poolBalanceLux, 0n), stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n) };
 }
