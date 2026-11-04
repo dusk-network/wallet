@@ -67,6 +67,10 @@ function profileValue(ov, tx, rail) {
 }
 
 // A fee, hidden as amounts are with Hide balances.
+// Anyone can send a memo, and these would show its text out of order, as
+// "exe.png" for "gnp.exe".
+const BIDI_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+
 const feeValue = (text, hidden) => h("span", {}, [balance(hidden, text), " DUSK"]);
 
 function feeRow(tx, desc, hidden) {
@@ -92,7 +96,7 @@ function technicalRows(tx, ov, nodeUrl, showToast, hidden) {
   return [
     kv("Network", nodeUrl ? networkNameFromNodeUrl(nodeUrl) : String(ov?.networkName ?? "Unknown")),
     num(tx?.blockHeight) ? kv("Block", mono(num(tx.blockHeight))) : null,
-    used || limit ? kv("Gas used", used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`) : null,
+    used || limit ? kv("Gas used", h("span", {}, [balance(hidden, used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`)])) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
     // The fee to the last LUX: the summary rounds it to 4 decimals.
     (tx?.fee ?? 0n) > 0n ? kv("Fee paid", feeValue(formatDuskExact(tx.fee), hidden)) : null,
@@ -279,7 +283,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     desc.arrivedAt ? kv("Arrived", dateText(desc.arrivedAt)) : null,
     evmRow,
     // A memo that is the recipient on another chain shows as that.
-    tx?.memo && String(tx.memo).trim() !== desc.recipient ? kv("Memo", String(tx.memo), { className: "kv--wrap" }) : null,
+    tx?.memo && String(tx.memo).trim() !== desc.recipient ? kv("Memo", String(tx.memo).replace(BIDI_CONTROLS, ""), { className: "kv--wrap" }) : null,
     feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,

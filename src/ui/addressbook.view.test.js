@@ -123,7 +123,8 @@ describe("contacts", () => {
     const save = rows[0].querySelector(".mini-btn");
     expect(accessibleName(save)).toBe("Save alice.dusk to Contacts");
     save.click();
-    expect(view.state.addressBook).toMatchObject({ view: "edit", editAddress: ACCOUNT, editName: "alice.dusk" });
+    // Named after a .dusk name, it's saved from that name.
+    expect(view.state.addressBook).toMatchObject({ view: "edit", editAddress: "alice.dusk", editName: "alice.dusk" });
   });
 
   it("saves a contact from a .dusk name, with the name and when it was checked", async () => {
@@ -151,6 +152,37 @@ describe("contacts", () => {
     await settle();
     expect(view.error("Address")).toBe("Not a valid address. Check it and try again.");
     expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+  });
+
+  it("won't save a contact named like a .dusk name it isn't saved from", async () => {
+    const view = mount({ view: "edit", editId: null, editReturnView: "list" });
+    typeInto(view.field("Address"), ACCOUNT);
+    for (const name of ["alice.dusk", "ALICE.Dusk", " alice.dusk ", "alice.dusk."]) {
+      typeInto(view.field("Name"), name);
+      view.button("Save").click();
+      await settle();
+      expect(view.error("Name")).toBe("That looks like a .dusk name. Enter it as the address below, or choose another name.");
+    }
+    expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+  });
+
+  it("won't save an address under a second name, and says which it has", async () => {
+    const view = mount({ view: "edit", editId: null, editReturnView: "list", items: [{ id: "2", name: "Shop", address: ACCOUNT, type: "account" }] });
+    typeInto(view.field("Name"), "Spaarpotje");
+    typeInto(view.field("Address"), ACCOUNT);
+    view.button("Save").click();
+    await settle();
+    expect(view.error("Address")).toBe("This address is already saved as Shop.");
+    expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+  });
+
+  it("joins up an address that a chat app broke with spaces", async () => {
+    const view = mount({ view: "edit", editId: null, editReturnView: "list" });
+    typeInto(view.field("Name"), "Shop");
+    typeInto(view.field("Address"), `${ACCOUNT.slice(0, 50)} ${ACCOUNT.slice(50)}`);
+    view.button("Save").click();
+    await settle();
+    expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ address: ACCOUNT }), expect.anything());
   });
 
   it("says under the field what can't be saved: no name, an unknown name, this profile's own account", async () => {

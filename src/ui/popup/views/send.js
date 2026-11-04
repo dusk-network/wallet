@@ -14,6 +14,7 @@ import { BLOCKED_TITLE, blockedRecipient } from "../../../shared/recipientBlockl
 import { ProfileGenerator } from "@dusk/w3sper";
 import { h, setChildren } from "../../lib/dom.js";
 import { guarded } from "../../lib/clickGuard.js";
+import { joinedAddress } from "../../lib/recipient.js";
 import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
@@ -50,6 +51,8 @@ import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 // Base58 of an account's length that isn't a key: a mistyped account.
 const NOT_AN_ADDRESS_TEXT = "Not a valid address. Check it and try again.";
+// The longest a .dusk name can be, with .dusk.
+const LONGEST_NAME = 68;
 // What the network takes.
 const MAX_MEMO_BYTES = 512;
 const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
@@ -633,6 +636,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   const updateToType = () => {
+    to.value = joinedAddress(to.value || "");
     const v = String(to.value || "").trim();
     showSelfNote("");
     shownName = null;
@@ -725,6 +729,17 @@ export function sendFormView(ov, { state, actions } = {}) {
       hideRecipientBadge(toTypePill);
       showNameBox([suggestionButton(bare)]);
       detectedRecipientType = null;
+      updateContactMatch("", null);
+      updateAmountHelpers();
+      return;
+    }
+
+    // Too long for a name, and it isn't an address: not one in the making.
+    if (v.length > LONGEST_NAME) {
+      hideRecipientBadge(toTypePill);
+      showNameBox([h("div", { class: "err", text: NOT_AN_ADDRESS_TEXT })]);
+      detectedRecipientType = null;
+      nextBtn.disabled = true;
       updateContactMatch("", null);
       updateAmountHelpers();
       return;

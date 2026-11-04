@@ -23,10 +23,10 @@ afterEach(() => {
 });
 
 // Renders a transaction's details as the popup does, the wallet's other records beside it.
-function details(tx, { contacts = [], others = [] } = {}) {
+function details(tx, { contacts = [], others = [], hidden = false } = {}) {
   const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home", addressBook: { loaded: true, items: contacts } };
   const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
-  const ov = { nodeUrl: NODE, txs: [{ hash: HASH, nodeUrl: NODE, ...tx }, ...others] };
+  const ov = { nodeUrl: NODE, hideBalances: hidden, txs: [{ hash: HASH, nodeUrl: NODE, ...tx }, ...others] };
   dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
   const body = dom.document.body;
   return {
@@ -254,5 +254,17 @@ describe("transaction details", () => {
     expect(visibleText(dom.document.body)).toBe(
       "← BackTransactionThis transaction isn't in your activity.Transaction IDefefef…efefefView in Dusk explorer"
     );
+  });
+
+  it("hides the gas used with Hide balances, as the fee can be worked out from it", () => {
+    const view = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", gasSpent: "1856398", gasPrice: "1", gasLimit: "2500000" }, { hidden: true });
+    const used = view.body.querySelectorAll(".tx-tech .kv").map(visibleText).find((row) => row.startsWith("Gas used"));
+    expect(used).toBe("Gas used••••");
+  });
+
+  it("shows a memo in the order it was written, whatever controls it carries", () => {
+    const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: "invoice \u202Egnp.exe\u202C" });
+    const memo = [...body.querySelectorAll(".kv")].map(visibleText).find((row) => row.startsWith("Memo"));
+    expect(memo).toBe("Memoinvoice gnp.exe");
   });
 });

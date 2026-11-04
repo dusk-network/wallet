@@ -484,6 +484,14 @@ function rewardRates(ov, { state, actions }) {
   };
 }
 
+// A Sozu stake or unstake of this profile's that isn't in a block yet.
+function sozuTxOnItsWay(ov) {
+  const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
+  return (Array.isArray(ov?.txs) ? ov.txs : []).find(
+    (tx) => tx?.asset?.kind === "sozu" && tx.profileIndex === idx && (tx.status === "submitted" || tx.status === "mempool")
+  );
+}
+
 function stakingOverview(ov, ctx, { state, actions }) {
   const { st, minLux, positions, pos, hidden, feeGas } = ctx;
   const onBack = () => {
@@ -509,16 +517,20 @@ function stakingOverview(ov, ctx, { state, actions }) {
   const hasLiquid = holding.known && (holding.poolLux > 0n || holding.stDuskLux > 0n);
   const hasNative = stakedLux > 0n || rewardLux > 0n;
   const showNativeActions = hasNative || !hasLiquid;
-  // Nothing natively staked says nothing of Sozu, until what's there is read.
-  const sozuUnread = (!holding.known || holding.failed) && !hasNative;
+  const sozuOnItsWay = sozuTxOnItsWay(ov);
+  // Nothing natively staked says nothing of Sozu, until what's there is read,
+  // with what's on its way in it.
+  const sozuUnread = (!holding.known || holding.failed || holding.reading || Boolean(sozuOnItsWay)) && !hasNative;
 
   // The reasons Unstake and Claim can't be pressed, said once each.
   const reasons = showNativeActions && !sozuUnread ? [...new Set([unstakeState, claimState].filter((s) => !s.ok).map((s) => s.reason))] : [];
-  const sozuNote = !holding.failed
-    ? null
-    : hasLiquid
-      ? "What's with Sozu couldn't be read again, so it may be out of date."
-      : "What's with Sozu couldn't be read.";
+  const sozuNote = sozuOnItsWay
+    ? `Your ${sozuOnItsWay.asset.action === "sozu_unstake" ? "unstake from" : "stake with"} Sozu is on its way.`
+    : !holding.failed
+      ? null
+      : hasLiquid
+        ? "What's with Sozu couldn't be read again, so it may be out of date."
+        : "What's with Sozu couldn't be read.";
 
   const figure = (label, lux, sub = null) =>
     h("div", {}, [

@@ -345,6 +345,32 @@ describe("staking overview", () => {
     expect(text).not.toContain("Nothing staked yet");
   });
 
+  it("says a first Sozu stake is on its way, and not that nothing is staked", () => {
+    const txs = [{ hash: "ab".repeat(32), status: "submitted", profileIndex: 0, asset: { kind: "sozu", action: "sozu_stake" } }];
+    popup({ route: "stake", staking: staking(), sozu: sozu() }, ov({ txs }));
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("Your stake with Sozu is on its way.");
+    expect(text).not.toContain("Nothing staked yet");
+  });
+
+  it("goes by this profile's own Sozu transactions that are still on their way", () => {
+    const tx = { hash: "ab".repeat(32), asset: { kind: "sozu", action: "sozu_unstake" } };
+    const says = (txs, over) => {
+      popup({ route: "stake", staking: staking(), sozu: sozu() }, ov({ txs, ...over }));
+      return visibleText(body.querySelector(".stake-sum"));
+    };
+    expect(says([{ ...tx, status: "mempool", profileIndex: 0 }])).toContain("Your unstake from Sozu is on its way.");
+    expect(says([{ ...tx, status: "executed", profileIndex: 0 }])).toContain("Nothing staked yet");
+    expect(says([{ ...tx, status: "failed", profileIndex: 0 }])).toContain("Nothing staked yet");
+    expect(says([{ ...tx, status: "submitted", profileIndex: 1 }])).toContain("Nothing staked yet");
+    expect(says([{ hash: tx.hash, status: "submitted", profileIndex: 0 }])).toContain("Nothing staked yet");
+  });
+
+  it("doesn't say nothing is staked while Sozu is being read again", () => {
+    popup({ route: "stake", staking: staking(), sozu: sozu({ loaded: false, loading: true }) });
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("Nothing staked yet");
+  });
+
   it("says nothing is staked on a network without Sozu", () => {
     const status = { configured: false, networkKey: "testnet" };
     popup({ route: "stake", staking: staking(), sozu: sozu({ status, position: null }) });

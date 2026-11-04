@@ -193,6 +193,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said a Sozu stake or unstake is on its way on Staking, not "Nothing staked yet", and showed it there as it completes.
+- Refused anything too long to be a name that isn't an address at To, with Review off.
+- Joined up an address a chat app broke with spaces, at To and in Contacts.
+- Refused a contact whose address is already saved under another name.
+- Refused a contact name that looks like a .dusk name it isn't saved from.
+- Showed a memo's text in the order it was written.
+- Hid the gas used on a transaction's page with Hide balances.
 - The Staking page shows what is staked with Sozu and how to unstake it, instead of saying nothing is staked.
 - Review goes back to the form when the wallet, profile or network changes.
 - A public send's Review says the recipient's account shows too.

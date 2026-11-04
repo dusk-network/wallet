@@ -403,10 +403,11 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
  * What the selected profile holds with Sozu, for the Staking overview, as read
  * for this wallet on this network. `known` is false until that's read, or when
  * the read found the pool but not the position. `failed` says the last read
- * failed, so what's known may be out of date.
+ * failed, so what's known may be out of date, and `reading` that it's being
+ * read again.
  * @param {object} ov
  * @param {{ state: object, actions: object }} ctx
- * @returns {{ known: boolean, failed: boolean, poolLux: bigint, stDuskLux: bigint }}
+ * @returns {{ known: boolean, failed: boolean, reading: boolean, poolLux: bigint, stDuskLux: bigint }}
  */
 export function sozuHolding(ov, { state, actions } = {}) {
   const st = sozuState(state);
@@ -433,6 +434,7 @@ export function sozuHolding(ov, { state, actions } = {}) {
   return {
     known: answered && !noPosition,
     failed: Boolean(st.error) || noPosition,
+    reading: Boolean(st.loading),
     poolLux: safeBigInt(position.poolBalanceLux, 0n),
     stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n),
   };

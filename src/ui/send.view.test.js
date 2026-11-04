@@ -448,6 +448,24 @@ describe("what the To field says about what's typed", () => {
     expect(form.review.disabled).toBe(false);
   });
 
+  it("says the same of what's too long to be a name and is no address either", () => {
+    const form = mount(newState());
+    for (const typo of [`${ALICE.account}x`, ALICE.account.slice(0, 70), `${ALICE.account.slice(0, 60)}0${ALICE.account.slice(61)}`]) {
+      typeInto(form.to, typo);
+      expect(visibleText(form.nameBox())).toBe("Not a valid address. Check it and try again.");
+      expect(form.pill()).toBe("");
+      expect(form.review.disabled).toBe(true);
+    }
+  });
+
+  it("joins up an address that a chat app broke with spaces", () => {
+    const form = mount(newState());
+    typeInto(form.to, `${ALICE.account.slice(0, 40)} ${ALICE.account.slice(40, 80)}\n${ALICE.account.slice(80)}`);
+    expect(form.to.value).toBe(ALICE.account);
+    expect(form.pill()).toBe("Public");
+    expect(form.review.disabled).toBe(false);
+  });
+
   it("offers a contact by name before any .dusk name, which would be somebody else's", () => {
     const state = newState();
     state.addressBook.items = [

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { accessibleName, installFakeDom, settle, typeInto } from "../testing/fakeDom.js";
+import { accessibleName, installFakeDom, settle, typeInto, visibleText } from "../testing/fakeDom.js";
+import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
@@ -157,6 +158,43 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     expect(app.querySelector(".sozu-notice")?.textContent).toBe(SWITCHED);
     expect(amount().value).toBe("100");
     expect(sent()).toEqual([]);
+  });
+
+  it("shows a stake with Sozu on Staking when it completes, with the screen left open", async () => {
+    const { dom, app } = popupPage();
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    const { state } = await import("./state.js");
+    const hash = "ab".repeat(32);
+    let completed = false;
+    send.mockReset();
+    send.mockImplementation(async (message) => {
+      switch (message.type) {
+        case "DUSK_UI_OVERVIEW":
+          return { ...TESTNET, txs: [{ hash, status: completed ? "executed" : "submitted", profileIndex: 0, asset: { kind: "sozu", action: "sozu_stake" } }] };
+        case "DUSK_UI_GET_SOZU_STATUS":
+          return { ok: true, result: { ...SOZU, position: completed ? { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" } : SOZU.position } };
+        case "DUSK_UI_GET_STAKE_OWNER_STATUS":
+          return { ok: true, result: { hasStake: false, profileIndex: 0, account: ACCOUNT, minimumStakeLux: "1000000000000", related: [] } };
+        case "DUSK_UI_GET_CACHED_GAS_PRICE":
+          return { min: "1", median: "1", max: "1" };
+        default:
+          return {};
+      }
+    });
+    state.route = "stake";
+    const { render } = await import("./app.js");
+    await render();
+    await flush();
+    expect(visibleText(app)).toContain("Your stake with Sozu is on its way.");
+    expect(visibleText(app)).not.toContain("Nothing staked yet");
+
+    completed = true;
+    dom.window.dispatchEvent(new CustomEvent(WALLET_MESSAGE_EVENT, { detail: { type: "DUSK_UI_TX_STATUS", hash, status: "executed" } }));
+    await vi.waitFor(() => expect(visibleText(app)).toContain("With Sozu0.0997 DUSK"), { timeout: 2000 });
+    expect(visibleText(app)).toContain("Unstake from Sozu");
+    expect(visibleText(app)).not.toContain("on its way");
   });
 
   it("offers no Confirm on a Review left idle while the header switches to Profile 2, and sends nothing from Profile 1", async () => {
