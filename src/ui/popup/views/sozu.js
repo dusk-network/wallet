@@ -8,6 +8,7 @@ import {
   parseDuskToLux,
   safeBigInt,
 } from "../../../shared/amount.js";
+import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
 import { SOZU_FN, feePercent, leastSozuStake, parsePool, sozuStake, sozuUnstakeAllowed } from "@dusk-network/networks/sozu";
 
 import {
@@ -379,6 +380,25 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
       actions?.render?.().catch(() => {});
     });
   return st;
+}
+
+/**
+ * What the selected profile holds with Sozu, as read on this network, for the
+ * Staking overview: null until that's read, or when it couldn't be, as Liquid
+ * staking then says why and asks again.
+ * @param {object} ov
+ * @param {{ state: object, actions: object }} ctx
+ * @returns {{ poolLux: bigint, stDuskLux: bigint } | null}
+ */
+export function sozuHolding(ov, { state, actions } = {}) {
+  const st = sozuState(state);
+  if (!st.error) ensureSozuLoaded(ov, { state, actions });
+  const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
+  const nodeUrl = String(ov?.nodeUrl ?? "");
+  const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
+  if (!st.position || st.profileIndex !== idx || st.status?.networkKey !== networkKey) return null;
+  const position = parseSozuPosition(st.position);
+  return { poolLux: safeBigInt(position.poolBalanceLux, 0n), stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n) };
 }
 
 // Sozu's switches as the screens say them: deposits paused, or a pool being

@@ -27,7 +27,7 @@ import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balanc
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { sozuLiquidStakingView } from "./sozu.js";
+import { sozuHolding, sozuLiquidStakingView } from "./sozu.js";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -499,8 +499,23 @@ function stakingOverview(ov, ctx, { state, actions }) {
   const { publicLux } = fundingOptionsForPosition(pos);
   const several = positions.length > 1;
 
+  // What's staked comes first, natively and with Sozu. With nothing natively
+  // staked beside Sozu, the native figure says there's nothing to unstake or
+  // claim, away from Unstake from Sozu.
+  const holding = sozuHolding(ov, { state, actions });
+  const hasLiquid = Boolean(holding && (holding.poolLux > 0n || holding.stDuskLux > 0n));
+  const hasNative = stakedLux > 0n || rewardLux > 0n;
+  const showNativeActions = hasNative || !hasLiquid;
+
   // The reasons Unstake and Claim can't be pressed, said once each.
-  const reasons = [...new Set([unstakeState, claimState].filter((s) => !s.ok).map((s) => s.reason))];
+  const reasons = showNativeActions ? [...new Set([unstakeState, claimState].filter((s) => !s.ok).map((s) => s.reason))] : [];
+
+  const figure = (label, lux, sub = null) =>
+    h("div", {}, [
+      h("div", { class: "stake-lbl", text: label }),
+      h("div", { class: "stake-big" }, amountParts(hidden, lux)),
+      sub ? h("div", { class: "stake-cap" }, sub) : null,
+    ].filter(Boolean));
 
   const summary = h("div", { class: "group stake-sum" }, [
     several
@@ -510,10 +525,17 @@ function stakingOverview(ov, ctx, { state, actions }) {
           h("span", { class: "mono", title: pos.stakeAccount, text: shortAddress(pos.stakeAccount) }),
         ])
       : null,
-    h("div", { class: "stake-sum__two" }, [
-      h("div", {}, [h("div", { class: "stake-lbl", text: "Staked" }), h("div", { class: "stake-big" }, amountParts(hidden, stakedLux))]),
-      h("div", {}, [h("div", { class: "stake-lbl", text: "Rewards" }), h("div", { class: "stake-big" }, amountParts(hidden, rewardLux))]),
-    ]),
+    hasLiquid
+      ? h("div", { class: "stake-sum__two" }, [
+          figure("Staked natively", stakedLux, hasNative ? null : ["Nothing to unstake or claim"]),
+          figure(
+            pos.stakeProfileIndex === ctx.selectedIndex ? "With Sozu" : `With Sozu · ${profileLabel(ctx.selectedIndex)}`,
+            holding.poolLux,
+            [balance(hidden, fmtLux(holding.stDuskLux)), " stDUSK, rewards included"]
+          ),
+          figure("Native rewards", rewardLux),
+        ])
+      : h("div", { class: "stake-sum__two" }, [figure("Staked", stakedLux), figure("Rewards", rewardLux)]),
     lockedLux > 0n
       ? h("div", { class: "stake-cap" }, [
           "Locked: ",
@@ -521,22 +543,35 @@ function stakingOverview(ov, ctx, { state, actions }) {
           ". It's still yours, and unstaking returns it.",
         ])
       : null,
-    h("div", { class: "stake-pair" }, [
-      h("button", {
-        class: "btn-outline",
-        type: "button",
-        text: "Unstake",
-        disabled: !unstakeState.ok,
-        onclick: () => makeDraft(pos, st, { state, actions, actionKind: ACTION_UNSTAKE }),
-      }),
-      h("button", {
-        class: "btn-outline",
-        type: "button",
-        text: "Claim rewards",
-        disabled: !claimState.ok,
-        onclick: () => makeDraft(pos, st, { state, actions, actionKind: ACTION_CLAIM }),
-      }),
-    ]),
+    showNativeActions
+      ? h("div", { class: "stake-pair" }, [
+          h("button", {
+            class: "btn-outline",
+            type: "button",
+            text: "Unstake",
+            disabled: !unstakeState.ok,
+            onclick: () => makeDraft(pos, st, { state, actions, actionKind: ACTION_UNSTAKE }),
+          }),
+          h("button", {
+            class: "btn-outline",
+            type: "button",
+            text: "Claim rewards",
+            disabled: !claimState.ok,
+            onclick: () => makeDraft(pos, st, { state, actions, actionKind: ACTION_CLAIM }),
+          }),
+        ])
+      : null,
+    hasLiquid
+      ? h("button", {
+          class: "btn-outline",
+          type: "button",
+          text: "Unstake from Sozu",
+          onclick: () => {
+            state.sozu.action = "withdraw";
+            setScreen(st, SCREEN_LIQUID, actions);
+          },
+        })
+      : null,
     ...reasons.map((reason) => h("div", { class: "stake-cap", text: reason })),
   ].filter(Boolean));
 
