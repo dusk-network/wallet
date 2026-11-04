@@ -102,6 +102,66 @@ describe("tokens and NFTs after a switch to another wallet, on the same network 
   });
 });
 
+describe("sending a token from its page", () => {
+  const TOKEN = `0x${"cd".repeat(32)}`;
+  const TO = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nF";
+
+  async function open(form) {
+    const { installFakeDom, settle } = await import("../../testing/fakeDom.js");
+    const { vi } = await import("vitest");
+    const { document } = installFakeDom();
+    const { assetTokenView, assetsOwner } = await import("./assets.js");
+    const ov = { isUnlocked: true, nodeUrl: "http://127.0.0.1:8080", accounts: ["acct"], selectedAccountIndex: 0 };
+    const send = vi.fn(async (message) => (message.type === "DUSK_UI_DRC20_ENCODE_INPUT" ? { result: [1, 2, 3] } : {}));
+    const state = {
+      route: "asset_token",
+      assetTokenForm: form,
+      assetTokenContractId: TOKEN,
+      assets: { loaded: true, loading: false, owner: assetsOwner(ov), updatedAt: Date.now(), tokens: [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }], nfts: [], balances: { [TOKEN]: "12345" }, balancesAt: { [TOKEN]: Date.now() } },
+    };
+    const actions = { send, render: vi.fn(async () => {}), showToast: vi.fn() };
+    document.body.replaceChildren(...assetTokenView(ov, { state, actions }));
+    const press = async (text) => {
+      document.body.querySelectorAll("button").find((b) => b.textContent === text).click();
+      await settle();
+    };
+    return { press, send, state };
+  }
+
+  it("asks the engine for the token's own call, and reviews what it asked", async () => {
+    const { press, send, state } = await open({ to: TO, amount: "90071992547409.93", spender: "", approveAmount: "" });
+    await press("Review transfer");
+    expect(send.mock.calls.map(([m]) => m).find((m) => m.type === "DUSK_UI_DRC20_ENCODE_INPUT")).toMatchObject({
+      contractId: TOKEN,
+      fnName: "transfer",
+      args: { to: { External: TO }, value: "9007199254740993" },
+    });
+    expect(state.route).toBe("asset_token_confirm");
+    expect(state.assetTxDraft.params).toMatchObject({ contractId: TOKEN, fnName: "transfer", fnArgs: [1, 2, 3], amount: "0" });
+    expect(state.assetTxDraft.asset).toMatchObject({ valueUnits: "9007199254740993", to: TO });
+  });
+
+  it.each([`0x${"AB".repeat(32)}`, "ab".repeat(32)])("takes %s as a contract, as the token drivers write one", async (typed) => {
+    const contract = "ab".repeat(32);
+    const { press, send, state } = await open({ to: typed, amount: "1", spender: typed, approveAmount: "2" });
+    await press("Review transfer");
+    expect(send.mock.calls.at(-1)[0].args).toEqual({ to: { Contract: contract }, value: "100" });
+    expect(state.assetTxDraft.asset.to).toBe(contract);
+    state.route = "asset_token";
+    await press("Review approval");
+    expect(send.mock.calls.at(-1)[0]).toMatchObject({ contractId: TOKEN, fnName: "approve", args: { spender: { Contract: contract }, value: "200" } });
+    expect(state.assetTxDraft.asset.spender).toBe(contract);
+  });
+
+  it("doesn't go to Review when the engine won't write the call", async () => {
+    const { press, send, state } = await open({ to: TO, amount: "1", spender: "", approveAmount: "" });
+    send.mockImplementation(async () => ({ error: { message: "The call wasn't written as asked, so it wasn't sent." } }));
+    await press("Review transfer");
+    expect(state.route).toBe("asset_token");
+    expect(state.assetTxDraft).toBeUndefined();
+  });
+});
+
 describe("a token send's Review", () => {
   it("names the wallet and profile it goes from with more than one wallet, and adds nothing with one", async () => {
     const { installFakeDom, visibleText } = await import("../../testing/fakeDom.js");

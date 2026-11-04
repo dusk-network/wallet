@@ -193,6 +193,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Read balances and sent tokens built on the DRC20 standard from the token list, and took a contract as a token recipient or spender.
 - Restarted an old background worker left running after an update, which stopped the wallet unlocking.
 - Read a site's DRC20 token calls in the DRC20 standard's form, with their exact amount and accounts, and warned on a token call the wallet can't read.
 - Turned the camera off when a scan is closed before the camera starts.

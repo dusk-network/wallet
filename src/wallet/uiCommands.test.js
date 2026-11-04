@@ -89,7 +89,7 @@ describe("shared UI command dispatcher", () => {
     ["DUSK_UI_GET_SOZU_STATUS", {}, "dusk_getSozuStatus", { profileIndex: 1 }, "sozu", "sozu"],
     ["DUSK_UI_DRC20_GET_METADATA", { contractId: "c", driver: "d" }, "dusk_getDrc20Metadata", { contractId: "c", driver: "d" }, { symbol: "T" }, { symbol: "T" }],
     ["DUSK_UI_DRC20_GET_BALANCE", { contractId: "c", driver: "d", profileIndex: "invalid" }, "dusk_getDrc20Balance", { contractId: "c", profileIndex: 1, driver: "d" }, 9n, "9"],
-    ["DUSK_UI_DRC20_ENCODE_INPUT", { fnName: "transfer", args: [1], driver: "d" }, "dusk_encodeDrc20Input", { fnName: "transfer", args: [1], driver: "d" }, "encoded", "encoded"],
+    ["DUSK_UI_DRC20_ENCODE_INPUT", { contractId: "c", fnName: "transfer", args: [1], driver: "d" }, "dusk_encodeDrc20Input", { contractId: "c", fnName: "transfer", args: [1], driver: "d" }, "encoded", "encoded"],
     ["DUSK_UI_DRC20_DECODE_INPUT", { fnName: "transfer", fnArgs: "0x01", driver: "d" }, "dusk_decodeDrc20Input", { fnName: "transfer", fnArgs: "0x01", driver: "d" }, [1], [1]],
     ["DUSK_UI_DRC721_GET_METADATA", { contractId: "n" }, "dusk_getDrc721Metadata", { contractId: "n" }, { name: "NFT" }, { name: "NFT" }],
     ["DUSK_UI_DRC721_OWNER_OF", { contractId: "n", tokenId: "1" }, "dusk_getDrc721OwnerOf", { contractId: "n", tokenId: "1" }, "owner", "owner"],

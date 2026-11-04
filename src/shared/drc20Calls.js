@@ -122,6 +122,50 @@ function readCall(key, driver, fn, decoded, bytes) {
   return known(parties, amount?.toString() ?? null, () => encodesTo(driver, fn, integerJson({ ...decoded, [field]: amount }), bytes));
 }
 
+/**
+ * A token call's bytes for `key`'s driver, from the popup's arguments:
+ * `{ to, value }` or `{ spender, value }`, with `{ External }` or `{ Contract }`
+ * accounts and `value` a decimal u64. They come back only when, read back with
+ * that driver, they say exactly those parties and that amount, which is what
+ * its Review shows.
+ * @param {string} key - the token's driver, as above
+ * @param {{ decodeInputFn: Function, encodeInputFn: Function }} driver
+ * @param {string} fn
+ * @param {Record<string, any>} args
+ * @returns {Uint8Array}
+ */
+export function encodeDrc20Call(key, driver, fn, args) {
+  const names = CALLS[key]?.[fn]?.[0];
+  if (!names) throw new Error(`Can't write ${fn} for this token`);
+  const value = BigInt(args?.value ?? 0n);
+  if (value < 0n || value > U64_MAX) throw new Error("That amount is too large.");
+  const bytes = driver.encodeInputFn(fn, CALL_JSON[key](fn, names, args, value));
+  const reading = readDrc20Call({ [key]: driver }, fn, bytes);
+  const says =
+    reading?.amount === value.toString() &&
+    names.every((name) => reading[name]?.value === accountText(args[name]) && reading[name]?.kind === accountKind(args[name]));
+  if (!says) throw new Error("The call wasn't written as asked, so it wasn't sent.");
+  return bytes;
+}
+
+const accountText = (account) => account?.External ?? account?.Contract;
+const accountKind = (account) => (account?.Contract ? "contract" : "account");
+
+// The arguments as each driver reads them.
+const CALL_JSON = {
+  drc20_standard: (fn, names, args, value) =>
+    integerJson({
+      ...Object.fromEntries(
+        names.map((name) => [name, args[name]?.Contract ? { Contract: args[name].Contract } : { Moonlight: args[name]?.External }])
+      ),
+      [CALLS.drc20_standard[fn][1]]: value,
+    }),
+  drc20: (_fn, names, args, value) =>
+    JSON.stringify({ ...Object.fromEntries(names.map((name) => [name, args[name]])), value: value.toString() }),
+  sozu_staked_dusk: (_fn, names, args, value) =>
+    JSON.stringify([...names.map((name) => accountText(args[name])), value.toString()]),
+};
+
 // A call the wallet knows: each party read, an amount, and the reading encodes back.
 function known(parties, amount, encodesBack) {
   if (amount === null || !parties.every(([, party]) => party) || !encodesBack()) return null;
