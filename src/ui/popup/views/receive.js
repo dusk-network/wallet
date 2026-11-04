@@ -7,7 +7,7 @@ import { duskNameEl } from "../../components/DuskName.js";
 import { shortAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
 import { segmented } from "../../components/Segmented.js";
-import { normalizeDuskInput, parseDuskToLux } from "../../../shared/amount.js";
+import { normalizeDuskInput, parseDuskToLux, amountForInput } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
 import {
@@ -32,9 +32,10 @@ function normalizeRequestAmount(amountStr) {
   const parts = s.split(".");
   if (parts[1] && parts[1].length > 9) return null;
 
-  // Validate using the canonical parser.
+  // Validate using the canonical parser, on what was typed: it reads a
+  // language's separators itself, and what's normalized no longer has them.
   try {
-    parseDuskToLux(s);
+    parseDuskToLux(raw.endsWith(".") || raw.endsWith(",") ? raw.slice(0, -1) : raw);
   } catch {
     return null;
   }
@@ -148,7 +149,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // --- Request payment (progressive disclosure) -----------------------
   const amountInput = decimalInput({
-    placeholder: "Optional, e.g. 1.25 DUSK",
+    placeholder: `Optional, e.g. ${amountForInput("1.25")} DUSK`,
     value: typeof r.amountDusk === "string" ? r.amountDusk : "",
     onEnter: () => memoInput.focus(),
   });
@@ -369,7 +370,7 @@ export function receiveView(ov, { state, actions } = {}) {
     // The fields copy the name and the address; the request link is copied here.
     copyRequestBtn.disabled = !wantRequest;
     if (wantRequest) {
-      summaryMeta.textContent = amountForUri ? `${amountForUri} DUSK` : "With memo";
+      summaryMeta.textContent = amountForUri ? `${amountForInput(amountForUri)} DUSK` : "With memo";
     } else {
       summaryMeta.textContent = hasReq ? "Configured" : "";
     }

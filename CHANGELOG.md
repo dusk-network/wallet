@@ -67,6 +67,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Followed DUSK bridged to BNB Smart Chain or Ethereum to its end: On its way, then Arrived, with the bridge fee, what was received and its transaction there
 - Listed DUSK bridged out under Sent and in under Received, as well as under Bridge
+- Wrote and read amounts in the browser's language, so 1,001 doesn't read as about one on a Dutch browser
 - Showed a migration's payout with its transaction on the other chain, not as a memo
 - Link to the explorer at its own domain
 - Opened and closed sections the same way, said Copied on the copy button instead of a toast, faded messages in place, and had Confirm and Approve ignore a click for half a second as they appear.

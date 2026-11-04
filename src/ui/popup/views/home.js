@@ -1,4 +1,4 @@
-import { formatDusk, formatLuxToDusk, groupThousands, safeBigInt } from "../../../shared/amount.js";
+import { formatDusk, formatDuskExact, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { h } from "../../lib/dom.js";
 import { assetsSectionsView } from "./assets.js";
@@ -13,7 +13,7 @@ export function homeView(ov, { state, actions } = {}) {
   const hidden = balancesHidden(ov);
   const hasBalance = Boolean(ov?.balance?.value);
   const pubLux = safeBigInt(ov?.balance?.value, 0n);
-  const balFull = hasBalance ? formatLuxToDusk(pubLux) : "—";
+  const balFull = hasBalance ? formatDuskExact(pubLux) : "—";
   const balDusk = hasBalance ? formatDusk(pubLux) : "—";
 
   // Shielded balance
@@ -26,7 +26,7 @@ export function homeView(ov, { state, actions } = {}) {
   // Always show the shielded row for Dusk. If values aren't available yet,
   // we show placeholders + sync state.
   const showShielded = true;
-  const shieldFull = hasShieldValue ? formatLuxToDusk(shieldLux) : "—";
+  const shieldFull = hasShieldValue ? formatDuskExact(shieldLux) : "—";
   const shieldDusk = hasShieldValue ? formatDusk(shieldLux) : "—";
 
   // Total (public + shielded) is only meaningful once shielded value is known.
@@ -47,7 +47,7 @@ export function homeView(ov, { state, actions } = {}) {
       : 0n;
   const hasTotal = hasBalance && typeof shieldLuxBI === "bigint";
   const totalLux = hasTotal ? pubLux + shieldLuxBI : null;
-  const totalFull = hasTotal ? formatLuxToDusk(totalLux) : null;
+  const totalFull = hasTotal ? formatDuskExact(totalLux) : null;
   const totalDusk = hasTotal ? formatDusk(totalLux) : null;
 
   // Shielded status suffix shown in Assets breakdown.

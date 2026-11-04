@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   LUX_DECIMALS,
   LUX_SCALE,
@@ -10,6 +10,8 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
+  amountForInput,
+  formatLuxForInput,
   maxAmountLux,
 } from "./amount.js";
 
@@ -202,5 +204,96 @@ describe("maxAmountLux", () => {
     // Never below zero.
     expect(maxAmountLux(50_000_000n, 100_000_000n)).toBe(0n);
     expect(maxAmountLux(100_000_000n, 100_000_000n)).toBe(0n);
+  });
+});
+
+describe("amounts in the browser's language", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const inLanguage = (language) => vi.stubGlobal("navigator", { language });
+
+  it("are written as a Dutch reader reads them", () => {
+    inLanguage("nl-NL");
+
+    expect(groupThousands("1484.9235")).toBe("1.484,9235");
+    expect(formatDuskExact("1001000000000")).toBe("1.001");
+    expect(formatDusk("1484923500000")).toBe("1.484,9235");
+    expect(formatFee("1856398")).toBe("0,0019");
+  });
+
+  it("group as the language does, in digits a person can type back", () => {
+    inLanguage("hi-IN");
+    expect(formatDuskExact("1234567891200000")).toBe("12,34,567.8912");
+    inLanguage("ar-EG");
+    expect(formatDuskExact("1500000000")).toMatch(/^1\D5$/u);
+  });
+
+  it("keep an exact amount exact, whatever its size", () => {
+    inLanguage("nl-NL");
+    expect(formatDuskExact("123456789012345678912")).toBe("123.456.789.012,345678912");
+  });
+
+  it("are read as they are written: what's shown is either the same amount or refused, never another", () => {
+    const amounts = ["1", "1500000000", "1001000000000", "1234567891", "1000000000000000", "999000000"];
+
+    for (const language of ["en-US", "en-GB", "nl-NL", "de-DE", "fr-FR", "de-CH", "hi-IN", "es-ES", "ar-EG"]) {
+      inLanguage(language);
+
+      for (const lux of amounts) {
+        let read = null;
+        try {
+          read = parseDuskToLux(formatDuskExact(lux));
+        } catch {
+          read = "refused";
+        }
+        expect(["refused", lux], `${language} ${lux}`).toContain(read);
+      }
+    }
+  });
+
+  it("refuse a point before three digits where a point groups, as it could mean a thousand or one", () => {
+    inLanguage("nl-NL");
+
+    expect(() => parseDuskToLux("1.001")).toThrow();
+    expect(() => parseDuskToLux("12.500")).toThrow();
+    expect(parseDuskToLux("1,5")).toBe("1500000000");
+    expect(parseDuskToLux("1,001")).toBe("1001000000");
+    expect(parseDuskToLux("1.001,5")).toBe("1001500000000");
+    expect(parseDuskToLux("1.000.000")).toBe("1000000000000000");
+    expect(parseDuskToLux("1.5")).toBe("1500000000");
+    expect(parseDuskToLux("0.125")).toBe("125000000");
+
+    inLanguage("en-US");
+
+    expect(parseDuskToLux("1.001")).toBe("1001000000");
+    expect(() => parseDuskToLux("1,001")).toThrow();
+  });
+
+  it("fill a field in a form the same language reads back as that amount", () => {
+    for (const language of ["en-US", "nl-NL", "de-DE", "fr-FR", "de-CH", "hi-IN", "ar-EG"]) {
+      inLanguage(language);
+
+      for (const lux of ["1234000000", "1500000000", "1000000000000", "1"]) {
+        expect(parseDuskToLux(formatLuxForInput(lux)), `${language} ${lux}`).toBe(lux);
+      }
+    }
+  });
+
+  it("read a link's plain amount the same in any language", () => {
+    for (const language of ["en-US", "nl-NL", "de-DE", "fr-FR"]) {
+      inLanguage(language);
+      expect(parseDuskToLux(amountForInput("1.234")), language).toBe("1234000000");
+    }
+  });
+
+  it("say their examples in the language's separators", () => {
+    inLanguage("nl-NL");
+
+    expect(() => parseDuskToLux("abc")).toThrow("0,123");
+  });
+
+  it("stay in the plain form everywhere a machine reads them", () => {
+    inLanguage("nl-NL");
+
+    expect(formatLuxToDusk("1484923500000")).toBe("1484.9235");
   });
 });

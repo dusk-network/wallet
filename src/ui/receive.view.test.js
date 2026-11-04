@@ -252,5 +252,15 @@ describe("receive", () => {
     Object.assign(state.receive, { amountDusk: "", memo: "Lunch" });
     await receive("public", { state });
     expect(summary()).toBe("Request paymentWith memo");
+
+    // On a Dutch browser, an amount written the Dutch way is the amount it asks for.
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "nl-NL" });
+    try {
+      Object.assign(state.receive, { amountDusk: "1,234", memo: "" });
+      await receive("public", { state });
+      expect(summary()).toBe("Request payment1,234 DUSK");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

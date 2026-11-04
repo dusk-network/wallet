@@ -4,6 +4,8 @@ import { feePercent } from "@dusk-network/networks/sozu";
 import {
   formatDusk,
   formatFee,
+  amountForInput,
+  formatLuxForInput,
   formatLuxToDusk,
   groupThousands,
   maxAmountLux,
@@ -762,7 +764,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError("Enter an amount such as 1000 or 1000.5.");
+      field.setError(`Enter an amount such as 1000 or ${amountForInput("1000.5")}.`);
       reviewBtn.disabled = true;
       return null;
     }
@@ -792,7 +794,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   const fill = (lux, mode) => {
     // What Max fills in shows as dots with balances hidden; the minimum isn't a balance.
     st.stakeMasked = mode === "max";
-    field.setValue(formatLuxToDusk(lux), { masked: hidden && st.stakeMasked });
+    field.setValue(formatLuxForInput(lux), { masked: hidden && st.stakeMasked });
     st.amountMode = mode;
     check();
     field.focus();
