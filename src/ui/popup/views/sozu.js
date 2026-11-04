@@ -410,6 +410,14 @@ export function sozuHolding(ov, { state, actions } = {}) {
   // Read before a switch of wallet, profile or network: not this one's.
   const current = st.readContext === state.context;
   if (st.loaded && !current) st.loaded = false;
+  // A custom node's network can come to be known after the read, with no
+  // switch: asked again once, as its key may not match until its chain ID is read.
+  if (st.status?.networkKey === networkKey) {
+    st.askedAgainFor = null;
+  } else if (st.loaded && st.askedAgainFor !== networkKey) {
+    st.askedAgainFor = networkKey;
+    st.loaded = false;
+  }
   if (!st.error) ensureSozuLoaded(ov, { state, actions });
   if (!current || !st.position || st.profileIndex !== idx || st.status?.networkKey !== networkKey) return null;
   const position = parseSozuPosition(st.position);

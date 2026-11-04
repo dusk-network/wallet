@@ -285,6 +285,16 @@ describe("staking overview", () => {
     expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu0.0997 DUSK");
   });
 
+  it("reads Sozu again when the network came to be known after the read, with no switch", async () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const held = sozu({ position });
+    const thisNetwork = { ...held.status, position, pool: held.pool };
+    held.status = { ...held.status, networkKey: "mainnet" };
+    popup({ route: "stake", staking: staking(), sozu: held }, ov(), { sozuStatus: async () => thisNetwork });
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu0.0997 DUSK");
+  });
+
   it("leaves out an answer from before a switch of wallet, and asks again", async () => {
     const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
     const theirs = { ...sozu().status, position: { poolBalanceLux: "5000000000", stDuskBalanceLux: "1600000000" }, pool: sozu().pool };
