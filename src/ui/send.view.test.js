@@ -431,6 +431,38 @@ describe("a Review when who pays changes", () => {
   });
 });
 
+describe("what Max fills in, with Hide balances", () => {
+  const shown = () => [...dom.document.body.querySelectorAll(".amount-field input")].find((input) => !input.hidden);
+
+  it("shows as dots on the form and on Review, and is what gets sent", async () => {
+    const state = newState();
+    const ov = overview({ hideBalances: true });
+    const form = mount(state, ov);
+    typeInto(form.to, ALICE.account);
+    dom.document.body.querySelector(".amount-avail .mini-btn").click();
+    expect([shown().value, shown().getAttribute("placeholder")]).toEqual(["", "••••"]);
+    expect(form.amount.value).not.toBe("");
+
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
+    expect(BigInt(state.draft.amountLux) > 0n).toBe(true);
+    mount(state, ov);
+    expect(visibleText(dom.document.body.querySelector(".balance-amount"))).toBe("•••• DUSK");
+  });
+
+  it("shows what's typed over it", () => {
+    const state = newState();
+    const form = mount(state, overview({ hideBalances: true }));
+    typeInto(form.to, ALICE.account);
+    dom.document.body.querySelector(".amount-avail .mini-btn").click();
+    typeInto(shown(), "1");
+    expect(shown().value).toBe("1");
+    expect(state.draft.amountMasked).toBe(false);
+    expect(state.draft.amountDusk).toBe("1");
+  });
+});
+
 describe("what the To field says about what's typed", () => {
   it("says a mistyped account isn't an address, and Review stays off", () => {
     isAccount.mockReturnValue(false);

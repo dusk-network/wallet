@@ -9,7 +9,7 @@ import { screenShown } from "./lib/clickGuard.js";
 import { isExtensionRuntime } from "../platform/runtime.js";
 import { convertConfirmView } from "./popup/views/convert.js";
 import { sendConfirmView } from "./popup/views/send.js";
-import { noteTxStatus, reviewOf, sentSteps, sentView } from "./popup/views/sent.js";
+import { noteTxStatus, reviewOf, sentAnnouncement, sentSteps, sentView } from "./popup/views/sent.js";
 import { switchContext } from "./popup/context.js";
 
 vi.mock("../shared/addressBook.js", () => ({ listAddressBook: vi.fn(async () => []) }));
@@ -365,6 +365,17 @@ describe("after Confirm", () => {
     const amount = body.querySelector(".sent-amount");
     expect([visibleText(amount), screenReaderText(amount)]).toEqual(["•••• DUSK", "hidden DUSK"]);
     expect(rows().at(-1)).toBe("Network feeUp to •••• DUSK");
+  });
+
+  it("leaves the fee out of a failed step's words with Hide balances, shown and announced", () => {
+    const sent = { phase: "sent", hash: HASH, status: "failed", feeCapLux: "2500000" };
+    const txs = [{ hash: HASH, status: "failed", feePaid: "2000000" }];
+    expect(sentSteps(sent, overview({ txs })).at(-1).sub).toContain("Fee charged: 0.002 DUSK.");
+    expect(sentSteps(sent, overview({ txs, hideBalances: true })).at(-1).sub).toContain("A fee was charged.");
+    expect(sentAnnouncement(sent, overview({ txs, hideBalances: true }))).not.toMatch(/\d DUSK/);
+    // The cap, where the fee isn't known yet.
+    expect(sentSteps(sent, overview()).at(-1).sub).toContain("Fee charged: up to 0.0025 DUSK.");
+    expect(sentSteps(sent, overview({ hideBalances: true })).at(-1).sub).not.toMatch(/\d DUSK/);
   });
 
   it("says to leave the screen where there is no popup to close", async () => {

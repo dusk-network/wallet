@@ -148,6 +148,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   const field = amountField({
     label: "Amount",
     value: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
+    masked: hidden && Boolean(draft.amountMasked),
     onInput: () => {
       checkAmount();
       syncDraft();
@@ -181,11 +182,11 @@ export function sendFormView(ov, { state, actions } = {}) {
     onclick: () => {
       const maxLux = getMaxAmountLux();
       if (maxLux == null || maxLux <= 0n) return;
-      // The real amount, with balances hidden too: it's what gets sent.
-      field.setValue(formatLuxToDusk(maxLux));
+      // The real amount, which gets sent, shown as dots with balances hidden.
+      field.setValue(formatLuxToDusk(maxLux), { masked: hidden });
       checkAmount();
       syncDraft();
-      amount.focus();
+      field.focus();
     },
   });
   const available = h("div", { class: "amount-avail", hidden: true }, [availText, maxBtn]);
@@ -780,6 +781,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       duskName: undefined,
       nameChoices: { ...nameChoices },
       amountDusk: String(amount.value || ""),
+      amountMasked: field.isMasked(),
       memo: String(memo.value || ""),
       // preserve any gas edits the user may have made on the confirm screen
       gas: state.draft?.gas,
@@ -944,6 +946,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           privacy,
           amountLux: amtLux,
           amountDusk: amount.value.trim(),
+          amountMasked: field.isMasked(),
           memo: memoVal,
           gas: prevGas,
           // A request link's network, for Review to say so when it isn't this one.
@@ -1007,7 +1010,7 @@ export function chainMismatchText(reqChain, nodeUrl) {
 
 // Who pays and on which network, as a Review was asked for.
 // What leaving a Review for a switch of wallet, profile or network says.
-const notSentNotice = (actions) => actions?.showToast?.("The wallet, profile or network changed, so nothing was sent. Check the send again.", 3000);
+const notSentNotice = (actions) => actions?.showToast?.("The wallet, profile or network changed. Check the send again.", 3000);
 
 const reviewedFor = (ov) => `${ov?.accounts?.[0] ?? ""} ${Number(ov?.selectedAccountIndex ?? 0) || 0} ${ov?.nodeUrl ?? ""}`;
 
@@ -1231,7 +1234,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           text: service ? `Bridge to ${service.chain}` : privacy === "shielded" ? "Shielded transfer" : "Public transfer",
         }),
         h("div", { class: "balance-amount" }, [
-          formatDuskExact(d.amountLux),
+          balance(balancesHidden(ov) && Boolean(d.amountMasked), formatDuskExact(d.amountLux)),
           h("span", { class: "balance-unit", text: " DUSK" }),
         ]),
         // To the bridge: what arrives on the other chain, once it takes its fee.

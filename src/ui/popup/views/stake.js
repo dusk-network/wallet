@@ -711,8 +711,10 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     label: isNew ? "Stake amount" : "Amount to add",
     value: st.stakeAmountDusk ?? "",
     disabled: !blocked.ok,
+    masked: hidden && Boolean(st.stakeMasked),
     onInput: () => {
       st.amountMode = "custom";
+      st.stakeMasked = false;
       check();
     },
     onEnter: () => review(),
@@ -786,10 +788,12 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   }
 
   const fill = (lux, mode) => {
-    field.setValue(formatLuxToDusk(lux));
+    // What Max fills in shows as dots with balances hidden; the minimum isn't a balance.
+    st.stakeMasked = mode === "max";
+    field.setValue(formatLuxToDusk(lux), { masked: hidden && st.stakeMasked });
     st.amountMode = mode;
     check();
-    field.input.focus();
+    field.focus();
   };
 
   const useMin =
@@ -931,10 +935,10 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
 
   // What moves: the amount staked, or all of the stake or the rewards. The
   // stake and the rewards are balances, hidden with Hide balances; an amount
-  // typed in for a stake shows, as on every Review.
+  // typed in for a stake shows, as on every Review; what Max filled in doesn't.
   const shownLux = kind === TX_KIND.STAKE ? d.amountLux : d.amountLux || d.displayLux;
   const allText = kind === TX_KIND.UNSTAKE ? "All stake" : kind === TX_KIND.WITHDRAW_REWARD ? "All rewards" : "—";
-  const hideAmount = kind !== TX_KIND.STAKE && balancesHidden(ov);
+  const hideAmount = (kind !== TX_KIND.STAKE || d.amountMode === "max") && balancesHidden(ov);
   const amountLine = () =>
     shownLux && safeBigInt(shownLux, 0n) > 0n ? [balance(hideAmount, fmtLux(shownLux)), " DUSK"] : [allText];
 

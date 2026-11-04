@@ -1371,6 +1371,57 @@ describe("liquid staking", () => {
   });
 });
 
+describe("what Max fills in, with Hide balances", () => {
+  const shownField = () => [...body.querySelectorAll(".amount-field input")].find((input) => !input.hidden);
+
+  it("hides a Sozu stake's amount and what it gets, on the form and on Review, and sends it all the same", async () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    popup(state, ov({ hideBalances: true }));
+    button("Max").click();
+    expect([shownField().value, shownField().getAttribute("placeholder")]).toEqual(["", "••••"]);
+    expect(accessibleName(shownField())).toBe("Stake amount, hidden");
+    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about •••• stDUSK, worth about •••• DUSK now.");
+
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".balance-amount"))).toBe("•••• DUSK");
+    expect([...body.querySelectorAll(".kv")].map(visibleText).find((row) => row.startsWith("You get about"))).toBe("You get about•••• stDUSK, worth about •••• DUSK now");
+    expect(BigInt(state.sozuDraft.fnArgsAmountLux) > 0n).toBe(true);
+  });
+
+  it("shows an amount typed over it, and the form keeps it hidden when it's drawn again", () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    const app = popup(state, ov({ hideBalances: true }));
+    button("Max").click();
+    app.draw();
+    expect(shownField().value).toBe("");
+    expect(accessibleName(shownField())).toBe("Stake amount, hidden");
+
+    typeInto(shownField(), "100");
+    expect(shownField().value).toBe("100");
+    expect(accessibleName(shownField())).toBe("Stake amount");
+    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.4714 stDUSK");
+  });
+
+  it("hides a native stake's amount from Max on Review, and sends it all the same", async () => {
+    const state = { route: "stake", staking: staking(owner({ publicBalance: { value: dusk(2000) } }), { screen: "native" }) };
+    popup(state, ov({ hideBalances: true }));
+    button("Max").click();
+    expect(shownField().value).toBe("");
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".balance-amount"))).toBe("•••• DUSK");
+    expect(BigInt(state.stakeDraft.amountLux) > 0n).toBe(true);
+  });
+
+  it("shows the minimum it can fill in, as it isn't a balance", () => {
+    const state = { route: "stake", staking: staking(owner({ publicBalance: { value: dusk(2000) } }), { screen: "native" }) };
+    popup(state, ov({ hideBalances: true }));
+    button("Use 1,000").click();
+    expect(shownField().value).toBe("1000");
+  });
+});
+
 describe("a staking Review's Confirm, the moment the Review is up", () => {
   // Each Review, reached as a person does: from Staking, with what's pressed on the way.
   const withStake = () => ({ route: "stake", staking: staking(owner({ relatedStakes: [related()] })) });

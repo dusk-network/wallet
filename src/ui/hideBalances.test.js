@@ -342,9 +342,9 @@ describe("hidden balances", () => {
     ]);
     button("Max").click();
     expect(st.depositAmountDusk).toBe("1482.9233");
-    // What the typed amount gets isn't a balance: it shows.
+    // What Max filled in gets a share of the balance: hidden too.
     expect(visibleText(body.querySelector(".stake-estimate .stake-estimate__main"))).toBe(
-      "You get about 1,408.7771 stDUSK, worth about 1,479.2159 DUSK now."
+      "You get about •••• stDUSK, worth about •••• DUSK now."
     );
     // Sozu's fee off it in DUSK gives the amount away: hidden, its rate shown.
     expect(seen(body.querySelector(".sozu-terms"))).toEqual(["Deposit fee 0.25% · •••• DUSK", "Deposit fee 0.25% · hidden DUSK"]);

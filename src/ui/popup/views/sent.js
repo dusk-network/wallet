@@ -91,7 +91,14 @@ export function sentSteps(sent, ov) {
   const { phase, status, error, feePaid, blockHeight } = sentStatus(sent, ov);
   const sentLine = [clock(sent?.sentAt || sent?.startedAt), sent?.from].filter(Boolean).join(" · ");
   const capLux = safeBigInt(sent?.feeCapLux ?? 0, 0n);
-  const charged = feePaid != null ? `Fee charged: ${formatFee(feePaid)} DUSK.` : capLux > 0n ? `Fee charged: up to ${formatFee(capLux, { max: true })} DUSK.` : "";
+  const charged =
+    feePaid == null && capLux <= 0n
+      ? ""
+      : balancesHidden(ov)
+        ? "A fee was charged."
+        : feePaid != null
+          ? `Fee charged: ${formatFee(feePaid)} DUSK.`
+          : `Fee charged: up to ${formatFee(capLux, { max: true })} DUSK.`;
 
   if (phase === "not_sent") {
     return [

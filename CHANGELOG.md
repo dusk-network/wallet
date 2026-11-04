@@ -199,6 +199,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Refused a contact whose address is already saved under another name.
 - Refused a contact name that looks like a .dusk name it isn't saved from.
 - Hid the fee on the Sent screen with Hide balances.
+- Hid what Max fills in with Hide balances, until an amount is typed.
 - Dropped the error under Send's form once the recipient changes, and said so in plain words.
 - Said why Send's Review went back after a switch of wallet, profile or network.
 - Showed a memo's text in the order it was written.
