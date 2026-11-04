@@ -3,6 +3,7 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
+  formatLuxForInput,
   formatLuxToDusk,
   maxAmountLux,
   parseDuskToLux,
@@ -659,7 +660,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     disabled: !cfg || stakeOff || maxActionLux <= 0n,
     onclick: () => {
       st[maskedKey] = true;
-      field.setValue(formatLuxToDusk(maxActionLux), { masked: hidden });
+      field.setValue(formatLuxForInput(maxActionLux), { masked: hidden });
       check();
       field.focus();
     },

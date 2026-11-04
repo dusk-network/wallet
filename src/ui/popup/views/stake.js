@@ -4,6 +4,7 @@ import { feePercent } from "@dusk-network/networks/sozu";
 import {
   formatDusk,
   formatFee,
+  formatLuxForInput,
   formatLuxToDusk,
   groupThousands,
   maxAmountLux,
@@ -792,7 +793,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   const fill = (lux, mode) => {
     // What Max fills in shows as dots with balances hidden; the minimum isn't a balance.
     st.stakeMasked = mode === "max";
-    field.setValue(formatLuxToDusk(lux), { masked: hidden && st.stakeMasked });
+    field.setValue(formatLuxForInput(lux), { masked: hidden && st.stakeMasked });
     st.amountMode = mode;
     check();
     field.focus();

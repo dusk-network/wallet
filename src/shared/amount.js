@@ -49,9 +49,38 @@ export function formatLuxToDusk(luxStr) {
   }
 }
 
+/** The language of the browser, in digits a person can type back. */
+function browserLocale() {
+  const language = globalThis.navigator?.language || "en-US";
+  try {
+    return new Intl.Locale(language, { numberingSystem: "latn" }).toString();
+  } catch {
+    return "en-US";
+  }
+}
+
+/** How that language writes decimals. */
+const decimalSeparator = () =>
+  new Intl.NumberFormat(browserLocale()).formatToParts(0.5).find((part) => part.type === "decimal")?.value ?? ".";
+
+/**
+ * An amount for an amount field, as the field reads it back: plain, in the
+ * language's decimal separator.
+ * @param {string|bigint|number} luxStr
+ * @returns {string}
+ */
+export const formatLuxForInput = (luxStr) => amountForInput(formatLuxToDusk(luxStr));
+
+/**
+ * A plain amount, as a link or a machine gives it, for an amount field.
+ * @param {string} plain
+ * @returns {string}
+ */
+export const amountForInput = (plain) => String(plain ?? "").replace(".", decimalSeparator());
+
 /**
  * A number as shown to people, its whole part grouped in thousands:
- * "1484.9235" becomes "1,484.9235". Inputs keep the plain form; anything that
+ * "1484.9235" becomes "1,484.9235", or "1.484,9235" on a Dutch browser. Inputs keep the plain form; anything that
  * isn't a plain decimal comes back as it is.
  * @param {string|number} numStr
  * @returns {string}
@@ -60,7 +89,8 @@ export function groupThousands(numStr) {
   const s = String(numStr ?? "");
   const m = /^(-?)(\d+)(\.\d+)?$/.exec(s);
   if (!m) return s;
-  return `${m[1]}${m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${m[3] ?? ""}`;
+  const whole = new Intl.NumberFormat(browserLocale()).format(BigInt(m[2]));
+  return `${m[1]}${whole}${m[3] ? `${decimalSeparator()}${m[3].slice(1)}` : ""}`;
 }
 
 /**
@@ -74,7 +104,7 @@ export function groupThousands(numStr) {
  */
 export function formatDusk(luxStr) {
   const lux = safeBigInt(luxStr, null);
-  return lux === null ? String(luxStr ?? "0") : formatDuskShared(lux, { round: "down", locale: "en-US" }).text;
+  return lux === null ? String(luxStr ?? "0") : formatDuskShared(lux, { round: "down", locale: browserLocale() }).text;
 }
 
 /**
@@ -103,7 +133,7 @@ export const FEE_DECIMALS = UI_DISPLAY_DECIMALS;
 export function formatFee(luxStr, { max = false } = {}) {
   const lux = safeBigInt(luxStr, 0n);
   if (lux <= 0n) return "0";
-  return formatDuskShared(lux, { round: max ? "up" : "nearest", locale: "en-US" }).text;
+  return formatDuskShared(lux, { round: max ? "up" : "nearest", locale: browserLocale() }).text;
 }
 
 /**
@@ -131,13 +161,18 @@ export function maxAmountLux(availableLux, keepLux = 0n) {
  */
 export function normalizeDuskInput(text) {
   const value = String(text ?? "").trim();
+  const commaDecimals = decimalSeparator() === ",";
 
   // Groups of three after a first group that doesn't start with a zero.
   if (/^[1-9]\d{0,2}(,\d{3})+\.\d*$/.test(value)) return value.replaceAll(",", "");
   if (/^[1-9]\d{0,2}(\.\d{3})+,\d*$/.test(value)) return value.replaceAll(".", "").replace(",", ".");
   if (/^[1-9]\d{0,2}(,\d{3}){2,}$/.test(value)) return value.replaceAll(",", "");
+  if (commaDecimals && /^[1-9]\d{0,2}(\.\d{3}){2,}$/.test(value)) return value.replaceAll(".", "");
 
-  if (/^\d*,\d*$/.test(value) && !/^[1-9]\d{0,2},\d{3}$/.test(value)) return value.replace(",", ".");
+  // One separator before three digits: where it's how decimals are written, a
+  // decimal. Where it's how thousands are, it could mean either, so it's refused.
+  if (commaDecimals && /^[1-9]\d{0,2}\.\d{3}$/.test(value)) return value.replace(".", ",");
+  if (/^\d*,\d*$/.test(value) && (commaDecimals || !/^[1-9]\d{0,2},\d{3}$/.test(value))) return value.replace(",", ".");
 
   return value;
 }

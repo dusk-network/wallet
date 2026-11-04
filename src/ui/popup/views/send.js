@@ -3,6 +3,8 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
+  amountForInput,
+  formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
   safeBigInt,
@@ -183,7 +185,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       const maxLux = getMaxAmountLux();
       if (maxLux == null || maxLux <= 0n) return;
       // The real amount, which gets sent, shown as dots with balances hidden.
-      field.setValue(formatLuxToDusk(maxLux), { masked: hidden });
+      field.setValue(formatLuxForInput(maxLux), { masked: hidden });
       checkAmount();
       syncDraft();
       field.focus();
@@ -278,11 +280,11 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     if (isDuskReq) {
       // A full dusk: request link should define the form values.
-      field.setValue(req.amountDusk || "");
+      field.setValue(amountForInput(req.amountDusk || ""));
       memo.value = req.memo || "";
     } else {
       // A raw recipient QR should not clobber what the user already typed.
-      if (req.amountDusk) field.setValue(req.amountDusk);
+      if (req.amountDusk) field.setValue(amountForInput(req.amountDusk));
       if (req.memo) memo.value = req.memo;
     }
 

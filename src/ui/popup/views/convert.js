@@ -2,6 +2,7 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
+  formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
   safeBigInt,
@@ -106,7 +107,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     disabled: avail <= 0n,
     onclick: () => {
       // The real amount, with balances hidden too: it's what gets moved.
-      field.setValue(formatLuxToDusk(avail));
+      field.setValue(formatLuxForInput(avail));
       check();
       syncDraft();
       field.input.focus();
