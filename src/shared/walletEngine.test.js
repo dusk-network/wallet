@@ -1735,21 +1735,23 @@ describe("walletEngine", () => {
     const newToken = () => (++tokens).toString(16).padStart(2, "0").repeat(32);
     // A node whose contract answers the forms of a balance it takes, and refuses
     // the rest as the node refuses a call: a 500 that gives no reason.
+    const formOf = (init) => {
+      const args = JSON.parse(new TextDecoder().decode(init.body));
+      const form = Object.keys(args?.account ?? {})[0] ?? "plain";
+      // The one contract asked of in the older form, which the standard's driver can't read.
+      return args?.account?.Contract === "ff".repeat(32) ? "OlderContract" : form;
+    };
     const nodeOf = (forms, balance = "42") =>
-      vi.fn(async (_url, init) => {
-        const args = JSON.parse(new TextDecoder().decode(init.body));
-        return forms.includes(Object.keys(args?.account ?? {})[0] ?? "plain")
+      vi.fn(async (_url, init) =>
+        forms.includes(formOf(init))
           ? new Response(new TextEncoder().encode(JSON.stringify(balance)))
-          : new Response('{"error":"Internal server error"}', { status: 500 });
-      });
+          : new Response('{"error":"Internal server error"}', { status: 500 })
+      );
     const STANDARD = ["Moonlight", "Phoenix", "Contract"];
-    const OLDER = ["External"];
+    const OLDER = ["External", "OlderContract"];
     // As Sozu's stDUSK answered on testnet: the standard's account, not its contract.
     const SOZU_LIKE = ["Moonlight", "Phoenix", "plain"];
-    const formsAsked = (node) => node.mock.calls.map(([, init]) => {
-      const args = JSON.parse(new TextDecoder().decode(init.body));
-      return Object.keys(args?.account ?? {})[0] ?? "plain";
-    });
+    const formsAsked = (node) => node.mock.calls.map(([, init]) => formOf(init));
 
     beforeEach(async () => {
       engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
@@ -1771,7 +1773,7 @@ describe("walletEngine", () => {
       vi.stubGlobal("fetch", node);
       await expect(engine.getDrc20Balance({ contractId: TOKEN, driver: "drc20" })).resolves.toBe("18446744073709551615");
       await engine.getDrc20Balance({ contractId: TOKEN, profileIndex: 1 });
-      expect(formsAsked(node)).toEqual(["Contract", "External", "External", "External"]);
+      expect(formsAsked(node)).toEqual(["Contract", "OlderContract", "External", "External"]);
     });
 
     it("reads Sozu's stDUSK by its note, without asking which it is", async () => {
@@ -1786,7 +1788,7 @@ describe("walletEngine", () => {
       const refuses = nodeOf([]);
       vi.stubGlobal("fetch", refuses);
       await expect(engine.getDrc20Balance({ contractId: TOKEN })).rejects.toThrow("Internal server error");
-      expect(formsAsked(refuses)).toEqual(["Contract", "External"]);
+      expect(formsAsked(refuses)).toEqual(["Contract", "OlderContract"]);
       const node = nodeOf(STANDARD);
       vi.stubGlobal("fetch", node);
       await expect(engine.getDrc20Balance({ contractId: TOKEN })).resolves.toBe("42");
@@ -1811,7 +1813,21 @@ describe("walletEngine", () => {
       const node = nodeOf(SOZU_LIKE);
       vi.stubGlobal("fetch", node);
       await expect(engine.getDrc20Balance({ contractId: newToken() })).rejects.toThrow("Internal server error");
-      expect(formsAsked(node)).toEqual(["Contract", "External"]);
+      expect(formsAsked(node)).toEqual(["Contract", "OlderContract"]);
+    });
+
+    it("doesn't take a standard token for an older one over a passing error", async () => {
+      const TOKEN = newToken();
+      let down = true;
+      const node = vi.fn(async (url, init) => {
+        const passing = down && formOf(init) === "Contract";
+        down = false;
+        return passing ? new Response('{"error":"Internal server error"}', { status: 500 }) : nodeOf(STANDARD)(url, init);
+      });
+      vi.stubGlobal("fetch", node);
+      await expect(engine.getDrc20Balance({ contractId: TOKEN })).rejects.toThrow("Internal server error");
+      await expect(engine.getDrc20Balance({ contractId: TOKEN })).resolves.toBe("42");
+      expect(formsAsked(node)).toEqual(["Contract", "OlderContract", "Contract", "Moonlight"]);
     });
 
     describe("writing its calls, with the real drivers", () => {
@@ -1851,6 +1867,26 @@ describe("walletEngine", () => {
         const [asked] = node.mock.calls.map(([, init]) => new TextDecoder().decode(init.body));
         expect(JSON.parse(asked).account.Contract).toBe(contractId);
         expect(drivers.drc20_standard.encodeInputFn("balance_of", asked)).toHaveLength(194);
+      });
+
+      it("asks an older token in a form the real older driver writes and the standard's can't read", async () => {
+        const node = nodeOf(OLDER);
+        vi.stubGlobal("fetch", node);
+        await engine.getDrc20Balance({ contractId: newToken() });
+        const drivers = globalThis.__W3SPER_REAL_DRIVERS__;
+        const asked = new TextDecoder().decode(node.mock.calls[1][1].body);
+        const bytes = drivers.drc20.encodeInputFn("balance_of", asked);
+        expect(drivers.drc20.decodeInputFn("balance_of", bytes)).toEqual(JSON.parse(asked));
+        expect(() => drivers.drc20_standard.decodeInputFn("balance_of", bytes)).toThrow();
+      });
+
+      it("writes an older token's call only after that answer, for any account", async () => {
+        // Some accounts' older balance calls read as a standard call, so an
+        // answer to one says nothing: the older form must not be taken from it.
+        vi.stubGlobal("fetch", nodeOf(["External", "Moonlight"]));
+        await expect(
+          engine.encodeDrc20Input({ contractId: newToken(), fnName: "transfer", args: toTheRecipient })
+        ).rejects.toThrow("Couldn't read this token");
       });
 
       it("writes a send in the form the token takes, asking it when nothing says yet", async () => {

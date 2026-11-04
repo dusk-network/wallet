@@ -1773,8 +1773,7 @@ export async function encodeDrc20Input(params = {}) {
   const fnName = String(params?.fnName ?? "").trim();
   if (!fnName) throw new Error("fnName is required");
   if (!state.unlocked) throw new Error("Wallet locked");
-  const profile = await ensureProfileIndex(resolveProfileIndex());
-  const driverKey = await tokenDriverKey(params, await ensureNetwork(), profile.account.toString()).catch(() => {
+  const driverKey = await tokenDriverKey(params, await ensureNetwork()).catch(() => {
     throw new Error("Couldn't read this token, so nothing was sent. Try again.");
   });
   return encodeDrc20Call(driverKey, await getDriver(driverKey), fnName, params?.args);
@@ -1867,14 +1866,19 @@ async function askTokenBalance(key, contractIdBytes, network, args) {
 // Which driver each token takes, by node and contract, once it has said.
 const tokenDrivers = new Map();
 
+// A contract no token holds for: the older driver's balance call for it is a
+// call the standard's can't read, since 0xff falls where it wants a principal's kind.
+const OLDER_FORM_ONLY = "ff".repeat(32);
+
 // The driver a token takes, which the token itself says: nothing kept does,
-// and tokens saved earlier have no note of it. Only the standard's takes its
-// contract principal: an older token's call is longer, and Sozu's stDUSK, which
-// takes the standard's account too, refuses it. The node gives no reason for a
-// refusal, so the older form must then answer. A connection that failed says
+// and tokens saved earlier have no note of it. Each is asked what only it can
+// answer. The standard's contract principal: an older token's call is longer,
+// and Sozu's stDUSK, which takes the standard's account too, refuses it. Then
+// the older form, as above, since the node gives no reason for a refusal and a
+// standard token's could be a passing error. A connection that failed says
 // nothing (as Chrome makes of an extension's request to a URL that keeps giving
 // 500s), and neither does a contract taking neither.
-async function tokenDriverOf(contractIdBytes, network, account) {
+async function tokenDriverOf(contractIdBytes, network) {
   const place = `${engineConfig.nodeUrl}|${bytesToHex(contractIdBytes)}`;
   const known = tokenDrivers.get(place);
   if (known) return known;
@@ -1884,7 +1888,7 @@ async function tokenDriverOf(contractIdBytes, network, account) {
   } catch (error) {
     if (error instanceof TypeError) throw error;
     key = DRIVER_KEYS.DRC20;
-    await askTokenBalance(key, contractIdBytes, network, BALANCE_ARGS[key](account));
+    await askTokenBalance(key, contractIdBytes, network, { account: { Contract: OLDER_FORM_ONLY } });
   }
   tokenDrivers.set(place, key);
   return key;
@@ -1892,10 +1896,10 @@ async function tokenDriverOf(contractIdBytes, network, account) {
 
 // The driver a call of this token's is written with, or its balance read: a
 // note of Sozu's stDUSK, else what the token says.
-async function tokenDriverKey(params, network, account) {
+async function tokenDriverKey(params, network) {
   const noted = normalizeTokenDriver(params?.driver);
   if (noted === DRIVER_KEYS.SOZU_STAKED_DUSK) return noted;
-  return tokenDriverOf(toContractIdBytes(params?.contractId), network, account);
+  return tokenDriverOf(toContractIdBytes(params?.contractId), network);
 }
 
 /**
@@ -1912,9 +1916,8 @@ export async function getDrc20Balance(params = {}) {
   const network = await ensureNetwork();
   const driverKey = normalizeTokenDriver(params?.driver);
   return await sharedRead(`drc20|${bytesToHex(contractIdBytes)}|${driverKey}|${profile.account}`, async () => {
-    const account = profile.account.toString();
-    const key = await tokenDriverKey(params, network, account);
-    return askTokenBalance(key, contractIdBytes, network, BALANCE_ARGS[key](account));
+    const key = await tokenDriverKey(params, network);
+    return askTokenBalance(key, contractIdBytes, network, BALANCE_ARGS[key](profile.account.toString()));
   });
 }
 
