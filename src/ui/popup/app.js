@@ -19,7 +19,7 @@ import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
 import { activityRows, ensureActivity, refreshActivitySoon, selected } from "./activity.js";
 import { checkArrivals } from "./arrivals.js";
-import { arrivalCheckDelay, awaitingArrival, loadArrivals } from "../../shared/bridgeArrival.js";
+import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
 
 import { homeView } from "./views/home.js";
@@ -614,7 +614,9 @@ function txStatusToastFor(hash, status) {
         render().catch(() => {});
       }
     : null;
-  return txStatusToast(tx, status, { hidden: balancesHidden(ov), contactName, onView });
+  const row = hash ? activityRows(ov, state).find((r) => String(r?.hash ?? "") === hash) : null;
+  const onItsWayTo = payoutOf(row) ? row.route.chain.name : "";
+  return txStatusToast(tx, status, { hidden: balancesHidden(ov), contactName, onItsWayTo, onView });
 }
 
 function installTxStatusListener() {
