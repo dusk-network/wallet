@@ -49,19 +49,29 @@ export function formatLuxToDusk(luxStr) {
   }
 }
 
-/** The language of the browser, in digits a person can type back. */
-function browserLocale() {
+/** The browser's language, in digits a person can type back, and its number format: made once per language. */
+const languages = new Map();
+function numbers() {
   const language = globalThis.navigator?.language || "en-US";
-  try {
-    return new Intl.Locale(language, { numberingSystem: "latn" }).toString();
-  } catch {
-    return "en-US";
+  let known = languages.get(language);
+  if (!known) {
+    let locale = "en-US";
+    try {
+      locale = new Intl.Locale(language, { numberingSystem: "latn" }).toString();
+    } catch {
+      // A language Intl can't read: English.
+    }
+    const format = new Intl.NumberFormat(locale);
+    known = { decimal: format.formatToParts(0.5).find((part) => part.type === "decimal")?.value ?? ".", format, locale };
+    languages.set(language, known);
   }
+  return known;
 }
 
+const browserLocale = () => numbers().locale;
+
 /** How that language writes decimals. */
-const decimalSeparator = () =>
-  new Intl.NumberFormat(browserLocale()).formatToParts(0.5).find((part) => part.type === "decimal")?.value ?? ".";
+const decimalSeparator = () => numbers().decimal;
 
 /**
  * An amount for an amount field, as the field reads it back: plain, in the
@@ -89,7 +99,7 @@ export function groupThousands(numStr) {
   const s = String(numStr ?? "");
   const m = /^(-?)(\d+)(\.\d+)?$/.exec(s);
   if (!m) return s;
-  const whole = new Intl.NumberFormat(browserLocale()).format(BigInt(m[2]));
+  const whole = numbers().format.format(BigInt(m[2]));
   return `${m[1]}${whole}${m[3] ? `${decimalSeparator()}${m[3].slice(1)}` : ""}`;
 }
 
