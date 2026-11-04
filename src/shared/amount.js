@@ -124,14 +124,12 @@ export function maxAmountLux(availableLux, keepLux = 0n) {
  * An amount as typed, in the form parseDuskToLux reads: a decimal comma made
  * a point, and digit grouping left out where it can't be decimals. "1,5" is
  * 1.5, "1.000,5" and "1,000.5" are 1000.5, and "1,000,000" is a million. A
- * lone comma before three digits groups them, unless the language writes
- * decimals with a comma. Anything else stays as typed. The web wallet reads
- * amounts the same way.
+ * lone comma before three digits, as in "1,000", could be either, and the
+ * wallet writes a thousand that way, so it stays as typed and isn't an amount.
  * @param {string} text
- * @param {string} [decimalSeparator] - the language's: "." or ","
  * @returns {string}
  */
-export function normalizeDuskInput(text, decimalSeparator = (0.1).toLocaleString().slice(1, 2)) {
+export function normalizeDuskInput(text) {
   const value = String(text ?? "").trim();
 
   // Groups of three after a first group that doesn't start with a zero.
@@ -139,10 +137,7 @@ export function normalizeDuskInput(text, decimalSeparator = (0.1).toLocaleString
   if (/^[1-9]\d{0,2}(\.\d{3})+,\d*$/.test(value)) return value.replaceAll(".", "").replace(",", ".");
   if (/^[1-9]\d{0,2}(,\d{3}){2,}$/.test(value)) return value.replaceAll(",", "");
 
-  if (/^\d*,\d*$/.test(value)) {
-    const grouping = decimalSeparator !== "," && /^[1-9]\d{0,2},\d{3}$/.test(value);
-    return grouping ? value.replace(",", "") : value.replace(",", ".");
-  }
+  if (/^\d*,\d*$/.test(value) && !/^[1-9]\d{0,2},\d{3}$/.test(value)) return value.replace(",", ".");
 
   return value;
 }

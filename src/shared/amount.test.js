@@ -122,10 +122,11 @@ describe("parseDuskToLux", () => {
     expect(parseDuskToLux("1,000,000")).toBe("1000000000000000");
   });
 
-  it("reads a lone comma before three digits by how the language writes decimals", () => {
-    expect(normalizeDuskInput("1,000", ",")).toBe("1.000");
-    expect(normalizeDuskInput("1,000", ".")).toBe("1000");
-    expect(normalizeDuskInput("0,125", ".")).toBe("0.125");
+  it("refuses a lone comma before three digits, which could be either", () => {
+    expect(() => parseDuskToLux("1,000")).toThrow("Invalid amount");
+    expect(() => parseDuskToLux("12,500")).toThrow("Invalid amount");
+    expect(parseDuskToLux("0,125")).toBe("125000000");
+    expect(parseDuskToLux("1,5000")).toBe("1500000000");
   });
 
   it("throws on invalid input", () => {
