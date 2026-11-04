@@ -19,7 +19,7 @@ import { signProfileTypedDataDigest } from "./blsDigest.js";
 import { MAX_ACCOUNT_COUNT, TX_KIND } from "./constants.js";
 import { ERROR_CODES } from "./errors.js";
 import { createContractReads } from "./contractReads.js";
-import { readDrc20Call } from "./drc20Calls.js";
+import { encodeDrc20Call, readDrc20Call } from "./drc20Calls.js";
 import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
@@ -696,33 +696,6 @@ function normalizeTokenDriver(driver) {
   if (raw === DRIVER_KEYS.DRC20_STANDARD) return DRIVER_KEYS.DRC20_STANDARD;
   if (raw === DRIVER_KEYS.SOZU_STAKED_DUSK) return DRIVER_KEYS.SOZU_STAKED_DUSK;
   throw new Error(`Unsupported token driver: ${raw}`);
-}
-
-function accountEnumToTokenString(account) {
-  if (typeof account === "string") return account;
-  if (account && typeof account === "object") {
-    if (typeof account.External === "string") return account.External;
-    if (typeof account.Contract === "string") return account.Contract;
-  }
-  return String(account ?? "");
-}
-
-function encodeSozuStakedDuskArgs(fnName, args = {}) {
-  const fn = String(fnName ?? "").trim().toLowerCase();
-  if (fn === "transfer") {
-    return [accountEnumToTokenString(args?.to), String(args?.value ?? "0")];
-  }
-  if (fn === "approve") {
-    return [accountEnumToTokenString(args?.spender), String(args?.value ?? "0")];
-  }
-  if (fn === "transfer_from") {
-    return [
-      accountEnumToTokenString(args?.owner),
-      accountEnumToTokenString(args?.to ?? args?.receiver),
-      String(args?.value ?? "0"),
-    ];
-  }
-  return args;
 }
 
 function ensureDriverRegistry() {
@@ -1791,21 +1764,20 @@ export async function getStakeOwnerStatus({ profileIndex } = {}) {
 }
 
 /**
- * Encode a DRC20 contract input using the canonical DRC20 data-driver.
+ * Encode a call of a token's, as that token reads it (tokenDriverKey).
  *
- * @param {{ fnName: string, args?: any }} params
+ * @param {{ contractId?: any, driver?: any, fnName: string, args?: any }} params
  * @returns {Promise<Uint8Array>}
  */
 export async function encodeDrc20Input(params = {}) {
   const fnName = String(params?.fnName ?? "").trim();
   if (!fnName) throw new Error("fnName is required");
-  const driverKey = normalizeTokenDriver(params?.driver);
-  const driver = await getDriver(driverKey);
-  const args = driverKey === DRIVER_KEYS.SOZU_STAKED_DUSK
-    ? encodeSozuStakedDuskArgs(fnName, params?.args)
-    : params?.args;
-  const json = args === undefined || args === null ? "null" : jsonWithBigInts(args);
-  return driver.encodeInputFn(fnName, json);
+  if (!state.unlocked) throw new Error("Wallet locked");
+  const profile = await ensureProfileIndex(resolveProfileIndex());
+  const driverKey = await tokenDriverKey(params, await ensureNetwork(), profile.account.toString()).catch(() => {
+    throw new Error("Couldn't read this token, so nothing was sent. Try again.");
+  });
+  return encodeDrc20Call(driverKey, await getDriver(driverKey), fnName, params?.args);
 }
 
 /**
@@ -1878,8 +1850,56 @@ export async function getDrc20Metadata(params = {}) {
   });
 }
 
+// A balance's argument, as each token driver reads an account.
+const BALANCE_ARGS = {
+  [DRIVER_KEYS.DRC20_STANDARD]: (account) => ({ account: { Moonlight: account } }),
+  [DRIVER_KEYS.DRC20]: (account) => ({ account: { External: account } }),
+  [DRIVER_KEYS.SOZU_STAKED_DUSK]: (account) => account,
+};
+
+async function askTokenBalance(key, contractIdBytes, network, args) {
+  const driver = await getDriver(key);
+  const c = new Contract({ contractId: contractIdBytes, driver, network });
+  // Every token driver gives a u64 answer as a string, exactly.
+  return String((await c.call.balance_of(args)) ?? "0");
+}
+
+// Which driver each token takes, by node and contract, once it has said.
+const tokenDrivers = new Map();
+
+// The driver a token takes, which the token itself says: nothing kept does,
+// and tokens saved earlier have no note of it. Only the standard's takes its
+// contract principal: an older token's call is longer, and Sozu's stDUSK, which
+// takes the standard's account too, refuses it. The node gives no reason for a
+// refusal, so the older form must then answer. A connection that failed says
+// nothing (as Chrome makes of an extension's request to a URL that keeps giving
+// 500s), and neither does a contract taking neither.
+async function tokenDriverOf(contractIdBytes, network, account) {
+  const place = `${engineConfig.nodeUrl}|${bytesToHex(contractIdBytes)}`;
+  const known = tokenDrivers.get(place);
+  if (known) return known;
+  let key = DRIVER_KEYS.DRC20_STANDARD;
+  try {
+    await askTokenBalance(key, contractIdBytes, network, { account: { Contract: bytesToHex(contractIdBytes) } });
+  } catch (error) {
+    if (error instanceof TypeError) throw error;
+    key = DRIVER_KEYS.DRC20;
+    await askTokenBalance(key, contractIdBytes, network, BALANCE_ARGS[key](account));
+  }
+  tokenDrivers.set(place, key);
+  return key;
+}
+
+// The driver a call of this token's is written with, or its balance read: a
+// note of Sozu's stDUSK, else what the token says.
+async function tokenDriverKey(params, network, account) {
+  const noted = normalizeTokenDriver(params?.driver);
+  if (noted === DRIVER_KEYS.SOZU_STAKED_DUSK) return noted;
+  return tokenDriverOf(toContractIdBytes(params?.contractId), network, account);
+}
+
 /**
- * @param {{ contractId: any, profileIndex?: number }} params
+ * @param {{ contractId: any, driver?: any, profileIndex?: number }} params
  * @returns {Promise<string>} u64 decimal string
  */
 export async function getDrc20Balance(params = {}) {
@@ -1892,17 +1912,9 @@ export async function getDrc20Balance(params = {}) {
   const network = await ensureNetwork();
   const driverKey = normalizeTokenDriver(params?.driver);
   return await sharedRead(`drc20|${bytesToHex(contractIdBytes)}|${driverKey}|${profile.account}`, async () => {
-    const driver = await getDriver(driverKey);
-    const c = new Contract({ contractId: contractIdBytes, driver, network });
-
-    const out = await c.call.balance_of(
-      driverKey === DRIVER_KEYS.SOZU_STAKED_DUSK
-        ? profile.account.toString()
-        : { account: { External: profile.account.toString() } }
-    );
-
-    // Data-driver returns bigints as strings.
-    return String(out ?? "0");
+    const account = profile.account.toString();
+    const key = await tokenDriverKey(params, network, account);
+    return askTokenBalance(key, contractIdBytes, network, BALANCE_ARGS[key](account));
   });
 }
 

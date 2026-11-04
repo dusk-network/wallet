@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { dataDrivers } from "@dusk/w3sper";
 
-import { readDrc20Call } from "./drc20Calls.js";
+import { encodeDrc20Call, readDrc20Call } from "./drc20Calls.js";
 
 // The token drivers the wallet ships, as the engine loads them.
 async function driver(file) {
@@ -157,5 +157,90 @@ describe("reading a DRC20 call", () => {
     expect(read("transfer", new Uint8Array([1, 2, 255]))).toBeNull();
     expect(read("burn", encode("drc20_standard", "burn", "7"))).toBeNull();
     expect(read("__proto__", new Uint8Array(208))).toBeNull();
+  });
+});
+
+describe("writing a DRC20 call", () => {
+  const written = (key, fn, args) => read(fn, encodeDrc20Call(key, drivers[key], fn, args));
+  const MAX = "18446744073709551615";
+
+  it("writes the standard's calls so they read back exactly, to an account or a contract, at any u64", () => {
+    expect(written("drc20_standard", "transfer", { to: { External: BOB }, value: "9007199254740993" })).toEqual({
+      driver: "drc20_standard",
+      fn: "transfer",
+      to: account(BOB),
+      amount: "9007199254740993",
+    });
+    expect(written("drc20_standard", "transfer", { to: { Contract: CONTRACT }, value: "5" })).toEqual({
+      driver: "drc20_standard",
+      fn: "transfer",
+      to: { kind: "contract", value: CONTRACT },
+      amount: "5",
+    });
+    expect(written("drc20_standard", "approve", { spender: { External: ALICE }, value: MAX })).toEqual({
+      driver: "drc20_standard",
+      fn: "approve",
+      spender: account(ALICE),
+      amount: MAX,
+    });
+    expect(written("drc20_standard", "approve", { spender: { Contract: CONTRACT }, value: "0" })).toEqual({
+      driver: "drc20_standard",
+      fn: "approve",
+      spender: { kind: "contract", value: CONTRACT },
+      amount: "0",
+    });
+  });
+
+  it("writes older tokens' and Sozu's stDUSK's as before", () => {
+    const older = (fn, args, json) =>
+      expect(encodeDrc20Call("drc20", drivers.drc20, fn, args)).toEqual(encode("drc20", fn, json));
+    older("transfer", { to: { External: BOB }, value: "9007199254740993" }, `{"to":{"External":"${BOB}"},"value":"9007199254740993"}`);
+    older("transfer", { to: { Contract: CONTRACT }, value: "5" }, `{"to":{"Contract":"${CONTRACT}"},"value":"5"}`);
+    older("approve", { spender: { External: ALICE }, value: MAX }, `{"spender":{"External":"${ALICE}"},"value":"${MAX}"}`);
+    expect(encodeDrc20Call("sozu_staked_dusk", drivers.sozu_staked_dusk, "transfer", { to: { External: BOB }, value: "5" })).toEqual(
+      encode("sozu_staked_dusk", "transfer", `["${BOB}","5"]`)
+    );
+  });
+
+  it("writes a call the older driver can't confuse with the standard's", () => {
+    const standard = encodeDrc20Call("drc20_standard", drivers.drc20_standard, "transfer", { to: { External: BOB }, value: "5" });
+    const older = encodeDrc20Call("drc20", drivers.drc20, "transfer", { to: { External: BOB }, value: "5" });
+    expect(standard).not.toEqual(older);
+    expect(() => drivers.drc20.decodeInputFn("transfer", standard)).toThrow();
+  });
+
+  it("doesn't write a shielded key, or anything else, as an account", () => {
+    for (const key of ["drc20_standard", "drc20"]) {
+      expect(() => encodeDrc20Call(key, drivers[key], "transfer", { to: { External: PHOENIX }, value: "5" })).toThrow();
+      expect(() => encodeDrc20Call(key, drivers[key], "transfer", { to: { External: "not an account" }, value: "5" })).toThrow();
+      expect(() => encodeDrc20Call(key, drivers[key], "transfer", { value: "5" })).toThrow();
+    }
+  });
+
+  it("refuses bytes that say another amount or party than was asked", () => {
+    const real = drivers.drc20_standard;
+    const writing = (json) => ({ decodeInputFn: (fn, bytes) => real.decodeInputFn(fn, bytes), encodeInputFn: (fn, asked) => real.encodeInputFn(fn, json(asked)) });
+    const amount = writing((asked) => asked.replace('"amount":5', '"amount":6'));
+    const party = writing((asked) => asked.replace(BOB, ALICE));
+    const args = { to: { External: BOB }, value: "5" };
+    expect(() => encodeDrc20Call("drc20_standard", real, "transfer", args)).not.toThrow();
+    expect(() => encodeDrc20Call("drc20_standard", amount, "transfer", args)).toThrow("wasn't written as asked");
+    expect(() => encodeDrc20Call("drc20_standard", party, "transfer", args)).toThrow("wasn't written as asked");
+  });
+
+  it("refuses an amount no u64 holds, and a call it doesn't write", () => {
+    const write = (fn, value) => encodeDrc20Call("drc20_standard", drivers.drc20_standard, fn, { to: { External: BOB }, value });
+    expect(() => write("transfer", "18446744073709551616")).toThrow("too large");
+    expect(() => write("transfer", "-1")).toThrow("too large");
+    expect(() => write("burn", "5")).toThrow("Can't write burn");
+    expect(() => write("__proto__", "5")).toThrow();
+  });
+
+  it("gets a balance above 2^53 exactly from each token driver", () => {
+    const balance = new Uint8Array(8);
+    new DataView(balance.buffer).setBigUint64(0, 9007199254740993n, true);
+    for (const key of ["drc20_standard", "drc20"]) {
+      expect(String(drivers[key].decodeOutputFn("balance_of", balance))).toBe("9007199254740993");
+    }
   });
 });

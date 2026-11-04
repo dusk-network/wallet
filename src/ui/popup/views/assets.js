@@ -49,7 +49,8 @@ function parseU64(s, { name = "value" } = {}) {
 function parseDrcAccount(s, { name = "account" } = {}) {
   const raw = String(s ?? "").trim();
   if (!raw) throw new Error(`Enter a ${name}.`);
-  if (/^0x[0-9a-f]{64}$/i.test(raw)) return { Contract: raw.toLowerCase() };
+  // The token drivers read a contract as 64 hex characters, without 0x.
+  if (/^(0x)?[0-9a-f]{64}$/i.test(raw)) return { Contract: raw.replace(/^0x/i, "").toLowerCase() };
   return { External: raw };
 }
 
@@ -644,6 +645,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
 
       const enc = await actions?.send?.({
         type: "DUSK_UI_DRC20_ENCODE_INPUT",
+        contractId: cid,
         fnName: "transfer",
         args: { to, value: valueUnits },
         driver: token?.driver,
@@ -689,6 +691,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
 
       const enc = await actions?.send?.({
         type: "DUSK_UI_DRC20_ENCODE_INPUT",
+        contractId: cid,
         fnName: "approve",
         args: { spender, value: valueUnits },
         driver: token?.driver,
