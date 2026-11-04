@@ -356,7 +356,7 @@ describe("after Confirm", () => {
     expect(state.draft).toMatchObject({ to: OTHER, amountLux: dusk(1500) });
   });
 
-  it("hides the amount with Hide balances, and leaves the fee", async () => {
+  it("hides the amount and the fee with Hide balances", async () => {
     const state = reviewState();
     const app = popup(state, overview({ hideBalances: true }));
     await settle();
@@ -364,7 +364,7 @@ describe("after Confirm", () => {
     await settle();
     const amount = body.querySelector(".sent-amount");
     expect([visibleText(amount), screenReaderText(amount)]).toEqual(["•••• DUSK", "hidden DUSK"]);
-    expect(rows().at(-1)).toBe("Network feeUp to 0.0025 DUSK");
+    expect(rows().at(-1)).toBe("Network feeUp to •••• DUSK");
   });
 
   it("says to leave the screen where there is no popup to close", async () => {

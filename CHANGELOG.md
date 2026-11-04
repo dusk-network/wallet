@@ -198,6 +198,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Joined up an address a chat app broke with spaces, at To and in Contacts.
 - Refused a contact whose address is already saved under another name.
 - Refused a contact name that looks like a .dusk name it isn't saved from.
+- Hid the fee on the Sent screen with Hide balances.
+- Dropped the error under Send's form once the recipient changes, and said so in plain words.
+- Said why Send's Review went back after a switch of wallet, profile or network.
 - Showed a memo's text in the order it was written.
 - Hid the gas used on a transaction's page with Hide balances.
 - The Staking page shows what is staked with Sozu and how to unstake it, instead of saying nothing is staked.

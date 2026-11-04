@@ -458,6 +458,17 @@ describe("what the To field says about what's typed", () => {
     }
   });
 
+  it("drops what Review said once the recipient changes, in plain words", async () => {
+    const form = mount(newState());
+    typeInto(form.amount, "1");
+    typeInto(form.to, "someone new");
+    form.review.click();
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".err"))).toBe("Not a valid address. Check it and try again.");
+    typeInto(form.to, ALICE.account);
+    expect(dom.document.body.querySelector(".err").textContent).toBe("");
+  });
+
   it("joins up an address that a chat app broke with spaces", () => {
     const form = mount(newState());
     typeInto(form.to, `${ALICE.account.slice(0, 40)} ${ALICE.account.slice(40, 80)}\n${ALICE.account.slice(80)}`);

@@ -163,18 +163,15 @@ export function addressBookView(ov, { state, actions } = {}) {
     }
   };
 
-  const startEdit = (entry = null, returnView = "list") => {
+  const startEdit = (entry = null, returnView = "list", shielded = false) => {
     ab.view = "edit";
     ab.error = null;
     ab.editId = entry?.id ?? null;
     ab.editReturnView = returnView;
     ab.editName = entry?.name ?? String(ab.prefillName ?? "");
-    // A contact saved from a .dusk name is edited by its name, and a new one
-    // named after a .dusk name is saved from it.
-    const prefilled = normalizeRecipient(ab.prefillAddress ?? "");
-    const fromName = !entry && isDuskName(ab.editName);
-    ab.editAddress = entry ? entry.duskName || entry.address || "" : fromName ? ab.editName : prefilled;
-    ab.editShielded = entry?.duskName ? entry.type === "address" : fromName && ProfileGenerator.typeOf(prefilled) === "address";
+    // A contact saved from a .dusk name is edited by its name.
+    ab.editAddress = entry ? entry.duskName || entry.address || "" : normalizeRecipient(ab.prefillAddress ?? "");
+    ab.editShielded = entry?.duskName ? entry.type === "address" : shielded;
     rerender();
   };
 
@@ -252,9 +249,11 @@ export function addressBookView(ov, { state, actions } = {}) {
                 text: "Save",
                 "aria-label": `Save ${d.name} to Contacts`,
                 onclick: () => {
-                  ab.prefillAddress = d.address;
+                  // Named after a .dusk name, it's saved from that name.
+                  const fromName = !d.isAddress && isDuskName(d.name);
+                  ab.prefillAddress = fromName ? d.name : d.address;
                   ab.prefillName = d.isAddress ? "" : d.name;
-                  startEdit(null);
+                  startEdit(null, "list", fromName && ProfileGenerator.typeOf(d.address) === "address");
                 },
               }),
             ])

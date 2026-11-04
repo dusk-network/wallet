@@ -353,7 +353,7 @@ const STATE_WORDS = { done: "Done: ", current: "Now: ", failed: "Failed: ", unkn
 
 /**
  * The Sent screen: what was sent, its steps, its transaction ID and fee, and
- * Done. Amounts hide with Hide balances; the fee doesn't.
+ * Done. Amounts and the fee hide with Hide balances.
  */
 export function sentView(ov, { state, actions } = {}) {
   const sent = state?.sent;
@@ -428,9 +428,9 @@ export function sentView(ov, { state, actions } = {}) {
 
   const feeRow = (() => {
     if (phase === "not_sent" || status === "removed") return ["Network fee", "None charged"];
-    if (phase === "unconfirmed") return capLux > 0n ? ["Network fee", `Up to ${formatFee(capLux, { max: true })} DUSK, if it went out`] : null;
-    if (feePaid != null) return [status === "failed" ? "Fee charged" : "Network fee", `${formatFee(feePaid)} DUSK`];
-    if (capLux > 0n) return ["Network fee", `Up to ${formatFee(capLux, { max: true })} DUSK`];
+    if (phase === "unconfirmed") return capLux > 0n ? ["Network fee", ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK, if it went out"]] : null;
+    if (feePaid != null) return [status === "failed" ? "Fee charged" : "Network fee", [balance(hidden, formatFee(feePaid)), " DUSK"]];
+    if (capLux > 0n) return ["Network fee", ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK"]];
     return null;
   })();
 

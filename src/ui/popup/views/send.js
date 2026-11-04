@@ -248,6 +248,17 @@ export function sendFormView(ov, { state, actions } = {}) {
   // A request for another network says so under the recipient, and stays
   // until the recipient changes: its network is kept with the draft, so
   // Review and any redraw say it too.
+  const errBox = h("div", { class: "err", style: "display:none" });
+  const setErr = (txt) => {
+    if (!txt) {
+      errBox.style.display = "none";
+      errBox.textContent = "";
+      return;
+    }
+    errBox.style.display = "block";
+    errBox.textContent = txt;
+  };
+
   const chainNote = h("div", { class: "field-error", role: "alert", hidden: true });
   const warnChainMismatch = (reqChain) => {
     const text = chainMismatchText(reqChain, ov?.nodeUrl);
@@ -636,6 +647,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   const updateToType = () => {
+    // Whatever Review said was about what was here before.
+    setErr("");
     to.value = joinedAddress(to.value || "");
     const v = String(to.value || "").trim();
     showSelfNote("");
@@ -848,6 +861,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           // A new contact gets the address a shown name sends to, in full in its form.
           // A name still being looked up, or one that didn't resolve, gives no address.
           prefillAddress: shownName ? nameRecipient(shownName) : isDuskName(toVal) ? "" : toVal,
+          prefillName: "",
           view: "list",
           query: "",
           loaded: false,
@@ -868,17 +882,6 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
 
   const toRow = h("div", { class: "input-row" }, [toWrap, scanBtn, bookBtn]);
-
-  const errBox = h("div", { class: "err", style: "display:none" });
-  const setErr = (txt) => {
-    if (!txt) {
-      errBox.style.display = "none";
-      errBox.textContent = "";
-      return;
-    }
-    errBox.style.display = "block";
-    errBox.textContent = txt;
-  };
 
   const nextBtn = h("button", {
     class: "btn-primary",
@@ -912,7 +915,7 @@ export function sendFormView(ov, { state, actions } = {}) {
 
         const recType = ProfileGenerator.typeOf(recipient);
         if (recType !== "account" && recType !== "address") {
-          throw new Error("Invalid recipient: expected a Dusk account or shielded address");
+          throw new Error(contactsNamed(toVal).length ? "Tap the contact above to use it." : NOT_AN_ADDRESS_TEXT);
         }
         const blocked = blockedRecipient(recipient, ov?.chainId);
         if (blocked) throw new Error(blocked);
@@ -1003,6 +1006,9 @@ export function chainMismatchText(reqChain, nodeUrl) {
 }
 
 // Who pays and on which network, as a Review was asked for.
+// What leaving a Review for a switch of wallet, profile or network says.
+const notSentNotice = (actions) => actions?.showToast?.("The wallet, profile or network changed, so nothing was sent. Check the send again.", 3000);
+
 const reviewedFor = (ov) => `${ov?.accounts?.[0] ?? ""} ${Number(ov?.selectedAccountIndex ?? 0) || 0} ${ov?.nodeUrl ?? ""}`;
 
 /**
@@ -1029,7 +1035,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // the form, rather than a Review that quietly says something else.
   if (!d || (duskName && duskName.nodeUrl !== String(ov?.nodeUrl ?? "")) || (d.reviewedFor && d.reviewedFor !== reviewedFor(ov))) {
     state.route = "send";
-    return sendFormView(ov, { state, actions });
+    const form = sendFormView(ov, { state, actions });
+    if (d?.reviewedFor && d.reviewedFor !== reviewedFor(ov)) notSentNotice(actions);
+    return form;
   }
 
   const recType = ProfileGenerator.typeOf(String(d.to || "").trim());
