@@ -33,11 +33,12 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
   });
   // What Max fills in while balances are hidden shows as dots, in a field of
   // its own: `input` keeps the amount for what reads it, away from the screen
-  // and screen readers, and what's typed here replaces it.
+  // and screen readers. Dots in the field, not a placeholder, so deleting them
+  // is a change too: what's left of them goes, and what's typed takes over.
   const cover = decimalInput({
     class: "amount-field__input",
     "aria-label": `${label}, hidden`,
-    placeholder: HIDDEN_BALANCE,
+    value: HIDDEN_BALANCE,
     autocomplete: "off",
     inputmode: "decimal",
     disabled,
@@ -69,8 +70,8 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
     onInput?.();
   });
   cover.addEventListener("input", () => {
-    input.value = cover.value;
-    cover.value = "";
+    input.value = String(cover.value ?? "").replaceAll(HIDDEN_BALANCE[0], "");
+    cover.value = HIDDEN_BALANCE;
     setMasked(false);
     fit();
     input.focus();
@@ -83,12 +84,14 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
     error.textContent = text || "";
     error.hidden = !text;
     el.classList.toggle("is-invalid", Boolean(text));
-    if (text) {
-      input.setAttribute("aria-invalid", "true");
-      input.setAttribute("aria-describedby", errorId);
-    } else {
-      input.removeAttribute("aria-invalid");
-      input.removeAttribute("aria-describedby");
+    for (const field of [input, cover]) {
+      if (text) {
+        field.setAttribute("aria-invalid", "true");
+        field.setAttribute("aria-describedby", errorId);
+      } else {
+        field.removeAttribute("aria-invalid");
+        field.removeAttribute("aria-describedby");
+      }
     }
   };
 

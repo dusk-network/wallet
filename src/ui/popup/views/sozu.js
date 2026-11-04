@@ -833,9 +833,13 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
 
   // The call's own gas at the network's price; Custom fee for gas of your own.
   const gasOpts = { privacy: "public", fnName };
+  const hidden = balancesHidden(ov);
+  // What Max filled in stays hidden here; an amount typed shows, as on every Review.
+  const amountMasked = hidden && Boolean(draft.amountMasked);
   const ownGas = getDefaultGas(TX_KIND.CONTRACT_CALL, gasOpts);
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
+  gasEditor.hideTotal = amountMasked;
   gasEditor.amountLux = "0";
   gasEditor.extraLux = [String(draft.deposit ?? "0")];
   gasEditor.setGas(draft?.gas ?? null);
@@ -865,9 +869,6 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
 
   const title = isStake ? "Liquid staking" : "Unstake from Sozu";
   const line = isStake ? "With Sozu, a third party" : "From Sozu, back to your public balance";
-  const hidden = balancesHidden(ov);
-  // What Max filled in stays hidden here; an amount typed shows, as on every Review.
-  const amountMasked = hidden && Boolean(draft.amountMasked);
   const profileName = profileNameEl(ov, { index: Number(draft.profileIndex ?? 0) || 0 });
 
   // Gas that won't do, or terms that couldn't be checked, say so above Confirm; nothing is sent.

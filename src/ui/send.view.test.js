@@ -440,7 +440,7 @@ describe("what Max fills in, with Hide balances", () => {
     const form = mount(state, ov);
     typeInto(form.to, ALICE.account);
     dom.document.body.querySelector(".amount-avail .mini-btn").click();
-    expect([shown().value, shown().getAttribute("placeholder")]).toEqual(["", "••••"]);
+    expect(shown().value).toBe("••••");
     expect(form.amount.value).not.toBe("");
 
     form.review.click();
@@ -449,6 +449,7 @@ describe("what Max fills in, with Hide balances", () => {
     expect(BigInt(state.draft.amountLux) > 0n).toBe(true);
     mount(state, ov);
     expect(visibleText(dom.document.body.querySelector(".balance-amount"))).toBe("•••• DUSK");
+    expect(visibleText(dom.document.body.querySelector(".gas-total-value"))).toBe("up to •••• DUSK");
   });
 
   it("shows what's typed over it", () => {
@@ -460,6 +461,16 @@ describe("what Max fills in, with Hide balances", () => {
     expect(shown().value).toBe("1");
     expect(state.draft.amountMasked).toBe(false);
     expect(state.draft.amountDusk).toBe("1");
+  });
+
+  it("clears the amount when the dots are deleted", () => {
+    const state = newState();
+    const form = mount(state, overview({ hideBalances: true }));
+    typeInto(form.to, ALICE.account);
+    dom.document.body.querySelector(".amount-avail .mini-btn").click();
+    typeInto(shown(), "•••");
+    expect(shown().value).toBe("");
+    expect(state.draft.amountDusk).toBe("");
   });
 });
 

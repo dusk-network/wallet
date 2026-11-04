@@ -1157,11 +1157,14 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // Back returns to Send with the draft, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm", disabled: nothingArrives });
 
+  // What Max filled in stays hidden with the balances; an amount typed shows.
+  const amountMasked = balancesHidden(ov) && Boolean(d.amountMasked);
   // The network's gas price by default; Custom fee for gas of your own.
   const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
     kind: TX_KIND.TRANSFER,
     gasOpts: { privacy },
     amountLux: d.amountLux,
+    hideTotal: amountMasked,
     ov,
     actions,
     gas: d?.gas,
@@ -1234,11 +1237,11 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           text: service ? `Bridge to ${service.chain}` : privacy === "shielded" ? "Shielded transfer" : "Public transfer",
         }),
         h("div", { class: "balance-amount" }, [
-          balance(balancesHidden(ov) && Boolean(d.amountMasked), formatDuskExact(d.amountLux)),
+          balance(amountMasked, formatDuskExact(d.amountLux)),
           h("span", { class: "balance-unit", text: " DUSK" }),
         ]),
         // To the bridge: what arrives on the other chain, once it takes its fee.
-        service ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) }) : null,
+        service && !amountMasked ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) }) : null,
         // What a public send shows everyone; a shielded one has no such line.
         privacy === "public" ? visibleLine : null,
       ].filter(Boolean)),

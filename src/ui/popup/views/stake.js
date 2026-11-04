@@ -322,7 +322,7 @@ function stakingContext(ov, { state, actions } = {}) {
 }
 
 // Where Review's draft comes from: the action, its amount and the profiles.
-function makeDraft(pos, st, { state, actions, actionKind, amountLux = null, amountMode = "all" }) {
+function makeDraft(pos, st, { state, actions, actionKind, amountLux = null, amountMode = "all", amountMasked = false }) {
   const kind = actionToKind(actionKind);
   const stakeProfileIndex = Number(pos.stakeProfileIndex) || 0;
   const ownerProfileIndex =
@@ -336,6 +336,7 @@ function makeDraft(pos, st, { state, actions, actionKind, amountLux = null, amou
     ownerProfileIndex,
     amountLux,
     amountMode,
+    amountMasked,
     hasStake: Boolean(pos.hasStake),
     // What Unstake and Claim move, for Review and the Sent screen.
     displayLux:
@@ -783,6 +784,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
       actionKind: ACTION_TOPUP,
       amountLux: lux.toString(),
       amountMode: st.amountMode === "max" ? "max" : "custom",
+      amountMasked: field.isMasked(),
     });
     st.amountMode = "custom";
   }
@@ -928,6 +930,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
     kind,
     gasOpts: { privacy: gasPrivacy },
     amountLux: kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0",
+    hideTotal: kind === TX_KIND.STAKE && balancesHidden(ov) && Boolean(d.amountMasked),
     ov,
     actions,
     gas: d?.gas,
@@ -938,7 +941,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   // typed in for a stake shows, as on every Review; what Max filled in doesn't.
   const shownLux = kind === TX_KIND.STAKE ? d.amountLux : d.amountLux || d.displayLux;
   const allText = kind === TX_KIND.UNSTAKE ? "All stake" : kind === TX_KIND.WITHDRAW_REWARD ? "All rewards" : "—";
-  const hideAmount = (kind !== TX_KIND.STAKE || d.amountMode === "max") && balancesHidden(ov);
+  const hideAmount = (kind !== TX_KIND.STAKE || Boolean(d.amountMasked)) && balancesHidden(ov);
   const amountLine = () =>
     shownLux && safeBigInt(shownLux, 0n) > 0n ? [balance(hideAmount, fmtLux(shownLux)), " DUSK"] : [allText];
 
