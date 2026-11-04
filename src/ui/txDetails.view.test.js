@@ -217,6 +217,55 @@ describe("transaction details", () => {
     expect([back.lead, back.name, back.via]).toEqual(["Bridge", "From Ethereum", `Ethereum migration payouts · ${payouts.slice(0, 6)}…${payouts.slice(-6)}`]);
   });
 
+  it("follows DUSK bridged to BNB Smart Chain to its end: on its way, late, then what arrived and where", async () => {
+    const MAINNET = "https://nodes.dusk.network";
+    const bsc = routes(networks.mainnet).find((r) => r.id === "dusk-to-bsc");
+    const evm = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
+    const payout = `0x${"7c".repeat(32)}`;
+    const on = (tx) => {
+      const ov = { nodeUrl: MAINNET, txs: [{ hash: HASH, nodeUrl: MAINNET, status: "executed", kind: TX_KIND.TRANSFER, to: bsc.account, memo: evm, amount: "3000000000", ...tx }] };
+      const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home", addressBook: { loaded: true, items: [] } };
+      dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
+      const body = dom.document.body;
+      return {
+        body,
+        status: visibleText(body.querySelector(".tx-hero-status")),
+        rows: body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText),
+      };
+    };
+    const sentAt = Date.now() - 60_000;
+
+    const going = on({ finalizedAt: sentAt });
+    expect(going.status).toBe("On its way");
+    expect(going.rows).toContain("Bridge fee1 DUSK");
+    expect(going.rows).toContain("You receive2 DUSK");
+
+    const lateAt = Date.now() - 3 * bsc.typicalSeconds * 1000;
+    expect(on({ finalizedAt: lateAt }).status).toBe("Taking longer than usual");
+
+    const arrivedAt = sentAt + 30_000;
+    keptArrivals().set(HASH, { hash: payout, at: arrivedAt });
+    const arrived = on({ finalizedAt: sentAt });
+    keptArrivals().delete(HASH);
+    expect(arrived.status).toBe("Arrived");
+    expect(arrived.rows).toContain(`Arrived${dateText(arrivedAt)}`);
+    expect(arrived.rows).toContain("Received2 DUSK");
+    expect(arrived.rows.at(-1)).toBe(`BNB Smart Chain transaction${payout.slice(0, 6)}…${payout.slice(-4)}Copy`);
+    dom.window.open = vi.fn(() => ({}));
+    const buttons = arrived.body.querySelectorAll(".tx-explorer-btn");
+    expect(buttons.map(visibleText)).toEqual(["View in Dusk explorer", "View in BNB Smart Chain explorer"]);
+    buttons[1].click();
+    await settle();
+    expect(dom.window.open).toHaveBeenCalledWith(`${networks.mainnet.routes.chains.bsc.explorerUrl}/tx/${payout}`, "_blank", expect.anything());
+
+    // Nothing can arrive from what the bridge doesn't pay: no more than its fee, or no address.
+    for (const tx of [{ amount: "1000000000" }, { memo: "" }]) {
+      const none = on({ finalizedAt: sentAt, ...tx });
+      expect(none.status).toBe("Completed");
+      expect(none.rows.some((r) => r.startsWith("You receive"))).toBe(false);
+    }
+  });
+
   it("leads with a saved contact's own name, its .dusk name beside the address", () => {
     const to = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
     const send = { kind: TX_KIND.TRANSFER, direction: "out", to, toName: "wallet-both.dusk", amount: "500000000", status: "executed" };

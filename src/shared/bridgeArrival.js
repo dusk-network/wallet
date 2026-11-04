@@ -1,8 +1,8 @@
-// A deposit to DuskEVM, once it's there: the DuskEVM transaction that paid it,
-// and when, as the popup finds it on DuskEVM (ui/popup/arrivals.js). Looked
-// for only while a deposit is on its way, less often the longer nothing
-// changes (as the web wallet's deposit tracking); kept once found, until a
-// wallet reset. A network without DuskEVM (Mainnet, for now) asks nothing.
+// A deposit to DuskEVM, or a transfer out to another chain, once it's there:
+// the transaction that paid it there, and when, as the popup finds it on that
+// chain (ui/popup/arrivals.js). Looked for only while one is on its way, less
+// often the longer nothing changes (as the web wallet's deposit tracking);
+// kept once found, until a wallet reset. A network with neither asks nothing.
 //
 // What's kept is kept per wallet, by its wallet ID, and tagged with the
 // transaction store's reset count it was found under (txStore.js); every page
@@ -10,6 +10,7 @@
 // shows the old wallet's arrivals, and a check that began before it keeps
 // nothing. Another wallet's are never read.
 
+import { isEvmAddress } from "./bridgeCalls.js";
 import { networkForNode } from "./nodeNetwork.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
@@ -91,8 +92,8 @@ export const keptArrivals = () => kept;
  * @param {string} evmHash
  * @returns {string | null}
  */
-export function arrivalUrl(nodeUrl, evmHash) {
-  const base = networkForNode(String(nodeUrl ?? ""))?.duskEvm?.explorerUrl;
+export function arrivalUrl(nodeUrl, evmHash, route = null) {
+  const base = route?.chain?.explorerUrl ?? networkForNode(String(nodeUrl ?? ""))?.duskEvm?.explorerUrl;
   return base && EVM_TX.test(String(evmHash ?? "")) ? `${base.replace(/\/+$/, "")}/tx/${evmHash}` : null;
 }
 
@@ -109,16 +110,32 @@ export const depositLux = (row) => {
 export const depositTime = (row) => Number(row?.entry?.timestamp ?? row?.sent?.finalizedAt) || 0;
 
 /**
- * Whether an Activity row is a deposit to DuskEVM on its way: gone through on
- * Dusk this week, its block's time known, to a DuskEVM address, on a network
- * with DuskEVM, and not seen there yet.
+ * What a transfer out to another chain pays: what was sent less the bridge's
+ * fee, to the address its memo gives. Null for anything else, and for one the
+ * bridge pays nothing for.
+ * @param {object} row - an Activity row
+ * @returns {{ fee: bigint, received: bigint } | null}
+ */
+export function payoutOf(row) {
+  const route = row?.route;
+  if (route?.kind !== "service" || !isEvmAddress(String(row?.memo ?? "").trim())) return null;
+  const fee = BigInt(route.feeLux ?? 0);
+  const sent = BigInt(row?.value ?? 0);
+  return sent > fee ? { fee, received: sent - fee } : null;
+}
+
+/**
+ * Whether an Activity row is on its way: gone through on Dusk this week, its
+ * block's time known, and not seen at the other end yet. Either a deposit to a
+ * DuskEVM address, on a network with DuskEVM, or a transfer out the bridge pays.
  * @param {object} row - an Activity row (activity.js activityRows)
  * @param {string} nodeUrl - the overview's network
  * @param {number} [now]
  */
 export function awaitingArrival(row, nodeUrl, now = Date.now()) {
-  if (!networkForNode(String(nodeUrl ?? ""))?.duskEvm || row?.bridge?.step !== "deposit" || !row.bridge.to) return false;
-  if (row.status !== "executed" || !depositLux(row) || kept.has(String(row.hash))) return false;
+  const deposit = networkForNode(String(nodeUrl ?? ""))?.duskEvm && row?.bridge?.step === "deposit" && row.bridge.to && depositLux(row);
+  if (!deposit && !payoutOf(row)) return false;
+  if (row.status !== "executed" || kept.has(String(row.hash))) return false;
   const at = depositTime(row);
   return at > 0 && now - at < ARRIVAL_WINDOW_MS;
 }

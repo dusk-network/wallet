@@ -10,6 +10,7 @@
 import { formatDusk, formatFee, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { isEvmAddress } from "../../../shared/bridgeCalls.js";
+import { depositTime, keptArrivals, payoutOf } from "../../../shared/bridgeArrival.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { labelForNode } from "../../../shared/nodeNetwork.js";
 import { h } from "../../lib/dom.js";
@@ -118,6 +119,7 @@ const NAME_CALLS = Object.freeze({
  *   amount: { sign: string, value: string, unit: string } | null,
  *   status: string, tone: "ok"|"bad"|"pending"|"neutral", statusWord: string|null,
  *   failed: boolean, unsent: boolean, fee: string|null, arrival: string|null, arrivedAt: number|null,
+ *   payout: { fee: bigint, received: bigint }|null,
  *   recipient: string|null, evmChain: string, via: { name: string, address: string|null, isAddress: boolean } | null,
  * }} `recipient`: the address on another chain, `evmChain`, a bridge transfer
  *   paid, which `evm` rows are named by; `via`: the bridge's account on Dusk
@@ -297,7 +299,12 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const unsent = failed || Boolean(tx?.dropped);
   const amount = d.amount && unsent ? { ...d.amount, sign: "", muted: true } : d.amount;
   // A deposit to DuskEVM that arrived there: its transaction there, and when (bridgeArrival.js).
-  const arrival = d.evm ? tx.bridge.arrival : null;
+  const payout = payoutOf(tx);
+  const arrival = d.evm ? tx.bridge.arrival : payout ? (keptArrivals().get(String(tx?.hash)) ?? null) : null;
+  // Gone through on Dusk, on its way to another chain: Completed isn't the end of it.
+  const onItsWay = Boolean(payout) && !arrival && status === "executed";
+  const sentAgo = Date.now() - depositTime(tx);
+  const isLate = onItsWay && depositTime(tx) > 0 && sentAgo > 2 * Number(tx.route.typicalSeconds ?? Infinity) * 1000;
   return {
     lead: "",
     alias: "",
@@ -312,9 +319,18 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     category: tx?.category,
     note: tx?.privacy === "shielded" && tx?.kind !== TX_KIND.SHIELD && tx?.kind !== TX_KIND.UNSHIELD ? "Shielded" : "",
     status: String(tx?.status ?? ""),
-    tone,
+    tone: onItsWay ? "pending" : tone,
     amount,
-    statusWord: arrival ? "Arrived" : tone === "ok" ? null : txStatusWord(status, { final }),
+    statusWord: arrival
+      ? "Arrived"
+      : isLate
+        ? "Taking longer than usual"
+        : onItsWay
+          ? "On its way"
+          : tone === "ok"
+            ? null
+            : txStatusWord(status, { final }),
+    payout,
     failed,
     unsent,
     fee: tx?.fee != null ? formatFee(tx.fee) : null,
