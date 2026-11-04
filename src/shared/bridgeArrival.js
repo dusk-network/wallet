@@ -10,7 +10,6 @@
 // shows the old wallet's arrivals, and a check that began before it keeps
 // nothing. Another wallet's are never read.
 
-import { isEvmAddress } from "./bridgeCalls.js";
 import { networkForNode } from "./nodeNetwork.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
@@ -22,6 +21,8 @@ export const ARRIVAL_WINDOW_MS = 7 * 24 * 60 * 60_000;
 const KEEP = 200;
 
 const EVM_TX = /^0x[0-9a-fA-F]{64}$/;
+// What the bridge pays to: any capitals, as it doesn't check their checksum.
+const PAYABLE_MEMO = /^0x[0-9a-fA-F]{40}$/;
 
 const V1 = STORAGE_KEYS.BRIDGE_ARRIVALS;
 const V2 = STORAGE_KEYS.BRIDGE_ARRIVALS_V2;
@@ -120,7 +121,7 @@ export function payoutOf(row) {
   const route = row?.route;
   if (route?.kind !== "service" || route.running === false || !route.payoutAddress) return null;
   // The address exactly as the bridge reads it: from text, as it was sent.
-  if (row?.entry?.memoBinary === true || !isEvmAddress(row?.memo)) return null;
+  if (row?.entry?.memoBinary === true || !PAYABLE_MEMO.test(String(row?.memo ?? ""))) return null;
   const fee = BigInt(route.feeLux ?? 0);
   // What left the account holds a gas refund it paid another account.
   const sent = BigInt(row?.value ?? 0) - BigInt(row?.entry?.refund ?? 0);

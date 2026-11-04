@@ -105,6 +105,9 @@ describe("a transfer out to another chain", () => {
     // The bridge reads the memo as it is: padded, or bytes, it pays nothing.
     expect(awaitingArrival(transferOut("f", { memo: ` ${TO}` }), MAINNET, NOW)).toBe(false);
     expect(awaitingArrival({ ...transferOut("g"), entry: { memoBinary: true, timestamp: NOW - 1000 } }, MAINNET, NOW)).toBe(false);
+    // Any capitals the bridge reads as an address, checksum or not, it pays.
+    const offChecksum = `0x${TO.slice(2, 4).toLowerCase()}${TO.slice(4, 8).toUpperCase()}${TO.slice(8)}`;
+    expect(awaitingArrival(transferOut("j", { memo: offChecksum }), MAINNET, NOW)).toBe(true);
     // A route that isn't paying out.
     const stopped = { ...transferOut("h"), route: { ...SERVICE, running: false } };
     expect(awaitingArrival(stopped, MAINNET, NOW)).toBe(false);
