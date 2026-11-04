@@ -78,6 +78,7 @@ const sozu = (over = {}) => ({
   loading: false,
   error: null,
   profileIndex: 0,
+  readAccount: ACCOUNT,
   status: {
     configured: true,
     networkKey: "testnet",
@@ -295,6 +296,48 @@ describe("staking overview", () => {
     expect(visibleText(body.querySelector(".stake-sum"))).toContain("With Sozu0.0997 DUSK");
   });
 
+  it("leaves out an answer for the wallet switched from, though it came under the new context", async () => {
+    const theirs = { ...sozu().status, position: { poolBalanceLux: "5000000000", stDuskBalanceLux: "1600000000" }, pool: sozu().pool };
+    const answers = [];
+    const state = { route: "stake", staking: staking(), sozu: sozu({ loaded: false, position: null }), overview: ov() };
+    popup(state, ov(), { sozuStatus: () => new Promise((resolve) => answers.push(resolve)) });
+
+    // The overview has moved on to the new wallet by the time the answer comes.
+    state.overview = ov({ accounts: [OTHER] });
+    answers[0](theirs);
+    await settle();
+    expect(visibleText(body.querySelector(".stake-sum"))).not.toContain("With Sozu");
+    expect(state.sozu.position).toBeNull();
+    expect(answers).toHaveLength(2);
+  });
+
+  it("says when what's with Sozu couldn't be read, rather than that nothing is staked", async () => {
+    const state = { route: "stake", staking: staking(), sozu: sozu({ loaded: false, position: null, readAccount: undefined }) };
+    popup(state, ov(), {
+      sozuStatus: async () => {
+        throw new Error("node down");
+      },
+    });
+    await settle();
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("What's with Sozu couldn't be read.");
+    expect(text).not.toContain("Nothing staked yet");
+  });
+
+  it("keeps what was read when reading it again fails, and says it may be out of date", async () => {
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    const state = { route: "stake", staking: staking(), sozu: sozu({ position, loaded: false }) };
+    popup(state, ov(), {
+      sozuStatus: async () => {
+        throw new Error("node down");
+      },
+    });
+    await settle();
+    const text = visibleText(body.querySelector(".stake-sum"));
+    expect(text).toContain("With Sozu0.0997 DUSK");
+    expect(text).toContain("What's with Sozu couldn't be read again, so it may be out of date.");
+  });
+
   it("leaves out an answer from before a switch of wallet, and asks again", async () => {
     const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
     const theirs = { ...sozu().status, position: { poolBalanceLux: "5000000000", stDuskBalanceLux: "1600000000" }, pool: sozu().pool };
@@ -357,7 +400,11 @@ describe("staking overview", () => {
   });
 
   it("says why Unstake and Claim rewards can't be pressed", () => {
+    // Until Sozu is read, nothing natively staked doesn't say nothing is staked.
     popup({ route: "stake", staking: staking() });
+    expect(body.querySelector(".stake-sum").querySelectorAll(".stake-cap")).toHaveLength(0);
+
+    popup({ route: "stake", staking: staking(), sozu: sozu() });
     const sum = body.querySelector(".stake-sum");
     expect(sum.querySelectorAll(".stake-big").map(visibleText)).toEqual(["0 DUSK", "0 DUSK"]);
     expect([button("Unstake").disabled, button("Claim rewards").disabled]).toEqual([true, true]);

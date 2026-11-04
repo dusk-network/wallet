@@ -353,6 +353,8 @@ function maybeAutoWatchStDusk({ state, actions, st, status, profileIndex }) {
     });
 }
 
+const accountOf = (ov, idx) => String(ov?.accounts?.[idx] ?? "");
+
 function ensureSozuLoaded(ov, { state, actions } = {}) {
   const st = sozuState(state);
   const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
@@ -362,9 +364,11 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
   st.loading = true;
   st.error = null;
   // An answer from before a switch is for what was switched from: asked again.
+  // The context changes as a switch starts, the overview's account once it's done.
   const context = state.context;
+  const account = accountOf(ov, idx);
   const switched = () => {
-    if (state.context === context) return false;
+    if (state.context === context && accountOf(state.overview ?? ov, idx) === account) return false;
     st.loading = false;
     st.loaded = false;
     actions?.render?.().catch(() => {});
@@ -375,6 +379,7 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
       if (switched()) return;
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to load Sozu status");
       st.readContext = context;
+      st.readAccount = account;
       st.status = resp?.result ?? resp ?? null;
       st.pool = st.status?.pool ?? null;
       st.position = st.status?.position ?? null;
@@ -395,12 +400,12 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
 }
 
 /**
- * What the selected profile holds with Sozu, as read on this network, for the
- * Staking overview: null until that's read, or when it couldn't be, as Liquid
- * staking then says why and asks again.
+ * What the selected profile holds with Sozu, as read for this wallet on this
+ * network, for the Staking overview: null until that's read. `stale` says a
+ * read of it again failed, so it may be out of date.
  * @param {object} ov
  * @param {{ state: object, actions: object }} ctx
- * @returns {{ poolLux: bigint, stDuskLux: bigint } | null}
+ * @returns {{ poolLux: bigint, stDuskLux: bigint, stale: boolean } | null}
  */
 export function sozuHolding(ov, { state, actions } = {}) {
   const st = sozuState(state);
@@ -408,7 +413,7 @@ export function sozuHolding(ov, { state, actions } = {}) {
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
   // Read before a switch of wallet, profile or network: not this one's.
-  const current = st.readContext === state.context;
+  const current = st.readContext === state.context && st.readAccount === accountOf(ov, idx);
   if (st.loaded && !current) st.loaded = false;
   // A custom node's network can come to be known after the read, with no
   // switch: asked again once, as its key may not match until its chain ID is read.
@@ -419,9 +424,13 @@ export function sozuHolding(ov, { state, actions } = {}) {
     st.loaded = false;
   }
   if (!st.error) ensureSozuLoaded(ov, { state, actions });
-  if (!current || !st.position || st.profileIndex !== idx || st.status?.networkKey !== networkKey) return null;
-  const position = parseSozuPosition(st.position);
-  return { poolLux: safeBigInt(position.poolBalanceLux, 0n), stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n) };
+  if (!current || st.profileIndex !== idx || st.status?.networkKey !== networkKey) return null;
+  const position = parseSozuPosition(st.position ?? {});
+  return {
+    poolLux: safeBigInt(position.poolBalanceLux, 0n),
+    stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n),
+    stale: Boolean(st.error),
+  };
 }
 
 // Sozu's switches as the screens say them: deposits paused, or a pool being
