@@ -1,4 +1,12 @@
-import { formatDusk as formatDuskShared } from "@dusk-network/networks/format";
+import {
+  amountForField,
+  amountLocale,
+  decimalSeparator,
+  formatDusk as formatDuskShared,
+  groupDigits,
+  normalizeAmount,
+  parseDusk,
+} from "@dusk-network/app-core/amounts";
 
 // Shared amount helpers.
 //
@@ -49,30 +57,6 @@ export function formatLuxToDusk(luxStr) {
   }
 }
 
-/** The browser's language, in digits a person can type back, and its number format: made once per language. */
-const languages = new Map();
-function numbers() {
-  const language = globalThis.navigator?.language || "en-US";
-  let known = languages.get(language);
-  if (!known) {
-    let locale = "en-US";
-    try {
-      locale = new Intl.Locale(language, { numberingSystem: "latn" }).toString();
-    } catch {
-      // A language Intl can't read: English.
-    }
-    const format = new Intl.NumberFormat(locale);
-    known = { decimal: format.formatToParts(0.5).find((part) => part.type === "decimal")?.value ?? ".", format, locale };
-    languages.set(language, known);
-  }
-  return known;
-}
-
-const browserLocale = () => numbers().locale;
-
-/** How that language writes decimals. */
-const decimalSeparator = () => numbers().decimal;
-
 /**
  * An amount for an amount field, as the field reads it back: plain, in the
  * language's decimal separator.
@@ -86,7 +70,7 @@ export const formatLuxForInput = (luxStr) => amountForInput(formatLuxToDusk(luxS
  * @param {string} plain
  * @returns {string}
  */
-export const amountForInput = (plain) => String(plain ?? "").replace(".", decimalSeparator());
+export const amountForInput = (plain) => amountForField(plain);
 
 /**
  * A number as shown to people, its whole part grouped in thousands:
@@ -99,12 +83,12 @@ export function groupThousands(numStr) {
   const s = String(numStr ?? "");
   const m = /^(-?)(\d+)(\.\d+)?$/.exec(s);
   if (!m) return s;
-  const whole = numbers().format.format(BigInt(m[2]));
+  const whole = groupDigits(m[2]);
   return `${m[1]}${whole}${m[3] ? `${decimalSeparator()}${m[3].slice(1)}` : ""}`;
 }
 
 /**
- * An amount in DUSK as every Dusk app writes one (@dusk-network/networks): at
+ * An amount in DUSK as every Dusk app writes one (@dusk-network/app-core): at
  * most 4 decimals, but 2 significant digits under 0.01, and never 0 for an
  * amount that isn't; rounded down, so a balance never reads more than there
  * is. In the wallet's separators: "1,484.9235". Anything that isn't a whole
@@ -114,7 +98,7 @@ export function groupThousands(numStr) {
  */
 export function formatDusk(luxStr) {
   const lux = safeBigInt(luxStr, null);
-  return lux === null ? String(luxStr ?? "0") : formatDuskShared(lux, { round: "down", locale: browserLocale() }).text;
+  return lux === null ? String(luxStr ?? "0") : formatDuskShared(lux, { round: "down", locale: amountLocale() }).text;
 }
 
 /**
@@ -131,7 +115,7 @@ export function formatDuskExact(luxStr) {
 export const FEE_DECIMALS = UI_DISPLAY_DECIMALS;
 
 /**
- * A fee in DUSK as every Dusk app writes one (@dusk-network/networks): at
+ * A fee in DUSK as every Dusk app writes one (@dusk-network/app-core): at
  * most 4 decimals, but 2 significant digits under 0.01, and never 0 for a
  * fee that isn't. A maximum (`max`, shown as "up to") rounds up, so it never
  * reads lower than it can be; a fee paid rounds to the nearest. In the
@@ -143,7 +127,7 @@ export const FEE_DECIMALS = UI_DISPLAY_DECIMALS;
 export function formatFee(luxStr, { max = false } = {}) {
   const lux = safeBigInt(luxStr, 0n);
   if (lux <= 0n) return "0";
-  return formatDuskShared(lux, { round: max ? "up" : "nearest", locale: browserLocale() }).text;
+  return formatDuskShared(lux, { round: max ? "up" : "nearest", locale: amountLocale() }).text;
 }
 
 /**
@@ -161,31 +145,11 @@ export function maxAmountLux(availableLux, keepLux = 0n) {
 }
 
 /**
- * An amount as typed, in the form parseDuskToLux reads: a decimal comma made
- * a point, and digit grouping left out where it can't be decimals. "1,5" is
- * 1.5, "1.000,5" and "1,000.5" are 1000.5, and "1,000,000" is a million. A
- * lone comma before three digits, as in "1,000", could be either, and the
- * wallet writes a thousand that way, so it stays as typed and isn't an amount.
+ * An amount as typed, in the form parseDuskToLux reads (@dusk-network/app-core).
  * @param {string} text
  * @returns {string}
  */
-export function normalizeDuskInput(text) {
-  const value = String(text ?? "").trim();
-  const commaDecimals = decimalSeparator() === ",";
-
-  // Groups of three after a first group that doesn't start with a zero.
-  if (/^[1-9]\d{0,2}(,\d{3})+\.\d*$/.test(value)) return value.replaceAll(",", "");
-  if (/^[1-9]\d{0,2}(\.\d{3})+,\d*$/.test(value)) return value.replaceAll(".", "").replace(",", ".");
-  if (/^[1-9]\d{0,2}(,\d{3}){2,}$/.test(value)) return value.replaceAll(",", "");
-  if (commaDecimals && /^[1-9]\d{0,2}(\.\d{3}){2,}$/.test(value)) return value.replaceAll(".", "");
-
-  // One separator before three digits: where it's how decimals are written, a
-  // decimal. Where it's how thousands are, it could mean either, so it's refused.
-  if (commaDecimals && /^[1-9]\d{0,2}\.\d{3}$/.test(value)) return value.replace(".", ",");
-  if (/^\d*,\d*$/.test(value) && (commaDecimals || !/^[1-9]\d{0,2},\d{3}$/.test(value))) return value.replace(",", ".");
-
-  return value;
-}
+export const normalizeDuskInput = (text) => normalizeAmount(text);
 
 /**
  * Parse a user-entered DUSK amount into a Lux (atomic units) string. It's
@@ -193,13 +157,11 @@ export function normalizeDuskInput(text) {
  * @param {string} duskStr
  */
 export function parseDuskToLux(duskStr) {
-  const s = normalizeDuskInput(duskStr);
-  if (!/^(\d+(\.\d*)?|\.\d+)$/.test(s)) {
-    throw new Error(`Invalid amount. Use a number like 1 or ${amountForInput("0.123")}`);
-  }
-  const [u, d = ""] = s.split(".");
-  if (d.length > LUX_DECIMALS) {
+  const plain = normalizeDuskInput(duskStr);
+  const lux = parseDusk(plain);
+  if (lux !== null) return lux.toString();
+  if (/^\d*\.\d+$/.test(plain)) {
     throw new Error(`Invalid amount. DUSK has ${LUX_DECIMALS} decimals at most`);
   }
-  return (BigInt(u || "0") * LUX_SCALE + BigInt(d.padEnd(LUX_DECIMALS, "0"))).toString();
+  throw new Error(`Invalid amount. Use a number like 1 or ${amountForInput("0.123")}`);
 }
