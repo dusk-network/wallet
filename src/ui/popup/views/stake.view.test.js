@@ -651,7 +651,7 @@ describe("staking reviews", () => {
     button("Review unstake").click();
     await settle();
     expect(body.querySelectorAll(".row > .group .kv").map(visibleText)).toEqual(["Toalice.dusk · Public"]);
-    expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)[0]).toBe("The DUSK comes back in the same transaction. No fee, no waiting.");
+    expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)[0]).toBe("The DUSK comes back in the same transaction. No Sozu fee, no waiting.");
   });
 });
 
@@ -1087,7 +1087,7 @@ describe("liquid staking", () => {
     state.route = "stake";
     state.sozu.action = "withdraw";
     app.draw();
-    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("The DUSK comes back in the same transaction. No fee, no waiting.");
+    expect(visibleText(body.querySelector(".sozu-terms"))).toBe("The DUSK comes back in the same transaction. No Sozu fee, no waiting.");
     typeInto(field("Unstake amount"), "13");
     expect(body.querySelector(".amount-field__error").textContent).toBe("That's more than you have staked with Sozu.");
     button("Max").click();

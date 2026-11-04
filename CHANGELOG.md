@@ -193,6 +193,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Review goes back to the form when the wallet, profile or network changes.
+- A public send's Review says the recipient's account shows too.
+- Hide balances also hides the fee on a transaction's page.
+- Sozu's unstake says no Sozu fee, as a network fee still applies.
 - A mistyped account is refused at the To field and in Contacts. A memo over the network's limit says so under the field.
 - Typing a contact's name offers that contact before any `.dusk` name.
 - A transaction the wallet can't build says nothing was sent, in plain words.

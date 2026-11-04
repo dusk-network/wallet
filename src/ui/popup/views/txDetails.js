@@ -9,7 +9,7 @@ import { h } from "../../lib/dom.js";
 import { contractIdText, shortAddress, shortEvmHash, siteName } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
-import { balancesHidden } from "../../components/Balance.js";
+import { balance, balancesHidden } from "../../components/Balance.js";
 import { contractValueEl, copyContractButton } from "../../components/ContractValue.js";
 import { copyButton as copyWordsButton } from "../../components/CopyButton.js";
 import { profileNameEl } from "../../components/ProfileName.js";
@@ -66,18 +66,21 @@ function profileValue(ov, tx, rail) {
   return h("span", {}, [profileNameEl(ov, { index: tx?.profileIndex }), h("span", { class: "kv-muted", text: ` · ${rail}` })]);
 }
 
-function feeRow(tx, desc) {
+// A fee, hidden as amounts are with Hide balances.
+const feeValue = (text, hidden) => h("span", {}, [balance(hidden, text), " DUSK"]);
+
+function feeRow(tx, desc, hidden) {
   if (tx?.dropped) return kv("Network fee", "None charged");
-  if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Network fee", `${formatFee(tx.fee)} DUSK`);
+  if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Network fee", feeValue(formatFee(tx.fee), hidden));
   const limit = tx?.gasLimit ?? 0n;
   const price = tx?.gasPrice ?? 0n;
   if (desc.tone === "pending" && tx?.source === "sent" && limit > 0n && price > 0n) {
-    return kv("Network fee", `Up to ${formatFee(limit * price, { max: true })} DUSK`);
+    return kv("Network fee", h("span", {}, ["Up to ", feeValue(formatFee(limit * price, { max: true }), hidden)]));
   }
   return null;
 }
 
-function technicalRows(tx, ov, nodeUrl, showToast) {
+function technicalRows(tx, ov, nodeUrl, showToast, hidden) {
   const num = (v) => (v != null && /^\d+$/.test(String(v)) ? groupThousands(String(v)) : null);
   const at = (label, ms) => (Number(ms) > 0 ? kv(label, dateText(Number(ms))) : null);
   const used = num(tx?.gasSpent);
@@ -92,7 +95,7 @@ function technicalRows(tx, ov, nodeUrl, showToast) {
     used || limit ? kv("Gas used", used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
     // The fee to the last LUX: the summary rounds it to 4 decimals.
-    (tx?.fee ?? 0n) > 0n ? kv("Fee paid", `${formatDuskExact(tx.fee)} DUSK`) : null,
+    (tx?.fee ?? 0n) > 0n ? kv("Fee paid", feeValue(formatDuskExact(tx.fee), hidden)) : null,
     tx?.source !== "sent" && ["executed", "failed"].includes(tx?.status) ? kv("Finality", "Final") : null,
     tx?.kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", contractValue(String(tx.contractId), nodeUrl || ov?.nodeUrl, showToast)) : null,
     tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,
@@ -277,7 +280,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     evmRow,
     // A memo that is the recipient on another chain shows as that.
     tx?.memo && String(tx.memo).trim() !== desc.recipient ? kv("Memo", String(tx.memo), { className: "kv--wrap" }) : null,
-    feeRow(tx, desc),
+    feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,
     kv("Transaction ID", [idButton, copyId]),
@@ -287,7 +290,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
   // Technical details stay open across redraws (a sync can redraw this view).
   const tech = h("details", { class: "advanced tx-tech", open: Boolean(state?.txTechOpen) }, [
     h("summary", { text: "Technical details" }),
-    h("div", { class: "group group--inset" }, technicalRows(tx, ov, nodeUrl, showToast)),
+    h("div", { class: "group group--inset" }, technicalRows(tx, ov, nodeUrl, showToast, hidden)),
   ]);
   tech.addEventListener("toggle", () => {
     if (state) state.txTechOpen = tech.open;
