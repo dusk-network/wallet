@@ -103,6 +103,58 @@ test("a payment shows its amount, recipient, fee and both buttons without scroll
   expect(await page.evaluate(() => window.decisions.map((d) => d.decision))).toEqual(["reject"]);
 });
 
+test("what keeps Approve off is in view with it, under a long request", async ({ page }) => {
+  const highFee = { ...pay, gas: { limit: "10000000", price: "50" }, feeFromSite: { limit: true, price: true } };
+  await open(page, pendingFor("send_tx", highFee, { payBalance: "1000" }));
+  const reason = page.locator(".pay-guard");
+  await expect(reason).toHaveText("That's 1.5 DUSK more than your public balance, with the network fee.");
+  await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeDisabled();
+  expect(await inView(page, reason)).toBe(true);
+  expect(await inView(page, page.getByRole("button", { name: "Reject", exact: true }))).toBe(true);
+});
+
+test("a Review keeps Confirm, and what stops it, in view at the popup's size as the page scrolls under it", async ({ page }) => {
+  const popupShell = readFileSync(new URL("../../public/popup.html", import.meta.url), "utf8")
+    .replace('href="ui.css"', 'href="/ui.css"')
+    .replace(/src="icons\//g, 'src="/icons/')
+    .replace(/<script type="module" src="popup.js"><\/script>/, "");
+  await page.setViewportSize({ width: 380, height: 600 });
+  await page.route("**/review-window", (route) => route.fulfill({ contentType: "text/html", body: popupShell }));
+  await page.goto("/review-window");
+  await page.evaluate(async ({ from, to }) => {
+    const { sendConfirmView } = await import("/src/ui/popup/views/send.js");
+    const ov = {
+      isUnlocked: true,
+      nodeUrl: "https://testnet.nodes.dusk.network",
+      accounts: [from],
+      addresses: ["addr0"],
+      selectedAccountIndex: 0,
+      balance: { value: "1000000000" },
+      shieldedBalance: { value: "0", spendable: "0" },
+    };
+    const state = {
+      route: "confirm",
+      addressBook: { loaded: true, items: [] },
+      draft: { to, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "Order 1042 ".repeat(12) },
+    };
+    const actions = { send: async () => ({}), render: async () => {}, showToast: () => {}, review: {} };
+    document.getElementById("app").replaceChildren(...sendConfirmView(ov, { state, actions }));
+  }, { from: ALICE, to: SHOP });
+
+  const confirm = page.getByRole("button", { name: "Confirm", exact: true });
+  const reason = page.locator(".pay-guard");
+  await expect(reason).toHaveText("That's 0.0025 DUSK more than your public balance, with the network fee.");
+  await expect(confirm).toBeDisabled();
+  const scroller = page.locator(".panel-content");
+  // It does go on under the fold.
+  expect(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  for (const y of ["0", "100", "el.scrollHeight"]) {
+    await scroller.evaluate((el, y) => el.scrollTo(0, y === "el.scrollHeight" ? el.scrollHeight : Number(y)), y);
+    expect(await inView(page, confirm), `Confirm at ${y}`).toBe(true);
+    expect(await inView(page, reason), `the reason at ${y}`).toBe(true);
+  }
+});
+
 test("a DuskEVM deposit shows what it does on top, and its bytes' hash under Details", async ({ page }) => {
   const deposit = fixtures.calls.find((c) => c.name === "deposit-shoot");
   await open(
