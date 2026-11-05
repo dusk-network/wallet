@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
+
+### Changed
+
+- Made a request link the https form, which opens the web wallet's Send filled in; Send also reads it pasted or scanned.
+
 ### Fixed
 
 - Named Mainnet, Testnet and Devnet only at their exact addresses: any other node is Custom with its host, whatever it says of itself.

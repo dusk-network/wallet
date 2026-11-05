@@ -22,7 +22,6 @@ export default defineConfig({
         "src/shared/bytes.js",
         "src/shared/chain.js",
         "src/shared/constants.js",
-        "src/shared/duskUri.js",
         "src/shared/explorer.js",
         "src/shared/network.js",
         "src/shared/networkPresets.js",

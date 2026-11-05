@@ -4,10 +4,12 @@ import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
+import { parsePaymentLink } from "@dusk-network/app-core/payment-links";
 import { TX_KIND } from "../shared/constants.js";
 import { isAccount } from "@dusk-network/networks/account";
 import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
+import { noteChainId } from "../shared/nodeNetwork.js";
 import { shortAddress } from "./lib/strings.js";
 import { fakeEvent, installFakeDom, isShown, pastClickGuard, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
@@ -1362,7 +1364,7 @@ describe("a slow name lookup on Review", () => {
 describe("a request for another network", () => {
   it("says so under the recipient, and Review doesn't clear it", async () => {
     // A Mainnet request link pasted while the wallet is on Testnet.
-    parseDuskQrPayload.mockReturnValueOnce({ kind: "public", to: ALICE.account, amountDusk: "1", chainId: "dusk:1" });
+    parseDuskQrPayload.mockReturnValueOnce({ form: "dusk", kind: "public", to: ALICE.account, amountDusk: "1", chainId: "dusk:1" });
     const state = newState();
     const form = mount(state);
     form.to.value = "dusk:mainnet-request";
@@ -1390,5 +1392,98 @@ describe("a request for another network", () => {
     expect(state.draft.requestChainId).toBeUndefined();
     mount(state);
     expect(note()).toBeUndefined();
+  });
+
+  it("goes by the chain a custom node signs for, and calls it by its node", async () => {
+    const custom = { ...overview(), nodeUrl: "https://node.example", chainId: 2 };
+    noteChainId(custom.nodeUrl, custom.chainId);
+    const note = () => dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
+    const state = newState();
+    state.draft = { to: ALICE.account, requestChainId: "dusk:2" };
+    mount(state, custom);
+    expect(note()).toBeUndefined();
+    state.draft = { to: ALICE.account, requestChainId: "dusk:1" };
+    mount(state, custom);
+    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Custom · node.example.");
+  });
+});
+
+describe("a request link", () => {
+  const httpsLink = (query) => `https://apps.testnet.dusk.network/wallet/dashboard/send?${query}`;
+
+  beforeEach(() => parseDuskQrPayload.mockImplementation(parsePaymentLink));
+  afterEach(() => parseDuskQrPayload.mockImplementation(() => null));
+
+  const paste = (form, text) => form.to.dispatchEvent(fakeEvent("paste", { clipboardData: { getData: () => text } }));
+
+  it("fills Send in when it's pasted, the https link as the dusk: one, in the browser's separators", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "nl-NL" });
+    const state = newState();
+    const form = mount(state);
+    paste(form, ` ${httpsLink(`to=${ALICE.account}&amount=0.15&memo=Factura+33&network=testnet`)} `);
+    await settle();
+    expect(state.draft).toMatchObject({ to: ALICE.account, amountDusk: "0,15", memo: "Factura 33", requestChainId: "dusk:2" });
+    expect(form.to.value).toBe(ALICE.account);
+    expect(form.amount.value).toBe("0,15");
+    expect(form.actions.showToast).toHaveBeenCalledWith("Request decoded", 1800);
+
+    const again = mount(newState());
+    paste(again, `dusk:public-${ALICE.account}@dusk:2?amount=1.5&memo=Rent`);
+    await settle();
+    expect(again.to.value).toBe(ALICE.account);
+    expect(again.amount.value).toBe("1,5");
+  });
+
+  it("says when it's for another network, and goes as far as Review only with what Send takes", async () => {
+    const state = newState();
+    const form = mount(state);
+    paste(form, `https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=1&network=mainnet`);
+    await settle();
+    const note = dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
+    expect(note?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+
+    // An amount in the link that isn't one is said under the field.
+    const typo = mount(newState());
+    paste(typo, httpsLink(`to=${ALICE.account}&amount=lots`));
+    await settle();
+    expect(typo.amountError()).toBe("Enter an amount such as 1 or 0.5.");
+    expect(typo.review.disabled).toBe(true);
+  });
+
+  it("is no request when it goes anywhere else, or names no recipient", async () => {
+    const form = mount(newState());
+    form.to.value = `https://phish.example/wallet/dashboard/send?to=${ALICE.account}&amount=1`;
+    form.to.dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(form.to.value).toContain("phish.example");
+    expect(form.amount.value).toBe("");
+    form.review.click();
+    await settle();
+    expect(dom.document.body.querySelector(".err").textContent).toBe("Not a valid address. Check it and try again.");
+
+    const empty = mount(newState());
+    empty.to.value = httpsLink("amount=1");
+    empty.to.dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(empty.amount.value).toBe("");
+  });
+
+  it("fills in the page it opened, a tab of its own, as the form any request fills in", async () => {
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=2.5&memo=Rent&network=testnet`))}` });
+    vi.resetModules();
+    const { state } = await import("./popup/state.js");
+    expect(state.route).toBe("send");
+    const form = mount(state);
+    expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "2.5"]);
+    expect(state.draft.memo).toBe("Rent");
+    expect(state.draft.requestChainId).toBe("dusk:2");
+
+    // No link, or a page opened with something that isn't one: an empty form.
+    vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send" });
+    vi.resetModules();
+    expect((await import("./popup/state.js")).state.draft).toBeNull();
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent("https://phish.example/x")}` });
+    vi.resetModules();
+    expect((await import("./popup/state.js")).state.draft).toBeNull();
   });
 });

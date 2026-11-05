@@ -1,5 +1,5 @@
 import { h } from "../lib/dom.js";
-import { parseDuskUri } from "../../shared/duskUri.js";
+import { parsePaymentLink } from "@dusk-network/app-core/payment-links";
 import { iconSvg } from "./ActionIcon.js";
 
 const DECODER_FAILED = "The QR scanner couldn't load. Close the wallet and open it again.";
@@ -15,15 +15,11 @@ function clamp(n, a, b) {
 }
 
 /**
- * Parse a scanned QR payload.
- *
- * Supported inputs:
- * - Raw base58 recipient string
- * - Canonical Dusk URI: `dusk:public-<recipient>@<chain>?amount=...&memo=...`
- * - Canonical Dusk URI: `dusk:shielded-<recipient>@<chain>?amount=...&memo=...`
+ * Read a request link or a recipient, as a QR code holds or a person pastes it:
+ * a `dusk:` link, an https link to the web wallet's Send, or a recipient as it is.
  */
 export function parseDuskQrPayload(input) {
-  return parseDuskUri(input);
+  return parsePaymentLink(input);
 }
 
 async function decodeFromImageEl(img, jsQR) {

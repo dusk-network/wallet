@@ -7,30 +7,11 @@ import { duskNameEl } from "../../components/DuskName.js";
 import { shortAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
 import { segmented } from "../../components/Segmented.js";
-import { amountForInput, amountProblem, formatLuxToDusk, parseDuskToLux, safeBigInt } from "../../../shared/amount.js";
+import { formatDuskPlain } from "@dusk-network/app-core/amounts";
+import { makePaymentLink } from "@dusk-network/app-core/payment-links";
+import { amountForInput } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
-import { buildDuskUri, MEMO_TOO_LONG_TEXT, memoTooLong } from "../../../shared/duskUri.js";
-
-/**
- * The amount a request asks for, as Send will read it: plain, "" with none, and
- * what's wrong with it when Send would refuse it.
- * @param {string} typed
- * @returns {{ plain: string, error: string }}
- */
-function requestAmount(typed) {
-  const raw = String(typed ?? "").trim();
-  if (!raw) return { plain: "", error: "" };
-  // A separator typed last is still being typed: "1," on the way to "1,5".
-  const amount = /[.,]$/.test(raw) ? raw.slice(0, -1) : raw;
-  let lux;
-  try {
-    lux = safeBigInt(parseDuskToLux(amount), 0n);
-  } catch {
-    return { plain: "", error: amountProblem(amount) };
-  }
-  return lux > 0n ? { plain: formatLuxToDusk(lux), error: "" } : { plain: "", error: "Enter an amount greater than 0." };
-}
 
 function isTauriMobileLike() {
   try {
@@ -59,7 +40,8 @@ export function receiveView(ov, { state, actions } = {}) {
   const account = accounts[idx] ?? accounts[0] ?? "";
   const address = addresses[idx] ?? addresses[0] ?? "";
 
-  const chainId = chainIdFromNodeUrl(ov?.nodeUrl ?? "");
+  // The network a request is for: the chain this node signs for, or for one that hasn't said, its own ID.
+  const chainId = Number.isInteger(ov?.chainId) ? ov.chainId : chainIdFromNodeUrl(ov?.nodeUrl ?? "");
 
   // Persist request fields while the user navigates around.
   const r = (state.receive ??= {
@@ -149,10 +131,12 @@ export function receiveView(ov, { state, actions } = {}) {
   });
   const amountErr = h("div", { class: "field-error receive-amount-error", role: "alert", hidden: true });
   const memoErr = h("div", { class: "field-error memo-error", role: "alert", hidden: true });
+  const linkErr = h("div", { class: "field-error", role: "alert", hidden: true });
+  const linkNote = h("div", { class: "muted" });
 
   // The request link's copy, which Enter in the memo presses; on once the QR holds a request.
   const copyRequestBtn = copyButton({
-    value: () => (wantRequest ? curUri : ""),
+    value: () => (wantRequest ? curLink : ""),
     label: "Copy request link",
     text: "Copy request link",
     className: "btn-outline",
@@ -175,10 +159,8 @@ export function receiveView(ov, { state, actions } = {}) {
         fieldLabel(memoInput, "Memo"),
         memoInput,
         memoErr,
-        h("div", {
-          class: "muted",
-          text: "The QR updates to a dusk: request link.",
-        }),
+        linkErr,
+        linkNote,
         copyRequestBtn,
       ]),
     ]
@@ -196,6 +178,9 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // --- Actions ---------------------------------------------------------
   const curRecipient = recipient || "";
+  // The link a payer gets, which opens the web wallet's Send, and the one the QR
+  // holds for a wallet to read: the same request.
+  let curLink = "";
   let curUri = "";
   let curQrValue = recipient || "";
   let wantRequest = false;
@@ -263,7 +248,7 @@ export function receiveView(ov, { state, actions } = {}) {
         class: "btn-outline",
         text: "Share",
         onclick: async () => {
-          const shareValue = wantRequest && curUri ? curUri : curRecipient;
+          const shareValue = wantRequest && curLink ? curLink : curRecipient;
           if (!shareValue) return;
 
           // Prefer native share sheet when available.
@@ -322,27 +307,23 @@ export function receiveView(ov, { state, actions } = {}) {
     wantRequest = false;
 
     // The checks Send has, so the link is one the payer can use. Said only with the panel open.
-    const { plain: amountForUri, error } = requestAmount(amountInput.value);
+    const made = makePaymentLink({ to: curRecipient, amount: amountInput.value, memo: memoInput.value, network: chainId });
+    const valid = made.ok;
+    sayUnder(amountErr, requestDetails.open ? made.problems.amount ?? "" : "");
+    sayUnder(memoErr, requestDetails.open ? made.problems.memo ?? "" : "");
+    sayUnder(linkErr, requestDetails.open && curRecipient ? made.problems.to ?? "" : "");
+
     const memoVal = String(memoInput.value ?? "").trim();
-    const memoOver = memoTooLong(memoVal);
-    const valid = !error && !memoOver;
-    sayUnder(amountErr, requestDetails.open ? error : "");
-    sayUnder(memoErr, requestDetails.open && memoOver ? MEMO_TOO_LONG_TEXT : "");
+    const hasReq = !!memoVal || made.lux !== null;
+    const asked = curLink;
 
-    const hasReq = !!memoVal || !!amountForUri;
-    const asked = curUri;
-
-    curUri = valid
-      ? buildDuskUri({
-          kind: tab,
-          recipient: curRecipient,
-          chainId,
-          amountDusk: amountForUri || "",
-          memo: memoVal || "",
-        })
-      : "";
+    curUri = made.dusk;
+    // Where the network has no web wallet, the one link there is.
+    curLink = made.https ?? made.dusk;
+    linkNote.textContent = made.https ? "The QR holds what you ask for. The link opens the web wallet's Send, filled in." : "The QR holds what you ask for.";
+    linkNote.hidden = !made.ok;
     // Copied was about the link before.
-    if (curUri !== asked) resetCopied(copyRequestBtn);
+    if (curLink !== asked) resetCopied(copyRequestBtn);
 
     wantRequest = !!(requestDetails.open && valid && hasReq && curUri);
 
@@ -354,7 +335,7 @@ export function receiveView(ov, { state, actions } = {}) {
     // The fields copy the name and the address; the request link is copied here.
     copyRequestBtn.disabled = !wantRequest;
     if (wantRequest) {
-      summaryMeta.textContent = amountForUri ? `${amountForInput(amountForUri)} DUSK` : "With memo";
+      summaryMeta.textContent = made.lux !== null ? `${amountForInput(formatDuskPlain(made.lux))} DUSK` : "With memo";
     } else {
       summaryMeta.textContent = hasReq && valid ? "Configured" : "";
     }

@@ -42,13 +42,16 @@ function typeLabel(t) {
   return "Unknown";
 }
 
+// A request link, `dusk:` or https: the recipient it asks to be paid.
+const requestRecipient = (text) => {
+  const req = parseDuskQrPayload(text);
+  return req && req.form !== "raw" ? String(req.to).trim() : "";
+};
+
 function normalizeRecipient(raw) {
   const s = String(raw ?? "").trim();
   if (!s) return "";
-  if (!/^dusk:/i.test(s)) return joinedAddress(s);
-  const req = parseDuskQrPayload(s);
-  if (req?.to) return String(req.to).trim();
-  return s;
+  return requestRecipient(s) || (/^dusk:/i.test(s) ? s : joinedAddress(s));
 }
 
 const lower = (v) => String(v ?? "").trim().toLowerCase();
@@ -572,7 +575,7 @@ export function addressBookView(ov, { state, actions } = {}) {
             addrInput.focus();
             return;
           }
-          if (/^dusk:/i.test(String(addrInput.value || "").trim())) {
+          if (requestRecipient(String(addrInput.value || "").trim())) {
             actions?.showToast?.("Saved the recipient from the request link", 1800);
           }
           const saved = await upsertAddressBookEntry({

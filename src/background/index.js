@@ -29,6 +29,7 @@ import {
   handleEngineReady,
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
+import { offersRequestLink, openRequestLink } from "./requestLinks.js";
 import { bindPendingWallet, cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
 import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNames.js";
 import {
@@ -670,6 +671,17 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const result = await handleRpc(origin, message.request);
         await updateDappActivity(message.request, activityContext);
         sendResponse({ id, result });
+        return;
+      }
+
+      // The web wallet's Send, opened from a request link: whether it offers
+      // this extension's Send, and its opening.
+      if (message?.type === "DUSK_REQUEST_LINK_OFFER") {
+        sendResponse({ offer: await offersRequestLink(message, sender) });
+        return;
+      }
+      if (message?.type === "DUSK_REQUEST_LINK_OPEN") {
+        sendResponse({ ok: await openRequestLink(message, sender) });
         return;
       }
 

@@ -1,4 +1,5 @@
 import { isOptionsPage } from "./env.js";
+import { requestDraftOf } from "../lib/requestLink.js";
 
 export const ONBOARD_ROUTES = new Set([
   "onboard_welcome",
@@ -103,7 +104,14 @@ export const state = {
   // Hide balances as chosen in this popup, once chosen: an overview read
   // before the choice was saved doesn't undo it.
   hideBalances: null,
-  draft: null,
+  // Send, filled in by a request link the page was opened with, or nothing yet.
+  draft: (() => {
+    try {
+      return requestDraftOf(location.search);
+    } catch {
+      return null;
+    }
+  })(),
   // Watched assets cache (tokens + NFTs)
   assets: null,
   // Selected asset for detail views

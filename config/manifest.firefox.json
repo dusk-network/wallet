@@ -53,6 +53,17 @@
         "contentScript.js"
       ],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://apps.dusk.network/wallet/*",
+        "https://apps.testnet.dusk.network/wallet/*",
+        "https://apps.devnet.dusk.network/wallet/*"
+      ],
+      "js": [
+        "requestLinkOffer.js"
+      ],
+      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
