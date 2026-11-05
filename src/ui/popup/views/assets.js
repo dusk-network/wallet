@@ -1,6 +1,6 @@
-import { amountForInput, UI_DISPLAY_DECIMALS, normalizeDuskInput, safeBigInt } from "../../../shared/amount.js";
+import { amountForInput, UI_DISPLAY_DECIMALS, groupThousands, normalizeDuskInput, safeBigInt, unclearAmountText } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
-import { reviewGas } from "../../components/NetworkGas.js";
+import { payGuard, reviewGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
 import { waiting } from "../../components/Waiting.js";
 import { guarded } from "../../lib/clickGuard.js";
@@ -8,10 +8,10 @@ import { contractIdText, shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyContractButton } from "../../components/ContractValue.js";
-import { balance, balancesHidden } from "../../components/Balance.js";
+import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { fieldLabel, integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
+import { fieldLabel, integerInput, reviewActions, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
 import { sendFromReview } from "./sent.js";
 
@@ -86,12 +86,14 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
     frac = frac.slice(0, maxFrac).replace(/0+$/, "");
   }
 
-  return frac ? `${intPart}.${frac}` : intPart;
+  return groupThousands(frac ? `${intPart}.${frac}` : intPart);
 }
 
 function parseTokenAmountHuman(raw, decimals) {
   const s = normalizeDuskInput(raw);
   if (!s) throw new Error("Enter an amount.");
+  const unclear = unclearAmountText(raw);
+  if (unclear) throw new Error(unclear);
   if (s.startsWith("-")) throw new Error("Enter an amount of 0 or more.");
 
   let d = Number(decimals ?? 0);
@@ -643,6 +645,11 @@ export function assetTokenView(ov, { state, actions } = {}) {
       const to = parseDrcAccount(form.to, { name: "recipient" });
       const valueUnits = parseTokenAmountHuman(form.amount, dec);
       if (safeBigInt(valueUnits, 0n) <= 0n) throw new Error("Enter an amount greater than 0.");
+      // More than it holds, by how much, once its balance is read.
+      if (balUnits != null && safeBigInt(valueUnits, 0n) > safeBigInt(balUnits, 0n)) {
+        const short = formatTokenUnits(safeBigInt(valueUnits, 0n) - safeBigInt(balUnits, 0n), dec, { maxFrac: dec });
+        throw new Error(`That's ${hidden ? HIDDEN_BALANCE : short} ${sym} more than you have.`);
+      }
 
       const enc = await actions?.send?.({
         type: "DUSK_UI_DRC20_ENCODE_INPUT",
@@ -884,8 +891,17 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   // Back returns to the token, so Review has no Cancel.
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
+  // The public balance pays its fee.
+  const pay = payGuard({
+    editor: gasEditor,
+    availableLux: ov?.balance?.value != null ? safeBigInt(ov.balance.value, 0n) : null,
+    hidden: balancesHidden(ov),
+    button: confirmBtn,
+  });
+
   // It ignores a click for a moment once Review is up (clickGuard.js).
   confirmBtn.addEventListener("click", guarded(async () => {
+    if (!pay.covered()) return;
     const gas = readGas();
     if (gas === false) return;
     confirmBtn.disabled = true;
@@ -922,9 +938,9 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
         if (state.assetTxDraft === d) state.assetTxDraft = null;
       },
     });
-    confirmBtn.disabled = false;
+    pay.draw();
   }));
-  submitOnGasEnter(gasEditor, confirmBtn);
+  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => pay.covered() });
 
   const counterpartyAddr = String(op === "approve" ? d?.asset?.spender ?? "" : d?.asset?.to ?? "");
   return [
@@ -948,8 +964,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       warn,
       gasEditor,
-      confirmError,
-      h("div", { class: "btnrow" }, [confirmBtn]),
+      reviewActions(confirmBtn, confirmError, pay.el),
     ].filter(Boolean)),
   ];
 }

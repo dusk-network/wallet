@@ -128,6 +128,17 @@ export function urlInput(attrs = {}) {
 const offForGas = new WeakSet();
 
 /**
+ * The end of a Review, which stays in view however long the Review is (ui.css):
+ * what stops it, then Confirm, so an off Confirm never hides why.
+ * @param {HTMLButtonElement} button
+ * @param {...(HTMLElement|null)} reasons
+ * @returns {HTMLElement}
+ */
+export function reviewActions(button, ...reasons) {
+  return h("div", { class: "review-actions" }, [...reasons.filter(Boolean), h("div", { class: "btnrow" }, [button])]);
+}
+
+/**
  * Ties a page's submit button to its gas editor: Enter in the gas price
  * presses it, and gas that won't do (a limit under the minimum, a price of 0)
  * keeps it off while the editor says why. Once the gas will do, the button

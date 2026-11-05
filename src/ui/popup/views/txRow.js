@@ -7,7 +7,7 @@
 // DUSK paid", and its amount shows muted, without a sign: nothing left.
 // Hide balances hides that fee too.
 
-import { formatDusk, formatFee, safeBigInt } from "../../../shared/amount.js";
+import { formatDusk, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { isEvmAddress } from "../../../shared/bridgeCalls.js";
 import { ARRIVAL_WINDOW_MS, depositTime, keptArrivals, payoutOf } from "../../../shared/bridgeArrival.js";
@@ -18,6 +18,7 @@ import { shortAddress, shortEvmAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton as copyIconButton } from "../../components/CopyButton.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
+import { ownProfileName } from "../../components/ProfileName.js";
 import { MONTHS, clockText, dateText } from "../../lib/time.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
 
@@ -240,7 +241,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
         lead: p ? "Sent to" : "",
         ...(p ?? { name: `Sent ${sym}`, generic: true }),
         word: "Sent",
-        amount: units !== "0" ? { sign: MINUS, value: units, unit: sym } : null,
+        amount: units !== "0" ? { sign: MINUS, value: groupThousands(units), plain: units, unit: sym } : null,
       };
     } else if (op === "approve") {
       // Whom it lets spend the token, as a counterparty; an allowance of 0 takes it back.
@@ -253,7 +254,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
         amount: asset.isMax
           ? { sign: "", value: "Unlimited", unit: sym, text: true }
           : units !== "0" || revoke
-          ? { sign: "", value: units, unit: sym }
+          ? { sign: "", value: groupThousands(units), plain: units, unit: sym }
           : null,
       };
     } else {
@@ -429,10 +430,11 @@ export function copyButton(address, { label = "Copy address", showToast, classNa
 }
 
 /**
- * Saved contacts' names by address, loading the address book the first time.
+ * Saved contacts' names by address, loading the address book the first time,
+ * and this wallet's own profiles' names: your other profile is no stranger.
  * @returns {(address: string) => string}
  */
-export function contactNames(state, actions) {
+export function contactNames(state, actions, ov) {
   const byAddress = new Map();
   const ab = state?.addressBook;
   if (ab?.loaded && Array.isArray(ab.items)) {
@@ -452,7 +454,7 @@ export function contactNames(state, actions) {
         state.addressBook = { ...(state.addressBook || {}), loading: false };
       });
   }
-  return (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? "";
+  return (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? ownProfileName(ov, address);
 }
 
 function pulseClass(state, hash) {

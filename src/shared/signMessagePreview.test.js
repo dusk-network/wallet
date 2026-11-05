@@ -61,6 +61,16 @@ describe("signMessage approval preview", () => {
     expect(preview).not.toHaveProperty("text");
   });
 
+  it("neutralizes what changes how text reads, and says so: it shows what the bytes say", () => {
+    const [rlo, pop] = [0x202e, 0x202c].map((c) => String.fromCodePoint(c));
+    const preview = describeSignMessagePreview(enc.encode(`I agree to pay ${rlo}0001${pop} DUSK`));
+    expect(preview).toMatchObject({ kind: "text", text: "I agree to pay �0001� DUSK", needsReview: true, truncated: false });
+    expect(describeSignMessagePreview(enc.encode("Sign in\nNonce: 12"))).toMatchObject({ text: "Sign in\nNonce: 12", needsReview: false });
+    // Cut as ever, by the characters written, flagged all the same.
+    const long = describeSignMessagePreview(enc.encode(`${rlo}${"a".repeat(SIGN_MESSAGE_PREVIEW_MAX_CHARS + 5)}`));
+    expect([long.truncated, long.needsReview, Array.from(long.text).length]).toEqual([true, true, SIGN_MESSAGE_PREVIEW_MAX_CHARS]);
+  });
+
   it("allows normal whitespace controls in readable text", () => {
     const preview = describeSignMessagePreview(enc.encode("line 1\nline 2\tok"));
 

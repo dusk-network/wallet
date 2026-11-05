@@ -6,7 +6,10 @@ import {
   groupDigits,
   normalizeAmount,
   parseDusk,
+  unclearAmount,
 } from "@dusk-network/app-core/amounts";
+
+export { amountLocale };
 
 // Shared amount helpers.
 //
@@ -150,6 +153,31 @@ export function maxAmountLux(availableLux, keepLux = 0n) {
  * @returns {string}
  */
 export const normalizeDuskInput = (text) => normalizeAmount(text);
+
+/**
+ * What to write instead of an amount that could be read two ways, or "".
+ * @param {string} text - as typed
+ * @returns {string}
+ */
+export function unclearAmountText(text) {
+  const either = unclearAmount(text);
+  return either ? `That could be two amounts: write ${either.grouped} or ${either.decimal}.` : "";
+}
+
+/**
+ * What's wrong with an amount of DUSK that can't be read, for the line under
+ * its field: that it could be two amounts, that it has too many decimals, else
+ * what an amount looks like.
+ * @param {string} text - as typed
+ * @param {{ whole?: string, decimal?: string }} [example] - the example's plain amounts
+ * @returns {string}
+ */
+export function amountProblem(text, { whole = "1", decimal = "0.5" } = {}) {
+  const unclear = unclearAmountText(text);
+  if (unclear) return unclear;
+  if (/^\d*\.\d+$/.test(normalizeDuskInput(text))) return `DUSK has ${LUX_DECIMALS} decimals at most.`;
+  return `Enter an amount such as ${whole} or ${amountForInput(decimal)}.`;
+}
 
 /**
  * Parse a user-entered DUSK amount into a Lux (atomic units) string. It's

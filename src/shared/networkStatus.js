@@ -14,8 +14,9 @@
  * - Don't block saving settings on validation failures
  */
 
-import { chainIdOfInfo, listedChainId } from "./nodeNetwork.js";
-import { rememberNodeChain } from "./settings.js";
+import { RUSK_HEADERS, chainChangeWords, chainIdOfInfo, chainRefusal, listedChainId, pinnedChainOf } from "./nodeNetwork.js";
+import { ERROR_CODES, rpcError } from "./errors.js";
+import { getSettings, rememberNodeChain } from "./settings.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 
 // ============================================================================
@@ -35,6 +36,8 @@ import { storage, STORAGE_KEYS } from "./storage.js";
  * @property {string|null} nodeError - Last error message for node
  * @property {string|null} proverError - Last error message for prover
  * @property {string|null} archiverError - Last error message for archiver
+ * @property {string|null} nodeUrl - The node the last check asked
+ * @property {number|null} nodeChainId - The chain ID it said then, if it said
  */
 
 /**
@@ -69,14 +72,6 @@ export async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
 // ============================================================================
 // Endpoint Probes
 // ============================================================================
-
-// What Rusk wants on its HTTP API, as the wallet's engine (w3sper) asks it:
-// a node that checks the version answers 400 to a request without one.
-const RUSK_HEADERS = Object.freeze({
-  "Content-Type": "application/octet-stream",
-  Accept: "application/json",
-  "Rusk-Version": "1.0.0-rc.0",
-});
 
 /**
  * Probe a node endpoint for reachability, and read the chain ID that names
@@ -131,6 +126,27 @@ export async function readChainId(nodeUrl, { attempts = 2, waitMs = 500, timeout
     if (Number.isInteger(chainId)) return chainId;
   }
   return null;
+}
+
+/**
+ * The chain ID to keep with a node as Settings or the network menu choose it:
+ * the one it was added with, or for a new node what it says now. A node that
+ * says something else than it was added with is refused until it's saved again
+ * knowingly (`accept`, the chain ID the user agreed to, and no other); one that
+ * doesn't say keeps the one it has.
+ * @param {string} nodeUrl
+ * @param {{ accept?: number | null }} [opts]
+ * @returns {Promise<number | null>}
+ */
+export async function chainIdForChoice(nodeUrl, { accept = null } = {}) {
+  const listed = listedChainId(nodeUrl);
+  if (listed !== null) return listed;
+  const pinned = pinnedChainOf(await getSettings(), nodeUrl);
+  const answered = await readChainId(nodeUrl);
+  if (pinned === null || answered === null || answered === pinned) return pinned ?? answered;
+  if (accept === answered) return answered;
+  const { notice, question } = chainChangeWords(nodeUrl, pinned, answered);
+  throw rpcError(ERROR_CODES.UNAUTHORIZED, notice, { chainChanged: { pinned, answered, question } });
 }
 
 /**
@@ -269,6 +285,8 @@ const DEFAULT_STATUS = {
   nodeError: null,
   proverError: null,
   archiverError: null,
+  nodeUrl: null,
+  nodeChainId: null,
 };
 
 /**
@@ -357,7 +375,7 @@ async function runEndpointChecks({ nodeUrl, proverUrl, archiverUrl }) {
     safeProbe(probeArchiver, archiverUrl, "Archiver"),
   ]);
 
-  // A node whose chain ID wasn't read when it was chosen gets it here.
+  // A node whose chain ID wasn't read when it was chosen gets it here, once.
   if (Number.isInteger(nodeResult.chainId)) {
     await rememberNodeChain(nodeUrl, nodeResult.chainId).catch(() => {});
   }
@@ -371,7 +389,23 @@ async function runEndpointChecks({ nodeUrl, proverUrl, archiverUrl }) {
     proverError: proverResult.error ?? null,
     archiverError: archiverResult.error ?? null,
     lastChecked: Date.now(),
+    // What it said, which the screens compare with the chain it's fixed to.
+    nodeUrl: nodeUrl ?? null,
+    nodeChainId: Number.isInteger(nodeResult.chainId) ? nodeResult.chainId : null,
   });
+}
+
+/**
+ * What the last check heard from a node, when it contradicts the chain it's
+ * fixed to: why nothing is signed on it, in plain words, else "".
+ * @param {NetworkStatusState | null | undefined} status
+ * @param {string} nodeUrl
+ * @param {number | null} pinned
+ * @returns {string}
+ */
+export function statusChainRefusal(status, nodeUrl, pinned) {
+  if (status?.nodeUrl !== nodeUrl || !Number.isInteger(status?.nodeChainId)) return "";
+  return chainRefusal(nodeUrl, pinned, status.nodeChainId, { required: false, ahead: true });
 }
 
 /**

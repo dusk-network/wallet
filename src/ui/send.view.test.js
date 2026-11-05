@@ -9,7 +9,7 @@ import { isAccount } from "@dusk-network/networks/account";
 import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
-import { fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { fakeEvent, installFakeDom, isShown, pastClickGuard, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
 import { parseDuskQrPayload } from "./components/QrScanModal.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
@@ -232,6 +232,15 @@ describe("send to a .dusk name with both addresses", () => {
     expect(form.review.disabled).toBe(false);
     // The old Public account | Shielded address switch is gone.
     expect(dom.document.body.querySelector(".name-address-toggle")).toBeNull();
+  });
+
+  it("says what's really missing when the balance is below the fee", () => {
+    const form = mount(newState(), overview({ balance: { value: "0" } }));
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "1");
+
+    // Sending that much more must be enough: the amount and the whole fee.
+    expect(form.amountError()).toBe("That's 1.0025 DUSK more than your public balance, with the network fee.");
   });
 
   it("follows the picked card in the balance line", () => {
@@ -590,7 +599,7 @@ describe("send's amount", () => {
     expect(form.amountError()).toBe("");
 
     typeInto(form.amount, "500");
-    expect(form.amountError()).toBe("That's more than you have, with the network fee.");
+    expect(form.amountError()).toBe("That's 322.016 DUSK more than your public balance, with the network fee.");
     expect(form.amount.getAttribute("aria-invalid")).toBe("true");
     typeInto(form.amount, "0");
     expect(form.amountError()).toBe("Enter an amount greater than 0.");
@@ -615,13 +624,53 @@ describe("send's amount", () => {
     expect(state.route).toBe("confirm");
     expect(state.draft.amountLux).toBe("100000000");
 
-    for (const bad of ["-1", "1e1", "0.25.1", "1,2,3", "0.0000000001", "1 DUSK"]) {
+    for (const bad of ["-1", "1e1", "0.25.1", "1,2,3", "1 DUSK"]) {
       const next = mount(newState());
       typeInto(next.to, ALICE.account);
       typeInto(next.amount, bad);
       expect(next.amount.value).toBe(bad);
       expect(next.amountError()).toBe("Enter an amount such as 1 or 0.5.");
     }
+    const last = mount(newState());
+    typeInto(last.to, ALICE.account);
+    typeInto(last.amount, "0,1234567891234");
+    expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
+    typeInto(last.amount, "0.0000000001");
+    expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
+    typeInto(last.amount, "1,234");
+    expect(last.amountError()).toBe("That could be two amounts: write 1234 or 1.234.");
+  });
+
+  it("keeps Review off while an amount typed won't do, and on for an empty one to say what's missing", () => {
+    const form = mount(newState());
+    typeInto(form.to, ALICE.account);
+    expect(form.review.disabled).toBe(false);
+    for (const bad of ["abc", "0,1234567891234", "0", "99999"]) {
+      typeInto(form.amount, bad);
+      expect(form.amountError()).not.toBe("");
+      expect(form.review.disabled).toBe(true);
+    }
+    typeInto(form.amount, "1");
+    expect([form.amountError(), form.review.disabled]).toEqual(["", false]);
+    typeInto(form.amount, "");
+    expect(form.review.disabled).toBe(false);
+  });
+
+  it("keeps Review off for a recipient that won't do, whatever the amount does", () => {
+    const form = mount(newState());
+    isAccount.mockReturnValue(false);
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "1");
+    expect(form.review.disabled).toBe(true);
+    typeInto(form.amount, "abc");
+    typeInto(form.amount, "1");
+    expect(form.review.disabled).toBe(true);
+    isAccount.mockReturnValue(true);
+    typeInto(form.to, ALICE.account);
+    expect(form.review.disabled).toBe(false);
+    typeInto(form.amount, "abc");
+    typeInto(form.to, BOB.account);
+    expect(form.review.disabled).toBe(true);
   });
 
   it("sets aside the fee Review starts from, with custom gas from Settings", async () => {
@@ -636,7 +685,7 @@ describe("send's amount", () => {
     expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 24.85 DUSK", "Network fee up to 0.15 DUSK"]);
     form.radios()[0].click();
     typeInto(form.amount, "177.98");
-    expect(form.amountError()).toBe("That's more than you have, with the network fee.");
+    expect(form.amountError()).toBe("That's 0.001 DUSK more than your public balance, with the network fee.");
     dom.document.body.querySelector(".amount-avail button").click();
     expect(form.amount.value).toBe("177.979");
 
@@ -710,6 +759,26 @@ describe("names on Send and Review", () => {
     mount(state, overview({ wallets: [{ ...wallets[1], n: 1 }] }));
     await settle();
     expect(from()).toBe("Fromme.dusk · Public");
+  });
+
+  it("names your other profile, on the form and on Review, and offers no Save to Contacts", async () => {
+    const ov = overview({ accountNames: { 1: "Savings" } });
+    const form = mount(newState(), ov);
+    typeInto(form.to, OTHER_PROFILE);
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".to-chip"))).toBe("Savings");
+
+    mount(
+      {
+        route: "confirm",
+        addressBook: { loaded: true, items: [] },
+        draft: { to: OTHER_PROFILE, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+      },
+      ov
+    );
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings");
+    expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
   });
 
   it("offers no Save to Contacts for this wallet's own account or address", () => {
@@ -881,6 +950,62 @@ describe("review", () => {
       send
     );
 
+  it("says how much is missing when the fee, as Custom fee changes it, takes it past the balance, and keeps Confirm off", async () => {
+    const send = async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "1", max: "1" } : { ok: true, result: { hash: "ab".repeat(32) } });
+    const ov = overview({ balance: { value: "1010000000", nonce: "0" } });
+    review({ to: ALICE.account, privacy: "public" }, ov, send);
+    await settle();
+    const body = dom.document.body;
+    const confirm = body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const guard = body.querySelector(".pay-guard");
+    expect([isShown(guard), confirm.disabled]).toEqual([false, false]);
+
+    const editor = body.querySelector("dusk-gas-editor");
+    editor.setGas({ limit: "2500000", price: "10" });
+    await settle();
+    expect(guard.textContent).toBe("That's 0.015 DUSK more than your public balance, with the network fee.");
+    expect(isShown(guard)).toBe(true);
+    expect(confirm.disabled).toBe(true);
+
+    // Back within it.
+    editor.setGas({ limit: "2500000", price: "1" });
+    await settle();
+    expect([isShown(guard), confirm.disabled]).toEqual([false, false]);
+  });
+
+  it("checks a shielded send against what can be spent now, and checks nothing against a balance it couldn't read", async () => {
+    const send = async () => ({ min: "1", median: "1", max: "1" });
+    review({ to: ALICE.address, privacy: "shielded" }, overview({ shieldedBalance: { value: "5000000000", spendable: "1000" } }), send);
+    await settle();
+    const body = dom.document.body;
+    expect(body.querySelector(".pay-guard").textContent).toContain("more than your shielded balance, with the network fee.");
+    review({ to: ALICE.account, privacy: "public" }, overview({ balance: null }), send);
+    await settle();
+    expect(isShown(body.querySelector(".pay-guard"))).toBe(false);
+    expect(body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(false);
+  });
+
+  it("shows a memo in the order it was written, flags what it hides, and sends it as it is", async () => {
+    const rlo = String.fromCodePoint(0x202e);
+    const memo = `${rlo}gnp.exe claim your airdrop`;
+    const sent = [];
+    const send = async (message) => {
+      if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+      return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "1", max: "1" } : { ok: true, result: { hash: "ab".repeat(32) } };
+    };
+    review({ to: ALICE.account, privacy: "public", memo }, overview(), send);
+    await settle();
+    const body = dom.document.body;
+    const row = body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
+    expect(row.querySelector(".safe-text > span").textContent).toBe("�gnp.exe claim your airdrop");
+    expect(row.querySelector(".safe-text__flag")).not.toBeNull();
+    expect(visibleText(body)).not.toContain(rlo);
+    pastClickGuard();
+    body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await settle();
+    expect(sent[0].params.memo).toBe(memo);
+  });
+
   it("shows the fee at the network's price and the total with Back and Confirm, and Custom fee for gas of your own", async () => {
     // The node asks 2 LUX; a transfer returns its hash.
     const send = async (message) =>
@@ -995,6 +1120,14 @@ describe("a send to the bridge's account", () => {
   const callouts = () => body().querySelectorAll(".callout.warn .callout-title").map((t) => t.textContent);
   const confirm = () => body().querySelectorAll("button").find((b) => b.textContent === "Confirm");
 
+  it("shows the memo that carries the recipient's address exactly, unflagged", async () => {
+    review();
+    await settle();
+    const row = body().querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Recipient on BNB Smart Chain");
+    expect(visibleText(row)).toBe(`Recipient on BNB Smart Chain${EVM}`);
+    expect(row.querySelector(".safe-text__flag")).toBeNull();
+  });
+
   it("says what arrives on BNB Smart Chain once the bridge takes its 1 DUSK fee, and to whom", async () => {
     const view = review();
     await settle();
@@ -1013,7 +1146,7 @@ describe("a send to the bridge's account", () => {
     const view = review({ amountDusk: "1", amountLux: "1000000000" });
     await settle();
     expect(text(".review-bridge-fee")).toBe("1 DUSK sent · 1 DUSK bridge fee · Nothing arrives on BNB Smart Chain");
-    expect(body().querySelector(".row > .field-error").textContent).toBe("Send more than the 1 DUSK bridge fee.");
+    expect(body().querySelector(".review-actions > .field-error").textContent).toBe("Send more than the 1 DUSK bridge fee.");
     expect(confirm().disabled).toBe(true);
     confirm().click();
     await settle();
@@ -1027,7 +1160,7 @@ describe("a send to the bridge's account", () => {
   ])("keeps Confirm off when the memo %s, as nothing would arrive", async (_, draft, ov, reason) => {
     const view = review(draft, ov);
     await settle();
-    expect(body().querySelectorAll(".row > .field-error").filter(isShown).map((e) => e.textContent)).toEqual([reason]);
+    expect(body().querySelectorAll(".review-actions > .field-error").filter(isShown).map((e) => e.textContent)).toEqual([reason]);
     expect(confirm().disabled).toBe(true);
     confirm().click();
     await settle();

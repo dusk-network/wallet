@@ -196,6 +196,8 @@ vi.mock("../shared/networkStatus.js", () => ({
   getNetworkStatus: vi.fn(async () => ({ checkedAt: 0 })),
   checkAllEndpoints: mocks.checkAllEndpoints,
   readChainId: mocks.readChainId,
+  chainIdForChoice: (nodeUrl) => mocks.readChainId(nodeUrl),
+  statusChainRefusal: () => "",
   resetNetworkStatus: vi.fn(async () => {}),
   isStatusStale: mocks.isStatusStale,
 }));
@@ -368,6 +370,11 @@ describe("background auto-lock activity", () => {
     // Every wallet's sites go.
     expect(mocks.clearAllPermissions).toHaveBeenCalledTimes(1);
     expect(mocks.clearPermissions).not.toHaveBeenCalled();
+    // The engine leaves the old node with the settings.
+    const { ensureEngineConfigured, invalidateEngineConfig } = await import("./engineHost.js");
+    expect(invalidateEngineConfig).toHaveBeenCalled();
+    expect(order(mocks.finishReset)).toBeLessThan(invalidateEngineConfig.mock.invocationCallOrder.at(-1));
+    expect(invalidateEngineConfig.mock.invocationCallOrder.at(-1)).toBeLessThan(ensureEngineConfigured.mock.invocationCallOrder.at(-1));
   });
 
   it("reports a reset that couldn't clear the old wallet's data, and makes no wallet until it can", async () => {

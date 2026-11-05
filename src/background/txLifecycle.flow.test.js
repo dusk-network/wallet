@@ -110,6 +110,8 @@ vi.mock("../shared/networkStatus.js", () => ({
   checkAllEndpoints: vi.fn(async () => ({ ok: true })),
   resetNetworkStatus: vi.fn(async () => {}),
   isStatusStale: vi.fn(() => false),
+  chainIdForChoice: vi.fn(async () => null),
+  statusChainRefusal: vi.fn(() => ""),
 }));
 
 vi.mock("../platform/extensionApi.js", () => ({
@@ -664,6 +666,145 @@ describe("background Phoenix tx lifecycle flow", () => {
       } finally {
         pendingApprovals.clear();
       }
+    });
+  });
+
+  describe("a site's request on a node that contradicts the chain it's fixed to", () => {
+    const ask = async (kind, says) => {
+      const { getPending } = await import("../background/pending.js");
+      getPending.mockReturnValueOnce({ kind, origin: "https://dapp.example", params: {}, shown: { walletId: "acct0" } });
+      vi.stubGlobal("fetch", vi.fn(async () => (says === null ? new Response("", { status: 503 }) : new Response(JSON.stringify({ chain_id: says })))));
+      try {
+        return await sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    };
+
+    beforeEach(() => {
+      globalThis.localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://hostile-node.example", chainId: 2 }));
+    });
+
+    it("says why it can't be signed as the window opens, of everything that's signed", async () => {
+      for (const kind of ["send_tx", "sign_message", "sign_auth", "sign_typed_data"]) {
+        const { chainRefusal, networkName, chainId } = await ask(kind, 1);
+        expect(chainRefusal, kind).toBe(
+          "hostile-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). The wallet won't sign on it, because a signature here could count on the other network."
+        );
+        expect([networkName, chainId]).toEqual(["Custom", 2]);
+      }
+    });
+
+    it("says nothing while it agrees or doesn't answer, or for what isn't signed", async () => {
+      expect((await ask("send_tx", 2)).chainRefusal).toBe("");
+      expect((await ask("send_tx", null)).chainRefusal).toBe("");
+      expect((await ask("connect", 1)).chainRefusal).toBe("");
+    });
+  });
+
+  describe("what pays for a site's request to send", () => {
+    const ask = async (params, { accountIndex = 0, reply } = {}) => {
+      const { engineCall, getEngineStatus } = await import("../background/engineHost.js");
+      const { getPending } = await import("../background/pending.js");
+      const { approveOrigin } = await import("../shared/permissions.js");
+      await approveOrigin("https://dapp.example", { profileId: `account:${accountIndex}:acct${accountIndex}`, accountIndex, grants: {} }, "acct0");
+      getPending.mockReturnValueOnce({ kind: "send_tx", origin: "https://dapp.example", params, shown: { walletId: "acct0" } });
+      getEngineStatus.mockResolvedValueOnce({ isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 });
+      engineCall.mockImplementation(reply);
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+      try {
+        return await sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" });
+      } finally {
+        vi.unstubAllGlobals();
+        engineCall.mockImplementation(async () => true);
+      }
+    };
+
+    it("is the connected profile's public balance, or for a shielded payment what can be spent", async () => {
+      const reply = vi.fn(async (method) => (method === "dusk_getPublicBalance" ? { nonce: "1", value: "777" } : { value: "9", spendable: "8" }));
+      expect((await ask({ kind: "transfer", privacy: "public" }, { accountIndex: 1, reply })).payBalance).toBe("777");
+      expect(reply).toHaveBeenCalledWith("dusk_getPublicBalance", { profileIndex: 1 });
+      expect((await ask({ kind: "transfer", privacy: "shielded" }, { reply })).payBalance).toBe("8");
+    });
+
+    it("is unknown when it can't be read, or for another profile's shielded balance, and the window checks nothing", async () => {
+      const failing = vi.fn(async () => {
+        throw new Error("node down");
+      });
+      expect((await ask({ kind: "transfer", privacy: "public" }, { reply: failing })).payBalance).toBeNull();
+      const reply = vi.fn(async () => ({ value: "9", spendable: "8" }));
+      expect((await ask({ kind: "transfer", privacy: "shielded" }, { accountIndex: 1, reply })).payBalance).toBeNull();
+      expect(reply).not.toHaveBeenCalledWith("dusk_getShieldedBalance", undefined);
+    });
+  });
+
+  describe("a send still marked on its way that no watcher follows", () => {
+    const HASH = "ab".repeat(32);
+    // It's looked up after the overview answers: wait for the outcome, however busy the machine.
+    const soon = (check) => vi.waitFor(check, { timeout: 4_000 });
+    const sozuStake = (over = {}) =>
+      seedTxMeta(HASH, { walletId: "acct0", kind: "contract_call", privacy: "public", pendingNullifiers: [], reservationStatus: undefined, asset: { kind: "sozu", action: "sozu_stake" }, submittedAt: Date.now() - 17 * 60_000, ...over });
+    const overview = () => sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+    const told = () => mocks.sentMessages.filter((m) => m.type === "DUSK_UI_TX_STATUS");
+    const kept = async () => (await (await import("../shared/txStore.js")).getTxMeta(HASH))?.status;
+
+    it("comes to its outcome as the wallet draws, and the pages are told, so its note goes", async () => {
+      await sozuStake();
+      mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: {} });
+      expect((await overview()).txs.map((t) => t.status)).toEqual(["submitted"]);
+      await soon(async () => expect(await kept()).toBe("executed"));
+      await soon(() => expect(told()).toEqual([expect.objectContaining({ hash: HASH, status: "executed", ok: true })]));
+      expect((await overview()).txs.map((t) => t.status)).toEqual(["executed"]);
+    });
+
+    it("says it failed, or that it isn't known any more, when that's what the node says", async () => {
+      await sozuStake();
+      mocks.classifyTxPresence.mockResolvedValue({ state: "executed_failed", tx: {}, error: "Out of gas" });
+      await overview();
+      await soon(async () => expect(await kept()).toBe("failed"));
+    });
+
+    it("stays on its way while the node still has it, asked at most once a minute", async () => {
+      await sozuStake();
+      mocks.classifyTxPresence.mockResolvedValue({ state: "mempool", tx: {} });
+      await overview();
+      await soon(() => expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1));
+      await soon(async () => expect(await kept()).toBe("mempool"));
+      await overview();
+      await overview();
+      expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1);
+    });
+
+    it("is left to its watcher in its first minute", async () => {
+      await sozuStake({ submittedAt: Date.now() - 30_000 });
+      mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: {} });
+      await overview();
+      await overview();
+      expect(mocks.classifyTxPresence).not.toHaveBeenCalled();
+      expect(await kept()).toBe("submitted");
+    });
+
+    it("takes only an outcome while a watcher may still follow it: done goes, not yet listed stays", async () => {
+      await sozuStake({ submittedAt: Date.now() - 70_000 });
+      mocks.classifyTxPresence.mockResolvedValue({ state: "not_found" });
+      await overview();
+      await soon(() => expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1));
+      await overview();
+      expect(await kept()).toBe("submitted");
+      expect(told()).toEqual([]);
+    });
+
+    it("comes to its outcome about a minute on, when the watcher went with a browser restart", async () => {
+      await sozuStake({ submittedAt: Date.now() - 70_000 });
+      mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: {} });
+      await overview();
+      await soon(async () => expect(await kept()).toBe("executed"));
+    });
+
+    it("asks nothing of a send that's done", async () => {
+      await sozuStake({ status: "executed" });
+      await overview();
+      expect(mocks.classifyTxPresence).not.toHaveBeenCalled();
     });
   });
 

@@ -3,7 +3,7 @@ import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
 import { NETWORK_PRESETS } from "./networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "./network.js";
-import { listedChainId, noteChainId } from "./nodeNetwork.js";
+import { listedChainId, noteChainId, pinnedChainOf } from "./nodeNetwork.js";
 import { MAX_ACCOUNT_COUNT } from "./constants.js";
 
 /**
@@ -53,11 +53,17 @@ export const DEFAULT_SETTINGS = {
   proverUrl: networks.mainnet.urls.prover,
   archiverUrl: networks.mainnet.urls.archive,
   /**
-   * The chain ID the node gave in /on/node/info, which names its network
-   * (nodeNetwork.js): read when the node was chosen, kept with it, and null
-   * while it couldn't be read. A network's own node needs no read.
+   * The chain ID the node signs for (nodeNetwork.js): a network's own node's
+   * from its file, without asking; another's as it gave it in /on/node/info
+   * when it was added, and null while it couldn't be read.
    */
   chainId: null,
+  /**
+   * The chain ID each node other than a network's own was added with, by its
+   * origin: fixed from then on, also through a switch away and back. Only
+   * saving the node again in Settings, and agreeing, changes it.
+   */
+  nodeChains: {},
   /** Auto-lock timeout in minutes (0 = disabled) */
   autoLockTimeoutMinutes: DEFAULT_AUTO_LOCK_MINUTES,
   /** A gas limit and price for every Review, or null for the network's price */
@@ -155,8 +161,12 @@ export async function getSettings() {
   }
   selectedAccountIndex = Math.min(Math.floor(selectedAccountIndex), Math.max(0, accountCount - 1));
 
-  // The node's network, as its settings keep it, for this context's lookups by the node.
-  const chainId = Number.isInteger(merged.chainId) ? merged.chainId : listedChainId(nodeUrl);
+  // The chain ID the node signs for: a network's own node's whatever is stored,
+  // another's as it was fixed, or as settings from before kept it with the node.
+  const storedChains = merged.nodeChains && typeof merged.nodeChains === "object" ? merged.nodeChains : {};
+  const chainId = pinnedChainOf({ nodeChains: storedChains }, nodeUrl) ?? (Number.isInteger(merged.chainId) ? merged.chainId : null);
+  const nodeChains = chainId !== null && listedChainId(nodeUrl) === null ? { ...storedChains, [nodeUrl]: chainId } : storedChains;
+  // For this context's lookups by the node.
   noteChainId(nodeUrl, chainId);
 
   return {
@@ -165,6 +175,7 @@ export async function getSettings() {
     proverUrl,
     archiverUrl,
     chainId,
+    nodeChains,
     accountCount,
     selectedAccountIndex,
     // Intentionally force this off for now. Older installs may still have
@@ -197,11 +208,13 @@ async function setSettingsUnlocked(patch) {
   if ("ipfsGateway" in patch) {
     next.ipfsGateway = normalizeIpfsGateway(next.ipfsGateway);
   }
-  // A chain ID is the node's it was read from: another node starts without
-  // one, until it's read (networkStatus.js readChainId).
+  // A chain ID is the node's it was read from, and stays with it: a network's
+  // own node's comes from its file, and another node starts with the one it
+  // was added with, or none until it's read (networkStatus.js readChainId).
   if ("chainId" in patch || "nodeUrl" in patch) {
-    const own = "chainId" in patch || next.nodeUrl === current.nodeUrl;
-    next.chainId = own && Number.isInteger(next.chainId) ? next.chainId : null;
+    const given = "chainId" in patch && Number.isInteger(patch.chainId) && listedChainId(next.nodeUrl) === null;
+    if (given) next.nodeChains = { ...current.nodeChains, [next.nodeUrl]: patch.chainId };
+    next.chainId = pinnedChainOf(next, next.nodeUrl);
   }
 
   // If nodeUrl changed but prover/archiver weren't provided, infer them.
@@ -239,7 +252,7 @@ async function setSettingsUnlocked(patch) {
   }
 
   await storage.set({ [STORAGE_KEYS.SETTINGS]: next });
-  noteChainId(next.nodeUrl, Number.isInteger(next.chainId) ? next.chainId : listedChainId(next.nodeUrl));
+  noteChainId(next.nodeUrl, next.chainId);
   return next;
 }
 
@@ -248,8 +261,17 @@ export function setSettings(patch) {
 }
 
 /**
- * Keeps the chain ID a node gave with the settings, when the node is still
- * the one they name: a read that finished after a switch changes nothing.
+ * Every setting back to its default, for a wallet reset: Mainnet's own node,
+ * and none of the nodes added before. The next read starts from DEFAULT_SETTINGS.
+ */
+export function clearSettings() {
+  return withStorageLock(STORAGE_KEYS.SETTINGS, () => storage.remove(STORAGE_KEYS.SETTINGS));
+}
+
+/**
+ * Fixes the chain ID a node gave, when the settings still name that node and
+ * have none for it yet: a read that finished after a switch changes nothing,
+ * and neither does a node saying something else later.
  * @param {string} nodeUrl
  * @param {unknown} chainId
  * @returns {Promise<boolean>} whether the settings changed
@@ -257,7 +279,7 @@ export function setSettings(patch) {
 export function rememberNodeChain(nodeUrl, chainId) {
   return withStorageLock(STORAGE_KEYS.SETTINGS, async () => {
     const current = await getSettings();
-    if (!Number.isInteger(chainId) || current.nodeUrl !== normalizeBaseUrl(nodeUrl) || current.chainId === chainId) return false;
+    if (!Number.isInteger(chainId) || current.nodeUrl !== normalizeBaseUrl(nodeUrl) || current.chainId !== null) return false;
     await setSettingsUnlocked({ chainId });
     return true;
   });

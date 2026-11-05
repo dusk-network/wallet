@@ -175,7 +175,7 @@ describe("setting up and unlocking", () => {
     const body = show(restoreWalletView({ state, actions: acts }));
     expect(body.querySelector("h1").textContent).toBe("Restore wallet");
     expect(body.querySelector(".auth-lead").textContent).toBe(
-      "This removes every recovery phrase on this device, then sets up this one with a new password. If it was here before, its contacts stay."
+      "This removes every recovery phrase on this device, then sets up this one with a new password. If it was here before, its contacts and profile names stay."
     );
     const group = body.querySelector("[role=group]");
     typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
@@ -213,6 +213,100 @@ describe("setting up and unlocking", () => {
     button(app, "← Back").click();
     await settle();
     expect(app.querySelector("h1").textContent).toBe("Unlock your wallet");
+  });
+});
+
+describe("a new recovery phrase", () => {
+  const actions = (reply = {}) => ({ send: vi.fn(async () => reply), render: vi.fn(async () => {}), showToast: vi.fn() });
+  const emptyFlow = () => ({ mode: null, mnemonic: null, password: "", reveal: false });
+  // On from the password, with what the form needs.
+  const pastPassword = async (state, acts) => {
+    const body = show(onboardingCreatePasswordView({ state, actions: acts }));
+    typeInto(field(body, "Password"), "long enough");
+    typeInto(field(body, "Confirm password"), "long enough");
+    body.querySelector("input[type=checkbox]").checked = true;
+    button(body, "Continue").click();
+    await settle();
+    expect(state.route).toBe("onboard_create_phrase");
+  };
+
+  it("keeps its words through Back to the password and forward again", async () => {
+    const state = { route: "onboard_welcome", onboard: emptyFlow() };
+    const acts = actions();
+    show(onboardingWelcomeView({ state, actions: acts })).querySelectorAll(".onboard-choice")[0].click();
+    expect(state.route).toBe("onboard_create_password");
+    await pastPassword(state, acts);
+    const first = state.onboard.mnemonic;
+    expect(first.split(" ")).toHaveLength(12);
+
+    // Back to the password, and on again: hidden again, the same words.
+    state.onboard.reveal = true;
+    button(show(onboardingCreatePhraseView({ state, actions: acts })), "← Back").click();
+    expect(state.route).toBe("onboard_create_password");
+    await pastPassword(state, acts);
+    expect(state.onboard.mnemonic).toBe(first);
+    expect(state.onboard.reveal).toBe(false);
+
+    // All the way back to the first choice, and Create wallet again.
+    button(show(onboardingCreatePasswordView({ state, actions: acts })), "← Back").click();
+    expect(state.route).toBe("onboard_welcome");
+    show(onboardingWelcomeView({ state, actions: acts })).querySelectorAll(".onboard-choice")[0].click();
+    await pastPassword(state, acts);
+    expect(state.onboard.mnemonic).toBe(first);
+
+    // Done with: gone from memory, as the wallet is made.
+    state.route = "onboard_create_confirm";
+    const confirm = show(onboardingCreateConfirmView({ state, actions: acts }));
+    typeInto(field(confirm, "Word 1"), first);
+    button(confirm, "Create wallet").click();
+    await settle();
+    expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: first }));
+    expect(state.onboard.mnemonic).toBeNull();
+    expect(JSON.stringify(state)).not.toContain(first);
+  });
+
+  it("isn't kept once someone chooses to import one instead", async () => {
+    const state = { route: "onboard_welcome", onboard: emptyFlow() };
+    const acts = actions();
+    show(onboardingWelcomeView({ state, actions: acts })).querySelectorAll(".onboard-choice")[0].click();
+    await pastPassword(state, acts);
+    const first = state.onboard.mnemonic;
+    show(onboardingWelcomeView({ state, actions: acts })).querySelectorAll(".onboard-choice")[1].click();
+    expect(state.onboard.mnemonic).toBeNull();
+    expect(JSON.stringify(state)).not.toContain(first);
+  });
+
+  it("keeps its words through Back in Add wallet, and drops them when Add wallet is left or done", async () => {
+    const state = { route: "wallet_add", onboard: { ...emptyFlow(), adding: true } };
+    const acts = actions();
+    show(onboardingWelcomeView({ state, actions: acts, adding: true })).querySelectorAll(".onboard-choice")[0].click();
+    const first = state.onboard.mnemonic;
+    expect(first.split(" ")).toHaveLength(12);
+
+    // Back from the words to the choice, and on again.
+    button(show(onboardingCreatePhraseView({ state, actions: acts, adding: true, ov: TWO })), "← Back").click();
+    expect(state.route).toBe("wallet_add");
+    show(onboardingWelcomeView({ state, actions: acts, adding: true })).querySelectorAll(".onboard-choice")[0].click();
+    expect(state.onboard.mnemonic).toBe(first);
+
+    // Left for home: gone.
+    button(show(onboardingWelcomeView({ state, actions: acts, adding: true })), "← Back").click();
+    expect(state.route).toBe("home");
+    expect(JSON.stringify(state)).not.toContain(first);
+
+    // Done: gone too.
+    state.route = "wallet_add";
+    state.onboard = { ...emptyFlow(), adding: true };
+    show(onboardingWelcomeView({ state, actions: acts, adding: true })).querySelectorAll(".onboard-choice")[0].click();
+    const second = state.onboard.mnemonic;
+    state.route = "wallet_add_confirm";
+    const confirm = show(onboardingCreateConfirmView({ state, actions: acts, adding: true }));
+    typeInto(field(confirm, "Word 1"), second);
+    typeInto(field(confirm, SHARED_PASSWORD), "password123");
+    button(confirm, "Add wallet").click();
+    await settle();
+    expect(state.route).toBe("home");
+    expect(JSON.stringify(state)).not.toContain(second);
   });
 });
 
@@ -355,8 +449,15 @@ describe("removing a wallet, and a new password", () => {
     button(body, "Change password").click();
     await settle();
     expect(errorOf(again)).toBe("The passwords don't match.");
+    // The one it has already changes nothing, so it's said.
+    typeInto(next, "password123");
+    typeInto(again, "password123");
+    button(body, "Change password").click();
+    await settle();
+    expect(errorOf(next)).toBe("Use a different password from the current one.");
     expect(acts.send).not.toHaveBeenCalled();
 
+    typeInto(next, "a new password");
     typeInto(again, "a new password");
     button(body, "Change password").click();
     await settle();
@@ -364,6 +465,7 @@ describe("removing a wallet, and a new password", () => {
     button(body, "Change password").click();
     await settle();
     expect(acts.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_CHANGE_PASSWORD", password: "password123", newPassword: "a new password" });
+    expect(acts.showToast).toHaveBeenCalledWith("Password changed.");
     expect(state.route).toBe("options");
     expect(JSON.stringify(state)).not.toContain("password");
   });

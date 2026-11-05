@@ -146,6 +146,7 @@ describe("a wallet form being filled in", () => {
     const t = await popupAt("change_password", {}, async (message) => (message.type === "DUSK_UI_CHANGE_PASSWORD" ? answer.promise : {}));
     const names = ["Current password", "New password", "Confirm password"];
     typeAll(fieldsOf(t.app, names));
+    typeInto(fieldsOf(t.app, names)[0], "the current password");
     button(t.app, "Change password").click();
     await flush();
     expect(button(t.app, "Changing…")?.disabled).toBe(true);

@@ -2,7 +2,7 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
-  amountForInput,
+  amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
@@ -16,8 +16,9 @@ import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
-import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
-import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { fieldLabel, reviewActions, submitOnGasEnter } from "../../components/FormControls.js";
+import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { segmented } from "../../components/Segmented.js";
 import { sendFromReview } from "./sent.js";
@@ -70,8 +71,16 @@ export function convertFormView(ov, { state, actions } = {}) {
     onEnter: () => nextBtn.click(),
   });
 
+  // Review is off while an amount typed won't do: the field says why. An empty
+  // one leaves it on, for it to say what's missing.
+  function check(opts) {
+    const lux = readAmount(opts);
+    nextBtn.disabled = lux == null && Boolean(String(field.input.value ?? "").trim());
+    return lux;
+  }
+
   // The amount as typed, checked as it is typed: an error under the field.
-  function check({ required = false } = {}) {
+  function readAmount({ required = false } = {}) {
     const raw = String(field.input.value ?? "").trim();
     if (!raw) {
       field.setError(required ? "Enter an amount." : "");
@@ -81,19 +90,15 @@ export function convertFormView(ov, { state, actions } = {}) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError(`Enter an amount such as 1 or ${amountForInput("0.5")}.`);
+      field.setError(amountProblem(raw));
       return null;
     }
     if (lux <= 0n) {
       field.setError("Enter an amount greater than 0.");
       return null;
     }
-    if (lux > avail) {
-      field.setError(
-        kind === TX_KIND.SHIELD
-          ? "That's more than your public balance, with the network fee."
-          : "That's more than your shielded balance, with the network fee."
-      );
+    if (lux + feeLux > availRaw) {
+      field.setError(shortfallText({ missingLux: lux + feeLux - availRaw, shielded: kind === TX_KIND.UNSHIELD, hidden }));
       return null;
     }
     field.setError("");
@@ -194,8 +199,23 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   // The network's gas price by default; Custom fee for gas of your own.
   const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({ kind, amountLux: d.amountLux, ov, actions, gas: d?.gas });
 
+  // What pays covers it, with the fee as Custom fee changes it.
+  const paying =
+    kind === TX_KIND.SHIELD
+      ? ov?.balance?.value
+      : ov?.shieldedBalance?.spendable ?? ov?.shieldedBalance?.value;
+  const pay = payGuard({
+    editor: gasEditor,
+    availableLux: paying != null ? safeBigInt(paying, 0n) : null,
+    sendsLux: safeBigInt(d.amountLux, 0n),
+    shielded: kind === TX_KIND.UNSHIELD,
+    hidden: balancesHidden(ov),
+    button: confirmBtn,
+  });
+
   // It ignores a click for a moment once Review is up (clickGuard.js).
   confirmBtn.addEventListener("click", guarded(async () => {
+    if (!pay.covered()) return;
     const gas = readGas();
     if (gas === false) return;
     confirmBtn.disabled = true;
@@ -227,9 +247,9 @@ export function convertConfirmView(ov, { state, actions } = {}) {
         if (state.draft === d) state.draft = null;
       },
     });
-    confirmBtn.disabled = false;
+    pay.draw();
   }));
-  submitOnGasEnter(gasEditor, confirmBtn);
+  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => pay.covered() });
 
   const kv = (label, rail) =>
     h("div", { class: "kv" }, [
@@ -253,8 +273,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       ]),
       h("div", { class: "group" }, [kv("From", fromRail), kv("To", toRail)]),
       gasEditor,
-      confirmError,
-      h("div", { class: "btnrow" }, [confirmBtn]),
+      reviewActions(confirmBtn, confirmError, pay.el),
     ]),
   ];
 }

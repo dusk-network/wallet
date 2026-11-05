@@ -241,6 +241,17 @@ describe("a wallet reset", () => {
     expect(await activity.getActivityMeta(owner)).toBeNull();
   });
 
+  it("goes back to the default network, for the engine too", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { setSettings } = await import("../shared/settings.js");
+    const engine = await import("../shared/walletEngine.js");
+    const configured = vi.spyOn(engine, "configure");
+    await setSettings({ nodeUrl: "https://hostile-node.example", chainId: 1 });
+    await expect(localSend({ type: "DUSK_UI_RESET_WALLET" })).resolves.toEqual({ ok: true });
+    expect(configured).toHaveBeenLastCalledWith(expect.objectContaining({ nodeUrl: "https://nodes.dusk.network", chainId: 1 }));
+    expect(localStorage.getItem("dusk_settings_v1")).toBeNull();
+  });
+
   it("fails while the old wallet's data can't be cleared, and makes no new wallet until it can", async () => {
     const { localSend } = await import("./localBus.js");
     const activity = await import("../shared/activityStore.js");

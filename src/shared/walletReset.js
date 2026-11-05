@@ -1,7 +1,8 @@
 // What a wallet reset clears besides the vault and the site permissions: every
 // wallet's transactions, shielded notes, history, deposits' arrivals on
-// DuskEVM and contacts, and the wallets' names. And what removing one wallet
-// clears of it alone (forgetWalletData).
+// DuskEVM, contacts, profile labels and tokens, the wallets' names, and the
+// settings, so the network is Mainnet's own node again and no address stays.
+// And what removing one wallet clears of it alone (forgetWalletData).
 //
 // A reset is noted before the vault goes. If any of these can't be cleared,
 // the reset fails and stays noted, and no new wallet is made until another
@@ -11,14 +12,16 @@
 // A restore after a forgotten password notes the wallet it makes, and stays
 // noted until that wallet's vault is: one cut short in between leaves no
 // vault, and the next wallet made here keeps those contacts only if it's
-// the same wallet.
+// the same wallet. That wallet's profile labels and tokens stay with them, and
+// everything else goes as with a reset, the network included.
 
-import { forgetAccountNames } from "./accountNames.js";
+import { forgetAccountNames, keepOnlyAccountNamesOf } from "./accountNames.js";
 import { clearActivityStore, forgetWalletActivity } from "./activityStore.js";
-import { forgetWalletAssets } from "./assetsStore.js";
+import { forgetWalletAssets, keepOnlyAssetsOf } from "./assetsStore.js";
 import { clearArrivals, forgetWalletArrivals } from "./bridgeArrival.js";
 import { clearContacts, forgetWalletContacts, keepOnlyContactsOf } from "./contactsStore.js";
 import { clearPermissions } from "./permissions.js";
+import { clearSettings } from "./settings.js";
 import { clearShieldedStore, forgetWalletNotes } from "./shieldedStore.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { clearTxs, forgetWalletTxs } from "./txStore.js";
@@ -41,7 +44,19 @@ export async function beginReset({ keepContactsOf } = {}) {
  */
 export async function clearWalletData({ keepContactsOf } = {}) {
   const contacts = keepContactsOf ? keepOnlyContactsOf(keepContactsOf) : clearContacts();
-  const results = await Promise.allSettled([clearTxs(), clearShieldedStore(), clearActivityStore(), clearArrivals(), contacts, clearWallets()]);
+  const results = await Promise.allSettled([
+    clearTxs(),
+    clearShieldedStore(),
+    clearActivityStore(),
+    clearArrivals(),
+    contacts,
+    keepOnlyAccountNamesOf(keepContactsOf),
+    keepOnlyAssetsOf(keepContactsOf),
+    clearWallets(),
+    clearSettings(),
+    // Names checked and rates read, kept by account or by node.
+    storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES]),
+  ]);
   if (results.some((r) => r.status === "rejected")) {
     throw new Error("The old wallet's data couldn't be cleared. Try again.");
   }

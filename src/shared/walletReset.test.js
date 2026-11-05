@@ -72,6 +72,76 @@ describe("walletReset", () => {
     expect(await storage.get(STORAGE_KEYS.CONTACTS)).toEqual({});
   });
 
+  describe("what's left of a wallet and its node", () => {
+    const NODE = "https://hostile-node.example";
+    const ACCOUNT = "acct-with-a-name";
+    const OTHER = "acct-of-another";
+    const TOKEN = { contractId: `0x${"cd".repeat(32)}`, name: "T", symbol: "T", decimals: 0 };
+
+    // Everything kept by a wallet on a custom node, as a day's use leaves it.
+    async function used() {
+      const settings = await import("./settings.js");
+      const names = await import("./accountNames.js");
+      const assets = await import("./assetsStore.js");
+      const { storage, STORAGE_KEYS } = await import("./storage.js");
+      await settings.setSettings({ nodeUrl: NODE, chainId: 1, autoLockTimeoutMinutes: 5, selectedAccountIndex: 1 });
+      for (const id of [ACCOUNT, OTHER]) {
+        await names.setAccountName(id, 0, `${id} label`);
+        await assets.watchToken(id, NODE, 0, TOKEN);
+      }
+      await storage.set({
+        [STORAGE_KEYS.VERIFIED_NAMES]: { mainnet: { [ACCOUNT]: { name: "alice.dusk", at: 1 } } },
+        [STORAGE_KEYS.NETWORK_STATUS]: { nodeUrl: NODE, nodeError: `Failed to reach ${NODE}` },
+        [STORAGE_KEYS.REWARD_RATES]: { [NODE]: { at: 1, rate: 0.2 } },
+      });
+      return { settings, names, assets };
+    }
+    const dump = () => {
+      const all = {};
+      for (let i = 0; i < localStorage.length; i++) all[localStorage.key(i)] = localStorage.getItem(localStorage.key(i));
+      return JSON.stringify(all);
+    };
+
+    it("after a reset, is the default network and no name or address", async () => {
+      const { settings } = await used();
+      expect(dump()).toContain(NODE.slice(8));
+      await reset.beginReset();
+      await reset.finishReset();
+      await expect(settings.getSettings()).resolves.toMatchObject({
+        nodeUrl: "https://nodes.dusk.network",
+        proverUrl: "https://provers.dusk.network",
+        chainId: 1,
+        nodeChains: {},
+        autoLockTimeoutMinutes: 15,
+        selectedAccountIndex: 0,
+      });
+      for (const left of [NODE.slice(8), ACCOUNT, OTHER, "label", "alice.dusk"]) expect(dump()).not.toContain(left);
+      expect(await pending()).toBe(false);
+    });
+
+    it("a node added before the reset is added anew after it", async () => {
+      const { settings } = await used();
+      await reset.finishReset();
+      await settings.setSettings({ nodeUrl: NODE });
+      await expect(settings.getSettings()).resolves.toMatchObject({ nodeUrl: NODE, chainId: null });
+    });
+
+    it("after a restore, keeps that wallet's own contacts, labels and tokens, and none of another's, on the default network", async () => {
+      const { settings, names, assets } = await used();
+      const { storage, STORAGE_KEYS } = await import("./storage.js");
+      const { contactsNamespace } = await import("./contactsCrypto.js");
+      const [mine, theirs] = await Promise.all([contactsNamespace(ACCOUNT), contactsNamespace(OTHER)]);
+      await storage.set({ [STORAGE_KEYS.CONTACTS]: { [mine]: { v: 1 }, [theirs]: { v: 1 } } });
+      await reset.beginReset({ keepContactsOf: ACCOUNT });
+      await reset.finishReset({ keepContactsOf: ACCOUNT });
+      expect((await storage.get(STORAGE_KEYS.CONTACTS))[STORAGE_KEYS.CONTACTS]).toEqual({ [mine]: { v: 1 } });
+      await expect(names.getAccountNames(ACCOUNT)).resolves.toEqual({ 0: `${ACCOUNT} label` });
+      expect((await assets.getWatchedAssets(ACCOUNT, NODE, 0)).tokens).toHaveLength(1);
+      for (const left of [OTHER, NODE.slice(8).concat('"'), "alice.dusk"]) expect(dump()).not.toContain(left);
+      await expect(settings.getSettings()).resolves.toMatchObject({ nodeUrl: "https://nodes.dusk.network", nodeChains: {} });
+    });
+  });
+
   it("tries every store when one can't be cleared, fails, and stays pending until it can", async () => {
     const owner = activity.activityOwnerKey("testnet", "acct");
     await txs.putTxMeta("aa".repeat(32), { status: "executed", submittedAt: 1 });

@@ -48,6 +48,28 @@ export function profileLabelOf(ov, index) {
 }
 
 /**
+ * What this wallet calls an account or address of its own: a profile's label on
+ * this device, or "Profile N", by its public account or shielded address; a
+ * profile of another wallet here, by its public account, after that wallet's
+ * name. "" for anyone else's. A site or a node picks addresses, so it must be
+ * the same address exactly: base58 tells cases apart.
+ * @param {object} ov - the overview
+ * @param {unknown} address
+ * @returns {string}
+ */
+export function ownProfileName(ov, address) {
+  const to = String(address ?? "").trim();
+  if (!to) return "";
+  const own = [ov?.accounts, ov?.addresses].map((list) => (Array.isArray(list) ? list.indexOf(to) : -1)).find((i) => i >= 0);
+  if (own !== undefined) return profileLabelOf(ov, own);
+  for (const wallet of Array.isArray(ov?.wallets) ? ov.wallets : []) {
+    const i = !wallet?.active && Array.isArray(wallet?.accounts) ? wallet.accounts.indexOf(to) : -1;
+    if (i >= 0) return `${walletLabel(wallet)} · ${String(wallet.accountNames?.[String(i)] ?? "").trim() || `Profile ${i + 1}`}`;
+  }
+  return "";
+}
+
+/**
  * A profile's name as the header shows it: its verified .dusk name once
  * looked up (the header's lookup, kept for a while), else its label on this
  * device, else "Profile N". The element updates itself when the name

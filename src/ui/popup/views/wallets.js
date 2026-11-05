@@ -143,6 +143,11 @@ export function changePasswordView(ov, { state, actions } = {}) {
         again.input.focus();
         return;
       }
+      if (next.input.value === current.input.value) {
+        next.error.show("Use a different password from the current one.");
+        next.input.focus();
+        return;
+      }
       busy = true;
       btn.disabled = true;
       for (const f of fields) f.input.disabled = true;

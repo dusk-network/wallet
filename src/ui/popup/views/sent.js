@@ -1,5 +1,6 @@
 import { formatDusk, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
+import { isNodeReply, nodeRefusalText } from "../../../shared/nodeRefusal.js";
 import { openUrl } from "../../../platform/index.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
@@ -10,6 +11,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { walletNameOf } from "../../components/ProfileName.js";
+import { safeTextEl } from "../../components/SafeText.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
 // with a toast: Sending while the wallet signs it and hands it to the network,
@@ -24,9 +26,10 @@ const FINAL = new Set(["executed", "failed", "removed"]);
 // ran: nothing went out, so there is no fee. Anything else (a reply that got
 // lost, a timeout, a failure after the hand-over) may have reached the network.
 // "Wallet changed while …" is the engine finding another network, profile or
-// wallet than the one the transaction was reviewed on.
+// wallet than the one the transaction was reviewed on; "nothing was signed" is
+// the engine refusing a node that contradicts the chain it's fixed to.
 const REFUSED =
-  /wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed|failed to (archive|unarchive|deserialize)|unknown error code/i;
+  /nothing was signed|not accepted|wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed|failed to (archive|unarchive|deserialize)|unknown error code/i;
 
 // Why a send stopped before it went to the wallet: a switch started meanwhile.
 const SWITCHED = "The network, profile or wallet changed meanwhile.";
@@ -55,6 +58,10 @@ export function reasonText(error) {
   // What the wallet's transaction builder says, in words.
   if (/failed to deserialize/i.test(text)) return "The wallet couldn't read the address. Check it and try again.";
   if (/failed to (archive|unarchive)|unknown error code/i.test(text)) return "The wallet couldn't build this transaction.";
+  // The wallet's own words on a node it won't sign for, whole.
+  if (/nothing was signed/i.test(text)) return text;
+  // A node's reply never shows as it came: JSON, cut off in the middle.
+  if (isNodeReply(text)) return nodeRefusalText(text);
   const short = text.length > 140 ? `${text.slice(0, 139)}…` : text;
   return /[.!?…]$/.test(short) ? short : `${short}.`;
 }
@@ -448,7 +455,7 @@ export function sentView(ov, { state, actions } = {}) {
     sent.hash
       ? kv("Transaction ID", [h("span", { class: "mono", title: sent.hash, text: shortAddress(sent.hash) }), copyBtn])
       : null,
-    sent.memo ? kv("Memo", sent.memo) : null,
+    sent.memo ? kv("Memo", safeTextEl(sent.memo)) : null,
     feeRow ? kv(feeRow[0], feeRow[1]) : null,
   ].filter(Boolean));
 

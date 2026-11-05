@@ -1,6 +1,7 @@
 import { UI_DISPLAY_DECIMALS } from "../../shared/amount.js";
 import { getDefaultGas, getMinimumGas } from "../../shared/txDefaults.js";
 import { h } from "../lib/dom.js";
+import { shortfallText } from "../lib/shortfall.js";
 import { sameGas } from "./GasEditor.js";
 
 const whole = (v) => /^\d+$/.test(String(v ?? "").trim());
@@ -90,6 +91,48 @@ export function useNetworkGas({ actions, gasEditor, defaultLimit, fallbackPrice,
     gasEditor.networkGas = network;
     if (untouched) gasEditor.setGas(network);
   })().catch(() => {});
+}
+
+const feeOfGas = (gas) => {
+  const { limit, price } = gas ?? {};
+  return whole(limit) && whole(price) ? BigInt(limit) * BigInt(price) : null;
+};
+
+/**
+ * Whether the balance covers what's being sent and its fee, before Confirm or
+ * Approve: how much is missing above the button, and the button off, as the
+ * fee changes. A balance that couldn't be read checks nothing: the node still
+ * says no, in plain words. The gas in the editor counts from the start, and
+ * `gas` where it hasn't drawn yet.
+ *
+ * @param {{
+ *   editor: HTMLElement, availableLux: bigint | null, sendsLux?: bigint, shielded?: boolean, hidden?: boolean,
+ *   button?: HTMLButtonElement, ready?: () => boolean, gas?: { limit: unknown, price: unknown } | null,
+ * }} opts - `sendsLux`: what it takes from the balance besides its fee; `ready`:
+ *   whether the rest of the page lets the button on
+ * @returns {{ el: HTMLElement, covered: () => boolean, draw: () => void }}
+ */
+export function payGuard({ editor, availableLux, sendsLux = 0n, shielded = false, hidden = false, button, ready = () => true, gas = null }) {
+  const el = h("div", { class: "field-error pay-guard", role: "alert", hidden: true });
+  let feeLux = feeOfGas(editor?.getGasInputs?.() ?? gas) ?? feeOfGas(gas);
+  const missing = () => {
+    if (availableLux === null || availableLux === undefined) return 0n;
+    const need = sendsLux + (feeLux ?? 0n);
+    return need > availableLux ? need - availableLux : 0n;
+  };
+  const draw = () => {
+    const missingLux = missing();
+    const text = missingLux > 0n ? shortfallText({ missingLux, moves: sendsLux > 0n, shielded, hidden }) : "";
+    if (el.textContent !== text) el.textContent = text;
+    el.hidden = !text;
+    if (button) button.disabled = Boolean(text) || Boolean(editor?.error) || !ready();
+  };
+  editor?.addEventListener?.("dusk-gas-fee", (event) => {
+    feeLux = event?.detail?.feeLux ?? null;
+    draw();
+  });
+  draw();
+  return { el, covered: () => missing() === 0n, draw };
 }
 
 /**

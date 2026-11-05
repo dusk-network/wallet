@@ -59,7 +59,7 @@ function csvLine(tx, { nodeUrl, contactName }, withContacts) {
   const lux = desc.unsent ? 0n : tx.value;
   const signed = tx.direction === "out" && lux > 0n ? `-${formatLuxToDusk(lux)}` : formatLuxToDusk(lux);
   // A token's amount, which no DUSK column holds, goes with what it did.
-  const token = desc.amount && desc.amount.unit !== "DUSK" ? `${desc.amount.value} ${desc.amount.unit}` : "";
+  const token = desc.amount && desc.amount.unit !== "DUSK" ? `${desc.amount.plain ?? desc.amount.value} ${desc.amount.unit}` : "";
   const line = [subText(desc, ""), token].filter(Boolean).join(" · ");
   const what = desc.isAddress ? line : line ? `${desc.name} (${line})` : desc.name;
   // A contract by its ID as every Dusk app writes one, without 0x; a transfer

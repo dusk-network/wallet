@@ -97,6 +97,15 @@ h1.ap-title {
   overflow-wrap: anywhere;
 }
 
+/* The host of a node a site asks to switch to: large, and never cut. */
+.ap-node {
+  max-width: 100%;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .ap-amount__unit,
 .ap-amount__lead {
   font-size: 17px;

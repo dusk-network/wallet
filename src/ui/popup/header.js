@@ -8,16 +8,18 @@ import { platform } from "../../platform/index.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
 import { profileLabelOf, walletNameOf } from "../components/ProfileName.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
+import { listedChainId } from "../../shared/nodeNetwork.js";
 
 /**
  * Get a CSS class for network status indicator.
  * @param {"online"|"offline"|"checking"|"unknown"} status
  * @returns {string}
  */
-function networkStatusClass(status) {
+function networkStatusClass(status, nodeUrl) {
   switch (status) {
     case "online":
-      return "net-status--online";
+      // Green for a network's own node: a custom one gets no such look.
+      return listedChainId(nodeUrl) === null ? "net-status--custom" : "net-status--online";
     case "offline":
       return "net-status--offline";
     case "checking":
@@ -58,8 +60,8 @@ export function createHeaderRenderer({
       networkLabel.textContent = ov?.networkName ?? "Network";
     }
 
-    // A test network says so above the header: its DUSK has no value.
-    syncTestnetStrip(document.querySelector(".panel"), ov?.networkName);
+    // A test network says so above the header, and a custom node which it is.
+    syncTestnetStrip(document.querySelector(".panel"), ov?.networkName, { nodeUrl: ov?.nodeUrl, chainId: ov?.chainId, refusal: ov?.chainRefusal });
 
     // Update network status indicator
     const nodeStatus = ov?.networkStatus?.nodeStatus ?? "unknown";
@@ -74,11 +76,12 @@ export function createHeaderRenderer({
       // Remove old status classes
       statusDot.classList.remove(
         "net-status--online",
+        "net-status--custom",
         "net-status--offline",
         "net-status--checking",
         "net-status--unknown"
       );
-      statusDot.classList.add(networkStatusClass(nodeStatus));
+      statusDot.classList.add(networkStatusClass(nodeStatus, ov?.nodeUrl));
 
       // Set title for tooltip
       const statusTitles = {

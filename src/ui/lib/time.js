@@ -46,17 +46,8 @@ export function clockText(ms) {
  * @returns {string}
  */
 export function zoneText(ms) {
-  const date = new Date(ms);
-  const short = (locale) => {
-    try {
-      return new Intl.DateTimeFormat(locale, { timeZoneName: "short" }).formatToParts(date).find((p) => p.type === "timeZoneName")?.value ?? "";
-    } catch {
-      return "";
-    }
-  };
-  // The reader's own, then the English names a zone may have: CET is en-GB's, EDT en-US's.
-  const names = [undefined, "en-US", "en-GB"].map(short).filter(Boolean);
-  return names.find((n) => !/^(GMT|UTC)[+\-−]/.test(n)) ?? names[0] ?? "";
+  // As a time in full writes it, so one screen's CET isn't another's MEZ.
+  return dateText(ms).split(" ").at(-1) ?? "";
 }
 
 /** "14:32 CET": a time of day with its zone. */

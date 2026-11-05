@@ -216,7 +216,7 @@ describe("hidden balances", () => {
     button("Review").click();
     await settle();
     expect(body.querySelector(".amount-field__error").textContent).toBe(
-      "That's more than your public balance, with the network fee."
+      "That's •••• DUSK more than your public balance, with the network fee."
     );
 
     state.draft = { kind: TX_KIND.UNSHIELD };
@@ -282,7 +282,7 @@ describe("hidden balances", () => {
     // Too much: the check holds, under the field, and doesn't give the balance away.
     typeInto(body.querySelector("input.amount-field__input"), "5000");
     expect(body.querySelector(".amount-field__error").textContent).toBe(
-      "That's •••• DUSK more than the public balance, with the network fee."
+      "That's •••• DUSK more than your public balance, with the network fee."
     );
     expect(act.showToast).not.toHaveBeenCalled();
 

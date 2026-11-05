@@ -219,7 +219,7 @@ export function addressBookView(ov, { state, actions } = {}) {
       if (ab.mode !== "pick") return null;
       const saved = new Set(items.map((e) => lower(e?.address)));
       const own = ownAddresses(ov);
-      const names = contactNames(state, actions);
+      const names = contactNames(state, actions, ov);
       const recent = [];
       for (const tx of activityRows(ov, state)) {
         if (recent.length >= 5) break;
@@ -377,7 +377,7 @@ export function addressBookView(ov, { state, actions } = {}) {
 
     // This contact's transactions, as Activity shows them.
     const hidden = balancesHidden(ov);
-    const names = contactNames(state, actions);
+    const names = contactNames(state, actions, ov);
     const now = Date.now();
     // A token's counterparties too: whom it went to or came from, and whom an approval lets spend it.
     const rows = activityRows(ov, state).filter(({ counterparty, sent }) =>

@@ -286,6 +286,30 @@ body[data-runtime="tauri"].page--full .panel {
   white-space: nowrap;
 }
 
+/* Text someone else chose, and a line under it when it had hidden characters */
+.safe-text__flag {
+  display: block;
+  margin-top: 2px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* A node that isn't a network's own says which it is, in neutral words, its
+   whole host showing: the end of a host is what names it. */
+.testnet-strip.node-strip {
+  border-bottom-color: var(--border);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.testnet-strip.node-strip--refused {
+  background: color-mix(in oklab, var(--danger) 13%, var(--surface-1));
+  color: var(--text);
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -453,6 +477,25 @@ code {
   gap: 10px;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+/* The end of a Review stays in view however long the Review is: what stops it,
+   and Confirm. It covers the scroller's padding, so nothing shows under it. */
+.review-actions {
+  position: sticky;
+  bottom: calc(var(--panel-padding) * -1);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: calc(var(--panel-padding) * -1);
+  padding: 10px 0 var(--panel-padding);
+  background: var(--background);
+}
+
+.panel-content:has(.review-actions) {
+  /* What gets the focus isn't left under it. */
+  scroll-padding-bottom: 96px;
 }
 
 /* Button rows that should align as a neat 2-column grid (e.g. Receive actions) */
@@ -1451,6 +1494,12 @@ body.page--popup .site-bar-action {
     height: var(--strip-height);
   }
 
+  /* Long words wrap to the height they take; the sidebar still sits under it. */
+  body.page--full .panel > .testnet-strip.node-strip {
+    height: auto;
+    min-height: var(--strip-height);
+  }
+
   body.page--full .panel-header {
     position: sticky;
     top: var(--strip-height);
@@ -2371,6 +2420,10 @@ button.network-pill.is-disabled .network-pill__chev {
 
 .net-status--online {
   background-color: var(--online);
+}
+
+.net-status--custom {
+  background-color: var(--text-subtle);
 }
 
 .net-status--offline {

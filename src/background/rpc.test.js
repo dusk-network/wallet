@@ -923,6 +923,27 @@ describe("background rpc handler", () => {
     );
   });
 
+  it("dusk_sendTransaction tells its approval which of the gas the site chose, and a site can't say otherwise", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    const send = (extra) =>
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", ...extra },
+      });
+    const asked = () => requestUserApproval.mock.lastCall[2].feeFromSite;
+
+    await send({ gas: { limit: "10000000", price: "50" } });
+    expect(asked()).toEqual({ limit: true, price: true });
+    await send({ gas: { limit: "10000000" } });
+    expect(asked()).toEqual({ limit: true, price: false });
+    await send({ feeFromSite: { limit: false, price: false }, gas: { limit: "10000000", price: "50" } });
+    expect(asked()).toEqual({ limit: true, price: true });
+    await send({});
+    expect(asked()).toEqual({ limit: false, price: false });
+  });
+
   it("dusk_sendTransaction applies the higher Phoenix transfer gas default", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
@@ -1789,6 +1810,36 @@ describe("background rpc handler", () => {
     expect(setSettings).toHaveBeenCalledWith({ nodeUrl, chainId: 2 });
     expect(readChainId).toHaveBeenCalledWith(nodeUrl);
     expect(readChainId.mock.invocationCallOrder.at(-1)).toBeGreaterThan(requestUserApproval.mock.invocationCallOrder.at(-1));
+  });
+
+  it("dusk_switchNetwork names a custom node Custom with its host, whatever its name looks like or it was known as", async () => {
+    vi.resetModules();
+    const { noteChainId } = await import("../shared/nodeNetwork.js");
+    const { handleRpc } = await import("./rpc.js");
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    noteChainId("https://hostile-node.example", 1);
+
+    for (const nodeUrl of ["https://hostile-node.example", "https://nodes.dusk.network.evil.example", "https://testnet.evil.example"]) {
+      await handleRpc("https://dapp.example", { method: "dusk_switchNetwork", params: { nodeUrl } });
+      const [, , { to }] = requestUserApproval.mock.lastCall;
+      expect(to).toMatchObject({ nodeUrl, host: new URL(nodeUrl).host, networkName: "Custom" });
+      expect(to.chainId).not.toMatch(/^dusk:[0-3]$/);
+    }
+    noteChainId("https://hostile-node.example", null);
+  });
+
+  it("dusk_switchNetwork keeps the chain ID a node was added with: it's asked nothing, and a site can't change it", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    vaultValue = { v: 1 };
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    settings = { ...settings, nodeChains: { "https://node.example": 3 } };
+    readChainId.mockClear();
+
+    await handleRpc("https://dapp.example", { method: "dusk_switchNetwork", params: { nodeUrl: "https://node.example" } });
+    expect(readChainId).not.toHaveBeenCalled();
+    expect(setSettings).toHaveBeenCalledWith({ nodeUrl: "https://node.example", chainId: 3 });
   });
 
   it("dusk_switchNetwork asks a site's node nothing when the user declines the switch", async () => {

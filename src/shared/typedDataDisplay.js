@@ -6,8 +6,10 @@
  * are unambiguous only for schema names accepted by the shared validator.
  */
 import { hashTypedDataHex } from "@dusk/typed-data";
-import { isUnsafeC0ControlCodePoint } from "./signMessagePreview.js";
+import { escapeCodeUnit, sanitizeStringForDisplay } from "./safeText.js";
 import { hexToBytes, sha256Hex } from "./bytes.js";
+
+export { sanitizeStringForDisplay };
 
 export const TYPED_DATA_DISPLAY_MAX_DEPTH = 8;
 export const TYPED_DATA_DISPLAY_MAX_ROWS = 200;
@@ -18,17 +20,8 @@ const ARRAY_FIXED = /^(.+)\[([1-9][0-9]*)\]$/;
 // Same shadowing hazard as the protocol: a field literally named
 // "__proto__" must not be treated as a live object-property lookup.
 const RESERVED_FIELD_NAMES = new Set(["__proto__", "constructor", "prototype"]);
-const REPLACEMENT_CHAR = "�";
-
-const BIDI_CONTROL = /\p{Bidi_Control}/u;
-const FORMAT_CONTROL = /\p{Cf}/u;
-const LINE_SEPARATOR = /[\n\r\u2028\u2029]/u;
 // ponytail: one 2 MiB text view; use pagination if legitimate requests exceed it.
 const MAX_DISCLOSURE_CHARS = 2 * 1024 * 1024;
-
-function escapeCodeUnit(char) {
-  return `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
-}
 
 /**
  * Prepare a JSON snapshot and its full ASCII-only disclosure. JSON escapes
@@ -55,10 +48,6 @@ export function prepareTypedDataDisclosure(input, digestHex) {
   return { json, input: snapshot };
 }
 
-function isC1ControlCodePoint(code) {
-  return code === 0x7f || (code >= 0x80 && code <= 0x9f);
-}
-
 function isPlainObject(v) {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
@@ -73,38 +62,6 @@ function parseArrayType(typeStr) {
 
 function makeRow(path, type, display, flags) {
   return { path, type: typeof type === "string" ? type : "", display, flags: flags || [] };
-}
-
-/**
- * Bound a readable preview by source code points without splitting pairs.
- * Replace unsafe controls and visibly escape formatting/line separators.
- * Non-NFC sequences are flagged, never normalized. Originals remain available
- * in the full JSON view; these display substitutions must never be signed.
- */
-export function sanitizeStringForDisplay(raw, maxChars = TYPED_DATA_DISPLAY_MAX_STRING_CHARS) {
-  const flags = new Set();
-  const out = [];
-  for (const char of raw) {
-    const code = char.codePointAt(0);
-    if (code >= 0xd800 && code <= 0xdfff) {
-      flags.add("invalid_surrogate");
-      out.push(REPLACEMENT_CHAR);
-    } else if (BIDI_CONTROL.test(char)) {
-      flags.add("bidi_control");
-      out.push(REPLACEMENT_CHAR);
-    } else if (FORMAT_CONTROL.test(char) || LINE_SEPARATOR.test(char)) {
-      flags.add(LINE_SEPARATOR.test(char) ? "line_separator" : "invisible_format");
-      out.push(char.replace(/[\s\S]/g, escapeCodeUnit));
-    } else if (code === 0x09 || isUnsafeC0ControlCodePoint(code) || isC1ControlCodePoint(code)) {
-      flags.add("control_chars");
-      out.push(REPLACEMENT_CHAR);
-    } else {
-      out.push(char);
-    }
-  }
-  if (raw.normalize("NFC") !== raw) flags.add("non_nfc");
-  if (out.length > maxChars) flags.add("truncated");
-  return { display: out.slice(0, maxChars).join(""), flags: [...flags] };
 }
 
 function describeStringLeaf(value, type, path, limits) {

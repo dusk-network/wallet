@@ -50,6 +50,18 @@ describe("network menu", () => {
     expect(items().map((el) => el.getAttribute("tabindex"))).toEqual(Array(5).fill("-1"));
   });
 
+  it("checks Custom for any address a network's file doesn't list, with its host, whatever it looks like", () => {
+    menu.open(pill, { nodeUrl: "https://testnet.evil.example" });
+    expect(items().map((el) => [el.querySelector(".net-menu-item-label").textContent, el.getAttribute("aria-checked")])).toEqual([
+      ["Mainnet", "false"],
+      ["Testnet", "false"],
+      ["Devnet", "false"],
+      ["Local", "false"],
+      ["Custom", "true"],
+    ]);
+    expect(item("Custom").querySelector(".net-menu-item-hint").textContent).toBe("testnet.evil.example");
+  });
+
   it("moves with the arrow keys, Home and End, and goes back to the pill on Escape", () => {
     menu.open(pill, ov);
     const at = () => dom.document.activeElement.querySelector(".net-menu-item-label").textContent;

@@ -1,46 +1,35 @@
 import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
-import { copyButton } from "../../components/CopyButton.js";
+import { copyButton, resetCopied } from "../../components/CopyButton.js";
 import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
 import { duskNameEl } from "../../components/DuskName.js";
 import { shortAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
 import { segmented } from "../../components/Segmented.js";
-import { normalizeDuskInput, parseDuskToLux, amountForInput } from "../../../shared/amount.js";
+import { amountForInput, amountProblem, formatLuxToDusk, parseDuskToLux, safeBigInt } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
-import {
-  buildDuskUri,
-} from "../../../shared/duskUri.js";
+import { buildDuskUri, MEMO_TOO_LONG_TEXT, memoTooLong } from "../../../shared/duskUri.js";
 
-function normalizeRequestAmount(amountStr) {
-  const raw = String(amountStr ?? "").trim();
-  if (!raw) return "";
-
-  // Allow users to type a trailing '.' (e.g. "1.") without marking it invalid.
-  let s = normalizeDuskInput(raw);
-  if (s.endsWith(".")) s = s.slice(0, -1);
-
-  // "." becomes empty after trimming '.' -> treat as invalid.
-  if (!s) return null;
-
-  // Basic format guard.
-  if (!/^\d+(\.\d+)?$/.test(s)) return null;
-
-  // Enforce max 9 decimals (LUX precision) so we don't silently truncate.
-  const parts = s.split(".");
-  if (parts[1] && parts[1].length > 9) return null;
-
-  // Validate using the canonical parser, on what was typed: it reads a
-  // language's separators itself, and what's normalized no longer has them.
+/**
+ * The amount a request asks for, as Send will read it: plain, "" with none, and
+ * what's wrong with it when Send would refuse it.
+ * @param {string} typed
+ * @returns {{ plain: string, error: string }}
+ */
+function requestAmount(typed) {
+  const raw = String(typed ?? "").trim();
+  if (!raw) return { plain: "", error: "" };
+  // A separator typed last is still being typed: "1," on the way to "1,5".
+  const amount = /[.,]$/.test(raw) ? raw.slice(0, -1) : raw;
+  let lux;
   try {
-    parseDuskToLux(raw.endsWith(".") || raw.endsWith(",") ? raw.slice(0, -1) : raw);
+    lux = safeBigInt(parseDuskToLux(amount), 0n);
   } catch {
-    return null;
+    return { plain: "", error: amountProblem(amount) };
   }
-
-  return s;
+  return lux > 0n ? { plain: formatLuxToDusk(lux), error: "" } : { plain: "", error: "Enter an amount greater than 0." };
 }
 
 function isTauriMobileLike() {
@@ -158,7 +147,8 @@ export function receiveView(ov, { state, actions } = {}) {
     value: typeof r.memo === "string" ? r.memo : "",
     onEnter: () => copyRequestBtn.click(),
   });
-  const amountErr = h("div", { class: "err", style: "display:none" });
+  const amountErr = h("div", { class: "field-error receive-amount-error", role: "alert", hidden: true });
+  const memoErr = h("div", { class: "field-error memo-error", role: "alert", hidden: true });
 
   // The request link's copy, which Enter in the memo presses; on once the QR holds a request.
   const copyRequestBtn = copyButton({
@@ -184,6 +174,7 @@ export function receiveView(ov, { state, actions } = {}) {
         amountErr,
         fieldLabel(memoInput, "Memo"),
         memoInput,
+        memoErr,
         h("div", {
           class: "muted",
           text: "The QR updates to a dusk: request link.",
@@ -198,14 +189,9 @@ export function receiveView(ov, { state, actions } = {}) {
     update();
   });
 
-  const setAmountErr = (txt) => {
-    if (!txt) {
-      amountErr.style.display = "none";
-      amountErr.textContent = "";
-      return;
-    }
-    amountErr.style.display = "block";
-    amountErr.textContent = String(txt);
+  const sayUnder = (el, text) => {
+    el.textContent = text;
+    el.hidden = !text;
   };
 
   // --- Actions ---------------------------------------------------------
@@ -335,22 +321,18 @@ export function receiveView(ov, { state, actions } = {}) {
   function update() {
     wantRequest = false;
 
-    // Validate request fields
-    const norm = normalizeRequestAmount(amountInput.value);
-    const amountValid = norm !== null;
+    // The checks Send has, so the link is one the payer can use. Said only with the panel open.
+    const { plain: amountForUri, error } = requestAmount(amountInput.value);
     const memoVal = String(memoInput.value ?? "").trim();
+    const memoOver = memoTooLong(memoVal);
+    const valid = !error && !memoOver;
+    sayUnder(amountErr, requestDetails.open ? error : "");
+    sayUnder(memoErr, requestDetails.open && memoOver ? MEMO_TOO_LONG_TEXT : "");
 
-    // Only show amount errors when the request panel is open and the user typed something.
-    if (requestDetails.open && norm === null) {
-      setAmountErr("Invalid amount (max 9 decimals)");
-    } else {
-      setAmountErr("");
-    }
-
-    const amountForUri = amountValid ? norm : "";
     const hasReq = !!memoVal || !!amountForUri;
+    const asked = curUri;
 
-    curUri = amountValid
+    curUri = valid
       ? buildDuskUri({
           kind: tab,
           recipient: curRecipient,
@@ -359,8 +341,10 @@ export function receiveView(ov, { state, actions } = {}) {
           memo: memoVal || "",
         })
       : "";
+    // Copied was about the link before.
+    if (curUri !== asked) resetCopied(copyRequestBtn);
 
-    wantRequest = !!(requestDetails.open && amountValid && hasReq && curUri);
+    wantRequest = !!(requestDetails.open && valid && hasReq && curUri);
 
     // QR encodes the request only when the request panel is open and has content.
     const qrValue = wantRequest ? curUri : curRecipient;
@@ -372,7 +356,7 @@ export function receiveView(ov, { state, actions } = {}) {
     if (wantRequest) {
       summaryMeta.textContent = amountForUri ? `${amountForInput(amountForUri)} DUSK` : "With memo";
     } else {
-      summaryMeta.textContent = hasReq ? "Configured" : "";
+      summaryMeta.textContent = hasReq && valid ? "Configured" : "";
     }
 
     downloadBtn.disabled = !curQrValue;

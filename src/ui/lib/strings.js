@@ -1,5 +1,7 @@
 import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
+import { amountLocale } from "../../shared/amount.js";
+
 /**
  * A Dusk account, address, contract ID or hash as every Dusk app shortens it
  * (@dusk-network/networks/format): its first and last six characters around
@@ -62,10 +64,10 @@ export function siteName(origin) {
 }
 
 /**
- * A yearly rate as the wallet says it: "23%".
+ * A yearly rate as the wallet says it, in the browser's language: "23%", "23 %".
  * @param {number} rate - a fraction
  */
-export const ratePercent = (rate) => new Intl.NumberFormat("en", { maximumFractionDigits: 0, style: "percent" }).format(rate);
+export const ratePercent = (rate) => new Intl.NumberFormat(amountLocale(), { maximumFractionDigits: 0, style: "percent" }).format(rate);
 
 /**
  * A Dusk contract ID as every Dusk app writes it (@dusk-network/networks):

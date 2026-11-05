@@ -1,21 +1,7 @@
+import { isUnsafeC0ControlCodePoint, sanitizeStringForDisplay, textNeedsReview } from "./safeText.js";
+
 export const SIGN_MESSAGE_PREVIEW_MAX_CHARS = 500;
 export const SIGN_MESSAGE_PREVIEW_MAX_BYTES = 4096;
-
-function toCodePoints(text) {
-  return Array.from(String(text ?? ""));
-}
-
-/**
- * True for a C0 control code point that is unsafe to render as-is on an
- * approval screen (excludes the whitespace controls tab/lf/cr, which are
- * fine in free text). Exported so typedDataDisplay.js shares this exact
- * definition of "unsafe control character" for per-field string leaves
- * instead of maintaining a second, potentially drifting copy.
- */
-export function isUnsafeC0ControlCodePoint(code) {
-  if (code === 0x09 || code === 0x0a || code === 0x0d) return false;
-  return code < 0x20 || code === 0x7f;
-}
 
 function hasUnsafeControlCharacters(text) {
   for (const ch of String(text ?? "")) {
@@ -34,7 +20,9 @@ function decodeUtf8(bytes) {
  * Classify arbitrary signMessage bytes for approval display.
  *
  * The returned preview is display metadata only. It must not be used as signing
- * input, and callers must render `text` with textContent rather than HTML.
+ * input, and callers must render `text` with textContent rather than HTML. Its
+ * text is what's safe to show (safeText.js): characters that change how text
+ * reads are neutralized as typed data's are, and `needsReview` says so.
  *
  * @param {Uint8Array|ArrayBuffer|ArrayLike<number>} bytes
  */
@@ -72,15 +60,16 @@ export function describeSignMessagePreview(bytes) {
     });
   }
 
-  const chars = toCodePoints(text);
-  const truncated = chars.length > SIGN_MESSAGE_PREVIEW_MAX_CHARS;
+  const { display, flags } = sanitizeStringForDisplay(text, SIGN_MESSAGE_PREVIEW_MAX_CHARS, { keepLines: true });
+  const truncated = flags.includes("truncated");
 
   return Object.freeze({
     kind: "text",
     byteLength,
     encoding: "utf-8",
-    text: truncated ? chars.slice(0, SIGN_MESSAGE_PREVIEW_MAX_CHARS).join("") : text,
+    text: display,
     truncated,
+    needsReview: textNeedsReview(flags),
     label: truncated ? "Readable message preview (truncated)" : "Readable message",
   });
 }

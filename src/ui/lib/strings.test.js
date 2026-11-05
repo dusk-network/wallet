@@ -1,5 +1,17 @@
-import { describe, it, expect } from "vitest";
-import { shortAddress, shortEvmAddress, shortEvmHash, normalizeMnemonic, siteName } from "./strings.js";
+import { describe, it, expect, vi } from "vitest";
+import { ratePercent, shortAddress, shortEvmAddress, shortEvmHash, normalizeMnemonic, siteName } from "./strings.js";
+
+describe("ratePercent", () => {
+  it("writes a rate as the browser's language does", () => {
+    expect(ratePercent(0.23)).toBe("23%");
+    vi.stubGlobal("navigator", { language: "de-DE" });
+    try {
+      expect(ratePercent(0.23).replace(/\s/g, " ")).toBe("23 %");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("shortAddress", () => {
   it("keeps the first and last six characters, and short input as it is", () => {

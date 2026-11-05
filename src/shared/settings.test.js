@@ -48,14 +48,31 @@ describe("settings", () => {
     await expect(getSettings()).resolves.toMatchObject({ chainId: 1 });
   });
 
-  it("forgets a node's network when it's chosen again and can't say this time", async () => {
-    const { setSettings } = await import("./settings.js");
+  it("keeps the chain ID a node was added with through a switch away and back, whatever it can say then", async () => {
+    const { getSettings, setSettings } = await import("./settings.js");
     const { networkForNode } = await import("./nodeNetwork.js");
     await setSettings({ nodeUrl: "https://my-node.example", chainId: 2 });
     await setSettings({ nodeUrl: "https://nodes.dusk.network" });
     expect(networkForNode("https://my-node.example")?.name).toBe("testnet");
     await setSettings({ nodeUrl: "https://my-node.example", chainId: null });
-    expect(networkForNode("https://my-node.example")).toBeNull();
+    await expect(getSettings()).resolves.toMatchObject({ chainId: 2 });
+    expect(networkForNode("https://my-node.example")?.name).toBe("testnet");
+    // Without being asked, in settings kept before chain IDs were fixed too.
+    await setSettings({ nodeUrl: "https://nodes.dusk.network" });
+    await setSettings({ nodeUrl: "https://my-node.example" });
+    await expect(getSettings()).resolves.toMatchObject({ chainId: 2 });
+    value = { nodeUrl: "https://old-node.example", chainId: 3 };
+    await setSettings({ nodeUrl: "https://nodes.dusk.network" });
+    await setSettings({ nodeUrl: "https://old-node.example" });
+    await expect(getSettings()).resolves.toMatchObject({ chainId: 3 });
+  });
+
+  it("takes a network's own chain ID from its file, whatever is stored or given", async () => {
+    const { getSettings, setSettings } = await import("./settings.js");
+    value = { nodeUrl: "https://testnet.nodes.dusk.network", chainId: 1, nodeChains: { "https://testnet.nodes.dusk.network": 1 } };
+    await expect(getSettings()).resolves.toMatchObject({ chainId: 2 });
+    await setSettings({ nodeUrl: "https://nodes.dusk.network", chainId: 2 });
+    await expect(getSettings()).resolves.toMatchObject({ chainId: 1 });
   });
 
   it("names the node's network for anything in this context that loads the settings, a worker just woken included", async () => {
@@ -67,12 +84,15 @@ describe("settings", () => {
     expect(networkForNode("https://my-node.example")?.name).toBe("testnet");
   });
 
-  it("keeps a chain ID read later only while the settings still name that node", async () => {
+  it("keeps a chain ID read later only while the settings still name that node, and only the first", async () => {
     const { getSettings, rememberNodeChain, setSettings } = await import("./settings.js");
     await setSettings({ nodeUrl: "https://my-node.example" });
     await expect(rememberNodeChain("https://my-node.example/", 2)).resolves.toBe(true);
     await expect(rememberNodeChain("https://my-node.example", 2)).resolves.toBe(false);
     await expect(rememberNodeChain("https://my-node.example", "2")).resolves.toBe(false);
+    // What it says later changes nothing kept.
+    await expect(rememberNodeChain("https://my-node.example", 1)).resolves.toBe(false);
+    await expect(getSettings()).resolves.toMatchObject({ chainId: 2 });
     // A read that finished after a switch, even at once, leaves the switch's node alone.
     await Promise.all([setSettings({ nodeUrl: "https://other-node.example", chainId: 1 }), rememberNodeChain("https://my-node.example", 3)]);
     await expect(getSettings()).resolves.toMatchObject({ nodeUrl: "https://other-node.example", chainId: 1 });

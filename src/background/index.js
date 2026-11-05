@@ -15,6 +15,7 @@ import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { askNodeChainId, chainRefusal } from "../shared/nodeNetwork.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -62,7 +63,8 @@ import { getWalletDirectory } from "../shared/wallets.js";
 import {
   getNetworkStatus,
   checkAllEndpoints,
-  readChainId,
+  chainIdForChoice,
+  statusChainRefusal,
   resetNetworkStatus,
   isStatusStale,
 } from "../shared/networkStatus.js";
@@ -422,6 +424,40 @@ async function reconcileTxPresence(hash, { preserveRemoved = false, epoch } = {}
   };
 }
 
+// A send still marked on its way that no watcher follows: the engine's watcher
+// gives up after 180 s and says so, and is gone with a browser restart. So it
+// doesn't say "on its way" for good, its outcome is looked up as the wallet
+// draws, at most once a minute, from a minute on: blocks come every 10 s or so.
+// While a watcher may still be following it, only an outcome counts: that the
+// node doesn't list it yet says nothing the watcher won't.
+const LOOKED_UP_FROM_MS = 60_000;
+const WATCHED_FOR_MS = 190_000;
+const RECHECK_EVERY_MS = 60_000;
+const recheckedAt = new Map();
+
+async function recheckUnwatchedSends(txs, nodeUrl) {
+  const now = Date.now();
+  const due = txs.filter(
+    (tx) =>
+      (tx?.status === "submitted" || tx?.status === "mempool") &&
+      now - Number(tx.submittedAt ?? 0) >= LOOKED_UP_FROM_MS &&
+      now - Math.max(Number(tx.lastCheckedAt ?? 0), recheckedAt.get(tx.hash) ?? 0) >= RECHECK_EVERY_MS
+  );
+  if (!due.length) return;
+  const epoch = await getTxEpoch();
+  for (const tx of due) {
+    recheckedAt.set(tx.hash, now);
+    if (now - Number(tx.submittedAt ?? 0) < WATCHED_FOR_MS) {
+      const { state } = await classifyTxPresence(nodeUrl, tx.hash);
+      if (!String(state).startsWith("executed")) continue;
+    }
+    const { status, error } = await reconcileTxPresence(tx.hash, { epoch });
+    if (status === tx.status) continue;
+    recheckedAt.delete(tx.hash);
+    emitUiTxStatus({ hash: tx.hash, status, ok: status === "executed" ? true : status === "failed" ? false : undefined, error }).catch(() => {});
+  }
+}
+
 /** Start or restart the auto-lock alarm based on current settings. */
 async function setupAutoLockAlarm() {
   const settings = await getSettings();
@@ -496,6 +532,23 @@ ext?.runtime?.onConnect?.addListener((port) => {
 
 // Keep provider state in sync even if storage is mutated from extension pages.
 registerStorageChangeForwarder();
+
+// The requests that end in a signature.
+const SIGNING_REQUESTS = new Set(["send_tx", "sign_message", "sign_auth", "sign_typed_data"]);
+
+// The balance a site's request to send pays from, in Lux, or null: not read in
+// time, or the shielded balance of a profile that isn't the one selected, which
+// the engine only keeps for the one selected.
+async function paysFor(params, accountIndex, status) {
+  const shielded = String(params?.privacy ?? "").toLowerCase() === "shielded";
+  if (shielded && accountIndex !== Number(status.selectedAccountIndex ?? 0)) return null;
+  const read = shielded
+    ? engineCall("dusk_getShieldedBalance").then((b) => b?.spendable ?? b?.value)
+    : engineCall("dusk_getPublicBalance", { profileIndex: accountIndex }).then((b) => b?.value);
+  const late = new Promise((resolve) => setTimeout(resolve, 2_000, null));
+  const lux = await Promise.race([read.catch(() => null), late]);
+  return /^\d+$/.test(String(lux ?? "")) ? String(lux) : null;
+}
 
 function getOriginFromSender(sender) {
   // sender.url for content scripts contains the full page URL. Some browser
@@ -791,14 +844,31 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
+        // What's asked to be signed, on a node that contradicts the chain it's
+        // fixed to: why not, at once. The engine refuses it again as it signs.
+        const signs = SIGNING_REQUESTS.has(entry.kind);
+        const refusal =
+          signs && status.isUnlocked
+            ? chainRefusal(settings.nodeUrl, settings.chainId, await askNodeChainId(settings.nodeUrl, { timeoutMs: 2_000 }), { required: entry.kind === "send_tx", ahead: true })
+            : "";
+
+        // What pays for a request to send, as the window checks it can: a
+        // read that's slow or fails checks nothing, and the window doesn't wait for it.
+        const accountIndex = perm?.accountIndex ?? status.selectedAccountIndex ?? 0;
+        const payBalance = entry.kind === "send_tx" && status.isUnlocked ? await paysFor(entry.params, Number(accountIndex) || 0, status) : null;
+
         sendResponse({
           rid: message.rid,
           kind: entry.kind,
           origin: entry.origin,
           params: entry.params,
-          // The wallet's network, for the approval's header, by the chain ID its node gave.
+          payBalance,
+          hideBalances: settings?.hideBalances === true,
+          // The wallet's network for the approval's header, by its node's
+          // address, and the chain ID that node signs for.
           nodeUrl: String(settings?.nodeUrl ?? ""),
           chainId: settings?.chainId ?? null,
+          chainRefusal: refusal,
           networkName: networkNameFromNodeUrl(String(settings?.nodeUrl ?? "")),
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
@@ -875,9 +945,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           await clearAllPermissions();
           await clearVault();
           // Nothing of the old wallet stays: its transactions, shielded notes
-          // and history. A store that can't be cleared fails the reset and
-          // keeps it pending (walletReset.js).
+          // and history, its names and addresses, and the node it was on. A
+          // store that can't be cleared fails the reset and keeps it pending
+          // (walletReset.js).
           await finishReset();
+          // On the default network from now on.
+          invalidateEngineConfig();
+          await ensureEngineConfigured().catch(() => {});
         });
         sendResponse({ ok: true });
         return;
@@ -1026,6 +1100,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
           const wallet = await createVault(mnemonic, password);
           if (pending) await endReset();
+          if (pending) invalidateEngineConfig();
           await ensureEngineConfigured();
           const result = await unlockEngine([{ ...wallet, mnemonic: String(mnemonic) }], wallet.id);
           // A phrase made here has no history: its shielded sync starts now.
@@ -1070,6 +1145,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           await clearVault();
           const restored = await createVault(mnemonic, password);
           await endReset();
+          // On the default network, as after a reset.
+          invalidateEngineConfig();
+          await ensureEngineConfigured();
           const result = await unlockEngine([{ ...restored, mnemonic: String(mnemonic) }], restored.id);
           await keepWalletShown(result);
           await updateActivity();
@@ -1136,9 +1214,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
-        // The node's chain ID, which names its network, kept with it (null
-        // while it can't be read: the next status check asks again).
-        const chainId = await readChainId(nodeUrl);
+        // The chain ID the node signs for, fixed with it (null while it can't
+        // be read: the next status check asks again). A node added before that
+        // says another now stays as it was, unless it's saved knowingly.
+        const chainId = await chainIdForChoice(nodeUrl, { accept: Number.isInteger(message?.acceptChain) ? message.acceptChain : null });
 
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           cancelPendingApprovals(null, "Network changed");
@@ -1263,6 +1342,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         } catch {
           txs = [];
         }
+        recheckUnwatchedSends(txs, settings.nodeUrl).catch(() => {});
 
         // Account names (stored per walletId, which is profile 0 account).
         let accountNames = {};
@@ -1346,7 +1426,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // the background; one that reads the chain ID tells the popup to
         // draw again.
         const networkStatus = await getNetworkStatus();
-        const failing = Boolean(balanceError) || networkStatus?.nodeStatus === "offline" || !Number.isInteger(chainId);
+        const refusal = statusChainRefusal(networkStatus, settings.nodeUrl, chainId);
+        const failing = Boolean(balanceError) || Boolean(refusal) || networkStatus?.nodeStatus === "offline" || !Number.isInteger(chainId);
         if (isStatusStale(networkStatus, failing ? 30_000 : 5 * 60_000)) {
           checkAllEndpoints({
             nodeUrl: settings.nodeUrl,
@@ -1384,6 +1465,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           ipfsGateway: settings.ipfsGateway ?? "",
           hideBalances: settings.hideBalances === true,
           chainId,
+          chainRefusal: refusal,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           networkStatus,
           activeOrigin,

@@ -3,7 +3,7 @@
 // at the bottom where they always show. Chain, node and raw bytes sit under
 // Details. A locked wallet shows what is asked, with Unlock and Reject.
 
-import { UI_DISPLAY_DECIMALS, formatDuskExact, groupThousands, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, amountLocale, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, callsBridge } from "../../shared/bridgeCalls.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
@@ -11,8 +11,9 @@ import { getMinimumGas } from "../../shared/txDefaults.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { networkFor } from "@dusk-network/networks";
-import { chainIdForNode, noteChainId } from "../../shared/nodeNetwork.js";
+import { chainIdForNode, networkTextOf, noteChainId } from "../../shared/nodeNetwork.js";
 import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist.js";
+import { safeText, textNeedsReview } from "../../shared/safeText.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
 import { contractLabel } from "../../shared/knownCalls.js";
@@ -25,6 +26,8 @@ import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
 import { contractValueEl } from "../components/ContractValue.js";
+import { payGuard } from "../components/NetworkGas.js";
+import { safeTextEl } from "../components/SafeText.js";
 import "../components/GasEditor.js";
 import {
   amountParts,
@@ -47,6 +50,7 @@ import { runtimeGetURL, runtimeSendMessage, tabsCreate } from "../../platform/ex
 
 const app = document.getElementById("app");
 const MAX_U64 = 18446744073709551615n;
+const TEXT_REVIEW_TITLE = "Text needs review";
 
 async function send(msg) {
   return runtimeSendMessage(msg, { allowLastError: true });
@@ -87,9 +91,10 @@ function renderError(text) {
 }
 
 // The network the request is on, in the header beside the wallet's name, and
-// on a test network the strip at the top that says its DUSK has no value.
-function showNetwork(name) {
-  syncTestnetStrip(app?.closest?.(".panel") ?? document.body, name);
+// at the top the strip that says a test network's DUSK has no value, or which
+// node a custom one is.
+function showNetwork(name, node) {
+  syncTestnetStrip(app?.closest?.(".panel") ?? document.body, name, node);
   const chip = document.getElementById("approval-network");
   if (!chip) return;
   chip.textContent = name || "";
@@ -303,8 +308,10 @@ export async function renderNotification() {
   // The network: a transaction's own, which it was approved for, a
   // signature's chain, or the wallet's.
   const nodeUrl = String(params?.nodeUrl ?? pending.nodeUrl ?? "");
+  const chainRefused = String(pending.chainRefusal ?? "");
   showNetwork(
-    String(params?.networkName ?? "") || chainName(params?.chainId) || String(pending.networkName ?? "") || (nodeUrl ? networkNameFromNodeUrl(nodeUrl) : "")
+    String(params?.networkName ?? "") || chainName(params?.chainId) || String(pending.networkName ?? "") || (nodeUrl ? networkNameFromNodeUrl(nodeUrl) : ""),
+    { nodeUrl, chainId: pending.chainId ?? null }
   );
 
   const accountsArr = Array.isArray(accounts) ? accounts : [];
@@ -468,6 +475,11 @@ export async function renderNotification() {
     return;
   }
 
+  if (chainRefused) {
+    renderChainRefused();
+    return;
+  }
+
   switch (kindNorm) {
     case "connect":
       return renderConnect();
@@ -485,6 +497,21 @@ export async function renderNotification() {
       return renderSendTx();
     default:
       renderError(`Unknown kind: ${kindNorm || String(kind)}`);
+  }
+
+  // ---- A node that contradicts its chain ----------------------------------
+
+  // What the site asks, why nothing is signed on this node, and Reject.
+  function renderChainRefused() {
+    const summary = requestSummary(kindNorm, params, { own });
+    show(
+      [
+        site,
+        requestHead({ title: summary.title, amount: summary.amount, to: headTo(summary.to) }),
+        warning("This can't be signed on this node", chainRefused),
+      ],
+      decisionBar({ approveDisabled: true }).nodes
+    );
   }
 
   // ---- Locked --------------------------------------------------------------
@@ -553,7 +580,7 @@ export async function renderNotification() {
     show(
       [
         site,
-        requestHead({ title: summary.title, amount: summary.amount, to: headTo(summary.to), sub: summary.sub }),
+        requestHead({ title: summary.title, amount: summary.amount, node: summary.node, to: headTo(summary.to), sub: summary.sub }),
         h("div", { class: "ap-unlock" }, [
           h("label", { for: "approval-password", text: "Unlock to review and approve it" }),
           pwd,
@@ -674,24 +701,26 @@ export async function renderNotification() {
 
   // ---- Switch network ------------------------------------------------------
 
+  // The host of the node it goes to in large type, what that choice means,
+  // and each side by its name, a custom node's with its host; the addresses
+  // in full and the chain IDs a site sees sit under Details.
   function renderSwitchNetwork() {
     const from = params?.from ?? {};
     const to = params?.to ?? {};
-    const net = (n) =>
-      h("span", { class: "ap-net-value" }, [
-        h("span", { text: String(n.networkName ?? "Unknown") }),
-        n.chainId ? h("span", { class: "kv-muted", text: ` · ${n.chainId}` }) : null,
-      ]);
+    const summary = requestSummary("switch_network", params);
+    const net = (n) => (n.nodeUrl ? networkTextOf(n.nodeUrl) : String(n.networkName ?? "Unknown"));
     show(
       [
         site,
-        requestHead({ title: requestSummary("switch_network", params).title, sub: "The wallet then uses that network, for every site." }),
+        requestHead({ title: summary.title, node: summary.node, sub: "The wallet then uses that network, for every site." }),
+        summary.sub ? note(summary.sub, "eye", { className: "ap-visible" }) : null,
         group([kv("From", net(from)), kv("To", net(to))]),
         details("Details", [
           group(
             [
               from.nodeUrl ? kv("From node", mono(from.nodeUrl), { stack: true }) : null,
               to.nodeUrl ? kv("To node", mono(to.nodeUrl), { stack: true }) : null,
+              to.chainId ? kv("Chain ID sites see", mono(to.chainId)) : null,
             ],
             { className: "group--inset" }
           ),
@@ -722,6 +751,7 @@ export async function renderNotification() {
           title: preview.truncated ? "Preview shortened; the hash covers the full message." : undefined,
         }),
         preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash below covers the full message." }) : null,
+        preview.needsReview ? warning(TEXT_REVIEW_TITLE, "This message has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign it if you trust this site.") : null,
       ]);
     } else {
       const reason = String(preview?.reason ?? "");
@@ -749,7 +779,7 @@ export async function renderNotification() {
         message,
         group([kv("Account", profileValue()), kv("Message hash", mono(hashLine), { stack: true })]),
         note("Signing sends no transaction and moves no funds.", "info"),
-        details("Details", [group([kv("Network", chainName(chainId) || "Custom network"), kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
+        details("Details", [group([kv("Network", nodeUrl ? networkTextOf(nodeUrl) : chainName(chainId) || "Custom"), kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
       ],
       decisionBar({ approveText: "Sign" }).nodes
     );
@@ -760,22 +790,24 @@ export async function renderNotification() {
   function renderSignAuth() {
     const chainId = String(params?.chainId ?? "");
     const nonce = String(params?.nonce ?? "");
-    const statement = String(params?.statement ?? "").trim();
+    const statement = safeText(String(params?.statement ?? "").trim(), { keepLines: true });
+    const nonceShown = safeText(nonce).text;
     const expiresAt = String(params?.expiresAt ?? "").trim();
 
     show(
       [
         site,
         requestHead({ title: "Sign in to this site?" }),
-        statement
+        statement.text
           ? h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-statement-title" }, [
               sectionTitle("The site's statement", "ap-statement-title"),
-              h("div", { class: "ap-message", text: statement }),
+              h("div", { class: "ap-message", text: statement.text }),
+              statement.flagged ? warning(TEXT_REVIEW_TITLE, "This statement has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign in if you trust this site.") : null,
             ])
           : null,
         group([
           kv("Account", profileValue()),
-          kv("Nonce", mono(nonce || "—"), { stack: nonce.length > 24 }),
+          kv("Nonce", mono(nonceShown || "—"), { stack: nonceShown.length > 24 }),
           expiresAt ? kv("Expires", dateText(expiresAt)) : null,
         ]),
         note("Only sign in to sites you trust. Signing in moves no funds.", "info"),
@@ -826,10 +858,7 @@ export async function renderNotification() {
     const { rows, truncated } = await flattenTypedMessage(disclosure.input);
     // Text shaping and normalization differences are not necessarily malicious;
     // distinguish their review notice from ordinary preview-size limits.
-    const unsafeTextFlags = ["control_chars", "bidi_control", "invalid_surrogate", "invisible_format", "line_separator", "non_nfc"];
-    const hasTextSafetyWarning = [originPreview, domainName, domainVersion, domainChainId, ...rows].some((row) =>
-      (row.flags ?? []).some((flag) => unsafeTextFlags.includes(flag))
-    );
+    const hasTextSafetyWarning = [originPreview, domainName, domainVersion, domainChainId, ...rows].some((row) => textNeedsReview(row.flags));
 
     // A row's value as the wallet will sign it, its flags in the tooltip, and
     // a notice when the preview cut it.
@@ -896,7 +925,7 @@ export async function renderNotification() {
         ]),
         hasTextSafetyWarning
           ? warning(
-              "Text needs review",
+              TEXT_REVIEW_TITLE,
               "Some origin, domain or message text contains controls, formatting characters, line separators or non-NFC sequences. The preview may use placeholders or escapes. Inspect the originals in Full signing request before signing."
             )
           : null,
@@ -976,7 +1005,7 @@ export async function renderNotification() {
   async function renderSendTx() {
     const txKind = String(params?.kind ?? "").toLowerCase();
     const txChainId = String(params?.chainId ?? "");
-    const networkName = String(params?.networkName ?? "") || networkNameFromNodeUrl(nodeUrl);
+    const networkName = nodeUrl ? networkTextOf(nodeUrl) : String(params?.networkName ?? "");
     const privacy = String(params?.privacy ?? (txKind === TX_KIND.CONTRACT_CALL ? "public" : "")).trim().toLowerCase();
     const shielded = privacy === "shielded";
     const rail = shielded ? "Shielded" : "Public";
@@ -993,6 +1022,41 @@ export async function renderNotification() {
       nodeUrl ? kv("Node", mono(nodeUrl), { stack: true }) : null,
     ];
 
+    // A fee the site chose, compared with the network's price once that's
+    // read: a warning with a way back from twice that, a note otherwise.
+    const fromSite = params?.feeFromSite ?? {};
+    const siteFee = h("div", { class: "ap-site-fee", hidden: !fromSite.limit && !fromSite.price });
+    const showSiteFee = (networkPrice, gasEditor) => {
+      const given = safeBigInt(gas?.price, 0n);
+      const asked = safeBigInt(networkPrice, 0n);
+      if (fromSite.price && asked > 0n && given >= asked * 2n) {
+        const times = (Number((given * 10n) / asked) / 10).toLocaleString(amountLocale(), { maximumFractionDigits: 1 });
+        const reset = h("button", {
+          class: "text-btn text-btn--inline",
+          type: "button",
+          text: "Use the network's price",
+          onclick: () => {
+            gasEditor.setGas?.(gasEditor.networkGas);
+            siteFee.hidden = true;
+          },
+        });
+        setChildren(siteFee, [warning("This site chose a high fee", `It's ${times} times the network's price.`, [reset])]);
+      } else if (fromSite.price) {
+        const compared =
+          asked <= 0n
+            ? "This site chose the fee."
+            : given === asked
+              ? "This site chose the fee, at the network's price."
+              : given > asked
+                ? "This site chose the fee, above the network's price."
+                : "This site chose the fee, below the network's price. It may take longer to go through.";
+        setChildren(siteFee, [note(compared)]);
+      } else if (fromSite.limit) {
+        const most = gas?.limit != null && gas?.price != null ? ` of up to ${formatFee(safeBigInt(gas.limit, 0n) * safeBigInt(gas.price, 0n), { max: true })} DUSK` : "";
+        setChildren(siteFee, [note(`This site chose the gas limit, for a fee${most} at the network's price.`)]);
+      }
+    };
+
     // The one fee editor, as on every Review: the fee and the total, then
     // Custom fee. A limit under the transaction's minimum says so while it's
     // typed, and "Use the network's price" puts back the request's limit at
@@ -1007,16 +1071,35 @@ export async function renderNotification() {
       gasEditor.minLimit = minimum;
       gasEditor.networkGas = gas;
       gasEditor.setGas(gas);
+      showSiteFee(null, gasEditor);
+      // Said of the site's own fee, until it's changed here.
+      const chosenLux = safeBigInt(gas?.limit, 0n) * safeBigInt(gas?.price, 0n);
+      gasEditor.addEventListener("dusk-gas-fee", (event) => {
+        siteFee.hidden = (!fromSite.limit && !fromSite.price) || event?.detail?.feeLux !== chosenLux;
+      });
       if (gas?.limit != null) {
         send({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" })
           .then((res) => {
             const stats = res?.result ?? res;
             const price = String(stats?.median ?? stats?.average ?? "").trim();
-            if (/^\d+$/.test(price) && price !== "0") gasEditor.networkGas = { limit: String(gas.limit), price };
+            if (/^\d+$/.test(price) && price !== "0") {
+              gasEditor.networkGas = { limit: String(gas.limit), price };
+              showSiteFee(price, gasEditor);
+            }
           })
           .catch(() => {});
       }
       return gasEditor;
+    };
+
+    // Whether what pays covers what's sent and the fee: in the bar, above the
+    // buttons, so what keeps Approve off is in view with it.
+    const available = /^\d+$/.test(String(pending.payBalance ?? "")) ? BigInt(pending.payBalance) : null;
+    const guardFor = (gasEditor, bar, sendsLux, ready = () => true) => {
+      const pay = payGuard({ editor: gasEditor, availableLux: available, sendsLux, shielded, hidden: pending.hideBalances === true, button: bar.approveBtn, ready, gas });
+      pay.el.classList.add("ap-actions__error");
+      bar.nodes.splice(1, 0, pay.el);
+      return pay;
     };
 
     if (txKind === TX_KIND.TRANSFER) {
@@ -1027,7 +1110,8 @@ export async function renderNotification() {
       // A recipient the network's file blocks: why, at the top, and no Approve.
       const blocked = blockedRecipient(to, chainIdForNode(nodeUrl));
       const bar = decisionBar({ approveDisabled: Boolean(blocked), getApprovedParams: () => gasEditor.readOverrideGas(gas) });
-      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => !blocked });
+      const pay = guardFor(gasEditor, bar, safeBigInt(amountLux, 0n), () => !blocked);
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => !blocked && pay.covered() });
       // To the bridge's account: the memo is the address the bridge pays
       // out to on another chain, and one that isn't an address there is
       // flagged, as are its fee taking the whole amount and a route it
@@ -1066,6 +1150,7 @@ export async function renderNotification() {
                 `The bridge pays out to the address in the memo. Reject this, and check the address on the site.`
               )
             : null,
+          siteFee,
           gasEditor,
           group([
             kv("From", shielded ? inWallet(h("span", { text: "Your shielded balance" })) : payerLine(rail)),
@@ -1076,9 +1161,9 @@ export async function renderNotification() {
                 })
               : kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
             service
-              ? kv(`Recipient on ${service.chain}`, h("code", { class: "ap-address", text: memo || "(none)" }), { stack: true })
+              ? kv(`Recipient on ${service.chain}`, h("code", { class: "ap-address", text: safeText(memo).text || "(none)" }), { stack: true })
               : memo
-                ? kv("Memo", memo, { stack: memo.length > 24 })
+                ? kv("Memo", safeTextEl(memo), { stack: memo.length > 24 })
                 : null,
           ]),
           details("Details", [group(networkRows(), { className: "group--inset" })]),
@@ -1089,13 +1174,13 @@ export async function renderNotification() {
     }
 
     if (txKind === TX_KIND.CONTRACT_CALL) {
-      return renderContractCall({ networkRows, gasEditorFor, rail, me });
+      return renderContractCall({ networkRows, gasEditorFor, guardFor, siteFee, rail, me });
     }
 
     renderError(`Unknown transaction kind: ${txKind || "(missing kind)"}`);
   }
 
-  async function renderContractCall({ networkRows, gasEditorFor, rail, me }) {
+  async function renderContractCall({ networkRows, gasEditorFor, guardFor, siteFee, rail, me }) {
     const gas = params?.gas ?? null;
     const amountLux = safeBigInt(params?.amount, 0n).toString();
     const depositLux = safeBigInt(params?.deposit, 0n).toString();
@@ -1167,17 +1252,16 @@ export async function renderNotification() {
         approveTitle: gated ? "Type MAX to enable approval" : "",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
       });
-      const acknowledged = () => !gated || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
       const ackInput = textInput({
         placeholder: "Type MAX to confirm",
         "aria-label": "Type MAX to confirm",
         onEnter: () => bar.approveBtn.click(),
-        oninput: () => {
-          bar.approveBtn.disabled = !acknowledged() || Boolean(gasEditor.error);
-        },
+        oninput: () => pay.draw(),
       });
-      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: acknowledged });
-      return { bar, ackInput };
+      const acknowledged = () => !gated || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
+      const pay = guardFor(gasEditor, bar, sendsLux, acknowledged);
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => acknowledged() && pay.covered() });
+      return { bar, ackInput, pay };
     };
 
     // A known DuskEVM bridge call: what it does, read from its arguments,
@@ -1185,7 +1269,8 @@ export async function renderNotification() {
     const bridge = argsOk ? bridgeCallOf(params, { own }) : null;
     if (bridge) {
       const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
-      submitOnGasEnter(gasEditor, bar.approveBtn);
+      const pay = guardFor(gasEditor, bar, sendsLux);
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => pay.covered() });
       const summary = requestSummary("send_tx", params, { own });
       let head;
       let decoded;
@@ -1233,6 +1318,7 @@ export async function renderNotification() {
           site,
           head,
           decoded,
+          siteFee,
           gasEditor,
           callRows(),
           detailsBlock(),
@@ -1296,7 +1382,7 @@ export async function renderNotification() {
       ];
       const partyTo = (party) => (kindOf(party) ? plainTo(party.value, "", { evm: false, prefix: `to ${kindOf(party)} ` }) : toLine(party.value));
 
-      const { bar, ackInput } = maxGatedBar(isMax, isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve");
+      const { bar, ackInput, pay } = maxGatedBar(isMax, isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve");
 
       show(
         [
@@ -1327,6 +1413,7 @@ export async function renderNotification() {
             ? warning("Unlimited allowance", "This lets the spender move all of this token from your account, now and later. Only continue if you trust it.", [ackInput])
             : null,
           callRows(),
+          siteFee,
           gasEditor,
           detailsBlock(),
         ],
@@ -1355,7 +1442,8 @@ export async function renderNotification() {
         approveText: isTransferFrom ? "Approve transfer" : "Approve",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
       });
-      submitOnGasEnter(gasEditor, bar.approveBtn);
+      const pay = guardFor(gasEditor, bar, sendsLux);
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => pay.covered() });
 
       show(
         [
@@ -1380,6 +1468,7 @@ export async function renderNotification() {
             ? warning("High risk", "This lets the operator move all of your NFTs in this collection.")
             : null,
           callRows(),
+          siteFee,
           gasEditor,
           detailsBlock(),
         ],
@@ -1394,7 +1483,7 @@ export async function renderNotification() {
     // a driver reads but not as one the wallet can show. Such a call that sets
     // an allowance may be unlimited, so it waits for MAX.
     const unreadAllowance = Boolean(tokenCall) && ["approve", "increase_allowance"].includes(fnNameLower);
-    const { bar, ackInput } = maxGatedBar(unreadAllowance);
+    const { bar, ackInput, pay } = maxGatedBar(unreadAllowance);
     const summary = requestSummary("send_tx", params, { own });
     const unchecked = callsBridge({ nodeUrl: params?.nodeUrl, contractId: contractIdHex })
       ? warning(
@@ -1425,6 +1514,7 @@ export async function renderNotification() {
               [ackInput]
             )
           : null,
+        siteFee,
         gasEditor,
         detailsBlock(),
       ],

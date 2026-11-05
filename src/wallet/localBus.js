@@ -11,7 +11,7 @@ import { clearAllPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
-import { readChainId } from "../shared/networkStatus.js";
+import { chainIdForChoice, readChainId } from "../shared/networkStatus.js";
 import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
@@ -214,9 +214,12 @@ export async function localSend(message) {
         await clearAllPermissions();
         await clearVault();
         // Nothing of the old wallet stays: its transactions, shielded notes
-        // and history. A store that can't be cleared fails the reset and keeps
-        // it pending (walletReset.js).
+        // and history, its names and addresses, and the node it was on. A
+        // store that can't be cleared fails the reset and keeps it pending
+        // (walletReset.js).
         await finishReset();
+        // On the default network from now on.
+        await ensureEngineConfigured();
         return { ok: true };
       });
     }
@@ -325,9 +328,8 @@ export async function localSend(message) {
         }
       }
 
-      // The node's chain ID, which names its network, kept with it, as the
-      // background keeps it.
-      const chainId = await readChainId(nodeUrl);
+      // The chain ID the node signs for, fixed with it, as the background fixes it.
+      const chainId = await chainIdForChoice(nodeUrl, { accept: Number.isInteger(message?.acceptChain) ? message.acceptChain : null });
       const nextSettings = await setSettings({
         nodeUrl,
         chainId,

@@ -90,7 +90,7 @@ describe("profile switcher", () => {
     press(dom.document.activeElement, "ArrowDown");
     expect(dom.document.activeElement).toBe(items[2]);
     press(dom.document.activeElement, "End");
-    expect(visibleText(dom.document.activeElement)).toBe("Manage profilesSettings");
+    expect(visibleText(dom.document.activeElement)).toBe("Profile namesSettings");
     press(dom.document.activeElement, "Escape");
     expect([menu.isOpen, dom.document.activeElement]).toEqual([false, anchor]);
   });
@@ -219,7 +219,7 @@ describe("profile switcher", () => {
     it("adds a wallet from the menu, after the wallets", async () => {
       menu.open(anchor, two);
       const items = dom.document.body.querySelectorAll(".acct-menu [role=menu] > [role=menuitem]");
-      expect(items.map(visibleText)).toEqual(["Add wallet", "Manage profilesSettings"]);
+      expect(items.map(visibleText)).toEqual(["Add wallet", "Profile namesSettings"]);
       items[0].click();
       await settle();
       expect(onAddWallet).toHaveBeenCalledTimes(1);

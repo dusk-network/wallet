@@ -25,6 +25,19 @@ describe("chainIdFromNodeUrl", () => {
     expect(chainIdFromNodeUrl("http://127.0.0.1:8080")).toBe("dusk:0");
   });
 
+  it("gives a network's chain ID only to the exact address its file lists", () => {
+    for (const url of ["https://testnet.evil.example", "https://devnet.evil.example", "https://nodes.dusk.network.evil.example", "https://nodes.dusk.network:8443"]) {
+      const reference = Number(chainIdFromNodeUrl(url).split(":")[1]);
+      expect(reference, url).toBeGreaterThan(255);
+    }
+  });
+
+  it("keeps a custom node's hash out of the chain IDs, however its host is picked", () => {
+    // This origin's FNV-1a hash is 182: a chain ID a network could have.
+    expect(fnv1a32("https://n10coq.example")).toBe(182);
+    expect(chainIdFromNodeUrl("https://n10coq.example")).toBe(`dusk:${182 + 2 ** 32}`);
+  });
+
   it("returns derived hash for custom URLs", () => {
     const result = chainIdFromNodeUrl("https://my-custom-node.example.com");
     expect(result).toMatch(/^dusk:\d+$/);

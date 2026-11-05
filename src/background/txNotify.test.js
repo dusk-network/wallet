@@ -47,11 +47,11 @@ afterEach(() => {
 });
 
 describe("a transaction's notification, in a worker just woken", () => {
-  it("names the node's network and offers its explorer, from the settings", async () => {
+  it("names the node by its address and offers its network's explorer, from the settings", async () => {
     const { notifyTxExecuted } = await import("./txNotify.js");
     await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
     const [{ opts }] = ext.created;
-    expect(opts.message).toContain("Network: Testnet");
+    expect(opts.message).toContain("Network: Custom · my-node.example");
     expect(opts.buttons.map((b) => b.title)).toEqual(["View in Explorer", "Open Wallet"]);
   });
 
@@ -62,12 +62,12 @@ describe("a transaction's notification, in a worker just woken", () => {
     expect(ext.tabs).toEqual([EXPLORER]);
   });
 
-  it("names the network a transaction was sent on, by the chain ID its record keeps, after a switch to another node", async () => {
+  it("names the node a transaction was sent on, and its network's explorer by the chain ID its record keeps, after a switch to another node", async () => {
     ext.meta = { nodeUrl: "https://my-node.example", chainId: 2 };
     localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://nodes.dusk.network" }));
     const { notifyTxExecuted, registerTxNotificationHandlers } = await import("./txNotify.js");
     await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
-    expect(ext.created[0].opts.message).toContain("Network: Testnet");
+    expect(ext.created[0].opts.message).toContain("Network: Custom · my-node.example");
     expect(ext.created[0].opts.buttons.map((b) => b.title)).toEqual(["View in Explorer", "Open Wallet"]);
     registerTxNotificationHandlers();
     await ext.clicked(`dusk_tx_${HASH}_executed_1`);

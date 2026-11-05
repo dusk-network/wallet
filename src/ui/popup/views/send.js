@@ -4,6 +4,7 @@ import {
   formatDuskExact,
   formatFee,
   amountForInput,
+  amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
@@ -23,9 +24,11 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
-import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
-import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { ownProfileName, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
+import { safeTextEl } from "../../components/SafeText.js";
+import { fieldLabel, reviewActions, submitOnGasEnter, textInput } from "../../components/FormControls.js";
+import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { shortfallText } from "../../lib/shortfall.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import {
   hideRecipientBadge,
@@ -47,7 +50,8 @@ import {
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { sendFromReview } from "./sent.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
-import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
+import { networkTextOf } from "../../../shared/nodeNetwork.js";
+import { MEMO_TOO_LONG_TEXT, chainLabel, memoTooLong, normalizeChainId } from "../../../shared/duskUri.js";
 
 // A pasted EVM address, which a Dusk transfer can't pay.
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -56,8 +60,6 @@ const NOT_AN_ADDRESS_TEXT = "Not a valid address. Check it and try again.";
 // The longest a .dusk name can be, with .dusk.
 const LONGEST_NAME = 68;
 // What the network takes.
-const MAX_MEMO_BYTES = 512;
-const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
 export const EVM_ADDRESS_TEXT = "That's an EVM address, not a Dusk account.";
 
 /**
@@ -98,7 +100,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
   const memoError = h("div", { class: "field-error memo-error", role: "alert", hidden: true });
   const checkMemo = () => {
-    const tooLong = new TextEncoder().encode(memo.value.trim()).length > MAX_MEMO_BYTES;
+    const tooLong = memoTooLong(memo.value);
     memoError.textContent = tooLong ? MEMO_TOO_LONG_TEXT : "";
     memoError.hidden = !tooLong;
     return !tooLong;
@@ -194,9 +196,28 @@ export function sendFormView(ov, { state, actions } = {}) {
   const available = h("div", { class: "amount-avail", hidden: true }, [availText, maxBtn]);
   const feeNote = h("div", { class: "amount-fee-note", hidden: true });
 
+  // Review is off while the recipient won't do, or an amount typed won't: the
+  // field says why. An empty one leaves it on, for it to say what's missing.
+  let recipientOff = false;
+  let amountOff = false;
+  const syncReview = () => {
+    nextBtn.disabled = recipientOff || amountOff;
+  };
+  const reviewOff = (off) => {
+    recipientOff = off;
+    syncReview();
+  };
+
+  function checkAmount(opts) {
+    const lux = readAmount(opts);
+    amountOff = lux == null && Boolean(String(amount.value ?? "").trim());
+    syncReview();
+    return lux;
+  }
+
   // The amount as typed, checked as it is typed: an error under the field,
   // and the amount in Lux when it can be sent.
-  function checkAmount({ required = false } = {}) {
+  function readAmount({ required = false } = {}) {
     const raw = String(amount.value ?? "").trim();
     if (!raw) {
       field.setError(required ? "Enter an amount." : "");
@@ -206,7 +227,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError(`Enter an amount such as 1 or ${amountForInput("0.5")}.`);
+      field.setError(amountProblem(raw));
       return null;
     }
     if (lux <= 0n) {
@@ -215,7 +236,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
     const maxLux = getMaxAmountLux();
     if (maxLux != null && lux > maxLux) {
-      field.setError("That's more than you have, with the network fee.");
+      field.setError(shortfallText({ missingLux: lux + feeLuxForRecipientType(detectedRecipientType) - (detectedRecipientType === "address" ? shSpendLux : pubBalLux), shielded: detectedRecipientType === "address", hidden }));
       return null;
     }
     field.setError("");
@@ -406,7 +427,9 @@ export function sendFormView(ov, { state, actions } = {}) {
 
       if (!contactsIndex) rebuildContactsIndex(state.addressBook?.items);
       const hit = contactsIndex?.get(String(addr).toLowerCase());
-      const name = String(hit?.name ?? "").trim();
+      // A saved contact, or another profile of this wallet's.
+      const profile = addr === ownAccount || addr === ownAddress ? "" : ownProfileName(ov, addr);
+      const name = String(hit?.name ?? "").trim() || profile;
       if (!name) {
         hideContactBadge();
         return;
@@ -416,7 +439,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         kind: "contact",
         label: name,
         seed: addr,
-        title: `Saved contact: ${name}`,
+        title: hit?.name ? `Saved contact: ${name}` : `Your profile: ${name}`,
         className: "to-chip",
       });
       toWrap.classList.add("has-chip");
@@ -464,7 +487,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     const blocked = blockedRecipient(recipient, ov?.chainId);
     blockedText.textContent = blocked ?? "";
     blockedNote.hidden = !blocked;
-    if (blocked) nextBtn.disabled = true;
+    if (blocked) reviewOff(true);
     return !blocked;
   };
 
@@ -505,7 +528,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     const allowed = showSelfNote(recipient);
     detectedRecipientType = t;
     const sendable = allowed && (t === "account" || shieldedCovers);
-    nextBtn.disabled = !sendable;
+    reviewOff(!sendable);
     updateAmountHelpers();
     return sendable;
   };
@@ -576,7 +599,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           : null,
       ]);
       detectedRecipientType = null;
-      nextBtn.disabled = true;
+      reviewOff(true);
       updateAmountHelpers();
       return false;
     }
@@ -641,7 +664,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
     hideRecipientBadge(toTypePill);
     detectedRecipientType = null;
-    nextBtn.disabled = true;
+    reviewOff(true);
     updateAmountHelpers();
     showNameBox([h("div", { class: "muted", text: `Looking up ${v}…` })]);
     lookup.promise.then((result) => {
@@ -659,7 +682,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     primaryCount += 1;
     if (!isDuskName(v)) {
       showNameBox([]);
-      nextBtn.disabled = false;
+      reviewOff(false);
     }
     if (!v) {
       hideRecipientBadge(toTypePill);
@@ -696,7 +719,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       hideRecipientBadge(toTypePill);
       showNameBox([h("div", { class: "err", text: NOT_AN_ADDRESS_TEXT })]);
       detectedRecipientType = null;
-      nextBtn.disabled = true;
+      reviewOff(true);
       updateContactMatch("", null);
       updateAmountHelpers();
       return;
@@ -720,7 +743,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       hideRecipientBadge(toTypePill);
       showNameBox([h("div", { class: "err", text: EVM_ADDRESS_TEXT })]);
       detectedRecipientType = null;
-      nextBtn.disabled = true;
+      reviewOff(true);
       updateContactMatch("", null);
       updateAmountHelpers();
       return;
@@ -755,7 +778,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       hideRecipientBadge(toTypePill);
       showNameBox([h("div", { class: "err", text: NOT_AN_ADDRESS_TEXT })]);
       detectedRecipientType = null;
-      nextBtn.disabled = true;
+      reviewOff(true);
       updateContactMatch("", null);
       updateAmountHelpers();
       return;
@@ -906,7 +929,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         let recipient = toVal;
         let duskName;
         if (isDuskName(toVal)) {
-          nextBtn.disabled = true;
+          reviewOff(true);
           const { lookup, latest } = startLookup(toVal);
           const result = await lookup.promise;
           // A lookup that ends after the user left Send, after a redraw replaced this form, or after the
@@ -1007,7 +1030,7 @@ export function chainMismatchText(reqChain, nodeUrl) {
   const have = normalizeChainId(current);
   if (!want || !have || want === have) return "";
   // Labelled from the full chain ids ("dusk:1"): the bare references don't name a network.
-  return `This request is for ${chainLabel(reqChain) || `Chain ${want}`}. You are on ${chainLabel(current) || `Chain ${have}`}.`;
+  return `This request is for ${chainLabel(reqChain) || `Chain ${want}`}. You are on ${networkTextOf(String(nodeUrl ?? "")) || `Chain ${have}`}.`;
 }
 
 // Who pays and on which network, as a Review was asked for.
@@ -1075,6 +1098,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     },
   });
 
+  const own = toAddr === ownAccount || toAddr === ownAddress;
   // Who it goes to: a saved contact's label and the recipient's .dusk name,
   // both when there are both, over the full address.
   const contactName = () => {
@@ -1082,7 +1106,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     const hit = (Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).find(
       (e) => String(e?.address ?? "").trim().toLowerCase() === key
     );
-    return String(hit?.name ?? "").trim();
+    // Or another profile of this wallet's, which needs no saving.
+    return String(hit?.name ?? "").trim() || (own ? "" : ownProfileName(ov, toAddr));
   };
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
@@ -1094,7 +1119,6 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   };
 
   // Save to Contacts, unless it's saved already or it's this wallet's own.
-  const own = toAddr === ownAccount || toAddr === ownAddress;
   const saveContactBtn = h("button", {
     class: "text-btn text-btn--inline review-save-contact",
     type: "button",
@@ -1172,9 +1196,21 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     gas: d?.gas,
   });
 
+  // What pays covers it, with the fee as Custom fee changes it.
+  const paying = privacy === "shielded" ? ov?.shieldedBalance?.spendable : ov?.balance?.value;
+  const pay = payGuard({
+    editor: gasEditor,
+    availableLux: paying != null ? safeBigInt(paying, 0n) : null,
+    sendsLux: safeBigInt(d.amountLux, 0n),
+    shielded: privacy === "shielded",
+    hidden: balancesHidden(ov),
+    button: confirmBtn,
+    ready: () => !nothingArrives,
+  });
+
   // It ignores a click for a moment once Review is up (clickGuard.js).
   confirmBtn.addEventListener("click", guarded(async () => {
-    if (nothingArrives) return;
+    if (nothingArrives || !pay.covered()) return;
     const gas = readGas();
     if (gas === false) return;
     confirmBtn.disabled = true;
@@ -1214,9 +1250,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         if (state.draft === d) state.draft = null;
       },
     });
-    confirmBtn.disabled = nothingArrives;
+    pay.draw();
   }));
-  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !nothingArrives });
+  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !nothingArrives && pay.covered() });
 
   const kv = (label, value, className = "") =>
     h("div", { class: ["kv", className].filter(Boolean).join(" ") }, [
@@ -1255,7 +1291,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         kv("To", h("span", { class: "review-to" }, [toNames, h("span", { class: "mono review-to__address", text: toAddr })]), "kv--wrap"),
         // With more than one wallet, the wallet first: "Wallet 2 · alice.dusk · Public".
         kv("From", h("span", {}, [withReviewWallet(fromName, actions?.review), h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
-        d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", d.memo, "kv--wrap") : null,
+        d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", safeTextEl(d.memo), "kv--wrap") : null,
       ].filter(Boolean)),
       ...serviceNotes
         .filter((n) => n.kind !== "fee")
@@ -1266,14 +1302,17 @@ export function sendConfirmView(ov, { state, actions } = {}) {
             h("div", { class: "muted", text: "The bridge pays out to the address in the memo. Go back and check it." }),
           ])
         : null,
-      tooLittle
-        ? h("div", { class: "field-error", role: "alert", text: `Send more than the ${formatDuskExact(service.feeLux)} DUSK bridge fee.` })
-        : null,
-      noRecipient ? h("div", { class: "field-error", role: "alert", text: `${noBridgeRecipientText(service.chain)}.` }) : null,
       saveContactBtn,
       gasEditor,
-      confirmError,
-      h("div", { class: "btnrow" }, [confirmBtn]),
+      reviewActions(
+        confirmBtn,
+        tooLittle
+          ? h("div", { class: "field-error", role: "alert", text: `Send more than the ${formatDuskExact(service.feeLux)} DUSK bridge fee.` })
+          : null,
+        noRecipient ? h("div", { class: "field-error", role: "alert", text: `${noBridgeRecipientText(service.chain)}.` }) : null,
+        confirmError,
+        pay.el
+      ),
     ]),
   ];
 }

@@ -23,10 +23,10 @@ afterEach(() => {
 });
 
 // Renders a transaction's details as the popup does, the wallet's other records beside it.
-function details(tx, { contacts = [], others = [], hidden = false } = {}) {
+function details(tx, { contacts = [], others = [], hidden = false, own = {} } = {}) {
   const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home", addressBook: { loaded: true, items: contacts } };
   const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
-  const ov = { nodeUrl: NODE, hideBalances: hidden, txs: [{ hash: HASH, nodeUrl: NODE, ...tx }, ...others] };
+  const ov = { nodeUrl: NODE, hideBalances: hidden, txs: [{ hash: HASH, nodeUrl: NODE, ...tx }, ...others], ...own };
   dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
   const body = dom.document.body;
   return {
@@ -40,6 +40,17 @@ function details(tx, { contacts = [], others = [], hidden = false } = {}) {
 }
 
 describe("transaction details", () => {
+  it("name your other profile by its public account or shielded address, with the short address and Copy under it", () => {
+    const account = "z".repeat(60);
+    const address = "s".repeat(90);
+    const own = { accounts: ["me", account], addresses: ["mine", address], accountNames: { 1: "Savings" } };
+    let view = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", direction: "out", to: account, status: "executed" }, { own });
+    expect(view.name).toBe("Savings");
+    expect(visibleText(view.body.querySelector(".tx-hero-addr"))).toContain("zzzzzz…zzzzzz");
+    view = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", direction: "out", privacy: "shielded", to: address, status: "executed" }, { own });
+    expect(view.name).toBe("Savings");
+  });
+
   it("names the type once, and adds a note only where the status needs one", () => {
     const shield = { kind: TX_KIND.SHIELD, amount: "1000000000", profileIndex: 0 };
     let view = details({ ...shield, status: "mempool" });
@@ -323,9 +334,19 @@ describe("transaction details", () => {
     expect(used).toBe("Gas used••••");
   });
 
-  it("shows a memo in the order it was written, whatever controls it carries", () => {
-    const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: "invoice \u202Egnp.exe\u202C" });
-    const memo = [...body.querySelectorAll(".kv")].map(visibleText).find((row) => row.startsWith("Memo"));
-    expect(memo).toBe("Memoinvoice gnp.exe");
+  it("shows a memo in the order it was written, its controls neutralized and flagged", () => {
+    const [rlo, pop] = [0x202e, 0x202c].map((c) => String.fromCodePoint(c));
+    const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: `invoice ${rlo}gnp.exe${pop}` });
+    const memo = [...body.querySelectorAll(".kv")].find((row) => visibleText(row).startsWith("Memo"));
+    expect(memo.querySelector(".safe-text > span").textContent).toBe("invoice �gnp.exe�");
+    expect(visibleText(memo)).not.toContain(rlo);
+    expect(memo.querySelector(".safe-text__flag").textContent).toBe("Hidden characters that can change how this reads show here as � or \\u codes.");
+  });
+
+  it("shows a plain memo as it is, unflagged, in any script", () => {
+    const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: "فاتورة 12 · Rechnung" });
+    const memo = [...body.querySelectorAll(".kv")].find((row) => visibleText(row).startsWith("Memo"));
+    expect(visibleText(memo)).toBe("Memoفاتورة 12 · Rechnung");
+    expect(memo.querySelector(".safe-text__flag")).toBeNull();
   });
 });

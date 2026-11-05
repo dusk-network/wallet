@@ -32,7 +32,7 @@ const overview = (over = {}) => ({
   nodeUrl: NODE,
   accounts: [ACCOUNT],
   selectedAccountIndex: 0,
-  balance: { value: dusk(1500) },
+  balance: { value: dusk(2000) },
   shieldedBalance: { value: "0", spendable: "0" },
   txs: [],
   ...over,
@@ -108,6 +108,19 @@ const reviewState = () => ({
 });
 
 describe("after Confirm", () => {
+  it("shows a memo in the order it was written, what it hides flagged", async () => {
+    const rlo = String.fromCodePoint(0x202e);
+    const state = reviewState();
+    state.draft.memo = `${rlo}gnp.exe`;
+    const app = popup(state);
+    await settle();
+    await app.confirm();
+    const row = body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
+    expect(row.querySelector(".safe-text > span").textContent).toBe("�gnp.exe");
+    expect(row.querySelector(".safe-text__flag")).not.toBeNull();
+    expect(visibleText(body)).not.toContain(rlo);
+  });
+
   it("shows Sending at once, then Sent to the network with the transaction ID, Copy and the Dusk explorer", async () => {
     const state = reviewState();
     const app = popup(state);
@@ -265,6 +278,28 @@ describe("after Confirm", () => {
     expect(button("Confirm")).toBeTruthy();
   });
 
+  it("never shows a node's reply as raw JSON, cut off or whole", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    const reply = JSON.stringify({ error: "Invalid input: Tx 7abc0686 not accepted: this transaction is invalid Value spent larger than account holds" });
+    (await app.confirm()).resolve({ error: { message: reply } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", "The node refused it: the balance doesn't cover the amount and the network fee. No fee was charged."]);
+    expect(visibleText(body)).not.toContain("{");
+    expect(visibleText(body)).not.toContain("Invalid input");
+  });
+
+  it("says whole why a node it won't sign for got nothing", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    const refusal = "hostile-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). Nothing was signed, because a signature here could count on the other network.";
+    (await app.confirm()).resolve({ error: { message: refusal } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", `${refusal} No fee was charged.`]);
+  });
+
   it.each(["Wallet changed while awaiting approval", "Wallet or network changed while transaction was queued"])(
     "says nothing went out when the wallet refused it for another network, profile or wallet than its review's: %s",
     async (error) => {
@@ -401,7 +436,7 @@ describe("after Confirm", () => {
     button("Confirm").click();
     await settle();
     expect(state.route).toBe("convert_confirm");
-    expect(body.querySelector(".convert-review > .field-error").textContent).toBe(
+    expect(body.querySelector(".review-actions > .field-error").textContent).toBe(
       "Enter both the gas limit and the gas price, or clear both."
     );
     expect(app.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);

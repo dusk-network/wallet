@@ -10,6 +10,9 @@ import { toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
 import { formatDuskExact, formatFee, safeBigInt } from "../../shared/amount.js";
 
+/** What choosing a node that isn't a network's own means. */
+export const SWITCH_NODE_FACT = "This node sees your activity and can show false balances.";
+
 /** A contract call's arguments as bytes, or null when they aren't any. */
 export function callArgs(params) {
   try {
@@ -64,11 +67,12 @@ export function withdrawalCost(feeLux) {
  *   to name: `on` says where the address is, "on Sepolia", and `prefix` what
  *   comes before it in place of "to "
  * - `sub`: a line of small print
+ * - `node`: for a switch of network, the host of the node it goes to
  *
  * @param {string} kind - the approval kind (connect, send_tx, sign_message, ...)
  * @param {object} params - the request as rpc.js passes it on
  * @param {{ own?: string[] }} [ctx] - the wallet's accounts and addresses (bridgeCallOf)
- * @returns {{ title: string, amount?: {lead?: string, value: string, unit?: string}, to?: {address: string, network: "dusk"|"contract"|"duskevm"|"evm", on?: string, prefix?: string}, sub?: string }}
+ * @returns {{ title: string, amount?: {lead?: string, value: string, unit?: string}, to?: {address: string, network: "dusk"|"contract"|"duskevm"|"evm", on?: string, prefix?: string}, sub?: string, node?: string }}
  */
 export function requestSummary(kind, params = {}, { own = [] } = {}) {
   const p = params ?? {};
@@ -82,8 +86,15 @@ export function requestSummary(kind, params = {}, { own = [] } = {}) {
       }
       return { title: "Connect this site?", sub: "It asks to see your public address, .dusk name and balance." };
     case "switch_network": {
+      // By the node's address (nodeNetwork.js), its host in large type: never
+      // a network's name for a node that only says it's on that network.
       const to = String(p.to?.networkName ?? "").trim();
-      return { title: to ? `Switch to ${to}?` : "Switch network?" };
+      const custom = !to || to === "Custom" || to === "Unknown";
+      return {
+        title: custom ? "Switch to a custom node?" : `Switch to ${to}?`,
+        node: String(p.to?.host ?? "").trim(),
+        sub: custom || to === "Local" ? SWITCH_NODE_FACT : "",
+      };
     }
     case "sign_message": {
       const preview = p.messagePreview;
