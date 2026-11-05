@@ -10,9 +10,12 @@
 // message, contract or hash. Those of a send are in Activity, which names its
 // site. A contract call keeps its function's name, as the site gave it, cut short.
 //
-// Bounded: a site's newest requests, and past that the oldest one not approved
-// goes first, so a site can't push out what it was allowed by asking again and
-// again. The same goes for a wallet's sites: those never approved go first.
+// Bounded: a site's newest requests, and past that the oldest of what no one
+// answered goes first (what the site cancelled, what wasn't answered in time),
+// then the oldest refusal, then the oldest approval. A site can't push out
+// what it was refused or allowed by asking again and again, and cancelling at
+// once. The same goes for a wallet's sites: a site with neither goes first,
+// then one that was only refused.
 
 import { getPermissionForOrigin } from "./permissions.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
@@ -30,6 +33,10 @@ const METHOD_CHARS = 64;
 const USE_EVERY_MS = 60_000;
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+// How long an answer stays as more come: the person's own longest, an approval longest of all.
+const KEEP_RANK = Object.freeze({ approved: 2, rejected: 1, closed: 1 });
+const rankOf = (entry) => KEEP_RANK[entry?.answer] ?? 0;
 const sitesOf = (all, id) => (isObject(all[id]) ? all[id] : {});
 const siteOf = (sites, origin) => (isObject(sites[origin]) ? sites[origin] : {});
 
@@ -60,8 +67,8 @@ export const siteLastSeen = (record) => Math.max(Number(record?.lastUsedAt) || 0
 function bounded(sites) {
   const entries = Object.entries(sites);
   if (entries.length <= SITES_KEPT) return sites;
-  const allowed = (site) => (site.asked?.some((entry) => entry.answer === "approved") ? 1 : 0);
-  entries.sort(([, a], [, b]) => allowed(b) - allowed(a) || siteLastSeen(b) - siteLastSeen(a));
+  const answered = (site) => Math.max(0, ...(Array.isArray(site.asked) ? site.asked.map(rankOf) : []));
+  entries.sort(([, a], [, b]) => answered(b) - answered(a) || siteLastSeen(b) - siteLastSeen(a));
   return Object.fromEntries(entries.slice(0, SITES_KEPT));
 }
 
@@ -103,8 +110,8 @@ export function noteSiteRequest(walletId, origin, { kind, params, answer, at = D
     const site = siteOf(sites, origin);
     const asked = [{ at, ...requestRecord(kind, params), answer }, ...(Array.isArray(site.asked) ? site.asked : [])];
     while (asked.length > SITE_ASKED_KEPT) {
-      const notApproved = asked.findLastIndex((entry) => entry.answer !== "approved");
-      asked.splice(notApproved >= 0 ? notApproved : asked.length - 1, 1);
+      const least = Math.min(...asked.map(rankOf));
+      asked.splice(asked.findLastIndex((entry) => rankOf(entry) === least), 1);
     }
     return { ...all, [id]: bounded({ ...sites, [origin]: { ...site, asked } }) };
   });

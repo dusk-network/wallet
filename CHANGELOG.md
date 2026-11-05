@@ -56,6 +56,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Neutralized and flagged characters that change how text reads in a contract call's function, as in a memo: approvals, Activity and a transaction's details.
 - Said when a message to sign or a sign-in's statement goes on below its box.
 - Named the chain a site's transaction signs for in its Details, apart from the chain ID sites see.
+- Kept a site's refusals in its record however often it asks and cancels: what no one answered goes first.
 
 ## [0.4.0] - 2026-11-04
 
