@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added a record per site to Settings' Connected sites: when it was last used, what it asked for and how you answered, also once it's disconnected, with Forget.
+- Added connections that end after 1, 7 or 30 days, for each site and for new sites.
 - Added an optional password on any send above an amount you choose, in Settings, off by default: the wallet's own sends and a site's, checked against the vault.
 - Showed a Sozu stake's position on Liquid staking: put in, taken out, worth now, deposit fees and rewards so far.
 - Said what an amount brings in a year with Sozu as it's typed, and one line of what the rate is made of under it.

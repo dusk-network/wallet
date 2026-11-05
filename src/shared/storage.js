@@ -16,6 +16,7 @@ export const STORAGE_KEYS = {
   SEND_PASSWORD: "dusk_send_password_v1", // lux, as text: the amount above which a send asks for the password; absent while it's off (sendPassword.js)
   PERMISSIONS: "dusk_permissions_v1", // { [origin]: { profileId, accountIndex, grants, connectedAt, updatedAt } }: one wallet's sites, from before PERMISSIONS_V2; moved there on unlock
   PERMISSIONS_V2: "dusk_permissions_v2", // { [walletId]: { [origin]: { profileId, accountIndex, grants, connectedAt, updatedAt } } }: each wallet's sites (permissions.js)
+  SITE_RECORDS: "dusk_site_records_v1", // What each site asked and how it was answered, by wallet (siteRecords.js)
   TXS: "dusk_txs_v1", // { [hash]: { walletId, origin, nodeUrl, kind, submittedAt, status, error? } }
   TXS_EPOCH: "dusk_txs_epoch_v1", // number: how many times TXS was cleared for a wallet reset
   ACCOUNT_NAMES: "dusk_account_names_v1", // { [walletId]: { [profileIndex]: string } }

@@ -84,7 +84,26 @@ export const DEFAULT_SETTINGS = {
   ipfsGateway: "https://ipfs.io/ipfs/",
   /** Show balances as •••• until the dashboard's eye button is pressed again. */
   hideBalances: false,
+  /** How long a site's new connection lasts, in milliseconds: 0 until it's disconnected. */
+  newSiteLastsMs: 0,
 };
+
+const DAY_MS = 24 * 60 * 60_000;
+
+/** How long a site's connection can last. */
+export const SITE_LASTS_OPTIONS = Object.freeze([
+  { value: 0, label: "Until I disconnect" },
+  { value: DAY_MS, label: "1 day" },
+  { value: 7 * DAY_MS, label: "7 days" },
+  { value: 30 * DAY_MS, label: "30 days" },
+]);
+
+/**
+ * How long a connection lasts, as one of the choices: until it's disconnected for anything else.
+ * @param {unknown} value
+ * @returns {number}
+ */
+export const normalizeSiteLasts = (value) => (SITE_LASTS_OPTIONS.some((o) => o.value === Number(value)) ? Number(value) : 0);
 
 function normalizeBaseUrl(v) {
   const s = String(v ?? "").trim();
@@ -185,6 +204,7 @@ export async function getSettings() {
     hideBalances: merged.hideBalances === true,
     autoLockTimeoutMinutes: normalizeAutoLock(merged.autoLockTimeoutMinutes),
     customGas: normalizeCustomGas(merged.customGas),
+    newSiteLastsMs: normalizeSiteLasts(merged.newSiteLastsMs),
   };
 }
 

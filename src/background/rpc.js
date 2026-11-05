@@ -7,6 +7,7 @@ import {
   revokeOriginEverywhere,
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
+import { siteLastsMs } from "../shared/siteRecords.js";
 import { assertSiteSend, proveSiteSend } from "../shared/sendPassword.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
@@ -425,8 +426,13 @@ export async function handleRpc(origin, request) {
       (sameProfilePermission(existing, selectedProfile) && hasShieldedGrant(existing));
 
     const shown = promptFor(statusBeforePrompt);
+    // A new connection lasts as this site was set to, else as new sites are.
+    const lastsMs = await siteLastsMs(await siteWalletId(statusBeforePrompt), origin, (await getSettings()).newSiteLastsMs);
     const approved = await requestUserApproval("connect", origin, {
       requestedProfiles: true,
+      lastsMs,
+      endsAt: Number(existing?.expiresAt) || 0,
+      stays: Boolean(existing),
       shieldedReceiveAddress: requestedShieldedGrant,
       effectiveShieldedReceiveAddress: effectiveShieldedGrant,
       currentProfileId: existing?.profileId,
@@ -457,6 +463,7 @@ export async function handleRpc(origin, request) {
       const perm = await approveOrigin(origin, {
         profileId: profile.profileId,
         accountIndex: idx,
+        lastsMs,
         grants: {
           publicAccount: true,
           shieldedReceiveAddress: effectiveGrant,

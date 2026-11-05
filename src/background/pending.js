@@ -1,4 +1,6 @@
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
+import { noteSiteRequest } from "../shared/siteRecords.js";
+import { activeWalletId } from "../shared/wallets.js";
 import {
   getExtensionApi,
   runtimeGetURL,
@@ -24,11 +26,20 @@ export const pendingApprovals = new Map();
 const MAX_PENDING = 20;
 const APPROVAL_TTL_MS = 5 * 60_000;
 
-function rejectPending(rid, entry, message) {
+// How a request ended, for its site's record: for the wallet it was for, or, asked
+// while locked and never shown, the one the next unlock opens. Never in the way
+// of the answer.
+function keepAnswer(entry, answer) {
+  const walletId = entry.shown?.walletId || activeWalletId().catch(() => "");
+  noteSiteRequest(walletId, entry.origin, { kind: entry.kind, params: entry.params, answer }).catch(() => {});
+}
+
+function rejectPending(rid, entry, message, answer = "cancelled") {
   if (!entry) return;
   pendingApprovals.delete(rid);
   clearTimeout(entry.timer);
   if (entry.windowId !== undefined) windowsRemove(entry.windowId).catch(() => {});
+  keepAnswer(entry, answer);
   entry.reject(rpcError(ERROR_CODES.USER_REJECTED, message));
 }
 
@@ -55,7 +66,7 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
   const promise = new Promise((resolve, reject) => {
     const entry = { kind, origin, params, shown, beforeApprove, createdAt: Date.now(), resolve, reject };
     entry.timer = setTimeout(
-      () => rejectPending(rid, entry, "Approval request expired"),
+      () => rejectPending(rid, entry, "Approval request expired", "expired"),
       APPROVAL_TTL_MS
     );
     pendingApprovals.set(rid, entry);
@@ -94,7 +105,7 @@ const ext = getExtensionApi();
 ext?.windows?.onRemoved?.addListener((windowId) => {
   for (const [rid, entry] of pendingApprovals.entries()) {
     if (entry.windowId === windowId) {
-      rejectPending(rid, entry, "User closed the approval window");
+      rejectPending(rid, entry, "User closed the approval window", "closed");
     }
   }
 });
@@ -151,6 +162,7 @@ function decided(rid, entry, message) {
   const { decision } = message;
   pendingApprovals.delete(rid);
   clearTimeout(entry.timer);
+  keepAnswer(entry, decision === "approve" ? "approved" : "rejected");
 
   if (decision === "approve") {
     // Optionally accept user edited parameters (e.g. gas overrides).

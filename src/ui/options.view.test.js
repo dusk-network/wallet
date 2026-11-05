@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAccountName } from "../shared/accountNames.js";
 import { clearAddressBook } from "../shared/addressBook.js";
+import { dateText } from "./lib/time.js";
 import { accessibleName, fakeEvent, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 vi.mock("../shared/accountNames.js", () => ({ setAccountName: vi.fn(async () => {}) }));
@@ -160,9 +161,123 @@ describe("settings", () => {
     ]);
   });
 
+  describe("a site's record", () => {
+    const DAY = 86_400_000;
+    const AT = Date.UTC(2031, 0, 15, 12);
+    const SITE = "https://app.example";
+    const permissions = [{ origin: SITE, walletId: ACCOUNTS[0], accountIndex: 0, lastsMs: 7 * DAY, expiresAt: AT + 7 * DAY }];
+    const asked = [
+      { at: AT + 3, what: "contract_call", method: "swap\u202Eyenom", answer: "rejected" },
+      { at: AT + 2, what: "transfer", answer: "approved" },
+      { at: AT + 1, what: "sign_message", answer: "closed" },
+      { at: AT, what: "connect", answer: "approved" },
+      { at: AT - 1, what: "switch_network", answer: "expired" },
+      { at: AT - 2, what: "watch_nft", answer: "cancelled" },
+    ];
+    const siteRecords = { [ACCOUNTS[0]]: { [SITE]: { lastUsedAt: AT + 60_000, asked } } };
+    const details = (el) => el.querySelector("details.settings-site__details");
+    const rowOf = (view, host) =>
+      view
+        .section("Connected sites")
+        .querySelectorAll(".settings-site")
+        .find((row) => visibleText(row.querySelector(".settings-site__host")) === host);
+
+    it("says when it was last used, until when it's connected, and under Details how long and what it asked", async () => {
+      const view = await settings({ permissions, siteRecords });
+      const row = rowOf(view, "app.example");
+      const notes = [...row.children].filter((el) => el.classList.contains("settings-site__note")).map(visibleText);
+      expect(notes).toEqual([`Last used ${dateText(AT + 60_000)}`, `Connected until ${dateText(AT + 7 * DAY)}`]);
+      expect(details(row).open).toBeFalsy();
+      expect(row.querySelector('select[aria-label="How long app.example stays connected"]').value).toBe(String(7 * DAY));
+      const list = row.querySelectorAll(".settings-site__ask").map((li) => [...li.children].map(visibleText));
+      expect(list).toEqual([
+        ["Contract call: swap\\u202eyenom", "Rejected", dateText(AT + 3)],
+        ["Pay", "Approved", dateText(AT + 2)],
+        ["Sign a message", "Window closed", dateText(AT + 1)],
+        ["Connect", "Approved", dateText(AT)],
+        ["Switch network", "Not answered in time", dateText(AT - 1)],
+        ["Import an NFT", "Cancelled", dateText(AT - 2)],
+      ]);
+      // Nothing a site chose reads as something else.
+      expect(row.textContent).not.toContain("\u202E");
+    });
+
+    it("draws one with nothing kept yet without any of that, its Details still setting how long", async () => {
+      const view = await settings({ permissions: [{ origin: SITE, walletId: ACCOUNTS[0], accountIndex: 0 }] });
+      const row = rowOf(view, "app.example");
+      expect([...row.children].filter((el) => el.classList.contains("settings-site__note"))).toEqual([]);
+      expect(row.querySelector('select[aria-label="How long app.example stays connected"]').value).toBe("0");
+      expect(row.querySelector(".settings-site__list")).toBeNull();
+    });
+
+    it("sets how long from its Details, and says so, and new sites' on their own", async () => {
+      const view = await settings({ permissions, siteRecords });
+      const choose = (label, value) => {
+        const select = view.section("Connected sites").querySelector(`select[aria-label="${label}"]`);
+        select.value = String(value);
+        select.dispatchEvent(fakeEvent("change"));
+      };
+      choose("How long app.example stays connected", DAY);
+      await settle();
+      expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_SET_SITE_LASTS", origin: SITE, siteWallet: ACCOUNTS[0], lastsMs: DAY });
+      expect(view.actions.showToast).toHaveBeenLastCalledWith("app.example stays connected for 1 day.");
+      expect(view.actions.render).toHaveBeenLastCalledWith({ forceRefresh: true });
+      choose("How long app.example stays connected", 0);
+      await settle();
+      expect(view.actions.showToast).toHaveBeenLastCalledWith("app.example stays connected until you disconnect it.");
+
+      choose("How long new sites stay connected", 30 * DAY);
+      await settle();
+      expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_SET_NEW_SITE_LASTS", lastsMs: 30 * DAY });
+      expect(view.actions.showToast).toHaveBeenLastCalledWith("New sites stay connected for 30 days.");
+
+      view.actions.send.mockResolvedValueOnce({ error: { message: "That site isn't connected any more." } });
+      choose("How long app.example stays connected", DAY);
+      await settle();
+      expect(view.actions.showToast).toHaveBeenLastCalledWith("That site isn't connected any more.", 2500);
+
+      const set = await settings({ newSiteLastsMs: 7 * DAY });
+      expect(set.section("Connected sites").querySelector('select[aria-label="How long new sites stay connected"]').value).toBe(String(7 * DAY));
+    });
+
+    it("keeps its Details open through a redraw", async () => {
+      const view = await settings({ permissions, siteRecords });
+      const row = () => rowOf(view, "app.example");
+      details(row()).open = true;
+      details(row()).dispatchEvent(fakeEvent("toggle"));
+      view.draw();
+      expect(details(row()).open).toBe(true);
+    });
+
+    it("lists sites no longer connected under Earlier sites, last heard of first, each to forget", async () => {
+      const records = {
+        [ACCOUNTS[0]]: {
+          [SITE]: { lastUsedAt: AT, asked },
+          "https://old.example": { lastUsedAt: AT - DAY },
+          "https://refused.example": { asked: [{ at: AT, what: "connect", answer: "rejected" }] },
+          // Only what it was set to: nothing to list.
+          "https://set.example": { lastsMs: DAY },
+        },
+      };
+      const view = await settings({ permissions, siteRecords: records });
+      const earlier = view.section("Connected sites").querySelector(".settings-sites-earlier");
+      expect(visibleText(earlier.querySelector("summary"))).toBe("Earlier sites (2)");
+      expect(earlier.querySelectorAll(".settings-site__host").map(visibleText)).toEqual(["refused.example", "old.example"]);
+      earlier.querySelectorAll("button").find((b) => accessibleName(b) === "Forget old.example").click();
+      await settle();
+      expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_FORGET_SITE_RECORD", origin: "https://old.example", siteWallet: ACCOUNTS[0] });
+      expect(view.actions.showToast).toHaveBeenLastCalledWith("Forgot old.example.");
+      expect(view.actions.render).toHaveBeenLastCalledWith({ forceRefresh: true });
+      // A site's connection isn't touched by it, and none listed means no list.
+      expect(view.actions.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_DISCONNECT_ORIGIN" }));
+      const none = await settings({ permissions, siteRecords });
+      expect(none.section("Connected sites").querySelector(".settings-sites-earlier")).toBeNull();
+    });
+  });
+
   it("disconnects one site, or all of them after asking, away from Reset wallet", async () => {
     let view = await settings();
-    expect(visibleText(view.section("Connected sites"))).toBe("[Connected sites]No sites are connected.");
+    expect(visibleText(view.section("Connected sites"))).toContain("[Connected sites]No sites are connected.");
 
     const permissions = [
       { origin: "https://app.example", accountIndex: 1 },
@@ -544,7 +659,7 @@ describe("wallets", () => {
     const sites = view.section("Connected sites");
     expect(sites.querySelectorAll(".settings-site__wallet").map(visibleText)).toEqual(["Wallet 1", "Savings · Rainy day"]);
     // The open wallet's site changes profile here; another's doesn't.
-    expect(sites.querySelectorAll("select").map((sel) => sel.getAttribute("aria-label"))).toEqual(["Profile for app.example"]);
+    expect(sites.querySelectorAll("select").map((sel) => sel.getAttribute("aria-label")).filter((label) => label.startsWith("Profile"))).toEqual(["Profile for app.example"]);
 
     vi.stubGlobal("confirm", vi.fn(() => true));
     button(sites, "Disconnect shop.example from Savings").click();

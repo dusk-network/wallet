@@ -5023,6 +5023,45 @@ p.settings-legal button.text-btn {
   min-width: 0;
 }
 
+/* What a site asked, newest first: what, how it was answered, and when */
+.settings-site__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-site__ask {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.settings-site__what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-site__answer,
+.settings-site__when {
+  color: var(--text-muted);
+}
+
+.settings-site__when {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+}
+
+.settings-sites-earlier {
+  margin-top: 8px;
+}
+
+/* A site's lines: when it was last used, and until when it's connected */
+.settings-site__note,
 /* The wallet a connected site is connected to */
 .settings-site__wallet {
   color: var(--text-muted);

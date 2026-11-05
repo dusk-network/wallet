@@ -7,10 +7,14 @@ import {
   clearAllPermissions,
   clearPermissions,
   getPermissionForOrigin,
+  endConnections,
   getPermissions,
+  nextConnectionEnd,
   revokeOrigin,
+  setConnectionLasts,
 } from "../shared/permissions.js";
-import { getSettings, normalizeAutoLock, setSettings } from "../shared/settings.js";
+import { getSettings, normalizeAutoLock, normalizeSiteLasts, setSettings } from "../shared/settings.js";
+import { forgetSiteRecord, getSiteRecords, noteSiteLasts, noteSiteUse, siteLastsMs } from "../shared/siteRecords.js";
 import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
@@ -504,11 +508,33 @@ async function handleAutoLockAlarm() {
   }
 }
 
+// Connections set to last a while go when their time is up, as one disconnected
+// does, waiting requests with them; the alarm's set for the next.
+const CONNECTION_END_ALARM_NAME = "dusk_connection_end";
+
+async function followConnectionEnds() {
+  const open = await siteWalletId().catch(() => "");
+  for (const { walletId, origin } of await endConnections()) {
+    cancelPendingApprovals(origin, "Site disconnected", { wallets: [walletId], open });
+  }
+  await alarmsClear(CONNECTION_END_ALARM_NAME);
+  const at = await nextConnectionEnd();
+  if (at !== null) ext?.alarms?.create(CONNECTION_END_ALARM_NAME, { when: at + 1_000 });
+}
+
 // Listen for alarms.
 ext?.alarms?.onAlarm?.addListener((alarm) => {
   if (alarm.name === AUTO_LOCK_ALARM_NAME) {
     handleAutoLockAlarm().catch(console.error);
   }
+  if (alarm.name === CONNECTION_END_ALARM_NAME) {
+    followConnectionEnds().catch(console.error);
+  }
+});
+
+followConnectionEnds().catch(console.error);
+ext?.storage?.onChanged?.addListener((changes) => {
+  if (changes?.[STORAGE_KEYS.PERMISSIONS_V2]) followConnectionEnds().catch(console.error);
 });
 
 // Initialize auto-lock alarm on startup.
@@ -550,6 +576,19 @@ async function paysFor(params, accountIndex, status) {
   const late = new Promise((resolve) => setTimeout(resolve, 2_000, null));
   const lux = await Promise.race([read.catch(() => null), late]);
   return /^\d+$/.test(String(lux ?? "")) ? String(lux) : null;
+}
+
+// Only the wallet's own pages' to send, whatever a content script is made to.
+const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS"]);
+
+// For when a site last used its connection: anything but what any page can ask.
+const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId"]);
+
+function noteConnectionUse(origin, request) {
+  if (OPEN_TO_ALL.has(String(request?.method ?? ""))) return;
+  siteWalletId()
+    .then((walletId) => noteSiteUse(walletId, origin))
+    .catch(() => {});
 }
 
 function getOriginFromSender(sender) {
@@ -615,8 +654,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
   (async () => {
     try {
-      // The password on big sends is the wallet's own pages' to ask and change.
-      if (SEND_PASSWORD_COMMANDS.has(message?.type) && !String(sender?.url ?? "").startsWith(runtimeGetURL(""))) {
+      // The password on big sends, and how long a site stays connected, are the
+      // wallet's own pages' to ask and change.
+      if (WALLET_PAGE_COMMANDS.has(message?.type) && !String(sender?.url ?? "").startsWith(runtimeGetURL(""))) {
         throw rpcError(ERROR_CODES.UNAUTHORIZED, "Only the wallet can do that");
       }
       const common = await handleUiCommand(message, {
@@ -673,7 +713,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         const id = message.id;
         const activityContext = await prepareDappActivityContext(message.request);
-        const result = await handleRpc(origin, message.request);
+        const result = await handleRpc(origin, message.request).finally(() => noteConnectionUse(origin, message.request));
         await updateDappActivity(message.request, activityContext);
         sendResponse({ id, result });
         return;
@@ -1013,6 +1053,31 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // Forgets the record of a site that isn't connected any more.
+      if (message?.type === "DUSK_UI_FORGET_SITE_RECORD") {
+        await forgetSiteRecord(String(message.siteWallet ?? ""), String(message.origin ?? ""));
+        sendResponse({ ok: true });
+        return;
+      }
+
+      // How long a connected site stays connected, from now.
+      if (message?.type === "DUSK_UI_SET_SITE_LASTS") {
+        const origin = String(message.origin ?? "").trim();
+        const owner = String(message.siteWallet ?? "") || (await siteWalletId());
+        const lastsMs = normalizeSiteLasts(message.lastsMs);
+        if (!(await setConnectionLasts(origin, owner, lastsMs))) throw new Error("That site isn't connected any more.");
+        await noteSiteLasts(owner, origin, lastsMs);
+        sendResponse({ ok: true });
+        return;
+      }
+
+      // How long a new site stays connected.
+      if (message?.type === "DUSK_UI_SET_NEW_SITE_LASTS") {
+        await setSettings({ newSiteLastsMs: normalizeSiteLasts(message.lastsMs) });
+        sendResponse({ ok: true });
+        return;
+      }
+
       // UI connects the active tab origin to the currently selected account.
       if (message?.type === "DUSK_UI_CONNECT_ORIGIN") {
         const origin = String(message.origin ?? "").trim();
@@ -1046,6 +1111,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           await approveOrigin(origin, {
             profileId: `account:${idx}:${account}`,
             accountIndex: idx,
+            lastsMs: await siteLastsMs(String(accounts[0] ?? ""), origin, (await getSettings()).newSiteLastsMs),
             grants: { publicAccount: true, shieldedReceiveAddress: false },
           }, String(accounts[0] ?? ""));
         });
@@ -1334,8 +1400,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // Connected sites (for settings UI): the wallet's, or with more than
         // one wallet, each wallet's, by wallet.
         let permissions = null;
+        const owners = wallets.length > 1 ? wallets.map((w) => w.walletId).filter(Boolean) : [walletId];
         try {
-          const owners = wallets.length > 1 ? wallets.map((w) => w.walletId).filter(Boolean) : [walletId];
           permissions = [];
           for (const owner of owners) {
             const sites = Object.entries((await getPermissions(owner)) ?? {})
@@ -1344,6 +1410,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
                 walletId: owner,
                 accountIndex: Number(p?.accountIndex ?? 0) || 0,
                 connectedAt: Number(p?.connectedAt ?? 0) || 0,
+                lastsMs: Number(p?.lastsMs ?? 0) || 0,
+                expiresAt: Number(p?.expiresAt ?? 0) || 0,
               }))
               .sort((a, b) => a.origin.localeCompare(b.origin));
             permissions.push(...sites);
@@ -1475,6 +1543,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           selectedAccountIndex: status.selectedAccountIndex ?? settings.selectedAccountIndex ?? 0,
           accountCount: settings.accountCount ?? 1,
           permissions,
+          siteRecords: await getSiteRecords(owners.filter(Boolean)).catch(() => ({})),
           nodeUrl: settings.nodeUrl,
           proverUrl: settings.proverUrl,
           archiverUrl: settings.archiverUrl,
@@ -1484,6 +1553,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           ipfsGateway: settings.ipfsGateway ?? "",
           hideBalances: settings.hideBalances === true,
           sendPasswordLimit: (await sendPasswordLimit())?.toString() ?? null,
+          newSiteLastsMs: settings.newSiteLastsMs,
           chainId,
           chainRefusal: refusal,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),

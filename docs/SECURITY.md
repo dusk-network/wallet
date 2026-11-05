@@ -118,6 +118,7 @@ those messages from anything but the wallet's own pages. The engine answers only
 - Permissions stored per wallet, then per origin, with the selected profile/account index and grants
 - A site connected to one wallet sees nothing of another unless it's connected there too
 - A site that disconnects itself is disconnected from every wallet
+- A connection can be set to end after 1, 7 or 30 days, for a site or for new sites: past its end the site is as if never connected, and what it had waiting is refused
 
 ```js
 // Permission record, under its wallet's ID (its first public account)
@@ -132,10 +133,19 @@ those messages from anything but the wallet's own pages. The engine answers only
       },
       connectedAt: 1706400000000,
       updatedAt: 1706400000000,
+      // Only for one set to end
+      lastsMs: 604800000,
+      expiresAt: 1707004800000,
     }
   }
 }
 ```
+
+The wallet also keeps a record per site (`dusk_site_records_v1`), for Settings: when it last used its
+connection, and what it asked for and how that was answered, with a contract call's function name. Never
+an amount, recipient, memo, message, contract or hash. It's bounded (30 requests a site, 50 sites a wallet, what
+was approved kept longest), stays once a site is disconnected until it's forgotten, and goes with its wallet or a reset.
+No provider method reads it.
 
 #### RPC Method Security
 

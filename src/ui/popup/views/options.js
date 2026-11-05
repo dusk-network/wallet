@@ -3,9 +3,10 @@ import { networks } from "@dusk-network/networks";
 import { formatDuskExact, formatFee } from "../../../shared/amount.js";
 import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
-import { AUTO_LOCK_OPTIONS, normalizeCustomGas } from "../../../shared/settings.js";
+import { AUTO_LOCK_OPTIONS, SITE_LASTS_OPTIONS, normalizeCustomGas, normalizeSiteLasts } from "../../../shared/settings.js";
 import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { setAccountName } from "../../../shared/accountNames.js";
+import { siteLastSeen } from "../../../shared/siteRecords.js";
 import { normalizeWalletName, walletLabel } from "../../../shared/wallets.js";
 import { clearAddressBook } from "../../../shared/addressBook.js";
 import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
@@ -14,6 +15,7 @@ import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress, siteName } from "../../lib/strings.js";
+import { dateText } from "../../lib/time.js";
 import { subnav } from "../../components/Subnav.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -21,6 +23,7 @@ import { setNetworkSwitching } from "../../components/NetworkMenu.js";
 import { fieldLabel, integerInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
 import { switchContext } from "../context.js";
+import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
 
 // Settings: the wallets, the profile, security, connected sites, contacts and
 // the network, then Advanced (custom gas, Delete all contacts), Reset wallet
@@ -365,11 +368,64 @@ export function optionsView(ov, { state, actions } = {}) {
       actions?.showToast?.(e?.message ?? String(e), 2500);
     }
   };
+  // What each site asked, and how long each stays connected, under its Details.
+  const sitesState = (state.settings ??= {});
+  const detailsOpen = (sitesState.siteDetailsOpen ??= {});
+  const siteDetails = (key, record, host, lasts = null) =>
+    siteDetailsEl(record, host, {
+      lasts,
+      open: Boolean(detailsOpen[key]),
+      onToggle: (open) => {
+        detailsOpen[key] = open;
+      },
+    });
+  const records = ov?.siteRecords ?? {};
+  const changeSite = async (message, done) => {
+    try {
+      const response = await actions?.send?.(message);
+      if (response?.error) throw new Error(response.error.message ?? "Couldn't save that");
+      actions?.showToast?.(done);
+      state.needsRefresh = true;
+      await actions?.render?.({ forceRefresh: true });
+    } catch (e) {
+      actions?.showToast?.(e?.message ?? String(e), 2500);
+    }
+  };
+  const lastsLabel = (lastsMs) => SITE_LASTS_OPTIONS.find((o) => o.value === lastsMs)?.label ?? "";
+  // How long a connection lasts, a site's or new sites', as a choice.
+  const lastsField = (label, value, ariaLabel, onChange) => {
+    const select = h(
+      "select",
+      { "aria-label": ariaLabel },
+      SITE_LASTS_OPTIONS.map((o) => h("option", { value: String(o.value), text: o.label }))
+    );
+    select.value = String(normalizeSiteLasts(value));
+    select.addEventListener("change", () => onChange(Number(select.value)));
+    return h("div", { class: "settings-field" }, [
+      h("span", { class: "settings-site__note", text: label }),
+      h("div", { class: "select-wrap" }, [select]),
+    ]);
+  };
   const siteRows = connectedSites.map((p) => {
     const origin = String(p?.origin ?? "");
     const host = siteName(origin);
     const idx = Number(p?.accountIndex ?? 0) || 0;
     const siteWallet = String(p?.walletId ?? "");
+    const key = `${siteWallet || walletId} ${origin}`;
+    const record = records[siteWallet || walletId]?.[origin];
+    const endsAt = Number(p?.expiresAt ?? 0);
+    const endsLine = endsAt > 0 ? h("span", { class: "settings-site__note", text: `Connected until ${dateText(endsAt)}` }) : null;
+    const details = siteDetails(
+      key,
+      record,
+      host,
+      lastsField("Stays connected", p?.lastsMs, `How long ${host} stays connected`, (lastsMs) =>
+        changeSite(
+          { type: "DUSK_UI_SET_SITE_LASTS", origin, ...(siteWallet ? { siteWallet } : {}), lastsMs },
+          lastsMs > 0 ? `${host} stays connected for ${lastsLabel(lastsMs)}.` : `${host} stays connected until you disconnect it.`
+        )
+      )
+    );
     const own = !siteWallet || siteWallet === walletId;
     const wallet = several ? wallets.find((w) => w.walletId === siteWallet) : null;
     const walletLine = wallet
@@ -390,7 +446,10 @@ export function optionsView(ov, { state, actions } = {}) {
       return h("div", { class: "settings-site" }, [
         h("div", { class: "settings-site__head" }, [h("span", { class: "settings-site__host", title: origin, text: host }), disconnectBtn]),
         walletLine,
-      ]);
+        siteLastUsedEl(record),
+        endsLine,
+        details,
+      ].filter(Boolean));
     }
     const sel = h(
       "select",
@@ -411,9 +470,37 @@ export function optionsView(ov, { state, actions } = {}) {
     return h("div", { class: "settings-site" }, [
       h("div", { class: "settings-site__head" }, [h("span", { class: "settings-site__host", title: origin, text: host }), disconnectBtn]),
       walletLine,
+      siteLastUsedEl(record),
+      endsLine,
       h("div", { class: "select-wrap" }, [sel]),
+      details,
     ].filter(Boolean));
   });
+  // Sites that asked or were connected, and aren't now: last heard of first, each with Forget.
+  const connectedKeys = new Set(connectedSites.map((p) => `${String(p?.walletId ?? "") || walletId} ${String(p?.origin ?? "")}`));
+  const earlierRows = Object.entries(records)
+    .flatMap(([owner, sites]) => Object.entries(sites ?? {}).map(([origin, record]) => ({ owner, origin, record })))
+    .filter(({ owner, origin, record }) => siteLastSeen(record) > 0 && !connectedKeys.has(`${owner} ${origin}`))
+    .sort((a, b) => siteLastSeen(b.record) - siteLastSeen(a.record))
+    .map(({ owner, origin, record }) => {
+      const host = siteName(origin);
+      const wallet = several ? wallets.find((w) => w.walletId === owner) : null;
+      return h("div", { class: "settings-site" }, [
+        h("div", { class: "settings-site__head" }, [
+          h("span", { class: "settings-site__host", title: origin, text: host }),
+          h("button", {
+            class: "mini-btn",
+            type: "button",
+            text: "Forget",
+            "aria-label": wallet ? `Forget ${host} in ${walletLabel(wallet)}` : `Forget ${host}`,
+            onclick: () => changeSite({ type: "DUSK_UI_FORGET_SITE_RECORD", origin, siteWallet: owner }, `Forgot ${host}.`),
+          }),
+        ]),
+        wallet ? h("span", { class: "settings-site__wallet", text: walletLabel(wallet) }) : null,
+        siteLastUsedEl(record),
+        siteDetails(`${owner} ${origin}`, record, host),
+      ].filter(Boolean));
+    });
   // Every listed site's wallet, for Disconnect all.
   const siteWallets = [...new Set(connectedSites.map((p) => String(p?.walletId ?? "")).filter(Boolean))];
   const sitesSection = platform.capabilities.dapp
@@ -421,6 +508,18 @@ export function optionsView(ov, { state, actions } = {}) {
         siteRows.length
           ? h("div", { class: "group settings-sites" }, siteRows)
           : h("p", { class: "settings-empty", text: "No sites are connected." }),
+        lastsField("New sites stay connected", ov?.newSiteLastsMs, "How long new sites stay connected", (lastsMs) =>
+          changeSite(
+            { type: "DUSK_UI_SET_NEW_SITE_LASTS", lastsMs },
+            lastsMs > 0 ? `New sites stay connected for ${lastsLabel(lastsMs)}.` : "New sites stay connected until you disconnect them."
+          )
+        ),
+        earlierRows.length
+          ? h("details", { class: "advanced settings-sites-earlier" }, [
+              h("summary", { text: `Earlier sites (${earlierRows.length})` }),
+              h("div", { class: "group settings-sites" }, earlierRows),
+            ])
+          : null,
         siteRows.length > 1
           ? h("button", {
               class: "text-btn settings-disconnect-all",

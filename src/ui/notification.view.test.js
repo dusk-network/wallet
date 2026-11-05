@@ -13,6 +13,7 @@ import { readDrc20Call } from "../shared/drc20Calls.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
+import { dateText } from "./lib/time.js";
 import { fakeEvent, installFakeDom, isShown, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 const mocks = vi.hoisted(() => ({ pending: null, sent: [], answers: {} }));
@@ -171,6 +172,20 @@ describe("connect approval", () => {
     ]);
     expect(app.textContent).not.toContain("only be able to use");
     expect(buttons()).toEqual(["Reject", "Connect"]);
+  });
+
+  it("says how long it stays connected, as Settings has it", async () => {
+    const seesLine = () => visibleText(app.querySelectorAll(".ap-facts .list-row")[0]);
+    await render("connect", { requestedProfiles: true, lastsMs: 86_400_000 });
+    expect(seesLine()).toContain(", for a day, or until you disconnect it");
+    await render("connect", { requestedProfiles: true, lastsMs: 7 * 86_400_000 });
+    expect(seesLine()).toContain(", for 7 days, or until you disconnect it");
+    // Connected already: until when, as it goes on.
+    const end = Date.UTC(2031, 0, 15, 12);
+    await render("connect", { requestedProfiles: true, stays: true, lastsMs: 7 * 86_400_000, endsAt: end }, { permissionAccountIndex: 0 });
+    expect(seesLine()).toContain(`, until ${dateText(end)}, or until you disconnect it`);
+    await render("connect", { requestedProfiles: true, stays: true, lastsMs: 7 * 86_400_000, endsAt: 0 }, { permissionAccountIndex: 0 });
+    expect(seesLine()).toMatch(/, until you disconnect it$/);
   });
 
   it("picks the connected profile with native radios and connects the one picked", async () => {

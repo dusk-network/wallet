@@ -658,6 +658,10 @@ export async function renderNotification() {
   // shielded address says so in the title.
   function renderConnect() {
     const requestedShielded = Boolean(params?.shieldedReceiveAddress);
+    // How long it stays connected: as it's set, and connected already, until when.
+    const endsAt = Number(params?.endsAt ?? 0);
+    const lastsDays = params?.stays ? 0 : Math.round(Number(params?.lastsMs ?? 0) / 86_400_000);
+    const lastsText = endsAt > 0 ? `until ${fullDateText(endsAt)}, or until you disconnect it` : lastsDays > 0 ? `for ${lastsDays === 1 ? "a day" : `${lastsDays} days`}, or until you disconnect it` : "until you disconnect it";
     const currentAccountIndexRaw = Number(params?.currentAccountIndex);
     const currentAccountIndex =
       params?.currentAccountIndex != null && Number.isFinite(currentAccountIndexRaw) && currentAccountIndexRaw >= 0
@@ -708,7 +712,7 @@ export async function renderNotification() {
               : {
                   icon: "eye",
                   title: "Sees your public address, .dusk name and balance",
-                  sub: `${who ? `${who}, ` : ""}until you disconnect it`,
+                  sub: `${who ? `${who}, ` : ""}${lastsText}`,
                 },
             sharesShielded()
               ? { icon: "shield", title: "Gets your shielded address", sub: "It can send you shielded payments. It can't see your shielded balance." }

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   notifyTxExecuted: vi.fn(async () => true),
   requestUserApproval: vi.fn(async () => null),
   bindPendingWallet: vi.fn(() => true),
+  alarmListeners: [],
+  alarmsCreate: vi.fn(),
 }));
 
 function makeLocalStorage() {
@@ -133,8 +135,12 @@ vi.mock("../platform/extensionApi.js", () => ({
     },
     alarms: {
       clear: vi.fn(),
-      create: vi.fn(),
-      onAlarm: { addListener: vi.fn() },
+      create: mocks.alarmsCreate,
+      onAlarm: {
+        addListener: (fn) => {
+          mocks.alarmListeners.push(fn);
+        },
+      },
     },
   }),
   alarmsClear: vi.fn(async () => true),
@@ -818,6 +824,98 @@ describe("background Phoenix tx lifecycle flow", () => {
     mocks.bindPendingWallet.mockReturnValueOnce(false);
     await expect(sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" })).resolves.toBeNull();
     expect(mocks.bindPendingWallet).toHaveBeenCalledWith("rid-1", "acct0");
+  });
+
+  describe("a site's record", () => {
+    const SITE = "https://dapp.example";
+    const fromPage = { url: "chrome-extension://wallet/popup.html" };
+    const fromSite = { url: `${SITE}/`, tab: { id: 7 } };
+    const grant = { accountIndex: 0, profileId: "account:0:acct0" };
+    const rpc = (method) => sendBackgroundMessage({ type: "DUSK_RPC_REQUEST", id: 1, request: { method } }, fromSite);
+    const stored = async () => {
+      const { STORAGE_KEYS, storage } = await import("../shared/storage.js");
+      return (await storage.get(STORAGE_KEYS.SITE_RECORDS))[STORAGE_KEYS.SITE_RECORDS];
+    };
+
+    it("notes when a connected site used its connection, not what any page can ask", async () => {
+      const { approveOrigin } = await import("../shared/permissions.js");
+      await rpc("dusk_profiles");
+      await rpc("dusk_chainId");
+      expect((await stored())?.acct0?.[SITE]).toBeUndefined();
+
+      await approveOrigin(SITE, grant, "acct0");
+      await rpc("dusk_chainId");
+      expect((await stored())?.acct0?.[SITE]).toBeUndefined();
+      const before = Date.now();
+      await rpc("dusk_profiles");
+      await vi.waitFor(async () => expect((await stored())?.acct0?.[SITE]?.lastUsedAt).toBeGreaterThanOrEqual(before));
+    });
+
+    it("gives Settings the records, and what new sites are set to", async () => {
+      const { noteSiteRequest } = await import("../shared/siteRecords.js");
+      await noteSiteRequest("acct0", SITE, { kind: "connect", answer: "approved", at: 5 });
+      await sendBackgroundMessage({ type: "DUSK_UI_SET_NEW_SITE_LASTS", lastsMs: 86_400_000 }, fromPage);
+      const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" }, fromPage);
+      expect(overview.siteRecords.acct0[SITE].asked).toEqual([{ at: 5, what: "connect", answer: "approved" }]);
+      expect(overview.newSiteLastsMs).toBe(86_400_000);
+      // Only what's offered.
+      await sendBackgroundMessage({ type: "DUSK_UI_SET_NEW_SITE_LASTS", lastsMs: 5 }, fromPage);
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" }, fromPage)).resolves.toMatchObject({ newSiteLastsMs: 0 });
+    });
+
+    it("lets only the wallet's own pages set how long a site stays connected, or forget it", async () => {
+      const { approveOrigin, getPermissionForOrigin } = await import("../shared/permissions.js");
+      const { noteSiteRequest } = await import("../shared/siteRecords.js");
+      await approveOrigin(SITE, grant, "acct0");
+      await noteSiteRequest("acct0", SITE, { kind: "connect", answer: "approved", at: 5 });
+      const set = { type: "DUSK_UI_SET_SITE_LASTS", origin: SITE, lastsMs: 86_400_000 };
+      const forget = { type: "DUSK_UI_FORGET_SITE_RECORD", origin: SITE, siteWallet: "acct0" };
+      for (const message of [set, forget, { type: "DUSK_UI_SET_NEW_SITE_LASTS", lastsMs: 86_400_000 }]) {
+        await expect(sendBackgroundMessage(message, fromSite)).resolves.toMatchObject({ error: { message: "Only the wallet can do that" } });
+      }
+      expect((await getPermissionForOrigin(SITE, "acct0")).expiresAt).toBeUndefined();
+      expect((await stored()).acct0[SITE]).toBeTruthy();
+
+      const before = Date.now();
+      await expect(sendBackgroundMessage(set, fromPage)).resolves.toEqual({ ok: true });
+      expect((await getPermissionForOrigin(SITE, "acct0")).expiresAt).toBeGreaterThanOrEqual(before + 86_400_000);
+      expect((await stored()).acct0[SITE].lastsMs).toBe(86_400_000);
+      await expect(sendBackgroundMessage(forget, fromPage)).resolves.toEqual({ ok: true });
+      expect((await stored())?.acct0?.[SITE]).toBeUndefined();
+      // One not connected says so.
+      await expect(sendBackgroundMessage({ ...set, origin: "https://gone.example" }, fromPage)).resolves.toMatchObject({ error: { message: "That site isn't connected any more." } });
+    });
+
+    it("lasts as new sites do when it's connected from the popup too", async () => {
+      const { getPermissionForOrigin, revokeOrigin } = await import("../shared/permissions.js");
+      await revokeOrigin(SITE, "acct0");
+      await sendBackgroundMessage({ type: "DUSK_UI_SET_NEW_SITE_LASTS", lastsMs: 86_400_000 }, fromPage);
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_CONNECT_ORIGIN", origin: SITE }, fromPage)).resolves.toEqual({ ok: true });
+      await expect(getPermissionForOrigin(SITE, "acct0")).resolves.toMatchObject({ lastsMs: 86_400_000 });
+      await revokeOrigin(SITE, "acct0");
+      await sendBackgroundMessage({ type: "DUSK_UI_SET_NEW_SITE_LASTS", lastsMs: 0 }, fromPage);
+    });
+
+    it("takes out a connection when its time is up, and sets the alarm for the next", async () => {
+      const { approveOrigin, getPermissions } = await import("../shared/permissions.js");
+      const { storage, STORAGE_KEYS } = await import("../shared/storage.js");
+      const now = Date.now();
+      await approveOrigin(SITE, { ...grant, lastsMs: 1_000 }, "acct0");
+      await approveOrigin("https://later.example", { ...grant, lastsMs: 86_400_000 }, "acct0");
+      await approveOrigin("https://stays.example", grant, "acct0");
+      const raw = async () => (await storage.get(STORAGE_KEYS.PERMISSIONS_V2))[STORAGE_KEYS.PERMISSIONS_V2].acct0;
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 5_000);
+      expect(Object.keys(await getPermissions("acct0"))).not.toContain(SITE);
+      expect(Object.keys(await raw())).toContain(SITE);
+      mocks.alarmsCreate.mockClear();
+      expect(mocks.alarmListeners.length).toBeGreaterThan(0);
+      for (const listener of mocks.alarmListeners) listener({ name: "dusk_connection_end" });
+      await vi.waitFor(() => expect(mocks.alarmsCreate).toHaveBeenCalled());
+      clock.mockRestore();
+      expect(Object.keys(await raw()).sort()).toEqual(["https://later.example", "https://stays.example"]);
+      expect(mocks.alarmsCreate).toHaveBeenCalledWith("dusk_connection_end", { when: expect.any(Number) });
+      expect(mocks.alarmsCreate.mock.lastCall[1].when).toBeGreaterThan(now + 86_000_000);
+    });
   });
 
   describe("the password on big sends, from the popup", () => {
