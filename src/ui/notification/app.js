@@ -92,6 +92,28 @@ function renderError(text) {
   show([h("div", { class: "err", role: "alert", text })]);
 }
 
+/**
+ * Under a box of a site's text that scrolls, a line that says it goes on, for
+ * as long as there's more of it below the box's edge: blank lines can push
+ * the rest of a message out of sight.
+ * @param {HTMLElement} box - the box, once it's on the page
+ * @param {string} what - "message", "statement"
+ */
+function goesOnNote(box, what) {
+  const line = h("p", { class: "ap-sub ap-goes-on", role: "note", hidden: true, text: `The ${what} goes on below. Scroll it to read all of it.` });
+  const check = () => {
+    if (!box.isConnected) {
+      window.removeEventListener?.("resize", check);
+      return;
+    }
+    line.hidden = !(box.scrollHeight - box.scrollTop - box.clientHeight > 1);
+  };
+  box.addEventListener("scroll", check);
+  window.addEventListener?.("resize", check);
+  requestAnimationFrame(check);
+  return line;
+}
+
 // The network the request is on, in the header beside the wallet's name, and
 // at the top the strip that says a test network's DUSK has no value, or which
 // node a custom one is.
@@ -809,13 +831,15 @@ export async function renderNotification() {
 
     let message;
     if (preview?.kind === "text") {
+      const box = h("div", {
+        class: "ap-message",
+        text: String(preview.text ?? ""),
+        title: preview.truncated ? "Preview shortened; the hash covers the full message." : undefined,
+      });
       message = h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-message-title" }, [
         sectionTitle(preview.truncated ? "Message, shortened" : "Message", "ap-message-title"),
-        h("div", {
-          class: "ap-message",
-          text: String(preview.text ?? ""),
-          title: preview.truncated ? "Preview shortened; the hash covers the full message." : undefined,
-        }),
+        box,
+        goesOnNote(box, "message"),
         preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash below covers the full message." }) : null,
         preview.needsReview ? warning(TEXT_REVIEW_TITLE, "This message has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign it if you trust this site.") : null,
       ]);
@@ -857,6 +881,7 @@ export async function renderNotification() {
     const chainId = String(params?.chainId ?? "");
     const nonce = String(params?.nonce ?? "");
     const statement = safeText(String(params?.statement ?? "").trim(), { keepLines: true });
+    const statementBox = statement.text ? h("div", { class: "ap-message", text: statement.text }) : null;
     const nonceShown = safeText(nonce).text;
     const expiresAt = String(params?.expiresAt ?? "").trim();
 
@@ -864,10 +889,11 @@ export async function renderNotification() {
       [
         site,
         requestHead({ title: "Sign in to this site?" }),
-        statement.text
+        statementBox
           ? h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-statement-title" }, [
               sectionTitle("The site's statement", "ap-statement-title"),
-              h("div", { class: "ap-message", text: statement.text }),
+              statementBox,
+              goesOnNote(statementBox, "statement"),
               statement.flagged ? warning(TEXT_REVIEW_TITLE, "This statement has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign in if you trust this site.") : null,
             ])
           : null,
@@ -1309,7 +1335,8 @@ export async function renderNotification() {
           [
             ...networkRows(),
             kv("Contract ID", mono(contractShown), { stack: true }),
-            kv("Method", mono(fnName || "(none)")),
+            // The site's name for it, as a memo is shown: what reorders text shows as its code.
+            kv("Method", fnName ? safeTextEl(fnName, { mono: true }) : mono("(none)")),
             kv("Call data", mono(callData), { stack: true }),
           ],
           { className: "group--inset" }

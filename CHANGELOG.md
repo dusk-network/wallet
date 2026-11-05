@@ -52,6 +52,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Cleared a Sozu stake's "on its way" note once the stake is done, also after a browser restart.
 - Refused a request link for another network in Send: it fills in nothing, says why, and can't be confirmed.
 - Said "Filled in from the link. Check it before you send." under the recipient, in place of a toast over Review.
+- Kept numbers beside right-to-left words in the order a site wrote them, in messages to sign, sign-ins, memos and a site's own words.
+- Neutralized and flagged characters that change how text reads in a contract call's function, as in a memo: approvals, Activity and a transaction's details.
+- Said when a message to sign or a sign-in's statement goes on below its box.
 
 ## [0.4.0] - 2026-11-04
 

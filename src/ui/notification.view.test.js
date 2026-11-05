@@ -7,6 +7,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { networks, routes } from "@dusk-network/networks";
 import { duskEvmContracts } from "@dusk-network/networks/duskevm";
+import { displayText } from "@dusk-network/app-core/text";
 
 import { bytesToHex, toBytes } from "../shared/bytes.js";
 import { readDrc20Call } from "../shared/drc20Calls.js";
@@ -479,6 +480,61 @@ describe("text that reads as something it isn't", () => {
     // The window only answers: the memo sent is the request's, untouched.
     expect(decision("approve").approvedParams ?? null).toBeNull();
     expect(mocks.pending.params.memo).toBe(memo);
+  });
+
+  it("shows a call's function as a memo is: what reorders it as its code, and flagged", async () => {
+    await render("send_tx", {
+      kind: "contract_call",
+      privacy: "public",
+      contractId: `0x${"11".repeat(32)}`,
+      fnName: `pay${RLO}evol_ot${POP}`,
+      fnArgs: "0x00",
+      chainId: "dusk:2",
+      nodeUrl: TESTNET,
+    });
+    expect(row("Method").querySelector(".safe-text > span").textContent).toBe("pay\\u202eevol_ot\\u202c");
+    expect(row("Method").querySelector(".safe-text__flag")).not.toBeNull();
+    expect(visibleText(app)).not.toContain(RLO);
+  });
+
+  // app-core 0.7.2 sets right-to-left words apart; until it's the one installed, this has nothing to show.
+  const setsApart = displayText("\u05d0", { isolate: true }).text !== "\u05d0";
+
+  it.runIf(setsApart)("shows a message and a memo with right-to-left words in the order of their bytes", async () => {
+    const [open, close] = ["\u2068", "\u2069"];
+    const bytes = new TextEncoder().encode("Pay \u05d0 10 \u05d0 1000 \u05d0 DUSK");
+    await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
+    // Each word set apart, so neither number moves: nothing's hidden, nothing to flag.
+    expect(app.querySelector(".ap-message").textContent).toBe(`Pay ${open}\u05d0${close} 10 ${open}\u05d0${close} 1000 ${open}\u05d0${close} DUSK`);
+    expect(app.querySelector(".callout.warn")).toBeNull();
+
+    await render("send_tx", transfer(BOB, { memo: "=HYPERLINK(1) pay \u05d0 10 \u05d0 1000" }));
+    expect(row("Memo").querySelector(".safe-text > span").textContent).toBe(`=HYPERLINK(1) pay ${open}\u05d0${close} 10 ${open}\u05d0${close} 1000`);
+  });
+
+  it("says when a message goes on past its box, for as long as there's more below", async () => {
+    const bytes = new TextEncoder().encode(`Login to site${"\n".repeat(60)}I transfer all funds`);
+    await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
+    const box = app.querySelector(".ap-message");
+    const goesOn = () => {
+      const line = app.querySelector(".ap-goes-on");
+      return isShown(line) ? line.textContent : "";
+    };
+    // As the window lays it out: 1,326 px of text in a box of 180.
+    Object.assign(box, { scrollHeight: 1326, clientHeight: 180, scrollTop: 0 });
+    dom.window.dispatchEvent(fakeEvent("resize"));
+    expect(goesOn()).toBe("The message goes on below. Scroll it to read all of it.");
+    // Read to the end, it has nothing more to say.
+    box.scrollTop = 1146;
+    box.dispatchEvent(fakeEvent("scroll"));
+    expect(goesOn()).toBe("");
+
+    // A message that fits says nothing.
+    const short = new TextEncoder().encode("Sign in to the shop");
+    await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: short.length, messagePreview: describeSignMessagePreview(short) });
+    Object.assign(app.querySelector(".ap-message"), { scrollHeight: 45, clientHeight: 45, scrollTop: 0 });
+    dom.window.dispatchEvent(fakeEvent("resize"));
+    expect(goesOn()).toBe("");
   });
 
   it("leaves a plain memo as it is, and neutralizes what a site writes about itself", async () => {

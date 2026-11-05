@@ -124,6 +124,16 @@ describe("transaction details", () => {
     expect([visibleText(id), Boolean(id.querySelector("button.copy-ico"))]).toEqual([`· ${pool.slice(0, 6)}…${pool.slice(-6)}`, true]);
   });
 
+  it("shows a call's function as its memo would be: what reorders it as its code, and flagged", () => {
+    const [rlo, pop] = ["\u202e", "\u202c"];
+    const view = details({ kind: TX_KIND.CONTRACT_CALL, contractId: "ab".repeat(32), fnName: `pay${rlo}evol_ot${pop}`, status: "executed" });
+    const method = view.body.querySelectorAll(".kv").find((row) => row.querySelector(".kv-label").textContent === "Method");
+    expect(method.querySelector(".safe-text > span").textContent).toBe("pay\\u202eevol_ot\\u202c");
+    expect(method.querySelector(".safe-text__flag")).not.toBeNull();
+    expect(view.name).toBe("Call pay\\u202eevol_ot\\u202c");
+    expect(visibleText(view.body)).not.toContain(rlo);
+  });
+
   it("says what a Dusk Domains call did, on its own network", () => {
     // The testnet release's store contract, where names are registered.
     const STORE = releases.testnet.contracts.find((c) => c.role === "store").contractId;
