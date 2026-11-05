@@ -377,7 +377,7 @@ describe("flattenTypedMessage", () => {
 
     expect(rows[0].flags).toContain("bidi_control");
     expect(rows[0].display).not.toContain("‮");
-    expect(rows[0].display).toContain("�");
+    expect(rows[0].display).toBe("send\\u202e1 DUSK");
   });
 
   it("neutralises every Unicode Bidi_Control, but preserves ordinary Arabic and emoji", () => {
@@ -389,7 +389,7 @@ describe("flattenTypedMessage", () => {
     expect(controls).toHaveLength(12);
     for (const char of controls) {
       expect(sanitizeStringForDisplay(`Amount: ${char}123 456`)).toEqual({
-        display: "Amount: �123 456", flags: ["bidi_control"],
+        display: `Amount: \\u${char.codePointAt(0).toString(16).padStart(4, "0")}123 456`, flags: ["bidi_control"],
       });
     }
     const plain = "العربية 123 456 😀";
@@ -419,7 +419,7 @@ describe("flattenTypedMessage", () => {
     expect(sanitizeStringForDisplay("😀X", 1)).toEqual({ display: "😀", flags: ["truncated"] });
     expect(sanitizeStringForDisplay("\ud800X\udfff")).toEqual({ display: "�X�", flags: ["invalid_surrogate"] });
     expect(sanitizeStringForDisplay("A\u{e0001}B")).toEqual({ display: "A\\udb40\\udc01B", flags: ["invisible_format"] });
-    expect(sanitizeStringForDisplay("A\tB")).toEqual({ display: "A�B", flags: ["control_chars"] });
+    expect(sanitizeStringForDisplay("A\tB")).toEqual({ display: "A\\u0009B", flags: ["control_chars"] });
   });
 
   it("neutralises and flags a control character", async () => {
@@ -433,7 +433,7 @@ describe("flattenTypedMessage", () => {
     });
 
     expect(rows[0].flags).toContain("control_chars");
-    expect(rows[0].display).toBe("a�b");
+    expect(rows[0].display).toBe("a\\u0007b");
   });
 
   it("renders a missing field honestly instead of throwing", async () => {

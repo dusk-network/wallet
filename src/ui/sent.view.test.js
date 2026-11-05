@@ -116,7 +116,7 @@ describe("after Confirm", () => {
     await settle();
     await app.confirm();
     const row = body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
-    expect(row.querySelector(".safe-text > span").textContent).toBe("�gnp.exe");
+    expect(row.querySelector(".safe-text > span").textContent).toBe("\\u202egnp.exe");
     expect(row.querySelector(".safe-text__flag")).not.toBeNull();
     expect(visibleText(body)).not.toContain(rlo);
   });

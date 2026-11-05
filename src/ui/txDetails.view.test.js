@@ -338,7 +338,7 @@ describe("transaction details", () => {
     const [rlo, pop] = [0x202e, 0x202c].map((c) => String.fromCodePoint(c));
     const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: `invoice ${rlo}gnp.exe${pop}` });
     const memo = [...body.querySelectorAll(".kv")].find((row) => visibleText(row).startsWith("Memo"));
-    expect(memo.querySelector(".safe-text > span").textContent).toBe("invoice �gnp.exe�");
+    expect(memo.querySelector(".safe-text > span").textContent).toBe("invoice \\u202egnp.exe\\u202c");
     expect(visibleText(memo)).not.toContain(rlo);
     expect(memo.querySelector(".safe-text__flag").textContent).toBe("Hidden characters that can change how this reads show here as � or \\u codes.");
   });

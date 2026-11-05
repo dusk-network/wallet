@@ -308,7 +308,7 @@ describe("text that reads as something it isn't", () => {
 
   it("shows a message to sign in the order its bytes say, and flags it", async () => {
     await render("sign_message", signRequest());
-    expect(app.querySelector(".ap-message").textContent).toBe("I agree to pay �0001� DUSK");
+    expect(app.querySelector(".ap-message").textContent).toBe("I agree to pay \\u202e0001\\u202c DUSK");
     expect(visibleText(app)).not.toContain(RLO);
     expect(visibleText(app.querySelector(".callout.warn"))).toContain("This message has hidden characters that can change how it reads.");
     expect(buttons()).toEqual(["Reject", "Sign"]);
@@ -316,7 +316,7 @@ describe("text that reads as something it isn't", () => {
 
   it("shows it so before the wallet is unlocked too", async () => {
     await render("sign_message", signRequest(), { isUnlocked: false, accounts: [], duskNames: {} });
-    expect(visibleText(head())).toContain("I agree to pay �0001� DUSK");
+    expect(visibleText(head())).toContain("I agree to pay \\u202e0001\\u202c DUSK");
     expect(visibleText(app)).not.toContain(RLO);
   });
 
@@ -329,8 +329,8 @@ describe("text that reads as something it isn't", () => {
 
   it("neutralizes and flags a site's statement and nonce on a sign-in", async () => {
     await render("sign_auth", { chainId: "dusk:2", nonce: `n${RLO}1`, statement: `Pay ${RLO}0001${POP}` });
-    expect(app.querySelector(".ap-message").textContent).toBe("Pay �0001�");
-    expect(row("Nonce").textContent).toBe("n�1");
+    expect(app.querySelector(".ap-message").textContent).toBe("Pay \\u202e0001\\u202c");
+    expect(row("Nonce").textContent).toBe("n\\u202e1");
     expect(visibleText(app)).not.toContain(RLO);
     expect(visibleText(app.querySelector(".callout.warn"))).toContain("This statement has hidden characters");
   });
@@ -339,7 +339,7 @@ describe("text that reads as something it isn't", () => {
     const memo = `${RLO}gnp.exe claim your airdrop https://evil.example`;
     await render("send_tx", transfer(BOB, { memo, gas: { limit: "2500000", price: "1" } }));
     expect(visibleText(app)).not.toContain(RLO);
-    expect(row("Memo").querySelector(".safe-text > span").textContent).toBe("�gnp.exe claim your airdrop https://evil.example");
+    expect(row("Memo").querySelector(".safe-text > span").textContent).toBe("\\u202egnp.exe claim your airdrop https://evil.example");
     expect(row("Memo").querySelector(".safe-text__flag")).not.toBeNull();
     pastClickGuard();
     approve().click();
@@ -365,7 +365,7 @@ describe("text that reads as something it isn't", () => {
       nodeUrl: TESTNET,
       networkName: "Testnet",
     });
-    expect(app.querySelector(".ap-site-details pre").textContent).toContain("Pay �0001");
+    expect(app.querySelector(".ap-site-details pre").textContent).toContain("Pay \\u202e0001");
     expect(visibleText(app)).not.toContain(RLO);
   });
 });
