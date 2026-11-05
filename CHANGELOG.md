@@ -62,6 +62,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said what Max keeps of a stake with Sozu, and on its Review that the deposit fee doesn't come back, as the web wallet does.
 - Showed what an unstake from Sozu brings back on Home and in Activity from the moment it's sent.
 - Showed the whole address on Receive, its first and last six set off, with a Copy address button that says Copied, as the web wallet does.
+- Showed the recovery words at 18 px, as the web wallet does, with I wrote it down kept in view at the bottom.
 
 ## [0.4.0] - 2026-11-04
 

@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { accessibleName, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
@@ -229,6 +231,16 @@ describe("a new recovery phrase", () => {
     await settle();
     expect(state.route).toBe("onboard_create_phrase");
   };
+
+  it("shows its words as large as the web wallet's, and keeps I wrote it down in view at the bottom", async () => {
+    const state = { route: "onboard_create_phrase", onboard: { ...emptyFlow(), mnemonic: MNEMONIC, reveal: true } };
+    const body = show(onboardingCreatePhraseView({ state, actions: actions() }));
+    // With Confirm on a Review, in the actions that stay at the bottom of the page.
+    expect(button(body, "I wrote it down").closest(".review-actions")).toBeTruthy();
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    expect(css).toMatch(/\.review-actions \{\s*position: sticky;/);
+    expect(Number(/\.srp-word-text \{[^}]*font-size: (\d+)px/.exec(css)?.[1])).toBeGreaterThanOrEqual(18);
+  });
 
   it("keeps its words through Back to the password and forward again", async () => {
     const state = { route: "onboard_welcome", onboard: emptyFlow() };
