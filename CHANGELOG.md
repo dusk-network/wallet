@@ -25,6 +25,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Kept Review off on Send while the amount typed won't do.
 - Kept Confirm, and what stops it, in view on every Review.
 - Wrote percentages, token amounts and examples in the browser's number format, and a time zone's name the same on every screen.
+- Called the profile menu's way to Settings Profile names, as profiles can't be added.
+- Listed what the network menu says of each network in Settings' list too.
+- Refused a new password that's the same as the current one.
 - Looked up a send no watcher follows any more, as after a browser restart, so a Sozu stake's "on its way" goes once it's done.
 
 ## [0.4.0] - 2026-11-04

@@ -424,16 +424,10 @@ export function optionsView(ov, { state, actions } = {}) {
   const networkSelect = h(
     "select",
     { id: "network", "aria-label": "Network" },
-    NETWORK_PRESETS.map((p) => h("option", { value: p.id, text: p.label }))
+    NETWORK_PRESETS.map((p) => h("option", { value: p.id, text: [p.label, p.hint].filter(Boolean).join(" · ") }))
   );
   networkSelect.value = nodeDraft?.preset ?? currentPresetId;
-  const networkHint = h("div", { class: "muted" });
   const nodeDetails = h("details", { class: "advanced settings-nodes", open: networkSelect.value === "custom" || Boolean(nodeDraft) });
-  const showNetworkHint = (preset) => {
-    networkHint.textContent = preset?.hint ?? "";
-    networkHint.hidden = !preset?.hint;
-  };
-  showNetworkHint(NETWORK_PRESETS.find((p) => p.id === networkSelect.value));
 
   // What's typed or picked and not saved says so beside Save.
   const unsavedNote = h("p", { class: "settings-note settings-unsaved", role: "status", hidden: true });
@@ -475,7 +469,6 @@ export function optionsView(ov, { state, actions } = {}) {
       // Still on its network: the choice names it again, and the pill too.
       setNetworkSwitching(pill, null);
       networkSelect.value = currentPresetId;
-      showNetworkHint(NETWORK_PRESETS.find((p) => p.id === currentPresetId));
       showUnsaved();
       switchError.textContent = e?.message ?? String(e);
       switchError.hidden = false;
@@ -487,7 +480,6 @@ export function optionsView(ov, { state, actions } = {}) {
   networkSelect.addEventListener("change", () => {
     const preset = NETWORK_PRESETS.find((p) => p.id === networkSelect.value);
     if (!preset) return;
-    showNetworkHint(preset);
     switchError.hidden = true;
     if (preset.id !== "custom") {
       if (preset.id !== currentPresetId) {
@@ -513,7 +505,6 @@ export function optionsView(ov, { state, actions } = {}) {
     const presetId = detectPresetIdFromNodeUrl(nodeUrlInput.value);
     networkSelect.value = presetId;
     const preset = NETWORK_PRESETS.find((p) => p.id === presetId);
-    showNetworkHint(preset);
     if (preset && preset.id !== "custom") {
       proverUrlInput.value = preset.proverUrl || nodeUrlInput.value.trim();
       archiverUrlInput.value = preset.archiverUrl || nodeUrlInput.value.trim();
@@ -780,7 +771,7 @@ export function optionsView(ov, { state, actions } = {}) {
     ]),
     sitesSection ? section("Connected sites", sitesSection) : null,
     section("Contacts", [h("div", { class: "group" }, [contactsRow])]),
-    section("Network", [h("div", { class: "select-wrap" }, [networkSelect]), networkHint, switchError, nodeDetails]),
+    section("Network", [h("div", { class: "select-wrap" }, [networkSelect]), switchError, nodeDetails]),
     // Advanced is its own section, its title the disclosure's.
     h("section", { class: "settings-section" }, [advanced]),
     section("Reset", [

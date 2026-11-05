@@ -449,8 +449,15 @@ describe("removing a wallet, and a new password", () => {
     button(body, "Change password").click();
     await settle();
     expect(errorOf(again)).toBe("The passwords don't match.");
+    // The one it has already changes nothing, so it's said.
+    typeInto(next, "password123");
+    typeInto(again, "password123");
+    button(body, "Change password").click();
+    await settle();
+    expect(errorOf(next)).toBe("Use a different password from the current one.");
     expect(acts.send).not.toHaveBeenCalled();
 
+    typeInto(next, "a new password");
     typeInto(again, "a new password");
     button(body, "Change password").click();
     await settle();
@@ -458,6 +465,7 @@ describe("removing a wallet, and a new password", () => {
     button(body, "Change password").click();
     await settle();
     expect(acts.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_CHANGE_PASSWORD", password: "password123", newPassword: "a new password" });
+    expect(acts.showToast).toHaveBeenCalledWith("Password changed.");
     expect(state.route).toBe("options");
     expect(JSON.stringify(state)).not.toContain("password");
   });

@@ -130,13 +130,15 @@ describe("settings", () => {
       "Node addresses",
       false,
     ]);
-    // Testnet says it all.
-    expect(network.querySelectorAll(".muted").filter(isShown)).toEqual([]);
-
-    view = await settings({ nodeUrl: "https://devnet.nodes.dusk.network" });
-    expect(view.section("Network").querySelectorAll(".muted").filter(isShown).map((el) => el.textContent)).toEqual([
-      "Experimental",
+    // The list says what the network menu says of each, before one is chosen.
+    expect(network.querySelectorAll("select#network option").map((o) => o.textContent)).toEqual([
+      "Mainnet",
+      "Testnet",
+      "Devnet · Experimental",
+      "Local · 127.0.0.1:8080",
+      "Custom · Any node URL",
     ]);
+    expect(network.querySelectorAll(".muted").filter(isShown)).toEqual([]);
   });
 
   it("names each profile by its verified name, as the header does, with names for this device", async () => {
