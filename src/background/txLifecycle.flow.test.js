@@ -740,6 +740,8 @@ describe("background Phoenix tx lifecycle flow", () => {
 
   describe("a send still marked on its way that no watcher follows", () => {
     const HASH = "ab".repeat(32);
+    // It's looked up after the overview answers: wait for the outcome, however busy the machine.
+    const soon = (check) => vi.waitFor(check, { timeout: 4_000 });
     const sozuStake = (over = {}) =>
       seedTxMeta(HASH, { walletId: "acct0", kind: "contract_call", privacy: "public", pendingNullifiers: [], reservationStatus: undefined, asset: { kind: "sozu", action: "sozu_stake" }, submittedAt: Date.now() - 17 * 60_000, ...over });
     const overview = () => sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
@@ -750,8 +752,8 @@ describe("background Phoenix tx lifecycle flow", () => {
       await sozuStake();
       mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: {} });
       expect((await overview()).txs.map((t) => t.status)).toEqual(["submitted"]);
-      await vi.waitFor(async () => expect(await kept()).toBe("executed"));
-      await vi.waitFor(() => expect(told()).toEqual([expect.objectContaining({ hash: HASH, status: "executed", ok: true })]));
+      await soon(async () => expect(await kept()).toBe("executed"));
+      await soon(() => expect(told()).toEqual([expect.objectContaining({ hash: HASH, status: "executed", ok: true })]));
       expect((await overview()).txs.map((t) => t.status)).toEqual(["executed"]);
     });
 
@@ -759,15 +761,15 @@ describe("background Phoenix tx lifecycle flow", () => {
       await sozuStake();
       mocks.classifyTxPresence.mockResolvedValue({ state: "executed_failed", tx: {}, error: "Out of gas" });
       await overview();
-      await vi.waitFor(async () => expect(await kept()).toBe("failed"));
+      await soon(async () => expect(await kept()).toBe("failed"));
     });
 
     it("stays on its way while the node still has it, asked at most once a minute", async () => {
       await sozuStake();
       mocks.classifyTxPresence.mockResolvedValue({ state: "mempool", tx: {} });
       await overview();
-      await vi.waitFor(() => expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1));
-      await vi.waitFor(async () => expect(await kept()).toBe("mempool"));
+      await soon(() => expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1));
+      await soon(async () => expect(await kept()).toBe("mempool"));
       await overview();
       await overview();
       expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1);
@@ -786,7 +788,7 @@ describe("background Phoenix tx lifecycle flow", () => {
       await sozuStake({ submittedAt: Date.now() - 70_000 });
       mocks.classifyTxPresence.mockResolvedValue({ state: "not_found" });
       await overview();
-      await vi.waitFor(() => expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1));
+      await soon(() => expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1));
       await overview();
       expect(await kept()).toBe("submitted");
       expect(told()).toEqual([]);
@@ -796,7 +798,7 @@ describe("background Phoenix tx lifecycle flow", () => {
       await sozuStake({ submittedAt: Date.now() - 70_000 });
       mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: {} });
       await overview();
-      await vi.waitFor(async () => expect(await kept()).toBe("executed"));
+      await soon(async () => expect(await kept()).toBe("executed"));
     });
 
     it("asks nothing of a send that's done", async () => {

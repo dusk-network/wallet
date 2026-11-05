@@ -181,6 +181,7 @@ The public repository does not currently include a native Tauri wrapper, so ther
 - All node communication over HTTPS
 - Users can configure custom node URLs
 - No hardcoded API keys or secrets
+- Nothing a node serves runs: the wallet core is the copy packaged with the wallet, never w3sper's download from the node
 - A node can't name its network: Mainnet, Testnet and Devnet are only the exact addresses in `@dusk-network/networks`; anything else is Custom, with its host showing
 - A node can't choose the chain ID that's signed: a known address's comes from `@dusk-network/networks`, a custom node's is read once when it's added and fixed, and w3sper's builders get that one (`pinNodeInfo` in `walletEngine.js`). A node that later answers another chain ID gets no signature
 

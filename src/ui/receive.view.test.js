@@ -301,18 +301,20 @@ describe("receive", () => {
       inLanguage("en-US");
       const view = await receive("public", { state: open({ amountDusk: "1" }) });
       const copy = view.button("Copy request link");
+      // The form's clock: well before Copied would end by itself.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       copy.click();
-      await settle();
+      await vi.advanceTimersByTimeAsync(0);
       expect(copy.hasAttribute("data-copied")).toBe(true);
       expect(accessibleName(copy)).toBe("Copied");
       const amount = dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Amount");
       typeInto(amount, "2");
-      // Well before Copied would have ended by itself.
-      await vi.waitFor(() => expect(copy.hasAttribute("data-copied")).toBe(false), { timeout: 800, interval: 20 });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(copy.hasAttribute("data-copied")).toBe(false);
       expect(accessibleName(copy)).toBe("Copy request link");
       // Copying the new link says it again.
       copy.click();
-      await settle();
+      await vi.advanceTimersByTimeAsync(0);
       expect(copy.hasAttribute("data-copied")).toBe(true);
       expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toContain("amount=2");
     });

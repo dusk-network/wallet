@@ -1312,7 +1312,7 @@ export async function ensureNetwork() {
   await ensureProtocolDriverLoaded();
 
   // Lazily create the Network instance.
-  state.network = state.network ?? sayRefusalsPlainly(pinNodeInfo(new Network(url)));
+  state.network = state.network ?? ownCoreOnly(sayRefusalsPlainly(pinNodeInfo(new Network(url))));
   registerNetworkDataDrivers(state.network);
 
   // Patch network methods that need to hit different services (prover/archiver)
@@ -1418,6 +1418,24 @@ export async function ensureNetwork() {
   state.bookkeeperAll = state.bookkeeperAll ?? new Bookkeeper(state.treasuryAll);
 
   return state.network;
+}
+
+// The wallet core is the copy packaged with the wallet. w3sper's connect, with
+// none loaded, would run the one the node serves, which would sign anything; and
+// its disconnect unloads the core, a while later as it's still starting up: right
+// when a switch of node has this network's successor connecting. So the core
+// stays through a disconnect, and connecting loads the wallet's, whichever node.
+function ownCoreOnly(network) {
+  const rues = network?.rues;
+  if (!rues) return network;
+  network.connect = async (options = {}) => {
+    await rues.connect(options);
+    state.protocolLoaded = false;
+    await ensureProtocolDriverLoaded();
+    return network;
+  };
+  network.disconnect = () => rues.disconnect();
+  return network;
 }
 
 // Every transaction's chain ID, whichever of w3sper's builders signs it: they

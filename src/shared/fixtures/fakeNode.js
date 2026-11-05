@@ -97,7 +97,7 @@ class FakeSocket extends EventTarget {
 
   close() {
     this.readyState = FakeSocket.CLOSED;
-    this.dispatchEvent(new Event("close"));
+    setTimeout(() => this.dispatchEvent(new Event("close")), 0);
   }
 }
 

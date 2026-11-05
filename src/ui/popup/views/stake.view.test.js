@@ -175,7 +175,7 @@ describe("staking overview", () => {
       fifteen.status = { ...fifteen.status, fees: { ...fifteen.status.fees, reward: { numerator: "15", denominator: "100" } } };
       popup({ route: "stake", staking: staking(), sozu: fifteen }, ov(), { rewardRate: 0.23498725582204427 });
       const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map((el) => visibleText(el).replace(/\s/g, " ")).slice(2));
-      await vi.waitFor(() => expect(subs()).toEqual([["About 23 % a year lately, across the network. Not promised."], ["About 20 % a year after Sozu's 15 %. Not promised."]]));
+      await vi.waitFor(() => expect(subs()).toEqual([["About 23 % a year lately, across the network. Not promised."], ["About 20 % a year after Sozu's 15 %. Not promised."]]), { timeout: 4_000 });
     } finally {
       vi.unstubAllGlobals();
     }

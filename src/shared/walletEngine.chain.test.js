@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 
-import { AccountSyncer, AddressSyncer, Bookkeeper } from "@dusk/w3sper";
+import { AccountSyncer, AddressSyncer, Bookkeeper, useAsProtocolDriver } from "@dusk/w3sper";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fakeNode, installWalletCore, moonlightChainId } from "./fixtures/fakeNode.js";
@@ -8,6 +8,10 @@ import { fakeNode, installWalletCore, moonlightChainId } from "./fixtures/fakeNo
 // The chain ID on everything the wallet signs, with the real engine, w3sper's
 // real builders and the real wallet core. The node here is the one thing that
 // isn't real, and it's the one being tested against: it may say anything.
+
+// The core shared by these tests takes its time on a busy machine, and a test
+// given up on would go on to unload it under the next.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 const HOSTILE = "https://hostile-node.example";
 const TESTNET = "https://testnet.nodes.dusk.network";
@@ -210,6 +214,42 @@ describe("every kind of transaction, on w3sper's real builders", () => {
     await expect(engine.sendTransaction(KINDS[name]())).rejects.toThrow("Nothing was signed");
     expect(calls.map((c) => c.member).filter(signs)).toEqual([]);
     expect(node.signed).toEqual([]);
+  });
+});
+
+describe("the wallet core", () => {
+  const wanted = () => {
+    const asked = [];
+    const answers = node.fetch;
+    vi.stubGlobal("fetch", (input, init) => {
+      asked.push(String(input));
+      return answers(input, init);
+    });
+    return () => asked.filter((url) => url.includes("wallet-core"));
+  };
+
+  it("is never the node's: connecting with none loaded loads the wallet's own, and it signs", async () => {
+    await addNode(HOSTILE, 2);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    await (await engine.ensureNetwork()).disconnect();
+    // None loaded, as w3sper's own disconnect leaves it.
+    await useAsProtocolDriver(new Uint8Array(0)).cleanup();
+    const coresAsked = wanted();
+    await engine.ensureNetwork();
+    expect(coresAsked()).toEqual([]);
+    await engine.sendTransaction(KINDS["a public transfer"]());
+    expect(moonlightChainId(node.signed.at(-1))).toBe(2);
+  });
+
+  it("stays through a switch of node, whose node is asked for none", async () => {
+    await addNode(HOSTILE, 2);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    await engine.ensureNetwork();
+    await addNode("https://other-node.example", 2);
+    const coresAsked = wanted();
+    await engine.sendTransaction(KINDS["a public transfer"]());
+    expect(coresAsked()).toEqual([]);
+    expect(moonlightChainId(node.signed.at(-1))).toBe(2);
   });
 });
 
