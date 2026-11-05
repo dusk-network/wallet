@@ -139,9 +139,10 @@ function explorerButton(url, actions, text = "View in Dusk explorer") {
 // (transferLedger): what it sent and the bridge's fee, then the network's, which
 // `feeRow` says, then what arrives, or is on its way. What arrives is said only
 // while it can: not of what the bridge doesn't pay, or past the week it's looked for.
+// One that failed, or was dropped before it ran, sent nothing.
 function ledgerRows(tx, desc, nodeUrl, hidden) {
   const received = desc.arrival ? desc.payout?.received ?? depositLux(tx) : undefined;
-  const ledger = transferLedger({ row: tx, received });
+  const ledger = transferLedger({ row: tx, received, failed: desc.unsent });
   if (!ledger) return null;
   const row = (label, line) => (line ? kv(label, h("span", {}, [balance(hidden, line.exact), ` ${line.coin}`])) : null);
   const coming = ledger.received && (!ledger.received.expected || desc.payout || awaitingArrival(tx, nodeUrl));

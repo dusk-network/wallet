@@ -246,6 +246,20 @@ describe("transaction details", () => {
     expect([back.lead, back.name, back.via]).toEqual(["Bridge", "From Ethereum", `Ethereum migration payouts · ${payouts.slice(0, 6)}…${payouts.slice(-6)}`]);
   });
 
+  it("shows no ledger for a bridge transfer the network dropped: it never ran", () => {
+    const MAINNET = "https://nodes.dusk.network";
+    const bsc = routes(networks.mainnet).find((r) => r.id === "dusk-to-bsc");
+    const dropped = { hash: HASH, nodeUrl: MAINNET, status: "removed", kind: TX_KIND.TRANSFER, to: bsc.account, memo: "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F", amount: "3000000000", submittedAt: Date.now() - 60_000 };
+    const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home", addressBook: { loaded: true, items: [] } };
+    const ov = { nodeUrl: MAINNET, txs: [dropped] };
+    dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
+    const body = dom.document.body;
+    const rows = body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText);
+    expect(visibleText(body.querySelector(".tx-hero-note"))).toBe("The network dropped it before it ran, so no fee was charged. The 3 DUSK stayed in your wallet.");
+    expect(rows.filter((r) => /^(Sent|Bridge fee|You receive|Received)/.test(r))).toEqual([]);
+    expect(rows).toContain("Network feeNone charged");
+  });
+
   it("follows DUSK bridged to BNB Smart Chain to its end: on its way, late, then what arrived and where", async () => {
     const MAINNET = "https://nodes.dusk.network";
     const bsc = routes(networks.mainnet).find((r) => r.id === "dusk-to-bsc");
