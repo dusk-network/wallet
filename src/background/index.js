@@ -425,25 +425,32 @@ async function reconcileTxPresence(hash, { preserveRemoved = false, epoch } = {}
 }
 
 // A send still marked on its way that no watcher follows: the engine's watcher
-// gives up after 180 s and says so, and is gone with a browser restart. Its
-// outcome is looked up as the wallet draws, at most once a minute, so it doesn't
-// say "on its way" for good.
+// gives up after 180 s and says so, and is gone with a browser restart. So it
+// doesn't say "on its way" for good, its outcome is looked up as the wallet
+// draws, at most once a minute, from a minute on: blocks come every 10 s or so.
+// While a watcher may still be following it, only an outcome counts: that the
+// node doesn't list it yet says nothing the watcher won't.
+const LOOKED_UP_FROM_MS = 60_000;
 const WATCHED_FOR_MS = 190_000;
 const RECHECK_EVERY_MS = 60_000;
 const recheckedAt = new Map();
 
-async function recheckUnwatchedSends(txs) {
+async function recheckUnwatchedSends(txs, nodeUrl) {
   const now = Date.now();
   const due = txs.filter(
     (tx) =>
       (tx?.status === "submitted" || tx?.status === "mempool") &&
-      now - Number(tx.submittedAt ?? 0) >= WATCHED_FOR_MS &&
+      now - Number(tx.submittedAt ?? 0) >= LOOKED_UP_FROM_MS &&
       now - Math.max(Number(tx.lastCheckedAt ?? 0), recheckedAt.get(tx.hash) ?? 0) >= RECHECK_EVERY_MS
   );
   if (!due.length) return;
   const epoch = await getTxEpoch();
   for (const tx of due) {
     recheckedAt.set(tx.hash, now);
+    if (now - Number(tx.submittedAt ?? 0) < WATCHED_FOR_MS) {
+      const { state } = await classifyTxPresence(nodeUrl, tx.hash);
+      if (!String(state).startsWith("executed")) continue;
+    }
     const { status, error } = await reconcileTxPresence(tx.hash, { epoch });
     if (status === tx.status) continue;
     recheckedAt.delete(tx.hash);
@@ -1335,7 +1342,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         } catch {
           txs = [];
         }
-        recheckUnwatchedSends(txs).catch(() => {});
+        recheckUnwatchedSends(txs, settings.nodeUrl).catch(() => {});
 
         // Account names (stored per walletId, which is profile 0 account).
         let accountNames = {};

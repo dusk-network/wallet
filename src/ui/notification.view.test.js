@@ -617,7 +617,8 @@ describe("a site's request to pay the bridge's account", () => {
 
 describe("a site's request the balance can't pay", () => {
   const gas = { limit: "2500000", price: "1" };
-  const guard = () => app.querySelector(".pay-guard");
+  // In the bar, in view with the buttons.
+  const guard = () => bar().querySelector(".pay-guard");
   const CONTRACT = `0x${"ab".repeat(32)}`;
   const call = (over = {}) => ({ kind: "contract_call", privacy: "public", contractId: CONTRACT, fnName: "do_it", fnArgs: "0x00", gas, chainId: "dusk:2", nodeUrl: TESTNET, networkName: "Testnet", ...over });
 

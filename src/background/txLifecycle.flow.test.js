@@ -773,13 +773,30 @@ describe("background Phoenix tx lifecycle flow", () => {
       expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1);
     });
 
-    it("is left to its watcher while one can still be following it", async () => {
-      await sozuStake({ submittedAt: Date.now() - 60_000 });
+    it("is left to its watcher in its first minute", async () => {
+      await sozuStake({ submittedAt: Date.now() - 30_000 });
       mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: {} });
       await overview();
       await overview();
       expect(mocks.classifyTxPresence).not.toHaveBeenCalled();
       expect(await kept()).toBe("submitted");
+    });
+
+    it("takes only an outcome while a watcher may still follow it: done goes, not yet listed stays", async () => {
+      await sozuStake({ submittedAt: Date.now() - 70_000 });
+      mocks.classifyTxPresence.mockResolvedValue({ state: "not_found" });
+      await overview();
+      await vi.waitFor(() => expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1));
+      await overview();
+      expect(await kept()).toBe("submitted");
+      expect(told()).toEqual([]);
+    });
+
+    it("comes to its outcome about a minute on, when the watcher went with a browser restart", async () => {
+      await sozuStake({ submittedAt: Date.now() - 70_000 });
+      mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: {} });
+      await overview();
+      await vi.waitFor(async () => expect(await kept()).toBe("executed"));
     });
 
     it("asks nothing of a send that's done", async () => {
