@@ -393,7 +393,10 @@ export async function wholeActivity(ov, { state, publicOnly = false }) {
  */
 export async function assertActivityOpen(ov, { state }) {
   const now = await state?.activity?.send?.({ type: "DUSK_UI_OVERVIEW" }).catch(() => null);
-  if (!activityKey(now) || activityKey(now) !== activityKey(ov)) throw new ActivityChangedError();
+  // An overview says what was open before its balance reads: what's open by now is asked last.
+  const status = await state?.activity?.send?.({ type: "DUSK_UI_STATUS" }).catch(() => null);
+  const open = activityKey(now) && activityKey(now) === activityKey(ov) && status?.isUnlocked && status.accounts?.includes(selected(ov).account);
+  if (!open) throw new ActivityChangedError();
 }
 
 // Each stake with Sozu's own stDUSK and deposit fee, read once a page.

@@ -100,7 +100,7 @@ afterEach(() => {
 
 // Activity, drawn again by every render as app.js does, its archive's history
 // (`entries`) read only by what asks for it whole.
-function setup({ contacts = [], entries = WHOLE, ov: over = {}, history: historyOver = {}, shielded = { walletId: ACCOUNT, nodeUrl: NODE, entries: [], profileIndex: 0 }, answer, open } = {}) {
+function setup({ status = null, contacts = [], entries = WHOLE, ov: over = {}, history: historyOver = {}, shielded = { walletId: ACCOUNT, nodeUrl: NODE, entries: [], profileIndex: 0 }, answer, open } = {}) {
   const ov = {
     isUnlocked: true,
     nodeUrl: NODE,
@@ -138,7 +138,7 @@ function setup({ contacts = [], entries = WHOLE, ov: over = {}, history: history
       history,
       epoch: Promise.resolve(1),
       // The wallet: the shielded history it answers with, and what's open in it now.
-      send: vi.fn(async ({ type }) => (type === "DUSK_UI_OVERVIEW" ? (open ?? ov) : (answer ?? { result: shielded }))),
+      send: vi.fn(async ({ type }) => (type === "DUSK_UI_OVERVIEW" ? (open ?? ov) : type === "DUSK_UI_STATUS" ? (status ?? { accounts: (open ?? ov).accounts, isUnlocked: (open ?? ov).isUnlocked }) : (answer ?? { result: shielded }))),
     },
   };
   const actions = { render: vi.fn(async () => draw()), showToast: vi.fn() };
@@ -409,6 +409,13 @@ describe("Activity's Export", () => {
       ["a locked wallet", { isUnlocked: false }],
     ])("saves nothing when it's %s by the time the file is made", async (_, open) => {
       await exporting({ open });
+      expect(saved).toEqual([]);
+      expect(fieldError()).toBe(CHANGED);
+    });
+
+    it("saves nothing when the wallet locks during the overview that checks it", async () => {
+      // The overview's status was taken before its balance reads: only the wallet's status is as of now.
+      await exporting({ status: { accounts: [], isUnlocked: false } });
       expect(saved).toEqual([]);
       expect(fieldError()).toBe(CHANGED);
     });
