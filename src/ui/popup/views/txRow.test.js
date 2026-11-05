@@ -5,6 +5,8 @@ import { PINNED_RELEASES as releases } from "@duskdomains/sdk/releases";
 
 import { keptArrivals } from "../../../shared/bridgeArrival.js";
 import { TX_KIND } from "../../../shared/constants.js";
+import { buildSozuWithdrawTx } from "../../../shared/sozuAdapter.js";
+import { submittedTxMeta, walletSendFields } from "../../../shared/txRecord.js";
 import { rowOf, rowsOf } from "../../../shared/fixtures/rows.js";
 import { ACTIVITY_FILTERS, amountText, dateText, dayLabel, describeTx, inFilter, recentText, subText, whenText } from "./txRow.js";
 
@@ -128,6 +130,17 @@ describe("what a row says", () => {
       "Pending",
     ]);
     expect(read({ kind: TX_KIND.UNSTAKE, status: "unknown" })).toEqual(["stake", "Unstake", "Staking · 14:32", "", "Not confirmed"]);
+  });
+
+  it("shows what a Sozu unstake brings back from the moment it's sent, as the wallet records it", () => {
+    const pool = networks.testnet.sozu.fallbacks.pool;
+    // As Sozu's Review sends it, and the wallet keeps the send.
+    const params = { ...buildSozuWithdrawTx({ config: { contracts: { pool } }, amountLux: 450_000_000n }), fnArgsAmountLux: "450000000", profileIndex: 0 };
+    const message = { asset: { kind: "sozu", action: params.fnName, pool } };
+    const record = submittedTxMeta(params, { origin: "Wallet", nodeUrl: TESTNET, profileIndex: 0 }, walletSendFields(params, message));
+    expect(read({ ...record, status: "executed" })).toEqual(["stake", "Unstaked from Sozu", "Staking · 14:32", "+0.45 DUSK", null]);
+    // The call itself still sends nothing along.
+    expect([params.amount, params.deposit]).toEqual(["0", "0"]);
   });
 
   it("names whom a token approval lets spend, and shows an allowance of 0 as a revoke", () => {
