@@ -14,6 +14,7 @@ import { copyButton } from "../../components/CopyButton.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, searchInput, textInput } from "../../components/FormControls.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
+import { ownProfileName } from "../../components/ProfileName.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
 import { contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
@@ -84,6 +85,9 @@ function ownText(ov, recipient) {
   if (recipient && recipient === own.address) return "That's this profile's own shielded address.";
   return "";
 }
+
+// A name as a person reads it: without its case, accents or extra spaces.
+const nameKey = (name) => String(name ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ");
 
 const fieldError = (id) => h("div", { class: "field-error", id, role: "alert", hidden: true });
 const setFieldError = (input, error, text) => {
@@ -441,9 +445,18 @@ export function addressBookView(ov, { state, actions } = {}) {
       oninput: (e) => {
         ab.editName = String(e?.target?.value ?? "");
         setFieldError(nameInput, nameError, "");
+        updateName();
       },
     });
     const nameError = fieldError(`contact-name-error-${n}`);
+    // A name in use: only the address would tell the two apart in a payment. It can be saved.
+    const nameNote = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
+    const updateName = () => {
+      const typed = nameKey(nameInput.value);
+      const other = typed ? (Array.isArray(ab.items) ? ab.items : []).find((e) => e?.id !== ab.editId && nameKey(e?.name) === typed) : null;
+      nameNote.textContent = other ? `You already have a contact called ${String(other.name).trim()}, at ${shortAddress(String(other.address ?? ""))}.` : "";
+      nameNote.hidden = !other;
+    };
 
     const addrInput = textInput({
       placeholder: duskNamesNetwork(ov?.nodeUrl) ? "Account, shielded address or .dusk name" : "Account or shielded address",
@@ -458,6 +471,17 @@ export function addressBookView(ov, { state, actions } = {}) {
     const addrError = fieldError(`contact-address-error-${n}`);
     // What the field holds: the kind of address, or the addresses a .dusk name points to.
     const addrBox = h("div", { class: "contact-address-box" });
+    // Another profile's own address, here or in another wallet: it can be saved, and it's said.
+    const addrNote = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
+    const noteOwn = (addresses) => {
+      const shown = addresses.filter(Boolean);
+      const own = shown.find((a) => ownText(ov, a));
+      const profile = own ? "" : shown.map((a) => ownProfileName(ov, a)).find(Boolean);
+      // This profile's own says so as an error: it can't be saved.
+      if (own) setFieldError(addrInput, addrError, ownText(ov, own));
+      addrNote.textContent = profile ? `That's your own profile: ${profile}.` : "";
+      addrNote.hidden = !profile;
+    };
 
     // The latest name lookup's answer, for the text the field holds.
     let lookupFor = "";
@@ -484,12 +508,14 @@ export function addressBookView(ov, { state, actions } = {}) {
         },
       });
       addrBox.replaceChildren(choice.el);
+      noteOwn([result.account, result.address]);
     };
 
     const updateAddress = () => {
       const text = normalizeRecipient(addrInput.value);
       resolved = null;
       lookupFor = "";
+      noteOwn([]);
       if (!text) {
         addrBox.replaceChildren();
         return;
@@ -514,6 +540,7 @@ export function addressBookView(ov, { state, actions } = {}) {
       addrBox.replaceChildren(
         t === "account" || t === "address" ? h("span", { class: "tag", text: t === "address" ? "Shielded address" : "Public account" }) : ""
       );
+      noteOwn([text]);
     };
 
     // What gets saved: the address, with the .dusk name it came from.
@@ -629,6 +656,7 @@ export function addressBookView(ov, { state, actions } = {}) {
         })
       : null;
 
+    updateName();
     updateAddress();
 
     return [
@@ -643,9 +671,11 @@ export function addressBookView(ov, { state, actions } = {}) {
         fieldLabel(nameInput, "Name"),
         nameInput,
         nameError,
+        nameNote,
         fieldLabel(addrInput, "Address"),
         addrInput,
         addrError,
+        addrNote,
         addrBox,
         h("div", { class: "btnrow" }, [saveBtn]),
         deleteBtn,

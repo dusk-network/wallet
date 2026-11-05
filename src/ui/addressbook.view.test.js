@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAddressBook, listAddressBook, markAddressBookNameChecked, upsertAddressBookEntry } from "../shared/addressBook.js";
 import { lookupDuskName } from "../shared/duskNames.js";
 import { TX_KIND } from "../shared/constants.js";
+import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
+import { shortAddress } from "./lib/strings.js";
 import { accessibleName, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { addressBookView, NAME_RECHECK_MS } from "./popup/views/addressbook.js";
 
@@ -203,6 +205,87 @@ describe("contacts", () => {
     await settle();
     expect(view.error("Address")).toBe("That's this profile's own account.");
     expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+  });
+
+  describe("what a new contact warns of", () => {
+    // Other accounts that are keys, and shielded addresses of the right length.
+    const BOB = "26JfWKvhYdVY71bdSPVLNJ51Buy4GjimCT7zcsoxNQtydDbdoH2AwZaH8W7rjcAc9riAu39Vw9Lx1w7yrkBgotSjWmUdkSyQuaTKDZWVCKp9g1GxiEnnksv3W3onToB5NsNi";
+    const CAROL = "zFVXTQZfY6gB2rWZFEm4ToWY2NKrpgeswTboWMAe7cjzaqHjsdGuADp8GsYzeruRkP3ZozA34mhWedEHkEiUr73iv8EcK3A192Y5b2uQYxLgprkZ2u8WKZyfDuZiyy4yEuL";
+    const ADDRESS_OWN = "4QpZhL54DtNrCpXRK54BhfF8WYsgvPbfVTfeNf2ePSRPTCnuZYMk988Es2NMbwCXMPTKGTLfYunZ4mbFc7i743QE";
+    const ADDRESS_SECOND = encodeBase58(decodeBase58(ADDRESS_OWN).map((byte, i, all) => (i === all.length - 1 ? byte ^ 1 : byte)));
+    const shownNote = () =>
+      dom.document.body.querySelectorAll(".contact-note").filter(isShown).map((el) => el.textContent);
+    const edit = (over = {}, ov) => mount({ view: "edit", editId: null, editReturnView: "list", loaded: true, items: [ALICE, { id: "2", name: "Estudio Marta", address: ADDRESS, type: "address" }], ...over }, ov);
+
+    it("says a name is in use, with the address it has, and lets it be saved", async () => {
+      const view = edit();
+      const name = view.field("Name");
+      expect(shownNote()).toEqual([]);
+      for (const typed of ["Estudio Marta", "  estudio   marta ", "Estudió Marta"]) {
+        typeInto(name, typed);
+        expect(shownNote()).toEqual([`You already have a contact called Estudio Marta, at ${shortAddress(ADDRESS)}.`]);
+      }
+      typeInto(name, "Estudio Marta 2");
+      expect(shownNote()).toEqual([]);
+
+      typeInto(name, "Alice");
+      typeInto(view.field("Address"), BOB);
+      expect(shownNote()).toEqual([`You already have a contact called Alice, at ${shortAddress(ACCOUNT)}.`]);
+      view.button("Save").click();
+      await settle();
+      // A warning, not a refusal: two people can have one name.
+      expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Alice", address: BOB }), expect.anything());
+    });
+
+    it("doesn't warn a contact of its own name, as it's edited", () => {
+      edit({ editId: "1", editName: "Alice", editAddress: ACCOUNT });
+      expect(shownNote()).toEqual([]);
+    });
+
+    it("says an address is another profile's of yours, or another wallet's, and lets it be saved", async () => {
+      const ov = {
+        nodeUrl: NODE,
+        accounts: [OWN, BOB],
+        addresses: [ADDRESS_OWN, ADDRESS_SECOND],
+        selectedAccountIndex: 0,
+        accountNames: { 1: "Savings" },
+        txs: [],
+        wallets: [{ key: "w1", active: true, accounts: [OWN, BOB] }, { key: "w2", n: 2, active: false, accounts: [CAROL], accountNames: {} }],
+      };
+      const view = edit({}, ov);
+      typeInto(view.field("Name"), "Rainy day");
+      typeInto(view.field("Address"), BOB);
+      expect(shownNote()).toEqual(["That's your own profile: Savings."]);
+      typeInto(view.field("Address"), ADDRESS_SECOND);
+      expect(shownNote()).toEqual(["That's your own profile: Savings."]);
+      typeInto(view.field("Address"), CAROL);
+      expect(shownNote()).toEqual(["That's your own profile: Wallet 2 · Profile 1."]);
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Rainy day", address: CAROL }), expect.anything());
+    });
+
+    it("says this profile's own address as it's typed, under the field, and won't save it", async () => {
+      const ov = { nodeUrl: NODE, accounts: [OWN], addresses: [ADDRESS_OWN], selectedAccountIndex: 0, txs: [] };
+      const view = edit({}, ov);
+      typeInto(view.field("Name"), "Me");
+      typeInto(view.field("Address"), OWN);
+      expect(view.error("Address")).toBe("That's this profile's own account.");
+      typeInto(view.field("Address"), ADDRESS_OWN);
+      expect(view.error("Address")).toBe("That's this profile's own shielded address.");
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+    });
+
+    it("says it of an address a .dusk name points to", async () => {
+      const ov = { nodeUrl: NODE, accounts: [OWN, ACCOUNT], addresses: [ADDRESS_OWN], selectedAccountIndex: 0, accountNames: { 1: "Savings" }, txs: [] };
+      const view = edit({}, ov);
+      typeInto(view.field("Name"), "Shop");
+      typeInto(view.field("Address"), "alice-shop.dusk");
+      await settle();
+      expect(shownNote()).toEqual(["That's your own profile: Savings."]);
+    });
   });
 
   it("edits a contact by its .dusk name, with Delete for a saved one and Back to leave", () => {
