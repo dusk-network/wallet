@@ -6,7 +6,7 @@
 // its check.
 
 import { isExtensionRuntime } from "../platform/runtime.js";
-import { chainIdForNode, networkOf } from "./nodeNetwork.js";
+import { chainIdForNode, listedNetwork, networkOf, nodeHost } from "./nodeNetwork.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
 
@@ -29,11 +29,25 @@ export function duskNamesNetwork(nodeUrl, chainId = chainIdForNode(String(nodeUr
   return net?.duskDomains && (net.name === "mainnet" || net.name === "testnet") ? net.name : null;
 }
 
+/**
+ * Where a node's name checks are kept: a network's own node's by that network,
+ * any other's by its host, as it can answer what it likes: back on the network's
+ * own node, nothing it said is taken for that node's word. Null where names are off.
+ * @param {string} nodeUrl
+ * @param {number | null} [chainId] - the node's, where the caller has it
+ * @returns {string | null}
+ */
+export function duskNamesScope(nodeUrl, chainId) {
+  const network = duskNamesNetwork(nodeUrl, chainId);
+  if (!network) return null;
+  return listedNetwork(nodeUrl) ? network : nodeHost(nodeUrl) || null;
+}
+
 const age = (entry, now) => now - Number(entry?.at);
 
 /**
- * Every check kept: { [network]: { [account]: { name, at } } }, `name` being
- * null for an account without a name. Never throws.
+ * Every check kept: { [scope]: { [account]: { name, at } } }, by duskNamesScope,
+ * `name` being null for an account without a name. Never throws.
  * @returns {Promise<Record<string, Record<string, { name: string|null, at: number }>>>}
  */
 export async function readVerifiedNames() {
@@ -46,17 +60,17 @@ export async function readVerifiedNames() {
 }
 
 /**
- * The names in `all` checked on the node's network within the last ten
- * minutes, by account.
+ * The names in `all` checked on the node's network, by that node if it's one the
+ * wallet doesn't know, within the last ten minutes, by account.
  * @param {object} all - from readVerifiedNames
  * @param {string} nodeUrl
  * @param {number} [now]
  * @returns {Map<string, string>}
  */
 export function verifiedNamesFor(all, nodeUrl, now = Date.now()) {
-  const network = duskNamesNetwork(nodeUrl);
+  const scope = duskNamesScope(nodeUrl);
   const names = new Map();
-  for (const [account, entry] of Object.entries((network && all?.[network]) || {})) {
+  for (const [account, entry] of Object.entries((scope && all?.[scope]) || {})) {
     const name = entry?.name;
     const since = age(entry, now);
     if (typeof name === "string" && name.endsWith(".dusk") && since >= 0 && since < VERIFIED_NAME_TTL_MS) {
@@ -76,10 +90,10 @@ export function verifiedNamesFor(all, nodeUrl, now = Date.now()) {
  * @returns {string[]}
  */
 export function namesToRecheck(all, nodeUrl, accounts, now = Date.now()) {
-  const network = duskNamesNetwork(nodeUrl);
-  if (!network) return [];
+  const scope = duskNamesScope(nodeUrl);
+  if (!scope) return [];
   return accounts.filter((account) => {
-    const since = age(all?.[network]?.[account], now);
+    const since = age(all?.[scope]?.[account], now);
     return !(since >= 0 && since < RECHECK_MS);
   });
 }
@@ -94,8 +108,8 @@ export function namesToRecheck(all, nodeUrl, accounts, now = Date.now()) {
  * @returns {Promise<void>}
  */
 export async function rememberVerifiedName(nodeUrl, account, name) {
-  const network = duskNamesNetwork(nodeUrl);
-  if (!network || !account || !isExtensionRuntime()) return;
+  const scope = duskNamesScope(nodeUrl);
+  if (!scope || !account || !isExtensionRuntime()) return;
   try {
     await withStorageLock(STORAGE_KEYS.VERIFIED_NAMES, async () => {
       const now = Date.now();
@@ -106,7 +120,7 @@ export async function rememberVerifiedName(nodeUrl, account, name) {
           if (since >= 0 && since < VERIFIED_NAME_TTL_MS) (next[net] ??= {})[acct] = entry;
         }
       }
-      (next[network] ??= {})[account] = { name: name ?? null, at: now };
+      (next[scope] ??= {})[account] = { name: name ?? null, at: now };
       await storage.set({ [STORAGE_KEYS.VERIFIED_NAMES]: next });
     });
   } catch {

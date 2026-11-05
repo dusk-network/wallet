@@ -30,6 +30,7 @@ import { fieldLabel, reviewActions, submitOnGasEnter, textInput } from "../../co
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
+import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
 import {
   hideRecipientBadge,
   recipientBadge,
@@ -627,7 +628,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       },
       onShield: openShield,
     });
-    showNameBox([choice.el]);
+    showNameBox([choice.el, nameCheckNoteEl(ov?.nodeUrl)]);
     return showNameAddress(result);
   };
 
@@ -650,12 +651,15 @@ export function sendFormView(ov, { state, actions } = {}) {
     lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true })
       ?.then?.((name) => {
         if (!name || n !== primaryCount || String(to.value || "").trim() !== account) return;
+        // Verified, on a network's own node; on another, that node's word.
+        const note = nameCheckNoteEl(ov?.nodeUrl);
         showNameBox([
           h("div", { class: "name-verified" }, [
-            h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("check") }),
+            note ? null : h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("check") }),
             h("span", { class: "name-verified__name", text: name }),
-            h("span", { class: "name-verified__note", text: " · its verified .dusk name" }),
+            h("span", { class: "name-verified__note", text: note ? " · its .dusk name" : " · its verified .dusk name" }),
           ]),
+          note,
         ]);
       })
       ?.catch?.(() => {});
@@ -1116,11 +1120,13 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   };
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
+  const toNameNote = nameCheckNoteEl(ov?.nodeUrl, { hidden: true });
   const showToNames = () => {
     const names = service ? [`The bridge's account for ${service.chain}`] : [contactName(), duskName?.name || verifiedName].filter(Boolean);
     const unique = names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
     toNames.textContent = unique.join(" · ");
     toNames.hidden = !unique.length;
+    if (toNameNote) toNameNote.hidden = Boolean(service) || !(duskName?.name || verifiedName);
   };
 
   // Save to Contacts, unless it's saved already or it's this wallet's own.
@@ -1298,6 +1304,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         kv("From", h("span", {}, [withReviewWallet(fromName, actions?.review), h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
         d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", safeTextEl(d.memo), "kv--wrap") : null,
       ].filter(Boolean)),
+      toNameNote,
       ...serviceNotes
         .filter((n) => n.kind !== "fee")
         .map((n) => h("div", { class: "callout warn", role: "note" }, [h("div", { class: "callout-title", text: n.title }), h("div", { class: "muted", text: n.text })])),

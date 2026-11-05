@@ -28,7 +28,7 @@ import { nameFactsFor } from "../../shared/knownCalls.js";
 import { chainIdForNode, networkForNode } from "../../shared/nodeNetwork.js";
 import { lookupRecipientNames } from "../../shared/duskNames.js";
 import { forgetTxs, getTxEpoch, listTxs, patchTxMeta } from "../../shared/txStore.js";
-import { VERIFIED_NAME_TTL_MS, duskNamesNetwork } from "../../shared/verifiedNames.js";
+import { VERIFIED_NAME_TTL_MS, duskNamesScope } from "../../shared/verifiedNames.js";
 import { noteTxStatus } from "./views/sent.js";
 
 /** Rows read for the History view at first, and how many more Show more adds. */
@@ -104,11 +104,11 @@ async function settle(a, state) {
 
 // Names kept from a check in the last ten minutes, as sites get them.
 async function keptNames(a) {
-  const network = duskNamesNetwork(a.nodeUrl);
+  const scope = duskNamesScope(a.nodeUrl);
   const accounts = counterparties(a);
-  if (!network || !accounts.length) return;
+  if (!scope || !accounts.length) return;
   const now = Date.now();
-  for (const [account, { name, at }] of await getCounterpartyNames(network, accounts)) {
+  for (const [account, { name, at }] of await getCounterpartyNames(scope, accounts)) {
     if (now - at >= 0 && now - at < VERIFIED_NAME_TTL_MS && !a.names.has(account)) a.names.set(account, name);
   }
 }
@@ -119,9 +119,9 @@ const counterparties = (a) => [
 
 // The shown counterparties' names, checked again: one Multicall query for up to 32.
 async function checkNames(a) {
-  const network = duskNamesNetwork(a.nodeUrl);
+  const scope = duskNamesScope(a.nodeUrl);
   const due = counterparties(a).filter((c) => !a.checked.has(c));
-  if (!network || !due.length) return false;
+  if (!scope || !due.length) return false;
   for (const c of due) a.checked.add(c);
   const names = await lookupRecipientNames(due, { nodeUrl: a.nodeUrl });
   for (const c of due) {
@@ -129,7 +129,7 @@ async function checkNames(a) {
     else a.names.delete(c);
   }
   const epoch = await a.epoch;
-  if (epoch !== undefined) await putCounterpartyNames(network, names, { epoch }).catch(() => {});
+  if (epoch !== undefined) await putCounterpartyNames(scope, names, { epoch }).catch(() => {});
   return names.size > 0;
 }
 

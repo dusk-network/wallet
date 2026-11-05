@@ -25,6 +25,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said under a .dusk name when a node the wallet doesn't know checked it, and kept that node's answers from the network's own node's.
 - Said plainly on Home when the balance can't be read, instead of showing what the node said.
 - Warned on a contact name already in use, and on your own address.
 - Read an amount as the browser's language groups it: 1 000 in French, 1'000 in Swiss German.

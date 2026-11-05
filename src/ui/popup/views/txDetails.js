@@ -4,7 +4,7 @@ import { formatDuskExact, formatFee, groupThousands } from "../../../shared/amou
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { arrivalUrl, awaitingArrival, depositLux } from "../../../shared/bridgeArrival.js";
-import { networkTextOf } from "../../../shared/nodeNetwork.js";
+import { networkTextOf, nameCheckNote } from "../../../shared/nodeNetwork.js";
 import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
@@ -201,6 +201,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const via = desc.via?.address ? desc.via : null;
   const other = via ? via.address : !desc.evm && desc.address && !desc.isAddress ? desc.address : "";
   const otherAlias = via ? (via.isAddress ? "" : via.name) : desc.alias;
+  // The name's a node the wallet doesn't know's word.
+  const nameNote = nameCheckNote(nodeUrl) ? h("p", { class: "tx-hero-note", role: "note", text: nameCheckNote(nodeUrl) }) : null;
   const hero = h("div", { class: "tx-hero" }, [
     h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true", html: txIconSvg(desc.icon) }),
     desc.lead ? h("div", { class: "tx-hero-lead", text: desc.lead }) : null,
@@ -215,6 +217,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
           copyButton(other, { label: "Copy address", showToast }),
         ].filter(Boolean))
       : null,
+    tx?.counterpartyName || tx?.toName ? nameNote : null,
     amountEl(desc.amount, hidden, "tx-hero-amount", { exact: true }),
     h("div", { class: `tx-hero-status is-${desc.tone}` }, [
       h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg(STATUS_ICON[desc.tone] ?? "clock") }),

@@ -3,6 +3,7 @@ import { ProfileGenerator } from "@dusk/w3sper";
 import { isDuskName } from "@duskdomains/sdk/names";
 import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { duskNameErrorText, duskNameRecipient, duskNamesNetwork, lookupDuskName } from "../../../shared/duskNames.js";
+import { nameCheckNote } from "../../../shared/nodeNetwork.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { joinedAddress, passesForDuskName } from "../../lib/recipient.js";
@@ -14,6 +15,7 @@ import { copyButton } from "../../components/CopyButton.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, searchInput, textInput } from "../../components/FormControls.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
+import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
@@ -335,13 +337,14 @@ export function addressBookView(ov, { state, actions } = {}) {
     // nowhere (expired, released, without an address), says so. A lookup that
     // failed says nothing: the name may be fine.
     const nameCheck = h("p", { class: "field-error contact-name-check", role: "alert", hidden: true });
+    const nodeSays = (text) => [text, nameCheckNote(nodeUrl)].filter(Boolean).join(" ");
     if (entry.duskName && duskNamesNetwork(nodeUrl) && Date.now() - Number(entry.checkedAt || 0) > NAME_RECHECK_MS) {
       const { result, promise } = lookupDuskName(entry.duskName, { nodeUrl });
       Promise.resolve(result ?? promise)
         .then(async (res) => {
           if (!res?.ok) {
             if (STALE_NAME_REASONS.has(res?.reason)) {
-              nameCheck.textContent = `${duskNameErrorText({ name: entry.duskName, reason: res.reason })} Edit the contact before you send to it.`;
+              nameCheck.textContent = nodeSays(`${duskNameErrorText({ name: entry.duskName, reason: res.reason })} Edit the contact before you send to it.`);
               nameCheck.hidden = false;
             }
             return;
@@ -349,9 +352,10 @@ export function addressBookView(ov, { state, actions } = {}) {
           const now = duskNameRecipient(res, { shielded: typ === "address" });
           if (now === addr) {
             // On the contact as saved now: one edited or deleted meanwhile stays so.
-            if (await markAddressBookNameChecked(entry, Date.now(), shown)) await refreshItems();
+            // A node the wallet doesn't know vouches for nothing, so it stays due.
+            if (!nameCheckNote(nodeUrl) && (await markAddressBookNameChecked(entry, Date.now(), shown))) await refreshItems();
           } else {
-            nameCheck.textContent = `${entry.duskName} now points to another address. Edit the contact before you send to it.`;
+            nameCheck.textContent = nodeSays(`${entry.duskName} now points to another address. Edit the contact before you send to it.`);
             nameCheck.hidden = false;
           }
         })
@@ -507,7 +511,7 @@ export function addressBookView(ov, { state, actions } = {}) {
           choice.set(shielded);
         },
       });
-      addrBox.replaceChildren(choice.el);
+      addrBox.replaceChildren(...[choice.el, nameCheckNoteEl(ov?.nodeUrl)].filter(Boolean));
       noteOwn([result.account, result.address]);
     };
 
@@ -558,7 +562,8 @@ export function addressBookView(ov, { state, actions } = {}) {
           return { error: duskNameErrorText(failed ?? { name: text }) };
         }
         const address = duskNameRecipient(result, { shielded: Boolean(ab.editShielded) && Boolean(result.address) });
-        return { address, duskName: result.name, checkedAt: Date.now() };
+        // A node the wallet doesn't know vouches for nothing: on a network's own node, it's looked up at once.
+        return { address, duskName: result.name, checkedAt: nameCheckNote(String(ov?.nodeUrl ?? "")) ? 0 : Date.now() };
       }
       const t = ProfileGenerator.typeOf(text);
       if (t === "account" && !isAccount(text)) return { error: "Not a valid address. Check it and try again." };

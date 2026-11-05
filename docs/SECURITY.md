@@ -209,6 +209,7 @@ The public repository does not currently include a native Tauri wrapper, so ther
 - Nothing a node serves runs: the wallet core is the copy packaged with the wallet, never w3sper's download from the node
 - A node can't name its network: Mainnet, Testnet and Devnet are only the exact addresses in `@dusk-network/networks`; anything else is Custom, with its host showing
 - A node can't choose the chain ID that's signed: a known address's comes from `@dusk-network/networks`, a custom node's is read once when it's added and fixed, and w3sper's builders get that one (`pinNodeInfo` in `walletEngine.js`). A node that later answers another chain ID gets no signature
+- A custom node can answer a `.dusk` name check with whatever it likes: wherever a name is taken for a payment (Send, Review, a site's approval window, the contact form, a contact's check) the wallet says which node checked it, and its answers are kept apart from those of the network's own node
 
 #### Prover Communication
 

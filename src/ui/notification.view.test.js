@@ -902,6 +902,33 @@ describe("the recipient of a site's request to send", () => {
     expect(app.textContent.split("carol.dusk")).toHaveLength(2);
   });
 
+  it("says whose word a name is when a node the wallet doesn't know gave it, once it comes", async () => {
+    const custom = "https://my-node.example:8443";
+    const note = () => head().querySelector(".ap-recipient__note");
+    let answer;
+    mocks.answers.DUSK_UI_RECIPIENT_NAME = () => new Promise((resolve) => (answer = resolve));
+    await render("send_tx", transfer(CAROL, { nodeUrl: custom }), { nodeUrl: custom, chainId: 2 });
+    await vi.waitFor(() => expect(answer).toBeTypeOf("function"));
+    // No name yet, so nothing to say of it.
+    expect(isShown(note())).toBe(false);
+    answer({ ok: true, result: "carol.dusk" });
+    await vi.waitFor(() => expect(recipient().lead).toBe("carol.dusk"));
+    expect(isShown(note())).toBe(true);
+    expect(visibleText(note())).toBe("Checked by my-node.example:8443, a node the wallet doesn't know. Check the address too.");
+
+    // None, and it stays out of sight.
+    answerName(null);
+    await render("send_tx", transfer(CAROL, { nodeUrl: custom }), { nodeUrl: custom, chainId: 2 });
+    await settle();
+    expect(isShown(note())).toBe(false);
+
+    // On the network's own node, there's none to show.
+    answerName("carol.dusk");
+    await render("send_tx", transfer(CAROL));
+    await vi.waitFor(() => expect(recipient().lead).toBe("carol.dusk"));
+    expect(note()).toBeNull();
+  });
+
   it("shows the short address until the name comes, in the same line, and Approve doesn't wait", async () => {
     let answer;
     mocks.answers.DUSK_UI_RECIPIENT_NAME = () => new Promise((resolve) => (answer = resolve));

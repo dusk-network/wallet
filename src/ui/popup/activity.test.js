@@ -73,6 +73,17 @@ describe("ensureActivity", () => {
     expect(rows.find((r) => r.counterparty === FAUCET)).toMatchObject({ counterpartyName: "faucet.dusk", direction: "in" });
   });
 
+  it("keeps the names a node the wallet doesn't know gave with it, not with its network's", async () => {
+    const custom = "https://my-node.example:8443";
+    (await import("../../shared/nodeNetwork.js")).noteChainId(custom, 2);
+    fakeArchive();
+    await popup(overview(A, { nodeUrl: custom, archiverUrl: NODE }));
+    const kept = await import("../../shared/activityStore.js");
+    await until(async () => (await kept.getCounterpartyNames("my-node.example:8443", [FAUCET])).has(FAUCET));
+    expect((await kept.getCounterpartyNames("testnet", [FAUCET])).has(FAUCET)).toBe(false);
+    (await import("../../shared/nodeNetwork.js")).noteChainId(custom, null);
+  });
+
   it("paints the kept history and names before the archive answers", async () => {
     const node = fakeArchive();
     await popup();

@@ -16,6 +16,7 @@ import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist
 import { safeText, textNeedsReview } from "../../shared/safeText.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
+import { nameCheckNoteEl } from "../components/NameCheckNote.js";
 import { contractLabel } from "../../shared/knownCalls.js";
 import { DRC20_CALL_NAMES } from "../../shared/drc20Calls.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
@@ -442,6 +443,8 @@ export async function renderNotification() {
     const to = String(address ?? "").trim();
     const known = to ? knownAs(to) : null;
     const lead = h("span", { class: "ap-recipient__lead mono", text: shortAddress(to) || "(missing)", title: to });
+    // Shown with a name a node the wallet doesn't know gave.
+    const note = nameCheckNoteEl(nodeUrl, { className: "ap-recipient__note", hidden: true });
     const showName = (name) => {
       lead.textContent = name;
       lead.title = `${name} · ${to}`;
@@ -454,7 +457,9 @@ export async function renderNotification() {
       send({ type: "DUSK_UI_RECIPIENT_NAME", rid, recipient: to })
         .then((res) => {
           const name = res?.ok ? res.result : null;
-          if (typeof name === "string" && name) showName(name);
+          if (typeof name !== "string" || !name) return;
+          showName(name);
+          if (note) note.hidden = false;
         })
         .catch(() => {});
     }
@@ -464,7 +469,7 @@ export async function renderNotification() {
           h("span", { class: "ap-recipient__source", text: ` · ${known.source}` }),
         ])
       : null;
-    return { lead, tag, known };
+    return { lead, tag, known, note };
   };
 
   // "to wallet-both.dusk", and under it your label for it, for a head's
@@ -478,6 +483,7 @@ export async function renderNotification() {
         network ? h("span", { class: "ap-recipient__to", text: ` ${network}` }) : null,
       ]),
       r.tag,
+      r.note,
     ]);
   };
   // An address without a name, as every Dusk app shortens it: "to

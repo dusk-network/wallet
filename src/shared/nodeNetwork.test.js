@@ -6,6 +6,7 @@ import {
   chainRefusal,
   labelForNode,
   listedChainId,
+  nameCheckNote,
   networkForNode,
   networkKeyOf,
   networkLabelOf,
@@ -81,6 +82,13 @@ describe("a node's network", () => {
     expect(chainRefusal(node, null, null, { ahead: true })).toBe("The wallet can't read which network hostile-node.example is on yet, so it won't sign on it. Try again in a moment.");
     // A node that agrees, or says nothing, is signed for; what doesn't carry a chain ID doesn't need one.
     expect([chainRefusal(node, 2, 2), chainRefusal(node, 2, null), chainRefusal(node, null, 1, { required: false })]).toEqual(["", "", ""]);
+  });
+
+  it("says under a name who checked it, unless it's a network's own node", () => {
+    for (const url of ["https://nodes.dusk.network", "https://testnet.nodes.dusk.network/"]) expect(nameCheckNote(url)).toBe("");
+    expect(nameCheckNote("https://my-node.example:8443")).toBe("Checked by my-node.example:8443, a node the wallet doesn't know. Check the address too.");
+    // By its exact address: a name that only looks like the network's own says so too.
+    expect(nameCheckNote("https://nodes.dusk.network.example")).toContain("Checked by nodes.dusk.network.example,");
   });
 
   it("is local on this machine, and named by its address alone", () => {

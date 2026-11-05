@@ -1079,6 +1079,73 @@ describe("review", () => {
     expect(view.reviewTo()).toBe(`alice.dusk${ALICE.address}`);
   });
 
+  describe("a name read through a node the wallet doesn't know", () => {
+    const CUSTOM = "https://my-node.example:8443";
+    const NOTE = "Checked by my-node.example:8443, a node the wallet doesn't know. Check the address too.";
+    const custom = (over = {}) => overview({ nodeUrl: CUSTOM, ...over });
+    const noted = () => dom.document.body.querySelectorAll('[role="note"]').filter(isShown).map(visibleText);
+
+    beforeEach(() => {
+      noteChainId(CUSTOM, 2);
+    });
+    afterEach(() => {
+      noteChainId(CUSTOM, null);
+    });
+
+    it("says whose word it is under a typed name, and takes the address as it is", async () => {
+      const form = mount(newState(), custom());
+      typeInto(form.to, "alice.dusk");
+      await settle();
+      expect(visibleText(form.nameBox())).toContain(NOTE);
+      expect(noted()).toEqual([NOTE]);
+    });
+
+    it("says nothing on a network's own node", async () => {
+      const form = mount(newState(), overview());
+      typeInto(form.to, "alice.dusk");
+      await settle();
+      expect(form.nameBox().querySelector(".name-option")).toBeTruthy();
+      expect(noted()).toEqual([]);
+    });
+
+    it("doesn't call a pasted account's name verified, and says whose word it is", async () => {
+      lookupPrimaryName.mockImplementation(async (account) => (account === BOB.account ? "bob.dusk" : null));
+      const form = mount(newState(), custom());
+      typeInto(form.to, BOB.account);
+      await settle();
+      expect(visibleText(form.nameBox().querySelector(".name-verified"))).toBe("bob.dusk · its .dusk name");
+      expect(form.nameBox().querySelector(".name-verified .btn-ico")).toBeNull();
+      expect(noted()).toEqual([NOTE]);
+
+      // Verified, on a network's own node.
+      const own = mount(newState(), overview());
+      typeInto(own.to, BOB.account);
+      await settle();
+      expect(visibleText(own.nameBox().querySelector(".name-verified"))).toBe("bob.dusk · its verified .dusk name");
+      expect(noted()).toEqual([]);
+    });
+
+    it("says so on Review under To, for a typed name and a pasted account's, and not with no name", async () => {
+      const ov = custom();
+      let view = review({ to: ALICE.address, privacy: "shielded", duskName: { name: "alice.dusk", nodeUrl: CUSTOM, to: ALICE.address } }, ov);
+      await settle();
+      expect(view.reviewTo()).toBe(`alice.dusk${ALICE.address}`);
+      expect(noted()).toContain(NOTE);
+
+      lookupPrimaryName.mockImplementation(async (account) => (account === BOB.account ? "bob.dusk" : null));
+      view = review({ to: BOB.account, privacy: "public" }, ov);
+      await settle();
+      expect(view.reviewTo()).toBe(`bob.dusk${BOB.account}`);
+      expect(noted()).toContain(NOTE);
+
+      lookupPrimaryName.mockImplementation(async () => null);
+      view = review({ to: ALICE.account, privacy: "public" }, ov);
+      await settle();
+      expect(view.reviewTo()).toBe(ALICE.account);
+      expect(noted()).not.toContain(NOTE);
+    });
+  });
+
   it("sends the .dusk name the recipient was typed as, for Activity, and none for a pasted address", async () => {
     const send = async (message) =>
       message.type === "DUSK_UI_GET_CACHED_GAS_PRICE"

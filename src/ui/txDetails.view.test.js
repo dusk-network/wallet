@@ -39,6 +39,19 @@ function details(tx, { contacts = [], others = [], hidden = false, own = {} } = 
   };
 }
 
+describe("a name read through a node the wallet doesn't know", () => {
+  const CUSTOM = "https://my-node.example:8443";
+  const NOTE = "Checked by my-node.example:8443, a node the wallet doesn't know. Check the address too.";
+  const OTHER = "z".repeat(90);
+  const transfer = { kind: TX_KIND.TRANSFER, to: OTHER, amount: "1000000000", status: "executed" };
+
+  it("says whose word it is in a transaction's details, and nothing on a network's own node or with no name", () => {
+    expect(details({ ...transfer, nodeUrl: CUSTOM, toName: "bob.dusk" }, { own: { nodeUrl: CUSTOM } }).note).toBe(NOTE);
+    expect(details({ ...transfer, toName: "bob.dusk" }).note).toBe("");
+    expect(details({ ...transfer, nodeUrl: CUSTOM }, { own: { nodeUrl: CUSTOM } }).note).toBe("");
+  });
+});
+
 describe("transaction details", () => {
   it("name your other profile by its public account or shielded address, with the short address and Copy under it", () => {
     const account = "z".repeat(60);

@@ -205,6 +205,13 @@ p.ap-sub {
   white-space: pre;
 }
 
+/* A name a node the wallet doesn't know gave: whose word it is */
+.ap-recipient__note {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
 /* A small heading over a group */
 h2.ap-section {
   margin: 4px 2px -4px;

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearAddressBook, listAddressBook, markAddressBookNameChecked, upsertAddressBookEntry } from "../shared/addressBook.js";
 import { lookupDuskName } from "../shared/duskNames.js";
+import { noteChainId } from "../shared/nodeNetwork.js";
 import { TX_KIND } from "../shared/constants.js";
 import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { shortAddress } from "./lib/strings.js";
@@ -326,6 +327,54 @@ describe("contacts", () => {
     view.button("Save").click();
     await settle();
     expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Shop", address: ADDRESS }), shown);
+  });
+
+  describe("a name read through a node the wallet doesn't know", () => {
+    const CUSTOM = "https://my-node.example:8443";
+    const NOTE = "Checked by my-node.example:8443, a node the wallet doesn't know. Check the address too.";
+    const onCustom = { nodeUrl: CUSTOM, accounts: [OWN], selectedAccountIndex: 0, txs: [] };
+    const notes = () => dom.document.body.querySelectorAll('[role="note"]').map(visibleText);
+
+    beforeEach(() => noteChainId(CUSTOM, 2));
+    afterEach(() => noteChainId(CUSTOM, null));
+
+    it("says whose word it is on the contact form, and leaves it due for a check", async () => {
+      const view = mount({ view: "edit" }, onCustom);
+      typeInto(view.field("Name"), "Shop");
+      typeInto(view.field("Address"), "alice-shop.dusk");
+      await settle();
+      expect(notes()).toContain(NOTE);
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ duskName: "alice-shop.dusk", checkedAt: 0 }), expect.anything());
+    });
+
+    it("says nothing on a network's own node, where saving counts as a check", async () => {
+      const view = mount({ view: "edit" });
+      typeInto(view.field("Name"), "Shop");
+      typeInto(view.field("Address"), "alice-shop.dusk");
+      await settle();
+      expect(notes()).not.toContain(NOTE);
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry.mock.lastCall[0].checkedAt).toBeGreaterThan(0);
+    });
+
+    it("says so with what it says of a saved contact's name, and doesn't count it as a check", async () => {
+      const shop = { id: "2", name: "Shop", address: ACCOUNT, type: "account", duskName: "alice-shop.dusk", checkedAt: Date.now() - NAME_RECHECK_MS - 1 };
+      mount({ view: "detail", detailId: "2", items: [shop] }, onCustom);
+      await settle();
+      expect(markAddressBookNameChecked).not.toHaveBeenCalled();
+      expect(isShown(dom.document.body.querySelector(".contact-name-check"))).toBe(false);
+
+      lookupDuskName.mockImplementation((name) => {
+        const result = { ...SHOP, name, account: OWN };
+        return { result, promise: Promise.resolve(result) };
+      });
+      mount({ view: "detail", detailId: "2", items: [shop] }, onCustom);
+      await settle();
+      expect(visibleText(dom.document.body.querySelector(".contact-name-check"))).toBe(`alice-shop.dusk now points to another address. Edit the contact before you send to it. ${NOTE}`);
+    });
   });
 
   it("marks an hour-old .dusk name checked on the contact as saved, never writing back the copy it showed", async () => {

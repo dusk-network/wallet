@@ -82,6 +82,16 @@ export function listedNetwork(nodeUrl) {
 }
 
 /**
+ * What goes under a .dusk name read through this node: nothing on a network's own
+ * node. Any other can answer what it likes, so it says whose word the name is.
+ * @param {string} nodeUrl
+ * @returns {string}
+ */
+export function nameCheckNote(nodeUrl) {
+  return listedNetwork(nodeUrl) ? "" : `Checked by ${nodeHost(nodeUrl)}, a node the wallet doesn't know. Check the address too.`;
+}
+
+/**
  * The chain ID of a network whose own node `nodeUrl` is, as its file lists
  * it, or null.
  * @param {string} nodeUrl
