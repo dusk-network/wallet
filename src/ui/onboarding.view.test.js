@@ -216,6 +216,100 @@ describe("setting up and unlocking", () => {
   });
 });
 
+describe("a new recovery phrase", () => {
+  const actions = (reply = {}) => ({ send: vi.fn(async () => reply), render: vi.fn(async () => {}), showToast: vi.fn() });
+  const emptyFlow = () => ({ mode: null, mnemonic: null, password: "", reveal: false });
+  // On from the password, with what the form needs.
+  const pastPassword = async (state, acts) => {
+    const body = show(onboardingCreatePasswordView({ state, actions: acts }));
+    typeInto(field(body, "Password"), "long enough");
+    typeInto(field(body, "Confirm password"), "long enough");
+    body.querySelector("input[type=checkbox]").checked = true;
+    button(body, "Continue").click();
+    await settle();
+    expect(state.route).toBe("onboard_create_phrase");
+  };
+
+  it("keeps its words through Back to the password and forward again", async () => {
+    const state = { route: "onboard_welcome", onboard: emptyFlow() };
+    const acts = actions();
+    show(onboardingWelcomeView({ state, actions: acts })).querySelectorAll(".onboard-choice")[0].click();
+    expect(state.route).toBe("onboard_create_password");
+    await pastPassword(state, acts);
+    const first = state.onboard.mnemonic;
+    expect(first.split(" ")).toHaveLength(12);
+
+    // Back to the password, and on again: hidden again, the same words.
+    state.onboard.reveal = true;
+    button(show(onboardingCreatePhraseView({ state, actions: acts })), "← Back").click();
+    expect(state.route).toBe("onboard_create_password");
+    await pastPassword(state, acts);
+    expect(state.onboard.mnemonic).toBe(first);
+    expect(state.onboard.reveal).toBe(false);
+
+    // All the way back to the first choice, and Create wallet again.
+    button(show(onboardingCreatePasswordView({ state, actions: acts })), "← Back").click();
+    expect(state.route).toBe("onboard_welcome");
+    show(onboardingWelcomeView({ state, actions: acts })).querySelectorAll(".onboard-choice")[0].click();
+    await pastPassword(state, acts);
+    expect(state.onboard.mnemonic).toBe(first);
+
+    // Done with: gone from memory, as the wallet is made.
+    state.route = "onboard_create_confirm";
+    const confirm = show(onboardingCreateConfirmView({ state, actions: acts }));
+    typeInto(field(confirm, "Word 1"), first);
+    button(confirm, "Create wallet").click();
+    await settle();
+    expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: first }));
+    expect(state.onboard.mnemonic).toBeNull();
+    expect(JSON.stringify(state)).not.toContain(first);
+  });
+
+  it("isn't kept once someone chooses to import one instead", async () => {
+    const state = { route: "onboard_welcome", onboard: emptyFlow() };
+    const acts = actions();
+    show(onboardingWelcomeView({ state, actions: acts })).querySelectorAll(".onboard-choice")[0].click();
+    await pastPassword(state, acts);
+    const first = state.onboard.mnemonic;
+    show(onboardingWelcomeView({ state, actions: acts })).querySelectorAll(".onboard-choice")[1].click();
+    expect(state.onboard.mnemonic).toBeNull();
+    expect(JSON.stringify(state)).not.toContain(first);
+  });
+
+  it("keeps its words through Back in Add wallet, and drops them when Add wallet is left or done", async () => {
+    const state = { route: "wallet_add", onboard: { ...emptyFlow(), adding: true } };
+    const acts = actions();
+    show(onboardingWelcomeView({ state, actions: acts, adding: true })).querySelectorAll(".onboard-choice")[0].click();
+    const first = state.onboard.mnemonic;
+    expect(first.split(" ")).toHaveLength(12);
+
+    // Back from the words to the choice, and on again.
+    button(show(onboardingCreatePhraseView({ state, actions: acts, adding: true, ov: TWO })), "← Back").click();
+    expect(state.route).toBe("wallet_add");
+    show(onboardingWelcomeView({ state, actions: acts, adding: true })).querySelectorAll(".onboard-choice")[0].click();
+    expect(state.onboard.mnemonic).toBe(first);
+
+    // Left for home: gone.
+    button(show(onboardingWelcomeView({ state, actions: acts, adding: true })), "← Back").click();
+    expect(state.route).toBe("home");
+    expect(JSON.stringify(state)).not.toContain(first);
+
+    // Done: gone too.
+    state.route = "wallet_add";
+    state.onboard = { ...emptyFlow(), adding: true };
+    show(onboardingWelcomeView({ state, actions: acts, adding: true })).querySelectorAll(".onboard-choice")[0].click();
+    const second = state.onboard.mnemonic;
+    state.route = "wallet_add_confirm";
+    const confirm = show(onboardingCreateConfirmView({ state, actions: acts, adding: true }));
+    typeInto(field(confirm, "Word 1"), second);
+    typeInto(field(confirm, SHARED_PASSWORD), "password123");
+    button(confirm, "Add wallet").click();
+    await settle();
+    expect(state.route).toBe("home");
+    expect(JSON.stringify(state)).not.toContain(second);
+  });
+});
+
 describe("adding a wallet beside the ones here", () => {
   const actions = (reply = {}) => ({ send: vi.fn(async () => reply), render: vi.fn(async () => {}), showToast: vi.fn() });
   const DUP = "This recovery phrase is already in your wallet.";

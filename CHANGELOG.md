@@ -12,6 +12,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Named Mainnet, Testnet and Devnet only at their exact addresses: any other node is Custom with its host, whatever it says of itself.
 - Fixed the chain ID on everything signed, a known address's from its network's file, a custom node's as it was added, and refused to sign, saying why, while the node answers another.
 - Showed the node's host in large type in a site's network-switch window, with what that node can see and show, and never Switch to Mainnet for another address.
+- Kept the same recovery words through Back while a wallet is being created.
 
 ## [0.4.0] - 2026-11-04
 

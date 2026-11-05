@@ -159,7 +159,9 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
         onclick: () => {
           state.onboard.mode = mode;
           state.onboard.adding = adding;
-          state.onboard.mnemonic = adding && mode === "create" ? generateMnemonic12() : null;
+          // A new phrase keeps its words through Back and forward, for this
+          // flow's whole length: someone may have written them down already.
+          state.onboard.mnemonic = mode === "create" ? state.onboard.mnemonic || (adding ? generateMnemonic12() : null) : null;
           state.onboard.password = "";
           state.onboard.reveal = false;
           state.route = route;
@@ -181,6 +183,8 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
       subnav({
         title: "Add wallet",
         onBack: () => {
+          // Out of the flow: its words go.
+          state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
           state.route = "home";
           actions?.render?.().catch(() => {});
         },
@@ -234,7 +238,8 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
         }
 
         state.onboard.password = password;
-        state.onboard.mnemonic = generateMnemonic12();
+        // The same words when this is Back and forward again.
+        state.onboard.mnemonic ||= generateMnemonic12();
         state.onboard.reveal = false;
         state.route = "onboard_create_phrase";
         await actions?.render?.();
