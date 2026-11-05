@@ -2,7 +2,7 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
-  amountForInput,
+  amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
@@ -16,7 +16,7 @@ import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
-import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
+import { fieldLabel, reviewActions, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
@@ -82,7 +82,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError(`Enter an amount such as 1 or ${amountForInput("0.5")}.`);
+      field.setError(amountProblem(raw));
       return null;
     }
     if (lux <= 0n) {
@@ -265,9 +265,7 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       ]),
       h("div", { class: "group" }, [kv("From", fromRail), kv("To", toRail)]),
       gasEditor,
-      confirmError,
-      pay.el,
-      h("div", { class: "btnrow" }, [confirmBtn]),
+      reviewActions(confirmBtn, confirmError, pay.el),
     ]),
   ];
 }

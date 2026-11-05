@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { lookupPrimaryName, lookupShieldedName } from "../shared/duskNames.js";
 import { iconSvg } from "./components/ActionIcon.js";
-import { accessibleName, installFakeDom, isShown, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
+import { accessibleName, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { receiveView } from "./popup/views/receive.js";
 
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
@@ -226,6 +226,96 @@ describe("receive", () => {
     await settle();
     const [link] = dom.clipboard.writeText.mock.calls.at(-1);
     expect(link).toContain("amount=1.5");
+  });
+
+  describe("Request payment's checks, the ones Send has", () => {
+    const open = (over) => ({ receive: { tab: "public", requestOpen: true, amountDusk: "", memo: "", ...over } });
+    const shown = (selector) => {
+      const el = dom.document.body.querySelector(selector);
+      return el && isShown(el) ? el.textContent : "";
+    };
+    const amountError = () => shown(".receive-amount-error");
+    const meta = () => dom.document.body.querySelector(".receive-request__meta").textContent;
+    const inLanguage = (language) => vi.stubGlobal("navigator", { ...globalThis.navigator, language });
+
+    it.each([
+      ["0", "Enter an amount greater than 0."],
+      ["0.000", "Enter an amount greater than 0."],
+      ["abc", "Enter an amount such as 1 or 0.5."],
+      ["0.1234567891", "DUSK has 9 decimals at most."],
+    ])("won't make a link for %s, and says why, with nothing claimed above it", async (amountDusk, said) => {
+      inLanguage("en-US");
+      const view = await receive("public", { state: open({ amountDusk, memo: "Lunch" }) });
+      expect(amountError()).toBe(said);
+      expect(view.button("Copy request link").disabled).toBe(true);
+      expect(meta()).toBe("");
+    });
+
+    it("says an amount that could be two amounts is that, in the language's own way", async () => {
+      inLanguage("nl-NL");
+      let view = await receive("public", { state: open({ amountDusk: "1.234" }) });
+      expect(amountError()).toBe("That could be two amounts: write 1234 or 1,234.");
+      expect(view.button("Copy request link").disabled).toBe(true);
+      inLanguage("en-US");
+      view = await receive("public", { state: open({ amountDusk: "1,234" }) });
+      expect(amountError()).toBe("That could be two amounts: write 1234 or 1.234.");
+      expect(view.button("Copy request link").disabled).toBe(true);
+    });
+
+    it("gives Dutch separators in its example", async () => {
+      inLanguage("nl-NL");
+      await receive("public", { state: open({ amountDusk: "abc" }) });
+      expect(amountError()).toBe("Enter an amount such as 1 or 0,5.");
+    });
+
+    it("takes an amount still being typed, and reads it as the plain amount the link asks for", async () => {
+      inLanguage("en-US");
+      const view = await receive("public", { state: open({ amountDusk: "1." }) });
+      expect(amountError()).toBe("");
+      view.button("Copy request link").click();
+      await settle();
+      expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toContain("amount=1");
+    });
+
+    it("won't make a link with a memo over 512 bytes, counted in bytes as Send counts them", async () => {
+      inLanguage("en-US");
+      let view = await receive("public", { state: open({ memo: "é".repeat(257) }) });
+      expect(shown(".memo-error")).toBe("That memo is too long: 512 bytes at most.");
+      expect(view.button("Copy request link").disabled).toBe(true);
+      expect(meta()).toBe("");
+      view = await receive("public", { state: open({ memo: "é".repeat(256) }) });
+      expect(shown(".memo-error")).toBe("");
+      expect(view.button("Copy request link").disabled).toBe(false);
+    });
+
+    it("says nothing with the panel closed, and claims nothing for what wouldn't do", async () => {
+      inLanguage("en-US");
+      await receive("public", { state: { receive: { tab: "public", requestOpen: false, amountDusk: "abc", memo: "Lunch" } } });
+      expect(amountError()).toBe("");
+      expect(meta()).toBe("");
+      await receive("public", { state: { receive: { tab: "public", requestOpen: false, amountDusk: "1", memo: "Lunch" } } });
+      expect(meta()).toBe("Configured");
+    });
+
+    it("takes back Copied once the request changes", async () => {
+      inLanguage("en-US");
+      const view = await receive("public", { state: open({ amountDusk: "1" }) });
+      const copy = view.button("Copy request link");
+      copy.click();
+      await settle();
+      expect(copy.hasAttribute("data-copied")).toBe(true);
+      expect(accessibleName(copy)).toBe("Copied");
+      const amount = dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Amount");
+      typeInto(amount, "2");
+      // Well before Copied would have ended by itself.
+      await vi.waitFor(() => expect(copy.hasAttribute("data-copied")).toBe(false), { timeout: 800, interval: 20 });
+      expect(accessibleName(copy)).toBe("Copy request link");
+      // Copying the new link says it again.
+      copy.click();
+      await settle();
+      expect(copy.hasAttribute("data-copied")).toBe(true);
+      expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toContain("amount=2");
+    });
   });
 
   it("says no more than the QR, the fields and Request payment show", async () => {

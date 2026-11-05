@@ -436,7 +436,7 @@ describe("after Confirm", () => {
     button("Confirm").click();
     await settle();
     expect(state.route).toBe("convert_confirm");
-    expect(body.querySelector(".convert-review > .field-error").textContent).toBe(
+    expect(body.querySelector(".review-actions > .field-error").textContent).toBe(
       "Enter both the gas limit and the gas price, or clear both."
     );
     expect(app.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);

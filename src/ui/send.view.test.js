@@ -615,13 +615,53 @@ describe("send's amount", () => {
     expect(state.route).toBe("confirm");
     expect(state.draft.amountLux).toBe("100000000");
 
-    for (const bad of ["-1", "1e1", "0.25.1", "1,2,3", "0.0000000001", "1 DUSK"]) {
+    for (const bad of ["-1", "1e1", "0.25.1", "1,2,3", "1 DUSK"]) {
       const next = mount(newState());
       typeInto(next.to, ALICE.account);
       typeInto(next.amount, bad);
       expect(next.amount.value).toBe(bad);
       expect(next.amountError()).toBe("Enter an amount such as 1 or 0.5.");
     }
+    const last = mount(newState());
+    typeInto(last.to, ALICE.account);
+    typeInto(last.amount, "0,1234567891234");
+    expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
+    typeInto(last.amount, "0.0000000001");
+    expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
+    typeInto(last.amount, "1,234");
+    expect(last.amountError()).toBe("That could be two amounts: write 1234 or 1.234.");
+  });
+
+  it("keeps Review off while an amount typed won't do, and on for an empty one to say what's missing", () => {
+    const form = mount(newState());
+    typeInto(form.to, ALICE.account);
+    expect(form.review.disabled).toBe(false);
+    for (const bad of ["abc", "0,1234567891234", "0", "99999"]) {
+      typeInto(form.amount, bad);
+      expect(form.amountError()).not.toBe("");
+      expect(form.review.disabled).toBe(true);
+    }
+    typeInto(form.amount, "1");
+    expect([form.amountError(), form.review.disabled]).toEqual(["", false]);
+    typeInto(form.amount, "");
+    expect(form.review.disabled).toBe(false);
+  });
+
+  it("keeps Review off for a recipient that won't do, whatever the amount does", () => {
+    const form = mount(newState());
+    isAccount.mockReturnValue(false);
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "1");
+    expect(form.review.disabled).toBe(true);
+    typeInto(form.amount, "abc");
+    typeInto(form.amount, "1");
+    expect(form.review.disabled).toBe(true);
+    isAccount.mockReturnValue(true);
+    typeInto(form.to, ALICE.account);
+    expect(form.review.disabled).toBe(false);
+    typeInto(form.amount, "abc");
+    typeInto(form.to, BOB.account);
+    expect(form.review.disabled).toBe(true);
   });
 
   it("sets aside the fee Review starts from, with custom gas from Settings", async () => {
@@ -1097,7 +1137,7 @@ describe("a send to the bridge's account", () => {
     const view = review({ amountDusk: "1", amountLux: "1000000000" });
     await settle();
     expect(text(".review-bridge-fee")).toBe("1 DUSK sent · 1 DUSK bridge fee · Nothing arrives on BNB Smart Chain");
-    expect(body().querySelector(".row > .field-error").textContent).toBe("Send more than the 1 DUSK bridge fee.");
+    expect(body().querySelector(".review-actions > .field-error").textContent).toBe("Send more than the 1 DUSK bridge fee.");
     expect(confirm().disabled).toBe(true);
     confirm().click();
     await settle();
@@ -1111,7 +1151,7 @@ describe("a send to the bridge's account", () => {
   ])("keeps Confirm off when the memo %s, as nothing would arrive", async (_, draft, ov, reason) => {
     const view = review(draft, ov);
     await settle();
-    expect(body().querySelectorAll(".row > .field-error").filter(isShown).map((e) => e.textContent)).toEqual([reason]);
+    expect(body().querySelectorAll(".review-actions > .field-error").filter(isShown).map((e) => e.textContent)).toEqual([reason]);
     expect(confirm().disabled).toBe(true);
     confirm().click();
     await settle();

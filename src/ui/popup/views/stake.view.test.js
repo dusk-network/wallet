@@ -962,7 +962,7 @@ describe("liquid staking", () => {
     await settle();
     status.features = { maintenance: true, synchronization: false };
     app.draw();
-    expect(body.querySelector(".row > .field-error").textContent).toBe("Sozu has paused deposits.");
+    expect(body.querySelector(".review-actions > .field-error").textContent).toBe("Sozu has paused deposits.");
     expect(button("Confirm").disabled).toBe(true);
   });
 
@@ -1038,7 +1038,7 @@ describe("liquid staking", () => {
     let now = null;
     const app = popup(state, ov(), { sozuStatus: () => now });
     const sent = () => app.actions.send.mock.calls.map(([m]) => m).filter((m) => m.type === "DUSK_UI_SEND_TX");
-    const errors = () => body.querySelectorAll(".row > .field-error").filter(isShown).map((e) => e.textContent);
+    const errors = () => body.querySelectorAll(".review-actions > .field-error").filter(isShown).map((e) => e.textContent);
     typeInto(field("Stake amount"), "100");
     button("Review stake").click();
     await settle();

@@ -4,6 +4,7 @@ import {
   formatDuskExact,
   formatFee,
   amountForInput,
+  amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
@@ -25,7 +26,7 @@ import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { ownProfileName, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
-import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
+import { fieldLabel, reviewActions, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
@@ -50,7 +51,7 @@ import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModa
 import { sendFromReview } from "./sent.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { networkTextOf } from "../../../shared/nodeNetwork.js";
-import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
+import { MEMO_TOO_LONG_TEXT, chainLabel, memoTooLong, normalizeChainId } from "../../../shared/duskUri.js";
 
 // A pasted EVM address, which a Dusk transfer can't pay.
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -59,8 +60,6 @@ const NOT_AN_ADDRESS_TEXT = "Not a valid address. Check it and try again.";
 // The longest a .dusk name can be, with .dusk.
 const LONGEST_NAME = 68;
 // What the network takes.
-const MAX_MEMO_BYTES = 512;
-const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
 export const EVM_ADDRESS_TEXT = "That's an EVM address, not a Dusk account.";
 
 /**
@@ -101,7 +100,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
   const memoError = h("div", { class: "field-error memo-error", role: "alert", hidden: true });
   const checkMemo = () => {
-    const tooLong = new TextEncoder().encode(memo.value.trim()).length > MAX_MEMO_BYTES;
+    const tooLong = memoTooLong(memo.value);
     memoError.textContent = tooLong ? MEMO_TOO_LONG_TEXT : "";
     memoError.hidden = !tooLong;
     return !tooLong;
@@ -197,9 +196,28 @@ export function sendFormView(ov, { state, actions } = {}) {
   const available = h("div", { class: "amount-avail", hidden: true }, [availText, maxBtn]);
   const feeNote = h("div", { class: "amount-fee-note", hidden: true });
 
+  // Review is off while the recipient won't do, or an amount typed won't: the
+  // field says why. An empty one leaves it on, for it to say what's missing.
+  let recipientOff = false;
+  let amountOff = false;
+  const syncReview = () => {
+    nextBtn.disabled = recipientOff || amountOff;
+  };
+  const reviewOff = (off) => {
+    recipientOff = off;
+    syncReview();
+  };
+
+  function checkAmount(opts) {
+    const lux = readAmount(opts);
+    amountOff = lux == null && Boolean(String(amount.value ?? "").trim());
+    syncReview();
+    return lux;
+  }
+
   // The amount as typed, checked as it is typed: an error under the field,
   // and the amount in Lux when it can be sent.
-  function checkAmount({ required = false } = {}) {
+  function readAmount({ required = false } = {}) {
     const raw = String(amount.value ?? "").trim();
     if (!raw) {
       field.setError(required ? "Enter an amount." : "");
@@ -209,7 +227,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError(`Enter an amount such as 1 or ${amountForInput("0.5")}.`);
+      field.setError(amountProblem(raw));
       return null;
     }
     if (lux <= 0n) {
@@ -469,7 +487,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     const blocked = blockedRecipient(recipient, ov?.chainId);
     blockedText.textContent = blocked ?? "";
     blockedNote.hidden = !blocked;
-    if (blocked) nextBtn.disabled = true;
+    if (blocked) reviewOff(true);
     return !blocked;
   };
 
@@ -510,7 +528,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     const allowed = showSelfNote(recipient);
     detectedRecipientType = t;
     const sendable = allowed && (t === "account" || shieldedCovers);
-    nextBtn.disabled = !sendable;
+    reviewOff(!sendable);
     updateAmountHelpers();
     return sendable;
   };
@@ -581,7 +599,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           : null,
       ]);
       detectedRecipientType = null;
-      nextBtn.disabled = true;
+      reviewOff(true);
       updateAmountHelpers();
       return false;
     }
@@ -646,7 +664,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
     hideRecipientBadge(toTypePill);
     detectedRecipientType = null;
-    nextBtn.disabled = true;
+    reviewOff(true);
     updateAmountHelpers();
     showNameBox([h("div", { class: "muted", text: `Looking up ${v}…` })]);
     lookup.promise.then((result) => {
@@ -664,7 +682,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     primaryCount += 1;
     if (!isDuskName(v)) {
       showNameBox([]);
-      nextBtn.disabled = false;
+      reviewOff(false);
     }
     if (!v) {
       hideRecipientBadge(toTypePill);
@@ -701,7 +719,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       hideRecipientBadge(toTypePill);
       showNameBox([h("div", { class: "err", text: NOT_AN_ADDRESS_TEXT })]);
       detectedRecipientType = null;
-      nextBtn.disabled = true;
+      reviewOff(true);
       updateContactMatch("", null);
       updateAmountHelpers();
       return;
@@ -725,7 +743,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       hideRecipientBadge(toTypePill);
       showNameBox([h("div", { class: "err", text: EVM_ADDRESS_TEXT })]);
       detectedRecipientType = null;
-      nextBtn.disabled = true;
+      reviewOff(true);
       updateContactMatch("", null);
       updateAmountHelpers();
       return;
@@ -760,7 +778,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       hideRecipientBadge(toTypePill);
       showNameBox([h("div", { class: "err", text: NOT_AN_ADDRESS_TEXT })]);
       detectedRecipientType = null;
-      nextBtn.disabled = true;
+      reviewOff(true);
       updateContactMatch("", null);
       updateAmountHelpers();
       return;
@@ -911,7 +929,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         let recipient = toVal;
         let duskName;
         if (isDuskName(toVal)) {
-          nextBtn.disabled = true;
+          reviewOff(true);
           const { lookup, latest } = startLookup(toVal);
           const result = await lookup.promise;
           // A lookup that ends after the user left Send, after a redraw replaced this form, or after the
@@ -1284,15 +1302,17 @@ export function sendConfirmView(ov, { state, actions } = {}) {
             h("div", { class: "muted", text: "The bridge pays out to the address in the memo. Go back and check it." }),
           ])
         : null,
-      tooLittle
-        ? h("div", { class: "field-error", role: "alert", text: `Send more than the ${formatDuskExact(service.feeLux)} DUSK bridge fee.` })
-        : null,
-      noRecipient ? h("div", { class: "field-error", role: "alert", text: `${noBridgeRecipientText(service.chain)}.` }) : null,
       saveContactBtn,
       gasEditor,
-      confirmError,
-      pay.el,
-      h("div", { class: "btnrow" }, [confirmBtn]),
+      reviewActions(
+        confirmBtn,
+        tooLittle
+          ? h("div", { class: "field-error", role: "alert", text: `Send more than the ${formatDuskExact(service.feeLux)} DUSK bridge fee.` })
+          : null,
+        noRecipient ? h("div", { class: "field-error", role: "alert", text: `${noBridgeRecipientText(service.chain)}.` }) : null,
+        confirmError,
+        pay.el
+      ),
     ]),
   ];
 }

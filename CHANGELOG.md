@@ -20,6 +20,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said when a site chose the fee, compared with the network's price, with a way back to that price when it's high.
 - Said why a node refused a transaction in the wallet's own words, never as its raw reply.
 - Named your other profiles in Activity, a transaction's details, toasts and Send, and stopped offering to save them as contacts.
+- Gave Request payment the checks Send has: an amount over 0, a memo of 512 bytes at most, and Copied goes when the request changes.
+- Said when an amount could be two amounts ("write 1234 or 1,234"), and when it has too many decimals, on every amount field.
+- Kept Review off on Send while the amount typed won't do.
+- Kept Confirm, and what stops it, in view on every Review.
 - Looked up a send no watcher follows any more, as after a browser restart, so a Sozu stake's "on its way" goes once it's done.
 
 ## [0.4.0] - 2026-11-04

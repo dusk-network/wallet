@@ -479,6 +479,25 @@ code {
   flex-wrap: wrap;
 }
 
+/* The end of a Review stays in view however long the Review is: what stops it,
+   and Confirm. It covers the scroller's padding, so nothing shows under it. */
+.review-actions {
+  position: sticky;
+  bottom: calc(var(--panel-padding) * -1);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: calc(var(--panel-padding) * -1);
+  padding: 10px 0 var(--panel-padding);
+  background: var(--background);
+}
+
+.panel-content:has(.review-actions) {
+  /* What gets the focus isn't left under it. */
+  scroll-padding-bottom: 96px;
+}
+
 /* Button rows that should align as a neat 2-column grid (e.g. Receive actions) */
 .btnrow--grid {
   display: grid;

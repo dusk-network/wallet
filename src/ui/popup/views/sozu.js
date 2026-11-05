@@ -1,5 +1,6 @@
 import {
   UI_DISPLAY_DECIMALS,
+  amountProblem,
   formatDusk,
   formatDuskExact,
   formatFee,
@@ -34,7 +35,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { amountField } from "../../components/AmountField.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { contractValueEl, copyContractButton } from "../../components/ContractValue.js";
-import { submitOnGasEnter } from "../../components/FormControls.js";
+import { reviewActions, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, payGuard, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
@@ -554,7 +555,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     try {
       lux = safeBigInt(parseAmountLux(raw), 0n);
     } catch (e) {
-      field.setError(/greater than 0/.test(String(e?.message)) ? "Enter an amount greater than 0." : "Enter an amount such as 10 or 10.5.");
+      field.setError(/greater than 0/.test(String(e?.message)) ? "Enter an amount greater than 0." : amountProblem(raw, { whole: "10", decimal: "10.5" }));
       reviewBtn.disabled = true;
       return null;
     }
@@ -1020,11 +1021,13 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       // How an unstake comes back.
       isStake ? null : h("p", { class: "stake-cap", text: SOZU_UNSTAKE_LINE }),
-      submitDisabledReason ? h("div", { class: "field-error", role: "alert", text: submitDisabledReason }) : null,
       gasEditor,
-      confirmError,
-      pay.el,
-      h("div", { class: "btnrow" }, [confirmBtn]),
+      reviewActions(
+        confirmBtn,
+        submitDisabledReason ? h("div", { class: "field-error", role: "alert", text: submitDisabledReason }) : null,
+        confirmError,
+        pay.el
+      ),
     ].filter(Boolean)),
   ];
 }

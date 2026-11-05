@@ -25,6 +25,17 @@ import { networkFor } from "@dusk-network/networks";
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "./chain.js";
 import { formatLuxToDusk } from "./amount.js";
 
+/** The longest memo a transaction carries, so the longest a request can ask for. */
+export const MAX_MEMO_BYTES = 512;
+export const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
+
+/**
+ * Whether a memo, as it would be sent, is over what a transaction carries.
+ * @param {string} memo
+ * @returns {boolean}
+ */
+export const memoTooLong = (memo) => new TextEncoder().encode(String(memo ?? "").trim()).length > MAX_MEMO_BYTES;
+
 /**
  * Convert a chain id (CAIP-2) to a decimal string.
  *

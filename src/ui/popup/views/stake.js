@@ -4,7 +4,7 @@ import { feePercent } from "@dusk-network/networks/sozu";
 import {
   formatDusk,
   formatFee,
-  amountForInput,
+  amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
   groupThousands,
@@ -26,7 +26,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { amountField } from "../../components/AmountField.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
-import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
+import { fieldLabel, reviewActions, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
@@ -758,7 +758,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError(`Enter an amount such as 1000 or ${amountForInput("1000.5")}.`);
+      field.setError(amountProblem(raw, { whole: "1000", decimal: "1000.5" }));
       reviewBtn.disabled = true;
       return null;
     }
@@ -1031,9 +1031,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
       // The node from the amount screen, once more before Confirm.
       kind === TX_KIND.STAKE ? h("div", { class: "group info" }, [nodeRow(actions)]) : null,
       gasEditor,
-      confirmError,
-      pay.el,
-      h("div", { class: "btnrow" }, [confirmBtn]),
+      reviewActions(confirmBtn, confirmError, pay.el),
     ].filter(Boolean)),
   ];
 }

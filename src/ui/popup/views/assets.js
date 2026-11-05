@@ -1,4 +1,4 @@
-import { amountForInput, UI_DISPLAY_DECIMALS, groupThousands, normalizeDuskInput, safeBigInt } from "../../../shared/amount.js";
+import { amountForInput, UI_DISPLAY_DECIMALS, groupThousands, normalizeDuskInput, safeBigInt, unclearAmountText } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { payGuard, reviewGas } from "../../components/NetworkGas.js";
 import { h } from "../../lib/dom.js";
@@ -11,7 +11,7 @@ import { copyContractButton } from "../../components/ContractValue.js";
 import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { fieldLabel, integerInput, submitOnGasEnter, textInput } from "../../components/FormControls.js";
+import { fieldLabel, integerInput, reviewActions, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import "../../components/GasEditor.js";
 import { sendFromReview } from "./sent.js";
 
@@ -92,6 +92,8 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
 function parseTokenAmountHuman(raw, decimals) {
   const s = normalizeDuskInput(raw);
   if (!s) throw new Error("Enter an amount.");
+  const unclear = unclearAmountText(raw);
+  if (unclear) throw new Error(unclear);
   if (s.startsWith("-")) throw new Error("Enter an amount of 0 or more.");
 
   let d = Number(decimals ?? 0);
@@ -962,9 +964,7 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       warn,
       gasEditor,
-      confirmError,
-      pay.el,
-      h("div", { class: "btnrow" }, [confirmBtn]),
+      reviewActions(confirmBtn, confirmError, pay.el),
     ].filter(Boolean)),
   ];
 }

@@ -37,6 +37,19 @@ function showCopied(button, label) {
 }
 
 /**
+ * Takes back a Copied a button still says, as what it copies has changed.
+ * @param {HTMLButtonElement} button - a copyButton
+ */
+export function resetCopied(button) {
+  if (!button.hasAttribute("data-copied")) return;
+  clearTimeout(timers.get(button));
+  button.removeAttribute("data-copied");
+  button.setAttribute("aria-label", button.getAttribute("data-label"));
+  // Cleared, so the next copy is said again.
+  if (region?.textContent === "Copied") region.textContent = "";
+}
+
+/**
  * A Copy button that says it copied on itself: for COPIED_MS its icon is a
  * check, or its words say "Copied", crossfading (ui.css), and its name is
  * "Copied". A copy that fails says `failText` through `onFail`, as a toast,
