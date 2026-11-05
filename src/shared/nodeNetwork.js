@@ -92,6 +92,17 @@ export function nameCheckNote(nodeUrl) {
 }
 
 /**
+ * The settings of the network whose own node `nodeUrl` is: its node, prover,
+ * archiver and chain ID, as its file lists them. Null for any other node.
+ * @param {string} nodeUrl
+ * @returns {{ nodeUrl: string, proverUrl: string, archiverUrl: string, chainId: number } | null}
+ */
+export function listedSettings(nodeUrl) {
+  const net = listedNetwork(nodeUrl);
+  return net ? { nodeUrl: net.urls.node, proverUrl: net.urls.prover, archiverUrl: net.urls.archive, chainId: net.chainId } : null;
+}
+
+/**
  * The chain ID of a network whose own node `nodeUrl` is, as its file lists
  * it, or null.
  * @param {string} nodeUrl

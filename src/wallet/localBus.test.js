@@ -387,6 +387,24 @@ describe("contacts", () => {
       expect(localStorage.getItem("dusk_reset_pending_v1")).toBeNull();
     });
 
+    it("keep the network it was on, one of Dusk's own, and go back to Mainnet from any other node", async () => {
+      const { getSettings, setSettings } = await import("../shared/settings.js");
+      let localSend = await walletA();
+      await setSettings({ nodeUrl: "https://testnet.nodes.dusk.network", proverUrl: "https://testnet.provers.dusk.network", chainId: 2 });
+      await expect(localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" })).resolves.toMatchObject({ ok: true });
+      expect(await getSettings()).toMatchObject({
+        nodeUrl: "https://testnet.nodes.dusk.network",
+        proverUrl: "https://testnet.provers.dusk.network",
+        archiverUrl: "https://testnet.nodes.dusk.network",
+        chainId: 2,
+      });
+
+      localSend = await walletA();
+      await setSettings({ nodeUrl: "https://my-node.example", proverUrl: "https://my-node.example", archiverUrl: "https://my-node.example", chainId: 2 });
+      await expect(localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" })).resolves.toMatchObject({ ok: true });
+      expect((await getSettings()).nodeUrl).toBe("https://nodes.dusk.network");
+    });
+
     it("leave everything as it was for a phrase that isn't one", async () => {
       const localSend = await walletA();
       const txs = await import("../shared/txStore.js");

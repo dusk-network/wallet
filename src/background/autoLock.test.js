@@ -412,6 +412,18 @@ describe("background auto-lock activity", () => {
     expect(methods.at(-1)).toBe("engine_unlock");
   });
 
+  it("restores on the network it was on, one of Dusk's own, once the old settings are gone", async () => {
+    mocks.engineUnlocked = false;
+    mocks.settings = { ...mocks.settings, nodeUrl: "https://testnet.nodes.dusk.network", proverUrl: "https://prover.example" };
+    // The reset clears the settings: the wallet stands on Mainnet's node until told otherwise.
+    mocks.clearWalletData.mockImplementationOnce(async () => {
+      mocks.settings = { ...mocks.settings, nodeUrl: "https://nodes.dusk.network", proverUrl: "https://provers.dusk.network" };
+    });
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" })).resolves.toMatchObject({ ok: true });
+    // Testnet's own addresses, not the prover the old settings had.
+    expect(mocks.settings).toMatchObject({ nodeUrl: "https://testnet.nodes.dusk.network", proverUrl: "https://testnet.provers.dusk.network", archiverUrl: "https://testnet.nodes.dusk.network", chainId: 2 });
+  });
+
   it("keeps a restore noted when its new vault can't be made, so the next import of that wallet keeps its contacts", async () => {
     mocks.engineUnlocked = false;
     mocks.createVault.mockRejectedValueOnce(new Error("Storage is full"));

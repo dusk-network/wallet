@@ -19,7 +19,7 @@ import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
-import { askNodeChainId, chainRefusal } from "../shared/nodeNetwork.js";
+import { askNodeChainId, chainRefusal, listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem, isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -1223,6 +1223,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
           await ensureEngineConfigured();
           const walletId = await engineCall("engine_walletId", { mnemonic: String(mnemonic) }, { timeoutMs: 120_000 });
+          // Mainnet, Testnet or Devnet stays: a restore isn't a move to another network.
+          const network = listedSettings(String((await getSettings())?.nodeUrl ?? ""));
 
           await lockWallet("restore");
           // Noted with the wallet it makes until that wallet's vault is: cut
@@ -1234,7 +1236,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           await clearVault();
           const restored = await createVault(mnemonic, password);
           await endReset();
-          // On the default network, as after a reset.
+          if (network) await setSettings(network);
+          // On that network, else the default one, as after a reset.
           invalidateEngineConfig();
           await ensureEngineConfigured();
           const result = await unlockEngine([{ ...restored, mnemonic: String(mnemonic) }], restored.id);

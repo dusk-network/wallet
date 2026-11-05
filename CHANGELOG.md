@@ -63,6 +63,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed what an unstake from Sozu brings back on Home and in Activity from the moment it's sent.
 - Showed the whole address on Receive, its first and last six set off, with a Copy address button that says Copied, as the web wallet does.
 - Showed the recovery words at 18 px, as the web wallet does, with I wrote it down kept in view at the bottom.
+- Stayed on Mainnet, Testnet or Devnet through a restore after a forgotten password; a custom node goes, as on Reset.
 
 ## [0.4.0] - 2026-11-04
 

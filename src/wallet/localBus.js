@@ -11,6 +11,7 @@ import { clearAllPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem } from "../shared/securityPolicy.js";
 import { chainIdForChoice, readChainId } from "../shared/networkStatus.js";
 import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
@@ -269,6 +270,8 @@ export async function localSend(message) {
         }
         if (isUnlocked()) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock the wallet first");
         const walletId = await walletIdOf(String(mnemonic));
+        // Mainnet, Testnet or Devnet stays: a restore isn't a move to another network.
+        const network = listedSettings(String((await getSettings())?.nodeUrl ?? ""));
         lock();
         // Noted with the wallet it makes until that wallet's vault is.
         await beginReset({ keepContactsOf: walletId });
@@ -277,6 +280,7 @@ export async function localSend(message) {
         await clearVault();
         const restored = await createVault(mnemonic, password);
         await endReset();
+        if (network) await setSettings(network);
         await ensureEngineConfigured();
         await unlockWallets({ wallets: [{ ...restored, mnemonic: String(mnemonic) }], walletKey: restored.id });
         await keepWalletShown(unlockedNow());
