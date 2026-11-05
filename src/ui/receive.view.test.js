@@ -102,7 +102,7 @@ describe("receive", () => {
     expect(shielded.address.title).toBe(ADDRESS);
   });
 
-  it("shows the name and the short account under the QR, each copying its own", async () => {
+  it("shows the name and the whole account under the QR, and copies the account with a button that says Copied", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const view = await receive("public");
     const row = dom.document.body.querySelector(".row").children;
@@ -111,32 +111,29 @@ describe("receive", () => {
 
     expect(view.name()).toBe("alice.dusk");
     expect(view.nameField.querySelector(".receive-field__name").title).toBe("alice.dusk");
-    expect(visibleText(view.address)).toBe("26FCH7…Tck927");
-    expect([view.address.title, screenReaderText(view.address)]).toEqual([ACCOUNT, ACCOUNT]);
+    // All of it, to read and compare, its ends set off: for the eyes and for screen readers alike.
+    expect([visibleText(view.address), screenReaderText(view.address), view.address.title]).toEqual([ACCOUNT, ACCOUNT, ACCOUNT]);
+    expect(view.address.querySelectorAll("b").map((b) => b.textContent)).toEqual([ACCOUNT.slice(0, 6), ACCOUNT.slice(-6)]);
 
-    // Each says Copied on itself, with no toast.
+    // The name's icon and the address's words each say Copied on themselves, with no toast.
     expect(await view.copy("Copy name")).toEqual(["alice.dusk", "Copied", undefined]);
+    const copyAddress = view.button("Copy address");
+    expect(copyAddress).toBeTruthy();
     expect(await view.copy("Copy address")).toEqual([ACCOUNT, "Copied", undefined]);
+    expect(visibleText(copyAddress)).toBe("Copied");
 
-    // No big copy button: the fields copy, the row below downloads the QR.
-    for (const text of ["Copy account", "Copy address"]) expect(view.button(text)).toBeUndefined();
+    // Beside Download, below the fields; nothing else is a big button.
     expect(dom.document.body.querySelector(".btn-primary")).toBeNull();
-    expect(dom.document.body.querySelector(".btnrow").children.map((b) => b.textContent)).toEqual(["Download QR PNG"]);
+    expect(dom.document.body.querySelector(".btnrow").children.map((b) => b.getAttribute("data-label") ?? b.textContent)).toEqual(["Copy address", "Download QR PNG"]);
   });
 
-  it("draws the copy buttons as SVG icons, centered in their buttons", async () => {
+  it("draws the name's copy button as an SVG icon, centered in its button", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     await receive("public");
-    const icons = ["Copy name", "Copy address"].map((label) => {
-      const button = dom.document.body.querySelector(`button[aria-label="${label}"]`);
-      return [button.querySelectorAll(".copy-swap > span").map((face) => face.innerHTML), button.textContent];
-    });
+    const button = dom.document.body.querySelector(`button[aria-label="Copy name"]`);
     // No glyph text, which shows as an empty box without a font that has it:
     // the copy icon, and the check it turns into.
-    expect(icons).toEqual([
-      [[iconSvg("copy"), iconSvg("check")], ""],
-      [[iconSvg("copy"), iconSvg("check")], ""],
-    ]);
+    expect([button.querySelectorAll(".copy-swap > span").map((face) => face.innerHTML), button.textContent]).toEqual([[iconSvg("copy"), iconSvg("check")], ""]);
 
     // The button centers the icon, the switcher's copy buttons too.
     const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
@@ -159,7 +156,7 @@ describe("receive", () => {
     let view = await receive("shielded", { state: { receive: { tab: "shielded" } } });
     expect(lookupShieldedName).toHaveBeenCalledWith(ACCOUNT, ADDRESS, { nodeUrl: overview.nodeUrl });
     expect([view.name(), view.shownNote()]).toEqual(["", ""]);
-    expect(visibleText(view.address)).toBe("2Ana1p…RbFj4T");
+    expect(visibleText(view.address)).toBe(ADDRESS);
     expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied", undefined]);
 
     lookupShieldedName.mockResolvedValue("alice.dusk");

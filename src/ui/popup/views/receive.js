@@ -4,7 +4,7 @@ import { subnav } from "../../components/Subnav.js";
 import { copyButton, resetCopied } from "../../components/CopyButton.js";
 import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
 import { duskNameEl } from "../../components/DuskName.js";
-import { shortAddressEl } from "../../components/ShortAddress.js";
+import { fullAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
 import { segmented } from "../../components/Segmented.js";
 import { formatDuskPlain } from "@dusk-network/app-core/amounts";
@@ -73,7 +73,7 @@ export function receiveView(ov, { state, actions } = {}) {
     },
   });
 
-  // --- QR, then the name and the address, each with a copy button -----
+  // --- QR, then the name with its copy button, and the address in full ---
   const qrCard = h("div", { class: "box qr-box receive-qr-card" });
 
   // An icon button that copies what `value` gives and says Copied on itself.
@@ -109,13 +109,20 @@ export function receiveView(ov, { state, actions } = {}) {
     nameNote.hidden = false;
   });
 
-  const copyAddress = copyIcon("Copy address", () => recipient);
+  // The address to read whole, and a button that copies it and says Copied in words.
+  const copyAddress = copyButton({
+    value: () => recipient,
+    label: "Copy address",
+    text: "Copy address",
+    className: "btn-outline receive-copy-address",
+    failText: "Copy failed",
+    onFail: actions?.showToast,
+  });
   copyAddress.disabled = !recipient;
-  const addressField = h("div", { class: "receive-field" }, [
+  const addressField = h("div", { class: "receive-field receive-field--address" }, [
     recipient
-      ? shortAddressEl(recipient, { className: "receive-field__address" })
+      ? fullAddressEl(recipient, { className: "receive-field__address" })
       : h("code", { class: "receive-field__address", text: "—" }),
-    copyAddress,
   ]);
 
   // --- Request payment (progressive disclosure) -----------------------
@@ -280,7 +287,7 @@ export function receiveView(ov, { state, actions } = {}) {
   const btnRow = h(
     "div",
     { class: "btnrow btnrow--grid" },
-    shareBtn ? [shareBtn, downloadBtn] : [downloadBtn]
+    [copyAddress, shareBtn, downloadBtn].filter(Boolean)
   );
 
   // --- Live update -----------------------------------------------------

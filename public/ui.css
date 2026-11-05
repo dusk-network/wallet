@@ -3544,6 +3544,35 @@ body[data-runtime="tauri"].page--full .panel {
   margin-left: auto;
 }
 
+/* The address in full, to read and compare: its first and last six stand out,
+   as in the web wallet, and it wraps anywhere but in its last six. */
+.full-address {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.full-address b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.full-address__tail {
+  white-space: nowrap;
+}
+
+.receive-field--address {
+  padding: 10px 12px;
+}
+
+.receive-field--address .receive-field__address {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
 /* What people reach through the name, said under it */
 p.receive-name-note {
   margin: 0;
