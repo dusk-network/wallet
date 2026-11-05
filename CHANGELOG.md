@@ -19,6 +19,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Checked the balance covers the amount and the fee in site approvals and on every form and Review, saying how much is missing, with Approve and Confirm off until it does.
 - Said when a site chose the fee, compared with the network's price, with a way back to that price when it's high.
 - Said why a node refused a transaction in the wallet's own words, never as its raw reply.
+- Looked up a send no watcher follows any more, as after a browser restart, so a Sozu stake's "on its way" goes once it's done.
 
 ## [0.4.0] - 2026-11-04
 

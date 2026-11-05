@@ -738,6 +738,57 @@ describe("background Phoenix tx lifecycle flow", () => {
     });
   });
 
+  describe("a send still marked on its way that no watcher follows", () => {
+    const HASH = "ab".repeat(32);
+    const sozuStake = (over = {}) =>
+      seedTxMeta(HASH, { walletId: "acct0", kind: "contract_call", privacy: "public", pendingNullifiers: [], reservationStatus: undefined, asset: { kind: "sozu", action: "sozu_stake" }, submittedAt: Date.now() - 17 * 60_000, ...over });
+    const overview = () => sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+    const told = () => mocks.sentMessages.filter((m) => m.type === "DUSK_UI_TX_STATUS");
+    const kept = async () => (await (await import("../shared/txStore.js")).getTxMeta(HASH))?.status;
+
+    it("comes to its outcome as the wallet draws, and the pages are told, so its note goes", async () => {
+      await sozuStake();
+      mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: {} });
+      expect((await overview()).txs.map((t) => t.status)).toEqual(["submitted"]);
+      await vi.waitFor(async () => expect(await kept()).toBe("executed"));
+      await vi.waitFor(() => expect(told()).toEqual([expect.objectContaining({ hash: HASH, status: "executed", ok: true })]));
+      expect((await overview()).txs.map((t) => t.status)).toEqual(["executed"]);
+    });
+
+    it("says it failed, or that it isn't known any more, when that's what the node says", async () => {
+      await sozuStake();
+      mocks.classifyTxPresence.mockResolvedValue({ state: "executed_failed", tx: {}, error: "Out of gas" });
+      await overview();
+      await vi.waitFor(async () => expect(await kept()).toBe("failed"));
+    });
+
+    it("stays on its way while the node still has it, asked at most once a minute", async () => {
+      await sozuStake();
+      mocks.classifyTxPresence.mockResolvedValue({ state: "mempool", tx: {} });
+      await overview();
+      await vi.waitFor(() => expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1));
+      await vi.waitFor(async () => expect(await kept()).toBe("mempool"));
+      await overview();
+      await overview();
+      expect(mocks.classifyTxPresence).toHaveBeenCalledTimes(1);
+    });
+
+    it("is left to its watcher while one can still be following it", async () => {
+      await sozuStake({ submittedAt: Date.now() - 60_000 });
+      mocks.classifyTxPresence.mockResolvedValue({ state: "executed_success", tx: {} });
+      await overview();
+      await overview();
+      expect(mocks.classifyTxPresence).not.toHaveBeenCalled();
+      expect(await kept()).toBe("submitted");
+    });
+
+    it("asks nothing of a send that's done", async () => {
+      await sozuStake({ status: "executed" });
+      await overview();
+      expect(mocks.classifyTxPresence).not.toHaveBeenCalled();
+    });
+  });
+
   it("shows a site's request only on its own wallet: on another, there's nothing to show", async () => {
     const { getPending } = await import("../background/pending.js");
     getPending.mockReturnValueOnce({ kind: "connect", origin: "https://dapp.example", params: {}, shown: { walletId: "acct9" } });
