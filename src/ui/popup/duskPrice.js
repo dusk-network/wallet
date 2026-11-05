@@ -11,18 +11,22 @@ const HOUR_MS = 60 * 60_000;
 const WINDOW_MS = 88 * 24 * HOUR_MS;
 // A price further from the payment than this is no price of it.
 const NEAREST_MS = 3 * HOUR_MS;
+// How far back the public API goes: a range that starts earlier, it refuses.
+const PAST_YEAR_MS = 365 * 24 * HOUR_MS;
 
 /**
  * A lookup of what one DUSK was worth at a time, in euros: null where it isn't
  * known, its windows read once for this lookup.
- * @param {{ fetch?: typeof fetchWithTimeout }} [opts]
+ * @param {{ fetch?: typeof fetchWithTimeout, now?: () => number }} [opts]
  * @returns {(asked: { at: number }) => Promise<number | null>}
  */
-export function duskEuroPrices({ fetch = fetchWithTimeout } = {}) {
+export function duskEuroPrices({ fetch = fetchWithTimeout, now = Date.now } = {}) {
   const windows = new Map();
+  // Kept clear of the API's end by an hour: this device's clock isn't the API's.
+  const earliest = () => now() - PAST_YEAR_MS + HOUR_MS;
   const windowFrom = (start) => {
     if (!windows.has(start)) {
-      const url = `${API}?vs_currency=eur&from=${Math.floor((start - NEAREST_MS) / 1000)}&to=${Math.ceil((start + WINDOW_MS + NEAREST_MS) / 1000)}`;
+      const url = `${API}?vs_currency=eur&from=${Math.floor(Math.max(start - NEAREST_MS, earliest()) / 1000)}&to=${Math.ceil((start + WINDOW_MS + NEAREST_MS) / 1000)}`;
       windows.set(
         start,
         fetch(url, {}, 15_000)
@@ -34,6 +38,7 @@ export function duskEuroPrices({ fetch = fetchWithTimeout } = {}) {
     return windows.get(start);
   };
   return async ({ at }) => {
+    if (at < now() - PAST_YEAR_MS) return null;
     const prices = await windowFrom(Math.floor(at / WINDOW_MS) * WINDOW_MS);
     let nearest = null;
     for (const point of prices) {
