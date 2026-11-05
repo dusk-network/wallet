@@ -13,6 +13,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Fixed the chain ID on everything signed, a known address's from its network's file, a custom node's as it was added, and refused to sign, saying why, while the node answers another.
 - Showed the node's host in large type in a site's network-switch window, with what that node can see and show, and never Switch to Mainnet for another address.
 - Kept the same recovery words through Back while a wallet is being created.
+- Switched network as soon as it's chosen in Settings, and said a custom node isn't saved until Save.
 
 ## [0.4.0] - 2026-11-04
 

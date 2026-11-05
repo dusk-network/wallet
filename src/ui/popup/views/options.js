@@ -9,7 +9,7 @@ import { setAccountName } from "../../../shared/accountNames.js";
 import { normalizeWalletName, walletLabel } from "../../../shared/wallets.js";
 import { clearAddressBook } from "../../../shared/addressBook.js";
 import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
-import { networkForNode } from "../../../shared/nodeNetwork.js";
+import { networkForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
 import { h } from "../../lib/dom.js";
@@ -17,6 +17,7 @@ import { shortAddress, siteName } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { iconSvg } from "../../components/ActionIcon.js";
+import { setNetworkSwitching } from "../../components/NetworkMenu.js";
 import { fieldLabel, integerInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
 import { switchContext } from "../context.js";
@@ -410,35 +411,103 @@ export function optionsView(ov, { state, actions } = {}) {
       ]
     : null;
 
-  // Network: the preset, and its node addresses for a custom one.
+  // Network: a preset applies as it's chosen, as the network menu's do. Custom
+  // opens its node addresses, whose Save is what applies them: until then the
+  // choice says it's not saved, and stays through a redraw, not past Back.
+  const st = (state.settings ??= {});
+  const nodeDraft = st.nodeDraft?.for === currentNodeUrl ? st.nodeDraft : null;
+  const currentPresetId = detectPresetIdFromNodeUrl(currentNodeUrl);
   const { urls } = networks.mainnet;
-  const nodeUrlInput = urlInput({ value: currentNodeUrl, placeholder: urls.node, onEnter: () => saveBtn.click() });
-  const proverUrlInput = urlInput({ value: currentProverUrl, placeholder: urls.prover, onEnter: () => saveBtn.click() });
-  const archiverUrlInput = urlInput({ value: currentArchiverUrl, placeholder: urls.archive, onEnter: () => saveBtn.click() });
+  const nodeUrlInput = urlInput({ value: nodeDraft?.node ?? currentNodeUrl, placeholder: urls.node, onEnter: () => saveBtn.click() });
+  const proverUrlInput = urlInput({ value: nodeDraft?.prover ?? currentProverUrl, placeholder: urls.prover, onEnter: () => saveBtn.click() });
+  const archiverUrlInput = urlInput({ value: nodeDraft?.archiver ?? currentArchiverUrl, placeholder: urls.archive, onEnter: () => saveBtn.click() });
   const networkSelect = h(
     "select",
     { id: "network", "aria-label": "Network" },
     NETWORK_PRESETS.map((p) => h("option", { value: p.id, text: p.label }))
   );
-  networkSelect.value = detectPresetIdFromNodeUrl(currentNodeUrl);
+  networkSelect.value = nodeDraft?.preset ?? currentPresetId;
   const networkHint = h("div", { class: "muted" });
-  const nodeDetails = h("details", { class: "advanced settings-nodes", open: networkSelect.value === "custom" });
+  const nodeDetails = h("details", { class: "advanced settings-nodes", open: networkSelect.value === "custom" || Boolean(nodeDraft) });
   const showNetworkHint = (preset) => {
     networkHint.textContent = preset?.hint ?? "";
     networkHint.hidden = !preset?.hint;
   };
   showNetworkHint(NETWORK_PRESETS.find((p) => p.id === networkSelect.value));
+
+  // What's typed or picked and not saved says so beside Save.
+  const unsavedNote = h("p", { class: "settings-note settings-unsaved", role: "status", hidden: true });
+  const addressesChanged = () =>
+    nodeUrlInput.value.trim() !== currentNodeUrl || proverUrlInput.value.trim() !== currentProverUrl || archiverUrlInput.value.trim() !== currentArchiverUrl;
+  const showUnsaved = () => {
+    const unsaved = networkSelect.value !== currentPresetId || addressesChanged();
+    unsavedNote.textContent = unsaved ? `Not saved. The wallet stays on ${networkTextOf(currentNodeUrl)} until you press Save.` : "";
+    unsavedNote.hidden = !unsaved;
+    st.nodeDraft = unsaved
+      ? {
+          for: currentNodeUrl,
+          preset: networkSelect.value,
+          node: nodeUrlInput.value,
+          prover: proverUrlInput.value,
+          archiver: archiverUrlInput.value,
+        }
+      : null;
+  };
+
+  // A preset that couldn't be applied says so under the choice.
+  const switchError = h("div", { class: "field-error", role: "alert", hidden: true });
+  const applyPreset = async (preset) => {
+    const pill = document.getElementById("network-pill");
+    networkSelect.disabled = true;
+    switchError.hidden = true;
+    setNetworkSwitching(pill, preset.label);
+    try {
+      // From now on, before the wallet answers or the overview is read again.
+      switchContext(state);
+      const res = await actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: preset.nodeUrl, proverUrl: preset.proverUrl, archiverUrl: preset.archiverUrl });
+      if (res?.error) throw new Error(res.error.message ?? `Couldn't switch to ${preset.label}`);
+      st.nodeDraft = null;
+      actions?.showToast?.(`Switched to ${preset.label}.`);
+      setNetworkSwitching(pill, null);
+      state.needsRefresh = true;
+      await actions?.render?.({ forceRefresh: true });
+    } catch (e) {
+      // Still on its network: the choice names it again, and the pill too.
+      setNetworkSwitching(pill, null);
+      networkSelect.value = currentPresetId;
+      showNetworkHint(NETWORK_PRESETS.find((p) => p.id === currentPresetId));
+      showUnsaved();
+      switchError.textContent = e?.message ?? String(e);
+      switchError.hidden = false;
+      actions?.renderHeader?.();
+    } finally {
+      networkSelect.disabled = false;
+    }
+  };
   networkSelect.addEventListener("change", () => {
     const preset = NETWORK_PRESETS.find((p) => p.id === networkSelect.value);
     if (!preset) return;
-    if (preset.id !== "custom" && preset.nodeUrl) {
-      nodeUrlInput.value = preset.nodeUrl;
-      if (preset.proverUrl) proverUrlInput.value = preset.proverUrl;
-      if (preset.archiverUrl) archiverUrlInput.value = preset.archiverUrl;
-    } else {
-      nodeDetails.open = true;
-    }
     showNetworkHint(preset);
+    switchError.hidden = true;
+    if (preset.id !== "custom") {
+      if (preset.id !== currentPresetId) {
+        applyPreset(preset);
+        return;
+      }
+      // Back to the network it's on: nothing to apply, nothing left unsaved.
+      nodeUrlInput.value = currentNodeUrl;
+      proverUrlInput.value = currentProverUrl;
+      archiverUrlInput.value = currentArchiverUrl;
+      showUnsaved();
+      return;
+    }
+    // A new custom node's addresses start empty: a network's aren't its own.
+    if (currentPresetId !== "custom") {
+      for (const input of [nodeUrlInput, proverUrlInput, archiverUrlInput]) input.value = "";
+    }
+    nodeDetails.open = true;
+    showUnsaved();
+    nodeUrlInput.focus?.();
   });
   nodeUrlInput.addEventListener("input", () => {
     const presetId = detectPresetIdFromNodeUrl(nodeUrlInput.value);
@@ -458,7 +527,10 @@ export function optionsView(ov, { state, actions } = {}) {
     networkError.hidden = !text;
   };
   for (const input of [nodeUrlInput, proverUrlInput, archiverUrlInput]) {
-    input.addEventListener("input", () => showNetworkError(""));
+    input.addEventListener("input", () => {
+      showNetworkError("");
+      showUnsaved();
+    });
   }
   const saveBtn = h("button", {
     class: "btn-primary",
@@ -493,6 +565,7 @@ export function optionsView(ov, { state, actions } = {}) {
         const changed = resp?.error?.data?.chainChanged;
         if (changed && confirm(changed.question)) resp = await save({ acceptChain: true });
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to save settings");
+        st.nodeDraft = null;
         actions?.showToast?.("Settings saved.");
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
@@ -514,12 +587,13 @@ export function optionsView(ov, { state, actions } = {}) {
       fieldLabel(archiverUrlInput, "Archiver URL"),
       archiverUrlInput,
       networkError,
+      unsavedNote,
       saveBtn,
     ])
   );
+  if (nodeDraft) showUnsaved();
 
   // Advanced: custom gas for every Review, as the web wallet has it.
-  const st = (state.settings ??= {});
   const custom = normalizeCustomGas(ov?.customGas);
   const gasOn = st.customGasOn ?? Boolean(custom);
   const gasToggle = h("input", { type: "checkbox", id: "custom-gas", checked: gasOn });
@@ -685,7 +759,7 @@ export function optionsView(ov, { state, actions } = {}) {
     ]);
 
   return [
-    subnav({ actions: lockBtn ? [lockBtn] : [], title: "Settings", onBack: () => ((state.route = "home"), rerender()) }),
+    subnav({ actions: lockBtn ? [lockBtn] : [], title: "Settings", onBack: () => ((st.nodeDraft = null), (state.route = "home"), rerender()) }),
     walletRows.length
       ? section("Wallets", [h("div", { class: "settings-labels" }, walletRows), h("div", { class: "group" }, [addWalletRow])])
       : null,
@@ -706,7 +780,7 @@ export function optionsView(ov, { state, actions } = {}) {
     ]),
     sitesSection ? section("Connected sites", sitesSection) : null,
     section("Contacts", [h("div", { class: "group" }, [contactsRow])]),
-    section("Network", [h("div", { class: "select-wrap" }, [networkSelect]), networkHint, nodeDetails]),
+    section("Network", [h("div", { class: "select-wrap" }, [networkSelect]), networkHint, switchError, nodeDetails]),
     // Advanced is its own section, its title the disclosure's.
     h("section", { class: "settings-section" }, [advanced]),
     section("Reset", [

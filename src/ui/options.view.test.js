@@ -302,6 +302,102 @@ describe("settings", () => {
   });
 });
 
+describe("the network", () => {
+  const choose = async (id) => {
+    const select = dom.document.body.querySelector("select#network");
+    select.value = id;
+    select.dispatchEvent(fakeEvent("change"));
+    await settle();
+    return select;
+  };
+  const field = (name) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === name);
+  const saveButton = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Save");
+  const shownText = (el) => el.querySelectorAll("[role=status], [role=alert]").filter(isShown).map((n) => n.textContent);
+
+  it("switches as soon as it's chosen, as the menu at the top does, and says so", async () => {
+    const view = await settings({ nodeUrl: "https://nodes.dusk.network" });
+    view.actions.send.mockImplementation(async () => ({ ok: true }));
+    await choose("testnet");
+    expect(view.actions.send).toHaveBeenCalledWith({
+      type: "DUSK_UI_SET_NODE_URL",
+      nodeUrl: "https://testnet.nodes.dusk.network",
+      proverUrl: "https://testnet.provers.dusk.network",
+      archiverUrl: "https://testnet.nodes.dusk.network",
+    });
+    expect(view.actions.showToast).toHaveBeenCalledWith("Switched to Testnet.");
+    expect(view.actions.render).toHaveBeenCalledWith({ forceRefresh: true });
+    expect(view.state.context?.reason).toBe("switch");
+  });
+
+  it("names the network it's still on when the switch fails, and says why under the choice", async () => {
+    const view = await settings({ nodeUrl: "https://nodes.dusk.network" });
+    view.actions.send.mockImplementation(async () => ({ error: { message: "Couldn't reach the node" } }));
+    const select = await choose("testnet");
+    expect(select.value).toBe("mainnet");
+    expect(shownText(view.section("Network"))).toEqual(["Couldn't reach the node"]);
+    expect(view.actions.showToast).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing when it's chosen again as it is", async () => {
+    const view = await settings({ nodeUrl: "https://nodes.dusk.network", proverUrl: "https://provers.dusk.network", archiverUrl: "https://nodes.dusk.network" });
+    await choose("mainnet");
+    expect(view.actions.send).not.toHaveBeenCalled();
+    expect(shownText(view.section("Network"))).toEqual([]);
+  });
+
+  it("opens the node addresses for Custom, says it isn't saved until Save, and keeps that through a redraw", async () => {
+    const view = await settings({ nodeUrl: "https://nodes.dusk.network", proverUrl: "https://provers.dusk.network", archiverUrl: "https://nodes.dusk.network" });
+    await choose("custom");
+    const network = () => view.section("Network");
+    expect(view.actions.send).not.toHaveBeenCalled();
+    expect(network().querySelector("details").open).toBe(true);
+    expect(isShown(saveButton())).toBe(true);
+    expect(shownText(network())).toEqual(["Not saved. The wallet stays on Mainnet until you press Save."]);
+    expect(field("Node URL").value).toBe("");
+
+    typeInto(field("Node URL"), "https://my-node.example");
+    view.draw();
+    expect(network().querySelector("select#network").value).toBe("custom");
+    expect(field("Node URL").value).toBe("https://my-node.example");
+    expect(shownText(network())).toEqual(["Not saved. The wallet stays on Mainnet until you press Save."]);
+
+    view.actions.send.mockImplementation(async () => ({ ok: true }));
+    saveButton().click();
+    await settle();
+    expect(view.actions.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: "https://my-node.example" }));
+    expect(view.state.settings.nodeDraft).toBeNull();
+  });
+
+  it("drops what wasn't saved on leaving Settings, so coming back says what the wallet is on", async () => {
+    const view = await settings({ nodeUrl: "https://nodes.dusk.network" });
+    await choose("custom");
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+    view.draw();
+    expect(dom.document.body.querySelector("select#network").value).toBe("mainnet");
+    expect(shownText(view.section("Network"))).toEqual([]);
+  });
+
+  it("asks before using a saved node on another chain than it was added with, and stays as it was without a yes", async () => {
+    const view = await settings({ nodeUrl: "https://my-node.example", proverUrl: "https://my-node.example", archiverUrl: "https://my-node.example" });
+    const question = "my-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). Use it on Mainnet (chain 1) from now on? What you sign there will count there.";
+    const refused = { error: { message: "my-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). To use it anyway, save it in Settings.", data: { chainChanged: { pinned: 2, answered: 1, question } } } };
+    view.actions.send.mockImplementation(async (message) => (message.acceptChain ? { ok: true } : refused));
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    saveButton().click();
+    await settle();
+    expect(confirm).toHaveBeenCalledWith(question);
+    expect(view.actions.send).toHaveBeenCalledTimes(1);
+    expect(visibleText(view.section("Network"))).toContain("To use it anyway, save it in Settings.");
+
+    confirm.mockReturnValue(true);
+    saveButton().click();
+    await settle();
+    expect(view.actions.send).toHaveBeenLastCalledWith(expect.objectContaining({ acceptChain: true }));
+    expect(view.actions.showToast).toHaveBeenCalledWith("Settings saved.");
+  });
+});
+
 describe("about", () => {
   const legal = (section) => section("About").querySelectorAll("button").filter(isShown);
 
