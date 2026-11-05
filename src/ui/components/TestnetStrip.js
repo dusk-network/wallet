@@ -1,12 +1,14 @@
-import { isLocalNode, listedNetwork, networkOf, nodeHost, signsOnNetwork } from "../../shared/nodeNetwork.js";
+import { isLocalNode, listedNetwork, networkOf, nodeHost, outsideEndpoints, outsideText, signsOnNetwork } from "../../shared/nodeNetwork.js";
 import { h } from "../lib/dom.js";
 
 // What the top of a page says about the node it's on. A test network says so,
 // in violet, as the bridge and the web wallet do: "Testnet · Test DUSK has no
 // value". A node that isn't a network's own says which it is, in neutral words:
 // "Custom node · my-node.example", and where what's signed there counts when
-// that's another network. A node contradicting the chain it's fixed to says
-// why nothing is signed on it. Mainnet's own node shows nothing.
+// that's another network. A prover or an archiver that isn't the network's own
+// says whose it is: "Proofs and history from x.example". A node contradicting
+// the chain it's fixed to says why nothing is signed on it. Mainnet's own node,
+// with its own prover and archiver, shows nothing.
 
 /**
  * Whether a network's DUSK has no value: Testnet's and Devnet's own nodes, by
@@ -21,14 +23,16 @@ export function isTestNetwork(nodeUrl, chainId = null) {
   return isLocalNode(nodeUrl) && !networkOf(chainId);
 }
 
-function stripOf(name, { nodeUrl, chainId, refusal }) {
+function stripOf(name, { nodeUrl, chainId, refusal, proverUrl, archiverUrl }) {
   const label = String(name ?? "").trim();
   if (refusal) return { text: refusal, role: "alert", className: "testnet-strip node-strip node-strip--refused" };
-  if (isTestNetwork(nodeUrl, chainId)) return { text: `${label} · Test DUSK has no value`, role: "note", className: "testnet-strip" };
-  if (listedNetwork(nodeUrl) || !nodeHost(nodeUrl)) return null;
+  const outside = outsideText(outsideEndpoints({ nodeUrl, proverUrl, archiverUrl }));
+  const join = (...parts) => parts.filter(Boolean).join(" · ");
+  if (isTestNetwork(nodeUrl, chainId)) return { text: join(`${label} · Test DUSK has no value`, outside), role: "note", className: "testnet-strip" };
+  if (listedNetwork(nodeUrl) || !nodeHost(nodeUrl)) return outside ? { text: join(label, outside), role: "note", className: "testnet-strip node-strip" } : null;
   const counts = signsOnNetwork(nodeUrl, chainId);
   return {
-    text: [`${label} node · ${nodeHost(nodeUrl)}`, counts ? `What you sign here counts on ${counts}.` : ""].filter(Boolean).join(" · "),
+    text: join(`${label} node · ${nodeHost(nodeUrl)}`, counts ? `What you sign here counts on ${counts}.` : "", outside),
     role: "note",
     className: "testnet-strip node-strip",
   };
@@ -39,14 +43,15 @@ function stripOf(name, { nodeUrl, chainId, refusal }) {
  * away where there isn't. Calling it again for the same network changes nothing.
  * @param {HTMLElement|null} host - the page's panel
  * @param {string} name - the network's name, by the node's address
- * @param {{ nodeUrl?: string, chainId?: number | null, refusal?: string }} [node] -
- *   the node, the chain it signs for, and why nothing is signed on it
+ * @param {{ nodeUrl?: string, chainId?: number | null, refusal?: string, proverUrl?: string, archiverUrl?: string }} [node] -
+ *   the node, the chain it signs for, why nothing is signed on it, and the
+ *   prover and archiver the wallet uses with it
  * @returns {HTMLElement|null} the strip, while it shows
  */
-export function syncTestnetStrip(host, name, { nodeUrl = "", chainId = null, refusal = "" } = {}) {
+export function syncTestnetStrip(host, name, { nodeUrl = "", chainId = null, refusal = "", proverUrl = "", archiverUrl = "" } = {}) {
   if (!host) return null;
   const current = host.querySelector(".testnet-strip");
-  const strip = stripOf(name, { nodeUrl, chainId, refusal });
+  const strip = stripOf(name, { nodeUrl, chainId, refusal, proverUrl, archiverUrl });
   if (!strip) {
     current?.remove();
     return null;

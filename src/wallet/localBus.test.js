@@ -427,6 +427,21 @@ describe("a custom node's chain ID, on the desktop app", () => {
     expect(infoReads(fetch)).toBe(1);
   });
 
+  it("refuses a node, prover or archiver over plain http on another computer, and saves nothing", async () => {
+    const fetch = vi.fn(async () => new Response('{"chain_id":2}'));
+    vi.stubGlobal("fetch", fetch);
+    const { localSend } = await import("./localBus.js");
+    for (const [message, problem] of [
+      [{ nodeUrl: "http://hostile-node.example" }, "The node URL must start with https://, unless it's on this computer."],
+      [{ nodeUrl: NODE, proverUrl: "http://hostile-node.example" }, "The prover URL must start with https://, unless it's on this computer."],
+      [{ nodeUrl: NODE, archiverUrl: "ftp://hostile-node.example" }, "Invalid archiver URL format"],
+    ]) {
+      await expect(localSend({ type: "DUSK_UI_SET_NODE_URL", ...message })).resolves.toMatchObject({ error: { message: problem } });
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(localSend({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: "http://localhost:8080" })).resolves.toMatchObject({ ok: true, nodeUrl: "http://localhost:8080" });
+  });
+
   it("is asked again as the wallet draws when the node couldn't say when chosen, at most every 30 seconds", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: NODE, chainId: null }));

@@ -35,3 +35,17 @@ export function isAllowedDappOrigin(origin) {
 export function isAllowedDappEndpoint(value) {
   return isAllowedSecureOrLocalHttpUrl(value);
 }
+
+/**
+ * What's wrong with an address given for the wallet's node, prover or
+ * archiver, in plain words, or "": a URL, https or plain http on this
+ * computer only, as a site's switch of network takes them.
+ * @param {string} value
+ * @param {"node" | "prover" | "archiver"} what
+ * @returns {string}
+ */
+export function endpointProblem(value, what) {
+  const url = parseUrl(value);
+  if (!url || (url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return `Invalid ${what} URL format`;
+  return isAllowedSecureOrLocalHttpUrl(value) ? "" : `The ${what} URL must start with https://, unless it's on this computer.`;
+}

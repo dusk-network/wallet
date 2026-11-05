@@ -168,6 +168,42 @@ export function networkKeyOf(chainId, nodeUrl) {
 }
 
 /**
+ * What of the wallet's work comes from somewhere else than its node's network,
+ * by host: its proofs (the prover) and its history (the archiver), where they
+ * aren't that network's own, as its file lists them; for a node on this
+ * machine, where they aren't on it too; for any other, where they aren't on
+ * the node's own address. None set is the node's own.
+ * @param {{ nodeUrl?: string, proverUrl?: string, archiverUrl?: string }} endpoints
+ * @returns {Array<{ what: "proofs" | "history", host: string }>}
+ */
+export function outsideEndpoints({ nodeUrl = "", proverUrl = "", archiverUrl = "" } = {}) {
+  const net = listedNetwork(nodeUrl);
+  const own = (url, listed) => {
+    const origin = originOf(url);
+    if (!origin) return true;
+    if (net) return origin === originOf(listed);
+    return isLocalNode(nodeUrl) ? isLocalNode(url) : origin === originOf(nodeUrl);
+  };
+  return [
+    ["proofs", proverUrl, net?.urls.prover],
+    ["history", archiverUrl, net?.urls.archive],
+  ].flatMap(([what, url, listed]) => (own(url, listed) ? [] : [{ what, host: hostOf(url) }]));
+}
+
+/**
+ * Where what's outside comes from, as a line says it: "Proofs and history from
+ * x.example", "Proofs from x.example, history from y.example", or "".
+ * @param {Array<{ what: "proofs" | "history", host: string }>} outside
+ * @returns {string}
+ */
+export function outsideText(outside) {
+  if (!outside.length) return "";
+  if (outside.length === 2 && outside[0].host === outside[1].host) return `Proofs and history from ${outside[0].host}`;
+  const text = outside.map(({ what, host }) => `${what} from ${host}`).join(", ");
+  return `${text[0].toUpperCase()}${text.slice(1)}`;
+}
+
+/**
  * What a node is called, by its address alone: its network's label for the
  * exact address that network's file lists ("Testnet"), "Local" for a node on
  * this machine, else "Custom". Nothing a node says changes it.

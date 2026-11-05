@@ -388,9 +388,11 @@ export async function renderNotification() {
   // signature's chain, or the wallet's.
   const nodeUrl = String(params?.nodeUrl ?? pending.nodeUrl ?? "");
   const chainRefused = String(pending.chainRefusal ?? "");
+  // The wallet's prover and archiver, which go with its own node.
+  const endpoints = nodeUrl === String(pending.nodeUrl ?? "") ? { proverUrl: String(pending.proverUrl ?? ""), archiverUrl: String(pending.archiverUrl ?? "") } : {};
   showNetwork(
     String(params?.networkName ?? "") || chainName(params?.chainId) || String(pending.networkName ?? "") || (nodeUrl ? networkNameFromNodeUrl(nodeUrl) : ""),
-    { nodeUrl, chainId: pending.chainId ?? null }
+    { nodeUrl, chainId: pending.chainId ?? null, ...endpoints }
   );
 
   const accountsArr = Array.isArray(accounts) ? accounts : [];

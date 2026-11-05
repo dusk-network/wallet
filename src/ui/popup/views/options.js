@@ -2,7 +2,8 @@ import { networks } from "@dusk-network/networks";
 
 import { formatDuskExact, formatFee } from "../../../shared/amount.js";
 import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
-import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
+import { detectPresetId, detectPresetIdFromNodeUrl } from "../../../shared/network.js";
+import { endpointProblem } from "../../../shared/securityPolicy.js";
 import { AUTO_LOCK_OPTIONS, SITE_LASTS_OPTIONS, normalizeCustomGas, normalizeSiteLasts } from "../../../shared/settings.js";
 import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { setAccountName } from "../../../shared/accountNames.js";
@@ -529,7 +530,8 @@ export function optionsView(ov, { state, actions } = {}) {
   // choice says it's not saved, and stays through a redraw, not past Back.
   const st = (state.settings ??= {});
   const nodeDraft = st.nodeDraft?.for === currentNodeUrl ? st.nodeDraft : null;
-  const currentPresetId = detectPresetIdFromNodeUrl(currentNodeUrl);
+  // A network's node with another's prover or archiver is custom, as the pill says.
+  const currentPresetId = detectPresetId({ nodeUrl: currentNodeUrl, proverUrl: currentProverUrl, archiverUrl: currentArchiverUrl });
   const { urls } = networks.mainnet;
   const nodeUrlInput = urlInput({ value: nodeDraft?.node ?? currentNodeUrl, placeholder: urls.node, onEnter: () => saveBtn.click() });
   const proverUrlInput = urlInput({ value: nodeDraft?.prover ?? currentProverUrl, placeholder: urls.prover, onEnter: () => saveBtn.click() });
@@ -649,18 +651,9 @@ export function optionsView(ov, { state, actions } = {}) {
         const v = nodeUrlInput.value.trim();
         const pv = proverUrlInput.value.trim();
         const av = archiverUrlInput.value.trim();
-        const valid = (u) => {
-          try {
-            // eslint-disable-next-line no-new
-            new URL(u);
-            return true;
-          } catch {
-            return false;
-          }
-        };
-        if (!valid(v)) throw new Error("Invalid node URL format");
-        if (pv && !valid(pv)) throw new Error("Invalid prover URL format");
-        if (av && !valid(av)) throw new Error("Invalid archiver URL format");
+        // Each an https address, or plain http on this computer only, as a site's switch takes them.
+        const problem = endpointProblem(v, "node") || (pv && endpointProblem(pv, "prover")) || (av && endpointProblem(av, "archiver"));
+        if (problem) throw new Error(problem);
 
         switchContext(state);
         const save = (more = {}) => actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: v, proverUrl: pv, archiverUrl: av, ...more });

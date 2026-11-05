@@ -20,7 +20,7 @@ import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { askNodeChainId, chainRefusal } from "../shared/nodeNetwork.js";
-import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
+import { endpointProblem, isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 
@@ -923,8 +923,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           payBalance,
           hideBalances: settings?.hideBalances === true,
           // The wallet's network for the approval's header, by its node's
-          // address, and the chain ID that node signs for.
+          // address, the chain ID that node signs for, and whose prover and
+          // archiver it uses.
           nodeUrl: String(settings?.nodeUrl ?? ""),
+          proverUrl: String(settings?.proverUrl ?? ""),
+          archiverUrl: String(settings?.archiverUrl ?? ""),
           chainId: settings?.chainId ?? null,
           chainRefusal: refusal,
           networkName: networkNameFromNodeUrl(String(settings?.nodeUrl ?? "")),
@@ -1273,32 +1276,11 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             ? String(message.archiverUrl).trim()
             : "";
 
-        // Only validate URL format (not reachability) - we accept any URL
-        // and do background polling for status.
-        try {
-          // eslint-disable-next-line no-new
-          new URL(nodeUrl);
-        } catch {
-          throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid node URL format");
-        }
-
-        // Optional validation for explicit prover/archiver URLs.
-        if (proverUrl) {
-          try {
-            // eslint-disable-next-line no-new
-            new URL(proverUrl);
-          } catch {
-            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid prover URL format");
-          }
-        }
-        if (archiverUrl) {
-          try {
-            // eslint-disable-next-line no-new
-            new URL(archiverUrl);
-          } catch {
-            throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid archiver URL format");
-          }
-        }
+        // Each an https address, or plain http on this computer only, as a
+        // site's switch takes them; not whether it answers: the status checks
+        // that in the background.
+        const problem = endpointProblem(nodeUrl, "node") || (proverUrl && endpointProblem(proverUrl, "prover")) || (archiverUrl && endpointProblem(archiverUrl, "archiver"));
+        if (problem) throw rpcError(ERROR_CODES.INVALID_PARAMS, problem);
 
         // The chain ID the node signs for, fixed with it (null while it can't
         // be read: the next status check asks again). A node added before that

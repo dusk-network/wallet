@@ -58,6 +58,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Named the chain a site's transaction signs for in its Details, apart from the chain ID sites see.
 - Kept a site's refusals in its record however often it asks and cancels: what no one answered goes first.
 - Warned on a contact name that looks like another one's in other letters, as Cyrillic Аlice does like Alice.
+- Marked the network Custom while its prover or archiver isn't the network's own, saying whose, and refused plain http to another computer in Settings, as a site's switch does.
 
 ## [0.4.0] - 2026-11-04
 

@@ -1,5 +1,5 @@
 import { NETWORK_PRESETS } from "../../shared/networkPresets.js";
-import { detectPresetIdFromNodeUrl } from "../../shared/network.js";
+import { detectPresetId } from "../../shared/network.js";
 import { nodeHost } from "../../shared/nodeNetwork.js";
 import { h } from "../lib/dom.js";
 import { iconSvg } from "./ActionIcon.js";
@@ -58,7 +58,7 @@ export function createNetworkMenuController({
     // One switch at a time.
     if (!anchorEl || anchorEl.classList.contains("is-switching")) return;
 
-    const currentPresetId = detectPresetIdFromNodeUrl(ov?.nodeUrl);
+    const currentPresetId = detectPresetId({ nodeUrl: ov?.nodeUrl, proverUrl: ov?.proverUrl, archiverUrl: ov?.archiverUrl });
 
     const items = NETWORK_PRESETS.map((p) => {
       const active = p.id === currentPresetId;
