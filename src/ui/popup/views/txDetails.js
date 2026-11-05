@@ -13,6 +13,7 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { contractValueEl, copyContractButton } from "../../components/ContractValue.js";
 import { copyButton as copyWordsButton } from "../../components/CopyButton.js";
 import { profileNameEl } from "../../components/ProfileName.js";
+import { safeTextEl } from "../../components/SafeText.js";
 import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
 import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, txIconSvg } from "./txRow.js";
 import { reasonText } from "./sent.js";
@@ -67,10 +68,6 @@ function profileValue(ov, tx, rail) {
 }
 
 // A fee, hidden as amounts are with Hide balances.
-// Anyone can send a memo, and these would show its text out of order, as
-// "exe.png" for "gnp.exe".
-const BIDI_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
-
 const feeValue = (text, hidden) => h("span", {}, [balance(hidden, text), " DUSK"]);
 
 function feeRow(tx, desc, hidden) {
@@ -293,7 +290,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
     desc.payout ? kv(desc.arrival ? "Received" : "You receive", lux(desc.payout.received)) : null,
     // A memo that is the recipient on another chain shows as that.
     migratedRow,
-    tx?.memo && !migrated && String(tx.memo).trim() !== desc.recipient ? kv("Memo", String(tx.memo).replace(BIDI_CONTROLS, ""), { className: "kv--wrap" }) : null,
+    // Anyone can send a memo: neutralized, so it can't read as something it isn't.
+    tx?.memo && !migrated && String(tx.memo).trim() !== desc.recipient ? kv("Memo", safeTextEl(tx.memo), { className: "kv--wrap" }) : null,
     feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,

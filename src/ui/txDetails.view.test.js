@@ -323,9 +323,19 @@ describe("transaction details", () => {
     expect(used).toBe("Gas used••••");
   });
 
-  it("shows a memo in the order it was written, whatever controls it carries", () => {
-    const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: "invoice \u202Egnp.exe\u202C" });
-    const memo = [...body.querySelectorAll(".kv")].map(visibleText).find((row) => row.startsWith("Memo"));
-    expect(memo).toBe("Memoinvoice gnp.exe");
+  it("shows a memo in the order it was written, its controls neutralized and flagged", () => {
+    const [rlo, pop] = [0x202e, 0x202c].map((c) => String.fromCodePoint(c));
+    const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: `invoice ${rlo}gnp.exe${pop}` });
+    const memo = [...body.querySelectorAll(".kv")].find((row) => visibleText(row).startsWith("Memo"));
+    expect(memo.querySelector(".safe-text > span").textContent).toBe("invoice �gnp.exe�");
+    expect(visibleText(memo)).not.toContain(rlo);
+    expect(memo.querySelector(".safe-text__flag").textContent).toBe("Hidden characters that can change how this reads show here as � or \\u codes.");
+  });
+
+  it("shows a plain memo as it is, unflagged, in any script", () => {
+    const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: "فاتورة 12 · Rechnung" });
+    const memo = [...body.querySelectorAll(".kv")].find((row) => visibleText(row).startsWith("Memo"));
+    expect(visibleText(memo)).toBe("Memoفاتورة 12 · Rechnung");
+    expect(memo.querySelector(".safe-text__flag")).toBeNull();
   });
 });

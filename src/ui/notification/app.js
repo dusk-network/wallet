@@ -13,6 +13,7 @@ import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { networkFor } from "@dusk-network/networks";
 import { chainIdForNode, networkTextOf, noteChainId } from "../../shared/nodeNetwork.js";
 import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist.js";
+import { safeText, textNeedsReview } from "../../shared/safeText.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
 import { contractLabel } from "../../shared/knownCalls.js";
@@ -25,6 +26,7 @@ import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
 import { contractValueEl } from "../components/ContractValue.js";
+import { safeTextEl } from "../components/SafeText.js";
 import "../components/GasEditor.js";
 import {
   amountParts,
@@ -47,6 +49,7 @@ import { runtimeGetURL, runtimeSendMessage, tabsCreate } from "../../platform/ex
 
 const app = document.getElementById("app");
 const MAX_U64 = 18446744073709551615n;
+const TEXT_REVIEW_TITLE = "Text needs review";
 
 async function send(msg) {
   return runtimeSendMessage(msg, { allowLastError: true });
@@ -747,6 +750,7 @@ export async function renderNotification() {
           title: preview.truncated ? "Preview shortened; the hash covers the full message." : undefined,
         }),
         preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash below covers the full message." }) : null,
+        preview.needsReview ? warning(TEXT_REVIEW_TITLE, "This message has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign it if you trust this site.") : null,
       ]);
     } else {
       const reason = String(preview?.reason ?? "");
@@ -785,22 +789,24 @@ export async function renderNotification() {
   function renderSignAuth() {
     const chainId = String(params?.chainId ?? "");
     const nonce = String(params?.nonce ?? "");
-    const statement = String(params?.statement ?? "").trim();
+    const statement = safeText(String(params?.statement ?? "").trim(), { keepLines: true });
+    const nonceShown = safeText(nonce).text;
     const expiresAt = String(params?.expiresAt ?? "").trim();
 
     show(
       [
         site,
         requestHead({ title: "Sign in to this site?" }),
-        statement
+        statement.text
           ? h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-statement-title" }, [
               sectionTitle("The site's statement", "ap-statement-title"),
-              h("div", { class: "ap-message", text: statement }),
+              h("div", { class: "ap-message", text: statement.text }),
+              statement.flagged ? warning(TEXT_REVIEW_TITLE, "This statement has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign in if you trust this site.") : null,
             ])
           : null,
         group([
           kv("Account", profileValue()),
-          kv("Nonce", mono(nonce || "—"), { stack: nonce.length > 24 }),
+          kv("Nonce", mono(nonceShown || "—"), { stack: nonceShown.length > 24 }),
           expiresAt ? kv("Expires", dateText(expiresAt)) : null,
         ]),
         note("Only sign in to sites you trust. Signing in moves no funds.", "info"),
@@ -851,10 +857,7 @@ export async function renderNotification() {
     const { rows, truncated } = await flattenTypedMessage(disclosure.input);
     // Text shaping and normalization differences are not necessarily malicious;
     // distinguish their review notice from ordinary preview-size limits.
-    const unsafeTextFlags = ["control_chars", "bidi_control", "invalid_surrogate", "invisible_format", "line_separator", "non_nfc"];
-    const hasTextSafetyWarning = [originPreview, domainName, domainVersion, domainChainId, ...rows].some((row) =>
-      (row.flags ?? []).some((flag) => unsafeTextFlags.includes(flag))
-    );
+    const hasTextSafetyWarning = [originPreview, domainName, domainVersion, domainChainId, ...rows].some((row) => textNeedsReview(row.flags));
 
     // A row's value as the wallet will sign it, its flags in the tooltip, and
     // a notice when the preview cut it.
@@ -921,7 +924,7 @@ export async function renderNotification() {
         ]),
         hasTextSafetyWarning
           ? warning(
-              "Text needs review",
+              TEXT_REVIEW_TITLE,
               "Some origin, domain or message text contains controls, formatting characters, line separators or non-NFC sequences. The preview may use placeholders or escapes. Inspect the originals in Full signing request before signing."
             )
           : null,
@@ -1101,9 +1104,9 @@ export async function renderNotification() {
                 })
               : kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
             service
-              ? kv(`Recipient on ${service.chain}`, h("code", { class: "ap-address", text: memo || "(none)" }), { stack: true })
+              ? kv(`Recipient on ${service.chain}`, h("code", { class: "ap-address", text: safeText(memo).text || "(none)" }), { stack: true })
               : memo
-                ? kv("Memo", memo, { stack: memo.length > 24 })
+                ? kv("Memo", safeTextEl(memo), { stack: memo.length > 24 })
                 : null,
           ]),
           details("Details", [group(networkRows(), { className: "group--inset" })]),

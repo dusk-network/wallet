@@ -286,6 +286,15 @@ body[data-runtime="tauri"].page--full .panel {
   white-space: nowrap;
 }
 
+/* Text someone else chose, and a line under it when it had hidden characters */
+.safe-text__flag {
+  display: block;
+  margin-top: 2px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 /* A node that isn't a network's own says which it is, in neutral words, its
    whole host showing: the end of a host is what names it. */
 .testnet-strip.node-strip {

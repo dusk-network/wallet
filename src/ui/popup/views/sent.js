@@ -10,6 +10,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { walletNameOf } from "../../components/ProfileName.js";
+import { safeTextEl } from "../../components/SafeText.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
 // with a toast: Sending while the wallet signs it and hands it to the network,
@@ -451,7 +452,7 @@ export function sentView(ov, { state, actions } = {}) {
     sent.hash
       ? kv("Transaction ID", [h("span", { class: "mono", title: sent.hash, text: shortAddress(sent.hash) }), copyBtn])
       : null,
-    sent.memo ? kv("Memo", sent.memo) : null,
+    sent.memo ? kv("Memo", safeTextEl(sent.memo)) : null,
     feeRow ? kv(feeRow[0], feeRow[1]) : null,
   ].filter(Boolean));
 

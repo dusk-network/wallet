@@ -24,6 +24,7 @@ import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
+import { safeTextEl } from "../../components/SafeText.js";
 import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
@@ -1256,7 +1257,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         kv("To", h("span", { class: "review-to" }, [toNames, h("span", { class: "mono review-to__address", text: toAddr })]), "kv--wrap"),
         // With more than one wallet, the wallet first: "Wallet 2 · alice.dusk · Public".
         kv("From", h("span", {}, [withReviewWallet(fromName, actions?.review), h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
-        d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", d.memo, "kv--wrap") : null,
+        d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", safeTextEl(d.memo), "kv--wrap") : null,
       ].filter(Boolean)),
       ...serviceNotes
         .filter((n) => n.kind !== "fee")

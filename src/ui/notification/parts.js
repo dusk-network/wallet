@@ -3,6 +3,7 @@
 // Details disclosure for the technical lines. Styles: public/notification.css
 // on top of the component layer in ui.css.
 
+import { safeText } from "../../shared/safeText.js";
 import { h } from "../lib/dom.js";
 import { shortAddress, siteName } from "../lib/strings.js";
 import { iconSvg } from "../components/ActionIcon.js";
@@ -158,6 +159,6 @@ export function siteDetails(display) {
   }
   return h("section", { class: "ap-site-details", "aria-labelledby": "ap-site-details" }, [
     sectionTitle("From the site, not checked by the wallet", "ap-site-details"),
-    h("pre", { class: "ap-code", text: json }),
+    h("pre", { class: "ap-code", text: safeText(json, { keepLines: true }).text }),
   ]);
 }

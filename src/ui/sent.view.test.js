@@ -108,6 +108,19 @@ const reviewState = () => ({
 });
 
 describe("after Confirm", () => {
+  it("shows a memo in the order it was written, what it hides flagged", async () => {
+    const rlo = String.fromCodePoint(0x202e);
+    const state = reviewState();
+    state.draft.memo = `${rlo}gnp.exe`;
+    const app = popup(state);
+    await settle();
+    await app.confirm();
+    const row = body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
+    expect(row.querySelector(".safe-text > span").textContent).toBe("�gnp.exe");
+    expect(row.querySelector(".safe-text__flag")).not.toBeNull();
+    expect(visibleText(body)).not.toContain(rlo);
+  });
+
   it("shows Sending at once, then Sent to the network with the transaction ID, Copy and the Dusk explorer", async () => {
     const state = reviewState();
     const app = popup(state);

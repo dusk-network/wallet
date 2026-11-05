@@ -9,7 +9,7 @@ import { isAccount } from "@dusk-network/networks/account";
 import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
-import { fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { fakeEvent, installFakeDom, isShown, pastClickGuard, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
 import { parseDuskQrPayload } from "./components/QrScanModal.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
@@ -881,6 +881,27 @@ describe("review", () => {
       send
     );
 
+  it("shows a memo in the order it was written, flags what it hides, and sends it as it is", async () => {
+    const rlo = String.fromCodePoint(0x202e);
+    const memo = `${rlo}gnp.exe claim your airdrop`;
+    const sent = [];
+    const send = async (message) => {
+      if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+      return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "1", max: "1" } : { ok: true, result: { hash: "ab".repeat(32) } };
+    };
+    review({ to: ALICE.account, privacy: "public", memo }, overview(), send);
+    await settle();
+    const body = dom.document.body;
+    const row = body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
+    expect(row.querySelector(".safe-text > span").textContent).toBe("�gnp.exe claim your airdrop");
+    expect(row.querySelector(".safe-text__flag")).not.toBeNull();
+    expect(visibleText(body)).not.toContain(rlo);
+    pastClickGuard();
+    body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await settle();
+    expect(sent[0].params.memo).toBe(memo);
+  });
+
   it("shows the fee at the network's price and the total with Back and Confirm, and Custom fee for gas of your own", async () => {
     // The node asks 2 LUX; a transfer returns its hash.
     const send = async (message) =>
@@ -994,6 +1015,14 @@ describe("a send to the bridge's account", () => {
   const text = (selector) => visibleText(body().querySelector(selector));
   const callouts = () => body().querySelectorAll(".callout.warn .callout-title").map((t) => t.textContent);
   const confirm = () => body().querySelectorAll("button").find((b) => b.textContent === "Confirm");
+
+  it("shows the memo that carries the recipient's address exactly, unflagged", async () => {
+    review();
+    await settle();
+    const row = body().querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Recipient on BNB Smart Chain");
+    expect(visibleText(row)).toBe(`Recipient on BNB Smart Chain${EVM}`);
+    expect(row.querySelector(".safe-text__flag")).toBeNull();
+  });
 
   it("says what arrives on BNB Smart Chain once the bridge takes its 1 DUSK fee, and to whom", async () => {
     const view = review();

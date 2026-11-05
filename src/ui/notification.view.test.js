@@ -10,6 +10,7 @@ import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 
 import { bytesToHex, toBytes } from "../shared/bytes.js";
 import { readDrc20Call } from "../shared/drc20Calls.js";
+import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
 import { fakeEvent, installFakeDom, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
@@ -295,6 +296,77 @@ describe("sign approvals", () => {
       if (zone === undefined) delete process.env.TZ;
       else process.env.TZ = zone;
     }
+  });
+});
+
+describe("text that reads as something it isn't", () => {
+  const [RLO, POP] = [0x202e, 0x202c].map((c) => String.fromCodePoint(c));
+  const signRequest = () => {
+    const bytes = new TextEncoder().encode(`I agree to pay ${RLO}0001${POP} DUSK`);
+    return { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) };
+  };
+
+  it("shows a message to sign in the order its bytes say, and flags it", async () => {
+    await render("sign_message", signRequest());
+    expect(app.querySelector(".ap-message").textContent).toBe("I agree to pay �0001� DUSK");
+    expect(visibleText(app)).not.toContain(RLO);
+    expect(visibleText(app.querySelector(".callout.warn"))).toContain("This message has hidden characters that can change how it reads.");
+    expect(buttons()).toEqual(["Reject", "Sign"]);
+  });
+
+  it("shows it so before the wallet is unlocked too", async () => {
+    await render("sign_message", signRequest(), { isUnlocked: false, accounts: [], duskNames: {} });
+    expect(visibleText(head())).toContain("I agree to pay �0001� DUSK");
+    expect(visibleText(app)).not.toContain(RLO);
+  });
+
+  it("flags no plain message, line breaks and all", async () => {
+    const bytes = new TextEncoder().encode("Sign in to the shop\nNonce: 12");
+    await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
+    expect(app.querySelector(".ap-message").textContent).toBe("Sign in to the shop\nNonce: 12");
+    expect(app.querySelector(".callout.warn")).toBeNull();
+  });
+
+  it("neutralizes and flags a site's statement and nonce on a sign-in", async () => {
+    await render("sign_auth", { chainId: "dusk:2", nonce: `n${RLO}1`, statement: `Pay ${RLO}0001${POP}` });
+    expect(app.querySelector(".ap-message").textContent).toBe("Pay �0001�");
+    expect(row("Nonce").textContent).toBe("n�1");
+    expect(visibleText(app)).not.toContain(RLO);
+    expect(visibleText(app.querySelector(".callout.warn"))).toContain("This statement has hidden characters");
+  });
+
+  it("neutralizes and flags a memo in a request to pay, and approves it as the site sent it", async () => {
+    const memo = `${RLO}gnp.exe claim your airdrop https://evil.example`;
+    await render("send_tx", transfer(BOB, { memo, gas: { limit: "2500000", price: "1" } }));
+    expect(visibleText(app)).not.toContain(RLO);
+    expect(row("Memo").querySelector(".safe-text > span").textContent).toBe("�gnp.exe claim your airdrop https://evil.example");
+    expect(row("Memo").querySelector(".safe-text__flag")).not.toBeNull();
+    pastClickGuard();
+    approve().click();
+    await settle();
+    // The window only answers: the memo sent is the request's, untouched.
+    expect(decision("approve").approvedParams ?? null).toBeNull();
+    expect(mocks.pending.params.memo).toBe(memo);
+  });
+
+  it("leaves a plain memo as it is, and neutralizes what a site writes about itself", async () => {
+    await render("send_tx", transfer(BOB, { memo: "Order 1042" }));
+    expect(row("Memo").textContent).toBe("Order 1042");
+    expect(row("Memo").querySelector(".safe-text__flag")).toBeNull();
+
+    await render("send_tx", {
+      kind: "contract_call",
+      privacy: "public",
+      contractId: `0x${"ab".repeat(32)}`,
+      fnName: "call",
+      fnArgs: "0x00",
+      display: { title: `Pay ${RLO}0001` },
+      chainId: "dusk:2",
+      nodeUrl: TESTNET,
+      networkName: "Testnet",
+    });
+    expect(app.querySelector(".ap-site-details pre").textContent).toContain("Pay �0001");
+    expect(visibleText(app)).not.toContain(RLO);
   });
 });
 
