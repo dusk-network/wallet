@@ -1030,7 +1030,8 @@ describe("a stake with Sozu in figures", () => {
     await settle();
     await settle();
     const factRows = () => body.querySelectorAll(".group.info .list-row").map(visibleText);
-    expect(factRows()[1]).toBe(
+    // Whether millions read M or m depends on the runtime's language data.
+    expect(factRows()[1].replace("200m DUSK", "200M DUSK")).toBe(
       "About 22% a year. Not promised.15.2 DUSK a block to stakers, 200M DUSK staked now: about 24% a year. Less Sozu's 10%: about 22%, and a little over as it restakes rewards every hour."
     );
     typeInto(field("Stake amount"), "100");
