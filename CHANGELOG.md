@@ -57,6 +57,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said when a message to sign or a sign-in's statement goes on below its box.
 - Named the chain a site's transaction signs for in its Details, apart from the chain ID sites see.
 - Kept a site's refusals in its record however often it asks and cancels: what no one answered goes first.
+- Warned on a contact name that looks like another one's in other letters, as Cyrillic Аlice does like Alice.
 
 ## [0.4.0] - 2026-11-04
 

@@ -238,6 +238,26 @@ describe("contacts", () => {
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Alice", address: BOB }), expect.anything());
     });
 
+    it("says a name looks like another contact's in other letters, and lets it be saved", async () => {
+      const view = edit();
+      const name = view.field("Name");
+      const alike = `This looks like your contact Alice, at ${shortAddress(ACCOUNT)}, but uses different letters.`;
+      // Cyrillic А and е, Greek Α, a capital I for the l, a 1, and a space that takes no room.
+      for (const typed of ["\u0410lice", "Alic\u0435", "\u0391LICE", "AIice", "A1ice", "Ali\u200bce"]) {
+        typeInto(name, typed);
+        expect(shownNote(), typed).toEqual([alike]);
+      }
+      for (const typed of ["Alicia", "Bob", "Estudio Marta"]) {
+        typeInto(name, typed);
+        expect(shownNote()).not.toContain(alike);
+      }
+      typeInto(name, "\u0410lice");
+      typeInto(view.field("Address"), BOB);
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "\u0410lice", address: BOB }), expect.anything());
+    });
+
     it("doesn't warn a contact of its own name, as it's edited", () => {
       edit({ editId: "1", editName: "Alice", editAddress: ACCOUNT });
       expect(shownNote()).toEqual([]);
