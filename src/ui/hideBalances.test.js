@@ -354,6 +354,7 @@ describe("hidden balances", () => {
     await show(sozuConfirmView(overview(HIDDEN), { state, actions: actions() }));
     const fee = body.querySelectorAll(".kv").find((row) => visibleText(row).startsWith("Deposit fee"));
     expect(seen(fee)).toEqual(["Deposit fee0.25% · •••• DUSK", "Deposit fee0.25% · hidden DUSK"]);
+    expect(seen(body.querySelector(".sozu-fee-gone"))).toEqual(["The deposit fee of •••• DUSK doesn't come back.", "The deposit fee of hidden DUSK doesn't come back."]);
   });
 });
 
