@@ -4411,7 +4411,7 @@ p.tx-empty {
   gap: 6px;
 }
 
-/* Export: whether to add contact names, what the file holds, Save CSV */
+/* Export: which period, what to add, what the file is, Save CSV */
 .group.activity-export {
   display: flex;
   flex-direction: column;
@@ -4419,15 +4419,26 @@ p.tx-empty {
   padding: 14px;
 }
 
-.activity-export-contacts {
+.activity-export-check {
   color: var(--text);
   font-size: 13.5px;
   line-height: 1.4;
 }
 
-.activity-export-contacts input[type="checkbox"] {
+.activity-export-check input[type="checkbox"] {
   flex: 0 0 auto;
   accent-color: var(--pill);
+}
+
+.activity-export-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.activity-export-date input {
+  width: 100%;
+  color-scheme: dark;
 }
 
 p.activity-export-note {

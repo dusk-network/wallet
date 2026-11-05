@@ -326,6 +326,49 @@ export async function showMoreActivity({ state, render }) {
   if (!a.complete && a.entries.length < a.limit) await run(a, state, render);
 }
 
+// A whole read: runs of this many history requests, at most this many runs.
+const WHOLE_RUN_REQUESTS = 64;
+const WHOLE_RUNS = 64;
+
+/**
+ * All of the account's history, for what needs every row (an export, a Sozu
+ * position), read from the archive as far as it isn't kept yet, with each
+ * entry's details. Throws when it can't be had whole. `activityRows` makes the
+ * rows of it.
+ * @param {object} ov - the overview
+ * @param {{ state: object }} ctx
+ * @returns {Promise<{ entries: object[], meta: object | null, shielded: object[], shieldedWaiting: boolean }>}
+ *   `shieldedWaiting`: its shielded history isn't all there yet
+ */
+export async function wholeActivity(ov, { state }) {
+  const a = state?.activity;
+  if (!a?.history || a.key !== activityKey(ov)) throw new Error("The activity of this profile isn't open");
+  if ((await a.epoch) === undefined) throw new Error("The activity store is out of reach");
+  let whole = false;
+  // At least one run: newer blocks than the last one read may hold more.
+  for (let run = 0; run < WHOLE_RUNS && !whole; run += 1) {
+    await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
+    ({ complete: whole } = await a.history.read({ limit: 1 }));
+  }
+  if (!whole) throw new Error("The history is too long to read at once");
+  const all = { limit: Number.MAX_SAFE_INTEGER - 1 };
+  let read = await a.history.read(all);
+  const missing = read.entries.filter((entry) => a.history.needsDetails(entry));
+  if (missing.length) {
+    await a.history.fillDetails(missing);
+    read = await a.history.read(all);
+  }
+  const answer = a.send ? await a.send({ type: "DUSK_UI_GET_SHIELDED_HISTORY" }).catch(() => null) : null;
+  const shielded = answer?.result;
+  const own = !answer?.error && Array.isArray(shielded?.entries) && shielded.profileIndex === a.profileIndex;
+  return {
+    entries: read.entries,
+    meta: read.state,
+    shielded: own ? shielded.entries : a.shielded,
+    shieldedWaiting: !own || Boolean(shielded.pending),
+  };
+}
+
 /** How long a detail lookup that brought nothing waits before it is asked again. */
 export const DETAIL_RETRY_MS = 60_000;
 // By activity and hash: "loading", or when a lookup that brought nothing
@@ -377,9 +420,11 @@ const sentOf = (tx) => (tx?.bridgeTo ? { ...tx, bridge: { amount: String(tx.depo
  * newest first, as @dusk-network/app-core/activity merges them.
  * @param {object} ov
  * @param {object} state
+ * @param {{ entries?: object[], meta?: object | null, shielded?: object[] }} [whole] - the
+ *   account's whole history (wholeActivity), in place of the page read so far
  * @returns {object[]}
  */
-export function activityRows(ov, state) {
+export function activityRows(ov, state, whole = null) {
   const key = activityKey(ov);
   const a = state?.activity;
   const ours = a && key && a.key === key ? a : null;
@@ -395,8 +440,8 @@ export function activityRows(ov, state) {
     pending: (Array.isArray(ov?.txs) ? ov.txs : []).map(sentOf),
     // The selected profile's activity; every profile's while locked.
     profileIndex: key ? profileIndex : null,
-    public: ours?.entries,
-    shielded: ours?.shielded,
-    state: ours?.meta,
+    public: whole?.entries ?? ours?.entries,
+    shielded: whole?.shielded ?? ours?.shielded,
+    state: whole?.meta ?? ours?.meta,
   });
 }

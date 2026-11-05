@@ -1181,17 +1181,12 @@ export async function render({ forceRefresh = false } = {}) {
 }
 
 export function mountPopup() {
-  // A tab the popup opened to save its Activity export saves it now.
-  if (!isPopupView) {
-    saveHandedExport()
-      .then((name) => {
-        if (name) showToast("CSV saved");
-      })
-      .catch((e) => showToast(e?.message ?? String(e), 3000));
-  }
-  render().catch((e) => {
-    setApp([showError(e)]);
-  });
+  render()
+    // A tab the popup opened to make its Activity export makes it now.
+    .then(() => (isPopupView ? null : saveHandedExport({ state, render, showToast }).catch((e) => showToast(e?.message ?? String(e), 3000))))
+    .catch((e) => {
+      setApp([showError(e)]);
+    });
 }
 
 (function setupViewportInsets() {

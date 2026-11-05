@@ -14,6 +14,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Made Activity's Export a file for accountants and tax tools, in Koinly's universal CSV: a quarter or any dates, your profile's name on it, transfers between your profiles marked, stDUSK and fees for staking, and euro values and Excel's accents when asked.
 - Showed an amount and its fee to the last lux in a transaction's details, on Sent and on every Review; rows and balance lines stay short.
 - Made a request link the https form, which opens the web wallet's Send filled in; Send also reads it pasted or scanned.
 
