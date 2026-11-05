@@ -1429,48 +1429,76 @@ describe("a slow name lookup on Review", () => {
 });
 
 describe("a request for another network", () => {
-  it("says so under the recipient, and Review doesn't clear it", async () => {
-    // A Mainnet request link pasted while the wallet is on Testnet.
-    parseDuskQrPayload.mockReturnValueOnce({ form: "dusk", kind: "public", to: ALICE.account, amountDusk: "1", chainId: "dusk:1" });
+  const note = () => dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
+  const filled = () => {
+    const el = dom.document.body.querySelector(".send-filled-note");
+    return el && isShown(el) ? el.textContent : "";
+  };
+
+  it("fills in nothing: the recipient empties, what was typed stays, and it says why", async () => {
+    // A Mainnet request link put in To on Testnet, over a form being filled in.
     const state = newState();
     const form = mount(state);
+    typeInto(form.to, BOB.account);
+    typeInto(form.amount, "0.5");
+    parseDuskQrPayload.mockReturnValueOnce({ form: "dusk", kind: "public", to: ALICE.account, amountDusk: "1", memo: "Invoice 9", chainId: "dusk:1" });
     form.to.value = "dusk:mainnet-request";
     form.to.dispatchEvent(fakeEvent("blur"));
     await settle();
-    const note = () => dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
-    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
 
+    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+    expect([form.to.value, form.amount.value]).toEqual(["", "0.5"]);
+    expect(state.draft).toMatchObject({ to: "", amountDusk: "0.5", memo: "" });
+    expect(filled()).toBe("");
+
+    // Review goes nowhere, and Send drawn again still says why.
     form.review.click();
     await settle();
-    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
-
-    // Review, drawn anew from the draft, says it too, and so does Send drawn again.
-    expect(state.route).toBe("confirm");
-    expect(state.draft.requestChainId).toBe("dusk:1");
-    mount(state);
-    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
-    state.route = "send";
+    expect(state.route).toBe("send");
     const again = mount(state);
     expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
 
-    // A recipient typed instead drops it, for good.
+    // A recipient typed instead takes it away, for good.
     typeInto(again.to, BOB.account);
     expect(note()).toBeUndefined();
-    expect(state.draft.requestChainId).toBeUndefined();
     mount(state);
     expect(note()).toBeUndefined();
+  });
+
+  it("fills in nothing of the page a link opened, and nothing of a request once the network changes", async () => {
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(`https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.001&memo=Rent`)}` });
+    vi.resetModules();
+    const { state } = await import("./popup/state.js");
+    const opened = mount(state);
+    expect([opened.to.value, opened.amount.value, state.draft.memo]).toEqual(["", "", ""]);
+    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+
+    // Filled in on Testnet, then the wallet went to Mainnet.
+    const filledIn = newState();
+    filledIn.draft = { to: ALICE.account, amountDusk: "2.5", memo: "Rent", requestChainId: "dusk:2", filledFrom: "link" };
+    expect(mount(filledIn).to.value).toBe(ALICE.account);
+    const moved = mount(filledIn, overview({ nodeUrl: "https://nodes.dusk.network" }));
+    expect([moved.to.value, moved.amount.value, filledIn.draft.memo]).toEqual(["", "", ""]);
+    expect(note()?.textContent).toBe("This request is for Testnet. You are on Mainnet.");
+    expect(filled()).toBe("");
+  });
+
+  it("can't be confirmed, however it reached Review", () => {
+    mount({ route: "confirm", draft: { to: ALICE.account, privacy: "public", amountLux: "1000000000", amountDusk: "1", memo: "", requestChainId: "dusk:1" } });
+    const body = dom.document.body;
+    expect(body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(true);
+    expect(visibleText(body.querySelector(".review-actions"))).toContain("This request is for Mainnet. You are on Testnet.");
   });
 
   it("goes by the chain a custom node signs for, and calls it by its node", async () => {
     const custom = { ...overview(), nodeUrl: "https://node.example", chainId: 2 };
     noteChainId(custom.nodeUrl, custom.chainId);
-    const note = () => dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
     const state = newState();
     state.draft = { to: ALICE.account, requestChainId: "dusk:2" };
-    mount(state, custom);
+    expect(mount(state, custom).to.value).toBe(ALICE.account);
     expect(note()).toBeUndefined();
     state.draft = { to: ALICE.account, requestChainId: "dusk:1" };
-    mount(state, custom);
+    expect(mount(state, custom).to.value).toBe("");
     expect(note()?.textContent).toBe("This request is for Mainnet. You are on Custom · node.example.");
   });
 });
@@ -1630,7 +1658,12 @@ describe("a request link", () => {
     expect(state.draft).toMatchObject({ to: ALICE.account, amountDusk: "0,15", memo: "Factura 33", requestChainId: "dusk:2" });
     expect(form.to.value).toBe(ALICE.account);
     expect(form.amount.value).toBe("0,15");
-    expect(form.actions.showToast).toHaveBeenCalledWith("Request decoded", 1800);
+    // Said under the recipient, in words, and covering nothing.
+    const filled = () => visibleText(dom.document.body.querySelector(".send-filled-note"));
+    expect(filled()).toBe("Filled in from the link. Check it before you send.");
+    expect(form.actions.showToast).not.toHaveBeenCalled();
+    typeInto(form.to, BOB.account);
+    expect(filled()).toBe("");
 
     const again = mount(newState());
     paste(again, `dusk:public-${ALICE.account}@dusk:2?amount=1.5&memo=Rent`);
@@ -1639,13 +1672,14 @@ describe("a request link", () => {
     expect(again.amount.value).toBe("1,5");
   });
 
-  it("says when it's for another network, and goes as far as Review only with what Send takes", async () => {
+  it("refuses one for another network, and goes as far as Review only with what Send takes", async () => {
     const state = newState();
     const form = mount(state);
     paste(form, `https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=1&network=mainnet`);
     await settle();
     const note = dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
     expect(note?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+    expect([form.to.value, form.amount.value]).toEqual(["", ""]);
 
     // An amount in the link that isn't one is said under the field.
     const typo = mount(newState());
@@ -1682,6 +1716,7 @@ describe("a request link", () => {
     expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "2.5"]);
     expect(state.draft.memo).toBe("Rent");
     expect(state.draft.requestChainId).toBe("dusk:2");
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link. Check it before you send.");
 
     // No link, or a page opened with something that isn't one: an empty form.
     vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send" });

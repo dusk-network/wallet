@@ -50,6 +50,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Listed Devnet as Experimental, and the network menu's other hints, in Settings' network list.
 - Refused a new password that's the same as the current one.
 - Cleared a Sozu stake's "on its way" note once the stake is done, also after a browser restart.
+- Refused a request link for another network in Send: it fills in nothing, says why, and can't be confirmed.
+- Said "Filled in from the link. Check it before you send." under the recipient, in place of a toast over Review.
 
 ## [0.4.0] - 2026-11-04
 

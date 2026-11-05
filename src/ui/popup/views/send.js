@@ -80,7 +80,18 @@ export function draftDuskName(draft) {
   return name && typeof draft.to === "string" && name.to === draft.to ? name : undefined;
 }
 
+// What a request link or a QR code filled in says under the recipient, until it changes.
+const FILLED_TEXT = Object.freeze({
+  link: "Filled in from the link. Check it before you send.",
+  qr: "Filled in from the QR code. Check it before you send.",
+});
+
 export function sendFormView(ov, { state, actions } = {}) {
+  // A request for another network leaves nothing of itself here, whether it
+  // opened this page or the network changed under it: the form says why.
+  if (state.draft?.requestChainId && chainMismatchText(state.draft.requestChainId, ov?.nodeUrl)) {
+    state.draft = { ...refusedRequest(state.draft), amountDusk: "", amountMasked: false, memo: "" };
+  }
   const draft = state.draft || {};
 
   const to = textInput({
@@ -289,16 +300,35 @@ export function sendFormView(ov, { state, actions } = {}) {
     errBox.textContent = txt;
   };
 
+  // A request for another network is refused: why says so under the
+  // recipient, until the recipient changes. What one filled in says so too.
   const chainNote = h("div", { class: "field-error", role: "alert", hidden: true });
-  const warnChainMismatch = (reqChain) => {
+  const sayRefused = (reqChain) => {
     const text = chainMismatchText(reqChain, ov?.nodeUrl);
     chainNote.textContent = text;
     chainNote.hidden = !text;
   };
-  if (state.draft?.to) warnChainMismatch(state.draft.requestChainId);
+  const filledNote = h("p", { class: "field-hint send-filled-note", role: "status", hidden: true });
+  const sayFilled = (from) => {
+    filledNote.textContent = FILLED_TEXT[from] ?? "";
+    filledNote.hidden = !FILLED_TEXT[from];
+  };
+  sayRefused(state.draft?.refusedChainId);
+  sayFilled(state.draft?.filledFrom);
 
   const applyRequest = (req, { source = "request" } = {}) => {
     if (!req?.to) return false;
+
+    // For another network, it fills in nothing: the recipient empties, and
+    // what was typed in the other fields stays.
+    if (chainMismatchText(req.chainId, ov?.nodeUrl)) {
+      to.value = "";
+      state.draft = refusedRequest({ ...(state.draft || {}), requestChainId: req.chainId });
+      sayRefused(req.chainId);
+      sayFilled("");
+      updateToType();
+      return "refused";
+    }
 
     const isDuskReq = req.form === "dusk" || req.form === "https";
 
@@ -329,18 +359,13 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
 
     nextDraft.requestChainId = req.chainId || undefined;
+    nextDraft.refusedChainId = undefined;
+    nextDraft.filledFrom = source === "qr" ? "qr" : "link";
     state.draft = nextDraft;
 
-    warnChainMismatch(req.chainId);
+    sayRefused("");
+    sayFilled(nextDraft.filledFrom);
     updateToType();
-
-    // Show a small hint toast so user understands it worked.
-    // (Toast triggers a render, hence why we persist draft first.)
-    try {
-      actions?.showToast?.(source === "qr" ? "Filled from QR" : "Request decoded", 1800);
-    } catch {
-      // ignore
-    }
 
     return true;
   };
@@ -823,12 +848,12 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   function onRecipientInput() {
-    chainNote.textContent = "";
-    chainNote.hidden = true;
+    sayRefused("");
+    sayFilled("");
     updateToType();
     syncDraft();
-    // Another recipient: the request's network no longer applies.
-    if (state.draft) state.draft.requestChainId = undefined;
+    // Another recipient: the request, and whether it was refused, no longer apply.
+    if (state.draft) Object.assign(state.draft, { requestChainId: undefined, refusedChainId: undefined, filledFrom: undefined });
   }
   to.addEventListener("input", onRecipientInput);
   memo.addEventListener("input", () => {
@@ -925,11 +950,10 @@ export function sendFormView(ov, { state, actions } = {}) {
     onclick: async () => {
       try {
         setErr("");
-        // Allow a request link to be pasted directly into the recipient field.
+        // Allow a request link to be pasted directly into the recipient field:
+        // one for another network says why under the field, and goes no further.
         const rawTo = to.value.trim();
-        if (looksLikeRequest(rawTo)) {
-          maybeDecodeRequest(rawTo, { source: "request" });
-        }
+        if (looksLikeRequest(rawTo) && maybeDecodeRequest(rawTo, { source: "request" }) === "refused") return;
 
         const toVal = to.value.trim();
         if (!toVal) throw new Error("Recipient is required");
@@ -1012,6 +1036,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       toRow,
       toTypePill,
       chainNote,
+      filledNote,
       nameBox,
       selfNote,
       blockedNote,
@@ -1025,6 +1050,14 @@ export function sendFormView(ov, { state, actions } = {}) {
     ]),
   ].filter(Boolean);
 }
+
+/**
+ * A draft with its request refused: no recipient, and the network the request
+ * was for, to say so. What else it holds stays.
+ * @param {object} draft
+ * @returns {object}
+ */
+const refusedRequest = (draft) => ({ ...draft, to: "", duskName: undefined, requestChainId: undefined, refusedChainId: draft?.requestChainId, filledFrom: undefined });
 
 /**
  * "This request is for Mainnet. You are on Testnet." for a request link of
@@ -1089,7 +1122,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const serviceNotes = service ? bridgeServiceWarnings(service) : [];
   const tooLittle = serviceNotes.some((n) => n.kind === "fee");
   const noRecipient = Boolean(service && !service.recipientOk);
-  const nothingArrives = tooLittle || noRecipient;
+  // A request link for another network is never confirmed, however it got here.
+  const otherNetwork = chainMismatchText(d.requestChainId, ov?.nodeUrl);
+  const nothingArrives = tooLittle || noRecipient || Boolean(otherNetwork);
 
   // The profile it's sent from, by its verified .dusk name as the header
   // shows it; what a public send shows everyone names it too.
@@ -1294,10 +1329,6 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         // What a public send shows everyone; a shielded one has no such line.
         privacy === "public" ? visibleLine : null,
       ].filter(Boolean)),
-      // A request link for another network, still said before Confirm.
-      chainMismatchText(d.requestChainId, ov?.nodeUrl)
-        ? h("div", { class: "field-error send-chain-note", role: "alert", text: chainMismatchText(d.requestChainId, ov?.nodeUrl) })
-        : null,
       h("div", { class: "group" }, [
         kv("To", h("span", { class: "review-to" }, [toNames, h("span", { class: "mono review-to__address", text: toAddr })]), "kv--wrap"),
         // With more than one wallet, the wallet first: "Wallet 2 · alice.dusk · Public".
@@ -1322,6 +1353,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           ? h("div", { class: "field-error", role: "alert", text: `Send more than the ${formatDuskExact(service.feeLux)} DUSK bridge fee.` })
           : null,
         noRecipient ? h("div", { class: "field-error", role: "alert", text: `${noBridgeRecipientText(service.chain)}.` }) : null,
+        otherNetwork ? h("div", { class: "field-error send-chain-note", role: "alert", text: otherNetwork }) : null,
         confirmError,
         pay.el
       ),
