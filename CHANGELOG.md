@@ -53,16 +53,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Refused a request link for another network in Send: it fills in nothing, says why, and can't be confirmed.
 - Said "Filled in from the link. Check it before you send." under the recipient, in place of a toast over Review.
 - Kept numbers beside right-to-left words in the order a site wrote them, in messages to sign, sign-ins, memos and a site's own words.
-- Neutralized and flagged characters that change how text reads in a contract call's function, as in a memo: approvals, Activity and a transaction's details.
+- Neutralized and flagged characters that change how text reads in a contract call's function: approvals, Activity and a transaction's details.
 - Said when a message to sign or a sign-in's statement goes on below its box.
 - Named the chain a site's transaction signs for in its Details, apart from the chain ID sites see.
-- Kept a site's refusals in its record however often it asks and cancels: what no one answered goes first.
-- Warned on a contact name that looks like another one's in other letters, as Cyrillic Аlice does like Alice.
-- Marked the network Custom while its prover or archiver isn't the network's own, saying whose, and refused plain http to another computer in Settings, as a site's switch does.
-- Said what Max keeps of a stake with Sozu, and on its Review that the deposit fee doesn't come back, as the web wallet does.
+- Kept a site's refusals in its record, however often it asks and cancels.
+- Warned on a contact name that looks like another one's in other letters.
+- Marked the network Custom while its prover or archiver isn't the network's own, saying whose, and refused plain http to another computer in Settings.
+- Said what Max keeps of a stake with Sozu, and on its Review that the deposit fee doesn't come back.
 - Showed what an unstake from Sozu brings back on Home and in Activity from the moment it's sent.
-- Showed the whole address on Receive, its first and last six set off, with a Copy address button that says Copied, as the web wallet does.
-- Showed the recovery words at 18 px, as the web wallet does, with I wrote it down kept in view at the bottom.
+- Showed the whole address on Receive, with a Copy address button that says Copied.
+- Showed the recovery words at 18 px, with I wrote it down kept in view.
 - Stayed on Mainnet, Testnet or Devnet through a restore after a forgotten password; a custom node goes, as on Reset.
 
 ## [0.4.0] - 2026-11-04
