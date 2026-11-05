@@ -224,8 +224,8 @@ for (const [section, field] of [["domain", "name"], ["domain", "version"], ["mes
     const label = section === "domain" ? `Domain ${field}` : `${field} · string`;
     const valueRow = page.getByText(label, { exact: true }).locator("..").locator("code");
     for (const [raw, display, unsafe, clipped] of [
-      ["Amount: \u061c123 456", "Amount: �123 456", true, false],
-      ["x\u0007\u202ey\u202c", "x��y�", true, false],
+      ["Amount: \u061c123 456", "Amount: \\u061c123 456", true, false],
+      ["x\u0007\u202ey\u202c", "x\\u0007\\u202ey\\u202c", true, false],
       ["A".repeat(2048) + " END", "A".repeat(2048), false, true],
       ["A".repeat(2048), "A".repeat(2048), false, false],
       ["Ali\u200bce", "Ali\\u200bce", true, false],

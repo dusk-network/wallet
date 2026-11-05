@@ -196,7 +196,7 @@ test.describe("Sozu liquid staking", () => {
     await expect(page.locator(".liquid-intro").getByRole("button", { name: "sozu.fi" })).toBeVisible();
     await expect(page.getByText("Hub discovered")).toHaveCount(0);
     await expect(page.getByText("testnet")).toHaveCount(0);
-    await expect(page.locator(".kv .kv-label")).toHaveText(["Staked with Sozu", "stDUSK"]);
+    await expect(page.locator(".kv .kv-label")).toHaveText(["Worth now", "stDUSK"]);
     await expect(page.getByRole("button", { name: "Review stake" })).toBeVisible();
 
     await expect.poll(async () => {
