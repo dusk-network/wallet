@@ -48,6 +48,24 @@ describe("a time of day, as the browser's language writes it", () => {
     expect(clockText(EVENING)).toBe(new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", numberingSystem: "arab" }).format(EVENING));
   });
 
+  it("names a zone one way on every screen, as a time in full does, in any language", () => {
+    process.env.TZ = "Europe/Berlin";
+    // A German browser's own default, which names this zone MEZ.
+    const { DateTimeFormat } = Intl;
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function (locale, options) {
+      return new DateTimeFormat(locale ?? "de-DE", options);
+    });
+    for (const language of ["de-DE", "nl-NL", "en-GB"]) {
+      inLanguage(language);
+      expect(zonedClockText(AT), language).toBe(`${clockText(AT)} CET`);
+      expect(dateText(AT).endsWith(` ${clockText(AT)} CET`), language).toBe(true);
+    }
+    vi.restoreAllMocks();
+    process.env.TZ = "Asia/Kolkata";
+    inLanguage("de-DE");
+    expect(dateText(AT).endsWith(zonedClockText(AT)), "a zone without a short name").toBe(true);
+  });
+
   it("falls back to the default language's clock for one Intl doesn't know", () => {
     const fallback = clockText(AT);
     inLanguage("not a language");

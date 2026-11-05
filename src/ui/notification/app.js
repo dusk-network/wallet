@@ -3,7 +3,7 @@
 // at the bottom where they always show. Chain, node and raw bytes sit under
 // Details. A locked wallet shows what is asked, with Unlock and Reject.
 
-import { UI_DISPLAY_DECIMALS, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, amountLocale, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, callsBridge } from "../../shared/bridgeCalls.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
@@ -1030,7 +1030,7 @@ export async function renderNotification() {
       const given = safeBigInt(gas?.price, 0n);
       const asked = safeBigInt(networkPrice, 0n);
       if (fromSite.price && asked > 0n && given >= asked * 2n) {
-        const times = (Number((given * 10n) / asked) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 });
+        const times = (Number((given * 10n) / asked) / 10).toLocaleString(amountLocale(), { maximumFractionDigits: 1 });
         const reset = h("button", {
           class: "text-btn text-btn--inline",
           type: "button",

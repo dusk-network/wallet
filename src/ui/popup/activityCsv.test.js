@@ -56,6 +56,18 @@ beforeAll(() => {
 
 const lines = (csv) => csv.split("\r\n");
 
+describe("a token's amount in the file", () => {
+  it("stays plain in any language, as the file's DUSK columns do", () => {
+    vi.stubGlobal("navigator", { language: "de-DE" });
+    try {
+      const rows = [{ hash: hash(7), source: "sent", time: AT, direction: "out", value: 0n, status: "executed", sent: { asset: { type: "DRC20", op: "transfer", symbol: "TKN", decimals: 2, valueUnits: "123456" } } }];
+      expect(activityCsv(rows, { nodeUrl: NODE })).toContain("1234.56 TKN");
+    } finally {
+      vi.stubGlobal("navigator", { language: "en-GB" });
+    }
+  });
+});
+
 describe("DUSK bridged through a route's account", () => {
   it("is a bridge transfer, the bridge's account its counterparty", async () => {
     const { networks, routes } = await import("@dusk-network/networks");

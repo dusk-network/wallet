@@ -1,5 +1,6 @@
 import {
   UI_DISPLAY_DECIMALS,
+  amountLocale,
   amountProblem,
   formatDusk,
   formatDuskExact,
@@ -104,8 +105,8 @@ export function sozuFeeFact(fees) {
   const reward = feeRateOf(fees?.reward);
   if (!deposit || !reward) return { title: "Sozu's fees", sub: "They couldn't be read just now." };
   return {
-    title: `Sozu keeps ${feePercent(reward, "en")} of rewards`,
-    sub: `${feePercent(deposit, "en")} on deposits · No fee to unstake`,
+    title: `Sozu keeps ${feePercent(reward, amountLocale())} of rewards`,
+    sub: `${feePercent(deposit, amountLocale())} on deposits · No fee to unstake`,
   };
 }
 
@@ -123,7 +124,7 @@ function stakeTerms(status) {
 
 /** The deposit fee as its row shows it: "0.25%", then the fee of an amount. */
 function depositFeeText(rate, feeLux = null) {
-  const pct = feePercent(rate, "en");
+  const pct = feePercent(rate, amountLocale());
   return feeLux === null ? pct : `${pct} · ${formatDuskExact(feeLux.toString())} DUSK`;
 }
 
@@ -132,7 +133,7 @@ function depositFeeText(rate, feeLux = null) {
  * amount it gives away is ("0.25% · •••• DUSK").
  */
 function depositFeeParts(rate, feeLux, hidden) {
-  const pct = feePercent(rate, "en");
+  const pct = feePercent(rate, amountLocale());
   return feeLux === null ? [pct] : [`${pct} · `, balance(hidden, formatDuskExact(feeLux.toString())), " DUSK"];
 }
 

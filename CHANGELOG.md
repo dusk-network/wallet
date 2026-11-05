@@ -24,6 +24,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said when an amount could be two amounts ("write 1234 or 1,234"), and when it has too many decimals, on every amount field.
 - Kept Review off on Send while the amount typed won't do.
 - Kept Confirm, and what stops it, in view on every Review.
+- Wrote percentages, token amounts and examples in the browser's number format, and a time zone's name the same on every screen.
 - Looked up a send no watcher follows any more, as after a browser restart, so a Sozu stake's "on its way" goes once it's done.
 
 ## [0.4.0] - 2026-11-04

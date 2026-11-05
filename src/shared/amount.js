@@ -9,6 +9,8 @@ import {
   unclearAmount,
 } from "@dusk-network/app-core/amounts";
 
+export { amountLocale };
+
 // Shared amount helpers.
 //
 // The Dusk protocol uses Lux as the atomic unit:

@@ -168,6 +168,19 @@ describe("staking while it loads", () => {
 });
 
 describe("staking overview", () => {
+  it("says what each choice pays a year in the browser's number format", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
+    try {
+      const fifteen = sozu();
+      fifteen.status = { ...fifteen.status, fees: { ...fifteen.status.fees, reward: { numerator: "15", denominator: "100" } } };
+      popup({ route: "stake", staking: staking(), sozu: fifteen }, ov(), { rewardRate: 0.23498725582204427 });
+      const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map((el) => visibleText(el).replace(/\s/g, " ")).slice(2));
+      await vi.waitFor(() => expect(subs()).toEqual([["About 23 % a year lately, across the network. Not promised."], ["About 20 % a year after Sozu's 15 %. Not promised."]]));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("says about what each choice pays a year, once read: native across the network lately, Sozu after its fee", async () => {
     const fifteen = sozu();
     fifteen.status = { ...fifteen.status, fees: { ...fifteen.status.fees, reward: { numerator: "15", denominator: "100" } } };
@@ -1290,6 +1303,22 @@ describe("liquid staking", () => {
     await settle();
     expect(body.querySelector(".pay-guard").textContent).toBe("The public balance doesn't cover the network fee: 0.03 DUSK short.");
     expect(button("Confirm").disabled).toBe(true);
+  });
+
+  it("writes its fees and its example in the browser's number format", () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
+    const plain = (text) => text.replace(/\s/g, " ");
+    try {
+      const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+      popup(state);
+      expect(body.querySelectorAll(".stake-fact, .sozu-fee-fact").map(visibleText).join()).not.toContain("0.25");
+      typeInto(field("Stake amount"), "100");
+      expect(plain(visibleText(body.querySelector(".sozu-terms")))).toBe("Deposit fee 0,25 % · 0,25 DUSK");
+      typeInto(field("Stake amount"), "abc");
+      expect(body.querySelector(".amount-field__error").textContent).toBe("Enter an amount such as 10 or 10,5.");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("says no stake gets stDUSK when Sozu's deposit fee is 100%", () => {

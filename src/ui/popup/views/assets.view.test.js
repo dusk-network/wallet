@@ -106,10 +106,11 @@ describe("sending a token from its page", () => {
   const TOKEN = `0x${"cd".repeat(32)}`;
   const TO = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nF";
 
-  async function open(form, held = "12345") {
+  async function open(form, held = "12345", language = "en-US") {
     const { installFakeDom, settle } = await import("../../testing/fakeDom.js");
     const { vi } = await import("vitest");
     const { document } = installFakeDom();
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language });
     const { assetTokenView, assetsOwner } = await import("./assets.js");
     const ov = { isUnlocked: true, nodeUrl: "http://127.0.0.1:8080", accounts: ["acct"], selectedAccountIndex: 0 };
     const send = vi.fn(async (message) => (message.type === "DUSK_UI_DRC20_ENCODE_INPUT" ? { result: [1, 2, 3] } : {}));
@@ -148,6 +149,16 @@ describe("sending a token from its page", () => {
     await settle();
     expect(document.body.querySelector(".pay-guard").textContent).toContain("The public balance doesn't cover the network fee:");
     expect(document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(true);
+  });
+
+  it("writes the token's balance and how much is missing in the browser's number format", async () => {
+    const { press } = await open({ to: TO, amount: "2000", spender: "", approveAmount: "" }, "123456", "de-DE");
+    const { document } = globalThis;
+    expect(document.body.querySelector(".asset-token-balance-value").textContent).toBe("1.234,56 TKN");
+    await press("Review transfer");
+    expect(document.body.querySelector(".asset-action-section .field-error").textContent).toBe("That's 765,44 TKN more than you have.");
+    const { vi } = await import("vitest");
+    vi.unstubAllGlobals();
   });
 
   it("says how much a transfer is over what the profile holds, and asks nothing", async () => {

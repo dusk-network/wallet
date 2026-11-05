@@ -7,7 +7,7 @@
 // DUSK paid", and its amount shows muted, without a sign: nothing left.
 // Hide balances hides that fee too.
 
-import { formatDusk, formatFee, safeBigInt } from "../../../shared/amount.js";
+import { formatDusk, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { isEvmAddress } from "../../../shared/bridgeCalls.js";
 import { ARRIVAL_WINDOW_MS, depositTime, keptArrivals, payoutOf } from "../../../shared/bridgeArrival.js";
@@ -241,7 +241,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
         lead: p ? "Sent to" : "",
         ...(p ?? { name: `Sent ${sym}`, generic: true }),
         word: "Sent",
-        amount: units !== "0" ? { sign: MINUS, value: units, unit: sym } : null,
+        amount: units !== "0" ? { sign: MINUS, value: groupThousands(units), plain: units, unit: sym } : null,
       };
     } else if (op === "approve") {
       // Whom it lets spend the token, as a counterparty; an allowance of 0 takes it back.
@@ -254,7 +254,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
         amount: asset.isMax
           ? { sign: "", value: "Unlimited", unit: sym, text: true }
           : units !== "0" || revoke
-          ? { sign: "", value: units, unit: sym }
+          ? { sign: "", value: groupThousands(units), plain: units, unit: sym }
           : null,
       };
     } else {

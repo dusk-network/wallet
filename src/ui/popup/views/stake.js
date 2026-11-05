@@ -4,6 +4,7 @@ import { feePercent } from "@dusk-network/networks/sozu";
 import {
   formatDusk,
   formatFee,
+  amountLocale,
   amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
@@ -477,7 +478,7 @@ function rewardRates(ov, { state, actions }) {
   const sozu = native !== null && sozuFee ? sozuRateEstimate(Math.round(native * 100) / 100, sozuFee) : null;
   return {
     native: native !== null ? `About ${ratePercent(native)} a year lately, across the network. Not promised.` : null,
-    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year after Sozu's ${feePercent(sozuFee, "en")}. Not promised.` : null,
+    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year after Sozu's ${feePercent(sozuFee, amountLocale())}. Not promised.` : null,
   };
 }
 

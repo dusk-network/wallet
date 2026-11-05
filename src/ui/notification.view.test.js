@@ -700,6 +700,14 @@ describe("a fee the site chose", () => {
     expect(app.querySelector(".ap-site-fee").hidden).toBe(true);
   });
 
+  it("writes how many times over in the browser's number format", async () => {
+    networkPrice("2");
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
+    await render("send_tx", transfer(BOB, { gas: { limit: "2500000", price: "5" }, feeFromSite: { limit: true, price: true } }));
+    await settle();
+    expect(fee()).toContain("It's 2,5 times the network's price.");
+  });
+
   it("says so calmly at or under the network's price", async () => {
     networkPrice("2");
     await render("send_tx", transfer(BOB, { gas: { limit: "2500000", price: "2" }, feeFromSite: { limit: true, price: true } }));

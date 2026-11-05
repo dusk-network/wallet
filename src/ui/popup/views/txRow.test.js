@@ -84,6 +84,17 @@ describe("what a row says", () => {
     return [d.icon, d.name, subText(d, "14:32"), amountText(d.amount, false), d.statusWord];
   };
 
+  it("writes a token's amount in the browser's number format", () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
+    try {
+      const token = { type: "DRC20", symbol: "TKN", decimals: 2 };
+      expect(read({ kind: TX_KIND.CONTRACT_CALL, asset: { ...token, op: "transfer", valueUnits: "123456", to: "a".repeat(40) } })[3]).toBe("−1.234,56 TKN");
+      expect(read({ kind: TX_KIND.CONTRACT_CALL, asset: { ...token, op: "approve", valueUnits: "150", spender: "a".repeat(40) } })[3]).toBe("1,5 TKN");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("names tokens, approvals, NFTs and calls by what they did", () => {
     const token = { type: "DRC20", symbol: "TKN", decimals: 2 };
     expect(read({ kind: TX_KIND.CONTRACT_CALL, asset: { ...token, op: "transfer", valueUnits: "12345", to: "a".repeat(40) } })).toEqual([

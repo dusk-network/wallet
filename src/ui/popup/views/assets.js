@@ -86,7 +86,7 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
     frac = frac.slice(0, maxFrac).replace(/0+$/, "");
   }
 
-  return frac ? `${intPart}.${frac}` : intPart;
+  return groupThousands(frac ? `${intPart}.${frac}` : intPart);
 }
 
 function parseTokenAmountHuman(raw, decimals) {
@@ -647,7 +647,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
       if (safeBigInt(valueUnits, 0n) <= 0n) throw new Error("Enter an amount greater than 0.");
       // More than it holds, by how much, once its balance is read.
       if (balUnits != null && safeBigInt(valueUnits, 0n) > safeBigInt(balUnits, 0n)) {
-        const short = groupThousands(formatTokenUnits(safeBigInt(valueUnits, 0n) - safeBigInt(balUnits, 0n), dec, { maxFrac: dec }));
+        const short = formatTokenUnits(safeBigInt(valueUnits, 0n) - safeBigInt(balUnits, 0n), dec, { maxFrac: dec });
         throw new Error(`That's ${hidden ? HIDDEN_BALANCE : short} ${sym} more than you have.`);
       }
 
