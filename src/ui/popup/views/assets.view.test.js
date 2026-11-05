@@ -195,6 +195,14 @@ describe("sending a token from its page", () => {
     expect(state.assetTxDraft.asset.spender).toBe(contract);
   });
 
+  it("reads a token's amount as French writes it", async () => {
+    const { press, send } = await open({ to: TO, amount: "1\u202f000,5", spender: "", approveAmount: "" }, "12345678", "fr-FR");
+    await press("Review transfer");
+    expect(send.mock.calls.find(([m]) => m.type === "DUSK_UI_DRC20_ENCODE_INPUT")[0].args.value).toBe("100050");
+    const { vi } = await import("vitest");
+    vi.unstubAllGlobals();
+  });
+
   it("reads a decimal comma, and refuses what isn't an amount instead of cutting it short", async () => {
     const first = await open({ to: TO, amount: "1,5", spender: "", approveAmount: "" });
     await first.press("Review transfer");

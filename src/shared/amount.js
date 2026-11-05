@@ -1,4 +1,5 @@
 import {
+  amountExample,
   amountForField,
   amountLocale,
   decimalSeparator,
@@ -176,7 +177,7 @@ export function amountProblem(text, { whole = "1", decimal = "0.5" } = {}) {
   const unclear = unclearAmountText(text);
   if (unclear) return unclear;
   if (/^\d*\.\d+$/.test(normalizeDuskInput(text))) return `DUSK has ${LUX_DECIMALS} decimals at most.`;
-  return `Enter an amount such as ${whole} or ${amountForInput(decimal)}.`;
+  return `Enter an amount such as ${whole} or ${amountExample(decimal)}.`;
 }
 
 /**

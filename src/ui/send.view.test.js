@@ -1408,6 +1408,23 @@ describe("a request for another network", () => {
   });
 });
 
+describe("an amount in the browser's language", () => {
+  it("reads as French writes it, in Send's own field, with no error and Review on", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "fr-FR" });
+    const state = newState();
+    const form = mount(state, overview({ balance: { value: "5000000000000" } }));
+    typeInto(form.to, ALICE.account);
+    for (const typed of ["1 000", "1\u00a0000", "1\u202f000", "1 000,5"]) {
+      typeInto(form.amount, typed);
+      expect(form.amountError()).toBe("");
+      expect(form.review.disabled).toBe(false);
+    }
+    form.review.click();
+    await settle();
+    expect(state.draft.amountLux).toBe("1000500000000");
+  });
+});
+
 describe("a request link", () => {
   const httpsLink = (query) => `https://apps.testnet.dusk.network/wallet/dashboard/send?${query}`;
 

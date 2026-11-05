@@ -17,6 +17,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Read an amount as the browser's language groups it: 1 000 in French, 1'000 in Swiss German.
 - Named Mainnet, Testnet and Devnet only at their exact addresses: any other node is Custom with its host, whatever it says of itself.
 - Fixed the chain ID on everything signed, and refused to sign, saying why, while the node answers another.
 - Showed the node's host in large type in a site's network-switch window, with what that node can see and show, and never Switch to Mainnet for another address.
