@@ -700,3 +700,49 @@ describe("DUSK bridged to DuskEVM in Activity", () => {
     expect(body().querySelectorAll(".tx-row").map(visibleText)).toEqual(["26JfWK…B5NsNiReceived · 07:00+1 DUSK"]);
   });
 });
+
+describe("A token in Activity's Export", () => {
+  const TOKEN = "ab".repeat(32);
+  const ASSET = { type: "DRC20", op: "transfer", symbol: "TKN", name: "Token", decimals: 9, driver: "drc20", valueUnits: "123456789100", to: FAUCET };
+  // The wallet's record of a token's transfer, kept settled for what the chain's row lacks.
+  const record = { hash: "b7".repeat(32), kind: TX_KIND.CONTRACT_CALL, privacy: "public", contractId: TOKEN, fnName: "transfer", amount: "0", deposit: "0", status: "executed", settled: true, submittedAt: AT, profileIndex: 0, asset: ASSET };
+  // The chain's row of it: that the contract was called, with nothing moved.
+  const called = { hash: record.hash, kind: "contract_call", direction: "out", counterparty: TOKEN, contractId: TOKEN, fnName: "transfer", value: "0", fee: "1850000", timestamp: AT, blockHeight: 4_650_000 };
+  const lineOf = async (hash) => (await linesOf()).find((line) => line.TxHash === hash);
+
+  it("is what it moved, to whom, in the file's own columns, with its fee, as the chain and the wallet say it", async () => {
+    page("/full.html");
+    setup({ ov: { txs: [record] }, entries: [called] });
+    button("Export").click();
+    button("Save CSV").click();
+    await settle();
+    expect(await lineOf(record.hash)).toMatchObject({
+      "Sent Amount": "123.4567891",
+      "Sent Currency": "TKN",
+      "Fee Amount": "0.00185",
+      "Fee Currency": "DUSK",
+      Tag: "",
+      Counterparty: FAUCET,
+      Description: `Transfer of TKN, contract ${TOKEN}`,
+    });
+  });
+
+  it("goes by the user's contact name for its recipient, only when asked", async () => {
+    page("/full.html");
+    setup({ ov: { txs: [record] }, entries: [called], contacts: [{ name: "Faucet shop", address: FAUCET }] });
+    button("Export").click();
+    choose("activity-export-contacts");
+    button("Save CSV").click();
+    await settle();
+    expect((await lineOf(record.hash))["Counterparty Name"]).toBe("Faucet shop");
+  });
+
+  it("marks one to another of the person's profiles, which isn't income", async () => {
+    page("/full.html");
+    setup({ ov: { txs: [{ ...record, asset: { ...ASSET, to: SAVINGS } }] }, entries: [called] });
+    button("Export").click();
+    button("Save CSV").click();
+    await settle();
+    expect(await lineOf(record.hash)).toMatchObject({ Counterparty: SAVINGS, "Internal Transfer": "yes", "Sent Currency": "TKN" });
+  });
+});
