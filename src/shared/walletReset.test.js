@@ -119,6 +119,27 @@ describe("walletReset", () => {
       expect(await pending()).toBe(false);
     });
 
+    it("forgets what every site asked", async () => {
+      const { getSiteRecords, noteSiteRequest } = await import("./siteRecords.js");
+      await used();
+      await noteSiteRequest(ACCOUNT, "https://dapp.example", { kind: "connect", answer: "approved" });
+      await expect(getSiteRecords([ACCOUNT])).resolves.not.toEqual({ [ACCOUNT]: {} });
+      await reset.beginReset();
+      await reset.finishReset();
+      await expect(getSiteRecords([ACCOUNT])).resolves.toEqual({ [ACCOUNT]: {} });
+      expect(dump()).not.toContain("dapp.example");
+    });
+
+    it("forgets the password on big sends: it's off again", async () => {
+      const { sendPasswordLimit, setSendPasswordLimit } = await import("./sendPassword.js");
+      await used();
+      await setSendPasswordLimit(5_000_000_000n);
+      await expect(sendPasswordLimit()).resolves.toBe(5_000_000_000n);
+      await reset.beginReset();
+      await reset.finishReset();
+      await expect(sendPasswordLimit()).resolves.toBeNull();
+    });
+
     it("a node added before the reset is added anew after it", async () => {
       const { settings } = await used();
       await reset.finishReset();
@@ -205,11 +226,13 @@ describe("walletReset", () => {
     const arrivals = await import("./bridgeArrival.js");
     const notes = await import("./shieldedStore.js");
     const { contactsNamespace } = await import("./contactsCrypto.js");
+    const { getSiteRecords, noteSiteRequest } = await import("./siteRecords.js");
     const wallets = { gone: ["gone0", "gone1"], kept: ["kept0", "kept1"] };
     const epoch = await txs.getTxEpoch();
     for (const [w, accounts] of Object.entries(wallets)) {
       const id = accounts[0];
       await permissions.approveOrigin("https://site.example", { profileId: `account:0:${id}`, accountIndex: 0 }, id);
+      await noteSiteRequest(id, "https://site.example", { kind: "connect", answer: "approved" });
       await txs.putTxMeta(`${w}-tx`, { walletId: id, status: "executed", submittedAt: 1 });
       await arrivals.keepArrivals({ [`${w}-deposit`]: { hash: `0x${"ab".repeat(32)}`, at: 1 } }, epoch, id);
       await names.setAccountName(id, 0, `${w} label`);
@@ -225,6 +248,8 @@ describe("walletReset", () => {
 
     await expect(permissions.getPermissions("gone0")).resolves.toEqual({});
     await expect(permissions.getPermissions("kept0")).resolves.toHaveProperty(["https://site.example"]);
+    await expect(getSiteRecords(["gone0"])).resolves.toEqual({ gone0: {} });
+    expect((await getSiteRecords(["kept0"])).kept0).toHaveProperty(["https://site.example"]);
     await expect(txs.listTxs({ walletId: "gone0" })).resolves.toEqual([]);
     await expect(txs.listTxs({ walletId: "kept0" })).resolves.toHaveLength(1);
     await arrivals.loadArrivals("kept0");

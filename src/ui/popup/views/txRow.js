@@ -7,7 +7,7 @@
 // DUSK paid", and its amount shows muted, without a sign: nothing left.
 // Hide balances hides that fee too.
 
-import { formatDusk, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
+import { formatDusk, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { isEvmAddress } from "../../../shared/bridgeCalls.js";
 import { ARRIVAL_WINDOW_MS, depositTime, keptArrivals, payoutOf } from "../../../shared/bridgeArrival.js";
@@ -85,12 +85,14 @@ export const SYNCING = "Syncing…";
  */
 export const whenText = (row, format) => (row?.time ? format(row.time) : row?.source === "public" && !row?.detailsAt ? SYNCING : "");
 
-function tokenUnits(units, decimals) {
+// A token's amount: at most 6 decimals for a row, every one (`exact`) for its details.
+function tokenUnits(units, decimals, { exact = false } = {}) {
   const u = safeBigInt(units, 0n).toString();
   const d = Math.min(64, Math.max(0, Math.floor(Number(decimals) || 0)));
   if (!d) return u;
   const pad = u.padStart(d + 1, "0");
-  const frac = pad.slice(-d).replace(/0+$/, "").slice(0, 6).replace(/0+$/, "");
+  const all = pad.slice(-d).replace(/0+$/, "");
+  const frac = exact ? all : all.slice(0, 6).replace(/0+$/, "");
   return frac ? `${pad.slice(0, -d)}.${frac}` : pad.slice(0, -d);
 }
 
@@ -117,14 +119,14 @@ const NAME_CALLS = Object.freeze({
  *   category: "sent"|"received"|"staking"|"bridge"|"other",
  *   lead: string, name: string, alias: string, address: string|null, isAddress: boolean, generic: boolean,
  *   word: string, note: string,
- *   amount: { sign: string, value: string, unit: string } | null,
+ *   amount: { sign: string, value: string, exact?: string, unit: string } | null,
  *   status: string, tone: "ok"|"bad"|"pending"|"neutral", statusWord: string|null,
  *   failed: boolean, unsent: boolean, fee: string|null, arrival: string|null, arrivedAt: number|null,
  *   payout: { fee: bigint, received: bigint }|null,
  *   recipient: string|null, evmChain: string, via: { name: string, address: string|null, isAddress: boolean } | null,
- * }} `recipient`: the address on another chain, `evmChain`, a bridge transfer
- *   paid, which `evm` rows are named by; `via`: the bridge's account on Dusk
- *   it went through
+ * }} `amount`: `value` as a row shows it, `exact` as its details do; `recipient`: the
+ *   address on another chain, `evmChain`, a bridge transfer paid, which `evm` rows are
+ *   named by; `via`: the bridge's account on Dusk it went through
  */
 export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const dir = tx?.direction;
@@ -148,7 +150,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     if (addr) return { name: shortAddress(addr), address: addr, isAddress: true };
     return null;
   };
-  const dusk = (lux, sign) => (lux > 0n ? { sign, value: formatDusk(lux), unit: "DUSK" } : null);
+  const dusk = (lux, sign) => (lux > 0n ? { sign, value: formatDusk(lux), exact: formatDuskExact(lux), unit: "DUSK" } : null);
 
   let d;
   if (tx?.bridge) {
@@ -234,6 +236,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     const sym = String(asset.symbol ?? "").trim() || "Token";
     const op = String(asset.op ?? "").toLowerCase();
     const units = tokenUnits(asset.valueUnits ?? asset.value ?? "0", asset.decimals);
+    const exact = groupThousands(tokenUnits(asset.valueUnits ?? asset.value ?? "0", asset.decimals, { exact: true }));
     if (op === "transfer") {
       const p = party(asset.to);
       d = {
@@ -241,7 +244,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
         lead: p ? "Sent to" : "",
         ...(p ?? { name: `Sent ${sym}`, generic: true }),
         word: "Sent",
-        amount: units !== "0" ? { sign: MINUS, value: groupThousands(units), plain: units, unit: sym } : null,
+        amount: units !== "0" ? { sign: MINUS, value: groupThousands(units), exact, plain: units, unit: sym } : null,
       };
     } else if (op === "approve") {
       // Whom it lets spend the token, as a counterparty; an allowance of 0 takes it back.
@@ -254,7 +257,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
         amount: asset.isMax
           ? { sign: "", value: "Unlimited", unit: sym, text: true }
           : units !== "0" || revoke
-          ? { sign: "", value: groupThousands(units), plain: units, unit: sym }
+          ? { sign: "", value: groupThousands(units), exact, plain: units, unit: sym }
           : null,
       };
     } else {
@@ -368,11 +371,15 @@ export function amountText(amount, hidden) {
   return `${amount.sign}${amount.value} ${amount.unit}`;
 }
 
-/** The amount for h(): the number (hidden with Hide balances), then its unit, muted. */
-export function amountEl(amount, hidden, className = "tx-amount") {
+/**
+ * The amount for h(): the number (hidden with Hide balances), then its unit,
+ * muted. Short as a row shows it, or `exact`, as its details do.
+ */
+export function amountEl(amount, hidden, className = "tx-amount", { exact = false } = {}) {
   if (!amount) return null;
+  const value = `${amount.sign}${exact ? amount.exact ?? amount.value : amount.value}`;
   return h("div", { class: amount.muted ? `${className} is-muted` : className }, [
-    amount.text ? `${amount.sign}${amount.value}` : balance(hidden, `${amount.sign}${amount.value}`),
+    amount.text ? value : balance(hidden, value),
     h("span", { class: "tx-unit", text: ` ${amount.unit}` }),
   ]);
 }

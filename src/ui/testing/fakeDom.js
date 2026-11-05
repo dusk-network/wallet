@@ -288,6 +288,12 @@ class FakeElement {
     this.parentNode?.removeChild(this);
   }
 
+  // A shadow root is an element of its own here, kept where a test can read it, closed or not.
+  attachShadow() {
+    this.shadow = new FakeElement("shadow-root", this.ownerDocument);
+    return this.shadow;
+  }
+
   contains(node) {
     for (let n = node; n; n = n.parentNode) if (n === this) return true;
     return false;

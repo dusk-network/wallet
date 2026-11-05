@@ -116,7 +116,7 @@ describe("after Confirm", () => {
     await settle();
     await app.confirm();
     const row = body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
-    expect(row.querySelector(".safe-text > span").textContent).toBe("�gnp.exe");
+    expect(row.querySelector(".safe-text > span").textContent).toBe("\\u202egnp.exe");
     expect(row.querySelector(".safe-text__flag")).not.toBeNull();
     expect(visibleText(body)).not.toContain(rlo);
   });
@@ -193,7 +193,8 @@ describe("after Confirm", () => {
     expect(steps()[0][2]).toMatch(/^\d\d:\d\d [A-Z][A-Za-z0-9+:−-]* · from your public balance$/);
     // Finished: no note about closing the wallet.
     expect(note()).toBeNull();
-    expect(rows().at(-1)).toBe("Network fee0.00031 DUSK");
+    // To the last lux, as its transaction's details say it.
+    expect(rows().at(-1)).toBe("Network fee0.000312345 DUSK");
 
     button("Done").click();
     await settle();

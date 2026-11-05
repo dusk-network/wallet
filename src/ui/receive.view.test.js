@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { lookupPrimaryName, lookupShieldedName } from "../shared/duskNames.js";
 import { iconSvg } from "./components/ActionIcon.js";
+import { qrSvgString } from "./components/QrCode.js";
 import { accessibleName, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { receiveView } from "./popup/views/receive.js";
 
@@ -215,8 +216,35 @@ describe("receive", () => {
     view.button("Copy request link").click();
     await settle();
     const [link] = dom.clipboard.writeText.mock.calls.at(-1);
-    expect(link).toMatch(/^dusk:/);
-    expect(link).toContain(ACCOUNT);
+    // The web wallet's Send on the network it's for, which survives email and chat.
+    expect(link).toBe(`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1.5&network=testnet`);
+    // The QR holds the same request, for a wallet to read.
+    expect(dom.document.body.querySelector(".qr-inner").innerHTML).toBe(qrSvgString(`dusk:public-${ACCOUNT}@dusk:2?amount=1.5`));
+    expect(visibleText(dom.document.body.querySelector(".receive-request"))).toContain("The link opens the web wallet's Send, filled in.");
+  });
+
+  it("copies a shielded request with its memo, and the dusk: link where the network has no web wallet", async () => {
+    const state = { receive: { tab: "shielded", requestOpen: true, amountDusk: "", memo: "Factura 33" } };
+    let view = await receive("shielded", { state });
+    view.button("Copy request link").click();
+    await settle();
+    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ADDRESS}&memo=Factura+33&network=testnet`);
+
+    // A chain there's no file for: nothing to open, so the link a wallet reads.
+    state.receive.tab = "public";
+    view = await receive("public", { state, ov: { ...overview, nodeUrl: "https://node.example", chainId: 42 } });
+    view.button("Copy request link").click();
+    await settle();
+    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`dusk:public-${ACCOUNT}@dusk:42?memo=Factura+33`);
+    expect(visibleText(dom.document.body.querySelector(".receive-request"))).not.toContain("web wallet");
+  });
+
+  it("asks for a network by the chain a custom node signs for", async () => {
+    const state = { receive: { tab: "public", requestOpen: true, amountDusk: "1", memo: "" } };
+    const view = await receive("public", { state, ov: { ...overview, nodeUrl: "https://node.example", chainId: 1 } });
+    view.button("Copy request link").click();
+    await settle();
+    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`https://apps.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1&network=mainnet`);
   });
 
   it("asks for the amount a decimal comma writes", async () => {
@@ -241,7 +269,7 @@ describe("receive", () => {
     it.each([
       ["0", "Enter an amount greater than 0."],
       ["0.000", "Enter an amount greater than 0."],
-      ["abc", "Enter an amount such as 1 or 0.5."],
+      ["abc", "Enter an amount such as 10 or 10.5."],
       ["0.1234567891", "DUSK has 9 decimals at most."],
     ])("won't make a link for %s, and says why, with nothing claimed above it", async (amountDusk, said) => {
       inLanguage("en-US");
@@ -254,18 +282,18 @@ describe("receive", () => {
     it("says an amount that could be two amounts is that, in the language's own way", async () => {
       inLanguage("nl-NL");
       let view = await receive("public", { state: open({ amountDusk: "1.234" }) });
-      expect(amountError()).toBe("That could be two amounts: write 1234 or 1,234.");
+      expect(amountError()).toBe("Is that 1234 or 1,234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
       inLanguage("en-US");
       view = await receive("public", { state: open({ amountDusk: "1,234" }) });
-      expect(amountError()).toBe("That could be two amounts: write 1234 or 1.234.");
+      expect(amountError()).toBe("Is that 1234 or 1.234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
     });
 
     it("gives Dutch separators in its example", async () => {
       inLanguage("nl-NL");
       await receive("public", { state: open({ amountDusk: "abc" }) });
-      expect(amountError()).toBe("Enter an amount such as 1 or 0,5.");
+      expect(amountError()).toBe("Enter an amount such as 10 or 10,5.");
     });
 
     it("takes an amount still being typed, and reads it as the plain amount the link asks for", async () => {

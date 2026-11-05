@@ -6,7 +6,7 @@
  * are unambiguous only for schema names accepted by the shared validator.
  */
 import { hashTypedDataHex } from "@dusk/typed-data";
-import { escapeCodeUnit, sanitizeStringForDisplay } from "./safeText.js";
+import { sanitizeStringForDisplay } from "./safeText.js";
 import { hexToBytes, sha256Hex } from "./bytes.js";
 
 export { sanitizeStringForDisplay };
@@ -22,6 +22,8 @@ const ARRAY_FIXED = /^(.+)\[([1-9][0-9]*)\]$/;
 const RESERVED_FIELD_NAMES = new Set(["__proto__", "constructor", "prototype"]);
 // ponytail: one 2 MiB text view; use pagination if legitimate requests exceed it.
 const MAX_DISCLOSURE_CHARS = 2 * 1024 * 1024;
+// A code unit as JSON escapes it: the disclosure stays ASCII, and JSON gives the original back.
+const jsonEscape = (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
 
 /**
  * Prepare a JSON snapshot and its full ASCII-only disclosure. JSON escapes
@@ -41,7 +43,7 @@ export function prepareTypedDataDisclosure(input, digestHex) {
     if (budget < 0) throw new Error("Signing request is too large to disclose in full");
     if (value && typeof value === "object") parents.push(value);
     return value;
-  }, 2).replace(/[\u007f-\uffff]/g, escapeCodeUnit);
+  }, 2).replace(/[\u007f-\uffff]/g, jsonEscape);
   if (json.length > MAX_DISCLOSURE_CHARS) throw new Error("Signing request is too large to disclose in full");
   const snapshot = JSON.parse(json);
   if (hashTypedDataHex(snapshot) !== digestHex) throw new Error("Signing request does not match its digest");

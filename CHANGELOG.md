@@ -7,8 +7,29 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Added a record per site to Settings' Connected sites: when it was last used, what it asked for and how you answered, also once it's disconnected, with Forget.
+- Added connections that end after 1, 7 or 30 days, for each site and for new sites.
+- Added an optional password on any send above an amount you choose, in Settings, off by default: the wallet's own sends and a site's, checked against the vault.
+- Showed a Sozu stake's position on Liquid staking: put in, taken out, worth now, deposit fees and rewards so far.
+- Said what an amount brings in a year with Sozu as it's typed, and one line of what the rate is made of under it.
+- Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
+- Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
+
+### Changed
+
+- Made Activity's Export a file for accountants and tax tools, in Koinly's universal CSV: a quarter or any dates, your profile's name on it, transfers between your profiles marked, stDUSK and fees for staking, and euro values and Excel's accents when asked.
+- Showed an amount and its fee to the last lux in a transaction's details, on Sent and on every Review; rows and balance lines stay short.
+- Made a request link the https form, which opens the web wallet's Send filled in; Send also reads it pasted or scanned.
+
 ### Fixed
 
+- Kept another wallet's shielded history out of Activity and Export when the wallet changes during a read; an Export it changes under saves nothing and says so.
+- Said under a .dusk name when a node the wallet doesn't know checked it, and kept that node's answers from the network's own node's.
+- Said plainly on Home when the balance can't be read, instead of showing what the node said.
+- Warned on a contact name already in use, and on your own address.
+- Read an amount as the browser's language groups it: 1 000 in French, 1'000 in Swiss German.
 - Named Mainnet, Testnet and Devnet only at their exact addresses: any other node is Custom with its host, whatever it says of itself.
 - Fixed the chain ID on everything signed, and refused to sign, saying why, while the node answers another.
 - Showed the node's host in large type in a site's network-switch window, with what that node can see and show, and never Switch to Mainnet for another address.

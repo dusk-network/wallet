@@ -73,6 +73,17 @@ describe("ensureActivity", () => {
     expect(rows.find((r) => r.counterparty === FAUCET)).toMatchObject({ counterpartyName: "faucet.dusk", direction: "in" });
   });
 
+  it("keeps the names a node the wallet doesn't know gave with it, not with its network's", async () => {
+    const custom = "https://my-node.example:8443";
+    (await import("../../shared/nodeNetwork.js")).noteChainId(custom, 2);
+    fakeArchive();
+    await popup(overview(A, { nodeUrl: custom, archiverUrl: NODE }));
+    const kept = await import("../../shared/activityStore.js");
+    await until(async () => (await kept.getCounterpartyNames("my-node.example:8443", [FAUCET])).has(FAUCET));
+    expect((await kept.getCounterpartyNames("testnet", [FAUCET])).has(FAUCET)).toBe(false);
+    (await import("../../shared/nodeNetwork.js")).noteChainId(custom, null);
+  });
+
   it("paints the kept history and names before the archive answers", async () => {
     const node = fakeArchive();
     await popup();
@@ -398,7 +409,7 @@ describe("shielded history", () => {
 
   it("asks the wallet for it once the public history is shown, and shows it with the rest", async () => {
     fakeArchive();
-    const send = vi.fn(async () => ({ ok: true, result: { profileIndex: 0, entries: [shieldedRow] } }));
+    const send = vi.fn(async () => ({ ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 0, entries: [shieldedRow] } }));
     const state = { route: "home" };
     const render = vi.fn(async () => {});
     activity.ensureActivity(overview(), { state, render, send });
@@ -409,12 +420,27 @@ describe("shielded history", () => {
     expect(rows.at(-1)).toMatchObject({ hash: shieldedRow.hash, source: "shielded" });
   });
 
+  it.each([
+    ["another wallet's, on the same profile", { walletId: B, nodeUrl: NODE, profileIndex: 0 }],
+    ["another network's, for the same wallet", { walletId: A, nodeUrl: "https://nodes.dusk.network", profileIndex: 0 }],
+  ])("shows no shielded history that's %s", async (_, of) => {
+    fakeArchive();
+    const send = vi.fn(async () => ({ ok: true, result: { ...of, entries: [shieldedRow] } }));
+    const state = { route: "home" };
+    activity.ensureActivity(overview(), { state, render: vi.fn(async () => {}), send });
+    await until(() => send.mock.calls.length === 1 && !state.activity.syncing);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(state.activity.shielded).toEqual([]);
+    expect(activity.activityRows(overview(), state).some((r) => r.hash === shieldedRow.hash)).toBe(false);
+    clearTimeout(state.activity.shieldedTimer);
+  });
+
   it("ignores another profile's answer, and asks again next time while notes still sync", async () => {
     fakeArchive();
     const send = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, result: { profileIndex: 1, entries: [shieldedRow] } })
-      .mockResolvedValue({ ok: true, result: { profileIndex: 0, entries: [], pending: true } });
+      .mockResolvedValueOnce({ ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 1, entries: [shieldedRow] } })
+      .mockResolvedValue({ ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 0, entries: [], pending: true } });
     let state = { route: "home" };
     activity.ensureActivity(overview(), { state, render: vi.fn(async () => {}), send });
     await until(() => send.mock.calls.length === 1 && !state.activity.syncing);
@@ -431,8 +457,8 @@ describe("shielded history", () => {
     fakeArchive();
     const send = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, result: { profileIndex: 0, entries: [], pending: true } })
-      .mockResolvedValue({ ok: true, result: { profileIndex: 0, entries: [shieldedRow] } });
+      .mockResolvedValueOnce({ ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 0, entries: [], pending: true } })
+      .mockResolvedValue({ ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 0, entries: [shieldedRow] } });
     const state = { route: "home" };
     const render = vi.fn(async () => {});
     const syncing = overview(A, { shieldedSync: { state: "syncing" } });
@@ -469,11 +495,11 @@ describe("shielded history retries", () => {
   it.each([
     ["an error", { error: { message: "Shielded sync is busy" } }],
     ["no entries", { ok: true, result: null }],
-    ["another profile's", { ok: true, result: { profileIndex: 3, entries: [shieldedRow] } }],
+    ["another profile's", { ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 3, entries: [shieldedRow] } }],
   ])("asks again after %s, instead of never", async (_label, first) => {
     fakeArchive();
     const { held } = holdRetries();
-    const send = vi.fn().mockResolvedValueOnce(first).mockResolvedValue({ ok: true, result: { profileIndex: 0, entries: [shieldedRow] } });
+    const send = vi.fn().mockResolvedValueOnce(first).mockResolvedValue({ ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 0, entries: [shieldedRow] } });
     const state = { route: "home" };
     const render = vi.fn(async () => {});
     activity.ensureActivity(synced(), { state, render, send });
@@ -490,9 +516,9 @@ describe("shielded history retries", () => {
     const { held, cleared } = holdRetries();
     const send = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, result: { profileIndex: 0, entries: [], pending: true } })
-      .mockResolvedValueOnce({ ok: true, result: { profileIndex: 0, entries: [shieldedRow], pending: true } })
-      .mockResolvedValue({ ok: true, result: { profileIndex: 0, entries: [shieldedRow] } });
+      .mockResolvedValueOnce({ ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 0, entries: [], pending: true } })
+      .mockResolvedValueOnce({ ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 0, entries: [shieldedRow], pending: true } })
+      .mockResolvedValue({ ok: true, result: { walletId: A, nodeUrl: NODE, profileIndex: 0, entries: [shieldedRow] } });
     const state = { route: "home" };
     const render = vi.fn(async () => {});
     activity.ensureActivity(synced(), { state, render, send });

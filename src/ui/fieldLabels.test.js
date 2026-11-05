@@ -146,7 +146,7 @@ describe("field labels", () => {
       "Custom gas",
     ]);
     // Contacts is a row of its own.
-    expect(visibleText(body.querySelector(".settings-row"))).toBe("Contacts");
+    expect(body.querySelectorAll(".settings-row").map(visibleText)).toContain("Contacts");
   });
 
   it("name the setup fields, and the recovery phrase's words as one group", async () => {

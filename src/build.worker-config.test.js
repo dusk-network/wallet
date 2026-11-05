@@ -1,7 +1,27 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { networks } from "@dusk-network/networks";
 import { describe, expect, it } from "vitest";
 import { w3sperOwnedWorkerPlugin } from "../vite.extension-workers.js";
+
+describe("the offer on the web wallet", () => {
+  it("runs on each network's web wallet, in both builds, and nowhere else", async () => {
+    const send = Object.values(networks).flatMap((n) => (n.apps.wallet ? [`${n.apps.wallet}/*`] : []));
+    expect(send.length).toBeGreaterThan(0);
+    for (const file of [["public", "manifest.json"], ["config", "manifest.firefox.json"]]) {
+      const { content_scripts: scripts } = JSON.parse(await readFile(path.resolve(process.cwd(), ...file), "utf8"));
+      expect(scripts.find((s) => s.js.includes("requestLinkOffer.js")).matches.sort()).toEqual([...send].sort());
+    }
+    for (const config of ["vite.config.js", "vite.firefox.config.js"]) {
+      expect(await readFile(path.resolve(process.cwd(), config), "utf8")).toContain('requestLinkOffer: "src/requestLinkOffer.js"');
+    }
+    // A classic script: no static imports in what's bundled, and nothing declared
+    // at its top, which the extension's other content script shares.
+    const script = await readFile(path.resolve(process.cwd(), "src", "requestLinkOffer.js"), "utf8");
+    expect(script).not.toMatch(/^\s*import\s/m);
+    expect(script).not.toMatch(/^(const|let|var|class|function)\s/m);
+  });
+});
 
 describe("extension worker build config", () => {
   it("configures extension-hosted workers for Chrome and Firefox builds", async () => {

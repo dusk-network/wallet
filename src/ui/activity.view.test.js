@@ -219,7 +219,7 @@ describe("Activity's rows", () => {
     expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);
   });
 
-  it("show a fee paid as its details do, rounded to the nearest, not up", () => {
+  it("show a fee paid rounded to the nearest, not up, and its details to the last lux", () => {
     const failed = {
       hash: "bc".repeat(32),
       kind: TX_KIND.TRANSFER,
@@ -238,7 +238,7 @@ describe("Activity's rows", () => {
     expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee 0.0018 DUSK paid1 DUSK`);
     Object.assign(view.state, { route: "tx", txDetailHash: failed.hash, txDetailFrom: "home" });
     view.draw();
-    expect(visibleText(body())).toContain("Fee charged0.0018 DUSK");
+    expect(visibleText(body())).toContain("Fee charged0.001840001 DUSK");
   });
 
   it("hide their amounts with Hide balances, on Home and in the full list", () => {
@@ -381,7 +381,6 @@ describe("a transaction's details", () => {
       "Block4,658,100",
       "Gas used3,700,000 of 10,000,000",
       "Gas price1 LUX",
-      "Fee paid0.0037 DUSK",
       "SubmittedThu 22 Oct 2026, 14:32 UTC",
     ]);
     button("View in Dusk explorer").click();

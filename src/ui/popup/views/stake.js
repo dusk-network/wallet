@@ -3,6 +3,7 @@ import { feePercent } from "@dusk-network/networks/sozu";
 
 import {
   formatDusk,
+  formatDuskExact,
   formatFee,
   amountLocale,
   amountProblem,
@@ -939,7 +940,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   const allText = kind === TX_KIND.UNSTAKE ? "All stake" : kind === TX_KIND.WITHDRAW_REWARD ? "All rewards" : "—";
   const hideAmount = (kind !== TX_KIND.STAKE || Boolean(d.amountMasked)) && balancesHidden(ov);
   const amountLine = () =>
-    shownLux && safeBigInt(shownLux, 0n) > 0n ? [balance(hideAmount, fmtLux(shownLux)), " DUSK"] : [allText];
+    shownLux && safeBigInt(shownLux, 0n) > 0n ? [balance(hideAmount, formatDuskExact(shownLux)), " DUSK"] : [allText];
 
   const line =
     kind === TX_KIND.STAKE ? "Native staking" : kind === TX_KIND.UNSTAKE ? "Back to your public balance" : "To your public balance";

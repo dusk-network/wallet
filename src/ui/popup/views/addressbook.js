@@ -3,6 +3,7 @@ import { ProfileGenerator } from "@dusk/w3sper";
 import { isDuskName } from "@duskdomains/sdk/names";
 import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { duskNameErrorText, duskNameRecipient, duskNamesNetwork, lookupDuskName } from "../../../shared/duskNames.js";
+import { nameCheckNote } from "../../../shared/nodeNetwork.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { joinedAddress, passesForDuskName } from "../../lib/recipient.js";
@@ -14,6 +15,8 @@ import { copyButton } from "../../components/CopyButton.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, searchInput, textInput } from "../../components/FormControls.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
+import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
+import { ownProfileName } from "../../components/ProfileName.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
 import { contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
@@ -42,13 +45,16 @@ function typeLabel(t) {
   return "Unknown";
 }
 
+// A request link, `dusk:` or https: the recipient it asks to be paid.
+const requestRecipient = (text) => {
+  const req = parseDuskQrPayload(text);
+  return req && req.form !== "raw" ? String(req.to).trim() : "";
+};
+
 function normalizeRecipient(raw) {
   const s = String(raw ?? "").trim();
   if (!s) return "";
-  if (!/^dusk:/i.test(s)) return joinedAddress(s);
-  const req = parseDuskQrPayload(s);
-  if (req?.to) return String(req.to).trim();
-  return s;
+  return requestRecipient(s) || (/^dusk:/i.test(s) ? s : joinedAddress(s));
 }
 
 const lower = (v) => String(v ?? "").trim().toLowerCase();
@@ -81,6 +87,9 @@ function ownText(ov, recipient) {
   if (recipient && recipient === own.address) return "That's this profile's own shielded address.";
   return "";
 }
+
+// A name as a person reads it: without its case, accents or extra spaces.
+const nameKey = (name) => String(name ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ");
 
 const fieldError = (id) => h("div", { class: "field-error", id, role: "alert", hidden: true });
 const setFieldError = (input, error, text) => {
@@ -328,13 +337,14 @@ export function addressBookView(ov, { state, actions } = {}) {
     // nowhere (expired, released, without an address), says so. A lookup that
     // failed says nothing: the name may be fine.
     const nameCheck = h("p", { class: "field-error contact-name-check", role: "alert", hidden: true });
+    const nodeSays = (text) => [text, nameCheckNote(nodeUrl)].filter(Boolean).join(" ");
     if (entry.duskName && duskNamesNetwork(nodeUrl) && Date.now() - Number(entry.checkedAt || 0) > NAME_RECHECK_MS) {
       const { result, promise } = lookupDuskName(entry.duskName, { nodeUrl });
       Promise.resolve(result ?? promise)
         .then(async (res) => {
           if (!res?.ok) {
             if (STALE_NAME_REASONS.has(res?.reason)) {
-              nameCheck.textContent = `${duskNameErrorText({ name: entry.duskName, reason: res.reason })} Edit the contact before you send to it.`;
+              nameCheck.textContent = nodeSays(`${duskNameErrorText({ name: entry.duskName, reason: res.reason })} Edit the contact before you send to it.`);
               nameCheck.hidden = false;
             }
             return;
@@ -342,9 +352,10 @@ export function addressBookView(ov, { state, actions } = {}) {
           const now = duskNameRecipient(res, { shielded: typ === "address" });
           if (now === addr) {
             // On the contact as saved now: one edited or deleted meanwhile stays so.
-            if (await markAddressBookNameChecked(entry, Date.now(), shown)) await refreshItems();
+            // A node the wallet doesn't know vouches for nothing, so it stays due.
+            if (!nameCheckNote(nodeUrl) && (await markAddressBookNameChecked(entry, Date.now(), shown))) await refreshItems();
           } else {
-            nameCheck.textContent = `${entry.duskName} now points to another address. Edit the contact before you send to it.`;
+            nameCheck.textContent = nodeSays(`${entry.duskName} now points to another address. Edit the contact before you send to it.`);
             nameCheck.hidden = false;
           }
         })
@@ -438,9 +449,18 @@ export function addressBookView(ov, { state, actions } = {}) {
       oninput: (e) => {
         ab.editName = String(e?.target?.value ?? "");
         setFieldError(nameInput, nameError, "");
+        updateName();
       },
     });
     const nameError = fieldError(`contact-name-error-${n}`);
+    // A name in use: only the address would tell the two apart in a payment. It can be saved.
+    const nameNote = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
+    const updateName = () => {
+      const typed = nameKey(nameInput.value);
+      const other = typed ? (Array.isArray(ab.items) ? ab.items : []).find((e) => e?.id !== ab.editId && nameKey(e?.name) === typed) : null;
+      nameNote.textContent = other ? `You already have a contact called ${String(other.name).trim()}, at ${shortAddress(String(other.address ?? ""))}.` : "";
+      nameNote.hidden = !other;
+    };
 
     const addrInput = textInput({
       placeholder: duskNamesNetwork(ov?.nodeUrl) ? "Account, shielded address or .dusk name" : "Account or shielded address",
@@ -455,6 +475,17 @@ export function addressBookView(ov, { state, actions } = {}) {
     const addrError = fieldError(`contact-address-error-${n}`);
     // What the field holds: the kind of address, or the addresses a .dusk name points to.
     const addrBox = h("div", { class: "contact-address-box" });
+    // Another profile's own address, here or in another wallet: it can be saved, and it's said.
+    const addrNote = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
+    const noteOwn = (addresses) => {
+      const shown = addresses.filter(Boolean);
+      const own = shown.find((a) => ownText(ov, a));
+      const profile = own ? "" : shown.map((a) => ownProfileName(ov, a)).find(Boolean);
+      // This profile's own says so as an error: it can't be saved.
+      if (own) setFieldError(addrInput, addrError, ownText(ov, own));
+      addrNote.textContent = profile ? `That's your own profile: ${profile}.` : "";
+      addrNote.hidden = !profile;
+    };
 
     // The latest name lookup's answer, for the text the field holds.
     let lookupFor = "";
@@ -480,13 +511,15 @@ export function addressBookView(ov, { state, actions } = {}) {
           choice.set(shielded);
         },
       });
-      addrBox.replaceChildren(choice.el);
+      addrBox.replaceChildren(...[choice.el, nameCheckNoteEl(ov?.nodeUrl)].filter(Boolean));
+      noteOwn([result.account, result.address]);
     };
 
     const updateAddress = () => {
       const text = normalizeRecipient(addrInput.value);
       resolved = null;
       lookupFor = "";
+      noteOwn([]);
       if (!text) {
         addrBox.replaceChildren();
         return;
@@ -511,6 +544,7 @@ export function addressBookView(ov, { state, actions } = {}) {
       addrBox.replaceChildren(
         t === "account" || t === "address" ? h("span", { class: "tag", text: t === "address" ? "Shielded address" : "Public account" }) : ""
       );
+      noteOwn([text]);
     };
 
     // What gets saved: the address, with the .dusk name it came from.
@@ -528,7 +562,8 @@ export function addressBookView(ov, { state, actions } = {}) {
           return { error: duskNameErrorText(failed ?? { name: text }) };
         }
         const address = duskNameRecipient(result, { shielded: Boolean(ab.editShielded) && Boolean(result.address) });
-        return { address, duskName: result.name, checkedAt: Date.now() };
+        // A node the wallet doesn't know vouches for nothing: on a network's own node, it's looked up at once.
+        return { address, duskName: result.name, checkedAt: nameCheckNote(String(ov?.nodeUrl ?? "")) ? 0 : Date.now() };
       }
       const t = ProfileGenerator.typeOf(text);
       if (t === "account" && !isAccount(text)) return { error: "Not a valid address. Check it and try again." };
@@ -572,7 +607,7 @@ export function addressBookView(ov, { state, actions } = {}) {
             addrInput.focus();
             return;
           }
-          if (/^dusk:/i.test(String(addrInput.value || "").trim())) {
+          if (requestRecipient(String(addrInput.value || "").trim())) {
             actions?.showToast?.("Saved the recipient from the request link", 1800);
           }
           const saved = await upsertAddressBookEntry({
@@ -626,6 +661,7 @@ export function addressBookView(ov, { state, actions } = {}) {
         })
       : null;
 
+    updateName();
     updateAddress();
 
     return [
@@ -640,9 +676,11 @@ export function addressBookView(ov, { state, actions } = {}) {
         fieldLabel(nameInput, "Name"),
         nameInput,
         nameError,
+        nameNote,
         fieldLabel(addrInput, "Address"),
         addrInput,
         addrError,
+        addrNote,
         addrBox,
         h("div", { class: "btnrow" }, [saveBtn]),
         deleteBtn,

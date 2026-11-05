@@ -6,7 +6,7 @@ Dusk Wallet is a non-custodial browser extension for the Dusk network.
 
 Recovery phrases and private keys are encrypted locally on your device. Dusk Network does not collect, store, or custody your recovery phrase or private keys.
 
-The extension stores local wallet data needed to operate the wallet, including encrypted vault data, wallet settings, approved dApp origins, watched assets, address book entries (encrypted with a key from your recovery phrase, and deleted when you reset the wallet), local transaction metadata, your profiles' transaction history, and the latest checks of .dusk names.
+The extension stores local wallet data needed to operate the wallet, including encrypted vault data, wallet settings, approved dApp origins, a record per site of when it was last used and what it asked for and how you answered (without amounts, recipients or messages, cleared when you reset the wallet), watched assets, address book entries (encrypted with a key from your recovery phrase, and deleted when you reset the wallet), local transaction metadata, your profiles' transaction history, and the latest checks of .dusk names.
 
 ## Network data
 
@@ -15,6 +15,8 @@ To provide wallet functionality, Dusk Wallet communicates with configured Dusk n
 Users may configure their own endpoints. Network operators may be able to observe requests sent to their endpoints.
 
 Looking up a .dusk name sends the name to your configured node. Showing your profiles' .dusk names sends their public accounts to it, as does showing the name of a public account a site asks you to send to.
+
+Activity's Export, only when you ask for each payment's value in euros, asks CoinGecko for DUSK's price over the period it holds. It sends no account or address.
 
 Activity asks your configured archiver for each profile's public transaction history, which sends it the profile's public account, and asks your node for the .dusk names of the accounts in that history, several at a time through the Multicall for Dusk contract. Once for each profile that has shielded notes, it asks the archiver for the blocks those notes are in, each mixed with four other blocks that hold shielded notes, which makes the profile's blocks harder, though not impossible, to pick out.
 

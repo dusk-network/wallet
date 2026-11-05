@@ -49,6 +49,19 @@ function engineCall(method, params) {
   });
 }
 
+describe("who the engine answers", () => {
+  it("answers the background alone: never a call from a tab, as a page's content script's", async () => {
+    mocks.sendTransaction.mockClear();
+    const answered = vi.fn();
+    const kept = listener({ type: "DUSK_ENGINE_CALL", id: "x", method: "dusk_sendTransaction", params: {} }, { tab: { id: 7 }, url: "https://dapp.example/" }, answered);
+    expect(kept).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(answered).not.toHaveBeenCalled();
+    expect(mocks.sendTransaction).not.toHaveBeenCalled();
+    await expect(engineCall("engine_status")).resolves.toMatchObject({ result: { isUnlocked: true } });
+  });
+});
+
 describe("engine byte responses", () => {
   it.each(["dusk_encodeDrc20Input", "dusk_encodeDrc721Input"])(
     "serializes %s before extension messaging",

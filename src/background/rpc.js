@@ -7,6 +7,8 @@ import {
   revokeOriginEverywhere,
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
+import { siteLastsMs } from "../shared/siteRecords.js";
+import { assertSiteSend, proveSiteSend } from "../shared/sendPassword.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
@@ -424,8 +426,13 @@ export async function handleRpc(origin, request) {
       (sameProfilePermission(existing, selectedProfile) && hasShieldedGrant(existing));
 
     const shown = promptFor(statusBeforePrompt);
+    // A new connection lasts as this site was set to, else as new sites are.
+    const lastsMs = await siteLastsMs(await siteWalletId(statusBeforePrompt), origin, (await getSettings()).newSiteLastsMs);
     const approved = await requestUserApproval("connect", origin, {
       requestedProfiles: true,
+      lastsMs,
+      endsAt: Number(existing?.expiresAt) || 0,
+      stays: Boolean(existing),
       shieldedReceiveAddress: requestedShieldedGrant,
       effectiveShieldedReceiveAddress: effectiveShieldedGrant,
       currentProfileId: existing?.profileId,
@@ -456,6 +463,7 @@ export async function handleRpc(origin, request) {
       const perm = await approveOrigin(origin, {
         profileId: profile.profileId,
         accountIndex: idx,
+        lastsMs,
         grants: {
           publicAccount: true,
           shieldedReceiveAddress: effectiveGrant,
@@ -779,11 +787,24 @@ export async function handleRpc(origin, request) {
       // Ask approval (the approval UI also lets the user unlock).
       // The approval can return user overrides (e.g. edited gas settings).
       const shown = promptFor(approvalContext);
-      const overrides = await requestUserApproval("send_tx", origin, approvalParams, shown);
+      // What the approval sends, as its window answers it.
+      const paramsAnswered = (answered) => {
+        const params = applyTxDefaultsForRpc(mergeTxParams(baseParams, answered), { dynamicPrice });
+        return { ...params, gas: validateGasShape(params.gas) };
+      };
+      // Above the amount chosen in Settings, the password, checked here against
+      // the vault as the window answers: a wrong one leaves the request waiting.
+      let passwordFor = null;
+      const overrides = await requestUserApproval("send_tx", origin, approvalParams, shown, {
+        beforeApprove: async ({ approvedParams, sendPassword }) => {
+          const { walletKey } = await getEngineStatusStrict();
+          passwordFor = await proveSiteSend(paramsAnswered(approvedParams), { password: sendPassword, walletKey, nodeUrl: approvalNodeUrl });
+        },
+      });
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
       const executionContext = await assertApprovalContext(approvalContext, shown);
-      const finalParams = applyTxDefaultsForRpc(mergeTxParams(baseParams, overrides), { dynamicPrice });
-      finalParams.gas = validateGasShape(finalParams.gas);
+      const finalParams = paramsAnswered(overrides);
+      await assertSiteSend(finalParams, passwordFor, executionContext.nodeUrl);
 
       const idx = executionContext.profileIndex;
       // The engine signs for the chain the node is fixed to now.

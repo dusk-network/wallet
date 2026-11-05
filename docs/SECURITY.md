@@ -94,6 +94,21 @@ The last activity timestamp is persisted in extension session storage when avail
 (falling back to local storage outside extension contexts), so a restarted background
 service worker does not immediately lock an otherwise active unlocked wallet.
 
+### Password on big sends
+
+Settings can ask for the password again on any send above an amount chosen, off by default.
+It covers everything that moves money out, the wallet's own sends and a site's in its
+approval window. What counts is what goes out with the most its fee can be; what comes back
+counts only its fee; and a token's transfer or allowance, or a call of a contract the network's
+file doesn't name, asks on any amount, as it can't be counted in DUSK.
+
+The background checks the password against the vault, for the wallet that's open, before anything
+of the send is made, under the unlock's own backoff: a page's say-so isn't enough. A wallet's own
+send carries a ticket the background gave for that send, once; a site's request stays waiting until
+its window gives the password. Changing the amount takes the password too. The amount is kept on its
+own (`dusk_send_password_v1`); no provider method reads or changes it, and the background refuses
+those messages from anything but the wallet's own pages. The engine answers only the background.
+
 ### 3. dApp Permissions
 
 #### Origin-Based Access Control
@@ -103,6 +118,7 @@ service worker does not immediately lock an otherwise active unlocked wallet.
 - Permissions stored per wallet, then per origin, with the selected profile/account index and grants
 - A site connected to one wallet sees nothing of another unless it's connected there too
 - A site that disconnects itself is disconnected from every wallet
+- A connection can be set to end after 1, 7 or 30 days, for a site or for new sites: past its end the site is as if never connected, and what it had waiting is refused
 
 ```js
 // Permission record, under its wallet's ID (its first public account)
@@ -117,10 +133,19 @@ service worker does not immediately lock an otherwise active unlocked wallet.
       },
       connectedAt: 1706400000000,
       updatedAt: 1706400000000,
+      // Only for one set to end
+      lastsMs: 604800000,
+      expiresAt: 1707004800000,
     }
   }
 }
 ```
+
+The wallet also keeps a record per site (`dusk_site_records_v1`), for Settings: when it last used its
+connection, and what it asked for and how that was answered, with a contract call's function name. Never
+an amount, recipient, memo, message, contract or hash. It's bounded (30 requests a site, 50 sites a wallet, what
+was approved kept longest), stays once a site is disconnected until it's forgotten, and goes with its wallet or a reset.
+No provider method reads it.
 
 #### RPC Method Security
 
@@ -184,6 +209,7 @@ The public repository does not currently include a native Tauri wrapper, so ther
 - Nothing a node serves runs: the wallet core is the copy packaged with the wallet, never w3sper's download from the node
 - A node can't name its network: Mainnet, Testnet and Devnet are only the exact addresses in `@dusk-network/networks`; anything else is Custom, with its host showing
 - A node can't choose the chain ID that's signed: a known address's comes from `@dusk-network/networks`, a custom node's is read once when it's added and fixed, and w3sper's builders get that one (`pinNodeInfo` in `walletEngine.js`). A node that later answers another chain ID gets no signature
+- A custom node can answer a `.dusk` name check with whatever it likes: wherever a name is taken for a payment (Send, Review, a site's approval window, the contact form, a contact's check) the wallet says which node checked it, and its answers are kept apart from those of the network's own node
 
 #### Prover Communication
 

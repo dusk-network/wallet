@@ -9,7 +9,7 @@ import { STORAGE_KEYS } from "../shared/storage.js";
 import { chainIdFromNodeUrl } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
-import { duskNamesNetwork } from "../shared/verifiedNames.js";
+import { duskNamesScope } from "../shared/verifiedNames.js";
 import { listedChainId, noteChainId } from "../shared/nodeNetwork.js";
 import { getEngineStatus } from "./engineHost.js";
 import { siteWalletId } from "./siteWallet.js";
@@ -377,9 +377,9 @@ export async function handleVerifiedNamesDiff(oldNames, newNames) {
     const names = await siteNames(nodeUrl);
     return { nodeUrl, perms, status, names };
   });
-  const network = duskNamesNetwork(nodeUrl);
-  if (!network) return;
-  const check = (all, account) => JSON.stringify(all?.[network]?.[account] ?? null);
+  const scope = duskNamesScope(nodeUrl);
+  if (!scope) return;
+  const check = (all, account) => JSON.stringify(all?.[scope]?.[account] ?? null);
 
   for (const [origin, set] of portsByOrigin.entries()) {
     const perm = perms?.[origin];
@@ -528,9 +528,10 @@ export async function handleSettingsDiff(oldSettings, newSettings) {
   // Each node's network, as the settings keep its chain ID (settings.js).
   const chainOf = (settings, url) => (Number.isInteger(settings?.chainId) ? settings.chainId : listedChainId(url));
   noteChainId(newUrl, chainOf(newSettings, newUrl));
-  // A profile's .dusk name is the one checked on its network: profile
-  // updates begun before the move are dropped, and sites get them again.
-  const moved = duskNamesNetwork(oldUrl, chainOf(oldSettings, oldUrl)) !== duskNamesNetwork(newUrl, chainOf(newSettings, newUrl));
+  // A profile's .dusk name is the one checked on its network, or by the node if
+  // it's one the wallet doesn't know: profile updates begun before the move are
+  // dropped, and sites get them again.
+  const moved = duskNamesScope(oldUrl, chainOf(oldSettings, oldUrl)) !== duskNamesScope(newUrl, chainOf(newSettings, newUrl));
   if (moved) profileVisibilityChanged();
   if (oldUrl !== newUrl) await broadcastChainChangedAll();
   if (moved) await broadcastProfilesChangedAll();

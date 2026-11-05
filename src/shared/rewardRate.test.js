@@ -12,7 +12,7 @@ vi.mock("./storage.js", () => ({
   },
 }));
 
-import { RATE_MAX_AGE_MS, nativeRewardRate } from "./rewardRate.js";
+import { RATE_MAX_AGE_MS, nativeRewardRate, stakingFigures } from "./rewardRate.js";
 
 const MAINNET = "https://nodes.dusk.network";
 const TIP = 5_615_071;
@@ -30,6 +30,24 @@ function node({ down = false } = {}) {
 
 beforeEach(() => {
   for (const key of Object.keys(items)) delete items[key];
+});
+
+describe("what the working under a staking rate is made of", () => {
+  it("is read from the node each time, each provisioner's stake and when it counts from, and kept nowhere", async () => {
+    const fetch = node();
+    const figures = await stakingFigures(MAINNET, { fetch });
+    expect(figures.tipHeight).toBe(TIP);
+    expect(figures.provisioners).toHaveLength(provisioners.length);
+    expect(figures.provisioners[0]).toEqual({ amount: provisioners[0].amount, eligibility: provisioners[0].eligibility });
+    expect(items).toEqual({});
+    await stakingFigures(MAINNET, { fetch });
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("is none when the node can't be read", async () => {
+    await expect(stakingFigures(MAINNET, { fetch: node({ down: true }) })).resolves.toBeNull();
+    await expect(stakingFigures("not a url", { fetch: node() })).resolves.toBeNull();
+  });
 });
 
 describe("native staking's yearly estimate", () => {

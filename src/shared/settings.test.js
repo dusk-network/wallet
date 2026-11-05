@@ -98,6 +98,17 @@ describe("settings", () => {
     await expect(getSettings()).resolves.toMatchObject({ nodeUrl: "https://other-node.example", chainId: 1 });
   });
 
+  it("keeps new sites connected until they're disconnected by default, and offers 1, 7 and 30 days", async () => {
+    const { SITE_LASTS_OPTIONS, getSettings, setSettings } = await import("./settings.js");
+    expect(SITE_LASTS_OPTIONS.map((o) => o.label)).toEqual(["Until I disconnect", "1 day", "7 days", "30 days"]);
+    await expect(getSettings()).resolves.toMatchObject({ newSiteLastsMs: 0 });
+    const week = SITE_LASTS_OPTIONS[2].value;
+    await setSettings({ newSiteLastsMs: week });
+    await expect(getSettings()).resolves.toMatchObject({ newSiteLastsMs: week });
+    await setSettings({ newSiteLastsMs: 12345 });
+    await expect(getSettings()).resolves.toMatchObject({ newSiteLastsMs: 0 });
+  });
+
   it("auto-locks after 15 minutes by default, and offers 5, 15 and Off only", async () => {
     const { AUTO_LOCK_OPTIONS, getSettings, setSettings } = await import("./settings.js");
     expect(AUTO_LOCK_OPTIONS.map((o) => [o.value, o.label])).toEqual([

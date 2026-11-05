@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("./storage.js", () => {
   let store = {};
@@ -250,5 +250,91 @@ describe("permissionProfileState", () => {
       isValid: false,
       profile: null,
     });
+  });
+});
+
+describe("a connection set to last a while", () => {
+  const DAY = 24 * 60 * 60_000;
+  let now;
+
+  beforeEach(async () => {
+    const { storageMod } = await loadPermissionsModule();
+    storageMod.__resetStore();
+    now = 1_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("is a connection until its time is up, and after it's as if there was none", async () => {
+    const { permissionsMod } = await loadPermissionsModule();
+    await permissionsMod.approveOrigin("https://a.example", { ...grant(W1, 0), lastsMs: DAY }, W1[0]);
+    await expect(permissionsMod.getPermissionForOrigin("https://a.example", W1[0])).resolves.toMatchObject({ lastsMs: DAY, expiresAt: now + DAY });
+    now += DAY - 1;
+    await expect(permissionsMod.getPermissionForOrigin("https://a.example", W1[0])).resolves.toBeTruthy();
+    now += 1;
+    await expect(permissionsMod.getPermissionForOrigin("https://a.example", W1[0])).resolves.toBeNull();
+    await expect(permissionsMod.getPermissions(W1[0])).resolves.toEqual({});
+    await expect(permissionsMod.setConnectionLasts("https://a.example", W1[0], 7 * DAY)).resolves.toBe(false);
+  });
+
+  it("goes on as it's set through another approval; once its time is up, the next is new", async () => {
+    const { permissionsMod } = await loadPermissionsModule();
+    await permissionsMod.approveOrigin("https://a.example", { ...grant(W1, 0), lastsMs: DAY }, W1[0]);
+    now += 1_000;
+    // Sharing more, or another profile, moves no end, whatever new sites are set to now.
+    await permissionsMod.approveOrigin("https://a.example", { ...grant(W1, 1, true), lastsMs: 30 * DAY }, W1[0]);
+    const end = now - 1_000 + DAY;
+    await expect(permissionsMod.getPermissionForOrigin("https://a.example", W1[0])).resolves.toMatchObject({ accountIndex: 1, lastsMs: DAY, expiresAt: end });
+    // One with no end doesn't get one.
+    await permissionsMod.approveOrigin("https://b.example", grant(W1, 0), W1[0]);
+    await permissionsMod.approveOrigin("https://b.example", { ...grant(W1, 0, true), lastsMs: DAY }, W1[0]);
+    expect((await permissionsMod.getPermissionForOrigin("https://b.example", W1[0])).expiresAt).toBeUndefined();
+
+    now = end;
+    await permissionsMod.approveOrigin("https://a.example", { ...grant(W1, 0), lastsMs: 7 * DAY }, W1[0]);
+    await expect(permissionsMod.getPermissionForOrigin("https://a.example", W1[0])).resolves.toMatchObject({ connectedAt: now, lastsMs: 7 * DAY, expiresAt: now + 7 * DAY, accountIndex: 0, grants: { shieldedReceiveAddress: false } });
+  });
+
+  it("is set from now, or until it's disconnected, without touching what a waiting request is checked by", async () => {
+    const { permissionsMod } = await loadPermissionsModule();
+    await permissionsMod.approveOrigin("https://a.example", grant(W1, 0), W1[0]);
+    const { updatedAt } = await permissionsMod.getPermissionForOrigin("https://a.example", W1[0]);
+    now += 5_000;
+    await expect(permissionsMod.setConnectionLasts("https://a.example", W1[0], DAY)).resolves.toBe(true);
+    await expect(permissionsMod.getPermissionForOrigin("https://a.example", W1[0])).resolves.toMatchObject({ updatedAt, lastsMs: DAY, expiresAt: now + DAY });
+    await expect(permissionsMod.setConnectionLasts("https://a.example", W1[0], 0)).resolves.toBe(true);
+    const unset = await permissionsMod.getPermissionForOrigin("https://a.example", W1[0]);
+    expect(unset.updatedAt).toBe(updatedAt);
+    expect(unset.expiresAt).toBeUndefined();
+    expect(unset.lastsMs).toBeUndefined();
+    await expect(permissionsMod.setConnectionLasts("https://nope.example", W1[0], DAY)).resolves.toBe(false);
+  });
+
+  it("names the next end of any wallet's, and takes out those that came, leaving the others alone", async () => {
+    const { storageMod, permissionsMod } = await loadPermissionsModule();
+    await expect(permissionsMod.nextConnectionEnd()).resolves.toBeNull();
+    await permissionsMod.approveOrigin("https://soon.example", { ...grant(W1, 0), lastsMs: DAY }, W1[0]);
+    await permissionsMod.approveOrigin("https://later.example", { ...grant(W2, 0), lastsMs: 7 * DAY }, W2[0]);
+    await permissionsMod.approveOrigin("https://stays.example", grant(W1, 0), W1[0]);
+    await expect(permissionsMod.nextConnectionEnd()).resolves.toBe(now + DAY);
+
+    await expect(permissionsMod.endConnections()).resolves.toEqual([]);
+    now += DAY;
+    await expect(permissionsMod.nextConnectionEnd()).resolves.toBe(now + 6 * DAY);
+    await expect(permissionsMod.endConnections()).resolves.toEqual([{ walletId: W1[0], origin: "https://soon.example" }]);
+    const kept = storageMod.__getStore()[storageMod.STORAGE_KEYS.PERMISSIONS_V2];
+    expect(Object.keys(kept[W1[0]])).toEqual(["https://stays.example"]);
+    expect(Object.keys(kept[W2[0]])).toEqual(["https://later.example"]);
+    // With nothing to take out, nothing's written, so nothing's told.
+    storageMod.storage.set.mockClear();
+    await expect(permissionsMod.endConnections()).resolves.toEqual([]);
+    expect(storageMod.storage.set).not.toHaveBeenCalled();
+
+    now += 6 * DAY;
+    await expect(permissionsMod.endConnections()).resolves.toEqual([{ walletId: W2[0], origin: "https://later.example" }]);
+    expect(storageMod.__getStore()[storageMod.STORAGE_KEYS.PERMISSIONS_V2][W2[0]]).toBeUndefined();
   });
 });

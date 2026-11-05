@@ -3684,6 +3684,32 @@ body[data-runtime="tauri"] .qrscan-overlay {
   flex-wrap: wrap;
 }
 
+/* The password again, over a Review, on the overlay the QR scan has */
+.send-password {
+  width: min(360px, 100%);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+  animation: modalIn 180ms ease;
+}
+
+.send-password__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.send-password__actions {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modalIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -4411,7 +4437,7 @@ p.tx-empty {
   gap: 6px;
 }
 
-/* Export: whether to add contact names, what the file holds, Save CSV */
+/* Export: which period, what to add, what the file is, Save CSV */
 .group.activity-export {
   display: flex;
   flex-direction: column;
@@ -4419,15 +4445,26 @@ p.tx-empty {
   padding: 14px;
 }
 
-.activity-export-contacts {
+.activity-export-check {
   color: var(--text);
   font-size: 13.5px;
   line-height: 1.4;
 }
 
-.activity-export-contacts input[type="checkbox"] {
+.activity-export-check input[type="checkbox"] {
   flex: 0 0 auto;
   accent-color: var(--pill);
+}
+
+.activity-export-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.activity-export-date input {
+  width: 100%;
+  color-scheme: dark;
 }
 
 p.activity-export-note {
@@ -4986,6 +5023,45 @@ p.settings-legal button.text-btn {
   min-width: 0;
 }
 
+/* What a site asked, newest first: what, how it was answered, and when */
+.settings-site__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-site__ask {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.settings-site__what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-site__answer,
+.settings-site__when {
+  color: var(--text-muted);
+}
+
+.settings-site__when {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+}
+
+.settings-sites-earlier {
+  margin-top: 8px;
+}
+
+/* A site's lines: when it was last used, and until when it's connected */
+.settings-site__note,
 /* The wallet a connected site is connected to */
 .settings-site__wallet {
   color: var(--text-muted);

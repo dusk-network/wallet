@@ -131,6 +131,32 @@ describe("verified names", () => {
     ]);
   });
 
+  it("keeps a custom node's checks with it: back on the network's own node, nothing it said is taken", async () => {
+    const custom = "https://my-node.example:8443";
+    (await import("./nodeNetwork.js")).noteChainId(custom, 1);
+    expect(names.duskNamesNetwork(custom)).toBe("mainnet");
+    expect(names.duskNamesScope(custom)).toBe("my-node.example:8443");
+    expect(names.duskNamesScope(MAINNET)).toBe("mainnet");
+    for (const url of NAMES_OFF) expect(names.duskNamesScope(url)).toBeNull();
+
+    await names.rememberVerifiedName(custom, ACCOUNT, "forged.dusk");
+    let all = await names.readVerifiedNames();
+    expect(all).toEqual({ "my-node.example:8443": { [ACCOUNT]: { name: "forged.dusk", at: expect.any(Number) } } });
+    expect(names.verifiedNamesFor(all, custom).get(ACCOUNT)).toBe("forged.dusk");
+    expect(names.verifiedNamesFor(all, MAINNET).has(ACCOUNT)).toBe(false);
+    // Another custom node's are its own too.
+    const other = "https://other-node.example";
+    (await import("./nodeNetwork.js")).noteChainId(other, 1);
+    expect(names.verifiedNamesFor(all, other).has(ACCOUNT)).toBe(false);
+    // And it's checked anew on the network's own node, with an answer of its own.
+    expect(names.namesToRecheck(all, MAINNET, [ACCOUNT])).toEqual([ACCOUNT]);
+    expect(names.namesToRecheck(all, custom, [ACCOUNT])).toEqual([]);
+    await names.rememberVerifiedName(MAINNET, ACCOUNT, "alice.dusk");
+    all = await names.readVerifiedNames();
+    expect(names.verifiedNamesFor(all, MAINNET).get(ACCOUNT)).toBe("alice.dusk");
+    expect(names.verifiedNamesFor(all, custom).get(ACCOUNT)).toBe("forged.dusk");
+  });
+
   it("never throws when storage fails", async () => {
     mocks.broken = true;
     await expect(names.rememberVerifiedName(TESTNET, ACCOUNT, "alice.dusk")).resolves.toBeUndefined();

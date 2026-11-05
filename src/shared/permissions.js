@@ -1,7 +1,11 @@
 // dApp connections, per wallet: STORAGE_KEYS.PERMISSIONS_V2 holds
-//   { [walletId]: { [origin]: { profileId, accountIndex, grants, connectedAt, updatedAt } } }
+//   { [walletId]: { [origin]: { profileId, accountIndex, grants, connectedAt, updatedAt, lastsMs?, expiresAt? } } }
 // by each wallet's ID (its first public account). A site connected to one
 // wallet sees nothing of another unless it's connected there too.
+//
+// A connection can be set to last a while (`lastsMs`), from when it's approved or
+// set: past `expiresAt` it's as if the site weren't connected, and it soon goes
+// as one disconnected does (endConnections).
 //
 // The connections from before (STORAGE_KEYS.PERMISSIONS, by origin) were the
 // one wallet's: each moves under the wallet its profile is of once that wallet
@@ -22,6 +26,9 @@ async function readAll() {
   return { legacy: isObject(legacy) ? legacy : null, byWallet: isObject(byWallet) ? byWallet : {} };
 }
 
+// Whether a connection's time is up.
+const ended = (perm, now) => Number(perm?.expiresAt) > 0 && now >= Number(perm.expiresAt);
+
 function walletOf(walletId) {
   const id = String(walletId ?? "").trim();
   if (!id) throw new Error("walletId is required");
@@ -38,7 +45,67 @@ export async function getPermissions(walletId) {
   const { legacy, byWallet } = await readAll();
   const id = String(walletId ?? "").trim();
   if (!id) return legacy ?? {};
-  return isObject(byWallet[id]) ? byWallet[id] : {};
+  if (!isObject(byWallet[id])) return {};
+  const now = Date.now();
+  return Object.fromEntries(Object.entries(byWallet[id]).filter(([, perm]) => !ended(perm, now)));
+}
+
+/**
+ * Sets how long a connection lasts, from now: 0 until it's disconnected. A site
+ * that isn't connected to the wallet changes nothing.
+ * @param {string} origin
+ * @param {string} walletId
+ * @param {number} lastsMs
+ * @returns {Promise<boolean>} whether it was connected
+ */
+export function setConnectionLasts(origin, walletId, lastsMs) {
+  const id = walletOf(walletId);
+  return mutate(async () => {
+    const { byWallet } = await readAll();
+    const permissions = isObject(byWallet[id]) ? { ...byWallet[id] } : {};
+    const perm = permissions[origin];
+    const now = Date.now();
+    if (!perm || ended(perm, now)) return false;
+    const { expiresAt: _end, lastsMs: _set, ...rest } = perm;
+    permissions[origin] = { ...rest, ...(lastsMs > 0 ? { lastsMs, expiresAt: now + lastsMs } : {}) };
+    await writeWallet(byWallet, id, permissions);
+    return true;
+  });
+}
+
+/**
+ * Takes out the connections whose time is up, any wallet's: as one disconnected
+ * goes, so its site's told the same (dappEvents.js).
+ * @param {number} [now]
+ * @returns {Promise<Array<{ walletId: string, origin: string }>>} those that went
+ */
+export function endConnections(now = Date.now()) {
+  return mutate(async () => {
+    const { byWallet } = await readAll();
+    const gone = [];
+    const next = {};
+    for (const [id, sites] of Object.entries(byWallet)) {
+      const left = Object.entries(isObject(sites) ? sites : {}).filter(([origin, perm]) => {
+        if (!ended(perm, now)) return true;
+        gone.push({ walletId: id, origin });
+        return false;
+      });
+      if (left.length) next[id] = Object.fromEntries(left);
+    }
+    if (gone.length) await storage.set({ [V2]: next });
+    return gone;
+  });
+}
+
+/**
+ * When the next connection ends, any wallet's, in milliseconds; null for none.
+ * @returns {Promise<number | null>}
+ */
+export async function nextConnectionEnd() {
+  const { byWallet } = await readAll();
+  const now = Date.now();
+  const ends = Object.values(byWallet).flatMap((sites) => Object.values(isObject(sites) ? sites : {}).map((perm) => Number(perm?.expiresAt))).filter((at) => at > now);
+  return ends.length ? Math.min(...ends) : null;
 }
 
 /**
@@ -105,9 +172,11 @@ async function writeWallet(byWallet, id, permissions) {
 }
 
 /**
- * Connect `origin` to a profile of the wallet `walletId`.
+ * Connect `origin` to a profile of the wallet `walletId`: from now for `lastsMs`
+ * when it's new (0, or left out, until it's disconnected). One still connected
+ * goes on as it's set.
  * @param {string} origin
- * @param {{ profileId?: string, accountIndex?: number, grants?: { publicAccount?: boolean, shieldedReceiveAddress?: boolean } }} grant
+ * @param {{ profileId?: string, accountIndex?: number, lastsMs?: number, grants?: { publicAccount?: boolean, shieldedReceiveAddress?: boolean } }} grant
  * @param {string} walletId
  */
 export function approveOrigin(origin, grant = {}, walletId) {
@@ -115,7 +184,9 @@ export function approveOrigin(origin, grant = {}, walletId) {
   return mutate(async () => {
     const { byWallet } = await readAll();
     const permissions = isObject(byWallet[id]) ? { ...byWallet[id] } : {};
-    const prev = permissions[origin] ?? null;
+    const now = Date.now();
+    const prev = permissions[origin] && !ended(permissions[origin], now) ? permissions[origin] : null;
+    const lastsMs = Number(prev ? prev.lastsMs : grant?.lastsMs) || 0;
     const accountIndex = Math.max(0, Math.floor(Number(grant?.accountIndex ?? 0) || 0));
     const profileId = String(grant?.profileId ?? `profile:${accountIndex}`);
     const sameProfile = prev?.profileId === profileId;
@@ -131,8 +202,9 @@ export function approveOrigin(origin, grant = {}, walletId) {
           ? previousShieldedGrant || requestedShieldedGrant
           : requestedShieldedGrant,
       },
-      connectedAt: Number(prev?.connectedAt) || Date.now(),
-      updatedAt: Date.now(),
+      connectedAt: Number(prev?.connectedAt) || now,
+      updatedAt: now,
+      ...(lastsMs > 0 ? { lastsMs, expiresAt: Number(prev?.expiresAt) || now + lastsMs } : {}),
     };
     await writeWallet(byWallet, id, permissions);
     return permissions[origin];

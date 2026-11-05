@@ -4,10 +4,12 @@ import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
+import { parsePaymentLink } from "@dusk-network/app-core/payment-links";
 import { TX_KIND } from "../shared/constants.js";
 import { isAccount } from "@dusk-network/networks/account";
 import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
+import { noteChainId } from "../shared/nodeNetwork.js";
 import { shortAddress } from "./lib/strings.js";
 import { fakeEvent, installFakeDom, isShown, pastClickGuard, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
@@ -997,7 +999,7 @@ describe("review", () => {
     await settle();
     const body = dom.document.body;
     const row = body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
-    expect(row.querySelector(".safe-text > span").textContent).toBe("�gnp.exe claim your airdrop");
+    expect(row.querySelector(".safe-text > span").textContent).toBe("\\u202egnp.exe claim your airdrop");
     expect(row.querySelector(".safe-text__flag")).not.toBeNull();
     expect(visibleText(body)).not.toContain(rlo);
     pastClickGuard();
@@ -1075,6 +1077,73 @@ describe("review", () => {
       duskName: { name: "alice.dusk", nodeUrl: overview().nodeUrl, to: ALICE.address },
     });
     expect(view.reviewTo()).toBe(`alice.dusk${ALICE.address}`);
+  });
+
+  describe("a name read through a node the wallet doesn't know", () => {
+    const CUSTOM = "https://my-node.example:8443";
+    const NOTE = "Checked by my-node.example:8443, a node the wallet doesn't know. Check the address too.";
+    const custom = (over = {}) => overview({ nodeUrl: CUSTOM, ...over });
+    const noted = () => dom.document.body.querySelectorAll('[role="note"]').filter(isShown).map(visibleText);
+
+    beforeEach(() => {
+      noteChainId(CUSTOM, 2);
+    });
+    afterEach(() => {
+      noteChainId(CUSTOM, null);
+    });
+
+    it("says whose word it is under a typed name, and takes the address as it is", async () => {
+      const form = mount(newState(), custom());
+      typeInto(form.to, "alice.dusk");
+      await settle();
+      expect(visibleText(form.nameBox())).toContain(NOTE);
+      expect(noted()).toEqual([NOTE]);
+    });
+
+    it("says nothing on a network's own node", async () => {
+      const form = mount(newState(), overview());
+      typeInto(form.to, "alice.dusk");
+      await settle();
+      expect(form.nameBox().querySelector(".name-option")).toBeTruthy();
+      expect(noted()).toEqual([]);
+    });
+
+    it("doesn't call a pasted account's name verified, and says whose word it is", async () => {
+      lookupPrimaryName.mockImplementation(async (account) => (account === BOB.account ? "bob.dusk" : null));
+      const form = mount(newState(), custom());
+      typeInto(form.to, BOB.account);
+      await settle();
+      expect(visibleText(form.nameBox().querySelector(".name-verified"))).toBe("bob.dusk · its .dusk name");
+      expect(form.nameBox().querySelector(".name-verified .btn-ico")).toBeNull();
+      expect(noted()).toEqual([NOTE]);
+
+      // Verified, on a network's own node.
+      const own = mount(newState(), overview());
+      typeInto(own.to, BOB.account);
+      await settle();
+      expect(visibleText(own.nameBox().querySelector(".name-verified"))).toBe("bob.dusk · its verified .dusk name");
+      expect(noted()).toEqual([]);
+    });
+
+    it("says so on Review under To, for a typed name and a pasted account's, and not with no name", async () => {
+      const ov = custom();
+      let view = review({ to: ALICE.address, privacy: "shielded", duskName: { name: "alice.dusk", nodeUrl: CUSTOM, to: ALICE.address } }, ov);
+      await settle();
+      expect(view.reviewTo()).toBe(`alice.dusk${ALICE.address}`);
+      expect(noted()).toContain(NOTE);
+
+      lookupPrimaryName.mockImplementation(async (account) => (account === BOB.account ? "bob.dusk" : null));
+      view = review({ to: BOB.account, privacy: "public" }, ov);
+      await settle();
+      expect(view.reviewTo()).toBe(`bob.dusk${BOB.account}`);
+      expect(noted()).toContain(NOTE);
+
+      lookupPrimaryName.mockImplementation(async () => null);
+      view = review({ to: ALICE.account, privacy: "public" }, ov);
+      await settle();
+      expect(view.reviewTo()).toBe(ALICE.account);
+      expect(noted()).not.toContain(NOTE);
+    });
   });
 
   it("sends the .dusk name the recipient was typed as, for Activity, and none for a pasted address", async () => {
@@ -1362,7 +1431,7 @@ describe("a slow name lookup on Review", () => {
 describe("a request for another network", () => {
   it("says so under the recipient, and Review doesn't clear it", async () => {
     // A Mainnet request link pasted while the wallet is on Testnet.
-    parseDuskQrPayload.mockReturnValueOnce({ kind: "public", to: ALICE.account, amountDusk: "1", chainId: "dusk:1" });
+    parseDuskQrPayload.mockReturnValueOnce({ form: "dusk", kind: "public", to: ALICE.account, amountDusk: "1", chainId: "dusk:1" });
     const state = newState();
     const form = mount(state);
     form.to.value = "dusk:mainnet-request";
@@ -1390,5 +1459,236 @@ describe("a request for another network", () => {
     expect(state.draft.requestChainId).toBeUndefined();
     mount(state);
     expect(note()).toBeUndefined();
+  });
+
+  it("goes by the chain a custom node signs for, and calls it by its node", async () => {
+    const custom = { ...overview(), nodeUrl: "https://node.example", chainId: 2 };
+    noteChainId(custom.nodeUrl, custom.chainId);
+    const note = () => dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
+    const state = newState();
+    state.draft = { to: ALICE.account, requestChainId: "dusk:2" };
+    mount(state, custom);
+    expect(note()).toBeUndefined();
+    state.draft = { to: ALICE.account, requestChainId: "dusk:1" };
+    mount(state, custom);
+    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Custom · node.example.");
+  });
+});
+
+describe("the password on big sends", () => {
+  const LIMIT = "5000000000";
+  const reviewAt = (amountLux) => {
+    const ov = overview({ sendPasswordLimit: LIMIT, balance: { value: "20000000000" } });
+    const state = { route: "confirm", overview: ov, draft: { to: ALICE.account, privacy: "public", amountLux, amountDusk: "6", memo: "" } };
+    const sent = [];
+    const answers = {
+      DUSK_UI_GET_CACHED_GAS_PRICE: () => ({}),
+      DUSK_UI_SEND_PASSWORD_ASKS: () => ({ ok: true, result: { limit: LIMIT, moves: amountLux, always: false } }),
+      DUSK_UI_SEND_PASSWORD_PROVE: ({ password }) => (password === "the password" ? { ok: true, result: "ticket-1" } : { error: { message: "Incorrect password" } }),
+      DUSK_UI_SEND_TX: () => ({ ok: true, result: { hash: "ab".repeat(32) } }),
+    };
+    const view = mount(state, ov, async (message) => {
+      sent.push(message);
+      return answers[message.type]?.(message) ?? {};
+    });
+    const body = dom.document.body;
+    const confirm = () => body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const dialog = () => body.querySelector(".send-password");
+    const password = () => dialog().querySelector("input[type=password]");
+    const press = (name) => dialog().querySelectorAll("button").find((b) => b.textContent === name).click();
+    const sends = () => sent.filter((m) => m.type === "DUSK_UI_SEND_TX");
+    return { ...view, state, sent, answers, body, confirm, dialog, password, press, sends };
+  };
+  const pressConfirm = async (view) => {
+    pastClickGuard();
+    view.confirm().click();
+    await settle();
+  };
+
+  it("asks over the Review before anything of it goes, and sends with what the wallet gave for it", async () => {
+    const view = reviewAt("6000000000");
+    await pressConfirm(view);
+    expect(visibleText(view.dialog())).toContain("Enter your password");
+    expect(visibleText(view.dialog())).toContain("This is above the 5 DUSK you set in Settings.");
+    expect(view.sends()).toEqual([]);
+    // The Review stays under it: no Sent screen yet.
+    expect(view.state.route).toBe("confirm");
+    expect(view.dialog().getAttribute("role")).toBe("dialog");
+    expect(dom.document.activeElement).toBe(view.password());
+
+    typeInto(view.password(), "the password");
+    view.press("Confirm");
+    await settle();
+    await settle();
+    expect(view.dialog()).toBeNull();
+    expect(view.sends()).toHaveLength(1);
+    expect(view.sends()[0].sendTicket).toBe("ticket-1");
+    expect(JSON.stringify(view.sends()[0])).not.toContain("the password");
+    expect(view.state.route).toBe("sent");
+  });
+
+  it("stays on a wrong password, says so, and sends nothing", async () => {
+    const view = reviewAt("6000000000");
+    await pressConfirm(view);
+    typeInto(view.password(), "not it");
+    view.press("Confirm");
+    await settle();
+    expect(visibleText(view.dialog())).toContain("Wrong password.");
+    expect(view.password().value).toBe("");
+    expect(view.sends()).toEqual([]);
+    // Nothing typed says so too.
+    view.press("Confirm");
+    await settle();
+    expect(visibleText(view.dialog())).toContain("Enter your password.");
+    expect(view.sent.filter((m) => m.type === "DUSK_UI_SEND_PASSWORD_PROVE")).toHaveLength(1);
+  });
+
+  it("goes back to the Review on Cancel or Escape, with nothing sent and Confirm on again", async () => {
+    const view = reviewAt("6000000000");
+    await pressConfirm(view);
+    view.press("Cancel");
+    await settle();
+    expect(view.dialog()).toBeNull();
+    expect(view.sends()).toEqual([]);
+    expect(view.state.route).toBe("confirm");
+    expect(view.actions.showToast).toHaveBeenCalledWith("It waits for your password, so nothing was sent.");
+    expect(view.confirm().disabled).toBe(false);
+
+    await pressConfirm(view);
+    dom.document.body.dispatchEvent(fakeEvent("keydown", { key: "Escape" }));
+    await settle();
+    expect(view.dialog()).toBeNull();
+    expect(view.sends()).toEqual([]);
+    expect(view.confirm().disabled).toBe(false);
+  });
+
+  it("asks nothing up to the amount, or with it off", async () => {
+    const view = reviewAt("1000000000");
+    view.answers.DUSK_UI_SEND_PASSWORD_ASKS = () => ({ ok: true, result: null });
+    await pressConfirm(view);
+    await settle();
+    expect(view.dialog()).toBeNull();
+    expect(view.sends()).toHaveLength(1);
+    expect(view.sends()[0].sendTicket).toBeUndefined();
+
+    const off = { route: "confirm", overview: overview(), draft: { to: ALICE.account, privacy: "public", amountLux: "6000000000", amountDusk: "6", memo: "" } };
+    const sent = [];
+    mount(off, off.overview, async (message) => {
+      sent.push(message);
+      return message.type === "DUSK_UI_SEND_TX" ? { ok: true, result: { hash: "ab".repeat(32) } } : {};
+    });
+    pastClickGuard();
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await settle();
+    await settle();
+    expect(sent.some((m) => m.type === "DUSK_UI_SEND_PASSWORD_ASKS")).toBe(false);
+    expect(sent.filter((m) => m.type === "DUSK_UI_SEND_TX")).toHaveLength(1);
+  });
+
+  it("says why nothing went when the wallet refuses it all the same, as Not sent, with Back to review", async () => {
+    const view = reviewAt("6000000000");
+    view.answers.DUSK_UI_SEND_PASSWORD_ASKS = () => ({ ok: true, result: null });
+    view.answers.DUSK_UI_SEND_TX = () => ({ error: { message: "It waits for your password, so nothing was sent." } });
+    await pressConfirm(view);
+    await settle();
+    expect(view.state.sent.phase).toBe("not_sent");
+    expect(view.state.sent.error).toBe("It waits for your password, so nothing was sent.");
+  });
+});
+
+describe("an amount in the browser's language", () => {
+  it("reads as French writes it, in Send's own field, with no error and Review on", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "fr-FR" });
+    const state = newState();
+    const form = mount(state, overview({ balance: { value: "5000000000000" } }));
+    typeInto(form.to, ALICE.account);
+    for (const typed of ["1 000", "1\u00a0000", "1\u202f000", "1 000,5"]) {
+      typeInto(form.amount, typed);
+      expect(form.amountError()).toBe("");
+      expect(form.review.disabled).toBe(false);
+    }
+    form.review.click();
+    await settle();
+    expect(state.draft.amountLux).toBe("1000500000000");
+  });
+});
+
+describe("a request link", () => {
+  const httpsLink = (query) => `https://apps.testnet.dusk.network/wallet/dashboard/send?${query}`;
+
+  beforeEach(() => parseDuskQrPayload.mockImplementation(parsePaymentLink));
+  afterEach(() => parseDuskQrPayload.mockImplementation(() => null));
+
+  const paste = (form, text) => form.to.dispatchEvent(fakeEvent("paste", { clipboardData: { getData: () => text } }));
+
+  it("fills Send in when it's pasted, the https link as the dusk: one, in the browser's separators", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "nl-NL" });
+    const state = newState();
+    const form = mount(state);
+    paste(form, ` ${httpsLink(`to=${ALICE.account}&amount=0.15&memo=Factura+33&network=testnet`)} `);
+    await settle();
+    expect(state.draft).toMatchObject({ to: ALICE.account, amountDusk: "0,15", memo: "Factura 33", requestChainId: "dusk:2" });
+    expect(form.to.value).toBe(ALICE.account);
+    expect(form.amount.value).toBe("0,15");
+    expect(form.actions.showToast).toHaveBeenCalledWith("Request decoded", 1800);
+
+    const again = mount(newState());
+    paste(again, `dusk:public-${ALICE.account}@dusk:2?amount=1.5&memo=Rent`);
+    await settle();
+    expect(again.to.value).toBe(ALICE.account);
+    expect(again.amount.value).toBe("1,5");
+  });
+
+  it("says when it's for another network, and goes as far as Review only with what Send takes", async () => {
+    const state = newState();
+    const form = mount(state);
+    paste(form, `https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=1&network=mainnet`);
+    await settle();
+    const note = dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
+    expect(note?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+
+    // An amount in the link that isn't one is said under the field.
+    const typo = mount(newState());
+    paste(typo, httpsLink(`to=${ALICE.account}&amount=lots`));
+    await settle();
+    expect(typo.amountError()).toBe("Enter an amount such as 1 or 0.5.");
+    expect(typo.review.disabled).toBe(true);
+  });
+
+  it("is no request when it goes anywhere else, or names no recipient", async () => {
+    const form = mount(newState());
+    form.to.value = `https://phish.example/wallet/dashboard/send?to=${ALICE.account}&amount=1`;
+    form.to.dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(form.to.value).toContain("phish.example");
+    expect(form.amount.value).toBe("");
+    form.review.click();
+    await settle();
+    expect(dom.document.body.querySelector(".err").textContent).toBe("Not a valid address. Check it and try again.");
+
+    const empty = mount(newState());
+    empty.to.value = httpsLink("amount=1");
+    empty.to.dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(empty.amount.value).toBe("");
+  });
+
+  it("fills in the page it opened, a tab of its own, as the form any request fills in", async () => {
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=2.5&memo=Rent&network=testnet`))}` });
+    vi.resetModules();
+    const { state } = await import("./popup/state.js");
+    expect(state.route).toBe("send");
+    const form = mount(state);
+    expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "2.5"]);
+    expect(state.draft.memo).toBe("Rent");
+    expect(state.draft.requestChainId).toBe("dusk:2");
+
+    // No link, or a page opened with something that isn't one: an empty form.
+    vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send" });
+    vi.resetModules();
+    expect((await import("./popup/state.js")).state.draft).toBeNull();
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent("https://phish.example/x")}` });
+    vi.resetModules();
+    expect((await import("./popup/state.js")).state.draft).toBeNull();
   });
 });

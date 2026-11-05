@@ -1,7 +1,7 @@
 // What a wallet reset clears besides the vault and the site permissions: every
 // wallet's transactions, shielded notes, history, deposits' arrivals on
-// DuskEVM, contacts, profile labels and tokens, the wallets' names, and the
-// settings, so the network is Mainnet's own node again and no address stays.
+// DuskEVM, contacts, profile labels and tokens, the wallets' names, what sites
+// asked, and the settings, so the network is Mainnet's own node again and no address stays.
 // And what removing one wallet clears of it alone (forgetWalletData).
 //
 // A reset is noted before the vault goes. If any of these can't be cleared,
@@ -22,6 +22,7 @@ import { clearArrivals, forgetWalletArrivals } from "./bridgeArrival.js";
 import { clearContacts, forgetWalletContacts, keepOnlyContactsOf } from "./contactsStore.js";
 import { clearPermissions } from "./permissions.js";
 import { clearSettings } from "./settings.js";
+import { clearSiteRecords, forgetWalletSiteRecords } from "./siteRecords.js";
 import { clearShieldedStore, forgetWalletNotes } from "./shieldedStore.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { clearTxs, forgetWalletTxs } from "./txStore.js";
@@ -54,8 +55,9 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     keepOnlyAssetsOf(keepContactsOf),
     clearWallets(),
     clearSettings(),
-    // Names checked and rates read, kept by account or by node.
-    storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES]),
+    clearSiteRecords(),
+    // Names checked and rates read, kept by account or by node, and the password on big sends.
+    storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES, STORAGE_KEYS.SEND_PASSWORD]),
   ]);
   if (results.some((r) => r.status === "rejected")) {
     throw new Error("The old wallet's data couldn't be cleared. Try again.");
@@ -93,8 +95,8 @@ export async function finishPendingReset() {
 }
 
 /**
- * Forget a removed wallet's data, and nothing of another's: its sites,
- * transactions, arrivals, labels, tokens, contacts, notes and history. Every
+ * Forget a removed wallet's data, and nothing of another's: its sites and
+ * what they asked, transactions, arrivals, labels, tokens, contacts, notes and history. Every
  * store is tried; one that can't be cleared keeps that wallet's data, which
  * no other wallet reads.
  * @param {{ walletId: string, accounts: string[] }} wallet - its first public account, and its profiles' accounts
@@ -105,6 +107,7 @@ export async function forgetWalletData({ walletId, accounts }) {
   if (!id) return false;
   const results = await Promise.allSettled([
     clearPermissions(id),
+    forgetWalletSiteRecords(id),
     forgetWalletTxs(id),
     forgetWalletArrivals(id),
     forgetAccountNames(id),

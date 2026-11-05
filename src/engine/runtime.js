@@ -172,7 +172,7 @@ keepPrimaryNamesWith((nodeUrl, account, name) =>
   runtimeSendMessage({ type: "DUSK_NAME_CHECKED", nodeUrl, account, name }).catch(() => {})
 );
 
-ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
+ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
   if (!message) return;
 
   if (message.type === "DUSK_ENGINE_PING") {
@@ -185,6 +185,9 @@ ext?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type !== "DUSK_ENGINE_CALL") return;
+  // The background alone: what it checks, the password on big sends among it,
+  // no page in a tab goes round.
+  if (sender?.tab) return;
 
   (async () => {
     try {

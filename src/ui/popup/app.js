@@ -49,7 +49,8 @@ import {
   restoreWalletView,
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
-import { changePasswordView, removeWalletView } from "./views/wallets.js";
+import { changePasswordView, removeWalletView, sendPasswordView } from "./views/wallets.js";
+import { cancelSendPassword } from "../components/SendPasswordDialog.js";
 import { getRuntimeKind, isExtensionRuntime } from "../../platform/runtime.js";
 import {
   getExtensionApi,
@@ -82,13 +83,14 @@ function isWalletLockedResponse(value) {
 }
 
 // The screens of a wallet being added, removed, or a new password: unlocked only.
-const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password"]);
+const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password", "send_password"]);
 
 function applyLockedOverviewPatch() {
   try {
     // Locked here or elsewhere: whatever began unlocked is for nothing now.
     switchContext(state, "lock");
     acctMenu.close();
+    cancelSendPassword();
     stopArrivalChecks();
     // A wallet being added keeps nothing of its new phrase through a lock.
     if (state.onboard?.adding) state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
@@ -644,6 +646,7 @@ function installTxStatusListener() {
           switchContext(state);
           // A menu still open shows the wallet before: it goes.
           acctMenu.close();
+          cancelSendPassword();
           state.needsRefresh = true;
           render({ forceRefresh: true }).catch(() => {});
           return;
@@ -1106,6 +1109,10 @@ export async function render({ forceRefresh = false } = {}) {
     setApp(keepForm(() => changePasswordView(ov, { state, actions })));
     return;
   }
+  if (state.route === "send_password") {
+    setApp(keepForm(() => sendPasswordView(ov, { state, actions })));
+    return;
+  }
   // After Confirm: the transaction's steps. Without one (a new popup), home.
   if (state.route === "sent") {
     if (state.sent) {
@@ -1181,17 +1188,12 @@ export async function render({ forceRefresh = false } = {}) {
 }
 
 export function mountPopup() {
-  // A tab the popup opened to save its Activity export saves it now.
-  if (!isPopupView) {
-    saveHandedExport()
-      .then((name) => {
-        if (name) showToast("CSV saved");
-      })
-      .catch((e) => showToast(e?.message ?? String(e), 3000));
-  }
-  render().catch((e) => {
-    setApp([showError(e)]);
-  });
+  render()
+    // A tab the popup opened to make its Activity export makes it now.
+    .then(() => (isPopupView ? null : saveHandedExport({ state, render, showToast }).catch((e) => showToast(e?.message ?? String(e), 3000))))
+    .catch((e) => {
+      setApp([showError(e)]);
+    });
 }
 
 (function setupViewportInsets() {

@@ -2,8 +2,11 @@ import { getSettings, normalizeCustomGas, setSettings } from "../shared/settings
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { serializeStakeInfo } from "../shared/transport.js";
-import { nativeRewardRate } from "../shared/rewardRate.js";
+import { nativeRewardRate, stakingFigures } from "../shared/rewardRate.js";
 import { contactsStore, forgetWalletContacts } from "../shared/contactsStore.js";
+import { askedOf, proveSendPassword, sendPasswordLimit, setSendPasswordLimit } from "../shared/sendPassword.js";
+import { checkVaultPassword } from "../shared/vault.js";
+import { applyTxDefaults } from "../shared/txDefaults.js";
 import {
   getWatchedAssets,
   watchToken,
@@ -97,11 +100,50 @@ function serializeResult(type, result) {
   return result;
 }
 
+// The transaction as it would go: with the gas it goes with, as the send does it.
+async function sendParams(message, { engineCall, ensureEngineConfigured }) {
+  await ensureEngineConfigured();
+  const stats = await engineCall("dusk_getCachedGasPrice").catch(() => null);
+  return applyTxDefaults(message.params ?? {}, { dynamicPrice: stats?.median });
+}
+
+/**
+ * The password on big sends: what a send asks, the password given for it, and a
+ * change of the amount, which takes the password too. All for the wallet that's
+ * open, and only from the wallet's own pages (background/index.js).
+ */
+async function sendPasswordCommand(message, host) {
+  const status = await host.getEngineStatus();
+  if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+  const { nodeUrl } = await getSettings();
+  switch (message.type) {
+    case "DUSK_UI_SEND_PASSWORD_ASKS":
+      return { ok: true, result: askedOf(await sendParams(message, host), await sendPasswordLimit(), nodeUrl) };
+    case "DUSK_UI_SEND_PASSWORD_PROVE": {
+      const walletId = String(status.accounts?.[0] ?? "");
+      const params = await sendParams(message, host);
+      return { ok: true, result: await proveSendPassword(message.password, params, { walletKey: status.walletKey, walletId, nodeUrl }) };
+    }
+    default: {
+      const limit = message.limitLux === null ? null : String(message.limitLux ?? "");
+      if (limit !== null && !/^\d+$/.test(limit)) throw rpcError(ERROR_CODES.INVALID_PARAMS, "That isn't an amount.");
+      await checkVaultPassword(message.password, status.walletKey);
+      await setSendPasswordLimit(limit);
+      return { ok: true };
+    }
+  }
+}
+
+/** What reads or changes the password on big sends, for the wallet's own pages alone. */
+export const SEND_PASSWORD_COMMANDS = new Set(["DUSK_UI_SEND_PASSWORD_ASKS", "DUSK_UI_SEND_PASSWORD_PROVE", "DUSK_UI_SET_SEND_PASSWORD"]);
+
 export async function handleUiCommand(
   message,
   { engineCall, ensureEngineConfigured, getEngineStatus }
 ) {
   const type = message?.type;
+
+  if (SEND_PASSWORD_COMMANDS.has(type)) return sendPasswordCommand(message, { engineCall, ensureEngineConfigured, getEngineStatus });
 
   if (type === "DUSK_UI_SET_NFT_SETTINGS") {
     const next = await setSettings({
@@ -126,6 +168,11 @@ export async function handleUiCommand(
   // About what native staking pays a year lately: from the node, at most once a day.
   if (type === "DUSK_UI_GET_REWARD_RATE") {
     return { ok: true, result: await nativeRewardRate((await getSettings()).nodeUrl) };
+  }
+
+  // What the working under Sozu's rate says: read as that screen opens.
+  if (type === "DUSK_UI_GET_STAKING_FIGURES") {
+    return { ok: true, result: await stakingFigures((await getSettings()).nodeUrl) };
   }
 
   if (type === "DUSK_UI_GET_CACHED_GAS_PRICE") {

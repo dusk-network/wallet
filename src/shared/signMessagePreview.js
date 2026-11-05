@@ -1,16 +1,12 @@
-import { isUnsafeC0ControlCodePoint, sanitizeStringForDisplay, textNeedsReview } from "./safeText.js";
+import { sanitizeStringForDisplay, textNeedsReview } from "./safeText.js";
 
 export const SIGN_MESSAGE_PREVIEW_MAX_CHARS = 500;
 export const SIGN_MESSAGE_PREVIEW_MAX_BYTES = 4096;
 
-function hasUnsafeControlCharacters(text) {
-  for (const ch of String(text ?? "")) {
-    const code = ch.codePointAt(0);
-    if (code == null) continue;
-    if (isUnsafeC0ControlCodePoint(code)) return true;
-  }
-  return false;
-}
+// A C0 control or DEL, other than what free text has: tab, line feed, carriage return.
+const UNSAFE_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
+
+const hasUnsafeControlCharacters = (text) => UNSAFE_CONTROL.test(String(text ?? ""));
 
 function decodeUtf8(bytes) {
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);

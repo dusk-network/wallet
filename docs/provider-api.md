@@ -582,7 +582,7 @@ dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 | Event | Payload | When |
 |-------|---------|------|
 | `connect` | `{ chainId }` | Permission granted, or the user switched to a wallet the site is connected to |
-| `disconnect` | `{ code: 4900, message }` | Permission revoked, or the user switched to a wallet the site isn't connected to |
+| `disconnect` | `{ code: 4900, message }` | Permission revoked, the connection reached the end the user set for it, or the user switched to a wallet the site isn't connected to |
 | `profilesChanged` | `DuskProfile[]` | Lock/unlock, connect/disconnect, selected profile or wallet changes, profile grant changes, or the profile's `.dusk` name changes |
 | `chainChanged` | `ChainId` | Network changed (different chain ID) |
 | `duskNodeChanged` | `{ chainId, nodeUrl, networkName }` | Node URL changed (even same chain) |

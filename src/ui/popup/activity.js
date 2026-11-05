@@ -13,8 +13,9 @@
 
 import { activityRows as rowsOf, settleSends } from "@dusk-network/app-core/activity";
 import { StaleHistoryError } from "@dusk-network/app-core/history";
+import { sozuFacts } from "@dusk-network/app-core/sozu";
 
-import { activityHistory, noteActivityUnavailable } from "../../shared/activityHistory.js";
+import { activityHistory, archiveAt, historyArchiverUrl, noteActivityUnavailable } from "../../shared/activityHistory.js";
 import { keptArrivals } from "../../shared/bridgeArrival.js";
 import {
   StaleActivityError,
@@ -27,7 +28,7 @@ import { nameFactsFor } from "../../shared/knownCalls.js";
 import { chainIdForNode, networkForNode } from "../../shared/nodeNetwork.js";
 import { lookupRecipientNames } from "../../shared/duskNames.js";
 import { forgetTxs, getTxEpoch, listTxs, patchTxMeta } from "../../shared/txStore.js";
-import { VERIFIED_NAME_TTL_MS, duskNamesNetwork } from "../../shared/verifiedNames.js";
+import { VERIFIED_NAME_TTL_MS, duskNamesScope } from "../../shared/verifiedNames.js";
 import { noteTxStatus } from "./views/sent.js";
 
 /** Rows read for the History view at first, and how many more Show more adds. */
@@ -66,6 +67,19 @@ function redraw(state, render) {
   }, 50);
 }
 
+/** What a whole read says when what's open in the wallet is no longer what it was read for. */
+export class ActivityChangedError extends Error {
+  constructor() {
+    super("The wallet changed while this was read, so nothing was saved. Export again.");
+    this.name = "ActivityChangedError";
+  }
+}
+
+// Whether the wallet's answer is this activity's shielded history: the wallet answers
+// for what's open in it now, whichever wallet, node and profile that is by then.
+const shieldedOwn = (a, result) =>
+  Array.isArray(result?.entries) && result.walletId === a.walletId && result.nodeUrl === a.nodeUrl && result.profileIndex === a.profileIndex;
+
 async function reload(a) {
   const { entries, state, coveredTo, complete } = await a.history.read({ limit: a.limit });
   a.entries = entries;
@@ -103,11 +117,11 @@ async function settle(a, state) {
 
 // Names kept from a check in the last ten minutes, as sites get them.
 async function keptNames(a) {
-  const network = duskNamesNetwork(a.nodeUrl);
+  const scope = duskNamesScope(a.nodeUrl);
   const accounts = counterparties(a);
-  if (!network || !accounts.length) return;
+  if (!scope || !accounts.length) return;
   const now = Date.now();
-  for (const [account, { name, at }] of await getCounterpartyNames(network, accounts)) {
+  for (const [account, { name, at }] of await getCounterpartyNames(scope, accounts)) {
     if (now - at >= 0 && now - at < VERIFIED_NAME_TTL_MS && !a.names.has(account)) a.names.set(account, name);
   }
 }
@@ -118,9 +132,9 @@ const counterparties = (a) => [
 
 // The shown counterparties' names, checked again: one Multicall query for up to 32.
 async function checkNames(a) {
-  const network = duskNamesNetwork(a.nodeUrl);
+  const scope = duskNamesScope(a.nodeUrl);
   const due = counterparties(a).filter((c) => !a.checked.has(c));
-  if (!network || !due.length) return false;
+  if (!scope || !due.length) return false;
   for (const c of due) a.checked.add(c);
   const names = await lookupRecipientNames(due, { nodeUrl: a.nodeUrl });
   for (const c of due) {
@@ -128,7 +142,7 @@ async function checkNames(a) {
     else a.names.delete(c);
   }
   const epoch = await a.epoch;
-  if (epoch !== undefined) await putCounterpartyNames(network, names, { epoch }).catch(() => {});
+  if (epoch !== undefined) await putCounterpartyNames(scope, names, { epoch }).catch(() => {});
   return names.size > 0;
 }
 
@@ -157,8 +171,8 @@ async function loadShielded(a, state, render) {
     // Another account's activity now: nothing more for this one.
     if (state.activity !== a) return;
     const result = res?.result;
-    // An error, or an answer that isn't this profile's history: asked again later.
-    if (res?.error || !Array.isArray(result?.entries) || result.profileIndex !== a.profileIndex) {
+    // An error, or an answer that isn't this activity's history: asked again later.
+    if (res?.error || !shieldedOwn(a, result)) {
       again();
       return;
     }
@@ -326,6 +340,80 @@ export async function showMoreActivity({ state, render }) {
   if (!a.complete && a.entries.length < a.limit) await run(a, state, render);
 }
 
+// A whole read: runs of this many history requests, at most this many runs.
+const WHOLE_RUN_REQUESTS = 64;
+const WHOLE_RUNS = 64;
+
+/**
+ * All of the account's history, for what needs every row (an export, a Sozu
+ * position), read from the archive as far as it isn't kept yet, with each
+ * entry's details. Throws when it can't be had whole, and ActivityChangedError when
+ * the wallet answers for another wallet, node or profile by then. `activityRows`
+ * makes the rows of it.
+ * @param {object} ov - the overview
+ * @param {{ state: object, publicOnly?: boolean }} ctx - `publicOnly`: its shielded history isn't asked for
+ * @returns {Promise<{ entries: object[], meta: object | null, shielded: object[], shieldedWaiting: boolean }>}
+ *   `shieldedWaiting`: its shielded history isn't all there yet
+ */
+export async function wholeActivity(ov, { state, publicOnly = false }) {
+  const a = state?.activity;
+  if (!a?.history || a.key !== activityKey(ov)) throw new Error("The activity of this profile isn't open");
+  if ((await a.epoch) === undefined) throw new Error("The activity store is out of reach");
+  let whole = false;
+  // At least one run: newer blocks than the last one read may hold more.
+  for (let run = 0; run < WHOLE_RUNS && !whole; run += 1) {
+    await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
+    ({ complete: whole } = await a.history.read({ limit: 1 }));
+  }
+  if (!whole) throw new Error("The history is too long to read at once");
+  const all = { limit: Number.MAX_SAFE_INTEGER - 1 };
+  let read = await a.history.read(all);
+  const missing = read.entries.filter((entry) => a.history.needsDetails(entry));
+  if (missing.length) {
+    await a.history.fillDetails(missing);
+    read = await a.history.read(all);
+  }
+  const answer = a.send && !publicOnly ? await a.send({ type: "DUSK_UI_GET_SHIELDED_HISTORY" }).catch(() => null) : null;
+  const shielded = answer?.error ? null : answer?.result;
+  // Another wallet's, node's or profile's: what's open changed while this was read.
+  if (shielded && !shieldedOwn(a, shielded)) throw new ActivityChangedError();
+  return {
+    entries: read.entries,
+    meta: read.state,
+    shielded: shielded ? shielded.entries : a.shielded,
+    shieldedWaiting: !shielded || Boolean(shielded.pending),
+  };
+}
+
+/**
+ * Refuses what was read for `ov` when that isn't what's open in the wallet any
+ * more: another wallet, profile or node, or none, unlocked.
+ * @param {object} ov - the overview it was read for
+ * @param {{ state: object }} ctx
+ */
+export async function assertActivityOpen(ov, { state }) {
+  const now = await state?.activity?.send?.({ type: "DUSK_UI_OVERVIEW" }).catch(() => null);
+  // An overview says what was open before its balance reads: what's open by now is asked last.
+  const status = await state?.activity?.send?.({ type: "DUSK_UI_STATUS" }).catch(() => null);
+  const open = activityKey(now) && activityKey(now) === activityKey(ov) && status?.isUnlocked && status.accounts?.includes(selected(ov).account);
+  if (!open) throw new ActivityChangedError();
+}
+
+// Each stake with Sozu's own stDUSK and deposit fee, read once a page.
+const sozuFactsKept = new Map();
+
+/**
+ * What each stake and unstake with Sozu in `rows` did, as the pool's event says
+ * it: none for what can't be read yet.
+ * @param {object} ov - the overview
+ * @param {object[]} rows - the account's rows
+ * @returns {Promise<Map<string, import("@dusk-network/app-core/sozu").SozuFact> | undefined>}
+ */
+export function sozuFactsOf(ov, rows) {
+  const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
+  return sozuFacts({ archive, account: selected(ov).account, rows, cache: sozuFactsKept }).catch(() => undefined);
+}
+
 /** How long a detail lookup that brought nothing waits before it is asked again. */
 export const DETAIL_RETRY_MS = 60_000;
 // By activity and hash: "loading", or when a lookup that brought nothing
@@ -377,9 +465,11 @@ const sentOf = (tx) => (tx?.bridgeTo ? { ...tx, bridge: { amount: String(tx.depo
  * newest first, as @dusk-network/app-core/activity merges them.
  * @param {object} ov
  * @param {object} state
+ * @param {{ entries?: object[], meta?: object | null, shielded?: object[] }} [whole] - the
+ *   account's whole history (wholeActivity), in place of the page read so far
  * @returns {object[]}
  */
-export function activityRows(ov, state) {
+export function activityRows(ov, state, whole = null) {
   const key = activityKey(ov);
   const a = state?.activity;
   const ours = a && key && a.key === key ? a : null;
@@ -395,8 +485,8 @@ export function activityRows(ov, state) {
     pending: (Array.isArray(ov?.txs) ? ov.txs : []).map(sentOf),
     // The selected profile's activity; every profile's while locked.
     profileIndex: key ? profileIndex : null,
-    public: ours?.entries,
-    shielded: ours?.shielded,
-    state: ours?.meta,
+    public: whole?.entries ?? ours?.entries,
+    shielded: whole?.shielded ?? ours?.shielded,
+    state: whole?.meta ?? ours?.meta,
   });
 }

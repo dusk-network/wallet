@@ -285,6 +285,27 @@ describe("amounts in the browser's language", () => {
     }
   });
 
+  it("read back as a language groups them, however its space was typed", () => {
+    inLanguage("fr-FR");
+    for (const space of [" ", "\u00a0", "\u202f", "\u2009"]) {
+      expect(parseDuskToLux(`1${space}000`), `U+${space.codePointAt(0).toString(16)}`).toBe("1000000000000");
+      expect(parseDuskToLux(`1${space}000,5`), `U+${space.codePointAt(0).toString(16)}`).toBe("1000500000000");
+      expect(parseDuskToLux(`1${space}000${space}000`), `U+${space.codePointAt(0).toString(16)}`).toBe("1000000000000000");
+    }
+    // What the wallet writes reads back as the same amount.
+    expect(parseDuskToLux(formatDuskExact("1000500000000"))).toBe("1000500000000");
+    // Groups that aren't the language's are refused, never read as another amount.
+    expect(() => parseDuskToLux("1 00")).toThrow("Invalid amount");
+    expect(() => parseDuskToLux("10 00")).toThrow("Invalid amount");
+    inLanguage("de-CH");
+    expect(parseDuskToLux("1\u2019000.5")).toBe("1000500000000");
+    inLanguage("hi-IN");
+    expect(parseDuskToLux("12,34,567")).toBe("1234567000000000");
+    // Not in a language that doesn't write it so.
+    inLanguage("en-US");
+    expect(() => parseDuskToLux("1 000")).toThrow("Invalid amount");
+  });
+
   it("say their examples in the language's separators", () => {
     inLanguage("nl-NL");
 

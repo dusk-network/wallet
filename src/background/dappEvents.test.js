@@ -812,9 +812,9 @@ describe("dappEvents", () => {
       expect(profileEvents(port)).toEqual([]);
     });
 
-    it("gives sites a custom node's network's names by the chain ID its settings keep, read when chosen or later", async () => {
+    it("gives sites a custom node's own checks by the chain ID its settings keep, read when chosen or later, and never its network's", async () => {
       permissions = { "https://dapp.example": connected(0) };
-      verifiedNames = { testnet: { acct0: check("alice.dusk") } };
+      verifiedNames = { testnet: { acct0: check("alice.dusk") }, "my-node.example": { acct0: check("its-word.dusk") } };
       const ev = await import("./dappEvents.js");
       const port = await openPort(ev);
       port.messages = [];
@@ -830,11 +830,12 @@ describe("dappEvents", () => {
       await ev.handleSettingsDiff({ nodeUrl: "https://my-node.example", chainId: null }, settings);
       expect(profileEvents(port)).toHaveLength(1);
 
-      // Testnet's own node, from a custom one of Testnet's: the same names, nothing to resend.
+      // Testnet's own node, from a custom one of Testnet's: that node's word goes, and sites get what's kept here.
       port.messages = [];
       settings = { nodeUrl: "https://testnet.nodes.dusk.network" };
       await ev.handleSettingsDiff({ nodeUrl: "https://my-node.example", chainId: 2 }, settings);
-      expect(profileEvents(port)).toEqual([]);
+      expect(profileEvents(port)).toHaveLength(1);
+      expect(profileEvents(port)[0].data[0].name).toBe("alice.dusk");
     });
   });
 });

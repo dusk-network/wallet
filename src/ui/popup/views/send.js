@@ -30,6 +30,7 @@ import { fieldLabel, reviewActions, submitOnGasEnter, textInput } from "../../co
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
+import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
 import {
   hideRecipientBadge,
   recipientBadge,
@@ -49,9 +50,9 @@ import {
 
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { sendFromReview } from "./sent.js";
+import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
-import { networkTextOf } from "../../../shared/nodeNetwork.js";
-import { MEMO_TOO_LONG_TEXT, chainLabel, memoTooLong, normalizeChainId } from "../../../shared/duskUri.js";
+import { chainIdForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 
 // A pasted EVM address, which a Dusk transfer can't pay.
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -61,6 +62,11 @@ const NOT_AN_ADDRESS_TEXT = "Not a valid address. Check it and try again.";
 const LONGEST_NAME = 68;
 // What the network takes.
 export const EVM_ADDRESS_TEXT = "That's an EVM address, not a Dusk account.";
+// The longest memo a transaction carries.
+const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
+const memoTooLong = (memo) => new TextEncoder().encode(String(memo ?? "").trim()).length > MAX_MEMO_BYTES;
+// A request link: `dusk:`, or https to the web wallet's Send.
+const looksLikeRequest = (text) => /^dusk:/i.test(text) || parseDuskQrPayload(text)?.form === "https";
 
 /**
  * The .dusk name the draft's recipient was resolved from, while the recipient
@@ -294,7 +300,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   const applyRequest = (req, { source = "request" } = {}) => {
     if (!req?.to) return false;
 
-    const isDuskReq = req.kind === "public" || req.kind === "shielded";
+    const isDuskReq = req.form === "dusk" || req.form === "https";
 
     // Update DOM values
     to.value = req.to;
@@ -622,7 +628,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       },
       onShield: openShield,
     });
-    showNameBox([choice.el]);
+    showNameBox([choice.el, nameCheckNoteEl(ov?.nodeUrl)]);
     return showNameAddress(result);
   };
 
@@ -645,12 +651,15 @@ export function sendFormView(ov, { state, actions } = {}) {
     lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true })
       ?.then?.((name) => {
         if (!name || n !== primaryCount || String(to.value || "").trim() !== account) return;
+        // Verified, on a network's own node; on another, that node's word.
+        const note = nameCheckNoteEl(ov?.nodeUrl);
         showNameBox([
           h("div", { class: "name-verified" }, [
-            h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("check") }),
+            note ? null : h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("check") }),
             h("span", { class: "name-verified__name", text: name }),
-            h("span", { class: "name-verified__note", text: " · its verified .dusk name" }),
+            h("span", { class: "name-verified__note", text: note ? " · its .dusk name" : " · its verified .dusk name" }),
           ]),
+          note,
         ]);
       })
       ?.catch?.(() => {});
@@ -692,13 +701,13 @@ export function sendFormView(ov, { state, actions } = {}) {
       return;
     }
 
-    // Give quick feedback when the user pastes a dusk: request link.
-    if (/^dusk:/i.test(v)) {
+    // Give quick feedback when the user pastes a request link.
+    if (looksLikeRequest(v)) {
       setRecipientBadge(toTypePill, {
         kind: "request",
         icon: "request",
         label: "Request",
-        title: "Dusk request link",
+        title: "Request link",
         className: "recipient-type-badge",
       });
       detectedRecipientType = null;
@@ -828,8 +837,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
   to.addEventListener("paste", (e) => {
     try {
-      const txt = e?.clipboardData?.getData?.("text") ?? "";
-      if (txt && /^dusk:/i.test(txt)) {
+      const txt = String(e?.clipboardData?.getData?.("text") ?? "").trim();
+      if (txt && looksLikeRequest(txt)) {
         e.preventDefault();
         if (!maybeDecodeRequest(txt, { source: "request" })) {
           // Fall back to normal paste
@@ -842,7 +851,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
   to.addEventListener("blur", () => {
     const v = String(to.value || "").trim();
-    if (/^dusk:/i.test(v)) {
+    if (looksLikeRequest(v)) {
       maybeDecodeRequest(v, { source: "request" });
     }
   });
@@ -916,9 +925,9 @@ export function sendFormView(ov, { state, actions } = {}) {
     onclick: async () => {
       try {
         setErr("");
-        // Allow a dusk: request link to be pasted directly into the recipient field.
+        // Allow a request link to be pasted directly into the recipient field.
         const rawTo = to.value.trim();
-        if (/^dusk:/i.test(rawTo)) {
+        if (looksLikeRequest(rawTo)) {
           maybeDecodeRequest(rawTo, { source: "request" });
         }
 
@@ -1025,12 +1034,12 @@ export function sendFormView(ov, { state, actions } = {}) {
  * @returns {string}
  */
 export function chainMismatchText(reqChain, nodeUrl) {
-  const want = normalizeChainId(reqChain);
-  const current = chainIdFromNodeUrl(String(nodeUrl ?? ""));
-  const have = normalizeChainId(current);
-  if (!want || !have || want === have) return "";
-  // Labelled from the full chain ids ("dusk:1"): the bare references don't name a network.
-  return `This request is for ${chainLabel(reqChain) || `Chain ${want}`}. You are on ${networkTextOf(String(nodeUrl ?? "")) || `Chain ${have}`}.`;
+  const node = String(nodeUrl ?? "");
+  // The chain the wallet signs for on this node, by which a request is the same network or not.
+  const current = chainIdForNode(node) ?? chainIdFromNodeUrl(node);
+  if (!networkMismatch(reqChain, current)) return "";
+  // The wallet by its node's name: a custom node is never called a network.
+  return `This request is for ${chainLabel(reqChain)}. You are on ${networkTextOf(node) || chainLabel(current)}.`;
 }
 
 // Who pays and on which network, as a Review was asked for.
@@ -1111,11 +1120,13 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   };
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
+  const toNameNote = nameCheckNoteEl(ov?.nodeUrl, { hidden: true });
   const showToNames = () => {
     const names = service ? [`The bridge's account for ${service.chain}`] : [contactName(), duskName?.name || verifiedName].filter(Boolean);
     const unique = names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
     toNames.textContent = unique.join(" · ");
     toNames.hidden = !unique.length;
+    if (toNameNote) toNameNote.hidden = Boolean(service) || !(duskName?.name || verifiedName);
   };
 
   // Save to Contacts, unless it's saved already or it's this wallet's own.
@@ -1293,6 +1304,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         kv("From", h("span", {}, [withReviewWallet(fromName, actions?.review), h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
         d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", safeTextEl(d.memo), "kv--wrap") : null,
       ].filter(Boolean)),
+      toNameNote,
       ...serviceNotes
         .filter((n) => n.kind !== "fee")
         .map((n) => h("div", { class: "callout warn", role: "note" }, [h("div", { class: "callout-title", text: n.title }), h("div", { class: "muted", text: n.text })])),

@@ -64,19 +64,19 @@ describe("signMessage approval preview", () => {
   it("neutralizes what changes how text reads, and says so: it shows what the bytes say", () => {
     const [rlo, pop] = [0x202e, 0x202c].map((c) => String.fromCodePoint(c));
     const preview = describeSignMessagePreview(enc.encode(`I agree to pay ${rlo}0001${pop} DUSK`));
-    expect(preview).toMatchObject({ kind: "text", text: "I agree to pay �0001� DUSK", needsReview: true, truncated: false });
+    expect(preview).toMatchObject({ kind: "text", text: "I agree to pay \\u202e0001\\u202c DUSK", needsReview: true, truncated: false });
     expect(describeSignMessagePreview(enc.encode("Sign in\nNonce: 12"))).toMatchObject({ text: "Sign in\nNonce: 12", needsReview: false });
     // Cut as ever, by the characters written, flagged all the same.
     const long = describeSignMessagePreview(enc.encode(`${rlo}${"a".repeat(SIGN_MESSAGE_PREVIEW_MAX_CHARS + 5)}`));
-    expect([long.truncated, long.needsReview, Array.from(long.text).length]).toEqual([true, true, SIGN_MESSAGE_PREVIEW_MAX_CHARS]);
+    expect([long.truncated, long.needsReview, long.text]).toEqual([true, true, `\\u202e${"a".repeat(SIGN_MESSAGE_PREVIEW_MAX_CHARS - 1)}`]);
   });
 
-  it("allows normal whitespace controls in readable text", () => {
+  it("keeps line breaks in readable text, and shows a tab as its code", () => {
     const preview = describeSignMessagePreview(enc.encode("line 1\nline 2\tok"));
 
     expect(preview).toMatchObject({
       kind: "text",
-      text: "line 1\nline 2\tok",
+      text: "line 1\nline 2\\u0009ok",
     });
   });
 });

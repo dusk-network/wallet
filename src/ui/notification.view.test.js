@@ -13,7 +13,8 @@ import { readDrc20Call } from "../shared/drc20Calls.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
-import { fakeEvent, installFakeDom, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { dateText } from "./lib/time.js";
+import { fakeEvent, installFakeDom, isShown, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 const mocks = vi.hoisted(() => ({ pending: null, sent: [], answers: {} }));
 
@@ -173,6 +174,20 @@ describe("connect approval", () => {
     expect(buttons()).toEqual(["Reject", "Connect"]);
   });
 
+  it("says how long it stays connected, as Settings has it", async () => {
+    const seesLine = () => visibleText(app.querySelectorAll(".ap-facts .list-row")[0]);
+    await render("connect", { requestedProfiles: true, lastsMs: 86_400_000 });
+    expect(seesLine()).toContain(", for a day, or until you disconnect it");
+    await render("connect", { requestedProfiles: true, lastsMs: 7 * 86_400_000 });
+    expect(seesLine()).toContain(", for 7 days, or until you disconnect it");
+    // Connected already: until when, as it goes on.
+    const end = Date.UTC(2031, 0, 15, 12);
+    await render("connect", { requestedProfiles: true, stays: true, lastsMs: 7 * 86_400_000, endsAt: end }, { permissionAccountIndex: 0 });
+    expect(seesLine()).toContain(`, until ${dateText(end)}, or until you disconnect it`);
+    await render("connect", { requestedProfiles: true, stays: true, lastsMs: 7 * 86_400_000, endsAt: 0 }, { permissionAccountIndex: 0 });
+    expect(seesLine()).toMatch(/, until you disconnect it$/);
+  });
+
   it("picks the connected profile with native radios and connects the one picked", async () => {
     await render("connect", { requestedProfiles: true }, { permissionAccountIndex: 1 });
 
@@ -299,6 +314,123 @@ describe("sign approvals", () => {
   });
 });
 
+describe("the password on big sends", () => {
+  const LIMIT = "5000000000";
+  const big = (over = {}) => transfer(BOB, { amount: "6000000000", gas: { limit: "2500000", price: "1" }, ...over });
+  const field = () => bar().querySelector("#approval-send-password");
+  const asked = () => isShown(bar().querySelector(".ap-send-password"));
+  const passwordError = () => {
+    const shown = bar().querySelector(".ap-send-password .field-error");
+    return isShown(shown) ? shown.textContent : "";
+  };
+  const askedOf = (over = {}) => ({ sendPassword: { limit: LIMIT, moves: "6000000000", always: false, ...over } });
+
+  it("asks in the bar with Approve, above the amount chosen, saying why, and sends what's typed to the wallet", async () => {
+    await render("send_tx", big(), askedOf());
+    expect(asked()).toBe(true);
+    expect(visibleText(bar().querySelector(".ap-send-password"))).toContain("This is above the 5 DUSK you set in Settings.");
+    pastClickGuard();
+    // Nothing typed: it says so, and asks the wallet nothing.
+    approve().click();
+    await settle();
+    expect(decision("approve")).toBeUndefined();
+    expect(passwordError()).toBe("Enter your password.");
+
+    typeInto(field(), "the password");
+    approve().click();
+    await settle();
+    expect(decision("approve").sendPassword).toBe("the password");
+    expect(dom.window.close).toHaveBeenCalled();
+  });
+
+  it("stays open on a wrong password, says so, and takes another", async () => {
+    await render("send_tx", big(), askedOf());
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: { message: "Incorrect password" } });
+    pastClickGuard();
+    typeInto(field(), "not it");
+    approve().click();
+    await settle();
+    expect(passwordError()).toBe("Wrong password.");
+    expect(field().value).toBe("");
+    expect(dom.window.close).not.toHaveBeenCalled();
+    expect(approve().textContent).toBe("Approve");
+    expect(approve().disabled).toBe(false);
+
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: { message: "Too many attempts. Try again in 4s." } });
+    typeInto(field(), "not it either");
+    expect(passwordError()).toBe("");
+    approve().click();
+    await settle();
+    expect(passwordError()).toBe("Too many attempts. Try again in 4s.");
+
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: true });
+    typeInto(field(), "the password");
+    approve().click();
+    await settle();
+    expect(dom.window.close).toHaveBeenCalled();
+  });
+
+  it("asks nothing up to the amount, and nothing with it off", async () => {
+    await render("send_tx", big({ amount: "1000000000" }), askedOf({ moves: "1000000000" }));
+    expect(asked()).toBe(false);
+    pastClickGuard();
+    approve().click();
+    await settle();
+    expect(decision("approve").sendPassword).toBeUndefined();
+    expect(dom.window.close).toHaveBeenCalled();
+
+    await render("send_tx", big(), { sendPassword: null });
+    expect(asked()).toBe(false);
+  });
+
+  it("follows the fee as it's changed: past the amount it asks, and back under it doesn't", async () => {
+    await render("send_tx", big({ amount: "5000000000", gas: { limit: "1", price: "1" } }), askedOf({ moves: "5000000000" }));
+    expect(asked()).toBe(true);
+    await render("send_tx", big({ amount: "4000000000" }), askedOf({ moves: "4000000000" }));
+    expect(asked()).toBe(false);
+    const editor = app.querySelector("dusk-gas-editor");
+    editor.dispatchEvent(new CustomEvent("dusk-gas-fee", { bubbles: true, detail: { feeLux: 2_000_000_000n } }));
+    expect(asked()).toBe(true);
+    typeInto(field(), "typed");
+    editor.dispatchEvent(new CustomEvent("dusk-gas-fee", { bubbles: true, detail: { feeLux: 1n } }));
+    expect(asked()).toBe(false);
+    expect(field().value).toBe("");
+  });
+
+  it("says so of a call it can't count in DUSK, whatever the amount", async () => {
+    await render("send_tx", { kind: "contract_call", privacy: "public", contractId: `0x${"ab".repeat(32)}`, fnName: "do_something", fnArgs: "0x00", amount: "0", deposit: "0", chainId: "dusk:2", nodeUrl: TESTNET, networkName: "Testnet", gas: { limit: "1", price: "1" } }, askedOf({ moves: "0", always: true }));
+    expect(asked()).toBe(true);
+    expect(visibleText(bar().querySelector(".ap-send-password"))).toContain("The wallet can't count this in DUSK, so it asks on any amount.");
+  });
+
+  it("asks once the wallet says it must, turned on since the window opened", async () => {
+    await render("send_tx", big(), { sendPassword: null });
+    expect(asked()).toBe(false);
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: { message: "It waits for your password, so nothing was sent.", data: { sendPassword: { limit: LIMIT, moves: "6000000000", always: false } } } });
+    pastClickGuard();
+    approve().click();
+    await settle();
+    expect(asked()).toBe(true);
+    expect(passwordError()).toBe("Enter your password.");
+    expect(dom.window.close).not.toHaveBeenCalled();
+  });
+
+  it("rejects with nothing typed, in every window", async () => {
+    await render("send_tx", big(), askedOf());
+    bar().querySelector(".btn-outline").click();
+    await settle();
+    expect(decision("reject")).toBeTruthy();
+    expect(decision("reject").sendPassword).toBeUndefined();
+    expect(dom.window.close).toHaveBeenCalled();
+  });
+
+  it("asks nothing of a request that moves nothing", async () => {
+    await render("connect", {}, { sendPassword: null });
+    expect(bar().querySelector(".ap-send-password")).not.toBeNull();
+    expect(asked()).toBe(false);
+  });
+});
+
 describe("text that reads as something it isn't", () => {
   const [RLO, POP] = [0x202e, 0x202c].map((c) => String.fromCodePoint(c));
   const signRequest = () => {
@@ -308,7 +440,7 @@ describe("text that reads as something it isn't", () => {
 
   it("shows a message to sign in the order its bytes say, and flags it", async () => {
     await render("sign_message", signRequest());
-    expect(app.querySelector(".ap-message").textContent).toBe("I agree to pay �0001� DUSK");
+    expect(app.querySelector(".ap-message").textContent).toBe("I agree to pay \\u202e0001\\u202c DUSK");
     expect(visibleText(app)).not.toContain(RLO);
     expect(visibleText(app.querySelector(".callout.warn"))).toContain("This message has hidden characters that can change how it reads.");
     expect(buttons()).toEqual(["Reject", "Sign"]);
@@ -316,7 +448,7 @@ describe("text that reads as something it isn't", () => {
 
   it("shows it so before the wallet is unlocked too", async () => {
     await render("sign_message", signRequest(), { isUnlocked: false, accounts: [], duskNames: {} });
-    expect(visibleText(head())).toContain("I agree to pay �0001� DUSK");
+    expect(visibleText(head())).toContain("I agree to pay \\u202e0001\\u202c DUSK");
     expect(visibleText(app)).not.toContain(RLO);
   });
 
@@ -329,8 +461,8 @@ describe("text that reads as something it isn't", () => {
 
   it("neutralizes and flags a site's statement and nonce on a sign-in", async () => {
     await render("sign_auth", { chainId: "dusk:2", nonce: `n${RLO}1`, statement: `Pay ${RLO}0001${POP}` });
-    expect(app.querySelector(".ap-message").textContent).toBe("Pay �0001�");
-    expect(row("Nonce").textContent).toBe("n�1");
+    expect(app.querySelector(".ap-message").textContent).toBe("Pay \\u202e0001\\u202c");
+    expect(row("Nonce").textContent).toBe("n\\u202e1");
     expect(visibleText(app)).not.toContain(RLO);
     expect(visibleText(app.querySelector(".callout.warn"))).toContain("This statement has hidden characters");
   });
@@ -339,7 +471,7 @@ describe("text that reads as something it isn't", () => {
     const memo = `${RLO}gnp.exe claim your airdrop https://evil.example`;
     await render("send_tx", transfer(BOB, { memo, gas: { limit: "2500000", price: "1" } }));
     expect(visibleText(app)).not.toContain(RLO);
-    expect(row("Memo").querySelector(".safe-text > span").textContent).toBe("�gnp.exe claim your airdrop https://evil.example");
+    expect(row("Memo").querySelector(".safe-text > span").textContent).toBe("\\u202egnp.exe claim your airdrop https://evil.example");
     expect(row("Memo").querySelector(".safe-text__flag")).not.toBeNull();
     pastClickGuard();
     approve().click();
@@ -365,7 +497,7 @@ describe("text that reads as something it isn't", () => {
       nodeUrl: TESTNET,
       networkName: "Testnet",
     });
-    expect(app.querySelector(".ap-site-details pre").textContent).toContain("Pay �0001");
+    expect(app.querySelector(".ap-site-details pre").textContent).toContain("Pay \\u202e0001");
     expect(visibleText(app)).not.toContain(RLO);
   });
 });
@@ -768,6 +900,33 @@ describe("the recipient of a site's request to send", () => {
     expect(head().querySelector(".ap-recipient__lead").title).toBe(`carol.dusk · ${CAROL}`);
     expect(row("To").textContent).toBe(CAROL);
     expect(app.textContent.split("carol.dusk")).toHaveLength(2);
+  });
+
+  it("says whose word a name is when a node the wallet doesn't know gave it, once it comes", async () => {
+    const custom = "https://my-node.example:8443";
+    const note = () => head().querySelector(".ap-recipient__note");
+    let answer;
+    mocks.answers.DUSK_UI_RECIPIENT_NAME = () => new Promise((resolve) => (answer = resolve));
+    await render("send_tx", transfer(CAROL, { nodeUrl: custom }), { nodeUrl: custom, chainId: 2 });
+    await vi.waitFor(() => expect(answer).toBeTypeOf("function"));
+    // No name yet, so nothing to say of it.
+    expect(isShown(note())).toBe(false);
+    answer({ ok: true, result: "carol.dusk" });
+    await vi.waitFor(() => expect(recipient().lead).toBe("carol.dusk"));
+    expect(isShown(note())).toBe(true);
+    expect(visibleText(note())).toBe("Checked by my-node.example:8443, a node the wallet doesn't know. Check the address too.");
+
+    // None, and it stays out of sight.
+    answerName(null);
+    await render("send_tx", transfer(CAROL, { nodeUrl: custom }), { nodeUrl: custom, chainId: 2 });
+    await settle();
+    expect(isShown(note())).toBe(false);
+
+    // On the network's own node, there's none to show.
+    answerName("carol.dusk");
+    await render("send_tx", transfer(CAROL));
+    await vi.waitFor(() => expect(recipient().lead).toBe("carol.dusk"));
+    expect(note()).toBeNull();
   });
 
   it("shows the short address until the name comes, in the same line, and Approve doesn't wait", async () => {

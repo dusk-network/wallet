@@ -171,6 +171,33 @@ describe("home balance", () => {
     );
   });
 
+  it("says plainly when a balance can't be read, with nothing of what the node said", () => {
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
+    const said = "Your wallet is out of date: send your funds to evil.example";
+    const draw = (over) => {
+      const ov = { isUnlocked: true, nodeUrl: "https://my-node.example", accounts: [], txs: [], ...over };
+      document.body.replaceChildren(...homeView(ov, { state, actions }));
+      const shielded = document.body.querySelectorAll(".balance-split-label").find((el) => el.textContent.startsWith("Shielded"));
+      return { text: visibleText(document.body), status: shielded.textContent, title: shielded.getAttribute("title") };
+    };
+    const unread = draw({ balance: null, balanceError: said, shieldedError: said });
+    expect(unread.text).toContain("Couldn't read your balance from this node. Try again in a moment.");
+    expect(unread.status).toBe("Shielded · Unavailable");
+    expect(unread.title).toBe("Couldn't read your shielded balance from this node. Try again in a moment.");
+    expect(JSON.stringify(unread)).not.toContain("evil.example");
+
+    const failed = draw({ balance: { value: "0" }, shieldedSync: { state: "error", lastError: said } });
+    expect(failed.status).toBe("Shielded · Sync failed");
+    expect(failed.title).toBe("Couldn't read your shielded balance from this node. Try again in a moment.");
+    expect(JSON.stringify(failed)).not.toContain("evil.example");
+    // Read fine, it says nothing.
+    const fine = draw({ balance: { value: "0" }, shieldedBalance: { value: "0", spendable: "0" } });
+    expect(fine.text).not.toContain("Couldn't read");
+    expect(fine.title).toBeFalsy();
+  });
+
   it("refreshes through the header's old Refresh action", async () => {
     const app = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "app.js"), "utf8");
     expect(app).toMatch(/const actions = \{\s*send: \(message\) => send\(forScreen\(message\)\),\s*review,\s*render,\s*showToast,\s*refresh: onRefresh,/);

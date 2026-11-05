@@ -1,8 +1,10 @@
+import { transferLedger } from "@dusk-network/app-core/bridge";
+
 import { formatDuskExact, formatFee, groupThousands } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
-import { arrivalUrl } from "../../../shared/bridgeArrival.js";
-import { networkTextOf } from "../../../shared/nodeNetwork.js";
+import { arrivalUrl, awaitingArrival, depositLux } from "../../../shared/bridgeArrival.js";
+import { networkTextOf, nameCheckNote } from "../../../shared/nodeNetwork.js";
 import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
@@ -23,8 +25,8 @@ import { activityRows, loadActivityDetail } from "../activity.js";
 // then its date, memo, fee, the profile it left or reached, and its ID, which
 // opens Dusk's explorer; a transfer to another chain that arrived adds when, and its
 // transaction there. Block, gas, finality and a call's contract sit under
-// Technical details, labelled as in every Dusk app. Hide balances hides the
-// amount; the fee stays.
+// Technical details, labelled as in every Dusk app. A row shows an amount short;
+// here it's exact, the fee too. Hide balances hides the amount; the fee stays.
 
 const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 
@@ -33,7 +35,7 @@ const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 function statusNote(tx, desc, hidden) {
   const shielded = tx?.privacy === "shielded";
   const a = desc.amount;
-  const stayed = !desc.unsent || !a || a.text ? "" : hidden ? " The amount stayed in your wallet." : ` The ${a.value} ${a.unit} stayed in your wallet.`;
+  const stayed = !desc.unsent || !a || a.text ? "" : hidden ? " The amount stayed in your wallet." : ` The ${a.exact ?? a.value} ${a.unit} stayed in your wallet.`;
   if (tx?.dropped) {
     return `The network dropped it before it ran, so no fee was charged.${stayed}${shielded ? " Shielded funds may still be reserved locally." : ""}`;
   }
@@ -72,7 +74,7 @@ const feeValue = (text, hidden) => h("span", {}, [balance(hidden, text), " DUSK"
 
 function feeRow(tx, desc, hidden) {
   if (tx?.dropped) return kv("Network fee", "None charged");
-  if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Network fee", feeValue(formatFee(tx.fee), hidden));
+  if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Network fee", feeValue(formatDuskExact(tx.fee), hidden));
   const limit = tx?.gasLimit ?? 0n;
   const price = tx?.gasPrice ?? 0n;
   if (desc.tone === "pending" && tx?.source === "sent" && limit > 0n && price > 0n) {
@@ -95,8 +97,6 @@ function technicalRows(tx, ov, nodeUrl, showToast, hidden) {
     num(tx?.blockHeight) ? kv("Block", mono(num(tx.blockHeight))) : null,
     used || limit ? kv("Gas used", h("span", {}, [balance(hidden, used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`)])) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
-    // The fee to the last LUX: the summary rounds it to 4 decimals.
-    (tx?.fee ?? 0n) > 0n ? kv("Fee paid", feeValue(formatDuskExact(tx.fee), hidden)) : null,
     tx?.source !== "sent" && ["executed", "failed"].includes(tx?.status) ? kv("Finality", "Final") : null,
     tx?.kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", contractValue(String(tx.contractId), nodeUrl || ov?.nodeUrl, showToast)) : null,
     tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,
@@ -133,6 +133,23 @@ function explorerButton(url, actions, text = "View in Dusk explorer") {
     },
     [h("span", { text }), h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("ext") })]
   );
+}
+
+// A bridge transfer's own amounts, exact and the same in every Dusk app
+// (transferLedger): what it sent and the bridge's fee, then the network's, which
+// `feeRow` says, then what arrives, or is on its way. What arrives is said only
+// while it can: not of what the bridge doesn't pay, or past the week it's looked for.
+// One that failed, or was dropped before it ran, sent nothing.
+function ledgerRows(tx, desc, nodeUrl, hidden) {
+  const received = desc.arrival ? desc.payout?.received ?? depositLux(tx) : undefined;
+  const ledger = transferLedger({ row: tx, received, failed: desc.unsent });
+  if (!ledger) return null;
+  const row = (label, line) => (line ? kv(label, h("span", {}, [balance(hidden, line.exact), ` ${line.coin}`])) : null);
+  const coming = ledger.received && (!ledger.received.expected || desc.payout || awaitingArrival(tx, nodeUrl));
+  return {
+    before: [row("Sent", ledger.sent), row("Bridge fee", ledger.bridgeFee)],
+    after: [coming ? row(ledger.received.expected ? "You receive" : "Received", ledger.received) : null],
+  };
 }
 
 export function txDetailsView(ov, { state, actions } = {}) {
@@ -185,6 +202,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const via = desc.via?.address ? desc.via : null;
   const other = via ? via.address : !desc.evm && desc.address && !desc.isAddress ? desc.address : "";
   const otherAlias = via ? (via.isAddress ? "" : via.name) : desc.alias;
+  // The name's a node the wallet doesn't know's word.
+  const nameNote = nameCheckNote(nodeUrl) ? h("p", { class: "tx-hero-note", role: "note", text: nameCheckNote(nodeUrl) }) : null;
   const hero = h("div", { class: "tx-hero" }, [
     h("span", { class: "row-icon tx-hero-icon", "aria-hidden": "true", html: txIconSvg(desc.icon) }),
     desc.lead ? h("div", { class: "tx-hero-lead", text: desc.lead }) : null,
@@ -199,7 +218,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
           copyButton(other, { label: "Copy address", showToast }),
         ].filter(Boolean))
       : null,
-    amountEl(desc.amount, hidden, "tx-hero-amount"),
+    tx?.counterpartyName || tx?.toName ? nameNote : null,
+    amountEl(desc.amount, hidden, "tx-hero-amount", { exact: true }),
     h("div", { class: `tx-hero-status is-${desc.tone}` }, [
       h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg(STATUS_ICON[desc.tone] ?? "clock") }),
       // The row's word, or Completed, which rows leave out.
@@ -258,7 +278,6 @@ export function txDetailsView(ov, { state, actions } = {}) {
   // Where it arrived: its transaction there, which opens that chain's explorer.
   const arrivalLink = desc.arrival ? arrivalUrl(nodeUrl, desc.arrival, tx?.route) : null;
   const arrivalChain = desc.evmChain || "DuskEVM";
-  const lux = (value) => h("span", {}, [balance(hidden, formatDuskExact(value)), " DUSK"]);
   // A transaction on another chain, which opens that chain's explorer.
   const chainTxRow = (chain, hash, link) =>
     kv(`${chain} transaction`, [
@@ -282,17 +301,19 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const migrated = tx?.route && tx.route.kind !== "service" && /^0x[0-9a-fA-F]{64}$/.test(memo);
   const migratedRow = migrated ? chainTxRow(tx.route.chain.name, memo, `${String(tx.route.chain.explorerUrl ?? "").replace(/\/+$/, "")}/tx/${memo}`) : null;
 
+  const ledger = ledgerRows(tx, desc, nodeUrl, hidden);
   const rows = h("div", { class: "group" }, [
     when ? kv("Date", dateText(when)) : null,
     desc.arrivedAt ? kv("Arrived", dateText(desc.arrivedAt)) : null,
     evmRow,
-    desc.payout ? kv("Bridge fee", lux(desc.payout.fee)) : null,
-    desc.payout ? kv(desc.arrival ? "Received" : "You receive", lux(desc.payout.received)) : null,
+    ...(ledger?.before ?? []),
+    ledger ? feeRow(tx, desc, hidden) : null,
+    ...(ledger?.after ?? []),
     // A memo that is the recipient on another chain shows as that.
     migratedRow,
     // Anyone can send a memo: neutralized, so it can't read as something it isn't.
     tx?.memo && !migrated && String(tx.memo).trim() !== desc.recipient ? kv("Memo", safeTextEl(tx.memo), { className: "kv--wrap" }) : null,
-    feeRow(tx, desc, hidden),
+    ledger ? null : feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,
     kv("Transaction ID", [idButton, copyId]),

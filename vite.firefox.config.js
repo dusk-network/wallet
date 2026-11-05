@@ -41,6 +41,7 @@ export default defineConfig({
       input: {
         background: "src/background.js",
         contentScript: "src/contentScript.js",
+        requestLinkOffer: "src/requestLinkOffer.js",
         inpage: "src/inpage.js",
         offscreen: "src/offscreen.js",
         engine: "src/engine.js",

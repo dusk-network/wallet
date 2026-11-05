@@ -13,6 +13,8 @@ const SHIELDED_ADDRESS =
 // The wallet a prompt is for, as rpc.js binds it (pending.js): the one
 // unlocked as the site asks.
 const SHOWN = { walletId: "acct0" };
+// What a site's send must pass as its window approves it: the password, above the amount chosen.
+const SENDS = expect.objectContaining({ beforeApprove: expect.any(Function) });
 // A prompt's window that showed the wallet unlocked now, as one asked while
 // locked binds it (bindPendingWallet).
 const showsWallet = (shown) => {
@@ -902,7 +904,8 @@ describe("background rpc handler", () => {
         nodeUrl: "https://testnet.nodes.dusk.network",
         gas: { limit: "2500000", price: "1" },
       }),
-      SHOWN
+      SHOWN,
+      SENDS
     );
 
     const call = engineCall.mock.calls.find(([m]) => m === "dusk_sendTransaction");
@@ -972,7 +975,8 @@ describe("background rpc handler", () => {
         to: SHIELDED_ADDRESS,
         gas: { limit: "50000000", price: "1" },
       }),
-      SHOWN
+      SHOWN,
+      SENDS
     );
     expect(putTxMeta).toHaveBeenCalledWith(
       "0xhash",
@@ -1041,7 +1045,8 @@ describe("background rpc handler", () => {
       "send_tx",
       "https://dapp.example",
       expect.objectContaining({ gas: { limit: "50000000", price: "1" } }),
-      SHOWN
+      SHOWN,
+      SENDS
     );
     expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
   });
@@ -1068,7 +1073,7 @@ describe("background rpc handler", () => {
     });
 
     const gas = { limit, price: "3" };
-    expect(requestUserApproval).toHaveBeenCalledWith("send_tx", "https://dapp.example", expect.objectContaining({ gas }), SHOWN);
+    expect(requestUserApproval).toHaveBeenCalledWith("send_tx", "https://dapp.example", expect.objectContaining({ gas }), SHOWN, SENDS);
     expect(engineCall).toHaveBeenCalledWith("dusk_sendTransaction", expect.objectContaining({ gas }));
   });
 
@@ -1555,7 +1560,8 @@ describe("background rpc handler", () => {
         networkName: "Testnet",
         nodeUrl: "https://testnet.nodes.dusk.network",
       }),
-      SHOWN
+      SHOWN,
+      SENDS
     );
   });
 

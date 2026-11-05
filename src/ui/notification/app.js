@@ -16,6 +16,7 @@ import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist
 import { safeText, textNeedsReview } from "../../shared/safeText.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
+import { nameCheckNoteEl } from "../components/NameCheckNote.js";
 import { contractLabel } from "../../shared/knownCalls.js";
 import { DRC20_CALL_NAMES } from "../../shared/drc20Calls.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
@@ -23,11 +24,12 @@ import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
 import { guarded, screenShown } from "../lib/clickGuard.js";
 import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js";
-import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
+import { fieldError, fieldLabel, passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
 import { contractValueEl } from "../components/ContractValue.js";
 import { payGuard } from "../components/NetworkGas.js";
 import { safeTextEl } from "../components/SafeText.js";
+import { sendPasswordRefusal, sendPasswordWhy } from "../components/SendPasswordDialog.js";
 import "../components/GasEditor.js";
 import {
   amountParts,
@@ -208,9 +210,37 @@ document.addEventListener(
   { passive: true }
 );
 
-async function decide(decision, approvedParams) {
-  await send({ type: "DUSK_PENDING_DECISION", rid, decision, ...(decision === "approve" ? { approvedParams } : {}) });
+// The answer, and the window goes, unless the wallet refused what came with it:
+// then it says why, and the request goes on waiting.
+async function decide(decision, approvedParams, withAnswer = {}) {
+  const res = await send({ type: "DUSK_PENDING_DECISION", rid, decision, ...(decision === "approve" ? { approvedParams, ...withAnswer } : {}) });
+  if (res?.error?.message) throw Object.assign(new Error(res.error.message), { refused: true, data: res.error.data });
   window.close();
+}
+
+// The password again, in the bar with Approve, for a send above the amount chosen
+// in Settings: the wallet checks it as the window answers. Hidden until it's asked.
+function sendPasswordField(onEnter) {
+  const input = passwordInput({ id: "approval-send-password", autocomplete: "current-password", onEnter });
+  const why = h("p", { class: "ap-sub" });
+  const error = fieldError(input);
+  input.addEventListener("input", () => error.show(""));
+  const el = h("div", { class: "ap-actions__error ap-send-password", hidden: true }, [fieldLabel(input, "Password you unlock with"), why, input, error.el]);
+  return {
+    el,
+    input,
+    error,
+    show(terms) {
+      why.textContent = sendPasswordWhy(terms);
+      el.hidden = false;
+    },
+    hide: () => {
+      el.hidden = true;
+      input.value = "";
+      error.show("");
+    },
+    asked: () => !el.hidden,
+  };
 }
 
 // What a window says when its answer didn't reach the wallet.
@@ -227,14 +257,26 @@ function answerFailedText(e) {
  */
 function decisionBar({ approveText = "Approve", approveDisabled = false, approveTitle = "", getApprovedParams } = {}) {
   const error = h("div", { class: "field-error ap-actions__error", role: "alert", hidden: true });
-  const answer = async (decision, approvedParams) => {
+  const answer = async (decision, approvedParams, withAnswer) => {
     try {
-      await decide(decision, approvedParams);
+      await decide(decision, approvedParams, withAnswer);
     } catch (e) {
-      error.textContent = answerFailedText(e);
-      error.hidden = false;
+      // What the password's refusal says, under its field.
+      if (e?.refused && e.data?.sendPassword) {
+        sendPassword.show(e.data.sendPassword);
+        sendPassword.error.show("Enter your password.");
+        sendPassword.input.focus();
+      } else if (e?.refused) {
+        sendPassword.input.value = "";
+        sendPassword.error.show(sendPasswordRefusal(e.message));
+        sendPassword.input.focus();
+      } else {
+        error.textContent = answerFailedText(e);
+        error.hidden = false;
+      }
     }
   };
+  const sendPassword = sendPasswordField(() => approveBtn.click());
   const rejectBtn = h("button", {
     class: "btn-outline",
     type: "button",
@@ -258,10 +300,25 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
         return;
       }
       error.hidden = true;
-      await answer("approve", approvedParams);
+      if (!sendPassword.asked()) {
+        await answer("approve", approvedParams);
+        return;
+      }
+      if (!sendPassword.input.value) {
+        sendPassword.error.show("Enter your password.");
+        sendPassword.input.focus();
+        return;
+      }
+      // A moment, as an unlock: the wallet derives its key from the password.
+      const wasOff = approveBtn.disabled;
+      approveBtn.disabled = true;
+      approveBtn.textContent = "Checking…";
+      await answer("approve", approvedParams, { sendPassword: sendPassword.input.value });
+      approveBtn.disabled = wasOff;
+      approveBtn.textContent = approveText;
     }),
   });
-  return { nodes: [error, rejectBtn, approveBtn], approveBtn, rejectBtn, error };
+  return { nodes: [error, sendPassword.el, rejectBtn, approveBtn], approveBtn, rejectBtn, error, sendPassword };
 }
 
 export async function renderNotification() {
@@ -386,6 +443,8 @@ export async function renderNotification() {
     const to = String(address ?? "").trim();
     const known = to ? knownAs(to) : null;
     const lead = h("span", { class: "ap-recipient__lead mono", text: shortAddress(to) || "(missing)", title: to });
+    // Shown with a name a node the wallet doesn't know gave.
+    const note = nameCheckNoteEl(nodeUrl, { className: "ap-recipient__note", hidden: true });
     const showName = (name) => {
       lead.textContent = name;
       lead.title = `${name} · ${to}`;
@@ -398,7 +457,9 @@ export async function renderNotification() {
       send({ type: "DUSK_UI_RECIPIENT_NAME", rid, recipient: to })
         .then((res) => {
           const name = res?.ok ? res.result : null;
-          if (typeof name === "string" && name) showName(name);
+          if (typeof name !== "string" || !name) return;
+          showName(name);
+          if (note) note.hidden = false;
         })
         .catch(() => {});
     }
@@ -408,7 +469,7 @@ export async function renderNotification() {
           h("span", { class: "ap-recipient__source", text: ` · ${known.source}` }),
         ])
       : null;
-    return { lead, tag, known };
+    return { lead, tag, known, note };
   };
 
   // "to wallet-both.dusk", and under it your label for it, for a head's
@@ -422,6 +483,7 @@ export async function renderNotification() {
         network ? h("span", { class: "ap-recipient__to", text: ` ${network}` }) : null,
       ]),
       r.tag,
+      r.note,
     ]);
   };
   // An address without a name, as every Dusk app shortens it: "to
@@ -602,6 +664,10 @@ export async function renderNotification() {
   // shielded address says so in the title.
   function renderConnect() {
     const requestedShielded = Boolean(params?.shieldedReceiveAddress);
+    // How long it stays connected: as it's set, and connected already, until when.
+    const endsAt = Number(params?.endsAt ?? 0);
+    const lastsDays = params?.stays ? 0 : Math.round(Number(params?.lastsMs ?? 0) / 86_400_000);
+    const lastsText = endsAt > 0 ? `until ${fullDateText(endsAt)}, or until you disconnect it` : lastsDays > 0 ? `for ${lastsDays === 1 ? "a day" : `${lastsDays} days`}, or until you disconnect it` : "until you disconnect it";
     const currentAccountIndexRaw = Number(params?.currentAccountIndex);
     const currentAccountIndex =
       params?.currentAccountIndex != null && Number.isFinite(currentAccountIndexRaw) && currentAccountIndexRaw >= 0
@@ -652,7 +718,7 @@ export async function renderNotification() {
               : {
                   icon: "eye",
                   title: "Sees your public address, .dusk name and balance",
-                  sub: `${who ? `${who}, ` : ""}until you disconnect it`,
+                  sub: `${who ? `${who}, ` : ""}${lastsText}`,
                 },
             sharesShielded()
               ? { icon: "shield", title: "Gets your shielded address", sub: "It can send you shielded payments. It can't see your shielded balance." }
@@ -1099,6 +1165,16 @@ export async function renderNotification() {
       const pay = payGuard({ editor: gasEditor, availableLux: available, sendsLux, shielded, hidden: pending.hideBalances === true, button: bar.approveBtn, ready, gas });
       pay.el.classList.add("ap-actions__error");
       bar.nodes.splice(1, 0, pay.el);
+      // Above the amount chosen in Settings, the password, as the fee changes too.
+      const terms = pending.sendPassword;
+      if (terms) {
+        const asksAt = (feeLux) => terms.always || safeBigInt(terms.moves, 0n) + feeLux > safeBigInt(terms.limit, 0n);
+        const draw = (feeLux) => (asksAt(feeLux) ? bar.sendPassword.show(terms) : bar.sendPassword.hide());
+        draw(safeBigInt(gas?.limit, 0n) * safeBigInt(gas?.price, 0n));
+        gasEditor.addEventListener("dusk-gas-fee", (event) => {
+          if (event?.detail?.feeLux != null) draw(event.detail.feeLux);
+        });
+      }
       return pay;
     };
 
