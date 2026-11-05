@@ -9,6 +9,10 @@ import { bracketTitle } from "../../components/BracketTitle.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 
+// In the wallet's words: what a node says of it is that node's to choose.
+const BALANCE_UNREAD = "Couldn't read your balance from this node. Try again in a moment.";
+const SHIELDED_UNREAD = "Couldn't read your shielded balance from this node. Try again in a moment.";
+
 export function homeView(ov, { state, actions } = {}) {
   const hidden = balancesHidden(ov);
   const hasBalance = Boolean(ov?.balance?.value);
@@ -53,7 +57,7 @@ export function homeView(ov, { state, actions } = {}) {
   // Shielded status suffix shown in Assets breakdown.
   // We only show a suffix when *not* fully healthy, to avoid "Shielded • Shielded".
   let shieldStatus = null;
-  let shieldStatusTitle = shieldedError || shieldedSync?.lastError || undefined;
+  let shieldStatusTitle = shieldedError || shieldedSync?.lastError ? SHIELDED_UNREAD : undefined;
   if (shieldedSync?.state === "idle") {
     const n = Number(shieldedSync?.notes ?? 0);
     if (n <= 0) shieldStatus = "Not synced";
@@ -224,7 +228,7 @@ export function homeView(ov, { state, actions } = {}) {
     ),
     balanceSplit,
     ov?.balanceError
-      ? h("div", { class: "muted", text: `Balance error: ${ov.balanceError}` })
+      ? h("div", { class: "muted", text: BALANCE_UNREAD })
       : null,
   ].filter(Boolean));
 
