@@ -55,6 +55,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Kept numbers beside right-to-left words in the order a site wrote them, in messages to sign, sign-ins, memos and a site's own words.
 - Neutralized and flagged characters that change how text reads in a contract call's function, as in a memo: approvals, Activity and a transaction's details.
 - Said when a message to sign or a sign-in's statement goes on below its box.
+- Named the chain a site's transaction signs for in its Details, apart from the chain ID sites see.
 
 ## [0.4.0] - 2026-11-04
 

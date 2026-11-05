@@ -1581,9 +1581,13 @@ describe("a node that isn't a network's own", () => {
       expect(visibleText(strip)).toBe(`Custom node · ${new URL(HOSTILE).host}`.concat(chainId === 2 ? " · What you sign here counts on Testnet." : " · What you sign here counts on Devnet."));
       expect(visibleText(strip)).not.toContain("no value");
     }
-    await render("send_tx", transfer(BOB, { nodeUrl: HOSTILE, networkName: "Custom" }), { nodeUrl: HOSTILE, networkName: "Custom", chainId: 1 });
+    await render("send_tx", transfer(BOB, { chainId: "dusk:3070325578", nodeUrl: HOSTILE, networkName: "Custom" }), { nodeUrl: HOSTILE, networkName: "Custom", chainId: 1 });
     expect(visibleText(panel.querySelector(".testnet-strip"))).toContain("What you sign here counts on Mainnet.");
     expect(row("Network").textContent).toBe(`Custom · ${new URL(HOSTILE).host}`);
+    // Details name the chain the signature carries, and the ID sites see apart from it.
+    expect(row("Signs for").textContent).toBe("Mainnet (chain 1)");
+    expect(row("Chain ID sites see").textContent).toBe("dusk:3070325578");
+    expect(row("Chain ID")).toBeUndefined();
   });
 
   it("says why it can't be signed, in plain words, and offers only Reject, for what's signed of every kind", async () => {

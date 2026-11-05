@@ -11,7 +11,7 @@ import { getMinimumGas } from "../../shared/txDefaults.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { networkFor } from "@dusk-network/networks";
-import { chainIdForNode, networkTextOf, noteChainId } from "../../shared/nodeNetwork.js";
+import { chainIdForNode, chainWords, networkTextOf, noteChainId } from "../../shared/nodeNetwork.js";
 import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist.js";
 import { safeText, textNeedsReview } from "../../shared/safeText.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
@@ -1107,10 +1107,13 @@ export async function renderNotification() {
     const myName = nameOf(activeAccount);
     const me = myName ? `your name ${myName}` : "your account";
 
-    // The network's lines, which most people skip.
+    // The network's lines, which most people skip: the chain the signature
+    // carries, and apart from it the ID sites are told, a custom node's own.
+    const signsFor = chainIdForNode(nodeUrl);
     const networkRows = () => [
       kv("Network", networkName || "Unknown"),
-      txChainId ? kv("Chain ID", mono(txChainId)) : null,
+      signsFor !== null ? kv("Signs for", chainWords(signsFor)) : null,
+      txChainId ? kv("Chain ID sites see", mono(txChainId)) : null,
       nodeUrl ? kv("Node", mono(nodeUrl), { stack: true }) : null,
     ];
 

@@ -202,7 +202,13 @@ export function signsOnNetwork(nodeUrl, chainId) {
   return listedNetwork(nodeUrl) ? "" : networkOf(chainId)?.label ?? "";
 }
 
-const chainWords = (id) => {
+/**
+ * A chain by its network and its number: "Mainnet (chain 1)", or "chain 42" for
+ * one there's no file for.
+ * @param {number} id
+ * @returns {string}
+ */
+export const chainWords = (id) => {
   const net = networkOf(id);
   return net ? `${net.label} (chain ${id})` : `chain ${id}`;
 };
