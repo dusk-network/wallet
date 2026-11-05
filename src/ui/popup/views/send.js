@@ -1197,7 +1197,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   });
 
   // What pays covers it, with the fee as Custom fee changes it.
-  const paying = privacy === "shielded" ? ov?.shieldedBalance?.spendable ?? ov?.shieldedBalance?.value : ov?.balance?.value;
+  const paying = privacy === "shielded" ? ov?.shieldedBalance?.spendable : ov?.balance?.value;
   const pay = payGuard({
     editor: gasEditor,
     availableLux: paying != null ? safeBigInt(paying, 0n) : null,

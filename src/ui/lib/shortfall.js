@@ -5,15 +5,18 @@ import { formatFee } from "../../shared/amount.js";
  * of what it moves with its fee, or of a fee alone, which the public balance
  * pays. Rounded up, so it never reads less than is missing.
  *
- * @param {{ missingLux: bigint, moves?: boolean, shielded?: boolean, hidden?: boolean, withFee?: string }} opts -
+ * @param {{ missingLux: bigint, moves?: boolean, shielded?: boolean, hidden?: boolean, withFee?: string, of?: string }} opts -
  *   `moves`: it moves DUSK from the balance as well as paying its fee;
  *   `shielded`: from the shielded balance; `hidden`: Hide balances is on, so
  *   the figure, which gives the balance away, is hidden; `withFee`: what it's
- *   more than the balance with, where that isn't the network fee alone
+ *   more than the balance with, where that isn't the network fee alone; `of`:
+ *   the profile that pays, where it isn't the one open
  * @returns {string}
  */
-export function shortfallText({ missingLux, moves = true, shielded = false, hidden = false, withFee = "the network fee" }) {
+export function shortfallText({ missingLux, moves = true, shielded = false, hidden = false, withFee = "the network fee", of = "" }) {
   const short = hidden ? "••••" : formatFee(missingLux, { max: true });
   const balance = shielded ? "shielded balance" : "public balance";
-  return moves ? `That's ${short} DUSK more than your ${balance}, with ${withFee}.` : `The ${balance} doesn't cover the network fee: ${short} DUSK short.`;
+  return moves
+    ? `That's ${short} DUSK more than your ${balance}, with ${withFee}.`
+    : `The ${balance}${of ? ` of ${of}` : ""} doesn't cover the network fee: ${short} DUSK short.`;
 }

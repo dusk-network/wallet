@@ -283,8 +283,7 @@ function actionState(pos, actionKind, amountLux, minLux, { hidden = false, feeGa
     // The fee comes from the stake's profile, also when another one owns it.
     const elsewhere =
       pos?.ownerProfileIndex !== undefined && Number(pos.ownerProfileIndex) !== Number(pos.stakeProfileIndex);
-    const short = shortfallText({ missingLux: feeLux - publicLux, moves: false, hidden });
-    return { ok: false, reason: elsewhere ? short.replace("The public balance", `The public balance of ${profileLabel(pos.stakeProfileIndex)}`) : short };
+    return { ok: false, reason: shortfallText({ missingLux: feeLux - publicLux, moves: false, hidden, of: elsewhere ? profileLabel(pos.stakeProfileIndex) : "" }) };
   }
   if (actionKind === ACTION_TOPUP && amountLux !== null && amountLux !== undefined) {
     if (safeBigInt(amountLux, 0n) <= 0n) {
