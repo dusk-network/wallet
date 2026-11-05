@@ -28,7 +28,8 @@ function stripOf(name, { nodeUrl, chainId, refusal, proverUrl, archiverUrl }) {
   if (refusal) return { text: refusal, role: "alert", className: "testnet-strip node-strip node-strip--refused" };
   const outside = outsideText(outsideEndpoints({ nodeUrl, proverUrl, archiverUrl }));
   const join = (...parts) => parts.filter(Boolean).join(" · ");
-  if (isTestNetwork(nodeUrl, chainId)) return { text: join(`${label} · Test DUSK has no value`, outside), role: "note", className: "testnet-strip" };
+  // Whose prover or archiver it uses wraps rather than being cut: the host is what it says.
+  if (isTestNetwork(nodeUrl, chainId)) return { text: join(`${label} · Test DUSK has no value`, outside), role: "note", className: outside ? "testnet-strip testnet-strip--wrap" : "testnet-strip" };
   if (listedNetwork(nodeUrl) || !nodeHost(nodeUrl)) return outside ? { text: join(label, outside), role: "note", className: "testnet-strip node-strip" } : null;
   const counts = signsOnNetwork(nodeUrl, chainId);
   return {

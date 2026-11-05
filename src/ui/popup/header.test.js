@@ -98,6 +98,10 @@ describe("the network at the top", () => {
 
     renderHeader({ ...own, proverUrl: "http://hostile-node.example", archiverUrl: "https://hostile-node.example" });
     expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK has no value · Proofs and history from hostile-node.example"]);
+    // It wraps, as a custom node's does, rather than cut off the host.
+    expect(dom.document.body.querySelector(".testnet-strip").classList.contains("testnet-strip--wrap")).toBe(true);
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    expect(css).toMatch(/\.testnet-strip\.testnet-strip--wrap \{\s*white-space: normal;/);
     renderHeader({ ...own, archiverUrl: "https://archive.example" });
     expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK has no value · History from archive.example"]);
 

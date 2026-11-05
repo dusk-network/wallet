@@ -297,6 +297,11 @@ body[data-runtime="tauri"].page--full .panel {
 
 /* A node that isn't a network's own says which it is, in neutral words, its
    whole host showing: the end of a host is what names it. */
+.testnet-strip.testnet-strip--wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .testnet-strip.node-strip {
   border-bottom-color: var(--border);
   background: var(--surface-1);
