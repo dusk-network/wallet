@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Showed a Sozu stake's position on Liquid staking: put in, taken out, worth now, deposit fees and rewards so far.
+- Said what an amount brings in a year with Sozu as it's typed, and one line of what the rate is made of under it.
 - Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
 

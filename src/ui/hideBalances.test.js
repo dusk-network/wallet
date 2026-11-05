@@ -337,7 +337,7 @@ describe("hidden balances", () => {
     const state = { route: "stake", sozu: st };
     await show(sozuLiquidStakingView(overview(HIDDEN), { state, actions: actions() }));
     expect(body.querySelectorAll(".kv").map(visibleText).slice(0, 2)).toEqual([
-      "Staked with Sozu•••• DUSK",
+      "Worth now•••• DUSK",
       "stDUSK•••• stDUSKAdd to Assets",
     ]);
     button("Max").click();

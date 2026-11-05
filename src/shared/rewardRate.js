@@ -35,7 +35,8 @@ async function keptRates() {
 
 const reads = new Map();
 
-async function readRate(origin, fetch) {
+// The node's provisioners and its tip, as they are now.
+async function readFigures(origin, fetch) {
   const post = (path, body) =>
     fetch(`${origin}${path}`, { method: "POST", body }, 15_000).then((res) => {
       if (!res.ok) throw new Error(`${path} answered ${res.status}`);
@@ -47,7 +48,24 @@ async function readRate(origin, fetch) {
   ]);
   const tipHeight = Number(pair?.pair?.json?.last_block?.[0]);
   if (!Array.isArray(provisioners) || !Number.isInteger(tipHeight)) throw new Error("The node's answer isn't a provisioners list and a tip");
-  return nativeRateEstimate({ provisioners, tipHeight });
+  return { provisioners, tipHeight };
+}
+
+const readRate = (origin, fetch) => readFigures(origin, fetch).then(nativeRateEstimate);
+
+/**
+ * What the working under a staking rate says is made of, from one read of the
+ * node: each provisioner's stake and when it counts from, and the tip. Null when
+ * it can't be read. Nothing is kept.
+ * @param {string} nodeUrl
+ * @param {{ fetch?: typeof fetchWithTimeout }} [opts]
+ * @returns {Promise<{ provisioners: Array<{ amount: unknown, eligibility: unknown }>, tipHeight: number } | null>}
+ */
+export async function stakingFigures(nodeUrl, { fetch = fetchWithTimeout } = {}) {
+  const origin = originOf(nodeUrl);
+  if (!origin) return null;
+  const figures = await readFigures(origin, fetch).catch(() => null);
+  return figures && { provisioners: figures.provisioners.map(({ amount, eligibility }) => ({ amount, eligibility })), tipHeight: figures.tipHeight };
 }
 
 /**

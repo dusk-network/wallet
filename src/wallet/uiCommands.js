@@ -2,7 +2,7 @@ import { getSettings, normalizeCustomGas, setSettings } from "../shared/settings
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { serializeStakeInfo } from "../shared/transport.js";
-import { nativeRewardRate } from "../shared/rewardRate.js";
+import { nativeRewardRate, stakingFigures } from "../shared/rewardRate.js";
 import { contactsStore, forgetWalletContacts } from "../shared/contactsStore.js";
 import {
   getWatchedAssets,
@@ -126,6 +126,11 @@ export async function handleUiCommand(
   // About what native staking pays a year lately: from the node, at most once a day.
   if (type === "DUSK_UI_GET_REWARD_RATE") {
     return { ok: true, result: await nativeRewardRate((await getSettings()).nodeUrl) };
+  }
+
+  // What the working under Sozu's rate says: read as that screen opens.
+  if (type === "DUSK_UI_GET_STAKING_FIGURES") {
+    return { ok: true, result: await stakingFigures((await getSettings()).nodeUrl) };
   }
 
   if (type === "DUSK_UI_GET_CACHED_GAS_PRICE") {

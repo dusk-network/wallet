@@ -9,16 +9,14 @@
 // a key of its own there, so two at once don't meet.
 
 import { accountingCsv, datesPeriod, quarterPeriod } from "@dusk-network/app-core/export";
-import { sozuFacts } from "@dusk-network/app-core/sozu";
 
 import { listAddressBook } from "../../shared/addressBook.js";
-import { archiveAt, historyArchiverUrl } from "../../shared/activityHistory.js";
 import { walletLabel } from "../../shared/wallets.js";
 import { runtimeGetURL, storageSessionGet, storageSessionRemove, storageSessionSet, tabsCreate } from "../../platform/extensionApi.js";
 import { fieldLabel } from "../components/FormControls.js";
 import { profileLabelOf } from "../components/ProfileName.js";
 import { h } from "../lib/dom.js";
-import { activityRows, selected, wholeActivity } from "./activity.js";
+import { activityRows, selected, sozuFactsOf, wholeActivity } from "./activity.js";
 import { duskEuroPrices } from "./duskPrice.js";
 
 /** Where the popup leaves what one export asks for the full view to do: `{ id, choices, at }`. */
@@ -102,9 +100,6 @@ function periodOf({ period, from, to } = {}) {
   return quarterPeriod(year, quarter);
 }
 
-// Each stake with Sozu's own stDUSK and deposit fee, read once a page.
-const factsCache = new Map();
-
 /**
  * The file asked for, from the account's whole history. Throws what to say when
  * it can't be read: nothing half read goes out as if it were all of it.
@@ -129,9 +124,8 @@ export async function makeExport(ov, choices, { state }) {
   });
   const rows = activityRows(ov, state, whole);
   const { account, profileIndex } = selected(ov);
-  const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
   // A stake whose stDUSK can't be read yet says so in its line.
-  const facts = await sozuFacts({ archive, account, rows, cache: factsCache }).catch(() => undefined);
+  const facts = await sozuFactsOf(ov, rows);
   const made = await accountingCsv({
     rows,
     profile: { name: profileLabelOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },

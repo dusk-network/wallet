@@ -12,6 +12,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
+import { sozuPosition, sozuRate, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
 import { SOZU_FN, feePercent, leastSozuStake, parsePool, sozuStake, sozuUnstakeAllowed } from "@dusk-network/networks/sozu";
 
 import {
@@ -40,6 +41,7 @@ import { reviewActions, submitOnGasEnter } from "../../components/FormControls.j
 import { gasFeeLux, payGuard, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
+import { activityKey, activityRows, sozuFactsOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 
 // What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
@@ -52,6 +54,8 @@ function fmtLux(value) {
 
 // Sozu's site.
 const SOZU_URL = "https://sozu.fi/";
+
+const MINUS = "−";
 
 /** How an unstake from Sozu comes back: its pool pays it out in the same call. */
 export const SOZU_UNSTAKE_LINE = "The DUSK comes back in the same transaction. No Sozu fee, no waiting.";
@@ -359,6 +363,51 @@ function maybeAutoWatchStDusk({ state, actions, st, status, profileIndex }) {
 
 const accountOf = (ov, idx) => String(ov?.accounts?.[idx] ?? "");
 
+/**
+ * What the profile did with Sozu, for its position: read from its whole history
+ * once a status is read, as long as that takes; what's on its way is counted when
+ * it's through, with the status read again. `reading` until then, and `rows`
+ * empty once it can't be read: what the status says shows all the same.
+ * @returns {{ reading: boolean, rows: object[], facts?: Map<string, object> }}
+ */
+function sozuHistory(ov, st, { state, actions }) {
+  const key = activityKey(ov);
+  if (state.activity?.key !== key) return { reading: false, rows: [] };
+  if (st.history?.key === key) return st.history;
+  const history = (st.history = { key, reading: true, rows: [] });
+  const done = (found) => {
+    if (st.history !== history) return;
+    Object.assign(history, { reading: false }, found);
+    actions?.render?.()?.catch?.(() => {});
+  };
+  wholeActivity(ov, { state, publicOnly: true })
+    .then(async (whole) => {
+      const rows = activityRows(ov, state, whole);
+      done({ rows, facts: await sozuFactsOf(ov, rows), whole: true });
+    })
+    .catch(() => done({}));
+  return history;
+}
+
+/**
+ * Native staking's rate, and what the working under Sozu's says is made of:
+ * asked once a popup and node, and drawn again when they come.
+ * @returns {{ native: number | null, provisioners?: object[], tipHeight?: number }}
+ */
+function sozuRateFigures(ov, st, { actions }) {
+  const key = String(ov?.nodeUrl ?? "");
+  if (st.rate?.key === key) return st.rate;
+  const rate = (st.rate = { key, native: null });
+  const result = (res) => (res?.error ? null : res?.result ?? null);
+  const ask = (type) => Promise.resolve(actions?.send?.({ type })).then(result, () => null);
+  Promise.all([ask("DUSK_UI_GET_REWARD_RATE"), ask("DUSK_UI_GET_STAKING_FIGURES")]).then(([native, figures]) => {
+    if (st.rate !== rate) return;
+    Object.assign(rate, { native: typeof native === "number" ? native : null }, Array.isArray(figures?.provisioners) ? { provisioners: figures.provisioners, tipHeight: figures.tipHeight } : {});
+    actions?.render?.()?.catch?.(() => {});
+  });
+  return rate;
+}
+
 function ensureSozuLoaded(ov, { state, actions } = {}) {
   const st = sozuState(state);
   const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
@@ -390,6 +439,8 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
       st.profileIndex = idx;
       st.loaded = true;
       st.loading = false;
+      // What's through by now counts in the position, read with this status.
+      st.history = null;
       maybeAutoWatchStDusk({ state, actions, st, status: st.status, profileIndex: idx });
       actions?.render?.().catch(() => {});
     })
@@ -475,6 +526,10 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const paused = maintenance === true;
   const syncing = liveStatus?.features?.synchronization === true;
   const hidden = balancesHidden(ov);
+  // The rate and its working, read once a popup; what the status and the history say of the stake.
+  const figures = cfg ? sozuRateFigures(ov, st, { actions }) : { native: null };
+  const rateStatus = { ...liveStatus, pool: st.pool, position: st.position };
+  const history = cfg && st.loaded && position ? sozuHistory(ov, st, { state, actions }) : { reading: false, rows: [] };
   const publicBalanceLux = safeBigInt(liveStatus?.publicBalance?.value ?? 0, 0n);
   const poolBalanceLux = safeBigInt(position?.poolBalanceLux ?? 0, 0n);
   const stDuskLux = safeBigInt(position?.stDuskBalanceLux ?? 0, 0n);
@@ -589,6 +644,25 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       reviewBtn.disabled = true;
       return null;
     }
+    // What it gets for what's left after the fee, what that earns in a year at
+    // today's rate, then what stDUSK is.
+    const { earned } = sozuYear({ amount: lux, nativeRate: figures.native, status: rateStatus });
+    estimate.replaceChildren(
+      ...[
+        h("div", { class: "stake-estimate__main" }, [
+          "You get about ",
+          balance(field.isMasked(), stDuskText(quote.stDusk)),
+          " stDUSK, worth about ",
+          balance(field.isMasked(), formatDusk(quote.worth.toString())),
+          " DUSK now.",
+        ]),
+        earned !== null && earned > 0n
+          ? h("div", { class: "sozu-year" }, ["At today's rate that's about ", balance(field.isMasked(), formatDusk(earned)), " DUSK in rewards a year, after Sozu's share and the deposit fee."])
+          : null,
+        h("div", { text: "stDUSK is Sozu's token for your share. Its DUSK value follows Sozu's pool, its rewards and its fees." }),
+      ].filter(Boolean)
+    );
+    estimate.hidden = false;
     if (lux > maxStakeLux) {
       field.setError(shortfallText({ missingLux: lux + stakeFeeLux + unstakeFeeLux - publicBalanceLux, hidden, withFee: "this fee and the fee to unstake later" }));
       reviewBtn.disabled = true;
@@ -596,18 +670,6 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     }
     field.setError("");
     reviewBtn.disabled = false;
-    // What it gets for what's left after the fee, then what stDUSK is.
-    estimate.replaceChildren(
-      h("div", { class: "stake-estimate__main" }, [
-        "You get about ",
-        balance(field.isMasked(), stDuskText(quote.stDusk)),
-        " stDUSK, worth about ",
-        balance(field.isMasked(), formatDusk(quote.worth.toString())),
-        " DUSK now.",
-      ]),
-      h("div", { text: "stDUSK is Sozu's token for your share. Its DUSK value follows Sozu's pool, its rewards and its fees." })
-    );
-    estimate.hidden = false;
     return lux;
   }
 
@@ -726,11 +788,26 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
-  const positionGroup = position && (poolBalanceLux > 0n || stDuskLux > 0n)
-    ? h("div", { class: "group" }, [
-        kv("Staked with Sozu", [balance(hidden, fmtLux(poolBalanceLux)), " DUSK"]),
+  // The position, as the shared sums make it (sozuPosition): each short, as a row
+  // is, with what it is to the last lux for a pointer. What's put in and earned
+  // waits for the whole history, and the rewards for each stake's deposit fee.
+  const held = sozuPosition({ rows: history.rows, status: rateStatus, facts: history.facts, complete: Boolean(history.whole) });
+  const money = (lux) => h("span", { title: hidden ? undefined : formatDuskExact(lux.toString()) }, [balance(hidden, fmtLux(lux)), " DUSK"]);
+  const reading = h("span", { class: "muted", text: "Reading your history…" });
+  const positionGroup = position && (poolBalanceLux > 0n || stDuskLux > 0n || held.putIn > 0n)
+    ? h("div", { class: "group sozu-position" }, [
+        history.whole ? kv("Put in", money(held.putIn)) : null,
+        history.whole && held.takenOut > 0n ? kv("Taken out", money(held.takenOut)) : null,
+        kv("Worth now", money(poolBalanceLux)),
+        history.whole && held.depositFees > 0n ? kv(held.feesExact ? "Deposit fees" : "Deposit fees, about", money(held.depositFees)) : null,
+        history.reading
+          ? kv("Rewards so far", reading)
+          : history.whole && held.earned !== null
+            ? kv("Rewards so far", held.earned < 0n ? h("span", {}, [MINUS, money(-held.earned)]) : money(held.earned))
+            : null,
         kv("stDUSK", [balance(hidden, fmtLux(stDuskLux)), " stDUSK", stDuskAction].filter(Boolean)),
-      ])
+        held.waiting ? h("p", { class: "stake-cap", text: held.waiting === 1 ? "One more on its way isn't counted yet." : `${held.waiting} more on their way aren't counted yet.` }) : null,
+      ].filter(Boolean))
     : null;
 
   const sozuLink = h("button", {
@@ -750,8 +827,14 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       h("span", { class: "row-main" }, [h("span", { class: "row-title", text: title }), sub ? h("span", { class: "row-sub", text: sub }) : null].filter(Boolean)),
       extra,
     ].filter(Boolean));
+  // What it pays a year, once that's read, and the one line of what that's made of.
+  const yearly = sozuRate(figures.native, rateStatus);
+  const working = sozuRateLine({ nativeRate: figures.native, provisioners: figures.provisioners, tipHeight: figures.tipHeight, status: rateStatus, locale: amountLocale() });
   const facts = h("div", { class: "group info" }, [
     fact("drop", "Any amount, no node needed", "You get stDUSK, a token for your share of Sozu's pool.", positionGroup ? null : stDuskAction),
+    yearly !== null && working
+      ? fact("percent", `About ${new Intl.NumberFormat(amountLocale(), { maximumFractionDigits: 0, style: "percent" }).format(yearly)} a year. Not promised.`, working)
+      : null,
     // Sozu's own fees, read from its contract each time.
     fact("percent", fees.title, fees.sub),
     fact("fee", `Network fee up to ${formatFee(isWithdraw ? unstakeFeeLux : stakeFeeLux, { max: true })} DUSK`),

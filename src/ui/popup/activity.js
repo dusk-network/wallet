@@ -13,8 +13,9 @@
 
 import { activityRows as rowsOf, settleSends } from "@dusk-network/app-core/activity";
 import { StaleHistoryError } from "@dusk-network/app-core/history";
+import { sozuFacts } from "@dusk-network/app-core/sozu";
 
-import { activityHistory, noteActivityUnavailable } from "../../shared/activityHistory.js";
+import { activityHistory, archiveAt, historyArchiverUrl, noteActivityUnavailable } from "../../shared/activityHistory.js";
 import { keptArrivals } from "../../shared/bridgeArrival.js";
 import {
   StaleActivityError,
@@ -336,11 +337,11 @@ const WHOLE_RUNS = 64;
  * entry's details. Throws when it can't be had whole. `activityRows` makes the
  * rows of it.
  * @param {object} ov - the overview
- * @param {{ state: object }} ctx
+ * @param {{ state: object, publicOnly?: boolean }} ctx - `publicOnly`: its shielded history isn't asked for
  * @returns {Promise<{ entries: object[], meta: object | null, shielded: object[], shieldedWaiting: boolean }>}
  *   `shieldedWaiting`: its shielded history isn't all there yet
  */
-export async function wholeActivity(ov, { state }) {
+export async function wholeActivity(ov, { state, publicOnly = false }) {
   const a = state?.activity;
   if (!a?.history || a.key !== activityKey(ov)) throw new Error("The activity of this profile isn't open");
   if ((await a.epoch) === undefined) throw new Error("The activity store is out of reach");
@@ -358,7 +359,7 @@ export async function wholeActivity(ov, { state }) {
     await a.history.fillDetails(missing);
     read = await a.history.read(all);
   }
-  const answer = a.send ? await a.send({ type: "DUSK_UI_GET_SHIELDED_HISTORY" }).catch(() => null) : null;
+  const answer = a.send && !publicOnly ? await a.send({ type: "DUSK_UI_GET_SHIELDED_HISTORY" }).catch(() => null) : null;
   const shielded = answer?.result;
   const own = !answer?.error && Array.isArray(shielded?.entries) && shielded.profileIndex === a.profileIndex;
   return {
@@ -367,6 +368,21 @@ export async function wholeActivity(ov, { state }) {
     shielded: own ? shielded.entries : a.shielded,
     shieldedWaiting: !own || Boolean(shielded.pending),
   };
+}
+
+// Each stake with Sozu's own stDUSK and deposit fee, read once a page.
+const sozuFactsKept = new Map();
+
+/**
+ * What each stake and unstake with Sozu in `rows` did, as the pool's event says
+ * it: none for what can't be read yet.
+ * @param {object} ov - the overview
+ * @param {object[]} rows - the account's rows
+ * @returns {Promise<Map<string, import("@dusk-network/app-core/sozu").SozuFact> | undefined>}
+ */
+export function sozuFactsOf(ov, rows) {
+  const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
+  return sozuFacts({ archive, account: selected(ov).account, rows, cache: sozuFactsKept }).catch(() => undefined);
 }
 
 /** How long a detail lookup that brought nothing waits before it is asked again. */
