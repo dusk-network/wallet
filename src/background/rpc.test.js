@@ -923,6 +923,27 @@ describe("background rpc handler", () => {
     );
   });
 
+  it("dusk_sendTransaction tells its approval which of the gas the site chose, and a site can't say otherwise", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    const send = (extra) =>
+      handleRpc("https://dapp.example", {
+        method: "dusk_sendTransaction",
+        params: { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", ...extra },
+      });
+    const asked = () => requestUserApproval.mock.lastCall[2].feeFromSite;
+
+    await send({ gas: { limit: "10000000", price: "50" } });
+    expect(asked()).toEqual({ limit: true, price: true });
+    await send({ gas: { limit: "10000000" } });
+    expect(asked()).toEqual({ limit: true, price: false });
+    await send({ feeFromSite: { limit: false, price: false }, gas: { limit: "10000000", price: "50" } });
+    expect(asked()).toEqual({ limit: true, price: true });
+    await send({});
+    expect(asked()).toEqual({ limit: false, price: false });
+  });
+
   it("dusk_sendTransaction applies the higher Phoenix transfer gas default", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");

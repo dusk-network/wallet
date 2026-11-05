@@ -1,5 +1,6 @@
 import { formatDusk, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
+import { isNodeReply, nodeRefusalText } from "../../../shared/nodeRefusal.js";
 import { openUrl } from "../../../platform/index.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
@@ -28,7 +29,7 @@ const FINAL = new Set(["executed", "failed", "removed"]);
 // wallet than the one the transaction was reviewed on; "nothing was signed" is
 // the engine refusing a node that contradicts the chain it's fixed to.
 const REFUSED =
-  /nothing was signed|wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed|failed to (archive|unarchive|deserialize)|unknown error code/i;
+  /nothing was signed|not accepted|wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed|failed to (archive|unarchive|deserialize)|unknown error code/i;
 
 // Why a send stopped before it went to the wallet: a switch started meanwhile.
 const SWITCHED = "The network, profile or wallet changed meanwhile.";
@@ -59,6 +60,8 @@ export function reasonText(error) {
   if (/failed to (archive|unarchive)|unknown error code/i.test(text)) return "The wallet couldn't build this transaction.";
   // The wallet's own words on a node it won't sign for, whole.
   if (/nothing was signed/i.test(text)) return text;
+  // A node's reply never shows as it came: JSON, cut off in the middle.
+  if (isNodeReply(text)) return nodeRefusalText(text);
   const short = text.length > 140 ? `${text.slice(0, 139)}…` : text;
   return /[.!?…]$/.test(short) ? short : `${short}.`;
 }

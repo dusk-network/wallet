@@ -3,7 +3,7 @@
 // at the bottom where they always show. Chain, node and raw bytes sit under
 // Details. A locked wallet shows what is asked, with Unlock and Reject.
 
-import { UI_DISPLAY_DECIMALS, formatDuskExact, groupThousands, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, callsBridge } from "../../shared/bridgeCalls.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
@@ -26,6 +26,7 @@ import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js
 import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
 import { contractValueEl } from "../components/ContractValue.js";
+import { payGuard } from "../components/NetworkGas.js";
 import { safeTextEl } from "../components/SafeText.js";
 import "../components/GasEditor.js";
 import {
@@ -1021,6 +1022,41 @@ export async function renderNotification() {
       nodeUrl ? kv("Node", mono(nodeUrl), { stack: true }) : null,
     ];
 
+    // A fee the site chose, compared with the network's price once that's
+    // read: a warning with a way back from twice that, a note otherwise.
+    const fromSite = params?.feeFromSite ?? {};
+    const siteFee = h("div", { class: "ap-site-fee", hidden: !fromSite.limit && !fromSite.price });
+    const showSiteFee = (networkPrice, gasEditor) => {
+      const given = safeBigInt(gas?.price, 0n);
+      const asked = safeBigInt(networkPrice, 0n);
+      if (fromSite.price && asked > 0n && given >= asked * 2n) {
+        const times = (Number((given * 10n) / asked) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 });
+        const reset = h("button", {
+          class: "text-btn text-btn--inline",
+          type: "button",
+          text: "Use the network's price",
+          onclick: () => {
+            gasEditor.setGas?.(gasEditor.networkGas);
+            siteFee.hidden = true;
+          },
+        });
+        setChildren(siteFee, [warning("This site chose a high fee", `It's ${times} times the network's price.`, [reset])]);
+      } else if (fromSite.price) {
+        const compared =
+          asked <= 0n
+            ? "This site chose the fee."
+            : given === asked
+              ? "This site chose the fee, at the network's price."
+              : given > asked
+                ? "This site chose the fee, above the network's price."
+                : "This site chose the fee, below the network's price. It may take longer to go through.";
+        setChildren(siteFee, [note(compared)]);
+      } else if (fromSite.limit) {
+        const most = gas?.limit != null && gas?.price != null ? ` of up to ${formatFee(safeBigInt(gas.limit, 0n) * safeBigInt(gas.price, 0n), { max: true })} DUSK` : "";
+        setChildren(siteFee, [note(`This site chose the gas limit, for a fee${most} at the network's price.`)]);
+      }
+    };
+
     // The one fee editor, as on every Review: the fee and the total, then
     // Custom fee. A limit under the transaction's minimum says so while it's
     // typed, and "Use the network's price" puts back the request's limit at
@@ -1035,17 +1071,26 @@ export async function renderNotification() {
       gasEditor.minLimit = minimum;
       gasEditor.networkGas = gas;
       gasEditor.setGas(gas);
+      showSiteFee(null, gasEditor);
       if (gas?.limit != null) {
         send({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" })
           .then((res) => {
             const stats = res?.result ?? res;
             const price = String(stats?.median ?? stats?.average ?? "").trim();
-            if (/^\d+$/.test(price) && price !== "0") gasEditor.networkGas = { limit: String(gas.limit), price };
+            if (/^\d+$/.test(price) && price !== "0") {
+              gasEditor.networkGas = { limit: String(gas.limit), price };
+              showSiteFee(price, gasEditor);
+            }
           })
           .catch(() => {});
       }
       return gasEditor;
     };
+
+    // Whether what pays covers what's sent and the fee, above the buttons.
+    const available = /^\d+$/.test(String(pending.payBalance ?? "")) ? BigInt(pending.payBalance) : null;
+    const guardFor = (gasEditor, bar, sendsLux, ready = () => true) =>
+      payGuard({ editor: gasEditor, availableLux: available, sendsLux, shielded, hidden: pending.hideBalances === true, button: bar.approveBtn, ready, gas });
 
     if (txKind === TX_KIND.TRANSFER) {
       const to = String(params?.to ?? "").trim();
@@ -1055,7 +1100,8 @@ export async function renderNotification() {
       // A recipient the network's file blocks: why, at the top, and no Approve.
       const blocked = blockedRecipient(to, chainIdForNode(nodeUrl));
       const bar = decisionBar({ approveDisabled: Boolean(blocked), getApprovedParams: () => gasEditor.readOverrideGas(gas) });
-      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => !blocked });
+      const pay = guardFor(gasEditor, bar, safeBigInt(amountLux, 0n), () => !blocked);
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => !blocked && pay.covered() });
       // To the bridge's account: the memo is the address the bridge pays
       // out to on another chain, and one that isn't an address there is
       // flagged, as are its fee taking the whole amount and a route it
@@ -1094,7 +1140,9 @@ export async function renderNotification() {
                 `The bridge pays out to the address in the memo. Reject this, and check the address on the site.`
               )
             : null,
+          siteFee,
           gasEditor,
+          pay.el,
           group([
             kv("From", shielded ? inWallet(h("span", { text: "Your shielded balance" })) : payerLine(rail)),
             service
@@ -1117,13 +1165,13 @@ export async function renderNotification() {
     }
 
     if (txKind === TX_KIND.CONTRACT_CALL) {
-      return renderContractCall({ networkRows, gasEditorFor, rail, me });
+      return renderContractCall({ networkRows, gasEditorFor, guardFor, siteFee, rail, me });
     }
 
     renderError(`Unknown transaction kind: ${txKind || "(missing kind)"}`);
   }
 
-  async function renderContractCall({ networkRows, gasEditorFor, rail, me }) {
+  async function renderContractCall({ networkRows, gasEditorFor, guardFor, siteFee, rail, me }) {
     const gas = params?.gas ?? null;
     const amountLux = safeBigInt(params?.amount, 0n).toString();
     const depositLux = safeBigInt(params?.deposit, 0n).toString();
@@ -1195,17 +1243,16 @@ export async function renderNotification() {
         approveTitle: gated ? "Type MAX to enable approval" : "",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
       });
-      const acknowledged = () => !gated || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
       const ackInput = textInput({
         placeholder: "Type MAX to confirm",
         "aria-label": "Type MAX to confirm",
         onEnter: () => bar.approveBtn.click(),
-        oninput: () => {
-          bar.approveBtn.disabled = !acknowledged() || Boolean(gasEditor.error);
-        },
+        oninput: () => pay.draw(),
       });
-      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: acknowledged });
-      return { bar, ackInput };
+      const acknowledged = () => !gated || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
+      const pay = guardFor(gasEditor, bar, sendsLux, acknowledged);
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => acknowledged() && pay.covered() });
+      return { bar, ackInput, pay };
     };
 
     // A known DuskEVM bridge call: what it does, read from its arguments,
@@ -1213,7 +1260,8 @@ export async function renderNotification() {
     const bridge = argsOk ? bridgeCallOf(params, { own }) : null;
     if (bridge) {
       const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
-      submitOnGasEnter(gasEditor, bar.approveBtn);
+      const pay = guardFor(gasEditor, bar, sendsLux);
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => pay.covered() });
       const summary = requestSummary("send_tx", params, { own });
       let head;
       let decoded;
@@ -1261,7 +1309,9 @@ export async function renderNotification() {
           site,
           head,
           decoded,
+          siteFee,
           gasEditor,
+          pay.el,
           callRows(),
           detailsBlock(),
         ],
@@ -1324,7 +1374,7 @@ export async function renderNotification() {
       ];
       const partyTo = (party) => (kindOf(party) ? plainTo(party.value, "", { evm: false, prefix: `to ${kindOf(party)} ` }) : toLine(party.value));
 
-      const { bar, ackInput } = maxGatedBar(isMax, isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve");
+      const { bar, ackInput, pay } = maxGatedBar(isMax, isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve");
 
       show(
         [
@@ -1355,7 +1405,9 @@ export async function renderNotification() {
             ? warning("Unlimited allowance", "This lets the spender move all of this token from your account, now and later. Only continue if you trust it.", [ackInput])
             : null,
           callRows(),
+          siteFee,
           gasEditor,
+          pay.el,
           detailsBlock(),
         ],
         bar.nodes
@@ -1383,7 +1435,8 @@ export async function renderNotification() {
         approveText: isTransferFrom ? "Approve transfer" : "Approve",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
       });
-      submitOnGasEnter(gasEditor, bar.approveBtn);
+      const pay = guardFor(gasEditor, bar, sendsLux);
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => pay.covered() });
 
       show(
         [
@@ -1408,7 +1461,9 @@ export async function renderNotification() {
             ? warning("High risk", "This lets the operator move all of your NFTs in this collection.")
             : null,
           callRows(),
+          siteFee,
           gasEditor,
+          pay.el,
           detailsBlock(),
         ],
         bar.nodes
@@ -1422,7 +1477,7 @@ export async function renderNotification() {
     // a driver reads but not as one the wallet can show. Such a call that sets
     // an allowance may be unlimited, so it waits for MAX.
     const unreadAllowance = Boolean(tokenCall) && ["approve", "increase_allowance"].includes(fnNameLower);
-    const { bar, ackInput } = maxGatedBar(unreadAllowance);
+    const { bar, ackInput, pay } = maxGatedBar(unreadAllowance);
     const summary = requestSummary("send_tx", params, { own });
     const unchecked = callsBridge({ nodeUrl: params?.nodeUrl, contractId: contractIdHex })
       ? warning(
@@ -1453,7 +1508,9 @@ export async function renderNotification() {
               [ackInput]
             )
           : null,
+        siteFee,
         gasEditor,
+        pay.el,
         detailsBlock(),
       ],
       bar.nodes

@@ -502,6 +502,20 @@ registerStorageChangeForwarder();
 // The requests that end in a signature.
 const SIGNING_REQUESTS = new Set(["send_tx", "sign_message", "sign_auth", "sign_typed_data"]);
 
+// The balance a site's request to send pays from, in Lux, or null: not read in
+// time, or the shielded balance of a profile that isn't the one selected, which
+// the engine only keeps for the one selected.
+async function paysFor(params, accountIndex, status) {
+  const shielded = String(params?.privacy ?? "").toLowerCase() === "shielded";
+  if (shielded && accountIndex !== Number(status.selectedAccountIndex ?? 0)) return null;
+  const read = shielded
+    ? engineCall("dusk_getShieldedBalance").then((b) => b?.spendable ?? b?.value)
+    : engineCall("dusk_getPublicBalance", { profileIndex: accountIndex }).then((b) => b?.value);
+  const late = new Promise((resolve) => setTimeout(resolve, 2_000, null));
+  const lux = await Promise.race([read.catch(() => null), late]);
+  return /^\d+$/.test(String(lux ?? "")) ? String(lux) : null;
+}
+
 function getOriginFromSender(sender) {
   // sender.url for content scripts contains the full page URL. Some browser
   // contexts omit it but still expose tab.url/pendingUrl.
@@ -804,11 +818,18 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             ? chainRefusal(settings.nodeUrl, settings.chainId, await askNodeChainId(settings.nodeUrl, { timeoutMs: 2_000 }), { required: entry.kind === "send_tx", ahead: true })
             : "";
 
+        // What pays for a request to send, as the window checks it can: a
+        // read that's slow or fails checks nothing, and the window doesn't wait for it.
+        const accountIndex = perm?.accountIndex ?? status.selectedAccountIndex ?? 0;
+        const payBalance = entry.kind === "send_tx" && status.isUnlocked ? await paysFor(entry.params, Number(accountIndex) || 0, status) : null;
+
         sendResponse({
           rid: message.rid,
           kind: entry.kind,
           origin: entry.origin,
           params: entry.params,
+          payBalance,
+          hideBalances: settings?.hideBalances === true,
           // The wallet's network for the approval's header, by its node's
           // address, and the chain ID that node signs for.
           nodeUrl: String(settings?.nodeUrl ?? ""),

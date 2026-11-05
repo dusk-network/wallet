@@ -47,6 +47,8 @@ export function fakeNode(nodeUrl) {
     says: null,
     asked: 0,
     signed: [],
+    // What it answers a transaction with instead of taking it, as a body and status.
+    refuses: null,
     balance: { nonce: 0n, value: 10n ** 13n },
     stake: {},
     async fetch(input, init = {}) {
@@ -60,7 +62,7 @@ export function fakeNode(nodeUrl) {
       }
       if (/\/on\/transactions\/(preverify|propagate)$/.test(url.pathname)) {
         node.signed.push(new Uint8Array(init.body));
-        return new Response("ok");
+        return node.refuses === null ? new Response("ok") : new Response(node.refuses, { status: 400 });
       }
       if (url.pathname.endsWith("/account")) return new Response(bytesOf([node.balance.nonce, node.balance.value]));
       if (url.pathname.endsWith("/get_stake")) return new Response(stakeReply(node.stake));

@@ -25,9 +25,10 @@ import "../../components/GasEditor.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { amountField } from "../../components/AmountField.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
-import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
+import { balance, balancesHidden } from "../../components/Balance.js";
 import { fieldLabel, submitOnGasEnter } from "../../components/FormControls.js";
-import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { sozuHolding, sozuLiquidStakingView } from "./sozu.js";
 import { sendFromReview } from "./sent.js";
@@ -281,12 +282,8 @@ function actionState(pos, actionKind, amountLux, minLux, { hidden = false, feeGa
     // The fee comes from the stake's profile, also when another one owns it.
     const elsewhere =
       pos?.ownerProfileIndex !== undefined && Number(pos.ownerProfileIndex) !== Number(pos.stakeProfileIndex);
-    return {
-      ok: false,
-      reason: elsewhere
-        ? `You need some public DUSK in ${profileLabel(pos.stakeProfileIndex)} to pay the network fee.`
-        : "You need some public DUSK to pay the network fee.",
-    };
+    const short = shortfallText({ missingLux: feeLux - publicLux, moves: false, hidden });
+    return { ok: false, reason: elsewhere ? short.replace("The public balance", `The public balance of ${profileLabel(pos.stakeProfileIndex)}`) : short };
   }
   if (actionKind === ACTION_TOPUP && amountLux !== null && amountLux !== undefined) {
     if (safeBigInt(amountLux, 0n) <= 0n) {
@@ -296,10 +293,7 @@ function actionState(pos, actionKind, amountLux, minLux, { hidden = false, feeGa
       return { ok: false, reason: `The minimum stake is ${fmtLux(minLux)} DUSK.` };
     }
     if (publicLux < requiredLux) {
-      return {
-        ok: false,
-        reason: `That's ${hidden ? HIDDEN_BALANCE : fmtLux(requiredLux - publicLux)} DUSK more than the public balance, with the network fee.`,
-      };
+      return { ok: false, reason: shortfallText({ missingLux: requiredLux - publicLux, hidden }) };
     }
   }
   return { ok: true, reason: "" };
@@ -508,8 +502,8 @@ function stakingOverview(ov, ctx, { state, actions }) {
   const stakedLux = safeBigInt(pos.info?.amount?.total ?? 0, 0n);
   const lockedLux = safeBigInt(pos.info?.amount?.locked ?? 0, 0n);
   const rewardLux = safeBigInt(pos.info?.reward ?? 0, 0n);
-  const unstakeState = actionState(pos, ACTION_UNSTAKE, null, minLux, { feeGas });
-  const claimState = actionState(pos, ACTION_CLAIM, null, minLux, { feeGas });
+  const unstakeState = actionState(pos, ACTION_UNSTAKE, null, minLux, { hidden, feeGas });
+  const claimState = actionState(pos, ACTION_CLAIM, null, minLux, { hidden, feeGas });
   const { publicLux } = fundingOptionsForPosition(pos);
   const several = positions.length > 1;
 
@@ -708,7 +702,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     : Number(st.ownerProfileIndex ?? stakeProfileIndex) || 0;
 
   // What stops any amount: no gas, a stake this wallet can't manage.
-  const blocked = actionState(pos, ACTION_TOPUP, null, minLux, { feeGas });
+  const blocked = actionState(pos, ACTION_TOPUP, null, minLux, { hidden, feeGas });
 
   const field = amountField({
     label: isNew ? "Stake amount" : "Amount to add",
@@ -950,8 +944,23 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
   const line =
     kind === TX_KIND.STAKE ? "Native staking" : kind === TX_KIND.UNSTAKE ? "Back to your public balance" : "To your public balance";
 
+  // The stake's profile pays, as Staking read it: a stake from its public
+  // balance with its fee, an unstake or a claim its fee alone.
+  const payerIndex = Number(d.stakeProfileIndex ?? d.profileIndex ?? 0) || 0;
+  const paying =
+    state.staking?.ownerStatus?.profiles?.find?.((p) => Number(p.profileIndex) === payerIndex)?.publicBalance?.value ??
+    (payerIndex === (Number(ov?.selectedAccountIndex ?? 0) || 0) ? ov?.balance?.value : null);
+  const pay = payGuard({
+    editor: gasEditor,
+    availableLux: paying != null ? safeBigInt(paying, 0n) : null,
+    sendsLux: kind === TX_KIND.STAKE ? safeBigInt(d.amountLux ?? 0, 0n) : 0n,
+    hidden: balancesHidden(ov),
+    button: confirmBtn,
+  });
+
   // It ignores a click for a moment once Review is up (clickGuard.js).
   confirmBtn.addEventListener("click", guarded(async () => {
+    if (!pay.covered()) return;
     const gas = readGas();
     if (gas === false) return;
     confirmBtn.disabled = true;
@@ -991,9 +1000,9 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
         }
       },
     });
-    confirmBtn.disabled = false;
+    pay.draw();
   }));
-  submitOnGasEnter(gasEditor, confirmBtn);
+  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => pay.covered() });
 
   const stakeIndex = d.stakeProfileIndex ?? d.profileIndex;
   const severalProfiles = Number(d.ownerProfileIndex) !== Number(stakeIndex);
@@ -1023,6 +1032,7 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
       kind === TX_KIND.STAKE ? h("div", { class: "group info" }, [nodeRow(actions)]) : null,
       gasEditor,
       confirmError,
+      pay.el,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ].filter(Boolean)),
   ];

@@ -615,6 +615,122 @@ describe("a site's request to pay the bridge's account", () => {
   });
 });
 
+describe("a site's request the balance can't pay", () => {
+  const gas = { limit: "2500000", price: "1" };
+  const guard = () => app.querySelector(".pay-guard");
+  const CONTRACT = `0x${"ab".repeat(32)}`;
+  const call = (over = {}) => ({ kind: "contract_call", privacy: "public", contractId: CONTRACT, fnName: "do_it", fnArgs: "0x00", gas, chainId: "dusk:2", nodeUrl: TESTNET, networkName: "Testnet", ...over });
+
+  it("says how much is missing, with the fee, and keeps Approve off", async () => {
+    await render("send_tx", transfer(BOB, { amount: "10000000000", gas }), { payBalance: "13000000" });
+    expect(guard().textContent).toBe("That's 9.9895 DUSK more than your public balance, with the network fee.");
+    expect(approve().disabled).toBe(true);
+    expect(buttons()).toEqual(["Reject", "Approve"]);
+    // Reject still answers.
+    bar().querySelector(".btn-outline").click();
+    await settle();
+    expect(decision("reject")).toBeTruthy();
+  });
+
+  it("follows the fee as it's edited, down within the balance and back past it", async () => {
+    await render("send_tx", transfer(BOB, { amount: "1000000000", gas }), { payBalance: "1001000000" });
+    expect(guard().textContent).toBe("That's 0.0015 DUSK more than your public balance, with the network fee.");
+    expect(approve().disabled).toBe(true);
+    const editor = app.querySelector("dusk-gas-editor");
+    editor.dispatchEvent(fakeEvent("dusk-gas-fee", { detail: { feeLux: 900000n } }));
+    expect(guard().hidden).toBe(true);
+    expect(approve().disabled).toBe(false);
+    editor.dispatchEvent(fakeEvent("dusk-gas-fee", { detail: { feeLux: 3000000n } }));
+    expect(approve().disabled).toBe(true);
+  });
+
+  it("says a fee alone isn't covered, for a call that moves no DUSK", async () => {
+    await render("send_tx", call(), { payBalance: "1000" });
+    expect(guard().textContent).toBe("The public balance doesn't cover the network fee: 0.0025 DUSK short.");
+    expect(approve().disabled).toBe(true);
+  });
+
+  it("counts a call's amount and deposit", async () => {
+    await render("send_tx", call({ amount: "2000000000", deposit: "3000000000" }), { payBalance: "4000000000" });
+    expect(guard().textContent).toBe("That's 1.0025 DUSK more than your public balance, with the network fee.");
+  });
+
+  it("checks a shielded payment against the shielded balance", async () => {
+    await render("send_tx", transfer(ADDRESS, { privacy: "shielded", gas }), { payBalance: "1000" });
+    expect(guard().textContent).toContain("more than your shielded balance, with the network fee.");
+  });
+
+  it("hides the figure with Hide balances, which would give the balance away", async () => {
+    await render("send_tx", transfer(BOB, { gas }), { payBalance: "1000", hideBalances: true });
+    expect(guard().textContent).toBe("That's •••• DUSK more than your public balance, with the network fee.");
+  });
+
+  it("stops nothing when it can pay, or when the balance couldn't be read", async () => {
+    await render("send_tx", transfer(BOB, { gas }), { payBalance: "5000000000" });
+    expect([guard().hidden, approve().disabled]).toEqual([true, false]);
+    await render("send_tx", transfer(BOB, { gas }), { payBalance: null });
+    expect([guard().hidden, approve().disabled]).toEqual([true, false]);
+  });
+
+  it("keeps an allowance's MAX and the balance's check together", async () => {
+    await render("send_tx", call({ fnName: "approve", fnArgs: "0x00" }), { payBalance: "1000" });
+    expect(approve().disabled).toBe(true);
+    const box = app.querySelectorAll("input").find((i) => i.getAttribute("aria-label") === "Type MAX to confirm");
+    typeInto(box, "MAX");
+    // MAX typed, and still not enough for the fee.
+    expect(approve().disabled).toBe(true);
+    expect(guard().textContent).toContain("doesn't cover the network fee");
+  });
+});
+
+describe("a fee the site chose", () => {
+  const networkPrice = (median) => {
+    mocks.answers.DUSK_UI_GET_CACHED_GAS_PRICE = () => ({ result: { median } });
+  };
+  const fee = () => visibleText(app.querySelector(".ap-site-fee"));
+
+  it("says so with a warning, compared with the network's price, and offers the network's price", async () => {
+    networkPrice("1");
+    await render("send_tx", transfer(BOB, { amount: "10000000", gas: { limit: "10000000", price: "50" }, feeFromSite: { limit: true, price: true } }));
+    await settle();
+    expect(fee()).toBe("This site chose a high feeIt's 50 times the network's price.Use the network's price");
+    const editor = app.querySelector("dusk-gas-editor");
+    app.querySelector(".ap-site-fee button").click();
+    expect(editor.setGas).toHaveBeenLastCalledWith({ limit: "10000000", price: "1" });
+    expect(app.querySelector(".ap-site-fee").hidden).toBe(true);
+  });
+
+  it("says so calmly at or under the network's price", async () => {
+    networkPrice("2");
+    await render("send_tx", transfer(BOB, { gas: { limit: "2500000", price: "2" }, feeFromSite: { limit: true, price: true } }));
+    await settle();
+    expect(fee()).toBe("This site chose the fee, at the network's price.");
+    await render("send_tx", transfer(BOB, { gas: { limit: "2500000", price: "1" }, feeFromSite: { limit: true, price: true } }));
+    await settle();
+    expect(fee()).toBe("This site chose the fee, below the network's price. It may take longer to go through.");
+    networkPrice("4");
+    await render("send_tx", transfer(BOB, { gas: { limit: "2500000", price: "5" }, feeFromSite: { limit: true, price: true } }));
+    await settle();
+    expect(fee()).toBe("This site chose the fee, above the network's price.");
+  });
+
+  it("says when the site chose only the limit, and nothing when it chose none of it", async () => {
+    networkPrice("1");
+    await render("send_tx", transfer(BOB, { gas: { limit: "100000000", price: "1" }, feeFromSite: { limit: true, price: false } }));
+    await settle();
+    expect(fee()).toBe("This site chose the gas limit, for a fee of up to 0.1 DUSK at the network's price.");
+    await render("send_tx", transfer(BOB, { gas: { limit: "2500000", price: "1" }, feeFromSite: { limit: false, price: false } }));
+    await settle();
+    expect(app.querySelector(".ap-site-fee").hidden).toBe(true);
+  });
+
+  it("says the site chose it before the network's price is read", async () => {
+    mocks.answers.DUSK_UI_GET_CACHED_GAS_PRICE = () => new Promise(() => {});
+    await render("send_tx", transfer(BOB, { gas: { limit: "2500000", price: "50" }, feeFromSite: { limit: true, price: true } }));
+    expect(fee()).toBe("This site chose the fee.");
+  });
+});
+
 describe("the recipient of a site's request to send", () => {
   const answerName = (result) => {
     mocks.answers.DUSK_UI_RECIPIENT_NAME = async () => ({ ok: true, result });

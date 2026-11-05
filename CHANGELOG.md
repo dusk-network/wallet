@@ -16,6 +16,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Switched network as soon as it's chosen in Settings, and said a custom node isn't saved until Save.
 - Went back to Mainnet on Reset, and removed the profile names, tokens, checked names and custom nodes kept with it.
 - Neutralized and flagged characters that change how text reads, in messages to sign, sign-ins and memos: approvals, Review, Sent and a transaction's details.
+- Checked the balance covers the amount and the fee in site approvals and on every form and Review, saying how much is missing, with Approve and Confirm off until it does.
+- Said when a site chose the fee, compared with the network's price, with a way back to that price when it's high.
+- Said why a node refused a transaction in the wallet's own words, never as its raw reply.
 
 ## [0.4.0] - 2026-11-04
 

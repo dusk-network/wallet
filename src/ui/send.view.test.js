@@ -590,7 +590,7 @@ describe("send's amount", () => {
     expect(form.amountError()).toBe("");
 
     typeInto(form.amount, "500");
-    expect(form.amountError()).toBe("That's more than you have, with the network fee.");
+    expect(form.amountError()).toBe("That's 322.016 DUSK more than your public balance, with the network fee.");
     expect(form.amount.getAttribute("aria-invalid")).toBe("true");
     typeInto(form.amount, "0");
     expect(form.amountError()).toBe("Enter an amount greater than 0.");
@@ -636,7 +636,7 @@ describe("send's amount", () => {
     expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 24.85 DUSK", "Network fee up to 0.15 DUSK"]);
     form.radios()[0].click();
     typeInto(form.amount, "177.98");
-    expect(form.amountError()).toBe("That's more than you have, with the network fee.");
+    expect(form.amountError()).toBe("That's 0.001 DUSK more than your public balance, with the network fee.");
     dom.document.body.querySelector(".amount-avail button").click();
     expect(form.amount.value).toBe("177.979");
 
@@ -880,6 +880,41 @@ describe("review", () => {
       ov,
       send
     );
+
+  it("says how much is missing when the fee, as Custom fee changes it, takes it past the balance, and keeps Confirm off", async () => {
+    const send = async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "1", max: "1" } : { ok: true, result: { hash: "ab".repeat(32) } });
+    const ov = overview({ balance: { value: "1010000000", nonce: "0" } });
+    review({ to: ALICE.account, privacy: "public" }, ov, send);
+    await settle();
+    const body = dom.document.body;
+    const confirm = body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const guard = body.querySelector(".pay-guard");
+    expect([isShown(guard), confirm.disabled]).toEqual([false, false]);
+
+    const editor = body.querySelector("dusk-gas-editor");
+    editor.setGas({ limit: "2500000", price: "10" });
+    await settle();
+    expect(guard.textContent).toBe("That's 0.015 DUSK more than your public balance, with the network fee.");
+    expect(isShown(guard)).toBe(true);
+    expect(confirm.disabled).toBe(true);
+
+    // Back within it.
+    editor.setGas({ limit: "2500000", price: "1" });
+    await settle();
+    expect([isShown(guard), confirm.disabled]).toEqual([false, false]);
+  });
+
+  it("checks a shielded send against what can be spent now, and checks nothing against a balance it couldn't read", async () => {
+    const send = async () => ({ min: "1", median: "1", max: "1" });
+    review({ to: ALICE.address, privacy: "shielded" }, overview({ shieldedBalance: { value: "5000000000", spendable: "1000" } }), send);
+    await settle();
+    const body = dom.document.body;
+    expect(body.querySelector(".pay-guard").textContent).toContain("more than your shielded balance, with the network fee.");
+    review({ to: ALICE.account, privacy: "public" }, overview({ balance: null }), send);
+    await settle();
+    expect(isShown(body.querySelector(".pay-guard"))).toBe(false);
+    expect(body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(false);
+  });
 
   it("shows a memo in the order it was written, flags what it hides, and sends it as it is", async () => {
     const rlo = String.fromCodePoint(0x202e);

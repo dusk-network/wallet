@@ -106,7 +106,7 @@ describe("sending a token from its page", () => {
   const TOKEN = `0x${"cd".repeat(32)}`;
   const TO = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nF";
 
-  async function open(form) {
+  async function open(form, held = "12345") {
     const { installFakeDom, settle } = await import("../../testing/fakeDom.js");
     const { vi } = await import("vitest");
     const { document } = installFakeDom();
@@ -117,7 +117,7 @@ describe("sending a token from its page", () => {
       route: "asset_token",
       assetTokenForm: form,
       assetTokenContractId: TOKEN,
-      assets: { loaded: true, loading: false, owner: assetsOwner(ov), updatedAt: Date.now(), tokens: [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }], nfts: [], balances: { [TOKEN]: "12345" }, balancesAt: { [TOKEN]: Date.now() } },
+      assets: { loaded: true, loading: false, owner: assetsOwner(ov), updatedAt: Date.now(), tokens: [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }], nfts: [], balances: { [TOKEN]: held }, balancesAt: { [TOKEN]: Date.now() } },
     };
     const actions = { send, render: vi.fn(async () => {}), showToast: vi.fn() };
     document.body.replaceChildren(...assetTokenView(ov, { state, actions }));
@@ -128,8 +128,39 @@ describe("sending a token from its page", () => {
     return { press, send, state };
   }
 
+  it("says on Review when the public balance can't pay its fee, and keeps Confirm off", async () => {
+    const { installFakeDom, settle } = await import("../../testing/fakeDom.js");
+    const { vi } = await import("vitest");
+    const { document } = installFakeDom();
+    const { assetTokenConfirmView } = await import("./assets.js");
+    const ov = { isUnlocked: true, nodeUrl: "http://127.0.0.1:8080", accounts: ["acct"], selectedAccountIndex: 0, balance: { value: "1000" } };
+    const state = {
+      route: "asset_token_confirm",
+      assetTxDraft: {
+        op: "transfer",
+        token: { contractId: TOKEN, symbol: "TKN", decimals: 2 },
+        params: { kind: "contract_call", privacy: "public", contractId: TOKEN, fnName: "transfer", fnArgs: [1], amount: "0", deposit: "0" },
+        asset: { type: "DRC20", op: "transfer", valueUnits: "100", to: TO },
+      },
+    };
+    const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn(), review: {} };
+    document.body.replaceChildren(...assetTokenConfirmView(ov, { state, actions }));
+    await settle();
+    expect(document.body.querySelector(".pay-guard").textContent).toContain("The public balance doesn't cover the network fee:");
+    expect(document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(true);
+  });
+
+  it("says how much a transfer is over what the profile holds, and asks nothing", async () => {
+    const { press, send, state } = await open({ to: TO, amount: "200", spender: "", approveAmount: "" });
+    await press("Review transfer");
+    expect(state.route).toBe("asset_token");
+    expect(send.mock.calls.map(([m]) => m.type)).not.toContain("DUSK_UI_DRC20_ENCODE_INPUT");
+    const { document } = globalThis;
+    expect(document.body.querySelector(".asset-action-section .field-error").textContent).toBe("That's 76.55 TKN more than you have.");
+  });
+
   it("asks the engine for the token's own call, and reviews what it asked", async () => {
-    const { press, send, state } = await open({ to: TO, amount: "90071992547409.93", spender: "", approveAmount: "" });
+    const { press, send, state } = await open({ to: TO, amount: "90071992547409.93", spender: "", approveAmount: "" }, "9007199254740993");
     await press("Review transfer");
     expect(send.mock.calls.map(([m]) => m).find((m) => m.type === "DUSK_UI_DRC20_ENCODE_INPUT")).toMatchObject({
       contractId: TOKEN,

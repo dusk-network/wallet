@@ -25,6 +25,7 @@ import { runtimeSendMessage } from "../platform/extensionApi.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
 import { blockedRecipient } from "./recipientBlocklist.js";
 import { askNodeChainId, chainIdForNode, chainRefusal, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
+import { nodeRefusalText } from "./nodeRefusal.js";
 
 import {
   clearNotes,
@@ -1311,7 +1312,7 @@ export async function ensureNetwork() {
   await ensureProtocolDriverLoaded();
 
   // Lazily create the Network instance.
-  state.network = state.network ?? pinNodeInfo(new Network(url));
+  state.network = state.network ?? sayRefusalsPlainly(pinNodeInfo(new Network(url)));
   registerNetworkDataDrivers(state.network);
 
   // Patch network methods that need to hit different services (prover/archiver)
@@ -1433,6 +1434,23 @@ function pinNodeInfo(network) {
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
+  return network;
+}
+
+// A transaction the node turned down: its reply, JSON or whatever it chose to
+// write, goes no further than here (nodeRefusal.js). No reply at all isn't a
+// refusal: it may still have reached the node, and stays the error it is.
+function sayRefusalsPlainly(network) {
+  const txs = network?.transactions;
+  for (const step of ["preverify", "propagate"]) {
+    const call = txs?.[step];
+    if (typeof call !== "function") continue;
+    txs[step] = (...args) =>
+      call.apply(txs, args).catch((error) => {
+        if (error?.name === "TypeError" || error?.name === "AbortError") throw error;
+        throw new Error(nodeRefusalText(error?.message ?? error));
+      });
+  }
   return network;
 }
 

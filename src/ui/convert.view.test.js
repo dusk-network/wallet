@@ -79,7 +79,7 @@ describe("shield and unshield", () => {
     button("Max").click();
     expect(input.value).toBe("24.95");
     typeInto(input, "30");
-    expect(error()).toBe("That's more than your shielded balance, with the network fee.");
+    expect(error()).toBe("That's 5.05 DUSK more than your shielded balance, with the network fee.");
     typeInto(input, "");
     button("Review").click();
     expect([error(), state.route]).toEqual(["Enter an amount.", "convert"]);
@@ -121,6 +121,18 @@ describe("shield and unshield", () => {
     const shown = () => body().querySelectorAll("button").filter(isShown).map((b) => b.textContent);
     expect(shown()).toEqual(["← Back", "Confirm"]);
     expect(visibleText(body().querySelector("details.gas-custom summary"))).toBe("Custom fee");
+  });
+
+  it("says on Review how much is missing once the fee takes it past the balance, and keeps Confirm off", async () => {
+    const dusk = (n) => (BigInt(n) * 1_000_000_000n).toString();
+    const { convertConfirmView } = await import("./popup/views/convert.js");
+    const state = { route: "convert_confirm", draft: { kind: "unshield", amountDusk: "1", amountLux: dusk(1), gas: { limit: "50000000", price: "1" } } };
+    const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn(), review: {} };
+    const ov = { isUnlocked: true, accounts: ["a"], addresses: ["b"], selectedAccountIndex: 0, balance: { value: dusk(100) }, shieldedBalance: { value: dusk(2), spendable: dusk(1) } };
+    dom.document.body.replaceChildren(...convertConfirmView(ov, { state, actions }));
+    await settle();
+    expect(dom.document.body.querySelector(".pay-guard").textContent).toBe("That's 0.05 DUSK more than your shielded balance, with the network fee.");
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(true);
   });
 
   it("names the wallet beside the profile with more than one wallet, as the Review was drawn for", async () => {

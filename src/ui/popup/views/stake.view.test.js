@@ -452,6 +452,18 @@ describe("staking overview", () => {
     expect(body.querySelectorAll(".section-head .bracket-title").map(screenReaderText)).toEqual(["Stake"]);
   });
 
+  it("says on a native unstake's Review how much the fee is short, from the stake's own profile", async () => {
+    const state = { route: "stake", staking: staking(owner({ hasStake: true, info: { amount: { total: dusk(1000), locked: "0" }, reward: "0" } })), sozu: sozu() };
+    const app = popup(state);
+    state.stakeDraft = { kind: "unstake", stakeProfileIndex: 0, profileIndex: 0, ownerProfileIndex: 0, payment: "account", displayLux: dusk(1000), hasStake: true };
+    state.staking.ownerStatus.profiles = [{ profileIndex: 0, publicBalance: { value: "1000" } }];
+    state.route = "stake_confirm";
+    app.draw();
+    await settle();
+    expect(body.querySelector(".pay-guard").textContent).toContain("The public balance doesn't cover the network fee:");
+    expect(button("Confirm").disabled).toBe(true);
+  });
+
   it("says why Unstake and Claim rewards can't be pressed", () => {
     // Until Sozu is read, nothing natively staked doesn't say nothing is staked.
     popup({ route: "stake", staking: staking() });
@@ -471,7 +483,7 @@ describe("staking overview", () => {
     expect([button("Unstake").disabled, button("Claim rewards").disabled]).toEqual([true, true]);
     expect(body.querySelectorAll(".stake-sum .stake-cap").map(visibleText)).toEqual([
       "Locked: 10 DUSK. It's still yours, and unstaking returns it.",
-      "You need some public DUSK in Profile 2 to pay the network fee.",
+      "The public balance of Profile 2 doesn't cover the network fee: 0.05 DUSK short.",
     ]);
 
     for (const [ownerKind, reason] of [
@@ -612,7 +624,7 @@ describe("native staking", () => {
     // Too much says by how much, fee included.
     typeInto(field("Stake amount"), "5000");
     expect(body.querySelector(".amount-field__error").textContent).toBe(
-      "That's 3,517.1117 DUSK more than the public balance, with the network fee."
+      "That's 3,517.1117 DUSK more than your public balance, with the network fee."
     );
 
     typeInto(field("Stake amount"), "1000");
@@ -635,7 +647,7 @@ describe("native staking", () => {
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toContain("Network fee up to 0.15 DUSK");
     typeInto(field("Stake amount"), "1482.8");
     expect(body.querySelector(".amount-field__error").textContent).toBe(
-      "That's 0.0117 DUSK more than the public balance, with the network fee."
+      "That's 0.0117 DUSK more than your public balance, with the network fee."
     );
     button("Max").click();
     expect(field("Stake amount").value).toBe("1482.6383");
@@ -753,7 +765,7 @@ describe("staking with little or nothing", () => {
     expect(body.querySelector(".amount-field__error").hidden).toBe(true);
     expect(amount.getAttribute("aria-invalid")).toBeNull();
     expect(body.querySelector(".amount-field").classList.contains("is-invalid")).toBe(false);
-    expect(visibleText(body.querySelector(".amount-note"))).toBe("You need some public DUSK to pay the network fee.");
+    expect(visibleText(body.querySelector(".amount-note"))).toBe("The public balance doesn't cover the network fee: 0.05 DUSK short.");
     expect(button("Review stake").disabled).toBe(true);
     expect(body.textContent).not.toMatch(/gas funds/i);
   });
@@ -1254,6 +1266,32 @@ describe("liquid staking", () => {
     expect(button("Review unstake").disabled).toBe(false);
   });
 
+  it("says on the form when the public balance can't pay an unstake's fee, with how much is missing, before Review", () => {
+    const base = sozu({ position: { poolBalanceLux: dusk(1), stDuskBalanceLux: dusk(1) } });
+    const status = { ...base.status, publicBalance: { nonce: "0", value: "2863982" } };
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: { ...base, status, action: "withdraw" } };
+    popup(state);
+    typeInto(field("Unstake amount"), "0.1");
+    expect(body.querySelector(".amount-field__error").textContent).toBe("The public balance doesn't cover the network fee: 0.0072 DUSK short.");
+    expect(button("Review unstake").disabled).toBe(true);
+  });
+
+  it("says on an unstake's Review when the fee takes it past the public balance, and keeps Confirm off", async () => {
+    const base = sozu({ position: { poolBalanceLux: dusk(1), stDuskBalanceLux: dusk(1) } });
+    const status = { ...base.status, publicBalance: { nonce: "0", value: "20000000" } };
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: { ...base, status, action: "withdraw" } };
+    popup(state);
+    typeInto(field("Unstake amount"), "0.1");
+    button("Review unstake").click();
+    await settle();
+    expect(state.route).toBe("sozu_confirm");
+    const editor = body.querySelector("dusk-gas-editor");
+    editor.setGas({ limit: "10000000", price: "5" });
+    await settle();
+    expect(body.querySelector(".pay-guard").textContent).toBe("The public balance doesn't cover the network fee: 0.03 DUSK short.");
+    expect(button("Confirm").disabled).toBe(true);
+  });
+
   it("says no stake gets stDUSK when Sozu's deposit fee is 100%", () => {
     const status = { ...sozu().status, fees: { ...sozu().status.fees, deposit: { numerator: "1", denominator: "1" } } };
     const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ status }) };
@@ -1277,7 +1315,7 @@ describe("liquid staking", () => {
     ]);
     typeInto(field("Stake amount"), "5000");
     expect(body.querySelector(".amount-field__error").textContent).toBe(
-      "That's more than your public balance, with the network fee."
+      "That's 3,517.0767 DUSK more than your public balance, with this fee and the fee to unstake later."
     );
     expect(button("Review stake").disabled).toBe(true);
     button("Max").click();

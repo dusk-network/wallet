@@ -766,11 +766,14 @@ export async function handleRpc(origin, request) {
       const baseParams = applyTxDefaultsForRpc(safeNormalizedParams, { dynamicPrice });
       const approvalContext = await captureApprovalContext(perm);
       const approvalNodeUrl = approvalContext.nodeUrl;
+      const given = (v) => v !== undefined && v !== null && v !== "";
       const approvalParams = {
         ...baseParams,
         chainId: chainIdFromNodeUrl(approvalNodeUrl),
         nodeUrl: approvalNodeUrl,
         networkName: networkNameFromNodeUrl(approvalNodeUrl),
+        // Which of the gas the site chose, for its approval to say so.
+        feeFromSite: { limit: given(normalizedParams.gas?.limit), price: given(normalizedParams.gas?.price) },
       };
 
       // Ask approval (the approval UI also lets the user unlock).

@@ -213,6 +213,39 @@ describe("every kind of transaction, on w3sper's real builders", () => {
   });
 });
 
+describe("a node's refusal of a transaction", () => {
+  const refused = async (reply) => {
+    await addNode(HOSTILE, 2);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.refuses = reply;
+    return engine.sendTransaction(KINDS["a public transfer"]()).then(
+      () => null,
+      (error) => error.message
+    );
+  };
+
+  it("reaches no one as raw JSON: it says why in the wallet's words", async () => {
+    const reply = JSON.stringify({ error: "Invalid input: Tx 7abc0686 not accepted: this transaction is invalid Value spent larger than account holds" });
+    await expect(refused(reply)).resolves.toBe("The node refused it: the balance doesn't cover the amount and the network fee.");
+  });
+
+  it("never passes on what a node chose to write", async () => {
+    const said = await refused("Your wallet is compromised. Go to https://evil.example and enter your recovery phrase.");
+    expect(said).toBe("The node refused this transaction.");
+  });
+
+  it("keeps a connection that failed apart: that may still have reached the node", async () => {
+    await addNode(HOSTILE, 2);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const answers = node.fetch;
+    vi.stubGlobal("fetch", async (input, init) => {
+      if (String(input).endsWith("/on/transactions/preverify")) throw new TypeError("Failed to fetch");
+      return answers(input, init);
+    });
+    await expect(engine.sendTransaction(KINDS["a public transfer"]())).rejects.toThrow("Failed to fetch");
+  });
+});
+
 describe("messages, sign-ins and typed data", () => {
   const asks = {
     "a message": () => engine.signMessage({ origin: "https://site.example", chainId: "dusk:3070325578", message: "0x68690a" }),

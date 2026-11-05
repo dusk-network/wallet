@@ -702,6 +702,42 @@ describe("background Phoenix tx lifecycle flow", () => {
     });
   });
 
+  describe("what pays for a site's request to send", () => {
+    const ask = async (params, { accountIndex = 0, reply } = {}) => {
+      const { engineCall, getEngineStatus } = await import("../background/engineHost.js");
+      const { getPending } = await import("../background/pending.js");
+      const { approveOrigin } = await import("../shared/permissions.js");
+      await approveOrigin("https://dapp.example", { profileId: `account:${accountIndex}:acct${accountIndex}`, accountIndex, grants: {} }, "acct0");
+      getPending.mockReturnValueOnce({ kind: "send_tx", origin: "https://dapp.example", params, shown: { walletId: "acct0" } });
+      getEngineStatus.mockResolvedValueOnce({ isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"], selectedAccountIndex: 0 });
+      engineCall.mockImplementation(reply);
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+      try {
+        return await sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" });
+      } finally {
+        vi.unstubAllGlobals();
+        engineCall.mockImplementation(async () => true);
+      }
+    };
+
+    it("is the connected profile's public balance, or for a shielded payment what can be spent", async () => {
+      const reply = vi.fn(async (method) => (method === "dusk_getPublicBalance" ? { nonce: "1", value: "777" } : { value: "9", spendable: "8" }));
+      expect((await ask({ kind: "transfer", privacy: "public" }, { accountIndex: 1, reply })).payBalance).toBe("777");
+      expect(reply).toHaveBeenCalledWith("dusk_getPublicBalance", { profileIndex: 1 });
+      expect((await ask({ kind: "transfer", privacy: "shielded" }, { reply })).payBalance).toBe("8");
+    });
+
+    it("is unknown when it can't be read, or for another profile's shielded balance, and the window checks nothing", async () => {
+      const failing = vi.fn(async () => {
+        throw new Error("node down");
+      });
+      expect((await ask({ kind: "transfer", privacy: "public" }, { reply: failing })).payBalance).toBeNull();
+      const reply = vi.fn(async () => ({ value: "9", spendable: "8" }));
+      expect((await ask({ kind: "transfer", privacy: "shielded" }, { accountIndex: 1, reply })).payBalance).toBeNull();
+      expect(reply).not.toHaveBeenCalledWith("dusk_getShieldedBalance", undefined);
+    });
+  });
+
   it("shows a site's request only on its own wallet: on another, there's nothing to show", async () => {
     const { getPending } = await import("../background/pending.js");
     getPending.mockReturnValueOnce({ kind: "connect", origin: "https://dapp.example", params: {}, shown: { walletId: "acct9" } });

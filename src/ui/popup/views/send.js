@@ -26,7 +26,8 @@ import { amountField } from "../../components/AmountField.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
-import { gasFeeLux, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { shortfallText } from "../../lib/shortfall.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import {
   hideRecipientBadge,
@@ -217,7 +218,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
     const maxLux = getMaxAmountLux();
     if (maxLux != null && lux > maxLux) {
-      field.setError("That's more than you have, with the network fee.");
+      field.setError(shortfallText({ missingLux: lux - maxLux, shielded: detectedRecipientType === "address", hidden }));
       return null;
     }
     field.setError("");
@@ -1174,9 +1175,21 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     gas: d?.gas,
   });
 
+  // What pays covers it, with the fee as Custom fee changes it.
+  const paying = privacy === "shielded" ? ov?.shieldedBalance?.spendable ?? ov?.shieldedBalance?.value : ov?.balance?.value;
+  const pay = payGuard({
+    editor: gasEditor,
+    availableLux: paying != null ? safeBigInt(paying, 0n) : null,
+    sendsLux: safeBigInt(d.amountLux, 0n),
+    shielded: privacy === "shielded",
+    hidden: balancesHidden(ov),
+    button: confirmBtn,
+    ready: () => !nothingArrives,
+  });
+
   // It ignores a click for a moment once Review is up (clickGuard.js).
   confirmBtn.addEventListener("click", guarded(async () => {
-    if (nothingArrives) return;
+    if (nothingArrives || !pay.covered()) return;
     const gas = readGas();
     if (gas === false) return;
     confirmBtn.disabled = true;
@@ -1216,9 +1229,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         if (state.draft === d) state.draft = null;
       },
     });
-    confirmBtn.disabled = nothingArrives;
+    pay.draw();
   }));
-  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !nothingArrives });
+  submitOnGasEnter(gasEditor, confirmBtn, { ready: () => !nothingArrives && pay.covered() });
 
   const kv = (label, value, className = "") =>
     h("div", { class: ["kv", className].filter(Boolean).join(" ") }, [
@@ -1275,6 +1288,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       saveContactBtn,
       gasEditor,
       confirmError,
+      pay.el,
       h("div", { class: "btnrow" }, [confirmBtn]),
     ]),
   ];

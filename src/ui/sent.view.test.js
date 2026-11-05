@@ -32,7 +32,7 @@ const overview = (over = {}) => ({
   nodeUrl: NODE,
   accounts: [ACCOUNT],
   selectedAccountIndex: 0,
-  balance: { value: dusk(1500) },
+  balance: { value: dusk(2000) },
   shieldedBalance: { value: "0", spendable: "0" },
   txs: [],
   ...over,
@@ -276,6 +276,28 @@ describe("after Confirm", () => {
     expect(state.route).toBe("confirm");
     expect(state.draft).toMatchObject({ to: OTHER, amountLux: dusk(1500), memo: "Lunch" });
     expect(button("Confirm")).toBeTruthy();
+  });
+
+  it("never shows a node's reply as raw JSON, cut off or whole", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    const reply = JSON.stringify({ error: "Invalid input: Tx 7abc0686 not accepted: this transaction is invalid Value spent larger than account holds" });
+    (await app.confirm()).resolve({ error: { message: reply } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", "The node refused it: the balance doesn't cover the amount and the network fee. No fee was charged."]);
+    expect(visibleText(body)).not.toContain("{");
+    expect(visibleText(body)).not.toContain("Invalid input");
+  });
+
+  it("says whole why a node it won't sign for got nothing", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    const refusal = "hostile-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). Nothing was signed, because a signature here could count on the other network.";
+    (await app.confirm()).resolve({ error: { message: refusal } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", `${refusal} No fee was charged.`]);
   });
 
   it.each(["Wallet changed while awaiting approval", "Wallet or network changed while transaction was queued"])(
