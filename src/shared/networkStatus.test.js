@@ -87,6 +87,27 @@ describe("checkAllEndpoints", () => {
     expect(await getSettings()).toMatchObject({ nodeUrl: "https://other.example", chainId: 1 });
   });
 
+  it("says what the node said, and why nothing is signed when that contradicts the chain it's fixed to", async () => {
+    const { getSettings, setSettings } = await import("./settings.js");
+    const { statusChainRefusal } = await import("./networkStatus.js");
+    const custom = { ...ENDPOINTS, nodeUrl: "https://my-node.example" };
+    await setSettings({ nodeUrl: custom.nodeUrl, chainId: 2 });
+    node.mockImplementation(async (url) =>
+      new URL(url).pathname === "/on/node/info" ? new Response('{"chain_id":1}') : new Response("{}")
+    );
+    const status = await checkAllEndpoints(custom);
+    // Kept as it was added; the check only reports it.
+    expect((await getSettings()).chainId).toBe(2);
+    expect(status).toMatchObject({ nodeUrl: custom.nodeUrl, nodeChainId: 1 });
+    expect(statusChainRefusal(status, custom.nodeUrl, 2)).toBe(
+      "my-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). The wallet won't sign on it, because a signature here could count on the other network."
+    );
+    // Agreeing, about another node, or not said: nothing to say.
+    expect(statusChainRefusal(status, custom.nodeUrl, 1)).toBe("");
+    expect(statusChainRefusal(status, "https://other.example", 2)).toBe("");
+    expect(statusChainRefusal({ nodeUrl: custom.nodeUrl, nodeChainId: null }, custom.nodeUrl, 2)).toBe("");
+  });
+
   it("asks a node for its info with the headers Rusk wants, so one that checks them answers", async () => {
     const { probeNode } = await import("./networkStatus.js");
     node.mockImplementation(async (_url, init) =>
@@ -96,6 +117,45 @@ describe("checkAllEndpoints", () => {
     // One that still refuses is up, though it hasn't said its network.
     node.mockResolvedValueOnce(new Response("", { status: 424 }));
     await expect(probeNode("https://rusk.example.io")).resolves.toEqual({ ok: true, chainId: null });
+  });
+});
+
+describe("chainIdForChoice", () => {
+  let node;
+
+  beforeEach(() => {
+    vi.resetModules();
+    for (const key of Object.keys(items)) delete items[key];
+    node = vi.fn(async () => new Response('{"chain_id":2}'));
+    vi.stubGlobal("fetch", node);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fixes a new node's chain ID as it says it, and refuses a node added before that says another, unless it's accepted", async () => {
+    const { chainIdForChoice } = await import("./networkStatus.js");
+    const { setSettings } = await import("./settings.js");
+    const url = "https://my-node.example";
+    await expect(chainIdForChoice(url)).resolves.toBe(2);
+    await setSettings({ nodeUrl: url, chainId: 2 });
+    // The same again, or nothing said: as it was added.
+    await expect(chainIdForChoice(url)).resolves.toBe(2);
+    node.mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(chainIdForChoice(url)).resolves.toBe(2);
+
+    node.mockResolvedValue(new Response('{"chain_id":1}'));
+    node.mockImplementation(async () => new Response('{"chain_id":1}'));
+    await expect(chainIdForChoice(url)).rejects.toMatchObject({
+      message: expect.stringContaining("my-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2)"),
+      data: { chainChanged: { pinned: 2, answered: 1, question: expect.stringContaining("Use it on Mainnet (chain 1) from now on?") } },
+    });
+    await expect(chainIdForChoice(url, { accept: true })).resolves.toBe(1);
+    // A network's own node is asked nothing.
+    node.mockClear();
+    await expect(chainIdForChoice("https://testnet.nodes.dusk.network")).resolves.toBe(2);
+    expect(node).not.toHaveBeenCalled();
   });
 });
 

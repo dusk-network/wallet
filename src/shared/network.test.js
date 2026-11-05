@@ -9,14 +9,26 @@ describe("detectPresetIdFromNodeUrl", () => {
     expect(detectPresetIdFromNodeUrl("http://0.0.0.0:8080")).toBe("local");
   });
 
-  it("detects testnet URLs", () => {
+  it("detects testnet's own URL", () => {
     expect(detectPresetIdFromNodeUrl("https://testnet.nodes.dusk.network")).toBe("testnet");
-    expect(detectPresetIdFromNodeUrl("https://nodes.testnet.dusk.network")).toBe("testnet");
   });
 
-  it("detects devnet URLs", () => {
+  it("detects devnet's own URL", () => {
     expect(detectPresetIdFromNodeUrl("https://devnet.nodes.dusk.network")).toBe("devnet");
-    expect(detectPresetIdFromNodeUrl("https://nodes.devnet.dusk.network")).toBe("devnet");
+  });
+
+  it("goes by the exact address the networks' files list, never what a host looks like", () => {
+    for (const url of [
+      "https://nodes.testnet.dusk.network",
+      "https://testnet.evil.example",
+      "https://devnet.evil.example",
+      "https://nodes.dusk.network.evil.example",
+      "https://nodes.dusk.network:8443",
+      "http://nodes.dusk.network",
+      "http://testnet.nodes.dusk.network",
+    ]) {
+      expect(detectPresetIdFromNodeUrl(url), url).toBe("custom");
+    }
   });
 
   it("detects mainnet URL", () => {
@@ -53,14 +65,15 @@ describe("networkNameFromNodeUrl", () => {
     expect(networkNameFromNodeUrl("https://nodes.dusk.network")).toBe("Mainnet");
   });
 
-  it("names a node it can't place yet Custom, and by its network once the node gave its chain ID", () => {
+  it("calls any other node Custom, whatever its name looks like and whichever chain it says it's on", () => {
     expect(networkNameFromNodeUrl("https://example.com")).toBe("Custom");
-    // A name that only looks like one network's says nothing.
     expect(networkNameFromNodeUrl("https://testnet.example.com")).toBe("Custom");
-    noteChainId("https://example.com", 2);
-    expect(networkNameFromNodeUrl("https://example.com/rusk")).toBe("Testnet");
-    noteChainId("https://rusk.example.com", 0);
-    expect(networkNameFromNodeUrl("https://rusk.example.com")).toBe("Local");
+    for (const chainId of [0, 1, 2, 3]) {
+      noteChainId("https://example.com", chainId);
+      expect(networkNameFromNodeUrl("https://example.com/rusk")).toBe("Custom");
+    }
+    noteChainId("https://nodes.dusk.network.evil.example", 1);
+    expect(networkNameFromNodeUrl("https://nodes.dusk.network.evil.example")).toBe("Custom");
   });
 
   it("returns Unknown for invalid URLs", () => {

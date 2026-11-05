@@ -487,7 +487,11 @@ export function optionsView(ov, { state, actions } = {}) {
         if (av && !valid(av)) throw new Error("Invalid archiver URL format");
 
         switchContext(state);
-        const resp = await actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: v, proverUrl: pv, archiverUrl: av });
+        const save = (more = {}) => actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: v, proverUrl: pv, archiverUrl: av, ...more });
+        let resp = await save();
+        // A node added before that says another chain now stays as it was, unless the user agrees.
+        const changed = resp?.error?.data?.chainChanged;
+        if (changed && confirm(changed.question)) resp = await save({ acceptChain: true });
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to save settings");
         actions?.showToast?.("Settings saved.");
         state.needsRefresh = true;

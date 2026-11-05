@@ -110,6 +110,8 @@ vi.mock("../shared/networkStatus.js", () => ({
   checkAllEndpoints: vi.fn(async () => ({ ok: true })),
   resetNetworkStatus: vi.fn(async () => {}),
   isStatusStale: vi.fn(() => false),
+  chainIdForChoice: vi.fn(async () => null),
+  statusChainRefusal: vi.fn(() => ""),
 }));
 
 vi.mock("../platform/extensionApi.js", () => ({
@@ -664,6 +666,39 @@ describe("background Phoenix tx lifecycle flow", () => {
       } finally {
         pendingApprovals.clear();
       }
+    });
+  });
+
+  describe("a site's request on a node that contradicts the chain it's fixed to", () => {
+    const ask = async (kind, says) => {
+      const { getPending } = await import("../background/pending.js");
+      getPending.mockReturnValueOnce({ kind, origin: "https://dapp.example", params: {}, shown: { walletId: "acct0" } });
+      vi.stubGlobal("fetch", vi.fn(async () => (says === null ? new Response("", { status: 503 }) : new Response(JSON.stringify({ chain_id: says })))));
+      try {
+        return await sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    };
+
+    beforeEach(() => {
+      globalThis.localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://hostile-node.example", chainId: 2 }));
+    });
+
+    it("says why it can't be signed as the window opens, of everything that's signed", async () => {
+      for (const kind of ["send_tx", "sign_message", "sign_auth", "sign_typed_data"]) {
+        const { chainRefusal, networkName, chainId } = await ask(kind, 1);
+        expect(chainRefusal, kind).toBe(
+          "hostile-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). The wallet won't sign on it, because a signature here could count on the other network."
+        );
+        expect([networkName, chainId]).toEqual(["Custom", 2]);
+      }
+    });
+
+    it("says nothing while it agrees or doesn't answer, or for what isn't signed", async () => {
+      expect((await ask("send_tx", 2)).chainRefusal).toBe("");
+      expect((await ask("send_tx", null)).chainRefusal).toBe("");
+      expect((await ask("connect", 1)).chainRefusal).toBe("");
     });
   });
 

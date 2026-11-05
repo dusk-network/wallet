@@ -2,9 +2,8 @@
 // Uses chrome.notifications (system popup) when available.
 
 import { getSettings } from "../shared/settings.js";
-import { networkNameFromNodeUrl } from "../shared/network.js";
 import { explorerTxUrl } from "../shared/explorer.js";
-import { chainIdForNode } from "../shared/nodeNetwork.js";
+import { chainIdForNode, networkTextOf } from "../shared/nodeNetwork.js";
 import { getTxMeta } from "../shared/txStore.js";
 import { shortAddress } from "../ui/lib/strings.js";
 import {
@@ -114,7 +113,7 @@ export async function notifyTxSubmitted({ hash, origin, title, nodeUrl } = {}) {
     if (!ext?.notifications) return;
 
     const sent = await sentOn(hash, nodeUrl);
-    const networkName = networkNameFromNodeUrl(sent.nodeUrl, sent.chainId);
+    const networkName = sent.nodeUrl ? networkTextOf(sent.nodeUrl) : "";
 
     const msgLines = [];
     const sh = shortAddress(hash);
@@ -160,7 +159,7 @@ export async function notifyTxExecuted({
     if (!hash) return;
 
     const sent = await sentOn(hash, nodeUrl);
-    const networkName = networkNameFromNodeUrl(sent.nodeUrl, sent.chainId);
+    const networkName = sent.nodeUrl ? networkTextOf(sent.nodeUrl) : "";
     const explorerUrl = explorerTxUrl(sent.nodeUrl, hash, sent.chainId);
 
     const msgLines = [];

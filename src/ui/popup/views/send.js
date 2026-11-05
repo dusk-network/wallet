@@ -47,6 +47,7 @@ import {
 import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { sendFromReview } from "./sent.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
+import { networkTextOf } from "../../../shared/nodeNetwork.js";
 import { chainLabel, normalizeChainId } from "../../../shared/duskUri.js";
 
 // A pasted EVM address, which a Dusk transfer can't pay.
@@ -1007,7 +1008,7 @@ export function chainMismatchText(reqChain, nodeUrl) {
   const have = normalizeChainId(current);
   if (!want || !have || want === have) return "";
   // Labelled from the full chain ids ("dusk:1"): the bare references don't name a network.
-  return `This request is for ${chainLabel(reqChain) || `Chain ${want}`}. You are on ${chainLabel(current) || `Chain ${have}`}.`;
+  return `This request is for ${chainLabel(reqChain) || `Chain ${want}`}. You are on ${networkTextOf(String(nodeUrl ?? "")) || `Chain ${have}`}.`;
 }
 
 // Who pays and on which network, as a Review was asked for.

@@ -1124,8 +1124,93 @@ describe("the request's network", () => {
     await renderShop("connect", { requestedProfiles: true }, { isUnlocked: false, accounts: [], duskNames: {} });
     expect(strips()).toHaveLength(1);
 
-    await renderShop("sign_message", { chainId: "dusk:1", messageLen: 1 }, { networkName: "Testnet" });
+    await renderShop("sign_message", { chainId: "dusk:1", messageLen: 1 }, { nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" });
     expect(strips()).toHaveLength(0);
+  });
+});
+
+describe("a node that isn't a network's own", () => {
+  const HOSTILE = "https://nodes.dusk.network.evil.example";
+  const panelled = () => {
+    const panel = dom.document.createElement("div");
+    panel.className = "panel";
+    panel.appendChild(app);
+    dom.document.body.appendChild(panel);
+    return panel;
+  };
+
+  it("is Custom with its host at the top of an approval, whichever chain it says, with no test-network words", async () => {
+    const panel = panelled();
+    const chip = dom.document.createElement("div");
+    chip.id = "approval-network";
+    dom.document.body.appendChild(chip);
+    for (const chainId of [2, 3]) {
+      await render(
+        "send_tx",
+        transfer(BOB, { chainId: "dusk:3070325578", nodeUrl: HOSTILE, networkName: "Custom" }),
+        { nodeUrl: HOSTILE, networkName: "Custom", chainId }
+      );
+      expect(chip.textContent).toBe("Custom");
+      const strip = panel.querySelector(".testnet-strip");
+      expect(visibleText(strip)).toBe(`Custom node · ${new URL(HOSTILE).host}`.concat(chainId === 2 ? " · What you sign here counts on Testnet." : " · What you sign here counts on Devnet."));
+      expect(visibleText(strip)).not.toContain("no value");
+    }
+    await render("send_tx", transfer(BOB, { nodeUrl: HOSTILE, networkName: "Custom" }), { nodeUrl: HOSTILE, networkName: "Custom", chainId: 1 });
+    expect(visibleText(panel.querySelector(".testnet-strip"))).toContain("What you sign here counts on Mainnet.");
+    expect(row("Network").textContent).toBe(`Custom · ${new URL(HOSTILE).host}`);
+  });
+
+  it("says why it can't be signed, in plain words, and offers only Reject, for what's signed of every kind", async () => {
+    const chainRefusal = "hostile.example now says it's on Mainnet (chain 1), not Testnet (chain 2). Nothing was signed, because a signature here could count on the other network.";
+    for (const [kind, params] of [
+      ["send_tx", transfer(BOB)],
+      ["sign_message", { chainId: "dusk:3070325578", messageLen: 2, messagePreview: { kind: "text", text: "hi" } }],
+      ["sign_auth", { chainId: "dusk:3070325578", nonce: "n" }],
+      ["sign_typed_data", { chainId: "dusk:3070325578" }],
+    ]) {
+      await render(kind, params, { chainRefusal });
+      expect(visibleText(app.querySelector(".callout.warn"))).toBe(`This can't be signed on this node${chainRefusal}`);
+      expect(approve().disabled, kind).toBe(true);
+      expect(buttons()).toEqual(["Reject", "Approve"]);
+    }
+    // Rejecting still answers.
+    bar().querySelector(".btn-outline").click();
+    await settle();
+    expect(decision("reject")).toBeTruthy();
+  });
+
+  describe("a site's request to switch to it", () => {
+    const from = { chainId: "dusk:1", nodeUrl: "https://nodes.dusk.network", host: "nodes.dusk.network", networkName: "Mainnet" };
+    const to = { chainId: "dusk:3070325578", nodeUrl: HOSTILE, host: new URL(HOSTILE).host, networkName: "Custom" };
+
+    it("shows the host large on the main view, what that choice means, and never a network's name", async () => {
+      await render("switch_network", { from, to });
+      const head = app.querySelector(".ap-head");
+      expect(head.querySelector("h1").textContent).toBe("Switch to a custom node?");
+      expect(head.querySelector(".ap-node").textContent).toBe("nodes.dusk.network.evil.example");
+      expect(visibleText(app)).toContain("This node sees your activity and can show false balances.");
+      expect(row("From").textContent).toBe("Mainnet");
+      expect(row("To").textContent).toBe("Custom · nodes.dusk.network.evil.example");
+      expect(visibleText(app)).not.toContain("Switch to Mainnet");
+      // Not behind Details.
+      expect(head.closest?.("details") ?? null).toBeNull();
+      expect(buttons()).toEqual(["Reject", "Switch"]);
+    });
+
+    it("says so before the wallet is unlocked too", async () => {
+      await render("switch_network", { from, to }, { isUnlocked: false, accounts: [], duskNames: {} });
+      expect(app.querySelector(".ap-head h1").textContent).toBe("Switch to a custom node?");
+      expect(app.querySelector(".ap-node").textContent).toBe("nodes.dusk.network.evil.example");
+      expect(visibleText(app)).toContain("This node sees your activity and can show false balances.");
+    });
+
+    it("says Switch to Mainnet for Mainnet's own address alone, its host still large", async () => {
+      await render("switch_network", { from: to, to: { ...from, chainId: "dusk:1" } });
+      expect(app.querySelector(".ap-head h1").textContent).toBe("Switch to Mainnet?");
+      expect(app.querySelector(".ap-node").textContent).toBe("nodes.dusk.network");
+      expect(visibleText(app)).not.toContain("false balances");
+      expect(row("From").textContent).toBe("Custom · nodes.dusk.network.evil.example");
+    });
   });
 });
 

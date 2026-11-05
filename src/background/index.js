@@ -15,6 +15,7 @@ import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { askNodeChainId, chainRefusal } from "../shared/nodeNetwork.js";
 import { isAllowedDappOrigin } from "../shared/securityPolicy.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -62,7 +63,8 @@ import { getWalletDirectory } from "../shared/wallets.js";
 import {
   getNetworkStatus,
   checkAllEndpoints,
-  readChainId,
+  chainIdForChoice,
+  statusChainRefusal,
   resetNetworkStatus,
   isStatusStale,
 } from "../shared/networkStatus.js";
@@ -497,6 +499,9 @@ ext?.runtime?.onConnect?.addListener((port) => {
 // Keep provider state in sync even if storage is mutated from extension pages.
 registerStorageChangeForwarder();
 
+// The requests that end in a signature.
+const SIGNING_REQUESTS = new Set(["send_tx", "sign_message", "sign_auth", "sign_typed_data"]);
+
 function getOriginFromSender(sender) {
   // sender.url for content scripts contains the full page URL. Some browser
   // contexts omit it but still expose tab.url/pendingUrl.
@@ -791,14 +796,24 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
+        // What's asked to be signed, on a node that contradicts the chain it's
+        // fixed to: why not, at once. The engine refuses it again as it signs.
+        const signs = SIGNING_REQUESTS.has(entry.kind);
+        const refusal =
+          signs && status.isUnlocked
+            ? chainRefusal(settings.nodeUrl, settings.chainId, await askNodeChainId(settings.nodeUrl, { timeoutMs: 2_000 }), { required: entry.kind === "send_tx", ahead: true })
+            : "";
+
         sendResponse({
           rid: message.rid,
           kind: entry.kind,
           origin: entry.origin,
           params: entry.params,
-          // The wallet's network, for the approval's header, by the chain ID its node gave.
+          // The wallet's network for the approval's header, by its node's
+          // address, and the chain ID that node signs for.
           nodeUrl: String(settings?.nodeUrl ?? ""),
           chainId: settings?.chainId ?? null,
+          chainRefusal: refusal,
           networkName: networkNameFromNodeUrl(String(settings?.nodeUrl ?? "")),
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
@@ -1136,9 +1151,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
         }
 
-        // The node's chain ID, which names its network, kept with it (null
-        // while it can't be read: the next status check asks again).
-        const chainId = await readChainId(nodeUrl);
+        // The chain ID the node signs for, fixed with it (null while it can't
+        // be read: the next status check asks again). A node added before that
+        // says another now stays as it was, unless it's saved knowingly.
+        const chainId = await chainIdForChoice(nodeUrl, { accept: message?.acceptChain === true });
 
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           cancelPendingApprovals(null, "Network changed");
@@ -1346,7 +1362,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // the background; one that reads the chain ID tells the popup to
         // draw again.
         const networkStatus = await getNetworkStatus();
-        const failing = Boolean(balanceError) || networkStatus?.nodeStatus === "offline" || !Number.isInteger(chainId);
+        const refusal = statusChainRefusal(networkStatus, settings.nodeUrl, chainId);
+        const failing = Boolean(balanceError) || Boolean(refusal) || networkStatus?.nodeStatus === "offline" || !Number.isInteger(chainId);
         if (isStatusStale(networkStatus, failing ? 30_000 : 5 * 60_000)) {
           checkAllEndpoints({
             nodeUrl: settings.nodeUrl,
@@ -1384,6 +1401,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           ipfsGateway: settings.ipfsGateway ?? "",
           hideBalances: settings.hideBalances === true,
           chainId,
+          chainRefusal: refusal,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
           networkStatus,
           activeOrigin,

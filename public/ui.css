@@ -286,6 +286,21 @@ body[data-runtime="tauri"].page--full .panel {
   white-space: nowrap;
 }
 
+/* A node that isn't a network's own says which it is, in neutral words, its
+   whole host showing: the end of a host is what names it. */
+.testnet-strip.node-strip {
+  border-bottom-color: var(--border);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.testnet-strip.node-strip--refused {
+  background: color-mix(in oklab, var(--danger) 13%, var(--surface-1));
+  color: var(--text);
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -1451,6 +1466,12 @@ body.page--popup .site-bar-action {
     height: var(--strip-height);
   }
 
+  /* Long words wrap to the height they take; the sidebar still sits under it. */
+  body.page--full .panel > .testnet-strip.node-strip {
+    height: auto;
+    min-height: var(--strip-height);
+  }
+
   body.page--full .panel-header {
     position: sticky;
     top: var(--strip-height);
@@ -2371,6 +2392,10 @@ button.network-pill.is-disabled .network-pill__chev {
 
 .net-status--online {
   background-color: var(--online);
+}
+
+.net-status--custom {
+  background-color: var(--text-subtle);
 }
 
 .net-status--offline {

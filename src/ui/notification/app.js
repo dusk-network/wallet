@@ -11,7 +11,7 @@ import { getMinimumGas } from "../../shared/txDefaults.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { networkFor } from "@dusk-network/networks";
-import { chainIdForNode, noteChainId } from "../../shared/nodeNetwork.js";
+import { chainIdForNode, networkTextOf, noteChainId } from "../../shared/nodeNetwork.js";
 import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
@@ -87,9 +87,10 @@ function renderError(text) {
 }
 
 // The network the request is on, in the header beside the wallet's name, and
-// on a test network the strip at the top that says its DUSK has no value.
-function showNetwork(name) {
-  syncTestnetStrip(app?.closest?.(".panel") ?? document.body, name);
+// at the top the strip that says a test network's DUSK has no value, or which
+// node a custom one is.
+function showNetwork(name, node) {
+  syncTestnetStrip(app?.closest?.(".panel") ?? document.body, name, node);
   const chip = document.getElementById("approval-network");
   if (!chip) return;
   chip.textContent = name || "";
@@ -303,8 +304,10 @@ export async function renderNotification() {
   // The network: a transaction's own, which it was approved for, a
   // signature's chain, or the wallet's.
   const nodeUrl = String(params?.nodeUrl ?? pending.nodeUrl ?? "");
+  const chainRefused = String(pending.chainRefusal ?? "");
   showNetwork(
-    String(params?.networkName ?? "") || chainName(params?.chainId) || String(pending.networkName ?? "") || (nodeUrl ? networkNameFromNodeUrl(nodeUrl) : "")
+    String(params?.networkName ?? "") || chainName(params?.chainId) || String(pending.networkName ?? "") || (nodeUrl ? networkNameFromNodeUrl(nodeUrl) : ""),
+    { nodeUrl, chainId: pending.chainId ?? null }
   );
 
   const accountsArr = Array.isArray(accounts) ? accounts : [];
@@ -468,6 +471,11 @@ export async function renderNotification() {
     return;
   }
 
+  if (chainRefused) {
+    renderChainRefused();
+    return;
+  }
+
   switch (kindNorm) {
     case "connect":
       return renderConnect();
@@ -485,6 +493,21 @@ export async function renderNotification() {
       return renderSendTx();
     default:
       renderError(`Unknown kind: ${kindNorm || String(kind)}`);
+  }
+
+  // ---- A node that contradicts its chain ----------------------------------
+
+  // What the site asks, why nothing is signed on this node, and Reject.
+  function renderChainRefused() {
+    const summary = requestSummary(kindNorm, params, { own });
+    show(
+      [
+        site,
+        requestHead({ title: summary.title, amount: summary.amount, to: headTo(summary.to) }),
+        warning("This can't be signed on this node", chainRefused),
+      ],
+      decisionBar({ approveDisabled: true }).nodes
+    );
   }
 
   // ---- Locked --------------------------------------------------------------
@@ -553,7 +576,7 @@ export async function renderNotification() {
     show(
       [
         site,
-        requestHead({ title: summary.title, amount: summary.amount, to: headTo(summary.to), sub: summary.sub }),
+        requestHead({ title: summary.title, amount: summary.amount, node: summary.node, to: headTo(summary.to), sub: summary.sub }),
         h("div", { class: "ap-unlock" }, [
           h("label", { for: "approval-password", text: "Unlock to review and approve it" }),
           pwd,
@@ -674,24 +697,26 @@ export async function renderNotification() {
 
   // ---- Switch network ------------------------------------------------------
 
+  // The host of the node it goes to in large type, what that choice means,
+  // and each side by its name, a custom node's with its host; the addresses
+  // in full and the chain IDs a site sees sit under Details.
   function renderSwitchNetwork() {
     const from = params?.from ?? {};
     const to = params?.to ?? {};
-    const net = (n) =>
-      h("span", { class: "ap-net-value" }, [
-        h("span", { text: String(n.networkName ?? "Unknown") }),
-        n.chainId ? h("span", { class: "kv-muted", text: ` · ${n.chainId}` }) : null,
-      ]);
+    const summary = requestSummary("switch_network", params);
+    const net = (n) => (n.nodeUrl ? networkTextOf(n.nodeUrl) : String(n.networkName ?? "Unknown"));
     show(
       [
         site,
-        requestHead({ title: requestSummary("switch_network", params).title, sub: "The wallet then uses that network, for every site." }),
+        requestHead({ title: summary.title, node: summary.node, sub: "The wallet then uses that network, for every site." }),
+        summary.sub ? note(summary.sub, "eye", { className: "ap-visible" }) : null,
         group([kv("From", net(from)), kv("To", net(to))]),
         details("Details", [
           group(
             [
               from.nodeUrl ? kv("From node", mono(from.nodeUrl), { stack: true }) : null,
               to.nodeUrl ? kv("To node", mono(to.nodeUrl), { stack: true }) : null,
+              to.chainId ? kv("Chain ID sites see", mono(to.chainId)) : null,
             ],
             { className: "group--inset" }
           ),
@@ -749,7 +774,7 @@ export async function renderNotification() {
         message,
         group([kv("Account", profileValue()), kv("Message hash", mono(hashLine), { stack: true })]),
         note("Signing sends no transaction and moves no funds.", "info"),
-        details("Details", [group([kv("Network", chainName(chainId) || "Custom network"), kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
+        details("Details", [group([kv("Network", nodeUrl ? networkTextOf(nodeUrl) : chainName(chainId) || "Custom"), kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
       ],
       decisionBar({ approveText: "Sign" }).nodes
     );
@@ -976,7 +1001,7 @@ export async function renderNotification() {
   async function renderSendTx() {
     const txKind = String(params?.kind ?? "").toLowerCase();
     const txChainId = String(params?.chainId ?? "");
-    const networkName = String(params?.networkName ?? "") || networkNameFromNodeUrl(nodeUrl);
+    const networkName = nodeUrl ? networkTextOf(nodeUrl) : String(params?.networkName ?? "");
     const privacy = String(params?.privacy ?? (txKind === TX_KIND.CONTRACT_CALL ? "public" : "")).trim().toLowerCase();
     const shielded = privacy === "shielded";
     const rail = shielded ? "Shielded" : "Public";

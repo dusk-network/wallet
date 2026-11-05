@@ -2,7 +2,7 @@ import { formatDuskExact, formatFee, groupThousands } from "../../../shared/amou
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { arrivalUrl } from "../../../shared/bridgeArrival.js";
-import { networkNameFromNodeUrl } from "../../../shared/network.js";
+import { networkTextOf } from "../../../shared/nodeNetwork.js";
 import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
@@ -94,7 +94,7 @@ function technicalRows(tx, ov, nodeUrl, showToast, hidden) {
   const sent = tx?.sent ?? {};
   const watch = tx?.source === "sent" ? sent : {};
   return [
-    kv("Network", nodeUrl ? networkNameFromNodeUrl(nodeUrl) : String(ov?.networkName ?? "Unknown")),
+    kv("Network", nodeUrl ? networkTextOf(nodeUrl) : String(ov?.networkName ?? "Unknown")),
     num(tx?.blockHeight) ? kv("Block", mono(num(tx.blockHeight))) : null,
     used || limit ? kv("Gas used", h("span", {}, [balance(hidden, used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`)])) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,

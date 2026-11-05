@@ -14,6 +14,7 @@ import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { readChainId } from "../shared/networkStatus.js";
+import { nodeHost, pinnedChainOf } from "../shared/nodeNetwork.js";
 import { NETWORK_PRESETS } from "../shared/networkPresets.js";
 import {
   isAllowedDappEndpoint,
@@ -339,6 +340,8 @@ export async function handleRpc(origin, request) {
       isUnlocked: Boolean(status?.isUnlocked),
       origin,
       nodeUrl: String(settings?.nodeUrl ?? ""),
+      // The chain it signs for: known since the request came, or it isn't what was approved.
+      chainId: settings?.chainId ?? null,
       walletId: String(accounts[0] ?? ""),
       account: permission.profile?.account ?? "",
       profileIndex: perm.accountIndex,
@@ -356,7 +359,7 @@ export async function handleRpc(origin, request) {
     } catch {
       throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet changed while awaiting approval");
     }
-    const keys = ["origin", "nodeUrl", "profileIndex", "permissionProfileId", "permissionUpdatedAt"];
+    const keys = ["origin", "nodeUrl", "chainId", "profileIndex", "permissionProfileId", "permissionUpdatedAt"];
     if (expected.walletId) keys.push("walletId", "account");
     if (!current.isUnlocked || !current.walletId || keys.some((key) => current[key] !== expected[key])) {
       throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet changed while awaiting approval");
@@ -625,21 +628,24 @@ export async function handleRpc(origin, request) {
       const from = {
         chainId: chainIdFromNodeUrl(currentNodeUrl),
         nodeUrl: currentNodeUrl,
+        host: nodeHost(currentNodeUrl),
         networkName: networkNameFromNodeUrl(currentNodeUrl),
       };
 
       const to = {
         chainId: chainIdFromNodeUrl(targetNodeUrl),
         nodeUrl: targetNodeUrl,
+        host: nodeHost(targetNodeUrl),
         networkName: networkNameFromNodeUrl(targetNodeUrl),
       };
 
       // Ask user approval.
       const shown = promptFor(approvalContext);
       await requestUserApproval("switch_network", origin, { from, to }, shown);
-      // Then the node's chain ID, kept with it as Settings keeps a chosen
-      // node's: a site's node is asked nothing before the user agreed.
-      const chainId = await readChainId(targetNodeUrl);
+      // Then the node's chain ID, fixed with it as Settings fixes a chosen
+      // node's: a site's node is asked nothing before the user agreed, and one
+      // added before keeps the chain ID it was added with, whatever it says now.
+      const chainId = pinnedChainOf(await getSettings(), targetNodeUrl) ?? (await readChainId(targetNodeUrl));
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         await assertApprovalContext(approvalContext, shown);
         cancelPendingApprovals(null, "Network changed");
@@ -777,6 +783,8 @@ export async function handleRpc(origin, request) {
       finalParams.gas = validateGasShape(finalParams.gas);
 
       const idx = executionContext.profileIndex;
+      // The engine signs for the chain the node is fixed to now.
+      await ensureEngineConfigured();
       // What this send and its watcher keep is dropped after a wallet reset.
       const txEpoch = await getTxEpoch();
       const engineParams = {

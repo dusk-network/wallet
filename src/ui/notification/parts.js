@@ -40,14 +40,15 @@ export function amountParts({ lead = "", value, unit = "" }) {
 }
 
 /**
- * What the site asks for: a title, then an amount, a line saying to whom, and
- * small print, each optional.
- * @param {{ title: string, amount?: {lead?: string, value: string, unit: string}|null, to?: Node|string|null, sub?: Node|string|null, tag?: Node|null }} parts
+ * What the site asks for: a title, then an amount or the host of a node, a line
+ * saying to whom, and small print, each optional.
+ * @param {{ title: string, amount?: {lead?: string, value: string, unit: string}|null, node?: string|null, to?: Node|string|null, sub?: Node|string|null, tag?: Node|null }} parts
  */
-export function requestHead({ title, amount = null, to = null, sub = null, tag = null }) {
+export function requestHead({ title, amount = null, node = null, to = null, sub = null, tag = null }) {
   return h("div", { class: "ap-head" }, [
     h("h1", { class: "ap-title", text: title }),
     amount ? h("div", { class: "ap-amount" }, amountParts(amount)) : null,
+    node ? h("div", { class: "ap-node", text: node }) : null,
     to ? h("div", { class: "ap-to" }, [to]) : null,
     sub ? h("div", { class: "ap-sub" }, [sub]) : null,
     tag,

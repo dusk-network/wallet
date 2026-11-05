@@ -2,19 +2,18 @@
 //
 // We expose a CAIP-2 compatible chain id string:
 //   dusk:<reference>
-// where <reference> is a stable decimal string for known presets and
-// a deterministic 32-bit hash for custom nodes.
+// where <reference> is the chain ID of the exact address a network's file
+// lists, 0 on this machine, and a deterministic hash of the origin for any
+// other node. No custom node can get a chain ID a network has: its hash stays
+// out of the range chain IDs are in, whatever host it picks to land there.
 
-import { detectPresetIdFromNodeUrl } from "./network.js";
+import { isLocalNode, listedChainId } from "./nodeNetwork.js";
 
 export const CAIP2_NAMESPACE = "dusk";
 
-const PRESET_CHAIN_REFERENCES = {
-  mainnet: "1",
-  testnet: "2",
-  devnet: "3",
-  local: "0",
-};
+// The hash of a custom node's origin, moved past the chain IDs (a byte) if it
+// lands among them.
+const CUSTOM_REFERENCE_FLOOR = 0x100000000;
 
 /**
  * Compute a CAIP-2 chain id from the currently selected node URL.
@@ -81,12 +80,11 @@ export function chainReferenceFromChainId(chainId) {
 
 function chainReferenceFromNodeUrl(nodeUrl) {
   const url = String(nodeUrl ?? "").trim();
-  const preset = detectPresetIdFromNodeUrl(url);
 
-  // Fixed IDs for known networks.
-  if (preset && PRESET_CHAIN_REFERENCES[preset]) {
-    return PRESET_CHAIN_REFERENCES[preset];
-  }
+  // Fixed IDs for the listed networks' own nodes, and for this machine.
+  const listed = listedChainId(url);
+  if (listed !== null) return String(listed);
+  if (isLocalNode(url)) return "0";
 
   // For custom nodes, derive a stable ID from the URL origin.
   let basis = url;
@@ -98,7 +96,7 @@ function chainReferenceFromNodeUrl(nodeUrl) {
   }
 
   const h = fnv1a32(basis);
-  return String(h);
+  return String(h > 255 ? h : h + CUSTOM_REFERENCE_FLOOR);
 }
 
 /**

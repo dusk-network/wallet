@@ -1,5 +1,6 @@
 import { NETWORK_PRESETS } from "../../shared/networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "../../shared/network.js";
+import { nodeHost } from "../../shared/nodeNetwork.js";
 import { h } from "../lib/dom.js";
 import { iconSvg } from "./ActionIcon.js";
 import { menuKeys } from "./MenuKeys.js";
@@ -61,11 +62,13 @@ export function createNetworkMenuController({
 
     const items = NETWORK_PRESETS.map((p) => {
       const active = p.id === currentPresetId;
+      // The custom node it's on, by its host.
+      const hint = active && p.id === "custom" ? nodeHost(ov?.nodeUrl) || p.hint : p.hint;
 
       const left = h("div", { class: "net-menu-item-left" }, [
         h("div", { class: "net-menu-item-label", text: p.label }),
-        p.hint
-          ? h("div", { class: "net-menu-item-hint", text: p.hint })
+        hint
+          ? h("div", { class: "net-menu-item-hint", text: hint })
           : h("div"),
       ]);
 

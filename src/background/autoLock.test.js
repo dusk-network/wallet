@@ -196,6 +196,8 @@ vi.mock("../shared/networkStatus.js", () => ({
   getNetworkStatus: vi.fn(async () => ({ checkedAt: 0 })),
   checkAllEndpoints: mocks.checkAllEndpoints,
   readChainId: mocks.readChainId,
+  chainIdForChoice: (nodeUrl) => mocks.readChainId(nodeUrl),
+  statusChainRefusal: () => "",
   resetNetworkStatus: vi.fn(async () => {}),
   isStatusStale: mocks.isStatusStale,
 }));

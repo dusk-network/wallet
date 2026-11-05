@@ -233,6 +233,61 @@ describe("header", () => {
     expect(panel.children).toEqual([header]);
   });
 
+  it("says which custom node it's on, whatever it says of itself, with no test-network words and no green", async () => {
+    const { dom, renderHeader } = await setup("popup");
+    const panel = dom.document.createElement("div");
+    panel.className = "panel";
+    const pill = dom.document.createElement("button");
+    pill.id = "network-pill";
+    const label = dom.document.createElement("span");
+    label.className = "network-pill__label";
+    pill.appendChild(label);
+    panel.appendChild(pill);
+    dom.document.body.appendChild(panel);
+    const strip = () => panel.querySelector(".testnet-strip");
+    const custom = { ...overview, networkName: "Custom", nodeUrl: "https://nodes.dusk.network.evil.example", networkStatus: { nodeStatus: "online" } };
+    const dot = () => pill.querySelector(".net-status-dot");
+
+    for (const chainId of [2, 3, 0, null, 9]) {
+      renderHeader({ ...custom, chainId });
+      expect(label.textContent).toBe("Custom");
+      expect(visibleText(strip())).toContain("Custom node · nodes.dusk.network.evil.example");
+      expect(visibleText(strip())).not.toContain("Test DUSK has no value");
+      expect(dot().classList.contains("net-status--online")).toBe(false);
+    }
+    // Where what's signed there counts, when that's a network's chain.
+    renderHeader({ ...custom, chainId: 1 });
+    expect(visibleText(strip())).toBe("Custom node · nodes.dusk.network.evil.example · What you sign here counts on Mainnet.");
+    expect(strip().getAttribute("role")).toBe("note");
+    // The real thing is green, and says nothing above its header.
+    renderHeader({ ...overview, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network", networkStatus: { nodeStatus: "online" } });
+    expect(strip()).toBeNull();
+    expect(dot().classList.contains("net-status--online")).toBe(true);
+  });
+
+  it("says a node on this machine's test DUSK has no value only on a chain of its own", async () => {
+    const { dom, renderHeader } = await setup("popup");
+    const panel = dom.document.createElement("div");
+    panel.className = "panel";
+    dom.document.body.appendChild(panel);
+    const local = { ...overview, networkName: "Local", nodeUrl: "http://127.0.0.1:8080" };
+    renderHeader({ ...local, chainId: 0 });
+    expect(visibleText(panel.querySelector(".testnet-strip"))).toBe("Local · Test DUSK has no value");
+    renderHeader({ ...local, chainId: 1 });
+    expect(visibleText(panel.querySelector(".testnet-strip"))).toBe("Local node · 127.0.0.1:8080 · What you sign here counts on Mainnet.");
+  });
+
+  it("says why nothing is signed on a node that contradicts the chain it's fixed to", async () => {
+    const { dom, renderHeader } = await setup("popup");
+    const panel = dom.document.createElement("div");
+    panel.className = "panel";
+    dom.document.body.appendChild(panel);
+    const refusal = "hostile-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). Nothing was signed, because a signature here could count on the other network.";
+    renderHeader({ ...overview, networkName: "Custom", nodeUrl: "https://hostile-node.example", chainId: 2, chainRefusal: refusal });
+    const strip = panel.querySelector(".testnet-strip");
+    expect([visibleText(strip), strip.getAttribute("role")]).toEqual([refusal, "alert"]);
+  });
+
   it("puts the strip across the top of the full view, over the sidebar, staying as the page scrolls", async () => {
     const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
     // A rule's declarations, by its selector and indent as the sheet writes it.

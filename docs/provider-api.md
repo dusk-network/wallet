@@ -144,7 +144,7 @@ The provider starts emitting events after the first `request()` call or `on()` s
 | `LuxString` | Decimal string (u64) | `"1000000000"` (= 1 DUSK) |
 | `ChainId` | CAIP-2 `dusk:<id>` | `"dusk:1"` (mainnet) |
 
-**Chain IDs:** `dusk:1` mainnet, `dusk:2` testnet, `dusk:3` devnet, `dusk:0` local. Custom nodes get `dusk:` + the FNV-1a32 hash of the node URL origin (decimal). Treat the value as CAIP-2, not as a bare decimal or hexadecimal number:
+**Chain IDs:** `dusk:1` mainnet, `dusk:2` testnet, `dusk:3` devnet, each only for the exact node address `@dusk-network/networks` lists, and `dusk:0` for a node on this machine. Any other node gets `dusk:` + the FNV-1a32 hash of the node URL origin (decimal, moved past 255 if it lands below), and `networkName` `"Custom"`, whatever the node says of itself. Treat the value as CAIP-2, not as a bare decimal or hexadecimal number:
 
 ```js
 const match = /^dusk:(\d+)$/.exec(chainId);
@@ -257,6 +257,10 @@ await dusk.request({
 Returns `null`. Emits `chainChanged` and `duskNodeChanged` on success.
 
 > Note: `chainId` must be CAIP-2 (`dusk:<id>`).
+
+The window shows the node's host, and calls a node a network only at the exact address that network lists. A node added before keeps the chain ID it was added with; a site can't change it.
+
+`dusk_sendTransaction` and the `dusk_sign*` methods reject, with why in the message, while the node answers `/on/node/info` with another chain ID than the one the wallet fixed for it: a known address's from `@dusk-network/networks`, a custom node's as it gave it when it was added. Every transaction carries that fixed chain ID.
 
 ---
 

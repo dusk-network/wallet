@@ -24,7 +24,7 @@ import { assetUrl } from "../platform/assets.js";
 import { runtimeSendMessage } from "../platform/extensionApi.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
 import { blockedRecipient } from "./recipientBlocklist.js";
-import { chainIdForNode, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
+import { askNodeChainId, chainIdForNode, chainRefusal, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
 
 import {
   clearNotes,
@@ -1168,7 +1168,8 @@ async function assertApprovalContext(params, profileIndex) {
     expected.walletId !== getWalletId() ||
     expected.profileIndex !== profileIndex ||
     expected.account !== profile.account.toString() ||
-    expected.nodeUrl !== String(engineConfig.nodeUrl ?? "")
+    expected.nodeUrl !== String(engineConfig.nodeUrl ?? "") ||
+    ("chainId" in expected && expected.chainId !== nodeChainId())
   ) {
     throw new Error("Wallet changed while awaiting approval");
   }
@@ -1310,7 +1311,7 @@ export async function ensureNetwork() {
   await ensureProtocolDriverLoaded();
 
   // Lazily create the Network instance.
-  state.network = state.network ?? new Network(url);
+  state.network = state.network ?? pinNodeInfo(new Network(url));
   registerNetworkDataDrivers(state.network);
 
   // Patch network methods that need to hit different services (prover/archiver)
@@ -1416,6 +1417,43 @@ export async function ensureNetwork() {
   state.bookkeeperAll = state.bookkeeperAll ?? new Bookkeeper(state.treasuryAll);
 
   return state.network;
+}
+
+// Every transaction's chain ID, whichever of w3sper's builders signs it: they
+// read it from `network.node.info` as they sign, an answer the node is free to
+// change. Here that read gives the chain the node is fixed to, once the node is
+// asked and doesn't contradict it, or refuses (assertNodeChain).
+function pinNodeInfo(network) {
+  const node = network?.node;
+  if (!node) return network;
+  network.node = new Proxy(node, {
+    get: (target, prop) => {
+      if (prop === "info") return assertNodeChain().then((chainId) => ({ chainId }));
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return network;
+}
+
+/**
+ * The chain ID to sign for: the one this node is fixed to (nodeNetwork.js),
+ * asked of the node again first. A node that says another, or a chain that
+ * must be known and isn't, signs nothing, and says why. A node that doesn't
+ * answer changes nothing: what's signed carries the fixed chain ID anyway.
+ * @param {{ required?: boolean }} [opts] - `required`: what's signed carries it
+ * @returns {Promise<number | null>}
+ */
+async function assertNodeChain({ required = true } = {}) {
+  const nodeUrl = engineConfig.nodeUrl;
+  const pinned = nodeChainId();
+  if (pinned !== null) {
+    const refusal = chainRefusal(nodeUrl, pinned, await askNodeChainId(nodeUrl));
+    if (refusal) throw Object.assign(new Error(refusal), { code: ERROR_CODES.UNAUTHORIZED });
+  } else if (required) {
+    throw Object.assign(new Error(chainRefusal(nodeUrl, null, null)), { code: ERROR_CODES.UNAUTHORIZED });
+  }
+  return pinned;
 }
 
 function patchNetworkEndpoints(network) {
@@ -3370,7 +3408,7 @@ async function signMemoAsMoonlight(profile, memoText) {
   // We intentionally use "dummy" fields so the produced signature cannot be
   // replayed as a valid on-chain transfer:
   // - nonce=0 (invalid, because on-chain nonces start at 1)
-  // - chainId=0 (local)
+  // - chainId=0 (local), never a node's: the chain it's for is in the memo
   // - value=0, deposit=0
   // - gas limit/price kept tiny but non-zero (w3sper defaults otherwise)
   const bk =
@@ -3447,6 +3485,7 @@ export async function signMessage(params) {
   ].join("\n");
 
   await assertApprovalContext(params, profileIndex);
+  await assertNodeChain({ required: false });
   const signed = await signMemoAsMoonlight(profile, memo);
   return Object.freeze({
     account: signed.account,
@@ -3505,6 +3544,7 @@ export async function signAuth(params) {
   const message = lines.join("\n");
 
   await assertApprovalContext(params, profileIndex);
+  await assertNodeChain({ required: false });
   const signed = await signMemoAsMoonlight(profile, message);
   return Object.freeze({
     account: signed.account,
@@ -3549,6 +3589,7 @@ export async function signTypedData(params) {
   // paths do the same. Note the guard is a no-op when `_approvalContext` is
   // absent, so it protects only callers that pass one.
   await assertApprovalContext(params, profileIndex);
+  await assertNodeChain({ required: false });
 
   const signed = await signProfileTypedDataDigest(profile, digestBytes);
 
