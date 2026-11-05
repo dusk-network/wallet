@@ -22,7 +22,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Named your other profiles in Activity, a transaction's details, toasts and Send, and stopped offering to save them as contacts.
 - Gave Request payment the checks Send has: an amount over 0, a memo of 512 bytes at most, and Copied goes when the request changes.
 - Said when an amount could be two amounts, or has too many decimals, on every amount field.
-- Kept Review off on Send while the amount typed won't do.
+- Kept Review off on Send and Shield while the amount typed won't do.
 - Kept Confirm, and what stops it, in view on every Review.
 - Wrote percentages, token amounts and examples in the browser's number format, and a time zone's name the same on every screen.
 - Renamed Manage profiles in the profile menu to Profile names.

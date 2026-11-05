@@ -71,8 +71,16 @@ export function convertFormView(ov, { state, actions } = {}) {
     onEnter: () => nextBtn.click(),
   });
 
+  // Review is off while an amount typed won't do: the field says why. An empty
+  // one leaves it on, for it to say what's missing.
+  function check(opts) {
+    const lux = readAmount(opts);
+    nextBtn.disabled = lux == null && Boolean(String(field.input.value ?? "").trim());
+    return lux;
+  }
+
   // The amount as typed, checked as it is typed: an error under the field.
-  function check({ required = false } = {}) {
+  function readAmount({ required = false } = {}) {
     const raw = String(field.input.value ?? "").trim();
     if (!raw) {
       field.setError(required ? "Enter an amount." : "");

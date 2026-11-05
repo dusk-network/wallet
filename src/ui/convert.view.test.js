@@ -123,6 +123,20 @@ describe("shield and unshield", () => {
     expect(visibleText(body().querySelector("details.gas-custom summary"))).toBe("Custom fee");
   });
 
+  it("keeps Review off while an amount typed won't do, and on for an empty one to say what's missing", () => {
+    draw({ route: "convert", draft: { kind: TX_KIND.UNSHIELD } });
+    const input = body().querySelector("input.amount-field__input");
+    const review = button("Review");
+    for (const bad of ["abc", "0", "0.1234567891", "99999"]) {
+      typeInto(input, bad);
+      expect(review.disabled).toBe(true);
+    }
+    typeInto(input, "1");
+    expect(review.disabled).toBe(false);
+    typeInto(input, "");
+    expect(review.disabled).toBe(false);
+  });
+
   it("says on Review how much is missing once the fee takes it past the balance, and keeps Confirm off", async () => {
     const dusk = (n) => (BigInt(n) * 1_000_000_000n).toString();
     const { convertConfirmView } = await import("./popup/views/convert.js");
