@@ -553,8 +553,12 @@ export function optionsView(ov, { state, actions } = {}) {
         const save = (more = {}) => actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: v, proverUrl: pv, archiverUrl: av, ...more });
         let resp = await save();
         // A node added before that says another chain now stays as it was, unless the user agrees.
-        const changed = resp?.error?.data?.chainChanged;
-        if (changed && confirm(changed.question)) resp = await save({ acceptChain: true });
+        // Agreeing covers the chain asked about only: a node that answers otherwise by then is asked about again.
+        let changed = resp?.error?.data?.chainChanged;
+        while (changed && confirm(changed.question)) {
+          resp = await save({ acceptChain: changed.answered });
+          changed = resp?.error?.data?.chainChanged;
+        }
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to save settings");
         st.nodeDraft = null;
         actions?.showToast?.("Settings saved.");

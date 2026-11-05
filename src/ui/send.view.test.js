@@ -234,6 +234,15 @@ describe("send to a .dusk name with both addresses", () => {
     expect(dom.document.body.querySelector(".name-address-toggle")).toBeNull();
   });
 
+  it("says what's really missing when the balance is below the fee", () => {
+    const form = mount(newState(), overview({ balance: { value: "0" } }));
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "1");
+
+    // Sending that much more must be enough: the amount and the whole fee.
+    expect(form.amountError()).toBe("That's 1.0025 DUSK more than your public balance, with the network fee.");
+  });
+
   it("follows the picked card in the balance line", () => {
     const state = newState();
     const form = mount(state);

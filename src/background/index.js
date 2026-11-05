@@ -1217,7 +1217,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // The chain ID the node signs for, fixed with it (null while it can't
         // be read: the next status check asks again). A node added before that
         // says another now stays as it was, unless it's saved knowingly.
-        const chainId = await chainIdForChoice(nodeUrl, { accept: message?.acceptChain === true });
+        const chainId = await chainIdForChoice(nodeUrl, { accept: Number.isInteger(message?.acceptChain) ? message.acceptChain : null });
 
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           cancelPendingApprovals(null, "Network changed");

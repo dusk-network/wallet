@@ -132,19 +132,19 @@ export async function readChainId(nodeUrl, { attempts = 2, waitMs = 500, timeout
  * The chain ID to keep with a node as Settings or the network menu choose it:
  * the one it was added with, or for a new node what it says now. A node that
  * says something else than it was added with is refused until it's saved again
- * knowingly (`accept`, which fixes what it says now); one that doesn't say keeps
- * the one it has.
+ * knowingly (`accept`, the chain ID the user agreed to, and no other); one that
+ * doesn't say keeps the one it has.
  * @param {string} nodeUrl
- * @param {{ accept?: boolean }} [opts]
+ * @param {{ accept?: number | null }} [opts]
  * @returns {Promise<number | null>}
  */
-export async function chainIdForChoice(nodeUrl, { accept = false } = {}) {
+export async function chainIdForChoice(nodeUrl, { accept = null } = {}) {
   const listed = listedChainId(nodeUrl);
   if (listed !== null) return listed;
   const pinned = pinnedChainOf(await getSettings(), nodeUrl);
   const answered = await readChainId(nodeUrl);
   if (pinned === null || answered === null || answered === pinned) return pinned ?? answered;
-  if (accept) return answered;
+  if (accept === answered) return answered;
   const { notice, question } = chainChangeWords(nodeUrl, pinned, answered);
   throw rpcError(ERROR_CODES.UNAUTHORIZED, notice, { chainChanged: { pinned, answered, question } });
 }

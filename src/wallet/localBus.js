@@ -329,7 +329,7 @@ export async function localSend(message) {
       }
 
       // The chain ID the node signs for, fixed with it, as the background fixes it.
-      const chainId = await chainIdForChoice(nodeUrl, { accept: message?.acceptChain === true });
+      const chainId = await chainIdForChoice(nodeUrl, { accept: Number.isInteger(message?.acceptChain) ? message.acceptChain : null });
       const nextSettings = await setSettings({
         nodeUrl,
         chainId,

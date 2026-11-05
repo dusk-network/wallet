@@ -395,7 +395,7 @@ describe("the network", () => {
     confirm.mockReturnValue(true);
     saveButton().click();
     await settle();
-    expect(view.actions.send).toHaveBeenLastCalledWith(expect.objectContaining({ acceptChain: true }));
+    expect(view.actions.send).toHaveBeenLastCalledWith(expect.objectContaining({ acceptChain: 1 }));
     expect(view.actions.showToast).toHaveBeenCalledWith("Settings saved.");
   });
 });

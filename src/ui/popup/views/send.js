@@ -236,7 +236,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
     const maxLux = getMaxAmountLux();
     if (maxLux != null && lux > maxLux) {
-      field.setError(shortfallText({ missingLux: lux - maxLux, shielded: detectedRecipientType === "address", hidden }));
+      field.setError(shortfallText({ missingLux: lux + feeLuxForRecipientType(detectedRecipientType) - (detectedRecipientType === "address" ? shSpendLux : pubBalLux), shielded: detectedRecipientType === "address", hidden }));
       return null;
     }
     field.setError("");

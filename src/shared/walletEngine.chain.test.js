@@ -135,7 +135,7 @@ describe("a node that changes its answer between its label and a signature", () 
     expect(await settings.setSettings({ nodeUrl: HOSTILE, chainId: null })).toMatchObject({ chainId: 2 });
     await expect(networkStatus.chainIdForChoice(HOSTILE)).rejects.toThrow("now says it's on Mainnet (chain 1), not Testnet (chain 2). To use it anyway, save it in Settings.");
     // Saving it knowingly fixes what it says now.
-    await expect(networkStatus.chainIdForChoice(HOSTILE, { accept: true })).resolves.toBe(1);
+    await expect(networkStatus.chainIdForChoice(HOSTILE, { accept: 1 })).resolves.toBe(1);
   });
 
   it("refuses a custom node whose chain ID was never read, rather than take its word as it signs", async () => {

@@ -151,7 +151,9 @@ describe("chainIdForChoice", () => {
       message: expect.stringContaining("my-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2)"),
       data: { chainChanged: { pinned: 2, answered: 1, question: expect.stringContaining("Use it on Mainnet (chain 1) from now on?") } },
     });
-    await expect(chainIdForChoice(url, { accept: true })).resolves.toBe(1);
+    await expect(chainIdForChoice(url, { accept: 1 })).resolves.toBe(1);
+    // Agreeing to one chain says nothing of another the node answers by then.
+    await expect(chainIdForChoice(url, { accept: 3 })).rejects.toMatchObject({ data: { chainChanged: { answered: 1, pinned: 2 } } });
     // A network's own node is asked nothing.
     node.mockClear();
     await expect(chainIdForChoice("https://testnet.nodes.dusk.network")).resolves.toBe(2);

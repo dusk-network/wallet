@@ -25,7 +25,7 @@ import { runtimeSendMessage } from "../platform/extensionApi.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
 import { blockedRecipient } from "./recipientBlocklist.js";
 import { askNodeChainId, chainIdForNode, chainRefusal, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
-import { nodeRefusalText } from "./nodeRefusal.js";
+import { nodeRefusalText, propagationError } from "./nodeRefusal.js";
 
 import {
   clearNotes,
@@ -1466,7 +1466,8 @@ function sayRefusalsPlainly(network) {
     txs[step] = (...args) =>
       call.apply(txs, args).catch((error) => {
         if (error?.name === "TypeError" || error?.name === "AbortError") throw error;
-        throw new Error(nodeRefusalText(error?.message ?? error));
+        // Before propagation nothing has gone out. After it, only the node's own word is a refusal.
+        throw new Error(step === "propagate" ? propagationError(error?.message ?? error) : nodeRefusalText(error?.message ?? error));
       });
   }
   return network;
