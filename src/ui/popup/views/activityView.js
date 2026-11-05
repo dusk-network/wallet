@@ -48,7 +48,7 @@ const empty = (text) =>
  */
 export function recentActivitySection(ov, { state, actions } = {}) {
   const hidden = balancesHidden(ov);
-  const contactName = contactNames(state, actions);
+  const contactName = contactNames(state, actions, ov);
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const rows = activityRows(ov, state);
   const recent = rows.slice(0, RECENT_ROWS);
@@ -85,7 +85,7 @@ export function recentActivitySection(ov, { state, actions } = {}) {
  */
 export function activityView(ov, { state, actions } = {}) {
   const hidden = balancesHidden(ov);
-  const contactName = contactNames(state, actions);
+  const contactName = contactNames(state, actions, ov);
   const filter = ACTIVITY_FILTERS.some((f) => f.id === state?.activityFilter) ? state.activityFilter : "all";
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const rows = activityRows(ov, state).filter((tx) => inFilter(describeTx(tx, { contactName, nodeUrl }), filter));

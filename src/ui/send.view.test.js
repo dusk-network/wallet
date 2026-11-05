@@ -712,6 +712,26 @@ describe("names on Send and Review", () => {
     expect(from()).toBe("Fromme.dusk · Public");
   });
 
+  it("names your other profile, on the form and on Review, and offers no Save to Contacts", async () => {
+    const ov = overview({ accountNames: { 1: "Savings" } });
+    const form = mount(newState(), ov);
+    typeInto(form.to, OTHER_PROFILE);
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".to-chip"))).toBe("Savings");
+
+    mount(
+      {
+        route: "confirm",
+        addressBook: { loaded: true, items: [] },
+        draft: { to: OTHER_PROFILE, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+      },
+      ov
+    );
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings");
+    expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
+  });
+
   it("offers no Save to Contacts for this wallet's own account or address", () => {
     for (const to of [OWN.account, OWN.address]) {
       mount({

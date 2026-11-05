@@ -23,7 +23,7 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
-import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
+import { ownProfileName, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { fieldLabel, submitOnGasEnter, textInput } from "../../components/FormControls.js";
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
@@ -409,7 +409,9 @@ export function sendFormView(ov, { state, actions } = {}) {
 
       if (!contactsIndex) rebuildContactsIndex(state.addressBook?.items);
       const hit = contactsIndex?.get(String(addr).toLowerCase());
-      const name = String(hit?.name ?? "").trim();
+      // A saved contact, or another profile of this wallet's.
+      const profile = addr === ownAccount || addr === ownAddress ? "" : ownProfileName(ov, addr);
+      const name = String(hit?.name ?? "").trim() || profile;
       if (!name) {
         hideContactBadge();
         return;
@@ -419,7 +421,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         kind: "contact",
         label: name,
         seed: addr,
-        title: `Saved contact: ${name}`,
+        title: hit?.name ? `Saved contact: ${name}` : `Your profile: ${name}`,
         className: "to-chip",
       });
       toWrap.classList.add("has-chip");
@@ -1078,6 +1080,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     },
   });
 
+  const own = toAddr === ownAccount || toAddr === ownAddress;
   // Who it goes to: a saved contact's label and the recipient's .dusk name,
   // both when there are both, over the full address.
   const contactName = () => {
@@ -1085,7 +1088,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     const hit = (Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).find(
       (e) => String(e?.address ?? "").trim().toLowerCase() === key
     );
-    return String(hit?.name ?? "").trim();
+    // Or another profile of this wallet's, which needs no saving.
+    return String(hit?.name ?? "").trim() || (own ? "" : ownProfileName(ov, toAddr));
   };
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
@@ -1097,7 +1101,6 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   };
 
   // Save to Contacts, unless it's saved already or it's this wallet's own.
-  const own = toAddr === ownAccount || toAddr === ownAddress;
   const saveContactBtn = h("button", {
     class: "text-btn text-btn--inline review-save-contact",
     type: "button",

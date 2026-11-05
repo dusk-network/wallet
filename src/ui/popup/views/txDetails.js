@@ -173,7 +173,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
   }
 
   const hidden = balancesHidden(ov);
-  const desc = describeTx(tx, { contactName: contactNames(state, actions), nodeUrl });
+  const desc = describeTx(tx, { contactName: contactNames(state, actions, ov), nodeUrl });
   const { kind } = tx;
   const showToast = actions?.showToast;
 

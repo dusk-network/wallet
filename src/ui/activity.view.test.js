@@ -120,6 +120,38 @@ describe("Activity's rows", () => {
     expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Registered a .dusk name, Dusk Domains · Yesterday, −100 DUSK");
   });
 
+  it("name your other profile, by the name it has on this device, without Copy", () => {
+    const { ov, state, draw } = setup();
+    ov.accounts = [A, SENDER];
+    draw();
+    expect(rows()[2]).toBe("Profile 2Received · Yesterday+1,000 DUSK");
+    const row = body().querySelectorAll(".tx-row")[2];
+    expect(row.querySelector(".tx-name").className).toBe("tx-name");
+    expect(row.querySelector("button.tx-copy")).toBeNull();
+
+    ov.accountNames = { 1: "Savings" };
+    draw();
+    expect(rows()[2]).toBe("SavingsReceived · Yesterday+1,000 DUSK");
+
+    // A saved contact's name for it stays what you called it.
+    state.addressBook.items = [{ name: "Old me", address: SENDER }];
+    draw();
+    expect(rows()[2]).toBe("Old meReceived · Yesterday+1,000 DUSK");
+  });
+
+  it("name a profile of another wallet here after its wallet, and no one else", () => {
+    const { ov, draw } = setup();
+    ov.wallets = [
+      { key: "a", n: 1, active: true, accounts: [A] },
+      { key: "b", n: 2, name: "Savings", active: false, accounts: ["other", SENDER], accountNames: {} },
+    ];
+    draw();
+    expect(rows()[2]).toBe("Savings · Profile 2Received · Yesterday+1,000 DUSK");
+    ov.wallets[1].accounts = [SENDER.toLowerCase()];
+    draw();
+    expect(rows()[2]).toBe(`${short(SENDER)}Received · Yesterday+1,000 DUSK`);
+  });
+
   it("name a .dusk name's reservation by the registration that follows it, once both calls are read", () => {
     const { state, draw } = setup();
     const R = "1f".repeat(32);
