@@ -357,10 +357,10 @@ export function optionsView(ov, { state, actions } = {}) {
   // every wallet's, named. A site's Disconnect is for the wallet it's
   // connected to; its profile changes on the wallet open now.
   const connectedSites = Array.isArray(ov?.permissions) ? ov.permissions : [];
-  const disconnect = async (message, done) => {
+  const changeSite = async (message, done, failed = "Couldn't save that") => {
     try {
       const response = await actions?.send?.(message);
-      if (response?.error) throw new Error(response.error.message ?? "Couldn't disconnect");
+      if (response?.error) throw new Error(response.error.message ?? failed);
       actions?.showToast?.(done);
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
@@ -368,6 +368,7 @@ export function optionsView(ov, { state, actions } = {}) {
       actions?.showToast?.(e?.message ?? String(e), 2500);
     }
   };
+  const disconnect = (message, done) => changeSite(message, done, "Couldn't disconnect");
   // What each site asked, and how long each stays connected, under its Details.
   const sitesState = (state.settings ??= {});
   const detailsOpen = (sitesState.siteDetailsOpen ??= {});
@@ -380,17 +381,6 @@ export function optionsView(ov, { state, actions } = {}) {
       },
     });
   const records = ov?.siteRecords ?? {};
-  const changeSite = async (message, done) => {
-    try {
-      const response = await actions?.send?.(message);
-      if (response?.error) throw new Error(response.error.message ?? "Couldn't save that");
-      actions?.showToast?.(done);
-      state.needsRefresh = true;
-      await actions?.render?.({ forceRefresh: true });
-    } catch (e) {
-      actions?.showToast?.(e?.message ?? String(e), 2500);
-    }
-  };
   const lastsLabel = (lastsMs) => SITE_LASTS_OPTIONS.find((o) => o.value === lastsMs)?.label ?? "";
   // How long a connection lasts, a site's or new sites', as a choice.
   const lastsField = (label, value, ariaLabel, onChange) => {

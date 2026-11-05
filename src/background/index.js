@@ -513,9 +513,10 @@ async function handleAutoLockAlarm() {
 const CONNECTION_END_ALARM_NAME = "dusk_connection_end";
 
 async function followConnectionEnds() {
-  const open = await siteWalletId().catch(() => "");
-  for (const { walletId, origin } of await endConnections()) {
-    cancelPendingApprovals(origin, "Site disconnected", { wallets: [walletId], open });
+  const ended = await endConnections();
+  if (ended.length) {
+    const open = await siteWalletId().catch(() => "");
+    for (const { walletId, origin } of ended) cancelPendingApprovals(origin, "Site disconnected", { wallets: [walletId], open });
   }
   await alarmsClear(CONNECTION_END_ALARM_NAME);
   const at = await nextConnectionEnd();
