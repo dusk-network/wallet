@@ -2786,8 +2786,9 @@ async function forgetShieldedActivity(nodeUrl) {
  * profile without shielded notes reads nothing. One read at a time per
  * profile.
  *
- * @returns {Promise<{ profileIndex: number, entries: object[], pending?: boolean }>} `entries`: as
- *   the package gives them
+ * @returns {Promise<{ walletId: string, nodeUrl: string, profileIndex: number, entries: object[], pending?: boolean }>}
+ *   whose it is, as what's open may change before the answer's read: the wallet, node
+ *   and profile it began with; `entries`: as the package gives them
  */
 export async function getShieldedHistory() {
   if (!state.unlocked) throw new Error("Wallet locked");
@@ -2849,7 +2850,7 @@ export async function getShieldedHistory() {
       },
       synced,
     });
-    return pending ? { profileIndex, entries, pending } : { profileIndex, entries };
+    return { walletId, nodeUrl, profileIndex, entries, ...(pending ? { pending } : {}) };
   })().finally(() => {
     if (shieldedHistoryRun?.promise === promise) shieldedHistoryRun = null;
   });

@@ -16,7 +16,7 @@ import { runtimeGetURL, storageSessionGet, storageSessionRemove, storageSessionS
 import { fieldLabel } from "../components/FormControls.js";
 import { profileLabelOf } from "../components/ProfileName.js";
 import { h } from "../lib/dom.js";
-import { activityRows, selected, sozuFactsOf, wholeActivity } from "./activity.js";
+import { ActivityChangedError, activityRows, assertActivityOpen, selected, sozuFactsOf, wholeActivity } from "./activity.js";
 import { duskEuroPrices } from "./duskPrice.js";
 
 /** Where the popup leaves what one export asks for the full view to do: `{ id, choices, at }`. */
@@ -119,8 +119,10 @@ export async function makeExport(ov, choices, { state }) {
       throw new Error("Couldn't read your contacts, so nothing was saved. Try again.");
     }
   }
-  const whole = await wholeActivity(ov, { state }).catch(() => {
-    throw new Error("Couldn't read your whole history from this node, so nothing was saved. Try again.");
+  const whole = await wholeActivity(ov, { state }).catch(async (error) => {
+    // One that stopped because the wallet changed says that, not that the node failed.
+    await assertActivityOpen(ov, { state });
+    throw error instanceof ActivityChangedError ? error : new Error("Couldn't read your whole history from this node, so nothing was saved. Try again.");
   });
   const rows = activityRows(ov, state, whole);
   const { account, profileIndex } = selected(ov);
@@ -138,6 +140,8 @@ export async function makeExport(ov, choices, { state }) {
     network: ov?.networkName,
     bom: Boolean(choices.excel),
   });
+  // The file is of what was open as it began: with anything else open now, there's none.
+  await assertActivityOpen(ov, { state });
   return { ...made, shieldedWaiting: whole.shieldedWaiting };
 }
 

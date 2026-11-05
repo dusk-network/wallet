@@ -67,6 +67,19 @@ function redraw(state, render) {
   }, 50);
 }
 
+/** What a whole read says when what's open in the wallet is no longer what it was read for. */
+export class ActivityChangedError extends Error {
+  constructor() {
+    super("The wallet changed while this was read, so nothing was saved. Export again.");
+    this.name = "ActivityChangedError";
+  }
+}
+
+// Whether the wallet's answer is this activity's shielded history: the wallet answers
+// for what's open in it now, whichever wallet, node and profile that is by then.
+const shieldedOwn = (a, result) =>
+  Array.isArray(result?.entries) && result.walletId === a.walletId && result.nodeUrl === a.nodeUrl && result.profileIndex === a.profileIndex;
+
 async function reload(a) {
   const { entries, state, coveredTo, complete } = await a.history.read({ limit: a.limit });
   a.entries = entries;
@@ -158,8 +171,8 @@ async function loadShielded(a, state, render) {
     // Another account's activity now: nothing more for this one.
     if (state.activity !== a) return;
     const result = res?.result;
-    // An error, or an answer that isn't this profile's history: asked again later.
-    if (res?.error || !Array.isArray(result?.entries) || result.profileIndex !== a.profileIndex) {
+    // An error, or an answer that isn't this activity's history: asked again later.
+    if (res?.error || !shieldedOwn(a, result)) {
       again();
       return;
     }
@@ -334,8 +347,9 @@ const WHOLE_RUNS = 64;
 /**
  * All of the account's history, for what needs every row (an export, a Sozu
  * position), read from the archive as far as it isn't kept yet, with each
- * entry's details. Throws when it can't be had whole. `activityRows` makes the
- * rows of it.
+ * entry's details. Throws when it can't be had whole, and ActivityChangedError when
+ * the wallet answers for another wallet, node or profile by then. `activityRows`
+ * makes the rows of it.
  * @param {object} ov - the overview
  * @param {{ state: object, publicOnly?: boolean }} ctx - `publicOnly`: its shielded history isn't asked for
  * @returns {Promise<{ entries: object[], meta: object | null, shielded: object[], shieldedWaiting: boolean }>}
@@ -360,14 +374,26 @@ export async function wholeActivity(ov, { state, publicOnly = false }) {
     read = await a.history.read(all);
   }
   const answer = a.send && !publicOnly ? await a.send({ type: "DUSK_UI_GET_SHIELDED_HISTORY" }).catch(() => null) : null;
-  const shielded = answer?.result;
-  const own = !answer?.error && Array.isArray(shielded?.entries) && shielded.profileIndex === a.profileIndex;
+  const shielded = answer?.error ? null : answer?.result;
+  // Another wallet's, node's or profile's: what's open changed while this was read.
+  if (shielded && !shieldedOwn(a, shielded)) throw new ActivityChangedError();
   return {
     entries: read.entries,
     meta: read.state,
-    shielded: own ? shielded.entries : a.shielded,
-    shieldedWaiting: !own || Boolean(shielded.pending),
+    shielded: shielded ? shielded.entries : a.shielded,
+    shieldedWaiting: !shielded || Boolean(shielded.pending),
   };
+}
+
+/**
+ * Refuses what was read for `ov` when that isn't what's open in the wallet any
+ * more: another wallet, profile or node, or none, unlocked.
+ * @param {object} ov - the overview it was read for
+ * @param {{ state: object }} ctx
+ */
+export async function assertActivityOpen(ov, { state }) {
+  const now = await state?.activity?.send?.({ type: "DUSK_UI_OVERVIEW" }).catch(() => null);
+  if (!activityKey(now) || activityKey(now) !== activityKey(ov)) throw new ActivityChangedError();
 }
 
 // Each stake with Sozu's own stDUSK and deposit fee, read once a page.

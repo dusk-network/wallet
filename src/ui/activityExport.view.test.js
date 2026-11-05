@@ -100,7 +100,7 @@ afterEach(() => {
 
 // Activity, drawn again by every render as app.js does, its archive's history
 // (`entries`) read only by what asks for it whole.
-function setup({ contacts = [], entries = WHOLE, ov: over = {}, history: historyOver = {}, shielded = { entries: [], profileIndex: 0 } } = {}) {
+function setup({ contacts = [], entries = WHOLE, ov: over = {}, history: historyOver = {}, shielded = { walletId: ACCOUNT, nodeUrl: NODE, entries: [], profileIndex: 0 }, answer, open } = {}) {
   const ov = {
     isUnlocked: true,
     nodeUrl: NODE,
@@ -128,6 +128,7 @@ function setup({ contacts = [], entries = WHOLE, ov: over = {}, history: history
       key: activityKey(ov),
       account: ACCOUNT,
       profileIndex: 0,
+      walletId: ACCOUNT,
       nodeUrl: NODE,
       entries: [],
       names: new Map(),
@@ -136,7 +137,8 @@ function setup({ contacts = [], entries = WHOLE, ov: over = {}, history: history
       limit: 50,
       history,
       epoch: Promise.resolve(1),
-      send: vi.fn(async () => ({ result: shielded })),
+      // The wallet: the shielded history it answers with, and what's open in it now.
+      send: vi.fn(async ({ type }) => (type === "DUSK_UI_OVERVIEW" ? (open ?? ov) : (answer ?? { result: shielded }))),
     },
   };
   const actions = { render: vi.fn(async () => draw()), showToast: vi.fn() };
@@ -370,6 +372,62 @@ describe("Activity's Export", () => {
     expect(saved).toHaveLength(1);
   });
 
+  describe("with a wallet that changes while the file is made", () => {
+    const OTHER_WALLET = FAUCET;
+    const THEIRS = { hash: "e1".repeat(32), kind: "transfer", direction: "out", value: "9000000000", fee: "1000000", success: true, timestamp: AT, blockHeight: 4_650_000 };
+    const CHANGED = "The wallet changed while this was read, so nothing was saved. Export again.";
+    const exporting = async (options) => {
+      page("/full.html");
+      setup(options);
+      button("Export").click();
+      button("Save CSV").click();
+      await settle();
+    };
+
+    it.each([
+      ["another wallet's, on the same profile", { walletId: OTHER_WALLET, nodeUrl: NODE }],
+      ["another network's, for the same wallet", { walletId: ACCOUNT, nodeUrl: "https://nodes.dusk.network" }],
+    ])("takes no shielded history that's %s, and saves nothing", async (_, of) => {
+      await exporting({ shielded: { ...of, profileIndex: 0, entries: [THEIRS] } });
+      expect(saved).toEqual([]);
+      expect(fieldError()).toBe(CHANGED);
+    });
+
+    it("saves nothing when the wallet says its read stopped as another opened", async () => {
+      await exporting({
+        answer: { error: { message: "The wallet changed while its shielded history was read" } },
+        open: { isUnlocked: true, nodeUrl: NODE, accounts: [OTHER_WALLET], selectedAccountIndex: 0 },
+      });
+      expect(saved).toEqual([]);
+      expect(fieldError()).toBe(CHANGED);
+    });
+
+    it.each([
+      ["another wallet", { isUnlocked: true, nodeUrl: NODE, accounts: [OTHER_WALLET], selectedAccountIndex: 0 }],
+      ["another profile", { isUnlocked: true, nodeUrl: NODE, accounts: [ACCOUNT, SAVINGS], selectedAccountIndex: 1 }],
+      ["another network", { isUnlocked: true, nodeUrl: "https://nodes.dusk.network", accounts: [ACCOUNT, SAVINGS], selectedAccountIndex: 0 }],
+      ["a locked wallet", { isUnlocked: false }],
+    ])("saves nothing when it's %s by the time the file is made", async (_, open) => {
+      await exporting({ open });
+      expect(saved).toEqual([]);
+      expect(fieldError()).toBe(CHANGED);
+    });
+
+    it("says so of a read that stopped as the wallet changed, not that the node failed", async () => {
+      await exporting({
+        history: { sync: vi.fn(async () => { throw new Error("Another run started this history over"); }) },
+        open: { isUnlocked: true, nodeUrl: NODE, accounts: [OTHER_WALLET], selectedAccountIndex: 0 },
+      });
+      expect(saved).toEqual([]);
+      expect(fieldError()).toBe(CHANGED);
+    });
+
+    it("saves its own shielded history as ever, with nothing changed", async () => {
+      await exporting({ shielded: { walletId: ACCOUNT, nodeUrl: NODE, profileIndex: 0, entries: [THEIRS] } });
+      expect((await linesOf()).map((line) => line.TxHash)).toContain(THEIRS.hash);
+    });
+  });
+
   it("saves nothing half read: a history it can't have whole says so", async () => {
     page("/full.html");
     setup({ history: { sync: vi.fn(async () => Promise.reject(new Error("offline"))) } });
@@ -389,7 +447,7 @@ describe("Activity's Export", () => {
 
   it("says what it left out, and that shielded activity is still coming", async () => {
     page("/full.html");
-    const { actions } = setup({ shielded: { entries: [], profileIndex: 0, pending: true }, entries: [...WHOLE, { hash: "c9".repeat(32), direction: "in", counterparty: FAUCET, payer: false, value: "5", detailsAt: 0, timestamp: null, success: null }] });
+    const { actions } = setup({ shielded: { walletId: ACCOUNT, nodeUrl: NODE, entries: [], profileIndex: 0, pending: true }, entries: [...WHOLE, { hash: "c9".repeat(32), direction: "in", counterparty: FAUCET, payer: false, value: "5", detailsAt: 0, timestamp: null, success: null }] });
     button("Export").click();
     button("Save CSV").click();
     await settle();

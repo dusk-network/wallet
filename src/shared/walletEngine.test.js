@@ -2324,7 +2324,8 @@ describe("walletEngine", () => {
       const queries = archive();
 
       const first = await engine.getShieldedHistory();
-      expect(first).toEqual({ profileIndex: 0, entries: ENTRIES });
+      // Whose it is, for whoever reads the answer after another wallet or node opened.
+      expect(first).toEqual({ walletId: WALLET_ID, nodeUrl: NETWORK_KEY, profileIndex: 0, entries: ENTRIES });
       // The profile's heights went out among the tree's others, all in one request.
       expect(queries).toHaveLength(1);
       const asked = [...queries[0].matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h)).sort((a, b) => a - b);
@@ -2353,13 +2354,13 @@ describe("walletEngine", () => {
         { ...ROWS[0], direction: "self", amount: undefined, feePaid: "1000" },
       ];
       await activity.putShieldedHistoryRecord(key, { fingerprint: "0s,1s,493,494,495", entries: kept, decoys: [GROWN] });
-      await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: kept.map(entryOf) });
+      await expect(engine.getShieldedHistory()).resolves.toEqual({ walletId: WALLET_ID, nodeUrl: NETWORK_KEY, profileIndex: 0, entries: kept.map(entryOf) });
       expect(queries).toHaveLength(1);
 
       // A profile without shielded notes reads nothing: pending until its
       // own notes are synced, as there may be some.
       await engine.selectAccountIndex({ index: 1 });
-      await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 1, entries: [], pending: true });
+      await expect(engine.getShieldedHistory()).resolves.toEqual({ walletId: WALLET_ID, nodeUrl: NETWORK_KEY, profileIndex: 1, entries: [], pending: true });
       expect(queries).toHaveLength(1);
     });
 
@@ -2427,7 +2428,7 @@ describe("walletEngine", () => {
         await engine.startShieldedSync({ force: true });
         await vi.waitFor(() => expect(engine.getShieldedStatus().state).toBe("syncing"));
         held.resolve();
-        await expect(history).resolves.toEqual({ profileIndex: 0, entries: [], pending: true });
+        await expect(history).resolves.toEqual({ walletId: WALLET_ID, nodeUrl: NETWORK_KEY, profileIndex: 0, entries: [], pending: true });
         expect(await activity.getShieldedHistoryRecord(`mainnet::${WALLET_ID}::0`)).toBeNull();
       } finally {
         scan.mockRestore();
@@ -2449,7 +2450,7 @@ describe("walletEngine", () => {
         return keep(key, () => next, epoch);
       });
       try {
-        await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: ENTRIES });
+        await expect(engine.getShieldedHistory()).resolves.toEqual({ walletId: WALLET_ID, nodeUrl: NETWORK_KEY, profileIndex: 0, entries: ENTRIES });
       } finally {
         update.mockRestore();
       }
@@ -2479,7 +2480,7 @@ describe("walletEngine", () => {
         return value(...args);
       };
 
-      await expect(engine.getShieldedHistory()).resolves.toEqual({ profileIndex: 0, entries: ENTRIES });
+      await expect(engine.getShieldedHistory()).resolves.toEqual({ walletId: WALLET_ID, nodeUrl: NETWORK_KEY, profileIndex: 0, entries: ENTRIES });
       const real = new Set([184423, 226951, 3602438, 3861643]);
       const asked = queries.flatMap((q) => [...q.matchAll(/b(\d+): block\(/g)].map(([, h]) => Number(h))).filter((h) => !real.has(h));
       expect(new Set(asked)).toEqual(new Set(OTHER));
