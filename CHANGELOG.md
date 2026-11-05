@@ -13,6 +13,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Showed an amount and its fee to the last lux in a transaction's details, on Sent and on every Review; rows and balance lines stay short.
 - Made a request link the https form, which opens the web wallet's Send filled in; Send also reads it pasted or scanned.
 
 ### Fixed

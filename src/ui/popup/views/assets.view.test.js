@@ -195,6 +195,28 @@ describe("sending a token from its page", () => {
     expect(state.assetTxDraft.asset.spender).toBe(contract);
   });
 
+  it("reviews a token's amount to its last decimal, as it will go", async () => {
+    const { installFakeDom, settle } = await import("../../testing/fakeDom.js");
+    const { document } = installFakeDom();
+    const { vi } = await import("vitest");
+    const { assetTokenConfirmView } = await import("./assets.js");
+    const state = {
+      route: "asset_token_confirm",
+      assetTxDraft: {
+        op: "transfer",
+        token: { contractId: TOKEN, symbol: "TKN", decimals: 9 },
+        asset: { valueUnits: "1234567891", to: TO },
+        params: { kind: "contract_call", privacy: "public", contractId: TOKEN, fnName: "transfer", fnArgs: "0x00", amount: "0", deposit: "0" },
+      },
+    };
+    const ov = { isUnlocked: true, nodeUrl: "http://127.0.0.1:8080", accounts: ["acct"], selectedAccountIndex: 0, balance: { value: "100000000" } };
+    const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn() };
+    document.body.replaceChildren(...assetTokenConfirmView(ov, { state, actions }));
+    await settle();
+    expect(document.body.querySelector(".review-head").textContent).toContain("1.234567891");
+    vi.unstubAllGlobals();
+  });
+
   it("reads a token's amount as French writes it", async () => {
     const { press, send } = await open({ to: TO, amount: "1\u202f000,5", spender: "", approveAmount: "" }, "12345678", "fr-FR");
     await press("Review transfer");

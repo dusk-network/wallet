@@ -299,16 +299,31 @@ describe("transaction details", () => {
     expect(details(send).name).toBe("wallet-both.dusk");
   });
 
-  it("shows the exact fee under Technical details, the summary's rounded, with every Dusk app's labels", () => {
+  it("shows the amount and the fee to the last lux, where a row shows them short, with every Dusk app's labels", () => {
     const send = { kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", feePaid: "1856398", gasSpent: "1856398", gasPrice: "1", gasLimit: "2500000" };
     const view = details(send);
-    expect(view.rows).toContain("Network fee0.0019 DUSK");
+    expect(view.rows).toContain("Network fee0.001856398 DUSK");
     const tech = view.body.querySelectorAll(".tx-tech .kv").map(visibleText);
-    expect(tech).toContain("Fee paid0.001856398 DUSK");
     expect(tech).toContain("Gas used1,856,398 of 2,500,000");
     expect(tech).toContain("Gas price1 LUX");
-    // None charged, none shown.
-    expect(details({ ...send, feePaid: "0" }).body.querySelectorAll(".tx-tech .kv").map(visibleText).filter((r) => r.startsWith("Fee paid"))).toEqual([]);
+
+    const exact = details({ ...send, amount: "53082083", to: "26JfWKvhYdVY71bdSPVLNJ51Buy4GjimCT7zcsoxNQtydDbdoH2AwZaH8W7rjcAc9riAu39Vw9Lx1w7yrkBgotSjWmUdkSyQuaTKDZWVCKp9g1GxiEnnksv3W3onToB5NsNi" });
+    expect(visibleText(exact.body.querySelector(".tx-hero-amount"))).toBe("−0.053082083 DUSK");
+    // What a failure kept says so to the last lux too, hidden with balances.
+    const failed = details({ ...send, amount: "53082083", status: "failed" });
+    expect(failed.note).toContain("The 0.053082083 DUSK stayed in your wallet.");
+    // A token's amount, which a row cuts at 6 decimals.
+    const token = details({
+      kind: TX_KIND.CONTRACT_CALL,
+      fnName: "transfer",
+      contractId: "ab".repeat(32),
+      amount: "0",
+      status: "executed",
+      asset: { type: "DRC20", op: "transfer", symbol: "TKN", decimals: 9, valueUnits: "1234567891", to: "26JfWKvhYdVY71bdSPVLNJ51Buy4GjimCT7zcsoxNQtydDbdoH2AwZaH8W7rjcAc9riAu39Vw9Lx1w7yrkBgotSjWmUdkSyQuaTKDZWVCKp9g1GxiEnnksv3W3onToB5NsNi" },
+    });
+    expect(visibleText(token.body.querySelector(".tx-hero-amount"))).toBe("−1.234567891 TKN");
+    // Hidden with balances all the same.
+    expect(visibleText(details({ ...send, amount: "53082083" }, { hidden: true }).body.querySelector(".tx-hero-amount"))).toBe("•••• DUSK");
   });
 
   it("names the site a transaction came from, and none for the wallet's own", () => {

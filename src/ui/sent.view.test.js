@@ -193,7 +193,8 @@ describe("after Confirm", () => {
     expect(steps()[0][2]).toMatch(/^\d\d:\d\d [A-Z][A-Za-z0-9+:−-]* · from your public balance$/);
     // Finished: no note about closing the wallet.
     expect(note()).toBeNull();
-    expect(rows().at(-1)).toBe("Network fee0.00031 DUSK");
+    // To the last lux, as its transaction's details say it.
+    expect(rows().at(-1)).toBe("Network fee0.000312345 DUSK");
 
     button("Done").click();
     await settle();

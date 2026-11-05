@@ -877,7 +877,8 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   });
 
   const valueUnits = String(d?.asset?.valueUnits ?? d?.asset?.value ?? "0");
-  const valueHuman = formatTokenUnits(valueUnits, dec, { maxFrac: UI_DISPLAY_DECIMALS });
+  // As it will be sent: every decimal it has.
+  const valueHuman = formatTokenUnits(valueUnits, dec, { maxFrac: dec });
 
   const warn =
     op === "approve" && d?.asset?.isMax

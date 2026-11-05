@@ -813,6 +813,14 @@ describe("staking reviews", () => {
     expect(visibleText(body)).not.toContain("Profile 1");
   });
 
+  it("show what's staked to the last lux, as it will go", async () => {
+    popup({ route: "stake", staking: staking(owner(), { screen: "native" }) }, named());
+    typeInto(field("Stake amount"), "1000.123456789");
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".balance-amount"))).toBe("1,000.123456789 DUSK");
+  });
+
   it("name the wallet beside the profile with more than one wallet", async () => {
     lookupPrimaryName.mockImplementation(async (account) => (account === ACCOUNT ? "alice.dusk" : null));
     const two = () => ov({ accounts: [ACCOUNT, OTHER], wallets: [{ key: "w1", n: 1, active: false }, { key: "w2", n: 2, name: "Savings", active: true }] });

@@ -1003,7 +1003,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     h("div", { class: "row" }, [
       h("div", { class: "review-head" }, [
         h("div", { class: "review-kind", text: title }),
-        h("div", { class: "balance-amount" }, [balance(amountMasked, fmtLux(draftNeeds.toString())), " DUSK"]),
+        h("div", { class: "balance-amount" }, [balance(amountMasked, formatDuskExact(draftNeeds.toString())), " DUSK"]),
         h("div", { class: "review-line", text: line }),
       ]),
       draft.termsChanged

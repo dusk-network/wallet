@@ -1,4 +1,4 @@
-import { formatDusk, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
+import { formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { isNodeReply, nodeRefusalText } from "../../../shared/nodeRefusal.js";
 import { openUrl } from "../../../platform/index.js";
@@ -104,7 +104,7 @@ export function sentSteps(sent, ov) {
       : balancesHidden(ov)
         ? "A fee was charged."
         : feePaid != null
-          ? `Fee charged: ${formatFee(feePaid)} DUSK.`
+          ? `Fee charged: ${formatDuskExact(feePaid)} DUSK.`
           : `Fee charged: up to ${formatFee(capLux, { max: true })} DUSK.`;
 
   if (phase === "not_sent") {
@@ -384,7 +384,7 @@ export function sentView(ov, { state, actions } = {}) {
   const amountEl =
     sent.amountLux != null && safeBigInt(sent.amountLux, 0n) > 0n
       ? h("div", { class: "sent-amount" }, [
-          balance(hidden, formatDusk(sent.amountLux)),
+          balance(hidden, formatDuskExact(sent.amountLux)),
           h("span", { class: "balance-unit", text: " DUSK" }),
         ])
       : sent.amountDisplay
@@ -443,7 +443,7 @@ export function sentView(ov, { state, actions } = {}) {
   const feeRow = (() => {
     if (phase === "not_sent" || status === "removed") return ["Network fee", "None charged"];
     if (phase === "unconfirmed") return capLux > 0n ? ["Network fee", ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK, if it went out"]] : null;
-    if (feePaid != null) return [status === "failed" ? "Fee charged" : "Network fee", [balance(hidden, formatFee(feePaid)), " DUSK"]];
+    if (feePaid != null) return [status === "failed" ? "Fee charged" : "Network fee", [balance(hidden, formatDuskExact(feePaid)), " DUSK"]];
     if (capLux > 0n) return ["Network fee", ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK"]];
     return null;
   })();

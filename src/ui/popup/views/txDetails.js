@@ -23,8 +23,8 @@ import { activityRows, loadActivityDetail } from "../activity.js";
 // then its date, memo, fee, the profile it left or reached, and its ID, which
 // opens Dusk's explorer; a transfer to another chain that arrived adds when, and its
 // transaction there. Block, gas, finality and a call's contract sit under
-// Technical details, labelled as in every Dusk app. Hide balances hides the
-// amount; the fee stays.
+// Technical details, labelled as in every Dusk app. A row shows an amount short;
+// here it's exact, the fee too. Hide balances hides the amount; the fee stays.
 
 const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 
@@ -33,7 +33,7 @@ const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 function statusNote(tx, desc, hidden) {
   const shielded = tx?.privacy === "shielded";
   const a = desc.amount;
-  const stayed = !desc.unsent || !a || a.text ? "" : hidden ? " The amount stayed in your wallet." : ` The ${a.value} ${a.unit} stayed in your wallet.`;
+  const stayed = !desc.unsent || !a || a.text ? "" : hidden ? " The amount stayed in your wallet." : ` The ${a.exact ?? a.value} ${a.unit} stayed in your wallet.`;
   if (tx?.dropped) {
     return `The network dropped it before it ran, so no fee was charged.${stayed}${shielded ? " Shielded funds may still be reserved locally." : ""}`;
   }
@@ -72,7 +72,7 @@ const feeValue = (text, hidden) => h("span", {}, [balance(hidden, text), " DUSK"
 
 function feeRow(tx, desc, hidden) {
   if (tx?.dropped) return kv("Network fee", "None charged");
-  if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Network fee", feeValue(formatFee(tx.fee), hidden));
+  if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Network fee", feeValue(formatDuskExact(tx.fee), hidden));
   const limit = tx?.gasLimit ?? 0n;
   const price = tx?.gasPrice ?? 0n;
   if (desc.tone === "pending" && tx?.source === "sent" && limit > 0n && price > 0n) {
@@ -95,8 +95,6 @@ function technicalRows(tx, ov, nodeUrl, showToast, hidden) {
     num(tx?.blockHeight) ? kv("Block", mono(num(tx.blockHeight))) : null,
     used || limit ? kv("Gas used", h("span", {}, [balance(hidden, used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`)])) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
-    // The fee to the last LUX: the summary rounds it to 4 decimals.
-    (tx?.fee ?? 0n) > 0n ? kv("Fee paid", feeValue(formatDuskExact(tx.fee), hidden)) : null,
     tx?.source !== "sent" && ["executed", "failed"].includes(tx?.status) ? kv("Finality", "Final") : null,
     tx?.kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", contractValue(String(tx.contractId), nodeUrl || ov?.nodeUrl, showToast)) : null,
     tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,
@@ -199,7 +197,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
           copyButton(other, { label: "Copy address", showToast }),
         ].filter(Boolean))
       : null,
-    amountEl(desc.amount, hidden, "tx-hero-amount"),
+    amountEl(desc.amount, hidden, "tx-hero-amount", { exact: true }),
     h("div", { class: `tx-hero-status is-${desc.tone}` }, [
       h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg(STATUS_ICON[desc.tone] ?? "clock") }),
       // The row's word, or Completed, which rows leave out.
