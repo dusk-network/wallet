@@ -119,6 +119,16 @@ describe("walletReset", () => {
       expect(await pending()).toBe(false);
     });
 
+    it("forgets the password on big sends: it's off again", async () => {
+      const { sendPasswordLimit, setSendPasswordLimit } = await import("./sendPassword.js");
+      await used();
+      await setSendPasswordLimit(5_000_000_000n);
+      await expect(sendPasswordLimit()).resolves.toBe(5_000_000_000n);
+      await reset.beginReset();
+      await reset.finishReset();
+      await expect(sendPasswordLimit()).resolves.toBeNull();
+    });
+
     it("a node added before the reset is added anew after it", async () => {
       const { settings } = await used();
       await reset.finishReset();

@@ -1,6 +1,6 @@
 import { networks } from "@dusk-network/networks";
 
-import { formatFee } from "../../../shared/amount.js";
+import { formatDuskExact, formatFee } from "../../../shared/amount.js";
 import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
 import { detectPresetIdFromNodeUrl } from "../../../shared/network.js";
 import { AUTO_LOCK_OPTIONS, normalizeCustomGas } from "../../../shared/settings.js";
@@ -300,6 +300,30 @@ export function optionsView(ov, { state, actions } = {}) {
           },
         })
       : null;
+
+  // The password again on big sends, on a screen of its own.
+  const sendLimit = ov?.sendPasswordLimit ?? null;
+  const sendPasswordRow = ov?.isUnlocked
+    ? h(
+        "button",
+        {
+          class: "list-row settings-row",
+          type: "button",
+          onclick: async () => {
+            state.route = "send_password";
+            await actions?.render?.();
+          },
+        },
+        [
+          h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg("lock") }),
+          h("span", { class: "row-main" }, [
+            h("span", { class: "row-title", text: "Password on big sends" }),
+            h("span", { class: "row-sub", text: sendLimit === null ? "Off" : BigInt(sendLimit) === 0n ? "On every send" : `Above ${formatDuskExact(sendLimit)} DUSK` }),
+          ]),
+          h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
+        ]
+      )
+    : null;
 
   // Auto-lock. The choice shows at once: a redraw before the overview has it
   // doesn't put the old one back.
@@ -772,6 +796,7 @@ export function optionsView(ov, { state, actions } = {}) {
       }),
       changePasswordBtn,
       changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
+      sendPasswordRow ? h("div", { class: "group" }, [sendPasswordRow]) : null,
     ]),
     sitesSection ? section("Connected sites", sitesSection) : null,
     section("Contacts", [h("div", { class: "group" }, [contactsRow])]),

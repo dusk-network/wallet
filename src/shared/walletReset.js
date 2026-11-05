@@ -54,8 +54,8 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     keepOnlyAssetsOf(keepContactsOf),
     clearWallets(),
     clearSettings(),
-    // Names checked and rates read, kept by account or by node.
-    storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES]),
+    // Names checked and rates read, kept by account or by node, and the password on big sends.
+    storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES, STORAGE_KEYS.SEND_PASSWORD]),
   ]);
   if (results.some((r) => r.status === "rejected")) {
     throw new Error("The old wallet's data couldn't be cleared. Try again.");

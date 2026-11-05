@@ -38,7 +38,7 @@ const flush = async () => {
 
 // The popup on `route`, with the wallet answering as `answer` says, and the
 // wallet's own messages to it delivered by `deliver`.
-async function popupAt(route, extra = {}, answer = async () => ({})) {
+async function popupAt(route, extra = {}, answer = async () => ({}), over = {}) {
   const dom = installFakeDom({ pathname: "/popup.html" });
   dom.document.body.innerHTML = "";
   const actions = dom.document.createElement("div");
@@ -53,7 +53,7 @@ async function popupAt(route, extra = {}, answer = async () => ({})) {
   vi.resetModules();
   const { send } = await import("../../wallet/bus.js");
   send.mockReset();
-  overview = OVERVIEW;
+  overview = { ...OVERVIEW, ...over };
   send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? overview : answer(message)));
   const { state } = await import("./state.js");
   Object.assign(state, { route, ...extra });
@@ -81,6 +81,7 @@ const button = (app, text) => app.querySelectorAll("button").find((b) => b.textC
 const FORMS = [
   ["Change password", "change_password", {}, ["Current password", "New password", "Confirm password"]],
   ["Remove wallet", "wallet_remove", { walletRemove: "w2" }, [SHARED_PASSWORD]],
+  ["Password on big sends", "send_password", {}, ["Above this amount, in DUSK"]],
   ["Add wallet's import", "wallet_add_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false, adding: true } }, ["Word 1", "Word 2", SHARED_PASSWORD]],
   ["Add wallet's new phrase, confirmed", "wallet_add_confirm", { onboard: { mode: "create", mnemonic: WORDS.join(" "), password: "", reveal: false, adding: true } }, ["Word 1", "Word 2", SHARED_PASSWORD]],
 ];
@@ -160,5 +161,80 @@ describe("a wallet form being filled in", () => {
     await t.deliver({ type: "DUSK_UI_NETWORK_CHANGED" });
     expect(t.app.querySelectorAll(".field-error").filter((el) => !el.hidden).map((el) => el.textContent)).toEqual(["Incorrect password"]);
     expect(button(t.app, "Change password")?.disabled).toBe(false);
+  });
+});
+
+describe("the password on big sends, in Settings", () => {
+  const typed = (app, name, value) => typeInto(app.querySelectorAll("input").find((i) => accessibleName(i) === name), value);
+  const pressed = (app, name) => app.querySelectorAll("button").find((b) => b.textContent === name).click();
+  const errorsOf = (app) => app.querySelectorAll(".field-error").filter((el) => !el.hidden).map((el) => el.textContent);
+
+  it("turns on above an amount, only with the password, and Settings says so", async () => {
+    const answers = [];
+    const { app } = await popupAt("send_password", {}, async (message) => {
+      answers.push(message);
+      if (message.type === "DUSK_UI_SET_SEND_PASSWORD" && message.password !== "the password") return { error: { message: "Incorrect password" } };
+      return { ok: true };
+    });
+    const on = app.querySelector("#send-password-on");
+    expect(on.checked).toBe(false);
+    // Off, there's nothing to save.
+    expect(app.querySelector(".send-password-amount").hidden).toBe(true);
+    on.checked = true;
+    on.dispatchEvent(new Event("change"));
+    expect(app.querySelector(".send-password-amount").hidden).toBe(false);
+
+    pressed(app, "Save");
+    await flush();
+    expect(errorsOf(app)).toEqual(["Enter an amount such as 100 or 100.5. 0 asks on every send."]);
+    typed(app, "Above this amount, in DUSK", "not an amount");
+    pressed(app, "Save");
+    await flush();
+    expect(errorsOf(app)).toEqual(["Enter an amount such as 100 or 100.5. 0 asks on every send."]);
+    typed(app, "Above this amount, in DUSK", "1 000,5".replace(",", ".").replace(" ", ""));
+    pressed(app, "Save");
+    await flush();
+    expect(errorsOf(app)).toEqual(["Enter your password."]);
+    expect(answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD")).toEqual([]);
+
+    typed(app, "Password you unlock with", "not it");
+    pressed(app, "Save");
+    await flush();
+    expect(errorsOf(app)).toEqual(["Wrong password."]);
+
+    typed(app, "Password you unlock with", "the password");
+    pressed(app, "Save");
+    await flush();
+    expect(answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD").at(-1)).toMatchObject({ password: "the password", limitLux: "1000500000000" });
+    // Back in Settings, it says what it's set to.
+    expect(app.querySelectorAll(".settings-row").map((row) => row.textContent)).toContain("Password on big sendsAbove 1,000.5 DUSK");
+  });
+
+  it("turns off only with the password too, and 0 asks on every send", async () => {
+    const answers = [];
+    const { app, state } = await popupAt("options", {}, async (message) => {
+      answers.push(message);
+      return { ok: true };
+    }, { sendPasswordLimit: "5000000000" });
+    expect(app.querySelectorAll(".settings-row").map((row) => row.textContent)).toContain("Password on big sendsAbove 5 DUSK");
+    app.querySelectorAll(".settings-row").find((row) => row.textContent.startsWith("Password on big sends")).click();
+    await flush();
+    expect(state.route).toBe("send_password");
+    const on = app.querySelector("#send-password-on");
+    expect(on.checked).toBe(true);
+    expect(app.querySelector("#send-password-amount").value).toBe("5");
+    on.checked = false;
+    on.dispatchEvent(new Event("change"));
+    pressed(app, "Turn off");
+    await flush();
+    expect(errorsOf(app)).toEqual(["Enter your password."]);
+    typed(app, "Password you unlock with", "the password");
+    pressed(app, "Turn off");
+    await flush();
+    expect(answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD").at(-1)).toMatchObject({ limitLux: null });
+    expect(app.querySelectorAll(".settings-row").map((row) => row.textContent)).toContain("Password on big sendsOff");
+
+    const every = await popupAt("options", {}, async () => ({ ok: true }), { sendPasswordLimit: "0" });
+    expect(every.app.querySelectorAll(".settings-row").map((row) => row.textContent)).toContain("Password on big sendsOn every send");
   });
 });

@@ -1,11 +1,12 @@
-// Settings' screens for the wallets here: removing one, and a new password
-// for all of them. Each asks for the password, says under its field what's
-// wrong, and goes back to Settings once done.
+// Settings' screens for the wallets here: removing one, a new password for all
+// of them, and the password again on big sends. Each asks for the password, says
+// under its field what's wrong, and goes back to Settings once done.
 
+import { formatLuxForInput, parseDuskToLux, amountForInput } from "../../../shared/amount.js";
 import { walletLabel } from "../../../shared/wallets.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
-import { fieldError, fieldLabel, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
+import { decimalInput, fieldError, fieldLabel, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
 import { subnav } from "../../components/Subnav.js";
 import { switchContext } from "../context.js";
 
@@ -175,6 +176,95 @@ export function changePasswordView(ov, { state, actions } = {}) {
     h("div", { class: "row onboard-form" }, [
       h("p", { class: "auth-lead", text: "Every recovery phrase here is encrypted again with the new password." }),
       ...fields.flatMap((f) => f.els),
+      err.el,
+      btn,
+    ]),
+  ], { busy: () => busy });
+}
+
+/**
+ * The password again on any send above an amount chosen, off until it's turned
+ * on. Every change takes the password, as turning it off in a wallet left
+ * unlocked would otherwise undo it: the wallet checks it against the vault.
+ */
+export function sendPasswordView(ov, { state, actions } = {}) {
+  const limit = ov?.sendPasswordLimit ?? null;
+  const on = h("input", { type: "checkbox", id: "send-password-on", checked: limit !== null });
+  const amount = decimalInput({ id: "send-password-amount", value: limit === null ? "" : formatLuxForInput(limit), onEnter: () => btn.click() });
+  const amountError = fieldError(amount);
+  amount.addEventListener("input", () => amountError.show(""));
+  const pwd = unlockPasswordField({ onEnter: () => btn.click() });
+  const err = formError();
+  const amountRow = h("div", { class: "onboard-form send-password-amount" }, [fieldLabel(amount, "Above this amount, in DUSK"), amount, amountError.el]);
+  const passwordRow = h("div", { class: "onboard-form" }, pwd.els);
+  let busy = false;
+  const btn = h("button", { class: "btn-primary btn-full", type: "button" });
+  const drawChoice = () => {
+    amountRow.hidden = !on.checked;
+    btn.textContent = on.checked ? "Save" : "Turn off";
+    // Off, and it was off: there's nothing to save.
+    btn.hidden = !on.checked && limit === null;
+    passwordRow.hidden = btn.hidden;
+  };
+  on.addEventListener("change", drawChoice);
+  btn.addEventListener("click", async () => {
+    if (busy) return;
+    err.show("");
+    amountError.show("");
+    pwd.error.show("");
+    let limitLux = null;
+    if (on.checked) {
+      try {
+        limitLux = parseDuskToLux(String(amount.value ?? "").trim());
+      } catch {
+        limitLux = "";
+      }
+      if (!String(amount.value ?? "").trim() || !limitLux) {
+        amountError.show(`Enter an amount such as 100 or ${amountForInput("100.5")}. 0 asks on every send.`);
+        amount.focus();
+        return;
+      }
+    }
+    if (!pwd.input.value) {
+      pwd.error.show("Enter your password.");
+      pwd.input.focus();
+      return;
+    }
+    busy = true;
+    btn.disabled = true;
+    pwd.input.disabled = true;
+    const text = btn.textContent;
+    btn.textContent = "Checking…";
+    try {
+      const res = await actions?.send?.({ type: "DUSK_UI_SET_SEND_PASSWORD", password: pwd.input.value, limitLux });
+      pwd.input.value = "";
+      if (res?.error) throw new Error(res.error.message ?? "Couldn't save it");
+      // Shown at once: the overview read again says the same.
+      for (const shown of [state.overview, ov]) if (shown) shown.sendPasswordLimit = limitLux;
+      actions?.showToast?.("Saved.");
+      state.needsRefresh = true;
+      backToSettings(state, actions);
+    } catch (e) {
+      const message = e?.message ?? String(e);
+      if (passwordRefusal(message)) pwd.error.show(/^Incorrect/.test(message) ? "Wrong password." : message);
+      else err.show(message);
+      busy = false;
+      btn.disabled = false;
+      pwd.input.disabled = false;
+      btn.textContent = text;
+    }
+  });
+  drawChoice();
+  return Object.assign([
+    subnav({ title: "Password on big sends", onBack: () => backToSettings(state, actions) }),
+    h("div", { class: "row onboard-form" }, [
+      h("label", { class: "settings-switch", for: "send-password-on" }, [on, h("span", { text: "Ask for the password on big sends" })]),
+      h("p", {
+        class: "settings-note",
+        text: "On sends, stakes, shielding and what sites ask, network fee included. A token's transfer, or a contract the wallet doesn't know, asks on any amount.",
+      }),
+      amountRow,
+      passwordRow,
       err.el,
       btn,
     ]),

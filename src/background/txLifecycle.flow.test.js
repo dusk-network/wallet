@@ -86,6 +86,10 @@ vi.mock("../background/txNotify.js", () => ({
 }));
 
 vi.mock("../shared/vault.js", () => ({
+  // The vault's check of a password, for the wallet open.
+  checkVaultPassword: vi.fn(async (password, id) => {
+    if (password !== "the password" || id !== "wallet-key") throw new Error("Incorrect password");
+  }),
   // Three wallets in the vault: the two the password opened, and one another opens.
   countVaultWallets: vi.fn(async () => 3),
   createVault: vi.fn(async () => ({ ok: true })),
@@ -134,7 +138,7 @@ vi.mock("../platform/extensionApi.js", () => ({
     },
   }),
   alarmsClear: vi.fn(async () => true),
-  runtimeGetURL: (p) => String(p ?? ""),
+  runtimeGetURL: (p) => `chrome-extension://wallet/${p ?? ""}`,
   runtimeSendMessage: vi.fn(async (message) => {
     mocks.sentMessages.push(message);
     return { ok: true };
@@ -150,10 +154,10 @@ async function importBackground() {
   expect(mocks.listener).toBeTypeOf("function");
 }
 
-async function sendBackgroundMessage(message) {
+async function sendBackgroundMessage(message, sender = {}) {
   return await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("sendResponse timed out")), 1000);
-    mocks.listener(message, {}, (response) => {
+    mocks.listener(message, sender, (response) => {
       clearTimeout(timeout);
       resolve(response);
     });
@@ -814,6 +818,93 @@ describe("background Phoenix tx lifecycle flow", () => {
     mocks.bindPendingWallet.mockReturnValueOnce(false);
     await expect(sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" })).resolves.toBeNull();
     expect(mocks.bindPendingWallet).toHaveBeenCalledWith("rid-1", "acct0");
+  });
+
+  describe("the password on big sends, from the popup", () => {
+    const params = { kind: "transfer", privacy: "public", to: "acct1", amount: "6000000000" };
+    // A wallet page's messages, and a page's own content script's.
+    const fromPage = { url: "chrome-extension://wallet/popup.html" };
+    const fromSite = { url: "https://dapp.example/", tab: { id: 7 } };
+    const status = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0, walletKey: "wallet-key" };
+    let sends;
+
+    beforeEach(async () => {
+      const { engineCall, getEngineStatus } = await import("../background/engineHost.js");
+      getEngineStatus.mockImplementation(async () => status);
+      engineCall.mockImplementation(async (method) => (method === "dusk_sendTransaction" ? { hash: "0xmine" } : method === "dusk_getCachedGasPrice" ? { median: "1" } : true));
+      sends = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction");
+      const { setSendPasswordLimit } = await import("../shared/sendPassword.js");
+      await setSendPasswordLimit(5_000_000_000n);
+    });
+
+    afterEach(async () => {
+      const { engineCall, getEngineStatus } = await import("../background/engineHost.js");
+      getEngineStatus.mockImplementation(async () => ({ isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 }));
+      engineCall.mockImplementation(async () => true);
+    });
+
+    it("refuses a send above the amount with no password, before anything of it is made", async () => {
+      const response = await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params });
+      expect(response).toMatchObject({ error: { message: "It waits for your password, so nothing was sent." } });
+      expect(sends()).toEqual([]);
+    });
+
+    it("sends once the vault took the password, for that send, with what's given not going on", async () => {
+      const asks = await sendBackgroundMessage({ type: "DUSK_UI_SEND_PASSWORD_ASKS", params }, fromPage);
+      expect(asks).toEqual({ ok: true, result: { limit: "5000000000", moves: "6000000000", always: false } });
+
+      const wrong = await sendBackgroundMessage({ type: "DUSK_UI_SEND_PASSWORD_PROVE", params, password: "not it" }, fromPage);
+      expect(wrong).toMatchObject({ error: { message: "Incorrect password" } });
+
+      const proved = await sendBackgroundMessage({ type: "DUSK_UI_SEND_PASSWORD_PROVE", params, password: "the password" }, fromPage);
+      expect(proved).toEqual({ ok: true, result: expect.any(String) });
+      const sent = await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params, sendTicket: proved.result });
+      expect(sent).toMatchObject({ ok: true });
+      expect(sends()).toHaveLength(1);
+      expect(JSON.stringify(sends()[0][1])).not.toContain("the password");
+
+      // Once.
+      const again = await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params, sendTicket: proved.result });
+      expect(again).toMatchObject({ error: { message: "It waits for your password, so nothing was sent." } });
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("says nothing's asked up to the amount, and sends with no password", async () => {
+      const small = { ...params, amount: "1" };
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_SEND_PASSWORD_ASKS", params: small }, fromPage)).resolves.toEqual({ ok: true, result: null });
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params: small })).resolves.toMatchObject({ ok: true });
+    });
+
+    it("changes the amount only with the password, and turns it off the same way", async () => {
+      const { sendPasswordLimit } = await import("../shared/sendPassword.js");
+      const wrong = await sendBackgroundMessage({ type: "DUSK_UI_SET_SEND_PASSWORD", password: "not it", limitLux: null }, fromPage);
+      expect(wrong).toMatchObject({ error: { message: "Incorrect password" } });
+      await expect(sendPasswordLimit()).resolves.toBe(5_000_000_000n);
+
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_SET_SEND_PASSWORD", password: "the password", limitLux: "7" }, fromPage)).resolves.toEqual({ ok: true });
+      await expect(sendPasswordLimit()).resolves.toBe(7n);
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_SET_SEND_PASSWORD", password: "the password", limitLux: "lots" }, fromPage)).resolves.toMatchObject({ error: {} });
+      await expect(sendPasswordLimit()).resolves.toBe(7n);
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_SET_SEND_PASSWORD", password: "the password", limitLux: null }, fromPage)).resolves.toEqual({ ok: true });
+      await expect(sendPasswordLimit()).resolves.toBeNull();
+    });
+
+    it("answers none of it to a page's content script, the right password or not", async () => {
+      const { sendPasswordLimit } = await import("../shared/sendPassword.js");
+      for (const message of [
+        { type: "DUSK_UI_SET_SEND_PASSWORD", password: "the password", limitLux: null },
+        { type: "DUSK_UI_SEND_PASSWORD_ASKS", params },
+        { type: "DUSK_UI_SEND_PASSWORD_PROVE", params, password: "the password" },
+      ]) {
+        await expect(sendBackgroundMessage(message, fromSite)).resolves.toMatchObject({ error: { message: "Only the wallet can do that" } });
+      }
+      await expect(sendPasswordLimit()).resolves.toBe(5_000_000_000n);
+    });
+
+    it("gives the amount to the wallet's own pages with what they draw, and to a site's window with its request", async () => {
+      const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+      expect(overview.sendPasswordLimit).toBe("5000000000");
+    });
   });
 
   describe("a send from the popup", () => {

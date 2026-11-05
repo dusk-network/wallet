@@ -412,3 +412,13 @@ textarea.ap-code {
 .ap-actions > .ap-actions__error {
   grid-column: 1 / -1;
 }
+
+.ap-send-password {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ap-send-password[hidden] {
+  display: none;
+}

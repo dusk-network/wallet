@@ -13,6 +13,7 @@ export const STORAGE_KEYS = {
   VAULT_V2: "dusk_vault_v2", // { version: 2, wallets: [{ id, n, data, iv, salt, iterations }] }: every wallet's encrypted mnemonic
   UNLOCK_GUARD: "dusk_unlock_guard_v1", // { failures, nextAllowedAt }
   SETTINGS: "dusk_settings_v1",
+  SEND_PASSWORD: "dusk_send_password_v1", // lux, as text: the amount above which a send asks for the password; absent while it's off (sendPassword.js)
   PERMISSIONS: "dusk_permissions_v1", // { [origin]: { profileId, accountIndex, grants, connectedAt, updatedAt } }: one wallet's sites, from before PERMISSIONS_V2; moved there on unlock
   PERMISSIONS_V2: "dusk_permissions_v2", // { [walletId]: { [origin]: { profileId, accountIndex, grants, connectedAt, updatedAt } } }: each wallet's sites (permissions.js)
   TXS: "dusk_txs_v1", // { [hash]: { walletId, origin, nodeUrl, kind, submittedAt, status, error? } }

@@ -13,7 +13,7 @@ import { readDrc20Call } from "../shared/drc20Calls.js";
 import { describeSignMessagePreview } from "../shared/signMessagePreview.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { shortAddress } from "./lib/strings.js";
-import { fakeEvent, installFakeDom, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { fakeEvent, installFakeDom, isShown, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 const mocks = vi.hoisted(() => ({ pending: null, sent: [], answers: {} }));
 
@@ -296,6 +296,123 @@ describe("sign approvals", () => {
       if (zone === undefined) delete process.env.TZ;
       else process.env.TZ = zone;
     }
+  });
+});
+
+describe("the password on big sends", () => {
+  const LIMIT = "5000000000";
+  const big = (over = {}) => transfer(BOB, { amount: "6000000000", gas: { limit: "2500000", price: "1" }, ...over });
+  const field = () => bar().querySelector("#approval-send-password");
+  const asked = () => isShown(bar().querySelector(".ap-send-password"));
+  const passwordError = () => {
+    const shown = bar().querySelector(".ap-send-password .field-error");
+    return isShown(shown) ? shown.textContent : "";
+  };
+  const askedOf = (over = {}) => ({ sendPassword: { limit: LIMIT, moves: "6000000000", always: false, ...over } });
+
+  it("asks in the bar with Approve, above the amount chosen, saying why, and sends what's typed to the wallet", async () => {
+    await render("send_tx", big(), askedOf());
+    expect(asked()).toBe(true);
+    expect(visibleText(bar().querySelector(".ap-send-password"))).toContain("This is above the 5 DUSK you set in Settings.");
+    pastClickGuard();
+    // Nothing typed: it says so, and asks the wallet nothing.
+    approve().click();
+    await settle();
+    expect(decision("approve")).toBeUndefined();
+    expect(passwordError()).toBe("Enter your password.");
+
+    typeInto(field(), "the password");
+    approve().click();
+    await settle();
+    expect(decision("approve").sendPassword).toBe("the password");
+    expect(dom.window.close).toHaveBeenCalled();
+  });
+
+  it("stays open on a wrong password, says so, and takes another", async () => {
+    await render("send_tx", big(), askedOf());
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: { message: "Incorrect password" } });
+    pastClickGuard();
+    typeInto(field(), "not it");
+    approve().click();
+    await settle();
+    expect(passwordError()).toBe("Wrong password.");
+    expect(field().value).toBe("");
+    expect(dom.window.close).not.toHaveBeenCalled();
+    expect(approve().textContent).toBe("Approve");
+    expect(approve().disabled).toBe(false);
+
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: { message: "Too many attempts. Try again in 4s." } });
+    typeInto(field(), "not it either");
+    expect(passwordError()).toBe("");
+    approve().click();
+    await settle();
+    expect(passwordError()).toBe("Too many attempts. Try again in 4s.");
+
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: true });
+    typeInto(field(), "the password");
+    approve().click();
+    await settle();
+    expect(dom.window.close).toHaveBeenCalled();
+  });
+
+  it("asks nothing up to the amount, and nothing with it off", async () => {
+    await render("send_tx", big({ amount: "1000000000" }), askedOf({ moves: "1000000000" }));
+    expect(asked()).toBe(false);
+    pastClickGuard();
+    approve().click();
+    await settle();
+    expect(decision("approve").sendPassword).toBeUndefined();
+    expect(dom.window.close).toHaveBeenCalled();
+
+    await render("send_tx", big(), { sendPassword: null });
+    expect(asked()).toBe(false);
+  });
+
+  it("follows the fee as it's changed: past the amount it asks, and back under it doesn't", async () => {
+    await render("send_tx", big({ amount: "5000000000", gas: { limit: "1", price: "1" } }), askedOf({ moves: "5000000000" }));
+    expect(asked()).toBe(true);
+    await render("send_tx", big({ amount: "4000000000" }), askedOf({ moves: "4000000000" }));
+    expect(asked()).toBe(false);
+    const editor = app.querySelector("dusk-gas-editor");
+    editor.dispatchEvent(new CustomEvent("dusk-gas-fee", { bubbles: true, detail: { feeLux: 2_000_000_000n } }));
+    expect(asked()).toBe(true);
+    typeInto(field(), "typed");
+    editor.dispatchEvent(new CustomEvent("dusk-gas-fee", { bubbles: true, detail: { feeLux: 1n } }));
+    expect(asked()).toBe(false);
+    expect(field().value).toBe("");
+  });
+
+  it("says so of a call it can't count in DUSK, whatever the amount", async () => {
+    await render("send_tx", { kind: "contract_call", privacy: "public", contractId: `0x${"ab".repeat(32)}`, fnName: "do_something", fnArgs: "0x00", amount: "0", deposit: "0", chainId: "dusk:2", nodeUrl: TESTNET, networkName: "Testnet", gas: { limit: "1", price: "1" } }, askedOf({ moves: "0", always: true }));
+    expect(asked()).toBe(true);
+    expect(visibleText(bar().querySelector(".ap-send-password"))).toContain("The wallet can't count this in DUSK, so it asks on any amount.");
+  });
+
+  it("asks once the wallet says it must, turned on since the window opened", async () => {
+    await render("send_tx", big(), { sendPassword: null });
+    expect(asked()).toBe(false);
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: { message: "It waits for your password, so nothing was sent.", data: { sendPassword: { limit: LIMIT, moves: "6000000000", always: false } } } });
+    pastClickGuard();
+    approve().click();
+    await settle();
+    expect(asked()).toBe(true);
+    expect(passwordError()).toBe("Enter your password.");
+    expect(dom.window.close).not.toHaveBeenCalled();
+  });
+
+  it("rejects with nothing typed, in every window", async () => {
+    await render("send_tx", big(), askedOf());
+    bar().querySelector(".btn-outline").click();
+    await settle();
+    expect(decision("reject")).toBeTruthy();
+    expect(decision("reject").sendPassword).toBeUndefined();
+    expect(dom.window.close).toHaveBeenCalled();
+  });
+
+  it("asks nothing of a request that moves nothing", async () => {
+    await render("connect", {}, { sendPassword: null });
+    expect(bar().querySelector(".ap-send-password")).not.toBeNull();
+    expect(asked()).toBe(false);
   });
 });
 

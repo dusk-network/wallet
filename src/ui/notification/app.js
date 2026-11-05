@@ -23,11 +23,12 @@ import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
 import { guarded, screenShown } from "../lib/clickGuard.js";
 import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js";
-import { passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
+import { fieldError, fieldLabel, passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
 import { contractValueEl } from "../components/ContractValue.js";
 import { payGuard } from "../components/NetworkGas.js";
 import { safeTextEl } from "../components/SafeText.js";
+import { sendPasswordRefusal, sendPasswordWhy } from "../components/SendPasswordDialog.js";
 import "../components/GasEditor.js";
 import {
   amountParts,
@@ -208,9 +209,37 @@ document.addEventListener(
   { passive: true }
 );
 
-async function decide(decision, approvedParams) {
-  await send({ type: "DUSK_PENDING_DECISION", rid, decision, ...(decision === "approve" ? { approvedParams } : {}) });
+// The answer, and the window goes, unless the wallet refused what came with it:
+// then it says why, and the request goes on waiting.
+async function decide(decision, approvedParams, withAnswer = {}) {
+  const res = await send({ type: "DUSK_PENDING_DECISION", rid, decision, ...(decision === "approve" ? { approvedParams, ...withAnswer } : {}) });
+  if (res?.error?.message) throw Object.assign(new Error(res.error.message), { refused: true, data: res.error.data });
   window.close();
+}
+
+// The password again, in the bar with Approve, for a send above the amount chosen
+// in Settings: the wallet checks it as the window answers. Hidden until it's asked.
+function sendPasswordField(onEnter) {
+  const input = passwordInput({ id: "approval-send-password", autocomplete: "current-password", onEnter });
+  const why = h("p", { class: "ap-sub" });
+  const error = fieldError(input);
+  input.addEventListener("input", () => error.show(""));
+  const el = h("div", { class: "ap-actions__error ap-send-password", hidden: true }, [fieldLabel(input, "Password you unlock with"), why, input, error.el]);
+  return {
+    el,
+    input,
+    error,
+    show(terms) {
+      why.textContent = sendPasswordWhy(terms);
+      el.hidden = false;
+    },
+    hide: () => {
+      el.hidden = true;
+      input.value = "";
+      error.show("");
+    },
+    asked: () => !el.hidden,
+  };
 }
 
 // What a window says when its answer didn't reach the wallet.
@@ -227,14 +256,26 @@ function answerFailedText(e) {
  */
 function decisionBar({ approveText = "Approve", approveDisabled = false, approveTitle = "", getApprovedParams } = {}) {
   const error = h("div", { class: "field-error ap-actions__error", role: "alert", hidden: true });
-  const answer = async (decision, approvedParams) => {
+  const answer = async (decision, approvedParams, withAnswer) => {
     try {
-      await decide(decision, approvedParams);
+      await decide(decision, approvedParams, withAnswer);
     } catch (e) {
-      error.textContent = answerFailedText(e);
-      error.hidden = false;
+      // What the password's refusal says, under its field.
+      if (e?.refused && e.data?.sendPassword) {
+        sendPassword.show(e.data.sendPassword);
+        sendPassword.error.show("Enter your password.");
+        sendPassword.input.focus();
+      } else if (e?.refused) {
+        sendPassword.input.value = "";
+        sendPassword.error.show(sendPasswordRefusal(e.message));
+        sendPassword.input.focus();
+      } else {
+        error.textContent = answerFailedText(e);
+        error.hidden = false;
+      }
     }
   };
+  const sendPassword = sendPasswordField(() => approveBtn.click());
   const rejectBtn = h("button", {
     class: "btn-outline",
     type: "button",
@@ -258,10 +299,25 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
         return;
       }
       error.hidden = true;
-      await answer("approve", approvedParams);
+      if (!sendPassword.asked()) {
+        await answer("approve", approvedParams);
+        return;
+      }
+      if (!sendPassword.input.value) {
+        sendPassword.error.show("Enter your password.");
+        sendPassword.input.focus();
+        return;
+      }
+      // A moment, as an unlock: the wallet derives its key from the password.
+      const wasOff = approveBtn.disabled;
+      approveBtn.disabled = true;
+      approveBtn.textContent = "Checking…";
+      await answer("approve", approvedParams, { sendPassword: sendPassword.input.value });
+      approveBtn.disabled = wasOff;
+      approveBtn.textContent = approveText;
     }),
   });
-  return { nodes: [error, rejectBtn, approveBtn], approveBtn, rejectBtn, error };
+  return { nodes: [error, sendPassword.el, rejectBtn, approveBtn], approveBtn, rejectBtn, error, sendPassword };
 }
 
 export async function renderNotification() {
@@ -1099,6 +1155,16 @@ export async function renderNotification() {
       const pay = payGuard({ editor: gasEditor, availableLux: available, sendsLux, shielded, hidden: pending.hideBalances === true, button: bar.approveBtn, ready, gas });
       pay.el.classList.add("ap-actions__error");
       bar.nodes.splice(1, 0, pay.el);
+      // Above the amount chosen in Settings, the password, as the fee changes too.
+      const terms = pending.sendPassword;
+      if (terms) {
+        const asksAt = (feeLux) => terms.always || safeBigInt(terms.moves, 0n) + feeLux > safeBigInt(terms.limit, 0n);
+        const draw = (feeLux) => (asksAt(feeLux) ? bar.sendPassword.show(terms) : bar.sendPassword.hide());
+        draw(safeBigInt(gas?.limit, 0n) * safeBigInt(gas?.price, 0n));
+        gasEditor.addEventListener("dusk-gas-fee", (event) => {
+          if (event?.detail?.feeLux != null) draw(event.detail.feeLux);
+        });
+      }
       return pay;
     };
 

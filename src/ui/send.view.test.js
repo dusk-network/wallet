@@ -1408,6 +1408,127 @@ describe("a request for another network", () => {
   });
 });
 
+describe("the password on big sends", () => {
+  const LIMIT = "5000000000";
+  const reviewAt = (amountLux) => {
+    const ov = overview({ sendPasswordLimit: LIMIT, balance: { value: "20000000000" } });
+    const state = { route: "confirm", overview: ov, draft: { to: ALICE.account, privacy: "public", amountLux, amountDusk: "6", memo: "" } };
+    const sent = [];
+    const answers = {
+      DUSK_UI_GET_CACHED_GAS_PRICE: () => ({}),
+      DUSK_UI_SEND_PASSWORD_ASKS: () => ({ ok: true, result: { limit: LIMIT, moves: amountLux, always: false } }),
+      DUSK_UI_SEND_PASSWORD_PROVE: ({ password }) => (password === "the password" ? { ok: true, result: "ticket-1" } : { error: { message: "Incorrect password" } }),
+      DUSK_UI_SEND_TX: () => ({ ok: true, result: { hash: "ab".repeat(32) } }),
+    };
+    const view = mount(state, ov, async (message) => {
+      sent.push(message);
+      return answers[message.type]?.(message) ?? {};
+    });
+    const body = dom.document.body;
+    const confirm = () => body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const dialog = () => body.querySelector(".send-password");
+    const password = () => dialog().querySelector("input[type=password]");
+    const press = (name) => dialog().querySelectorAll("button").find((b) => b.textContent === name).click();
+    const sends = () => sent.filter((m) => m.type === "DUSK_UI_SEND_TX");
+    return { ...view, state, sent, answers, body, confirm, dialog, password, press, sends };
+  };
+  const pressConfirm = async (view) => {
+    pastClickGuard();
+    view.confirm().click();
+    await settle();
+  };
+
+  it("asks over the Review before anything of it goes, and sends with what the wallet gave for it", async () => {
+    const view = reviewAt("6000000000");
+    await pressConfirm(view);
+    expect(visibleText(view.dialog())).toContain("Enter your password");
+    expect(visibleText(view.dialog())).toContain("This is above the 5 DUSK you set in Settings.");
+    expect(view.sends()).toEqual([]);
+    // The Review stays under it: no Sent screen yet.
+    expect(view.state.route).toBe("confirm");
+    expect(view.dialog().getAttribute("role")).toBe("dialog");
+    expect(dom.document.activeElement).toBe(view.password());
+
+    typeInto(view.password(), "the password");
+    view.press("Confirm");
+    await settle();
+    await settle();
+    expect(view.dialog()).toBeNull();
+    expect(view.sends()).toHaveLength(1);
+    expect(view.sends()[0].sendTicket).toBe("ticket-1");
+    expect(JSON.stringify(view.sends()[0])).not.toContain("the password");
+    expect(view.state.route).toBe("sent");
+  });
+
+  it("stays on a wrong password, says so, and sends nothing", async () => {
+    const view = reviewAt("6000000000");
+    await pressConfirm(view);
+    typeInto(view.password(), "not it");
+    view.press("Confirm");
+    await settle();
+    expect(visibleText(view.dialog())).toContain("Wrong password.");
+    expect(view.password().value).toBe("");
+    expect(view.sends()).toEqual([]);
+    // Nothing typed says so too.
+    view.press("Confirm");
+    await settle();
+    expect(visibleText(view.dialog())).toContain("Enter your password.");
+    expect(view.sent.filter((m) => m.type === "DUSK_UI_SEND_PASSWORD_PROVE")).toHaveLength(1);
+  });
+
+  it("goes back to the Review on Cancel or Escape, with nothing sent and Confirm on again", async () => {
+    const view = reviewAt("6000000000");
+    await pressConfirm(view);
+    view.press("Cancel");
+    await settle();
+    expect(view.dialog()).toBeNull();
+    expect(view.sends()).toEqual([]);
+    expect(view.state.route).toBe("confirm");
+    expect(view.actions.showToast).toHaveBeenCalledWith("It waits for your password, so nothing was sent.");
+    expect(view.confirm().disabled).toBe(false);
+
+    await pressConfirm(view);
+    dom.document.body.dispatchEvent(fakeEvent("keydown", { key: "Escape" }));
+    await settle();
+    expect(view.dialog()).toBeNull();
+    expect(view.sends()).toEqual([]);
+    expect(view.confirm().disabled).toBe(false);
+  });
+
+  it("asks nothing up to the amount, or with it off", async () => {
+    const view = reviewAt("1000000000");
+    view.answers.DUSK_UI_SEND_PASSWORD_ASKS = () => ({ ok: true, result: null });
+    await pressConfirm(view);
+    await settle();
+    expect(view.dialog()).toBeNull();
+    expect(view.sends()).toHaveLength(1);
+    expect(view.sends()[0].sendTicket).toBeUndefined();
+
+    const off = { route: "confirm", overview: overview(), draft: { to: ALICE.account, privacy: "public", amountLux: "6000000000", amountDusk: "6", memo: "" } };
+    const sent = [];
+    mount(off, off.overview, async (message) => {
+      sent.push(message);
+      return message.type === "DUSK_UI_SEND_TX" ? { ok: true, result: { hash: "ab".repeat(32) } } : {};
+    });
+    pastClickGuard();
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await settle();
+    await settle();
+    expect(sent.some((m) => m.type === "DUSK_UI_SEND_PASSWORD_ASKS")).toBe(false);
+    expect(sent.filter((m) => m.type === "DUSK_UI_SEND_TX")).toHaveLength(1);
+  });
+
+  it("says why nothing went when the wallet refuses it all the same, as Not sent, with Back to review", async () => {
+    const view = reviewAt("6000000000");
+    view.answers.DUSK_UI_SEND_PASSWORD_ASKS = () => ({ ok: true, result: null });
+    view.answers.DUSK_UI_SEND_TX = () => ({ error: { message: "It waits for your password, so nothing was sent." } });
+    await pressConfirm(view);
+    await settle();
+    expect(view.state.sent.phase).toBe("not_sent");
+    expect(view.state.sent.error).toBe("It waits for your password, so nothing was sent.");
+  });
+});
+
 describe("an amount in the browser's language", () => {
   it("reads as French writes it, in Send's own field, with no error and Review on", async () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "fr-FR" });

@@ -11,6 +11,8 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { walletNameOf } from "../../components/ProfileName.js";
+import { askSendPassword } from "../../components/SendPasswordDialog.js";
+import { SEND_PASSWORD_WAITS } from "../../../shared/sendPassword.js";
 import { safeTextEl } from "../../components/SafeText.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
@@ -27,9 +29,10 @@ const FINAL = new Set(["executed", "failed", "removed"]);
 // lost, a timeout, a failure after the hand-over) may have reached the network.
 // "Wallet changed while …" is the engine finding another network, profile or
 // wallet than the one the transaction was reviewed on; "nothing was signed" is
-// the engine refusing a node that contradicts the chain it's fixed to.
+// the engine refusing a node that contradicts the chain it's fixed to; "waits
+// for your password" the wallet refusing a send above the amount chosen.
 const REFUSED =
-  /nothing was signed|not accepted|wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed|failed to (archive|unarchive|deserialize)|unknown error code/i;
+  /waits for your password|nothing was signed|not accepted|wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed|failed to (archive|unarchive|deserialize)|unknown error code/i;
 
 // Why a send stopped before it went to the wallet: a switch started meanwhile.
 const SWITCHED = "The network, profile or wallet changed meanwhile.";
@@ -251,6 +254,27 @@ function boundToReview(message, review) {
   return { ...message, walletId: review.walletId, params: { ...params, _approvalContext } };
 }
 
+// Above the amount chosen in Settings, the password first, over the Review:
+// what the wallet gives for it goes with the send, and the wallet checks it again
+// as it goes. "" when it isn't asked, null when it wasn't given. An answer that
+// doesn't come asks nothing here: the wallet refuses the send all the same.
+async function sendPasswordFor(message, { state, actions }) {
+  if (state?.overview?.sendPasswordLimit == null) return "";
+  const { params } = message;
+  const res = await actions?.send?.({ type: "DUSK_UI_SEND_PASSWORD_ASKS", params }).catch(() => null);
+  const asked = res?.error ? null : res?.result;
+  if (!asked) return "";
+  return askSendPassword({
+    limit: asked.limit,
+    always: asked.always,
+    check: async (password) => {
+      const proved = await actions.send({ type: "DUSK_UI_SEND_PASSWORD_PROVE", password, params });
+      if (proved?.error) throw new Error(proved.error.message);
+      return String(proved?.result ?? "");
+    },
+  });
+}
+
 /**
  * Sends a reviewed transaction and shows the Sent screen at once. A send the
  * network didn't take stays on the Sent screen with why, and Back returns to
@@ -270,9 +294,15 @@ function boundToReview(message, review) {
  * @param {() => boolean} [opts.unchanged] - asked just before the transaction
  *   goes to the wallet: false when what it was reviewed for changed, and then
  *   it isn't sent
- * @returns {Promise<object>} the Sent screen's state
+ * @returns {Promise<object | null>} the Sent screen's state, or null when the
+ *   password it needed wasn't given, and the Review stays
  */
 export async function sendFromReview({ state, actions, message, summary, backRoute, doneRoute = "home", onSent, unchanged }) {
+  const sendTicket = await sendPasswordFor(message, { state, actions });
+  if (sendTicket === null) {
+    actions?.showToast?.(SEND_PASSWORD_WAITS);
+    return null;
+  }
   // A switch of network, profile or wallet since the Review was drawn, here
   // or in another window, gave the popup another context.
   const review = actions?.review;
@@ -306,7 +336,7 @@ export async function sendFromReview({ state, actions, message, summary, backRou
   let res;
   if (!switched) {
     try {
-      res = await actions?.send?.(boundToReview(message, review));
+      res = await actions?.send?.({ ...boundToReview(message, review), ...(sendTicket ? { sendTicket } : {}) });
     } catch (e) {
       res = { error: { message: e?.message ?? String(e) } };
     }

@@ -29,6 +29,7 @@ import {
   handleEngineReady,
 } from "./engineHost.js";
 import { handleRpc } from "./rpc.js";
+import { assertSendPassword, sendPasswordLimit, sendPasswordTerms } from "../shared/sendPassword.js";
 import { offersRequestLink, openRequestLink } from "./requestLinks.js";
 import { bindPendingWallet, cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
 import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNames.js";
@@ -58,7 +59,7 @@ import {
 } from "../shared/txStore.js";
 import { submittedTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
-import { assertScreenWallet, engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
+import { SEND_PASSWORD_COMMANDS, assertScreenWallet, engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
 import { handleWalletCommand, keepWalletShown, openWalletName, walletsShown } from "../wallet/walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
 import {
@@ -614,6 +615,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
   (async () => {
     try {
+      // The password on big sends is the wallet's own pages' to ask and change.
+      if (SEND_PASSWORD_COMMANDS.has(message?.type) && !String(sender?.url ?? "").startsWith(runtimeGetURL(""))) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Only the wallet can do that");
+      }
       const common = await handleUiCommand(message, {
         engineCall,
         ensureEngineConfigured,
@@ -882,6 +887,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           chainId: settings?.chainId ?? null,
           chainRefusal: refusal,
           networkName: networkNameFromNodeUrl(String(settings?.nodeUrl ?? "")),
+          // Above the amount chosen in Settings, its window asks for the password.
+          sendPassword: entry.kind === "send_tx" ? await sendPasswordTerms(entry.params, String(entry.params?.nodeUrl ?? settings?.nodeUrl ?? "")) : null,
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
           accounts: status.accounts,
@@ -1292,7 +1299,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI approves or rejects a pending request
       if (message?.type === "DUSK_PENDING_DECISION") {
-        const res = resolvePendingDecision(message);
+        const res = await resolvePendingDecision(message);
         sendResponse(res);
         return;
       }
@@ -1476,6 +1483,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           nftMetadataEnabled: settings.nftMetadataEnabled !== false,
           ipfsGateway: settings.ipfsGateway ?? "",
           hideBalances: settings.hideBalances === true,
+          sendPasswordLimit: (await sendPasswordLimit())?.toString() ?? null,
           chainId,
           chainRefusal: refusal,
           networkName: networkNameFromNodeUrl(settings.nodeUrl),
@@ -1531,6 +1539,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           }
           // Apply standard gas defaults for wallet initiated transactions.
           const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
+          // Above the amount chosen in Settings, only with the password checked for it.
+          const { nodeUrl } = await getSettings();
+          await assertSendPassword(baseParams, { ticket: message.sendTicket, walletId: String(status.accounts?.[0] ?? ""), nodeUrl });
           const result = await engineCall("dusk_sendTransaction", { ...baseParams, txEpoch });
           return { status, txEpoch, baseParams, result };
         });

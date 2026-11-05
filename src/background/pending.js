@@ -39,8 +39,11 @@ function rejectPending(rid, entry, message) {
  * @param {any} params
  * @param {{ walletId: string }} [shown] - the wallet the request is for, ""
  *   until its window shows one; kept by reference, so the caller sees it bound
+ * @param {{ beforeApprove?: (answer: object) => Promise<unknown> }} [opts] - what
+ *   an approval must pass first: thrown, the request goes on waiting, and its
+ *   window says why
  */
-export async function requestUserApproval(kind, origin, params, shown = { walletId: "" }) {
+export async function requestUserApproval(kind, origin, params, shown = { walletId: "" }, { beforeApprove } = {}) {
   if (
     pendingApprovals.size >= MAX_PENDING ||
     [...pendingApprovals.values()].some((entry) => entry.origin === origin)
@@ -50,7 +53,7 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
 
   const rid = crypto.randomUUID();
   const promise = new Promise((resolve, reject) => {
-    const entry = { kind, origin, params, shown, createdAt: Date.now(), resolve, reject };
+    const entry = { kind, origin, params, shown, beforeApprove, createdAt: Date.now(), resolve, reject };
     entry.timer = setTimeout(
       () => rejectPending(rid, entry, "Approval request expired"),
       APPROVAL_TTL_MS
@@ -118,13 +121,34 @@ export function bindPendingWallet(rid, walletId) {
   return false;
 }
 
+// An approval that must pass `beforeApprove` first: one at a time, and it stands
+// only while the request is still waiting.
+async function approveChecked(rid, entry, message) {
+  if (entry.checking) return { ok: false, error: "Unknown request" };
+  entry.checking = true;
+  try {
+    await entry.beforeApprove(message);
+  } catch (error) {
+    return { ok: false, error: { code: error?.code, message: error?.message ?? String(error), data: error?.data } };
+  } finally {
+    entry.checking = false;
+  }
+  if (pendingApprovals.get(rid) !== entry) return { ok: false, error: "Unknown request" };
+  return decided(rid, entry, message);
+}
+
 export function resolvePendingDecision(message) {
   const { rid, decision } = message || {};
   const entry = pendingApprovals.get(rid);
   if (!entry) {
     return { ok: false, error: "Unknown request" };
   }
+  if (decision === "approve" && entry.beforeApprove) return approveChecked(rid, entry, message);
+  return decided(rid, entry, message);
+}
 
+function decided(rid, entry, message) {
+  const { decision } = message;
   pendingApprovals.delete(rid);
   clearTimeout(entry.timer);
 

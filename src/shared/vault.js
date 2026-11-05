@@ -613,6 +613,22 @@ export function unlockVault(password) {
   });
 }
 
+/**
+ * Checks the password against the vault, for what asks for it again while a
+ * wallet is open: it must open the wallet `id`, the one open. It gives nothing
+ * back: a wrong one throws as an unlock's does, and counts as one.
+ * @param {string} password
+ * @param {string} id
+ */
+export function checkVaultPassword(password, id) {
+  return vaultLock(async () => {
+    const p = String(password ?? "");
+    const opened = isTauriRuntime() ? (await tauriOpen(p)).wallets : (await openVault(p)).opened;
+    if (!opened.some((w) => w.id === String(id ?? ""))) throw await incorrectPassword();
+    await resetUnlockFailures();
+  });
+}
+
 // The vault opened with the password for a change: refused for a wrong one,
 // one that doesn't open every wallet in `held` (the IDs of those unlocked
 // with one password) included, and while v1 is still to move (a write just

@@ -94,6 +94,21 @@ The last activity timestamp is persisted in extension session storage when avail
 (falling back to local storage outside extension contexts), so a restarted background
 service worker does not immediately lock an otherwise active unlocked wallet.
 
+### Password on big sends
+
+Settings can ask for the password again on any send above an amount chosen, off by default.
+It covers everything that moves money out, the wallet's own sends and a site's in its
+approval window. What counts is what goes out with the most its fee can be; what comes back
+counts only its fee; and a token's transfer or allowance, or a call of a contract the network's
+file doesn't name, asks on any amount, as it can't be counted in DUSK.
+
+The background checks the password against the vault, for the wallet that's open, before anything
+of the send is made, under the unlock's own backoff: a page's say-so isn't enough. A wallet's own
+send carries a ticket the background gave for that send, once; a site's request stays waiting until
+its window gives the password. Changing the amount takes the password too. The amount is kept on its
+own (`dusk_send_password_v1`); no provider method reads or changes it, and the background refuses
+those messages from anything but the wallet's own pages. The engine answers only the background.
+
 ### 3. dApp Permissions
 
 #### Origin-Based Access Control

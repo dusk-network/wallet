@@ -25,6 +25,7 @@ import {
 } from "../shared/txExecution.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { engineContactsVault, handleUiCommand } from "./uiCommands.js";
+import { assertSendPassword, sendPasswordLimit } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
 import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
@@ -451,6 +452,7 @@ export async function localSend(message) {
         nftMetadataEnabled: settings.nftMetadataEnabled !== false,
         ipfsGateway: settings.ipfsGateway ?? "",
         hideBalances: settings.hideBalances === true,
+        sendPasswordLimit: (await sendPasswordLimit())?.toString() ?? null,
         customGas: settings.customGas ?? null,
         chainId: settings.chainId,
         networkName: networkNameFromNodeUrl(settings.nodeUrl),
@@ -491,6 +493,9 @@ export async function localSend(message) {
           // Ignore errors, will fall back to static default
         }
         const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
+        // Above the amount chosen in Settings, only with the password checked for it.
+        const { nodeUrl } = await getSettings();
+        await assertSendPassword(baseParams, { ticket: message.sendTicket, walletId: String(status.accounts?.[0] ?? ""), nodeUrl });
         const result = await sendTransaction(baseParams);
         return { status, txEpoch, baseParams, result };
       });
