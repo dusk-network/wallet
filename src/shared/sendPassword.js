@@ -14,15 +14,12 @@
 
 import { TX_KIND } from "./constants.js";
 import { DRC20_CALL_NAMES } from "./drc20Calls.js";
-import { ERROR_CODES, rpcError } from "./errors.js";
+import { ERROR_CODES, SEND_PASSWORD_WAITS, rpcError } from "./errors.js";
 import { contractLabel } from "./knownCalls.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { checkVaultPassword } from "./vault.js";
 
 const KEY = STORAGE_KEYS.SEND_PASSWORD;
-
-/** What a send says that the wallet refused for want of the password. */
-export const SEND_PASSWORD_WAITS = "It waits for your password, so nothing was sent.";
 
 const lux = (value) => {
   try {

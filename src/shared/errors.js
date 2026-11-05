@@ -6,6 +6,9 @@ export function rpcError(code, message, data) {
   return err;
 }
 
+/** What a send says that the wallet refused for want of the password (sendPassword.js). */
+export const SEND_PASSWORD_WAITS = "It waits for your password, so nothing was sent.";
+
 export const ERROR_CODES = {
   USER_REJECTED: 4001,
   UNAUTHORIZED: 4100,

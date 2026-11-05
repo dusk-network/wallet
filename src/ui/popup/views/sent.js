@@ -12,7 +12,7 @@ import { copyButton } from "../../components/CopyButton.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { walletNameOf } from "../../components/ProfileName.js";
 import { askSendPassword } from "../../components/SendPasswordDialog.js";
-import { SEND_PASSWORD_WAITS } from "../../../shared/sendPassword.js";
+import { SEND_PASSWORD_WAITS } from "../../../shared/errors.js";
 import { safeTextEl } from "../../components/SafeText.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
