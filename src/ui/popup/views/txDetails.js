@@ -1,7 +1,9 @@
+import { transferLedger } from "@dusk-network/app-core/bridge";
+
 import { formatDuskExact, formatFee, groupThousands } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
-import { arrivalUrl } from "../../../shared/bridgeArrival.js";
+import { arrivalUrl, awaitingArrival, depositLux } from "../../../shared/bridgeArrival.js";
 import { networkTextOf } from "../../../shared/nodeNetwork.js";
 import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
@@ -133,6 +135,22 @@ function explorerButton(url, actions, text = "View in Dusk explorer") {
   );
 }
 
+// A bridge transfer's own amounts, exact and the same in every Dusk app
+// (transferLedger): what it sent and the bridge's fee, then the network's, which
+// `feeRow` says, then what arrives, or is on its way. What arrives is said only
+// while it can: not of what the bridge doesn't pay, or past the week it's looked for.
+function ledgerRows(tx, desc, nodeUrl, hidden) {
+  const received = desc.arrival ? desc.payout?.received ?? depositLux(tx) : undefined;
+  const ledger = transferLedger({ row: tx, received });
+  if (!ledger) return null;
+  const row = (label, line) => (line ? kv(label, h("span", {}, [balance(hidden, line.exact), ` ${line.coin}`])) : null);
+  const coming = ledger.received && (!ledger.received.expected || desc.payout || awaitingArrival(tx, nodeUrl));
+  return {
+    before: [row("Sent", ledger.sent), row("Bridge fee", ledger.bridgeFee)],
+    after: [coming ? row(ledger.received.expected ? "You receive" : "Received", ledger.received) : null],
+  };
+}
+
 export function txDetailsView(ov, { state, actions } = {}) {
   const hash = String(state?.txDetailHash ?? "");
   const txs = activityRows(ov, state);
@@ -256,7 +274,6 @@ export function txDetailsView(ov, { state, actions } = {}) {
   // Where it arrived: its transaction there, which opens that chain's explorer.
   const arrivalLink = desc.arrival ? arrivalUrl(nodeUrl, desc.arrival, tx?.route) : null;
   const arrivalChain = desc.evmChain || "DuskEVM";
-  const lux = (value) => h("span", {}, [balance(hidden, formatDuskExact(value)), " DUSK"]);
   // A transaction on another chain, which opens that chain's explorer.
   const chainTxRow = (chain, hash, link) =>
     kv(`${chain} transaction`, [
@@ -280,17 +297,19 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const migrated = tx?.route && tx.route.kind !== "service" && /^0x[0-9a-fA-F]{64}$/.test(memo);
   const migratedRow = migrated ? chainTxRow(tx.route.chain.name, memo, `${String(tx.route.chain.explorerUrl ?? "").replace(/\/+$/, "")}/tx/${memo}`) : null;
 
+  const ledger = ledgerRows(tx, desc, nodeUrl, hidden);
   const rows = h("div", { class: "group" }, [
     when ? kv("Date", dateText(when)) : null,
     desc.arrivedAt ? kv("Arrived", dateText(desc.arrivedAt)) : null,
     evmRow,
-    desc.payout ? kv("Bridge fee", lux(desc.payout.fee)) : null,
-    desc.payout ? kv(desc.arrival ? "Received" : "You receive", lux(desc.payout.received)) : null,
+    ...(ledger?.before ?? []),
+    ledger ? feeRow(tx, desc, hidden) : null,
+    ...(ledger?.after ?? []),
     // A memo that is the recipient on another chain shows as that.
     migratedRow,
     // Anyone can send a memo: neutralized, so it can't read as something it isn't.
     tx?.memo && !migrated && String(tx.memo).trim() !== desc.recipient ? kv("Memo", safeTextEl(tx.memo), { className: "kv--wrap" }) : null,
-    feeRow(tx, desc, hidden),
+    ledger ? null : feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,
     kv("Transaction ID", [idButton, copyId]),

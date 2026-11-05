@@ -253,8 +253,12 @@ describe("transaction details", () => {
 
     const going = on({ finalizedAt: sentAt });
     expect(going.status).toBe("On its way");
-    expect(going.rows).toContain("Bridge fee1 DUSK");
-    expect(going.rows).toContain("You receive2 DUSK");
+    // Sent, the bridge's fee, the network's, then what arrives, in that order, each exact.
+    expect(going.rows.filter((r) => /^(Sent|Bridge fee|Network fee|You receive|Received)/.test(r))).toEqual([
+      "Sent3 DUSK",
+      "Bridge fee1 DUSK",
+      "You receive2 BEP20 DUSK",
+    ]);
 
     const lateAt = Date.now() - 3 * bsc.typicalSeconds * 1000;
     expect(on({ finalizedAt: lateAt }).status).toBe("Taking longer than usual");
@@ -265,7 +269,8 @@ describe("transaction details", () => {
     keptArrivals().delete(HASH);
     expect(arrived.status).toBe("Arrived");
     expect(arrived.rows).toContain(`Arrived${dateText(arrivedAt)}`);
-    expect(arrived.rows).toContain("Received2 DUSK");
+    expect(arrived.rows).toContain("Received2 BEP20 DUSK");
+    expect(arrived.rows.some((r) => r.startsWith("You receive"))).toBe(false);
     expect(arrived.rows.at(-1)).toBe(`BNB Smart Chain transaction${payout.slice(0, 6)}…${payout.slice(-4)}Copy`);
     dom.window.open = vi.fn(() => ({}));
     const buttons = arrived.body.querySelectorAll(".tx-explorer-btn");
@@ -286,7 +291,47 @@ describe("transaction details", () => {
       expect(none.rows.some((r) => r.startsWith("You receive"))).toBe(false);
     }
     const failed = on({ finalizedAt: sentAt, status: "failed" });
-    expect(failed.rows.some((r) => r.startsWith("You receive") || r.startsWith("Bridge fee"))).toBe(false);
+    expect(failed.rows.some((r) => r.startsWith("You receive") || r.startsWith("Bridge fee") || r.startsWith("Sent"))).toBe(false);
+  });
+
+  it("says one transfer's amounts to the last lux, the network fee between what's sent and what arrives", () => {
+    const MAINNET = "https://nodes.dusk.network";
+    const bsc = routes(networks.mainnet).find((r) => r.id === "dusk-to-bsc");
+    const evm = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
+    const on = (tx, { hidden = false } = {}) => {
+      const ov = { nodeUrl: MAINNET, hideBalances: hidden, txs: [{ hash: HASH, nodeUrl: MAINNET, status: "executed", kind: TX_KIND.TRANSFER, finalizedAt: Date.now() - 60_000, ...tx }] };
+      const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home", addressBook: { loaded: true, items: [] } };
+      dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
+      return dom.document.body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText).filter((r) => /^(Sent|Bridge fee|Network fee|You receive|Received)/.test(r));
+    };
+    expect(on({ to: bsc.account, memo: evm, amount: "3190082082", feePaid: "1859281" })).toEqual([
+      "Sent3.190082082 DUSK",
+      "Bridge fee1 DUSK",
+      "Network fee0.001859281 DUSK",
+      "You receive2.190082082 BEP20 DUSK",
+    ]);
+    // Hide balances hides them all.
+    expect(on({ to: bsc.account, memo: evm, amount: "3190082082", feePaid: "1859281" }, { hidden: true })).toEqual([
+      "Sent•••• DUSK",
+      "Bridge fee•••• DUSK",
+      "Network fee•••• DUSK",
+      "You receive•••• BEP20 DUSK",
+    ]);
+    // A transfer that's no bridge's has no such lines but its fee.
+    expect(on({ to: evm.replace("0x", ""), amount: "3190082082", feePaid: "1859281" })).toEqual(["Network fee0.001859281 DUSK"]);
+  });
+
+  it("says a deposit to DuskEVM's amounts, what arrives until it has", () => {
+    const bridge = duskEvmContracts(2).bridge;
+    const evm = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
+    const deposit = { kind: TX_KIND.CONTRACT_CALL, contractId: bridge, fnName: "depositETHToWithValue", amount: "0", deposit: "500000001", bridgeTo: evm, status: "executed", feePaid: "2500000", finalizedAt: Date.now() - 60_000 };
+    const ledger = (view) => view.rows.filter((r) => /^(Sent|Bridge fee|Network fee|You receive|Received)/.test(r));
+    expect(ledger(details(deposit))).toEqual(["Sent0.500000001 DUSK", "Network fee0.0025 DUSK", "You receive0.500000001 DUSK"]);
+    keptArrivals().set(HASH, { hash: `0x${"7c".repeat(32)}`, at: Date.now() });
+    expect(ledger(details(deposit))).toEqual(["Sent0.500000001 DUSK", "Network fee0.0025 DUSK", "Received0.500000001 DUSK"]);
+    keptArrivals().delete(HASH);
+    // Past the week it's looked for, what it paid stands alone.
+    expect(ledger(details({ ...deposit, finalizedAt: Date.now() - 8 * 86_400_000 }))).toEqual(["Sent0.500000001 DUSK", "Network fee0.0025 DUSK"]);
   });
 
   it("leads with a saved contact's own name, its .dusk name beside the address", () => {

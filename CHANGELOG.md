@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
 
 ### Changed
