@@ -214,9 +214,12 @@ export async function localSend(message) {
         await clearAllPermissions();
         await clearVault();
         // Nothing of the old wallet stays: its transactions, shielded notes
-        // and history. A store that can't be cleared fails the reset and keeps
-        // it pending (walletReset.js).
+        // and history, its names and addresses, and the node it was on. A
+        // store that can't be cleared fails the reset and keeps it pending
+        // (walletReset.js).
         await finishReset();
+        // On the default network from now on.
+        await ensureEngineConfigured();
         return { ok: true };
       });
     }

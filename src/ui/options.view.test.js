@@ -189,7 +189,7 @@ describe("settings", () => {
     expect(view.shownButtons(view.section("Reset"))).toEqual(["Reset wallet"]);
     // One line on what it removes, and that the funds stay on Dusk.
     expect(visibleText(view.section("Reset").querySelector(".settings-note"))).toBe(
-      "Removes every wallet, with its contacts, activity and connected sites, from this browser. Your funds stay on Dusk. You need each recovery phrase to use them again."
+      "Removes every wallet, with its contacts, names, activity and connected sites, from this browser, and goes back to Mainnet. Your funds stay on Dusk. You need each recovery phrase to use them again."
     );
   });
 

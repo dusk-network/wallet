@@ -261,6 +261,14 @@ export function setSettings(patch) {
 }
 
 /**
+ * Every setting back to its default, for a wallet reset: Mainnet's own node,
+ * and none of the nodes added before. The next read starts from DEFAULT_SETTINGS.
+ */
+export function clearSettings() {
+  return withStorageLock(STORAGE_KEYS.SETTINGS, () => storage.remove(STORAGE_KEYS.SETTINGS));
+}
+
+/**
  * Fixes the chain ID a node gave, when the settings still name that node and
  * have none for it yet: a read that finished after a switch changes nothing,
  * and neither does a node saying something else later.

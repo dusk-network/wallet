@@ -786,7 +786,7 @@ export function optionsView(ov, { state, actions } = {}) {
     section("Reset", [
       h("p", {
         class: "settings-note",
-        text: "Removes every wallet, with its contacts, activity and connected sites, from this browser. Your funds stay on Dusk. You need each recovery phrase to use them again.",
+        text: "Removes every wallet, with its contacts, names, activity and connected sites, from this browser, and goes back to Mainnet. Your funds stay on Dusk. You need each recovery phrase to use them again.",
       }),
       resetBtn,
     ], "settings-section--danger"),

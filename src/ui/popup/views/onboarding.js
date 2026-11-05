@@ -595,7 +595,7 @@ export function restoreWalletView({ state, actions } = {}) {
     state,
     actions,
     title: "Restore wallet",
-    lead: "This removes every recovery phrase on this device, then sets up this one with a new password. If it was here before, its contacts stay.",
+    lead: "This removes every recovery phrase on this device, then sets up this one with a new password. If it was here before, its contacts and profile names stay.",
     passwordLabel: "New password",
     verb: "Restore wallet",
     busyVerb: "Restoring…",

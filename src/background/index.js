@@ -890,9 +890,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           await clearAllPermissions();
           await clearVault();
           // Nothing of the old wallet stays: its transactions, shielded notes
-          // and history. A store that can't be cleared fails the reset and
-          // keeps it pending (walletReset.js).
+          // and history, its names and addresses, and the node it was on. A
+          // store that can't be cleared fails the reset and keeps it pending
+          // (walletReset.js).
           await finishReset();
+          // On the default network from now on.
+          invalidateEngineConfig();
+          await ensureEngineConfigured().catch(() => {});
         });
         sendResponse({ ok: true });
         return;
@@ -1041,6 +1045,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
           const wallet = await createVault(mnemonic, password);
           if (pending) await endReset();
+          if (pending) invalidateEngineConfig();
           await ensureEngineConfigured();
           const result = await unlockEngine([{ ...wallet, mnemonic: String(mnemonic) }], wallet.id);
           // A phrase made here has no history: its shielded sync starts now.
@@ -1085,6 +1090,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           await clearVault();
           const restored = await createVault(mnemonic, password);
           await endReset();
+          // On the default network, as after a reset.
+          invalidateEngineConfig();
+          await ensureEngineConfigured();
           const result = await unlockEngine([{ ...restored, mnemonic: String(mnemonic) }], restored.id);
           await keepWalletShown(result);
           await updateActivity();

@@ -93,3 +93,15 @@ export async function forgetAccountNames(walletId) {
   const { [id]: _gone, ...rest } = await getAll();
   await setAll(rest);
 }
+
+/**
+ * What a reset leaves of the profile labels: a wallet restored in place of the
+ * ones here keeps its own, and no other's; else none stay.
+ * @param {string | null} [walletId]
+ */
+export async function keepOnlyAccountNamesOf(walletId) {
+  const id = String(walletId ?? "").trim();
+  const own = id ? (await getAll())[id] : null;
+  if (own) await setAll({ [id]: own });
+  else await storage.remove(STORAGE_KEYS.ACCOUNT_NAMES);
+}

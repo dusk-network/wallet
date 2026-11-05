@@ -175,7 +175,7 @@ describe("setting up and unlocking", () => {
     const body = show(restoreWalletView({ state, actions: acts }));
     expect(body.querySelector("h1").textContent).toBe("Restore wallet");
     expect(body.querySelector(".auth-lead").textContent).toBe(
-      "This removes every recovery phrase on this device, then sets up this one with a new password. If it was here before, its contacts stay."
+      "This removes every recovery phrase on this device, then sets up this one with a new password. If it was here before, its contacts and profile names stay."
     );
     const group = body.querySelector("[role=group]");
     typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
