@@ -10,25 +10,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Fixed
 
 - Named Mainnet, Testnet and Devnet only at their exact addresses: any other node is Custom with its host, whatever it says of itself.
-- Fixed the chain ID on everything signed, a known address's from its network's file, a custom node's as it was added, and refused to sign, saying why, while the node answers another.
+- Fixed the chain ID on everything signed, and refused to sign, saying why, while the node answers another.
 - Showed the node's host in large type in a site's network-switch window, with what that node can see and show, and never Switch to Mainnet for another address.
 - Kept the same recovery words through Back while a wallet is being created.
 - Switched network as soon as it's chosen in Settings, and said a custom node isn't saved until Save.
 - Went back to Mainnet on Reset, and removed the profile names, tokens, checked names and custom nodes kept with it.
 - Neutralized and flagged characters that change how text reads, in messages to sign, sign-ins and memos: approvals, Review, Sent and a transaction's details.
-- Checked the balance covers the amount and the fee in site approvals and on every form and Review, saying how much is missing, with Approve and Confirm off until it does.
+- Checked the balance covers the amount and the fee in site approvals, forms and Reviews, saying how much is missing, with Approve and Confirm off.
 - Said when a site chose the fee, compared with the network's price, with a way back to that price when it's high.
 - Said why a node refused a transaction in the wallet's own words, never as its raw reply.
 - Named your other profiles in Activity, a transaction's details, toasts and Send, and stopped offering to save them as contacts.
 - Gave Request payment the checks Send has: an amount over 0, a memo of 512 bytes at most, and Copied goes when the request changes.
-- Said when an amount could be two amounts ("write 1234 or 1,234"), and when it has too many decimals, on every amount field.
+- Said when an amount could be two amounts, or has too many decimals, on every amount field.
 - Kept Review off on Send while the amount typed won't do.
 - Kept Confirm, and what stops it, in view on every Review.
 - Wrote percentages, token amounts and examples in the browser's number format, and a time zone's name the same on every screen.
-- Called the profile menu's way to Settings Profile names, as profiles can't be added.
-- Listed what the network menu says of each network in Settings' list too.
+- Renamed Manage profiles in the profile menu to Profile names.
+- Listed Devnet as Experimental, and the network menu's other hints, in Settings' network list.
 - Refused a new password that's the same as the current one.
-- Looked up a send no watcher follows any more, as after a browser restart, so a Sozu stake's "on its way" goes once it's done.
+- Cleared a Sozu stake's "on its way" note once the stake is done, also after a browser restart.
 
 ## [0.4.0] - 2026-11-04
 

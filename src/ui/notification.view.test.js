@@ -709,6 +709,20 @@ describe("a fee the site chose", () => {
     expect(fee()).toContain("It's 2,5 times the network's price.");
   });
 
+  it("says it of the site's own fee only: a fee changed here puts it away, and the site's brings it back", async () => {
+    networkPrice("1");
+    await render("send_tx", transfer(BOB, { gas: { limit: "10000000", price: "50" }, feeFromSite: { limit: true, price: true } }));
+    await settle();
+    const editor = app.querySelector("dusk-gas-editor");
+    const box = app.querySelector(".ap-site-fee");
+    editor.dispatchEvent(fakeEvent("dusk-gas-fee", { detail: { feeLux: 500000000n } }));
+    expect(box.hidden).toBe(false);
+    editor.dispatchEvent(fakeEvent("dusk-gas-fee", { detail: { feeLux: 20000000n } }));
+    expect(box.hidden).toBe(true);
+    editor.dispatchEvent(fakeEvent("dusk-gas-fee", { detail: { feeLux: 500000000n } }));
+    expect(box.hidden).toBe(false);
+  });
+
   it("says so calmly at or under the network's price", async () => {
     networkPrice("2");
     await render("send_tx", transfer(BOB, { gas: { limit: "2500000", price: "2" }, feeFromSite: { limit: true, price: true } }));

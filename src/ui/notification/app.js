@@ -1072,6 +1072,11 @@ export async function renderNotification() {
       gasEditor.networkGas = gas;
       gasEditor.setGas(gas);
       showSiteFee(null, gasEditor);
+      // Said of the site's own fee, until it's changed here.
+      const chosenLux = safeBigInt(gas?.limit, 0n) * safeBigInt(gas?.price, 0n);
+      gasEditor.addEventListener("dusk-gas-fee", (event) => {
+        siteFee.hidden = (!fromSite.limit && !fromSite.price) || event?.detail?.feeLux !== chosenLux;
+      });
       if (gas?.limit != null) {
         send({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" })
           .then((res) => {
