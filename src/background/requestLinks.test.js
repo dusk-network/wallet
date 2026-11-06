@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 import { loadVault } from "../shared/vault.js";
-import { offersRequestLink, openRequestLink } from "./requestLinks.js";
+import { handOverRequestLink, offersRequestLink, openRequestLink } from "./requestLinks.js";
 
 vi.mock("../platform/extensionApi.js", () => ({
   runtimeGetURL: vi.fn((path) => `chrome-extension://wallet/${path}`),
@@ -43,11 +43,64 @@ describe("a request link from the web wallet's Send", () => {
       ["https://phish.example/wallet/dashboard/send?to=abc", { url: "https://phish.example/" }],
       ["dusk:public-abc", onWalletPage],
       [undefined, onWalletPage],
+      // A link that says a field twice, or with a user part before its host, which could be read two ways.
+      [`${LINK}&network=mainnet`, onWalletPage],
+      ["https://apps.testnet.dusk.network/wallet/dashboard/send?to=abc&to=def", onWalletPage],
+      ["https://apps.dusk.network@apps.testnet.dusk.network/wallet/dashboard/send?to=abc", onWalletPage],
     ]) {
       await expect(offersRequestLink({ link }, sender)).resolves.toBe(false);
       await expect(openRequestLink({ link }, sender)).resolves.toBe(false);
     }
     expect(tabsCreate).not.toHaveBeenCalled();
     expect(runtimeGetURL).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a request the web wallet hands over (dusk_openPaymentLink)", () => {
+  const WALLET = "https://apps.testnet.dusk.network";
+  const ACCOUNT = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
+  const opened = () => tabsCreate.mock.calls.map(([{ url }]) => decodeURIComponent(url.split("&link=")[1]));
+
+  it("opens Send with the link of the web wallet's own page, on a press, with a wallet here", async () => {
+    await expect(handOverRequestLink(WALLET, LINK, { pressed: true })).resolves.toBe(true);
+    // A browser that can't say whether there was a press: as for the offer card.
+    await expect(handOverRequestLink(WALLET, LINK)).resolves.toBe(true);
+    expect(opened()).toEqual([LINK, LINK]);
+    loadVault.mockImplementation(async () => null);
+    await expect(handOverRequestLink(WALLET, LINK, { pressed: true })).resolves.toBe(false);
+    expect(opened()).toHaveLength(2);
+  });
+
+  it("refuses another site's, another page's or another network's link, and one asked without a press", async () => {
+    for (const [origin, link] of [
+      ["https://phish.example", LINK],
+      ["https://phish.example", "https://phish.example/wallet/dashboard/send?to=abc"],
+      [WALLET, "https://apps.dusk.network/wallet/dashboard/send?to=abc"],
+      [WALLET, "https://apps.testnet.dusk.network/wallet/settings?to=abc"],
+      [WALLET, `dusk:public-${ACCOUNT}`],
+      [WALLET, undefined],
+    ]) {
+      await expect(handOverRequestLink(origin, link, { pressed: true })).rejects.toMatchObject({ code: -32602 });
+    }
+    await expect(handOverRequestLink(WALLET, LINK, { pressed: false })).rejects.toMatchObject({ code: 4100 });
+    expect(tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it("opens a web wallet's on this machine as its network's own link, for Send to read", async () => {
+    const local = `http://localhost:5173/dashboard/send?to=${ACCOUNT}&amount=1.5&memo=Factura+33&network=testnet`;
+    await expect(handOverRequestLink("http://localhost:5173", local, { pressed: true })).resolves.toBe(true);
+    expect(opened()).toEqual([`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1.5&memo=Factura+33&network=testnet`]);
+    // Not from another page on this machine.
+    await expect(handOverRequestLink("http://localhost:4000", local, { pressed: true })).rejects.toMatchObject({ code: -32602 });
+  });
+
+  it("refuses a link on this machine that Send would refuse, rather than rebuild it into one Send takes", async () => {
+    // Codex's: amount=1 and amountLux 5,000 DUSK came out as a link for 5,000 DUSK.
+    const twice = `http://localhost:5173/dashboard/send?to=${ACCOUNT}&amount=1&amountLux=5000000000000&network=testnet`;
+    await expect(handOverRequestLink("http://localhost:5173", twice, { pressed: true })).rejects.toMatchObject({ code: -32602, message: "This link asks for two different amounts. Ask for a new one." });
+    expect(tabsCreate).not.toHaveBeenCalled();
+    // The same amount said both ways is one amount.
+    await expect(handOverRequestLink("http://localhost:5173", twice.replace("amount=1&", "amount=5000&"), { pressed: true })).resolves.toBe(true);
+    expect(opened()).toEqual([`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=5000&network=testnet`]);
   });
 });

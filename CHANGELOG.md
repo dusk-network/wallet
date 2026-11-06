@@ -15,16 +15,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed a Sozu stake's position on Liquid staking: put in, taken out, worth now, deposit fees and rewards so far.
 - Said what an amount brings in a year with Sozu as it's typed, and one line of what the rate is made of under it.
 - Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
+- Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei, and put those fees in the export.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
+- Added `dusk_openPaymentLink`, for the web wallet's own button to open a request link in the extension's Send.
+- Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
+- Listed the requests made in Receive, each Waiting, Paid, Check or Paid twice, with its payments to open.
+- Added a search to Activity: by name, address, memo, transaction ID or amount.
+- Gave the export's values in euros where the browser's region pays in them, and in US dollars elsewhere.
 
 ### Changed
 
+- Told a site nothing of the wallet's network or version before it connects; the network comes with the connection.
+- Counted what's staked, natively and with Sozu, in Home's total balance, read with the public balance, and showed it beside the rest.
+- Gave Sozu's rate as stDUSK grew over the last 30 days, on Liquid staking and Staking, where the chain says it.
 - Made Activity's Export a file for accountants and tax tools, in Koinly's universal CSV: a quarter or any dates, your profile's name on it, transfers between your profiles marked, stDUSK and fees for staking, and euro values and Excel's accents when asked.
 - Showed an amount and its fee to the last lux in a transaction's details, on Sent and on every Review; rows and balance lines stay short.
 - Made a request link the https form, which opens the web wallet's Send filled in; Send also reads it pasted or scanned.
 
 ### Fixed
 
+- Refused a request link that says a field twice or has a user part before its host, and one for another network the moment it's put in, saying only why.
+- Said when a number in a message to sign, a sign-in or a memo mixes digits of different scripts or reads right to left.
+- Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
+- Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
+- Repeated on Review that a send goes to your own account, and said what to try after a wrong password.
 - Kept another wallet's shielded history out of Activity and Export when the wallet changes during a read; an Export it changes under saves nothing and says so.
 - Said under a .dusk name when a node the wallet doesn't know checked it, and kept that node's answers from the network's own node's.
 - Said plainly on Home when the balance can't be read, instead of showing what the node said.

@@ -133,6 +133,14 @@ provider = {
 
 The provider starts emitting events after the first `request()` call or `on()` subscription.
 
+A site learns nothing of the wallet's network before it connects: `chainId` is
+`null` until then, `dusk_chainId` answers `null`, `dusk_getCapabilities`
+leaves out the wallet's version and network, and `chainChanged` and
+`duskNodeChanged` go only to connected sites. The answer to
+`dusk_requestProfiles` or `dusk_requestShieldedAddress` brings the network:
+`chainId` is set as the request resolves, and `connect` follows with it. After
+a disconnect, `chainId` is `null` again.
+
 ---
 
 ## Types
@@ -166,7 +174,7 @@ const numericChainId = Number(match[1]);
 
 Get a machine-readable description of the provider surface (supported methods, tx kinds, limits).
 
-This method does **not** require connection permission.
+This method does **not** require connection permission. Only a connected site gets `walletVersion`, `chainId`, `nodeUrl` and `networkName` in it.
 
 ```js
 const caps = await dusk.request({ method: "dusk_getCapabilities" });
@@ -227,11 +235,11 @@ const result = await dusk.request({
 
 ### `dusk_chainId`
 
-Get current chain ID (CAIP-2, `dusk:<id>`).
+Get current chain ID (CAIP-2, `dusk:<id>`): `null` until the site connects.
 
 ```js
 const chainId = await dusk.request({ method: "dusk_chainId" });
-// → "dusk:2" (testnet)
+// → "dusk:2" (testnet), or null before connecting
 ```
 
 ---
@@ -569,6 +577,30 @@ Emits `disconnect`.
 
 ---
 
+### `dusk_openPaymentLink`
+
+Hand a request link over to the wallet's own Send, filled in, for the person
+to review and confirm there. It needs no connection, and tells the page
+nothing of the wallet. Only a network's own web wallet (or one on this
+machine) may ask, only for a link to its own Send, and only from a press of
+the person's.
+
+```js
+const opened = await dusk.request({
+  method: "dusk_openPaymentLink",
+  params: { link: location.href }
+});
+// → true once Send opened; false with no wallet in the extension to pay it with
+```
+
+Throws `-32602` for a link that isn't a request link to the asking web
+wallet's own Send, and `4100` when the browser says the page had no press as
+it asked. A page that offers this itself can turn off the extension's own
+offer card with `<meta name="dusk-wallet-request-handoff" content="1">` in
+its head.
+
+---
+
 ## Events
 
 ```js
@@ -584,8 +616,8 @@ dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 | `connect` | `{ chainId }` | Permission granted, or the user switched to a wallet the site is connected to |
 | `disconnect` | `{ code: 4900, message }` | Permission revoked, the connection reached the end the user set for it, or the user switched to a wallet the site isn't connected to |
 | `profilesChanged` | `DuskProfile[]` | Lock/unlock, connect/disconnect, selected profile or wallet changes, profile grant changes, or the profile's `.dusk` name changes |
-| `chainChanged` | `ChainId` | Network changed (different chain ID) |
-| `duskNodeChanged` | `{ chainId, nodeUrl, networkName }` | Node URL changed (even same chain) |
+| `chainChanged` | `ChainId` | Network changed (different chain ID), to connected sites |
+| `duskNodeChanged` | `{ chainId, nodeUrl, networkName }` | Node URL changed (even same chain), to connected sites |
 
 ---
 

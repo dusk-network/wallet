@@ -193,21 +193,39 @@ describe("background rpc handler", () => {
     vi.clearAllMocks();
   });
 
-  it("dusk_getCapabilities is public", async () => {
+  it("dusk_getCapabilities is public, and says the wallet's version and network only to a connected site", async () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
+    const ask = (method) => handleRpc("https://dapp.example", { method });
 
-    const caps = await handleRpc("https://dapp.example", { method: "dusk_getCapabilities" });
+    // Before it connects: what the wallet can do, and nothing of it or its network (E09).
+    const before = await ask("dusk_getCapabilities");
+    expect(before.provider).toBe("dusk-wallet");
+    expect(Array.isArray(before.methods)).toBe(true);
+    expect(before.features).toMatchObject({ shieldedRead: false, signMessage: true, signAuth: true });
+    expect(["walletVersion", "chainId", "nodeUrl", "networkName"].filter((key) => key in before)).toEqual([]);
+    await expect(ask("dusk_chainId")).resolves.toBeNull();
 
-    expect(caps.provider).toBe("dusk-wallet");
-    expect(caps.walletVersion).toBe("9.9.9");
-    expect(caps.chainId).toBe("dusk:2");
-    expect(Array.isArray(caps.methods)).toBe(true);
-    expect(caps.features).toMatchObject({
-      shieldedRead: false,
-      signMessage: true,
-      signAuth: true,
-    });
+    perms["https://dapp.example"] = { accountIndex: 0, grants: { publicAccount: true } };
+    const after = await ask("dusk_getCapabilities");
+    expect([after.walletVersion, after.chainId, after.nodeUrl, after.networkName]).toEqual(["9.9.9", "dusk:2", "https://testnet.nodes.dusk.network", "Testnet"]);
+    await expect(ask("dusk_chainId")).resolves.toBe("dusk:2");
+  });
+
+  it("dusk_openPaymentLink opens Send with a web wallet's own request link, needing no connection, on a press", async () => {
+    // N21: Sofia's "Open in the Dusk extension" on the web wallet's page.
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    vaultValue = { v: 1 };
+    const link = "https://apps.testnet.dusk.network/wallet/dashboard/send?to=abc&amount=1&network=testnet";
+    const handOver = (context) => handleRpc("https://apps.testnet.dusk.network", { method: "dusk_openPaymentLink", params: { link } }, context);
+
+    await expect(handOver({ pressed: true })).resolves.toBe(true);
+    expect(tabsCreate).toHaveBeenLastCalledWith({ url: expect.stringContaining(`full.html?route=send&link=${encodeURIComponent(link)}`) });
+    expect(getPermissionForOrigin).not.toHaveBeenCalledWith("https://apps.testnet.dusk.network", expect.anything());
+    await expect(handOver({ pressed: false })).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+    // Listed for a page to find before it offers it.
+    expect((await handleRpc("https://apps.testnet.dusk.network", { method: "dusk_getCapabilities" })).methods).toContain("dusk_openPaymentLink");
   });
 
   it.each([

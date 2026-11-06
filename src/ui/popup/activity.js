@@ -13,7 +13,7 @@
 
 import { activityRows as rowsOf, settleSends } from "@dusk-network/app-core/activity";
 import { StaleHistoryError } from "@dusk-network/app-core/history";
-import { sozuFacts } from "@dusk-network/app-core/sozu";
+import { sozuFacts, sozuGrowth } from "@dusk-network/app-core/sozu";
 
 import { activityHistory, archiveAt, historyArchiverUrl, noteActivityUnavailable } from "../../shared/activityHistory.js";
 import { keptArrivals } from "../../shared/bridgeArrival.js";
@@ -33,8 +33,8 @@ import { noteTxStatus } from "./views/sent.js";
 
 /** Rows read for the History view at first, and how many more Show more adds. */
 export const ACTIVITY_PAGE = 50;
-// Routes that show Activity: a sync step redraws only these.
-const ROUTES = new Set(["home", "activity", "tx"]);
+// Routes that show Activity, and Receive for what came in for its requests: a sync step redraws only these.
+const ROUTES = new Set(["home", "activity", "tx", "receive"]);
 // The wait after a transaction went through before the archive is asked for it.
 const AFTER_TX_MS = 10_000;
 
@@ -157,6 +157,7 @@ export const SHIELDED_RETRY_MS = 60_000;
 async function loadShielded(a, state, render) {
   if (a.shieldedAsked || !a.send) return;
   a.shieldedAsked = true;
+  a.shieldedReadAt = Date.now();
   clearTimeout(a.shieldedTimer);
   const again = () => {
     a.shieldedAsked = false;
@@ -318,6 +319,59 @@ export function refreshActivitySoon({ state, render }, delayMs = AFTER_TX_MS) {
 }
 
 /**
+ * Receive's look for what came in while a request waits: the account's
+ * history synced again now, and its shielded history read again once its
+ * notes synced since it was last read (the overview starts such a sync).
+ * @param {object} ov - the overview
+ * @param {{ state: object, render: () => Promise<void> }} ctx
+ */
+export function lookForPayments(ov, { state, render }) {
+  const a = state?.activity;
+  if (!a || a.key !== activityKey(ov)) return;
+  refreshActivitySoon({ state, render }, 0);
+  const sync = ov?.shieldedSync;
+  if (sync?.state === "done" && Number(sync.updatedAt) > (a.shieldedReadAt ?? 0)) {
+    a.shieldedAsked = false;
+    loadShielded(a, state, render).catch(() => {});
+  }
+}
+
+/** Rows read at most for Receive's requests, past the page Activity shows. */
+const REQUEST_ROWS = 2_000;
+/** Details read at most at once for them: one archive request's worth. */
+const REQUEST_DETAILS = 50;
+
+/**
+ * The account's kept history back to `since` (milliseconds), past the page
+ * Activity shows, for what must see every payment since then however many
+ * came after (Receive's requests), with the details of what came in: what
+ * `activityRows` takes as `whole`. Null while it isn't open or loaded.
+ * @param {{ state: object }} ctx
+ * @param {number} since
+ */
+export async function activitySince({ state }, since) {
+  const a = state?.activity;
+  if (!a?.history || !a.loaded) return null;
+  // An entry's time, or where its details aren't read yet, about when its block was made.
+  const timeOf = (entry, meta) =>
+    Number(entry?.timestamp) || (meta?.headAt && Number.isFinite(entry?.blockHeight) ? meta.headAt - Math.max(0, Number(meta.finalized) - entry.blockHeight) * 10_000 : NaN);
+  const readBack = async () => {
+    for (let limit = Math.max(a.limit, ACTIVITY_PAGE); ; limit = Math.min(REQUEST_ROWS, limit * 2)) {
+      const read = await a.history.read({ limit });
+      if (read.entries.length < limit || limit >= REQUEST_ROWS || timeOf(read.entries.at(-1), read.state) < since) return read;
+    }
+  };
+  let read = await readBack();
+  // What came in has its time once its details are read.
+  const missing = read.entries.filter((entry) => entry.direction === "in" && a.history.needsDetails(entry)).slice(0, REQUEST_DETAILS);
+  if (missing.length && (await a.epoch) !== undefined) {
+    await a.history.fillDetails(missing).catch(() => {});
+    read = await readBack();
+  }
+  return state.activity === a ? { entries: read.entries, meta: read.state, shielded: a.shielded } : null;
+}
+
+/**
  * Show more: the next page of kept history, and a sync run for older history
  * when the kept history runs out.
  * @param {{ state: object, render: () => Promise<void> }} ctx
@@ -412,6 +466,23 @@ const sozuFactsKept = new Map();
 export function sozuFactsOf(ov, rows) {
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
   return sozuFacts({ archive, account: selected(ov).account, rows, cache: sozuFactsKept }).catch(() => undefined);
+}
+
+// How Sozu's stDUSK grew lately, by pool, as app-core reads it from the chain:
+// read once an hour in this popup, for every screen that shows Sozu's rate.
+const sozuGrowthKept = new Map();
+
+/**
+ * How Sozu's stDUSK grew over the last 30 days, from the pool its status names
+ * (app-core's sozuGrowth): null where it can't be read, or before the status is.
+ * @param {object} ov - the overview
+ * @param {object | null | undefined} status - Sozu's status, as the engine reads it
+ * @param {number | null} [tipHeight] - the node's height, where it's known
+ */
+export function sozuGrowthOf(ov, status, tipHeight = null) {
+  if (!status?.contracts?.pool) return Promise.resolve(null);
+  const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
+  return sozuGrowth({ archive, cache: sozuGrowthKept, pool: status.contracts.pool, status, tipHeight }).catch(() => null);
 }
 
 /** How long a detail lookup that brought nothing waits before it is asked again. */

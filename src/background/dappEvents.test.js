@@ -133,10 +133,13 @@ describe("dappEvents", () => {
     // initPortForOrigin() posts DUSK_PROVIDER_STATE immediately.
     const stateMsg = port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE");
     expect(stateMsg).toBeTruthy();
+    // Nor the network: a site learns it as it connects (E09).
     expect(stateMsg.state).toMatchObject({
       isConnected: false,
       profiles: [],
-      chainId: "dusk:2",
+      chainId: null,
+      networkName: null,
+      nodeUrl: null,
     });
 
     // profilesChanged should also emit [] (not the full list).
@@ -145,6 +148,29 @@ describe("dappEvents", () => {
       (m) => m?.type === "DUSK_PROVIDER_EVENT" && m?.name === "profilesChanged"
     );
     expect(profileMsgs.at(-1)?.data).toEqual([]);
+  });
+
+  it("tells only connected sites of a change of network or node, and gives a connected site its network", async () => {
+    // E09: a site not connected learns nothing of the wallet's network.
+    permissions = { "https://one.example": { profileId: "account:0:acct0", accountIndex: 0, grants: { publicAccount: true }, updatedAt: 1 } };
+    const ev = await import("./dappEvents.js");
+    const [one, other] = ["one", "other"].map((site, i) => new FakePort(`https://${site}.example`, i + 1));
+    ev.registerDappPort(one);
+    ev.registerDappPort(other);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(one.messages.find((m) => m.type === "DUSK_PROVIDER_STATE").state).toMatchObject({ chainId: "dusk:2", isConnected: true, networkName: "Testnet", nodeUrl: "https://testnet.nodes.dusk.network" });
+
+    one.messages.length = 0;
+    other.messages.length = 0;
+    settings = { nodeUrl: "https://nodes.dusk.network" };
+    await ev.broadcastChainChangedAll();
+    const events = (port) => port.messages.filter((m) => m.type === "DUSK_PROVIDER_EVENT").map((m) => [m.name, m.data]);
+    expect(events(one)).toEqual([
+      ["chainChanged", "dusk:1"],
+      ["duskNodeChanged", { chainId: "dusk:1", networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" }],
+    ]);
+    expect(other.messages).toEqual([]);
+    await expect(ev.providerStateFor("https://other.example")).resolves.toMatchObject({ chainId: null, isConnected: false });
   });
 
   it("disconnects a stale permission without exposing a replacement wallet", async () => {

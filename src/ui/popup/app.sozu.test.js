@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { accessibleName, installFakeDom, settle, typeInto, visibleText } from "../testing/fakeDom.js";
 import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
+import { sozuArchive } from "../testing/sozuArchive.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
@@ -299,5 +300,35 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     await flush();
     expect(overviews()).toBe(before + 1);
     expect(state.overview.chainId).toBe(2);
+  });
+});
+
+describe("Sozu's rate, as its stDUSK grew", () => {
+  const TIP = 4_800_000;
+  const archive = sozuArchive({ pool: SOZU.contracts.pool, tip: TIP, now: Date.UTC(2026, 10, 6, 12), from: 3_020_000_000_000n, to: 3_071_932_000_000n });
+
+  it("is what stDUSK did over the last 30 days, and its line says so, in place of the estimate's working", async () => {
+    // Lena's: "15,5 DUSK a block to stakers" matched nothing the chain says.
+    const { app } = popupPage();
+    vi.stubGlobal("fetch", archive);
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    const { state } = await import("./state.js");
+    send.mockReset();
+    send.mockImplementation(async (message) => {
+      if (message.type === "DUSK_UI_GET_REWARD_RATE") return { result: 0.2 };
+      if (message.type === "DUSK_UI_GET_STAKING_FIGURES") return { result: { provisioners: [{ amount: 1_000_000_000_000_000, eligibility: 1 }], tipHeight: TIP } };
+      return { result: null };
+    });
+    const { sozuLiquidStakingView } = await import("./views/sozu.js");
+    state.staking = { screen: "liquid" };
+    state.sozu = { action: "deposit", depositAmountDusk: "", loaded: true, loading: false, profileIndex: 0, status: SOZU, pool: SOZU.pool, position: SOZU.position };
+    const draw = () => app.replaceChildren(...sozuLiquidStakingView(TESTNET, { state, actions: { send, render: async () => draw() } }));
+    draw();
+    await flush();
+    draw();
+    await flush();
+    const rate = app.querySelectorAll(".group.info .list-row").map((row) => visibleText(row)).find((text) => text.startsWith("About"));
+    expect(rate).toBe("About 21% a year. Not promised.stDUSK went from 3.0200 to 3.0719 DUSK over the last 30 days, after Sozu's share.");
   });
 });

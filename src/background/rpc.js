@@ -49,6 +49,7 @@ import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { siteWalletId } from "./siteWallet.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { readCurrent, siteNames } from "./siteNames.js";
+import { handOverRequestLink } from "./requestLinks.js";
 import { getTxEpoch, putTxMeta } from "../shared/txStore.js";
 import { submittedTxMeta } from "../shared/txRecord.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
@@ -58,7 +59,7 @@ import {
 import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
-export async function handleRpc(origin, request) {
+export async function handleRpc(origin, request, { pressed } = {}) {
   origin = String(origin ?? "").trim();
   if (!isAllowedDappOrigin(origin)) {
     throw rpcError(
@@ -91,6 +92,12 @@ export async function handleRpc(origin, request) {
     if (!(await getPermissionForOrigin(origin, ""))) return null;
     const moved = await adoptLegacyPermissions(walletId, current.accounts).catch(() => 0);
     return moved ? getPermissionForOrigin(origin, walletId) : null;
+  };
+
+  // Whether the site is connected, as its provider state says (dappEvents.js), locked or not.
+  const isConnected = async () => {
+    const status = await getEngineStatus();
+    return permissionProfileState(await permissionFor(status), status).isValid;
   };
 
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
@@ -496,6 +503,8 @@ export async function handleRpc(origin, request) {
 
   switch (method) {
     case "dusk_getCapabilities": {
+      // Before a site connects, it learns nothing of the wallet: not its version, nor the network it's on.
+      const known = await isConnected();
       const settings = await getSettings();
       const nodeUrl = String(settings?.nodeUrl ?? "");
       const chainId = chainIdFromNodeUrl(nodeUrl);
@@ -512,10 +521,7 @@ export async function handleRpc(origin, request) {
       // Capabilities are public (no permission required).
       return Object.freeze({
         provider: "dusk-wallet",
-        walletVersion,
-        chainId,
-        nodeUrl,
-        networkName,
+        ...(known ? { walletVersion, chainId, nodeUrl, networkName } : {}),
         methods: [...DAPP_RPC_METHODS],
         txKinds: [...DAPP_TX_KINDS],
         limits: { ...DAPP_LIMITS },
@@ -569,7 +575,14 @@ export async function handleRpc(origin, request) {
       };
     }
 
+    case "dusk_openPaymentLink": {
+      // Not a connection's: a web wallet hands over its own request, to be reviewed in Send.
+      return handOverRequestLink(origin, firstParamObject(params)?.link, { pressed });
+    }
+
     case "dusk_chainId": {
+      // A site learns the network as it connects: null before.
+      if (!(await isConnected())) return null;
       const settings = await getSettings();
       return chainIdFromNodeUrl(settings?.nodeUrl ?? "");
     }

@@ -1,4 +1,4 @@
-import { sozuRateEstimate } from "@dusk-network/networks/rates";
+import { sozuRate } from "@dusk-network/app-core/sozu";
 import { feePercent } from "@dusk-network/networks/sozu";
 
 import {
@@ -33,6 +33,7 @@ import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/Ne
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { sozuHolding, sozuLiquidStakingView } from "./sozu.js";
+import { sozuGrowthOf } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -450,36 +451,53 @@ function rewardRates(ov, { state, actions }) {
   const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
   const ofNetwork = (status) => (status?.networkKey === networkKey ? status : null);
   // Sozu's status as Liquid staking read it last, while it's this network's.
-  const held = ofNetwork(state.sozu?.status)?.fees?.reward ?? null;
+  const heldStatus = ofNetwork(state.sozu?.status);
+  const held = heldStatus?.fees?.reward ?? null;
   const key = `${networkKey} ${nodeUrl}`;
   if (state.rewardRates?.key !== key) {
-    const rates = (state.rewardRates = { key, native: null, sozuFee: null });
+    const rates = (state.rewardRates = { key, native: null, sozuFee: null, growth: null });
     const result = (res) => (res?.error ? null : res?.result ?? null);
     const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
     Promise.all([
       Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_REWARD_RATE" })).then(result, () => null),
       // What the overview reads of Sozu has the fee too, once it answers.
-      held ??
+      heldStatus ??
         (state.sozu?.loading
           ? null
           : Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: idx })).then(
-              (res) => ofNetwork(result(res))?.fees?.reward ?? null,
+              (res) => ofNetwork(result(res)),
               () => null
             )),
-    ]).then(([native, sozuFee]) => {
+    ]).then(([native, status]) => {
       if (state.rewardRates !== rates) return;
-      Object.assign(rates, { native: typeof native === "number" ? native : null, sozuFee });
+      Object.assign(rates, { native: typeof native === "number" ? native : null, sozuFee: status?.fees?.reward ?? null });
       if (rates.native !== null) actions?.render?.().catch(() => {});
+      measureGrowth(ov, status, { state, actions });
     });
   }
+  // Or Liquid staking's status, where it came in while this read none.
+  measureGrowth(ov, heldStatus, { state, actions });
   // Sozu's fee as Liquid staking read it last, else as asked here.
   const sozuFee = held ?? state.rewardRates.sozuFee;
   const native = state.rewardRates.native;
-  const sozu = native !== null && sozuFee ? sozuRateEstimate(Math.round(native * 100) / 100, sozuFee) : null;
+  const sozu = native !== null && sozuFee ? sozuRate(native, { fees: { reward: sozuFee } }, state.rewardRates.growth) : null;
   return {
     native: native !== null ? `About ${ratePercent(native)} a year lately, across the network. Not promised.` : null,
     sozu: sozu !== null ? `About ${ratePercent(sozu)} a year after Sozu's ${feePercent(sozuFee, amountLocale())}. Not promised.` : null,
   };
+}
+
+// How stDUSK grew lately, as Liquid staking measures it, read once a status
+// names the pool: the same rate on both screens.
+function measureGrowth(ov, status, { state, actions }) {
+  const rates = state.rewardRates;
+  if (!rates || rates.growthAsked || !status?.contracts?.pool) return;
+  rates.growthAsked = true;
+  sozuGrowthOf(ov, status).then((growth) => {
+    if (state.rewardRates !== rates || !growth) return;
+    rates.growth = growth;
+    actions?.render?.().catch(() => {});
+  });
 }
 
 // A Sozu stake or unstake of this profile's that isn't in a block yet.

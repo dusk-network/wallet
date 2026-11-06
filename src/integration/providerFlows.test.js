@@ -75,6 +75,7 @@ vi.mock("../background/txNotify.js", () => ({ notifyTxSubmitted: vi.fn(async () 
 
 vi.mock("../background/dappEvents.js", () => ({
   broadcastChainChangedAll: vi.fn(async () => {}),
+  providerStateFor: vi.fn(async () => ({})),
 }));
 
 vi.mock("../platform/extensionApi.js", () => ({

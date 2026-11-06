@@ -66,6 +66,8 @@ describe("signMessage approval preview", () => {
     const preview = describeSignMessagePreview(enc.encode(`I agree to pay ${rlo}0001${pop} DUSK`));
     expect(preview).toMatchObject({ kind: "text", text: "I agree to pay \\u202e0001\\u202c DUSK", needsReview: true, truncated: false });
     expect(describeSignMessagePreview(enc.encode("Sign in\nNonce: 12"))).toMatchObject({ text: "Sign in\nNonce: 12", needsReview: false });
+    // A number whose digits read right to left needs a look, though nothing in it is hidden.
+    expect(describeSignMessagePreview(enc.encode("Pay \u07c0\u07c0\u07c0\u07c1 DUSK"))).toMatchObject({ needsReview: true, checks: { hidden: false, mixedDigits: false, rtlDigits: true } });
     // Cut as ever, by the characters written, flagged all the same.
     const long = describeSignMessagePreview(enc.encode(`${rlo}${"a".repeat(SIGN_MESSAGE_PREVIEW_MAX_CHARS + 5)}`));
     expect([long.truncated, long.needsReview, long.text]).toEqual([true, true, `\\u202e${"a".repeat(SIGN_MESSAGE_PREVIEW_MAX_CHARS - 1)}`]);

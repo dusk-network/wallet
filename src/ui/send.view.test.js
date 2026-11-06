@@ -11,6 +11,7 @@ import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { noteChainId } from "../shared/nodeNetwork.js";
 import { shortAddress } from "./lib/strings.js";
+import { clockText } from "./lib/time.js";
 import { fakeEvent, installFakeDom, isShown, pastClickGuard, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
 import { parseDuskQrPayload } from "./components/QrScanModal.js";
@@ -554,6 +555,23 @@ describe("what the To field says about what's typed", () => {
     expect(form.to.value).toBe(BOB.account);
     expect(form.pill()).toBe("Public");
   });
+
+  it("says which contacts' names look like another's, with each one's address", () => {
+    // Sofia's: two "Estudio Marta", one in a Cyrillic а, told apart only by the address.
+    const state = newState();
+    state.addressBook.items = [
+      { name: "Estudio Marta", address: ALICE.account },
+      { name: "Estudio M\u0430rta", address: BOB.account },
+      { name: "Estudio Sol", address: BOB.address },
+    ];
+    const form = mount(state);
+    typeInto(form.to, "estudio");
+    expect(form.nameBox().querySelectorAll("button").map((b) => b.textContent)).toEqual([
+      `Your contact Estudio Marta · ${shortAddress(ALICE.account)} · looks like another contact`,
+      `Your contact Estudio M\u0430rta · ${shortAddress(BOB.account)} · looks like another contact`,
+      `Your contact Estudio Sol · ${shortAddress(BOB.address)}`,
+    ]);
+  });
 });
 
 describe("a memo too long for the network", () => {
@@ -779,8 +797,20 @@ describe("names on Send and Review", () => {
       ov
     );
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings");
+    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Your profile Savings");
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
+
+    // Marek's: a contact named like it, for someone else, never reads the same on Review.
+    mount(
+      {
+        route: "confirm",
+        addressBook: { loaded: true, items: [{ name: "Savings", address: ALICE.account }] },
+        draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+      },
+      ov
+    );
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings");
   });
 
   it("offers no Save to Contacts for this wallet's own account or address", () => {
@@ -1006,6 +1036,14 @@ describe("review", () => {
     body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
     await settle();
     expect(sent[0].params.memo).toBe(memo);
+  });
+
+  it("says on Review when a memo's number may not read as its digits do", async () => {
+    // Marek's memo, from a link: an Arabic-Indic zero in 105.
+    review({ to: ALICE.account, privacy: "public", memo: "Invoice 1\u06605" }, overview());
+    await settle();
+    const row = dom.document.body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
+    expect(row.querySelectorAll(".safe-text__flag").map((el) => el.textContent)).toEqual(["A number here mixes digits of different scripts. Check it digit by digit."]);
   });
 
   it("shows the fee at the network's price and the total with Back and Confirm, and Custom fee for gas of your own", async () => {
@@ -1441,8 +1479,7 @@ describe("a request for another network", () => {
     const form = mount(state);
     typeInto(form.to, BOB.account);
     typeInto(form.amount, "0.5");
-    parseDuskQrPayload.mockReturnValueOnce({ form: "dusk", kind: "public", to: ALICE.account, amountDusk: "1", memo: "Invoice 9", chainId: "dusk:1" });
-    form.to.value = "dusk:mainnet-request";
+    form.to.value = `dusk:public-${ALICE.account}@dusk:1?amount=1&memo=Invoice+9`;
     form.to.dispatchEvent(fakeEvent("blur"));
     await settle();
 
@@ -1689,6 +1726,70 @@ describe("a request link", () => {
     expect(typo.review.disabled).toBe(true);
   });
 
+  const refusal = () => dom.document.body.querySelectorAll(".field-error").filter((el) => isShown(el)).map((el) => el.textContent);
+  const errLine = () => {
+    const el = dom.document.body.querySelector(".err");
+    return el && el.style.display !== "none" ? el.textContent : "";
+  };
+
+  it("refuses a link that says a field twice, or has a user part before its host, with that alone", async () => {
+    // Marek's: each would fill in its first value without a word.
+    for (const link of [
+      httpsLink(`to=${ALICE.account}&amount=0.001&network=testnet&network=mainnet`),
+      httpsLink(`to=${ALICE.account}&to=${BOB.account}&amount=0.001`),
+      `https://apps.dusk.network@apps.testnet.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.001`,
+    ]) {
+      const state = newState();
+      const form = mount(state);
+      paste(form, link);
+      await settle();
+      expect(refusal(), link).toEqual(["That link can't be read. Ask for a new one."]);
+      expect([form.to.value, form.amount.value, state.draft.to]).toEqual(["", "", ""]);
+    }
+
+    const twice = mount(newState());
+    paste(twice, httpsLink(`to=${ALICE.account}&amount=0.001&amount=0.15`));
+    await settle();
+    expect(refusal()).toEqual(["This link asks for two different amounts. Ask for a new one."]);
+  });
+
+  it("refuses one for another network the moment it's put in, saying that alone, before and at Review", async () => {
+    // Nandini's: put in whole, not pasted, it sat in To until Review, which said "Recipient is required" too.
+    const state = newState();
+    const form = mount(state);
+    typeInto(form.to, `https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.0013&memo=Order+1044&network=mainnet`);
+    await settle();
+    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect(form.to.value).toBe("");
+
+    form.to.dispatchEvent(fakeEvent("blur"));
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("send");
+    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect(errLine()).toBe("");
+  });
+
+  it("says the same of a QR code's request as of the link pasted", async () => {
+    // Chen's: a mainnet request's QR said it couldn't be read.
+    const { openQrScanModal } = await import("./components/QrScanModal.js");
+    const state = newState();
+    const form = mount(state);
+    openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:1?amount=1&memo=Rent`);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect(errLine()).toBe("");
+
+    // A QR code of the recipient alone fills in To, and says where it came from.
+    openQrScanModal.mockResolvedValueOnce(BOB.account);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    expect(form.to.value).toBe(BOB.account);
+    expect(refusal()).toEqual([]);
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the QR code. Check it before you send.");
+  });
+
   it("is no request when it goes anywhere else, or names no recipient", async () => {
     const form = mount(newState());
     form.to.value = `https://phish.example/wallet/dashboard/send?to=${ALICE.account}&amount=1`;
@@ -1700,11 +1801,13 @@ describe("a request link", () => {
     await settle();
     expect(dom.document.body.querySelector(".err").textContent).toBe("Not a valid address. Check it and try again.");
 
+    // One to the wallet's Send that names no recipient can't be read.
     const empty = mount(newState());
     empty.to.value = httpsLink("amount=1");
     empty.to.dispatchEvent(fakeEvent("blur"));
     await settle();
     expect(empty.amount.value).toBe("");
+    expect(refusal()).toEqual(["That link can't be read. Ask for a new one."]);
   });
 
   it("fills in the page it opened, a tab of its own, as the form any request fills in", async () => {
@@ -1718,6 +1821,14 @@ describe("a request link", () => {
     expect(state.draft.requestChainId).toBe("dusk:2");
     expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link. Check it before you send.");
 
+    // Marek's: a testnet link that says mainnet opened an empty Send without a word.
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=0.001&network=mainnet`))}` });
+    vi.resetModules();
+    const refused = (await import("./popup/state.js")).state;
+    const unread = mount(refused);
+    expect([unread.to.value, unread.amount.value]).toEqual(["", ""]);
+    expect(refusal()).toEqual(["That link can't be read. Ask for a new one."]);
+
     // No link, or a page opened with something that isn't one: an empty form.
     vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send" });
     vi.resetModules();
@@ -1725,5 +1836,51 @@ describe("a request link", () => {
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent("https://phish.example/x")}` });
     vi.resetModules();
     expect((await import("./popup/state.js")).state.draft).toBeNull();
+  });
+});
+
+describe("a payment made already", () => {
+  const draft = (over = {}) => ({ to: ALICE.account, privacy: "public", amountDusk: "0.013", amountLux: "13000000", memo: "Order 1044", ...over });
+  const sentRecord = (over = {}) => ({ hash: "ab".repeat(32), kind: TX_KIND.TRANSFER, privacy: "public", to: ALICE.account, amount: "13000000", memo: "Order 1044", status: "executed", submittedAt: Date.now() - 60_000, profileIndex: 0, ...over });
+  const confirm = (d, txs, ov = overview()) => mount({ route: "confirm", addressBook: { loaded: true, items: [{ name: "Alice", address: ALICE.account }] }, draft: d }, { ...ov, txs });
+  const again = () => {
+    const el = dom.document.body.querySelector(".review-again");
+    return el ? visibleText(el) : "";
+  };
+
+  it("is said on Review, with when it went, and Confirm still goes", () => {
+    // Sofia's: the same request link paid, then pasted again.
+    const at = Date.now() - 60_000;
+    confirm(draft(), [sentRecord({ submittedAt: at })]);
+    expect(again()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(false);
+  });
+
+  it("is said of the same memo whenever it went, and of the same payment without one only moments after", () => {
+    const yesterday = Date.now() - 24 * 60 * 60_000;
+    confirm(draft(), [sentRecord({ submittedAt: yesterday })]);
+    expect(again()).toMatch(/^You sent 0\.013 DUSK to Alice with this memo (yesterday at|on .+ at) /);
+
+    confirm(draft({ memo: "" }), [sentRecord({ memo: undefined, submittedAt: Date.now() - 30_000 })]);
+    expect(again()).toBe(`You sent 0.013 DUSK to Alice at ${clockText(Date.now() - 30_000)}.`);
+    confirm(draft({ memo: "" }), [sentRecord({ memo: undefined, submittedAt: Date.now() - 11 * 60_000 })]);
+    expect(again()).toBe("");
+  });
+
+  it("is nothing for another amount, recipient or memo, or one that failed", () => {
+    for (const record of [sentRecord({ amount: "14000000" }), sentRecord({ to: BOB.account }), sentRecord({ memo: "Order 1045" }), sentRecord({ status: "failed" })]) {
+      confirm(draft(), [record]);
+      expect(again()).toBe("");
+    }
+  });
+});
+
+describe("a send to yourself", () => {
+  it("says so on Review too: it only costs a fee", () => {
+    // Sofia's: the form said it, and Review showed just the address.
+    mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: OWN.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } });
+    expect(visibleText(dom.document.body.querySelector(".review-self-note"))).toBe("This is your own account. Sending to yourself only costs a fee.");
+    mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } });
+    expect(dom.document.body.querySelector(".review-self-note")).toBeNull();
   });
 });

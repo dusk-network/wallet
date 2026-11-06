@@ -1,10 +1,12 @@
 // Activity on Home (the five newest rows and See all) and the full Activity
-// view: day groups, the All / Sent / Received / Staking / Bridge filters,
-// Show more for older history, and Export for an accountant (activityExport.js).
+// view: a search, day groups, the All / Sent / Received / Staking / Bridge
+// filters, Show more for older history, and Export for an accountant
+// (activityExport.js).
 
 import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
+import { textInput } from "../../components/FormControls.js";
 import { waiting } from "../../components/Waiting.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
@@ -36,6 +38,13 @@ function emptyText(state, filter) {
   if (filter === "staking") return "No staking yet.";
   if (filter === "bridge") return "No bridge transfers yet.";
   return "No activity yet.";
+}
+
+// Nothing found: what's searched covers what's read so far.
+function searchedText(state, filter, query) {
+  const text = emptyText(state, filter);
+  if (!query || text === LOOKING) return text;
+  return hasMoreActivity(state) ? "Nothing read so far matches that. Show more to look further back." : "Nothing in your activity matches that.";
 }
 
 const empty = (text) =>
@@ -79,6 +88,20 @@ export function recentActivitySection(ov, { state, actions } = {}) {
 }
 
 /**
+ * Whether a row has what's searched for, in any case: its name, contact or
+ * .dusk name, address, memo as text, or transaction ID, and its amount while
+ * balances show.
+ */
+export function inSearch(tx, desc, query, { hidden = false } = {}) {
+  if (!query) return true;
+  const amount = hidden || !desc.amount ? [] : [desc.amount.value, desc.amount.exact, desc.amount.plain];
+  const memo = tx?.entry?.memoBinary === true ? "" : tx?.memo;
+  return [desc.name, desc.alias, desc.address, desc.recipient, desc.lead, tx?.counterparty, memo, tx?.hash, ...amount].some((field) =>
+    String(field ?? "").toLowerCase().includes(query)
+  );
+}
+
+/**
  * The full Activity view.
  * @returns {HTMLElement[]}
  */
@@ -87,8 +110,25 @@ export function activityView(ov, { state, actions } = {}) {
   const contactName = contactNames(state, actions, ov);
   const filter = ACTIVITY_FILTERS.some((f) => f.id === state?.activityFilter) ? state.activityFilter : "all";
   const nodeUrl = String(ov?.nodeUrl ?? "");
-  const rows = activityRows(ov, state).filter((tx) => inFilter(describeTx(tx, { contactName, nodeUrl }), filter));
+  const query = String(state?.activitySearch ?? "").trim().toLowerCase();
+  const rows = activityRows(ov, state).filter((tx) => {
+    const desc = describeTx(tx, { contactName, nodeUrl });
+    return inFilter(desc, filter) && inSearch(tx, desc, query, { hidden });
+  });
   const when = (row) => whenText(row, clockText);
+
+  // Drawn again as it's typed in: the redraw keeps the field's focus and caret (app.js).
+  const search = textInput({
+    class: "activity-search",
+    type: "search",
+    placeholder: "Search",
+    "aria-label": "Search activity",
+    value: String(state?.activitySearch ?? ""),
+  });
+  search.addEventListener("input", () => {
+    state.activitySearch = search.value;
+    actions?.render?.()?.catch?.(() => {});
+  });
 
   const chips = h(
     "div",
@@ -190,8 +230,9 @@ export function activityView(ov, { state, actions } = {}) {
     }),
     h("div", { class: "activity-page" }, [
       ex.open ? activityExportPanel(ov, { state, actions }) : null,
+      search,
       chips,
-      ...(groups.length ? groups : [empty(emptyText(state, filter))]),
+      ...(groups.length ? groups : [empty(searchedText(state, filter, query))]),
       more,
       explorer,
     ].filter(Boolean)),

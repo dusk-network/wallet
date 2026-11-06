@@ -259,6 +259,8 @@
       }
       if (name === "disconnect") {
         setProfiles([], { emitEvent: true });
+        // A site not connected is told nothing of the network.
+        setChainId(null, { emitEvent: false });
         setAuthorized(false, { emitEvent: true, data });
         return;
       }
@@ -284,9 +286,13 @@
     }
 
     const result = response?.result !== undefined ? response.result : response;
+    const m = entry.method;
+    // A connection's answer brings the wallet's network: known as it resolves.
+    if ((m === "dusk_requestProfiles" || m === "dusk_requestShieldedAddress") && response?.state) {
+      setChainId(response.state.chainId, { emitEvent: false });
+    }
     entry.resolve(result);
 
-    const m = entry.method;
     if (m === "dusk_requestProfiles" && Array.isArray(result)) {
       setProfiles(result, { emitEvent: true });
     }
@@ -298,6 +304,7 @@
     }
     if (m === "dusk_disconnect") {
       setProfiles([], { emitEvent: true });
+      setChainId(null, { emitEvent: false });
       setAuthorized(false, { emitEvent: true, data: { code: 4900, message: "Disconnected" } });
     }
   });

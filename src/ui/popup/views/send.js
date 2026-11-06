@@ -48,11 +48,15 @@ import {
   lookupPrimaryName,
 } from "../../../shared/duskNames.js";
 
-import { openQrScanModal, parseDuskQrPayload } from "../../components/QrScanModal.js";
+import { openQrScanModal } from "../../components/QrScanModal.js";
+import { readRequestLink, walletChainOf } from "../../lib/requestLink.js";
+import { contactAlikeText } from "../../lib/contactNames.js";
+import { sentAlready } from "@dusk-network/app-core/requests";
+import { activityRows } from "../activity.js";
+import { whenAtText } from "./txRow.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
-import { chainIdFromNodeUrl } from "../../../shared/chain.js";
-import { chainIdForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
+import { networkTextOf } from "../../../shared/nodeNetwork.js";
 
 // A pasted EVM address, which a Dusk transfer can't pay.
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -65,8 +69,6 @@ export const EVM_ADDRESS_TEXT = "That's an EVM address, not a Dusk account.";
 // The longest memo a transaction carries.
 const MEMO_TOO_LONG_TEXT = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
 const memoTooLong = (memo) => new TextEncoder().encode(String(memo ?? "").trim()).length > MAX_MEMO_BYTES;
-// A request link: `dusk:`, or https to the web wallet's Send.
-const looksLikeRequest = (text) => /^dusk:/i.test(text) || parseDuskQrPayload(text)?.form === "https";
 
 /**
  * The .dusk name the draft's recipient was resolved from, while the recipient
@@ -300,11 +302,12 @@ export function sendFormView(ov, { state, actions } = {}) {
     errBox.textContent = txt;
   };
 
-  // A request for another network is refused: why says so under the
-  // recipient, until the recipient changes. What one filled in says so too.
+  // A request for another network, or a link that can't be read, is refused:
+  // why says so under the recipient, until the recipient changes. What one
+  // filled in says so too.
   const chainNote = h("div", { class: "field-error", role: "alert", hidden: true });
-  const sayRefused = (reqChain) => {
-    const text = chainMismatchText(reqChain, ov?.nodeUrl);
+  const sayRefused = ({ chainId = "", problem = "" } = {}) => {
+    const text = problem || chainMismatchText(chainId, ov?.nodeUrl);
     chainNote.textContent = text;
     chainNote.hidden = !text;
   };
@@ -313,23 +316,24 @@ export function sendFormView(ov, { state, actions } = {}) {
     filledNote.textContent = FILLED_TEXT[from] ?? "";
     filledNote.hidden = !FILLED_TEXT[from];
   };
-  sayRefused(state.draft?.refusedChainId);
+  sayRefused({ chainId: state.draft?.refusedChainId, problem: state.draft?.refusedProblem });
   sayFilled(state.draft?.filledFrom);
 
-  const applyRequest = (req, { source = "request" } = {}) => {
-    if (!req?.to) return false;
-
-    // For another network, it fills in nothing: the recipient empties, and
-    // what was typed in the other fields stays.
-    if (chainMismatchText(req.chainId, ov?.nodeUrl)) {
+  // A link read (readRequestLink), as it's pasted, scanned or opened.
+  const applyRequest = (read, { source = "request" } = {}) => {
+    // For another network, or one that can't be read, it fills in nothing:
+    // the recipient empties, what was typed in the other fields stays, and
+    // the reason alone is said.
+    if (!read?.link) {
       to.value = "";
-      state.draft = refusedRequest({ ...(state.draft || {}), requestChainId: req.chainId });
-      sayRefused(req.chainId);
+      state.draft = refusedRequest({ ...(state.draft || {}), requestChainId: read?.reason === "other-network" ? read.chainId : undefined }, read?.reason === "other-network" ? "" : read?.problem);
+      sayRefused({ chainId: state.draft.refusedChainId, problem: state.draft.refusedProblem });
       sayFilled("");
       updateToType();
       return "refused";
     }
 
+    const req = read.link;
     const isDuskReq = req.form === "dusk" || req.form === "https";
 
     // Update DOM values
@@ -360,22 +364,32 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     nextDraft.requestChainId = req.chainId || undefined;
     nextDraft.refusedChainId = undefined;
+    nextDraft.refusedProblem = undefined;
     nextDraft.filledFrom = source === "qr" ? "qr" : "link";
     state.draft = nextDraft;
 
-    sayRefused("");
+    sayRefused();
     sayFilled(nextDraft.filledFrom);
     updateToType();
 
     return true;
   };
 
+  // A link, read on the wallet's network; what isn't one is a recipient, as a
+  // QR code may hold just the address: it fills in To alone.
+  const looksLikeRequest = (text) => readRequestLink(text, ov?.nodeUrl) !== null;
   const maybeDecodeRequest = (raw, { source = "request" } = {}) => {
     const s = String(raw || "").trim();
     if (!s) return false;
-    const req = parseDuskQrPayload(s);
-    if (!req) return false;
-    return applyRequest(req, { source });
+    const read = readRequestLink(s, ov?.nodeUrl);
+    if (read) return applyRequest(read, { source });
+    if (source !== "qr") return false;
+    to.value = s;
+    state.draft = { ...(state.draft || {}), to: s, duskName: undefined, requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: "qr" };
+    sayRefused();
+    sayFilled("qr");
+    updateToType();
+    return true;
   };
 
   // Lightweight recipient-type detection (public account vs shielded address)
@@ -589,12 +603,16 @@ export function sendFormView(ov, { state, actions } = {}) {
       .slice(0, 3);
   };
 
-  // "Your contact Jan · 26FCH7…", which puts the contact's address in the field.
+  // "Your contact Jan · 26FCH7…", which puts the contact's address in the field;
+  // one whose name looks like another's says so, its address beside it.
   const contactButton = (contact) =>
     h("button", {
       class: "text-btn text-btn--inline name-suggestion",
       type: "button",
-      text: `Your contact ${String(contact.name).trim()} · ${shortAddress(contact.address)}`,
+      text: [
+        `Your contact ${String(contact.name).trim()} · ${shortAddress(contact.address)}`,
+        contactAlikeText(ov, contact, Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).toLowerCase(),
+      ].filter(Boolean).join(" · "),
       onclick: () => {
         to.value = contact.address;
         onRecipientInput();
@@ -847,13 +865,24 @@ export function sendFormView(ov, { state, actions } = {}) {
     };
   };
 
-  function onRecipientInput() {
-    sayRefused("");
+  // What To held before this input, to tell a link put in whole from one typed.
+  let toBefore = String(to.value ?? "");
+  function onRecipientInput(e) {
+    const now = String(to.value ?? "");
+    const whole = /^insertFrom/.test(String(e?.inputType ?? "")) || now.length - toBefore.length > 1;
+    toBefore = now;
+    sayRefused();
     sayFilled("");
+    // Another recipient: the request, and whether it was refused, no longer apply.
+    if (state.draft) Object.assign(state.draft, { requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: undefined });
+    // A link put in whole is read at once, as a paste is: one for another
+    // network, or that can't be read, says so then, not at Review.
+    if (whole && looksLikeRequest(now.trim()) && maybeDecodeRequest(now, { source: "request" })) {
+      toBefore = String(to.value ?? "");
+      return;
+    }
     updateToType();
     syncDraft();
-    // Another recipient: the request, and whether it was refused, no longer apply.
-    if (state.draft) Object.assign(state.draft, { requestChainId: undefined, refusedChainId: undefined, filledFrom: undefined });
   }
   to.addEventListener("input", onRecipientInput);
   memo.addEventListener("input", () => {
@@ -896,6 +925,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         if (!payload) return;
         const ok = maybeDecodeRequest(payload, { source: "qr" });
         if (!ok) setErr("This QR code isn't a Dusk account, address or request.");
+        toBefore = String(to.value ?? "");
       } catch (e) {
         setErr(e?.message ?? String(e));
       }
@@ -951,11 +981,14 @@ export function sendFormView(ov, { state, actions } = {}) {
       try {
         setErr("");
         // Allow a request link to be pasted directly into the recipient field:
-        // one for another network says why under the field, and goes no further.
+        // one for another network, or that can't be read, says why under the
+        // field, and goes no further.
         const rawTo = to.value.trim();
         if (looksLikeRequest(rawTo) && maybeDecodeRequest(rawTo, { source: "request" }) === "refused") return;
 
         const toVal = to.value.trim();
+        // A link refused says why under the field already: that's all.
+        if (!toVal && !chainNote.hidden) return;
         if (!toVal) throw new Error("Recipient is required");
 
         // A .dusk name sends to the address it resolves to, as shown under the field.
@@ -1057,7 +1090,12 @@ export function sendFormView(ov, { state, actions } = {}) {
  * @param {object} draft
  * @returns {object}
  */
-const refusedRequest = (draft) => ({ ...draft, to: "", duskName: undefined, requestChainId: undefined, refusedChainId: draft?.requestChainId, filledFrom: undefined });
+/**
+ * When a payment went, from now: "at 14:32", "yesterday at 14:32" or "on Fri 24 Oct at 14:32".
+ * @param {number} ms
+ */
+
+const refusedRequest = (draft, problem = "") => ({ ...draft, to: "", duskName: undefined, requestChainId: undefined, refusedChainId: draft?.requestChainId, refusedProblem: problem || undefined, filledFrom: undefined });
 
 /**
  * "This request is for Mainnet. You are on Testnet." for a request link of
@@ -1069,7 +1107,7 @@ const refusedRequest = (draft) => ({ ...draft, to: "", duskName: undefined, requ
 export function chainMismatchText(reqChain, nodeUrl) {
   const node = String(nodeUrl ?? "");
   // The chain the wallet signs for on this node, by which a request is the same network or not.
-  const current = chainIdForNode(node) ?? chainIdFromNodeUrl(node);
+  const current = walletChainOf(node);
   if (!networkMismatch(reqChain, current)) return "";
   // The wallet by its node's name: a custom node is never called a network.
   return `This request is for ${chainLabel(reqChain)}. You are on ${networkTextOf(node) || chainLabel(current)}.`;
@@ -1150,8 +1188,10 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     const hit = (Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).find(
       (e) => String(e?.address ?? "").trim().toLowerCase() === key
     );
-    // Or another profile of this wallet's, which needs no saving.
-    return String(hit?.name ?? "").trim() || (own ? "" : ownProfileName(ov, toAddr));
+    // Or another profile of this wallet's, which needs no saving: said as yours,
+    // so a contact named like it never reads the same.
+    const profile = own ? "" : ownProfileName(ov, toAddr);
+    return profile ? `Your profile ${profile}` : String(hit?.name ?? "").trim();
   };
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
@@ -1163,6 +1203,20 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     toNames.hidden = !unique.length;
     if (toNameNote) toNameNote.hidden = Boolean(service) || !(duskName?.name || verifiedName);
   };
+
+  // The same payment, made already: moments ago, or with this memo whenever,
+  // as a request paid once. Said, not stopped: it can be meant.
+  const madeAgain = sentAlready(activityRows(ov, state), { lux: safeBigInt(d.amountLux, 0n), memo: String(d.memo ?? ""), to: toAddr });
+  const againNote =
+    madeAgain && madeAgain.time !== null
+      ? h("div", { class: "callout warn review-again", role: "alert" }, [
+          h("div", { class: "callout-title" }, [
+            "You sent ",
+            balance(balancesHidden(ov) && Boolean(d.amountMasked), formatDuskExact(d.amountLux)),
+            ` DUSK to ${own ? "yourself" : contactName() || duskName?.name || shortAddress(toAddr)}${String(d.memo ?? "").trim() ? " with this memo" : ""} ${whenAtText(madeAgain.time)}.`,
+          ]),
+        ])
+      : null;
 
   // Save to Contacts, unless it's saved already or it's this wallet's own.
   const saveContactBtn = h("button", {
@@ -1335,6 +1389,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         kv("From", h("span", {}, [withReviewWallet(fromName, actions?.review), h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
         d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", safeTextEl(d.memo), "kv--wrap") : null,
       ].filter(Boolean)),
+      // As the form said it: it goes, for a fee.
+      own ? h("div", { class: "send-self-note review-self-note", text: `This is your own ${toAddr === ownAccount ? "account" : "shielded address"}. Sending to yourself only costs a fee.` }) : null,
+      againNote,
       toNameNote,
       ...serviceNotes
         .filter((n) => n.kind !== "fee")

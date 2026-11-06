@@ -185,7 +185,8 @@ describe("unlock", () => {
     pwd.value = "wrong";
     dom.document.querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
     await settle();
-    expect([error.hidden, error.textContent, error.getAttribute("role")]).toEqual([false, "Incorrect password", "alert"]);
+    // Amélie's: it says what to try, not just that it's wrong.
+    expect([error.hidden, error.textContent, error.getAttribute("role")]).toEqual([false, "Wrong password. Check Caps Lock, or restore with your recovery phrase below.", "alert"]);
     expect([pwd.getAttribute("aria-invalid"), pwd.getAttribute("aria-describedby")]).toEqual(["true", "unlock-error"]);
     expect(showToast).not.toHaveBeenCalled();
 

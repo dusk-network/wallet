@@ -47,7 +47,7 @@ class FakeWindow {
   }
 }
 
-async function runContentScript() {
+async function runContentScript({ navigator } = {}) {
   const source = await readFile(contentScriptUrl, "utf8");
   const window = new FakeWindow();
   const sentMessages = [];
@@ -78,7 +78,7 @@ async function runContentScript() {
     Error,
     String,
     Boolean,
-    globalThis: { chrome },
+    globalThis: { chrome, navigator },
   });
 
   vm.runInContext(source, context);
@@ -122,6 +122,21 @@ describe("contentScript message bridge", () => {
 
     expect(sendMessage).not.toHaveBeenCalled();
     expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("says whether the page had a press as it handed a request over, as the browser says it, and for nothing else", async () => {
+    for (const isActive of [true, false]) {
+      const { window, sentMessages } = await runContentScript({ navigator: { userActivation: { isActive } } });
+      const ask = (id, method) =>
+        window.dispatchMessage({ target: "DUSK_WALLET_EXTENSION", walletId: DUSK_WALLET_ID, type: "DUSK_RPC_REQUEST", id, pressed: !isActive, request: { method, params: { pressed: !isActive } } });
+      ask("req-1", "dusk_openPaymentLink");
+      ask("req-2", "dusk_profiles");
+      expect(sentMessages.map((m) => [m.id, m.pressed])).toEqual([["req-1", isActive], ["req-2", undefined]]);
+    }
+    // A browser that can't say: nothing said.
+    const { window, sentMessages } = await runContentScript();
+    window.dispatchMessage({ target: "DUSK_WALLET_EXTENSION", walletId: DUSK_WALLET_ID, type: "DUSK_RPC_REQUEST", id: "req-3", request: { method: "dusk_openPaymentLink" } });
+    expect(sentMessages.map((m) => "pressed" in m)).toEqual([false]);
   });
 
   it("derives origin from the content-script window instead of page payload fields", async () => {

@@ -75,6 +75,7 @@ const mocks = vi.hoisted(() => {
     })),
     broadcastProfilesChangedAll: vi.fn(async () => {}),
     broadcastWalletChanged: vi.fn(async () => {}),
+    providerStateFor: vi.fn(async () => ({ chainId: "dusk:2", isConnected: true, networkName: "Testnet", nodeUrl: "https://testnet.nodes.dusk.network", profiles: [] })),
     handleRpc: vi.fn(async (_origin, request) => {
       if (request?.method === "dusk_switchNetwork") {
         const nextNodeUrl = String(request?.params?.nodeUrl ?? "").trim();
@@ -170,6 +171,7 @@ vi.mock("./dappEvents.js", () => ({
   broadcastProfilesChangedAll: mocks.broadcastProfilesChangedAll,
   broadcastWalletChanged: mocks.broadcastWalletChanged,
   bindPortsForSenderOrigin: vi.fn(() => {}),
+  providerStateFor: mocks.providerStateFor,
   registerDappPort: vi.fn(() => {}),
   registerStorageChangeForwarder: vi.fn(() => {}),
 }));
@@ -717,6 +719,57 @@ describe("background auto-lock activity", () => {
         message: "storage unavailable",
       },
     });
+  });
+
+  it("reads what's staked in the same go as the public balance, natively and with Sozu, and none of it when a read fails", async () => {
+    await sendBackgroundMessage({ type: "DUSK_UI_UNLOCK", password: "pw" });
+    const before = mocks.engineCall.getMockImplementation();
+    const answers = (sozu) => async (method) => {
+      if (method === "engine_walletId") return "acct0";
+      if (method === "dusk_getPublicBalance") return { nonce: "1", value: "1150500000" };
+      if (method === "dusk_getStakeInfo") return { amount: { eligibility: "1", locked: "5000000000", total: "1005000000000", value: "1000000000000" }, reward: "7" };
+      if (method === "dusk_getSozuStatus") return sozu();
+      return true;
+    };
+    try {
+      // Eligible and locked, rewards aside, and what the Sozu stake is worth now.
+      mocks.engineCall.mockImplementation(answers(() => ({ configured: true, position: { poolBalanceLux: "1790000000", stDuskBalanceLux: "1384000000" } })));
+      expect((await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" })).staked).toEqual({ lux: "1006790000000", native: "1005000000000", sozu: "1790000000" });
+      // No Sozu on the network is none of it.
+      mocks.engineCall.mockImplementation(answers(() => ({ configured: false })));
+      expect((await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" })).staked).toEqual({ lux: "1005000000000", native: "1005000000000", sozu: "0" });
+      // A position that couldn't be read, or a read that failed: not known, so no total counts it.
+      mocks.engineCall.mockImplementation(answers(() => ({ configured: true, position: null })));
+      expect((await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" })).staked).toBeNull();
+      mocks.engineCall.mockImplementation(
+        answers(() => {
+          throw new Error("Sozu timed out");
+        })
+      );
+      const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+      expect([overview.staked, overview.balance]).toEqual([null, { nonce: "1", value: "1150500000" }]);
+    } finally {
+      mocks.engineCall.mockImplementation(before);
+    }
+  });
+
+  it("sends a site its provider state with the answer that connects it, and with no other", async () => {
+    // E09: the network comes with the connection, so the page knows it as the request resolves.
+    const ask = (method) => sendBackgroundMessage({ type: "DUSK_RPC_REQUEST", id: method, request: { method } }, { url: "https://dapp.example/page" });
+    for (const method of ["dusk_requestProfiles", "dusk_requestShieldedAddress"]) {
+      await expect(ask(method)).resolves.toMatchObject({ id: method, result: { method }, state: { chainId: "dusk:2", isConnected: true } });
+    }
+    expect(mocks.providerStateFor).toHaveBeenCalledWith("https://dapp.example");
+    expect(await ask("dusk_profiles")).toEqual({ id: "dusk_profiles", result: { method: "dusk_profiles" } });
+  });
+
+  it("passes on whether the page had a press as it handed a request over, as the content script says, never the page", async () => {
+    const page = { url: "https://apps.testnet.dusk.network/wallet/dashboard/send?to=abc" };
+    const handOver = (pressed) => sendBackgroundMessage({ type: "DUSK_RPC_REQUEST", id: "h", pressed, request: { method: "dusk_openPaymentLink", params: { link: page.url, pressed: true } } }, page);
+    for (const [said, passed] of [[true, true], [false, false], ["yes", undefined], [undefined, undefined]]) {
+      await handOver(said);
+      expect(mocks.handleRpc).toHaveBeenLastCalledWith("https://apps.testnet.dusk.network", expect.objectContaining({ method: "dusk_openPaymentLink" }), { pressed: passed });
+    }
   });
 
   it("saves a custom node with the chain ID it gives, read before it's saved", async () => {

@@ -1,11 +1,12 @@
 import { CSV_COLUMNS } from "@dusk-network/app-core/export";
-import { networks } from "@dusk-network/networks";
+import { networks, routes } from "@dusk-network/networks";
 import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 import { entryOf } from "../shared/fixtures/rows.js";
 import { accessibleName, installFakeDom, isShown, settle, visibleText } from "./testing/fakeDom.js";
+import { recordedEvm, recordedMigration } from "./testing/recordedEvm.js";
 import { activityView } from "./popup/views/activityView.js";
 import { activityKey } from "./popup/activity.js";
 import { handedExportKey, saveHandedExport } from "./popup/activityExport.js";
@@ -112,7 +113,7 @@ function setup({ status = null, contacts = [], entries = WHOLE, ov: over = {}, h
     txs: LOCAL,
     ...over,
   };
-  const read = entries.map((fields) => entryOf(fields, NODE));
+  const read = entries.map((fields) => entryOf(fields, ov.nodeUrl));
   const history = {
     sync: vi.fn(async () => ({})),
     read: vi.fn(async () => ({ entries: read, state: { finalized: 5_000_000, headAt: AT }, complete: true, coveredTo: 0 })),
@@ -129,7 +130,7 @@ function setup({ status = null, contacts = [], entries = WHOLE, ov: over = {}, h
       account: ACCOUNT,
       profileIndex: 0,
       walletId: ACCOUNT,
-      nodeUrl: NODE,
+      nodeUrl: ov.nodeUrl,
       entries: [],
       names: new Map(),
       loaded: true,
@@ -198,7 +199,8 @@ describe("Activity's Export", () => {
     expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual([
       "Period",
       "Add my contact names",
-      "Add each payment's value in euros, from CoinGecko's prices",
+      // An American browser's: in US dollars.
+      "Add each payment's value in US dollars, from CoinGecko's prices",
       "For Excel: keep accents as it opens",
     ]);
     expect(visibleText(panel())).toContain("One profile's file for tax tools such as Koinly: exact amounts, times in UTC, transfers between your profiles marked.");
@@ -465,6 +467,8 @@ describe("Activity's Export", () => {
 
   it("adds each payment's value in euros only when asked, from prices near its time, asking for no account", async () => {
     page("/full.html");
+    // A browser in a region that pays in euros.
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "nl-NL" });
     const asked = [];
     vi.stubGlobal(
       "fetch",
@@ -486,7 +490,7 @@ describe("Activity's Export", () => {
     expect((await linesOf()).every((l) => l["Net Worth Amount"] === "" && l["Net Worth Currency"] === "")).toBe(true);
 
     button("Export").click();
-    choose("activity-export-euro");
+    choose("activity-export-value");
     button("Save CSV").click();
     await settle();
     const lines = await linesOf(1);
@@ -504,14 +508,38 @@ describe("Activity's Export", () => {
 
   it("says a price that can't be read leaves the columns empty, and saves the file all the same", async () => {
     page("/full.html");
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) })));
     const { actions } = setup({ entries: WHOLE.slice(0, 1) });
     button("Export").click();
-    choose("activity-export-euro");
+    choose("activity-export-value");
     button("Save CSV").click();
     await settle();
     expect(saved).toHaveLength(1);
     expect(actions.showToast.mock.calls.at(-1)[0]).toContain("no euro value");
+  });
+
+  it("adds values in US dollars where the browser's region doesn't pay in euros, as Singapore's", async () => {
+    // Lena's German browser got dollars on the web wallet; the export follows the region too.
+    page("/full.html");
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
+    const asked = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        asked.push(String(url));
+        return { ok: false, status: 429, json: async () => ({}) };
+      })
+    );
+    const { actions } = setup({ entries: WHOLE.slice(0, 1) });
+    button("Export").click();
+    expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain("Add each payment's value in US dollars, from CoinGecko's prices");
+    choose("activity-export-value");
+    button("Save CSV").click();
+    await settle();
+    expect(asked.length).toBeGreaterThan(0);
+    for (const url of asked) expect(url).toContain("vs_currency=usd&from=");
+    expect(actions.showToast.mock.calls.at(-1)[0]).toContain("no dollar value");
   });
 
   it("starts the file with a BOM only for Excel", async () => {
@@ -527,6 +555,68 @@ describe("Activity's Export", () => {
     button("Save CSV").click();
     await settle();
     expect(await firstBytes(1)).toEqual([0xef, 0xbb, 0xbf]);
+  });
+
+  it("adds what a migration paid on its own chain, its approval too, by its payout, and says when that chain can't be read", async () => {
+    // Nandini's: the file had the payout on Dusk, and nothing of the fees paid on BNB Smart Chain.
+    page("/full.html");
+    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
+    const { approval, migration, owner, payout } = recordedMigration;
+    const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: payout.at, blockHeight: 5_684_134 }];
+    const MAINNET = "https://nodes.dusk.network";
+    const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+    const exportAll = async () => {
+      button("Export").click();
+      button("Save CSV").click();
+      await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+      const toast = actions.showToast.mock.calls.at(-1)[0];
+      actions.showToast.mockClear();
+      return { lines: await linesOf(saved.length - 1), toast };
+    };
+    const paidThere = (lines) => lines.filter((l) => l["Sent Currency"] === "BNB").map((l) => [l.TxHash, l["Sent Amount"], l.Tag, l["Account Name"], l.Account]);
+
+    // BNB Smart Chain's RPC can't be read: the payout alone, and the toast says what's missing.
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+    const down = await exportAll();
+    expect(paidThere(down.lines)).toEqual([]);
+    expect(down.lines.find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
+    expect(down.toast).toContain("1 migration's fee on BNB Smart Chain couldn't be read: export again to add it.");
+
+    // Read: the approval and the migration, each a cost of its own, in BNB, from the address that paid it.
+    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
+    const up = await exportAll();
+    expect(paidThere(up.lines)).toEqual([
+      [approval, "0.0000023109", "cost", "BNB Smart Chain", owner],
+      [migration, "0.00000243765", "cost", "BNB Smart Chain", owner],
+    ]);
+    expect(up.toast).not.toContain("couldn't be read");
+  });
+
+  it("puts a migration's fees in the period of their own day, though its payout came the day after", async () => {
+    // Codex's: a 30 September fee was left out of Q3, and put in Q4 with its payout.
+    vi.setSystemTime(new Date("2026-11-10T09:00:00Z"));
+    page("/full.html");
+    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
+    const { approval, migration, owner, payout } = recordedMigration;
+    const nextDay = Date.UTC(2026, 10, 6, 0, 30);
+    const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: nextDay, blockHeight: 5_684_134 }];
+    const MAINNET = "https://nodes.dusk.network";
+    const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
+    button("Export").click();
+    pickPeriod("dates");
+    for (const id of ["activity-export-from", "activity-export-to"]) {
+      const input = body().querySelector(`#${id}`);
+      input.value = "2026-11-05";
+      input.dispatchEvent(new Event("input"));
+    }
+    button("Save CSV").click();
+    await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+    // The approval and the migration of 5 November, and not the payout of the 6th.
+    expect((await linesOf()).map((l) => [l.TxHash, l["Sent Currency"] || l["Received Currency"], l.Account])).toEqual([
+      [approval, "BNB", owner],
+      [migration, "BNB", owner],
+    ]);
   });
 
   it("makes a stake with Sozu a trade of DUSK for stDUSK, with its deposit fee, as the pool's event says it", async () => {
@@ -576,7 +666,7 @@ describe("Activity's Export", () => {
     const [key] = Object.keys(items);
     const handed = items[key];
     expect(key).toBe(handedExportKey(handed.id));
-    expect(handed.choices).toMatchObject({ period: "2026-3", withContacts: true, euro: false, excel: false });
+    expect(handed.choices).toMatchObject({ period: "2026-3", withContacts: true, fiat: false, excel: false });
     expect(runtimeGetURL).toHaveBeenCalledWith(`full.html?route=activity&save=${handed.id}`);
     expect(tabsCreate).toHaveBeenCalledWith({ url: `chrome-extension://wallet/full.html?route=activity&save=${handed.id}` });
     expect(close).toHaveBeenCalled();

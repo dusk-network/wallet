@@ -17,7 +17,9 @@ import { fieldLabel } from "../components/FormControls.js";
 import { profileLabelOf } from "../components/ProfileName.js";
 import { h } from "../lib/dom.js";
 import { ActivityChangedError, activityRows, assertActivityOpen, selected, sozuFactsOf, wholeActivity } from "./activity.js";
-import { duskEuroPrices } from "./duskPrice.js";
+import { duskPrices } from "./duskPrice.js";
+import { migrationFactsOf } from "./migrationFacts.js";
+import { defaultCurrency } from "@dusk-network/app-core/amounts";
 
 /** Where the popup leaves what one export asks for the full view to do: `{ id, choices, at }`. */
 export const handedExportKey = (id) => `dusk_activity_export_v1:${id}`;
@@ -104,12 +106,14 @@ function periodOf({ period, from, to } = {}) {
  * The file asked for, from the account's whole history. Throws what to say when
  * it can't be read: nothing half read goes out as if it were all of it.
  * @param {object} ov - the overview
- * @param {{ period?: string, from?: string, to?: string, withContacts?: boolean, euro?: boolean, excel?: boolean }} choices
+ * @param {{ period?: string, from?: string, to?: string, withContacts?: boolean, fiat?: boolean, excel?: boolean }} choices
  * @param {{ state: object }} ctx
  * @returns {Promise<import("@dusk-network/app-core/export").ExportResult & { shieldedWaiting: boolean }>}
  */
 export async function makeExport(ov, choices, { state }) {
   const period = periodOf(choices);
+  // Euros where the browser's region pays in them, US dollars elsewhere.
+  const currency = defaultCurrency();
   if (!ov?.isUnlocked) throw new Error("Unlock the wallet, then export again.");
   let contactName;
   if (choices.withContacts) {
@@ -128,30 +132,38 @@ export async function makeExport(ov, choices, { state }) {
   const { account, profileIndex } = selected(ov);
   // A stake whose stDUSK can't be read yet says so in its line.
   const facts = await sozuFactsOf(ov, rows);
+  // What each migration paid on its own chain, its approval too, on lines of their own, each in the period
+  // of its own time: a payout after the period can have fees in it, one before it can't.
+  const evm = await migrationFactsOf(ov, period ? rows.filter((row) => row.time >= period.from) : rows);
   const made = await accountingCsv({
     rows,
     profile: { name: profileLabelOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
     profiles: otherProfiles(ov, profileIndex),
     period,
-    price: choices.euro ? duskEuroPrices() : undefined,
-    currency: "EUR",
+    price: choices.fiat ? duskPrices({ currency }) : undefined,
+    currency,
     facts,
+    evm,
     contactName,
     network: ov?.networkName,
     bom: Boolean(choices.excel),
   });
   // The file is of what was open as it began: with anything else open now, there's none.
   await assertActivityOpen(ov, { state });
-  return { ...made, shieldedWaiting: whole.shieldedWaiting };
+  // A migration whose side there couldn't be read has no fee there in the file.
+  const evmUnread = [...evm.values()].filter((fact) => fact.state === "pending" || fact.state === "error");
+  const evmChains = [...new Set(evmUnread.map((fact) => rows.find((row) => row.route?.id === fact.route)?.route.chain?.name ?? "its chain"))];
+  return { ...made, currency, evmUnread: { count: evmUnread.length, chain: evmChains.length === 1 ? evmChains[0] : "their chains" }, shieldedWaiting: whole.shieldedWaiting };
 }
 
 // What the file holds, and what it doesn't, once it's saved.
-function savedText({ count, left, unpriced, shieldedWaiting }) {
+function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting }) {
   const out = [left.pending ? `${left.pending} on its way` : "", left.notRead ? `${left.notRead} not read yet` : ""].filter(Boolean);
   return [
     `CSV saved: ${count === 1 ? "1 line" : `${count} lines`}.`,
     out.length ? `Left out: ${out.join(", ")}.` : "",
-    unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no euro value.` : "",
+    unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no ${currency === "USD" ? "dollar" : "euro"} value.` : "",
+    evmUnread?.count ? `${evmUnread.count === 1 ? "1 migration's fee" : `${evmUnread.count} migrations' fees`} on ${evmUnread.chain} couldn't be read: export again to add ${evmUnread.count === 1 ? "it" : "them"}.` : "",
     shieldedWaiting ? "Your shielded activity is still syncing: export again once it's done." : "",
   ]
     .filter(Boolean)
@@ -253,7 +265,7 @@ export function activityExportPanel(ov, { state, actions }) {
     return h("div", { class: "activity-export-date" }, [fieldLabel(input, label), input]);
   };
   const error = h("div", { class: "field-error", role: "alert", hidden: !ex.error, text: ex.error ?? "" });
-  const choicesOf = () => ({ period: ex.period ?? "all", from: ex.from, to: ex.to, withContacts: Boolean(ex.withContacts), euro: Boolean(ex.euro), excel: Boolean(ex.excel) });
+  const choicesOf = () => ({ period: ex.period ?? "all", from: ex.from, to: ex.to, withContacts: Boolean(ex.withContacts), fiat: Boolean(ex.fiat), excel: Boolean(ex.excel) });
   const save = h("button", {
     class: "btn-primary btn-full",
     type: "button",
@@ -304,8 +316,8 @@ export function activityExportPanel(ov, { state, actions }) {
     checkbox("activity-export-contacts", "Add my contact names", ex.withContacts, (on) => {
       ex.withContacts = on;
     }),
-    checkbox("activity-export-euro", "Add each payment's value in euros, from CoinGecko's prices", ex.euro, (on) => {
-      ex.euro = on;
+    checkbox("activity-export-value", `Add each payment's value in ${defaultCurrency() === "USD" ? "US dollars" : "euros"}, from CoinGecko's prices`, ex.fiat, (on) => {
+      ex.fiat = on;
     }),
     checkbox("activity-export-excel", "For Excel: keep accents as it opens", ex.excel, (on) => {
       ex.excel = on;

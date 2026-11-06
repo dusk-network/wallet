@@ -13,7 +13,7 @@ import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { networkFor } from "@dusk-network/networks";
 import { chainIdForNode, chainWords, networkTextOf, noteChainId } from "../../shared/nodeNetwork.js";
 import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist.js";
-import { safeText, textNeedsReview } from "../../shared/safeText.js";
+import { safeText, textChecks, textNeedsReview } from "../../shared/safeText.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
 import { nameCheckNoteEl } from "../components/NameCheckNote.js";
@@ -28,7 +28,7 @@ import { fieldError, fieldLabel, passwordInput, submitOnGasEnter, textInput } fr
 import { shortAddressEl } from "../components/ShortAddress.js";
 import { contractValueEl } from "../components/ContractValue.js";
 import { payGuard } from "../components/NetworkGas.js";
-import { safeTextEl } from "../components/SafeText.js";
+import { numbersText, safeTextEl } from "../components/SafeText.js";
 import { sendPasswordRefusal, sendPasswordWhy } from "../components/SendPasswordDialog.js";
 import "../components/GasEditor.js";
 import {
@@ -53,6 +53,20 @@ import { runtimeGetURL, runtimeSendMessage, tabsCreate } from "../../platform/ex
 const app = document.getElementById("app");
 const MAX_U64 = 18446744073709551615n;
 const TEXT_REVIEW_TITLE = "Text needs review";
+
+/**
+ * What a site's text asks a person to check before they act, in words: its
+ * hidden characters, and numbers that may not read as their digits say.
+ * @param {{ hidden?: boolean, mixedDigits?: boolean, rtlDigits?: boolean }} checks - safeText's
+ * @param {string} what - "message", "statement"
+ * @param {string} act - "sign it", "sign in"
+ */
+const reviewWords = (checks, what, act) =>
+  [
+    checks?.hidden ? `This ${what} has hidden characters that can change how it reads. They show here as � or \\u codes.` : "",
+    numbersText(checks),
+    `Only ${act} if you trust this site.`,
+  ].filter(Boolean).join(" ");
 
 async function send(msg) {
   return runtimeSendMessage(msg, { allowLastError: true });
@@ -843,7 +857,7 @@ export async function renderNotification() {
         box,
         goesOnNote(box, "message"),
         preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash below covers the full message." }) : null,
-        preview.needsReview ? warning(TEXT_REVIEW_TITLE, "This message has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign it if you trust this site.") : null,
+        preview.needsReview ? warning(TEXT_REVIEW_TITLE, reviewWords(preview.checks ?? { hidden: true }, "message", "sign it")) : null,
       ]);
     } else {
       const reason = String(preview?.reason ?? "");
@@ -896,7 +910,7 @@ export async function renderNotification() {
               sectionTitle("The site's statement", "ap-statement-title"),
               statementBox,
               goesOnNote(statementBox, "statement"),
-              statement.flagged ? warning(TEXT_REVIEW_TITLE, "This statement has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign in if you trust this site.") : null,
+              statement.flagged ? warning(TEXT_REVIEW_TITLE, reviewWords(statement.checks, "statement", "sign in")) : null,
             ])
           : null,
         group([
@@ -952,7 +966,9 @@ export async function renderNotification() {
     const { rows, truncated } = await flattenTypedMessage(disclosure.input);
     // Text shaping and normalization differences are not necessarily malicious;
     // distinguish their review notice from ordinary preview-size limits.
-    const hasTextSafetyWarning = [originPreview, domainName, domainVersion, domainChainId, ...rows].some((row) => textNeedsReview(row.flags));
+    const typedRows = [originPreview, domainName, domainVersion, domainChainId, ...rows];
+    const hasTextSafetyWarning = typedRows.some((row) => textNeedsReview(row.flags));
+    const typedChecks = textChecks(typedRows.flatMap((row) => row.flags));
 
     // A row's value as the wallet will sign it, its flags in the tooltip, and
     // a notice when the preview cut it.
@@ -1020,7 +1036,10 @@ export async function renderNotification() {
         hasTextSafetyWarning
           ? warning(
               TEXT_REVIEW_TITLE,
-              "Some origin, domain or message text contains controls, formatting characters, line separators or non-NFC sequences. The preview may use placeholders or escapes. Inspect the originals in Full signing request before signing."
+              [
+                typedChecks.hidden ? "Some origin, domain or message text contains controls, formatting characters, line separators or non-NFC sequences. The preview may use placeholders or escapes. Inspect the originals in Full signing request before signing." : "",
+                numbersText(typedChecks),
+              ].filter(Boolean).join(" ")
             )
           : null,
         note(

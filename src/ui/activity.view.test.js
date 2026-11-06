@@ -312,6 +312,39 @@ describe("the Activity view", () => {
     draw();
   });
 
+  it("finds rows as a search is typed: by name in any case, address, ID or amount, and says when none matches", () => {
+    // Nandini's: no way to find one payment among the rest.
+    const { state } = setup({ names: new Map([[FAUCET, "faucet.dusk"], [SENDER, null]]), route: "activity" });
+    const search = (text) => {
+      const field = body().querySelector('input[aria-label="Search activity"]');
+      field.value = text;
+      field.dispatchEvent(new Event("input"));
+      return rows();
+    };
+    const all = rows();
+    const only = (keep) => {
+      const kept = all.filter(keep);
+      expect(kept.length).toBeGreaterThan(0);
+      expect(kept.length).toBeLessThan(all.length);
+      return kept;
+    };
+
+    expect(search("FAUCET.dusk")).toEqual(only((row) => row.startsWith("faucet.dusk")));
+    expect(search(SENDER.slice(20, 40))).toEqual(only((row) => row.startsWith(short(SENDER))));
+    const [{ hash }] = state.activity.entries;
+    expect(search(hash.slice(8, 24))).toHaveLength(1);
+    expect(search("1,100")).toEqual(only((row) => row.endsWith("+1,100 DUSK")));
+    expect([search("not in any row"), visibleText(body().querySelector(".tx-empty"))]).toEqual([[], "Nothing in your activity matches that."]);
+    expect(search("")).toEqual(all);
+  });
+
+  it("finds no row by its amount while balances are hidden, and says what's still to read", () => {
+    const { state, draw } = setup({ complete: false, hidden: true, route: "activity" });
+    state.activitySearch = "1,100";
+    draw();
+    expect([rows(), visibleText(body().querySelector(".tx-empty"))]).toEqual([[], "Nothing read so far matches that. Show more to look further back."]);
+  });
+
   it("offers Show more while older history is still to come, and the account on Dusk's explorer", async () => {
     const { state, draw } = setup({ complete: false, route: "activity" });
     expect(button("Show more")).toBeTruthy();

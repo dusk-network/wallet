@@ -42,6 +42,7 @@ import {
   broadcastProfilesChangedAll,
   broadcastWalletChanged,
   bindPortsForSenderOrigin,
+  providerStateFor,
   registerDappPort,
   registerStorageChangeForwarder,
 } from "./dappEvents.js";
@@ -583,7 +584,9 @@ async function paysFor(params, accountIndex, status) {
 const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS"]);
 
 // For when a site last used its connection: anything but what any page can ask.
-const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId"]);
+const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId", "dusk_openPaymentLink"]);
+// What connects a site: its answer brings the provider state with it.
+const CONNECTS = new Set(["dusk_requestProfiles", "dusk_requestShieldedAddress"]);
 
 function noteConnectionUse(origin, request) {
   if (OPEN_TO_ALL.has(String(request?.method ?? ""))) return;
@@ -619,6 +622,24 @@ function getOriginFromSender(sender) {
 // ------------------------------
 // Message bus
 // ------------------------------
+/**
+ * What a profile has staked, in lux as text, from the engine's two reads: its
+ * native stake (eligible and locked, rewards aside) and what its Sozu stake is
+ * worth now. Null where either read failed: a total without it isn't one.
+ * @param {any} stake - dusk_getStakeInfo's
+ * @param {any} sozu - dusk_getSozuStatus's
+ * @returns {{ lux: string, native: string, sozu: string } | null}
+ */
+export function stakedOf(stake, sozu) {
+  const lux = (value) => (/^\d+$/.test(String(value ?? "")) ? BigInt(String(value)) : null);
+  if (!stake || !sozu) return null;
+  const native = stake.amount ? (lux(stake.amount.value) ?? 0n) + (lux(stake.amount.locked) ?? 0n) : 0n;
+  // No Sozu on this network is none; a position that couldn't be read isn't known.
+  const liquid = sozu.configured === false ? 0n : lux(sozu.position?.poolBalanceLux);
+  if (liquid === null) return null;
+  return { lux: String(native + liquid), native: String(native), sozu: String(liquid) };
+}
+
 ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
   // Engine calls are handled by offscreen.js. Do not respond here.
   if (message?.type === "DUSK_ENGINE_CALL") {
@@ -714,9 +735,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         const id = message.id;
         const activityContext = await prepareDappActivityContext(message.request);
-        const result = await handleRpc(origin, message.request).finally(() => noteConnectionUse(origin, message.request));
+        // Whether the page had a person's press as it asked: the content script's word, never the page's.
+        const pressed = typeof message.pressed === "boolean" ? message.pressed : undefined;
+        const result = await handleRpc(origin, message.request, { pressed }).finally(() => noteConnectionUse(origin, message.request));
         await updateDappActivity(message.request, activityContext);
-        sendResponse({ id, result });
+        // A connection's answer brings the site the wallet's network, read once it's connected.
+        sendResponse(CONNECTS.has(String(message.request?.method ?? "")) ? { id, result, state: await providerStateFor(origin) } : { id, result });
         return;
       }
 
@@ -1379,6 +1403,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         let shieldedBalance = null;
         let shieldedSync = null;
         let shieldedError = null;
+        // What's staked, natively and with Sozu, read with the public balance.
+        let staked = null;
 
         // The wallets the switcher shows: every one the engine holds.
         const wallets = await walletsShown(status).catch(() => []);
@@ -1441,8 +1467,16 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
           try {
             await ensureEngineConfigured();
-            balance = await engineCall("dusk_getPublicBalance");
+            // In one go with the public balance, so a stake or an unstake on
+            // its way never counts twice or not at all in Home's total.
+            const [read, stake, sozu] = await Promise.all([
+              engineCall("dusk_getPublicBalance"),
+              engineCall("dusk_getStakeInfo").catch(() => undefined),
+              engineCall("dusk_getSozuStatus").catch(() => undefined),
+            ]);
+            balance = read;
             publicBalanceAvailable = true;
+            staked = stakedOf(stake, sozu);
           } catch (e) {
             balanceError = e?.message ?? String(e);
           }
@@ -1526,6 +1560,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           shieldedBalance,
           shieldedSync,
           shieldedError,
+          staked,
           selectedAccountIndex: status.selectedAccountIndex ?? settings.selectedAccountIndex ?? 0,
           accountCount: settings.accountCount ?? 1,
           permissions,

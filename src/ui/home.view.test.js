@@ -87,6 +87,7 @@ describe("home balance", () => {
       accounts: [],
       balance: { value: "177986500000" },
       shieldedBalance: { value: "0", spendable: "0" },
+      staked: { lux: "0", native: "0", sozu: "0" },
     };
     document.body.replaceChildren(...homeView(ov, { state, actions }));
 
@@ -104,6 +105,36 @@ describe("home balance", () => {
     expect(refresh.getAttribute("aria-label")).toBe("Refresh");
     refresh.click();
     expect(actions.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts what's staked, natively and with Sozu, in the total, and says it beside the rest", () => {
+    // Lena's: 1.1505 DUSK public, and 1.79 DUSK with Sozu the total left out.
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const ov = (staked) => ({
+      isUnlocked: true,
+      nodeUrl: "https://testnet.nodes.dusk.network",
+      accounts: [],
+      balance: { value: "1150500000" },
+      shieldedBalance: { value: "0", spendable: "0" },
+      staked,
+    });
+    const split = () => document.body.querySelectorAll(".balance-split-item").map((el) => visibleText(el));
+
+    document.body.replaceChildren(...homeView(ov({ lux: "1790000000", native: "0", sozu: "1790000000" }), { state, actions: {} }));
+    expect(document.body.querySelector(".balance-label__text").textContent).toBe("Total balance");
+    expect(document.body.querySelector(".home-hero .balance-amount").textContent).toBe("2.9405 DUSK");
+    expect(split()).toEqual(["Public1.1505 DUSK", "Shielded0 DUSK", "Staked1.79 DUSK"]);
+
+    // Nothing staked: no line for it, and the total is still the total.
+    document.body.replaceChildren(...homeView(ov({ lux: "0", native: "0", sozu: "0" }), { state, actions: {} }));
+    expect(document.body.querySelector(".balance-label__text").textContent).toBe("Total balance");
+    expect(split()).toEqual(["Public1.1505 DUSK", "Shielded0 DUSK"]);
+
+    // The stake couldn't be read: the sum shown isn't called the total.
+    document.body.replaceChildren(...homeView(ov(null), { state, actions: {} }));
+    expect(document.body.querySelector(".balance-label__text").textContent).toBe("Public and shielded");
+    expect(document.body.querySelector(".home-hero .balance-amount").textContent).toBe("1.1505 DUSK");
   });
 
   it("names shield rows as the Shield view does, shows five, and offers See all", async () => {

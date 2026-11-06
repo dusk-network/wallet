@@ -55,6 +55,24 @@ describe("the offer on the web wallet", () => {
     }
   });
 
+  it("shows nothing on a web wallet that offers the extension itself, by its head", async () => {
+    dom = installFakeDom();
+    const meta = dom.document.createElement("meta");
+    meta.setAttribute("name", "dusk-wallet-request-handoff");
+    meta.setAttribute("content", "1");
+    // In its head, as a page has it: the fake document has a body alone.
+    dom.document.body.append(meta);
+    at(LINK);
+    sent = [];
+    kept = new Map();
+    vi.stubGlobal("sessionStorage", { getItem: (key) => kept.get(key) ?? null, setItem: (key, value) => kept.set(key, value), removeItem: (key) => kept.delete(key) });
+    vi.stubGlobal("chrome", { runtime: { sendMessage: vi.fn(async (message) => (sent.push(message), { offer: true })) } });
+    vi.resetModules();
+    await import("./requestLinkOffer.js");
+    await settle();
+    expect(host()).toBeNull();
+  });
+
   it("asks about the link it was opened with, and shows nothing the wallet doesn't offer", async () => {
     await page(LINK, { offer: false });
     expect(sent).toEqual([{ type: "DUSK_REQUEST_LINK_OFFER", link: LINK }]);

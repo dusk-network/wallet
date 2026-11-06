@@ -77,6 +77,7 @@ vi.mock("../background/dappEvents.js", () => ({
   broadcastChainChangedAll: vi.fn(async () => {}),
   broadcastProfilesChangedAll: vi.fn(async () => {}),
   bindPortsForSenderOrigin: vi.fn(() => {}),
+  providerStateFor: vi.fn(async () => ({})),
   registerDappPort: vi.fn(() => {}),
   registerStorageChangeForwarder: vi.fn(() => {}),
 }));

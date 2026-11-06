@@ -62,6 +62,7 @@ export function resetCopied(button) {
  * @param {string} [opts.className]
  * @param {string} [opts.failText]
  * @param {(text: string) => void} [opts.onFail]
+ * @param {(copied: string) => void} [opts.onCopied] - once a copy went through
  * @param {boolean} [opts.stopPropagation] - a press doesn't reach the row it sits in
  * @param {object} [opts.attrs] - more attributes: title, disabled, role
  * @returns {HTMLButtonElement}
@@ -73,6 +74,7 @@ export function copyButton({
   className = "copy-ico",
   failText = "Couldn't copy",
   onFail,
+  onCopied,
   stopPropagation = false,
   attrs = {},
 }) {
@@ -98,6 +100,7 @@ export function copyButton({
           return;
         }
         showCopied(button, label);
+        onCopied?.(copied);
       },
     },
     [

@@ -41,7 +41,7 @@ import { reviewActions, submitOnGasEnter } from "../../components/FormControls.j
 import { gasFeeLux, payGuard, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { activityKey, activityRows, sozuFactsOf, wholeActivity } from "../activity.js";
+import { activityKey, activityRows, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 
 // What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
@@ -414,7 +414,18 @@ function sozuHistory(ov, st, { state, actions }) {
  */
 function sozuRateFigures(ov, st, { actions }) {
   const key = String(ov?.nodeUrl ?? "");
-  if (st.rate?.key === key) return st.rate;
+  // How stDUSK grew lately, once the status names its pool: the rate as measured, its line too.
+  const measure = (rate) => {
+    if (rate.growth !== undefined || !st.status?.contracts?.pool) return rate;
+    rate.growth = null;
+    sozuGrowthOf(ov, st.status, rate.tipHeight ?? null).then((growth) => {
+      if (st.rate !== rate || !growth) return;
+      rate.growth = growth;
+      actions?.render?.()?.catch?.(() => {});
+    });
+    return rate;
+  };
+  if (st.rate?.key === key) return measure(st.rate);
   const rate = (st.rate = { key, native: null });
   const result = (res) => (res?.error ? null : res?.result ?? null);
   const ask = (type) => Promise.resolve(actions?.send?.({ type })).then(result, () => null);
@@ -423,7 +434,7 @@ function sozuRateFigures(ov, st, { actions }) {
     Object.assign(rate, { native: typeof native === "number" ? native : null }, Array.isArray(figures?.provisioners) ? { provisioners: figures.provisioners, tipHeight: figures.tipHeight } : {});
     actions?.render?.()?.catch?.(() => {});
   });
-  return rate;
+  return measure(rate);
 }
 
 function ensureSozuLoaded(ov, { state, actions } = {}) {
@@ -673,7 +684,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     }
     // What it gets for what's left after the fee, what that earns in a year at
     // today's rate, then what stDUSK is.
-    const { earned } = sozuYear({ amount: lux, nativeRate: figures.native, status: rateStatus });
+    const { earned } = sozuYear({ amount: lux, growth: figures.growth, nativeRate: figures.native, status: rateStatus });
     estimate.replaceChildren(
       ...[
         h("div", { class: "stake-estimate__main" }, [
@@ -856,8 +867,8 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       extra,
     ].filter(Boolean));
   // What it pays a year, once that's read, and the one line of what that's made of.
-  const yearly = sozuRate(figures.native, rateStatus);
-  const working = sozuRateLine({ nativeRate: figures.native, provisioners: figures.provisioners, tipHeight: figures.tipHeight, status: rateStatus, locale: amountLocale() });
+  const yearly = sozuRate(figures.native, rateStatus, figures.growth);
+  const working = sozuRateLine({ growth: figures.growth, nativeRate: figures.native, provisioners: figures.provisioners, tipHeight: figures.tipHeight, status: rateStatus, locale: amountLocale() });
   const facts = h("div", { class: "group info" }, [
     fact("drop", "Any amount, no node needed", "You get stDUSK, a token for your share of Sozu's pool.", positionGroup ? null : stDuskAction),
     yearly !== null && working
