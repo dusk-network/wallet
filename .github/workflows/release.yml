@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: "24"
+          node-version-file: ".nvmrc"
           cache: "npm"
 
       - name: Validate package release ages
@@ -57,13 +57,23 @@ jobs:
       - name: Package artifacts
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          # Sourcemaps stay in the build, for debugging, but out of the zips.
-          (cd dist && zip -r "../dusk-wallet-chrome-${VERSION}.zip" . -x '*.map')
-          (cd dist-firefox && zip -r "../dusk-wallet-firefox-${VERSION}.zip" . -x '*.map')
+          # The same zips from the same tag, without sourcemaps (scripts/zip.js).
+          node scripts/zip.js dist "dusk-wallet-chrome-${VERSION}.zip"
+          node scripts/zip.js dist-firefox "dusk-wallet-firefox-${VERSION}.zip"
+          {
+            echo "SHA-256 of the zips, built with Node $(node --version) and npm $(npm --version):"
+            echo
+            echo '```'
+            sha256sum "dusk-wallet-chrome-${VERSION}.zip" "dusk-wallet-firefox-${VERSION}.zip"
+            echo '```'
+            echo
+            echo "To rebuild them from this tag and compare: \`node scripts/verify-release.js ${VERSION}\`"
+          } > release-notes.md
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
         with:
+          body_path: release-notes.md
           generate_release_notes: true
           files: |
             dusk-wallet-chrome-${{ github.ref_name }}.zip
