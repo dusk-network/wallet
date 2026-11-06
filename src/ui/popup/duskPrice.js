@@ -1,5 +1,5 @@
-// What a DUSK was worth in euros, at the time of a payment, for an export that
-// asks for it: CoinGecko's hourly prices, a window of them at a time, read once.
+// What a DUSK was worth in euros or US dollars, at the time of a payment, for an
+// export that asks for it: CoinGecko's hourly prices, a window of them at a time, read once.
 // Only the times go out, as a range, never an account. Its public API has the
 // past year; older, or a request that fails, is no price, and the export says so.
 
@@ -15,18 +15,19 @@ const NEAREST_MS = 3 * HOUR_MS;
 const PAST_YEAR_MS = 365 * 24 * HOUR_MS;
 
 /**
- * A lookup of what one DUSK was worth at a time, in euros: null where it isn't
- * known, its windows read once for this lookup.
- * @param {{ fetch?: typeof fetchWithTimeout, now?: () => number }} [opts]
+ * A lookup of what one DUSK was worth at a time, in `currency` ("EUR" or
+ * "USD"): null where it isn't known, its windows read once for this lookup.
+ * @param {{ currency?: "EUR" | "USD", fetch?: typeof fetchWithTimeout, now?: () => number }} [opts]
  * @returns {(asked: { at: number }) => Promise<number | null>}
  */
-export function duskEuroPrices({ fetch = fetchWithTimeout, now = Date.now } = {}) {
+export function duskPrices({ currency = "EUR", fetch = fetchWithTimeout, now = Date.now } = {}) {
+  const vs = currency === "USD" ? "usd" : "eur";
   const windows = new Map();
   // Kept clear of the API's end by an hour: this device's clock isn't the API's.
   const earliest = () => now() - PAST_YEAR_MS + HOUR_MS;
   const windowFrom = (start) => {
     if (!windows.has(start)) {
-      const url = `${API}?vs_currency=eur&from=${Math.floor(Math.max(start - NEAREST_MS, earliest()) / 1000)}&to=${Math.ceil((start + WINDOW_MS + NEAREST_MS) / 1000)}`;
+      const url = `${API}?vs_currency=${vs}&from=${Math.floor(Math.max(start - NEAREST_MS, earliest()) / 1000)}&to=${Math.ceil((start + WINDOW_MS + NEAREST_MS) / 1000)}`;
       windows.set(
         start,
         fetch(url, {}, 15_000)

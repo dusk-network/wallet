@@ -17,6 +17,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
 - Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
+- Gave the export's values in euros where the browser's region pays in them, and in US dollars elsewhere.
 
 ### Changed
 

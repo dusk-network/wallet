@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { duskEuroPrices } from "./duskPrice.js";
+import { duskPrices } from "./duskPrice.js";
 
 const DAY = 24 * 60 * 60_000;
 const NOW = Date.UTC(2026, 10, 5);
@@ -18,7 +18,7 @@ describe("what a DUSK was worth at a payment", () => {
   it("has a price for a payment near the end of the year the API keeps", async () => {
     const fetch = api();
     const at = NOW - 364 * DAY;
-    const price = duskEuroPrices({ fetch, now: () => NOW });
+    const price = duskPrices({ fetch, now: () => NOW });
     const [url] = fetch.mock.calls[0] ?? [];
     expect(url).toBeUndefined();
     await price({ at });
@@ -29,7 +29,7 @@ describe("what a DUSK was worth at a payment", () => {
 
   it("asks nothing for a payment older than that", async () => {
     const fetch = api();
-    await expect(duskEuroPrices({ fetch, now: () => NOW })({ at: NOW - 400 * DAY })).resolves.toBeNull();
+    await expect(duskPrices({ fetch, now: () => NOW })({ at: NOW - 400 * DAY })).resolves.toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
 });

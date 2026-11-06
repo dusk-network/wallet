@@ -198,7 +198,8 @@ describe("Activity's Export", () => {
     expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual([
       "Period",
       "Add my contact names",
-      "Add each payment's value in euros, from CoinGecko's prices",
+      // An American browser's: in US dollars.
+      "Add each payment's value in US dollars, from CoinGecko's prices",
       "For Excel: keep accents as it opens",
     ]);
     expect(visibleText(panel())).toContain("One profile's file for tax tools such as Koinly: exact amounts, times in UTC, transfers between your profiles marked.");
@@ -465,6 +466,8 @@ describe("Activity's Export", () => {
 
   it("adds each payment's value in euros only when asked, from prices near its time, asking for no account", async () => {
     page("/full.html");
+    // A browser in a region that pays in euros.
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "nl-NL" });
     const asked = [];
     vi.stubGlobal(
       "fetch",
@@ -486,7 +489,7 @@ describe("Activity's Export", () => {
     expect((await linesOf()).every((l) => l["Net Worth Amount"] === "" && l["Net Worth Currency"] === "")).toBe(true);
 
     button("Export").click();
-    choose("activity-export-euro");
+    choose("activity-export-value");
     button("Save CSV").click();
     await settle();
     const lines = await linesOf(1);
@@ -504,14 +507,38 @@ describe("Activity's Export", () => {
 
   it("says a price that can't be read leaves the columns empty, and saves the file all the same", async () => {
     page("/full.html");
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) })));
     const { actions } = setup({ entries: WHOLE.slice(0, 1) });
     button("Export").click();
-    choose("activity-export-euro");
+    choose("activity-export-value");
     button("Save CSV").click();
     await settle();
     expect(saved).toHaveLength(1);
     expect(actions.showToast.mock.calls.at(-1)[0]).toContain("no euro value");
+  });
+
+  it("adds values in US dollars where the browser's region doesn't pay in euros, as Singapore's", async () => {
+    // Lena's German browser got dollars on the web wallet; the export follows the region too.
+    page("/full.html");
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
+    const asked = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        asked.push(String(url));
+        return { ok: false, status: 429, json: async () => ({}) };
+      })
+    );
+    const { actions } = setup({ entries: WHOLE.slice(0, 1) });
+    button("Export").click();
+    expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain("Add each payment's value in US dollars, from CoinGecko's prices");
+    choose("activity-export-value");
+    button("Save CSV").click();
+    await settle();
+    expect(asked.length).toBeGreaterThan(0);
+    for (const url of asked) expect(url).toContain("vs_currency=usd&from=");
+    expect(actions.showToast.mock.calls.at(-1)[0]).toContain("no dollar value");
   });
 
   it("starts the file with a BOM only for Excel", async () => {
@@ -576,7 +603,7 @@ describe("Activity's Export", () => {
     const [key] = Object.keys(items);
     const handed = items[key];
     expect(key).toBe(handedExportKey(handed.id));
-    expect(handed.choices).toMatchObject({ period: "2026-3", withContacts: true, euro: false, excel: false });
+    expect(handed.choices).toMatchObject({ period: "2026-3", withContacts: true, fiat: false, excel: false });
     expect(runtimeGetURL).toHaveBeenCalledWith(`full.html?route=activity&save=${handed.id}`);
     expect(tabsCreate).toHaveBeenCalledWith({ url: `chrome-extension://wallet/full.html?route=activity&save=${handed.id}` });
     expect(close).toHaveBeenCalled();
