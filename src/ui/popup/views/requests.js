@@ -9,6 +9,7 @@
 import { CLOCK_SKEW_MS, matchRequests } from "@dusk-network/app-core/requests";
 
 import { formatDuskExact } from "../../../shared/amount.js";
+import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
 import { forgetRequest, keepRequestsPaid, listRequests } from "../../../shared/paymentRequests.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
@@ -21,10 +22,17 @@ import { whenAtText } from "./txRow.js";
 /** How often the history is read again while a request shown waits. */
 export const LOOK_MS = 30_000;
 
-/** The network key requests are kept under: "mainnet", "testnet", or another. */
+/**
+ * The network requests are kept and matched under: a listed network's name,
+ * and any other node's by the chain it signs for, as its request links say
+ * it ("custom:dusk:42"), so two such chains' requests stay apart.
+ */
 export function requestNetwork(ov) {
   const nodeUrl = String(ov?.nodeUrl ?? "");
-  return networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
+  const pinned = Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl);
+  const key = networkKeyOf(pinned, nodeUrl);
+  if (key !== "custom" && key !== "local") return key;
+  return `${key}:${Number.isInteger(pinned) ? `dusk:${pinned}` : chainIdFromNodeUrl(nodeUrl)}`;
 }
 
 // The wallet's kept requests, read once a page and wallet, and drawn again when they come.
@@ -104,12 +112,14 @@ function matchedLine(match, again, hidden) {
   return [hidden ? `Same memo${when}. Check it's this one.` : `Same memo${when}, for ${formatDuskExact(String(match.lux ?? 0n))} DUSK. Check it's this one.`];
 }
 
-function requestRow(request, match, { hidden, address, state, actions, walletId }) {
+function requestRow(request, match, { hidden, address, state, actions, walletId, rowOf, rowBack }) {
   // The payments with all a request asks, after the one that paid it: paid twice, or more.
   const again = match?.state === "paid" ? (match.more ?? []).filter((payment) => payment.matched === "amount-memo") : [];
   const [word, tone] = again.length ? ["Paid twice", "warn"] : match?.state === "paid" ? ["Paid", "ok"] : match?.state === "check" ? ["Check", "warn"] : ["Waiting", "muted"];
-  const payments = match?.hash ? [{ hash: match.hash }, ...again] : [];
-  const open = (hash) => {
+  const payments = match?.hash ? [{ at: match.at, hash: match.hash }, ...again] : [];
+  const open = async (hash, at) => {
+    // Its row, as found here or read back to its time: past Activity's page, the details have no other.
+    state.txDetailRow = rowOf(hash) ?? (await rowBack(hash, at)) ?? null;
     state.txDetailHash = hash;
     state.txDetailFrom = "receive";
     state.route = "tx";
@@ -131,8 +141,8 @@ function requestRow(request, match, { hidden, address, state, actions, walletId 
     ].filter(Boolean)),
     h("p", { class: "request-row__match" }, matchedLine(match, again, hidden)),
     h("div", { class: "request-row__actions" }, [
-      ...payments.map(({ hash }, i) =>
-        h("button", { class: "text-btn chain-link", type: "button", text: payments.length > 1 ? `Payment ${i + 1}` : "See payment", onclick: () => open(hash) })
+      ...payments.map(({ at, hash }, i) =>
+        h("button", { class: "text-btn chain-link", type: "button", text: payments.length > 1 ? `Payment ${i + 1}` : "See payment", onclick: () => open(hash, at) })
       ),
       h("button", { class: "text-btn", type: "button", text: "Remove", "aria-label": `Remove the request${request.memo ? ` "${request.memo}"` : ""}`, onclick: remove }),
     ]),
@@ -153,7 +163,16 @@ export function requestsSection(ov, { state, actions } = {}) {
   // Back to the oldest request not paid yet, a payment a little before it too (app-core's skew).
   const open = mine.filter((request) => !request.paid);
   const since = open.length ? Math.min(...open.map((request) => request.at)) - CLOCK_SKEW_MS : null;
-  const matches = matchRequests(mine, requestRows(ov, { state, actions }, kept, since));
+  const rows = requestRows(ov, { state, actions }, kept, since);
+  const matches = matchRequests(mine, rows);
+  const rowOf = (hash) => rows.find((row) => row.hash === hash);
+  // A paid request's payment, past the page once it's kept paid: read back to its time.
+  const rowBack = async (hash, at) => {
+    const a = state.activity;
+    const whole = a && Number.isFinite(at) ? await activitySince({ state }, at - CLOCK_SKEW_MS).catch(() => null) : null;
+    if (!whole || state.activity !== a) return undefined;
+    return activityRows(ov, state, { ...whole, entries: mergedEntries(a.entries, whole.entries), meta: a.meta, shielded: a.shielded }).find((row) => row.hash === hash);
+  };
   // What paid a request stays paid once its payment is too far back to read.
   if (mine.some((request) => !request.paid && matches.get(request.id)?.state === "paid")) {
     keepRequestsPaid(kept.walletId, matches)
@@ -165,6 +184,6 @@ export function requestsSection(ov, { state, actions } = {}) {
   const hidden = balancesHidden(ov);
   return h("section", { class: "box receive-requests" }, [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Requests" })]),
-    h("ul", { class: "group request-list" }, mine.map((request) => requestRow(request, matches.get(request.id), { hidden, address, state, actions, walletId: kept.walletId }))),
+    h("ul", { class: "group request-list" }, mine.map((request) => requestRow(request, matches.get(request.id), { hidden, address, state, actions, walletId: kept.walletId, rowOf, rowBack }))),
   ]);
 }

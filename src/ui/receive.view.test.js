@@ -8,6 +8,7 @@ import { iconSvg } from "./components/ActionIcon.js";
 import { qrSvgString } from "./components/QrCode.js";
 import { accessibleName, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { receiveView } from "./popup/views/receive.js";
+import { txDetailsView } from "./popup/views/txDetails.js";
 import { activityKey } from "./popup/activity.js";
 import { whenAtText } from "./popup/views/txRow.js";
 import { entryOf } from "../shared/fixtures/rows.js";
@@ -489,9 +490,39 @@ describe("the requests made here", () => {
     const all = [paid, ...after].sort((x, y) => y.blockHeight - x.blockHeight);
     const history = { read: vi.fn(async ({ limit }) => ({ entries: all.slice(0, limit), state: null, complete: true })), needsDetails: () => false, fillDetails: vi.fn(async () => {}) };
     const state = { receive: { tab: "public" }, activity: { key: activityKey(unlocked), entries: all.slice(0, 50), loaded: true, limit: 50, history, names: new Map(), shielded: [] } };
-    await draw(state);
+    const actions = await draw(state);
     await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Paid"]));
     expect(history.read).toHaveBeenCalledWith({ limit: 100 });
+
+    // Its details, from the row found past the page: Codex's "isn't in your activity".
+    // Kept paid by now: the page alone is matched, and the payment is read back to its time.
+    await vi.waitFor(() => expect(items[KEY][ACCOUNT][0].paid?.hash).toBe("a1".repeat(32)));
+    await actions.render();
+    dom.document.body.querySelectorAll(".request-row button").find((b) => visibleText(b) === "See payment").click();
+    await vi.waitFor(() => expect([state.route, state.txDetailHash]).toEqual(["tx", "a1".repeat(32)]));
+    dom.document.body.replaceChildren(...txDetailsView(unlocked, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
+    expect(visibleText(dom.document.body)).not.toContain("isn't in your activity");
+    expect(visibleText(dom.document.body.querySelector(".tx-hero"))).toContain("1.25");
+  });
+
+  it("keeps the requests of a node outside the listed networks by the chain it signs for, apart from another's", async () => {
+    // Codex's: two such chains both kept "custom", and one's requests showed, and could be paid, on the other.
+    const on = (chainId) => ({ ...unlocked, nodeUrl: `https://node-${chainId}.example`, chainId });
+    const state = { receive: { tab: "public", requestOpen: true, amountDusk: "0.5", memo: "r17" } };
+    const drawOn = async (chainId) => {
+      const actions = { render: vi.fn(async () => dom.document.body.replaceChildren(...receiveView(on(chainId), { state, actions }))), showToast: vi.fn() };
+      await actions.render();
+      await vi.waitFor(() => expect(state.requests?.loaded).toBe(true));
+      await actions.render();
+    };
+    await drawOn(42);
+    dom.document.body.querySelector('button[data-label="Copy request link"]').click();
+    await vi.waitFor(() => expect(items[KEY]?.[ACCOUNT]).toHaveLength(1));
+    expect(items[KEY][ACCOUNT][0].network).toBe("custom:dusk:42");
+    await drawOn(43);
+    expect(shown()).toEqual([]);
+    await drawOn(42);
+    expect(shown().map((row) => row.amount)).toEqual(["0.5 DUSK"]);
   });
 
   it("reads the shielded history again as it looks, once the notes synced since, for a request to the shielded address", async () => {

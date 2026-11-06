@@ -160,7 +160,9 @@ function ledgerRows(tx, desc, nodeUrl, hidden, evm) {
 export function txDetailsView(ov, { state, actions } = {}) {
   const hash = String(state?.txDetailHash ?? "");
   const txs = activityRows(ov, state);
-  const tx = txs.find((t) => String(t?.hash ?? "") === hash.toLowerCase()) || null;
+  // Or the row a screen gave it, found past Activity's page (Receive's requests).
+  const given = state?.txDetailRow && String(state.txDetailRow.hash ?? "") === hash.toLowerCase() ? state.txDetailRow : null;
+  const tx = txs.find((t) => String(t?.hash ?? "") === hash.toLowerCase()) || given;
   // A synced entry not looked up yet gets its time, outcome and fee now, and
   // a deposit to DuskEVM its address there.
   if (tx?.source === "public") {
