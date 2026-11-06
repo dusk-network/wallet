@@ -64,6 +64,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed the whole address on Receive, with a Copy address button that says Copied.
 - Showed the recovery words at 18 px, with I wrote it down kept in view.
 - Stayed on Mainnet, Testnet or Devnet through a restore after a forgotten password; a custom node goes, as on Reset.
+- Wrote the stDUSK a Sozu unstake burned in the accounting export, as the trade back.
 
 ## [0.4.0] - 2026-11-04
 
