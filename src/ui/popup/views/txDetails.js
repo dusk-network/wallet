@@ -19,8 +19,9 @@ import { safeTextEl } from "../../components/SafeText.js";
 import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
 import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, txIconSvg } from "./txRow.js";
 import { reasonText } from "./sent.js";
-import { activityRows, loadActivityDetail } from "../activity.js";
+import { activityKey, activityRows, loadActivityDetail } from "../activity.js";
 import { migrationFactOf } from "../migrationFacts.js";
+import { waiting } from "../../components/Waiting.js";
 
 // A transaction's details: a centred summary (who, how much, its status),
 // then its date, memo, fee, the profile it left or reached, and its ID, which
@@ -160,9 +161,11 @@ function ledgerRows(tx, desc, nodeUrl, hidden, evm) {
 export function txDetailsView(ov, { state, actions } = {}) {
   const hash = String(state?.txDetailHash ?? "");
   const txs = activityRows(ov, state);
-  // Or the row a screen gave it, found past Activity's page (Receive's requests).
+  // Or the row a screen gave it, found past Activity's page (Receive's
+  // requests): only in the context it was found in, dropped in another.
+  if (state?.txDetailRow && state.txDetailRow.context !== activityKey(ov)) state.txDetailRow = null;
   const given = state?.txDetailRow && String(state.txDetailRow.hash ?? "") === hash.toLowerCase() ? state.txDetailRow : null;
-  const tx = txs.find((t) => String(t?.hash ?? "") === hash.toLowerCase()) || given;
+  const tx = txs.find((t) => String(t?.hash ?? "") === hash.toLowerCase()) || given?.row || null;
   // A synced entry not looked up yet gets its time, outcome and fee now, and
   // a deposit to DuskEVM its address there.
   if (tx?.source === "public") {
@@ -184,6 +187,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   const nodeUrl = String(tx?.sent?.nodeUrl ?? ov?.nodeUrl ?? "");
   const explorerUrl = explorerTxUrl(nodeUrl, hash);
+
+  // Still read for, past Activity's page.
+  if (!tx && given?.reading) return [nav, waiting("Looking for this transaction…", { tag: "p", className: "tx-missing" })];
 
   if (!tx) {
     return [

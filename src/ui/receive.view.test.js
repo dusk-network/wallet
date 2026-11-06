@@ -499,10 +499,69 @@ describe("the requests made here", () => {
     await vi.waitFor(() => expect(items[KEY][ACCOUNT][0].paid?.hash).toBe("a1".repeat(32)));
     await actions.render();
     dom.document.body.querySelectorAll(".request-row button").find((b) => visibleText(b) === "See payment").click();
-    await vi.waitFor(() => expect([state.route, state.txDetailHash]).toEqual(["tx", "a1".repeat(32)]));
-    dom.document.body.replaceChildren(...txDetailsView(unlocked, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
-    expect(visibleText(dom.document.body)).not.toContain("isn't in your activity");
+    await vi.waitFor(() => expect([state.route, state.txDetailHash, state.txDetailRow?.reading]).toEqual(["tx", "a1".repeat(32), false]));
+    const details = (ov) => {
+      dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
+      return visibleText(dom.document.body);
+    };
+    expect(details(unlocked)).not.toContain("isn't in your activity");
     expect(visibleText(dom.document.body.querySelector(".tx-hero"))).toContain("1.25");
+
+    // Another profile open by now: its row isn't this one's (Codex's: a Testnet payment shown under Mainnet).
+    expect(details({ ...unlocked, accounts: [ACCOUNT, "z".repeat(60)], selectedAccountIndex: 1 })).toContain("isn't in your activity");
+    expect(state.txDetailRow).toBeNull();
+  });
+
+  it("opens a payment's details at once, and goes nowhere when the person went elsewhere as it was read", async () => {
+    // Codex's: the read's end took them to the payment from wherever they'd gone.
+    items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "1250000000", memo: "Factura 33", paid: { at: T0 + HOUR, hash: "a1".repeat(32) } })] };
+    const paid = paidIn("a1".repeat(32), "1250000000", "Factura 33", T0 + HOUR, 4_700_000);
+    const after = Array.from({ length: 60 }, (_, i) => paidIn(`${i}`.padStart(64, "f"), "1000000", `n${i}`, T0 + 2 * HOUR + i * 60_000, 4_700_100 + i));
+    const all = [paid, ...after].sort((x, y) => y.blockHeight - x.blockHeight);
+    const held = Promise.withResolvers();
+    const history = { read: vi.fn(async ({ limit }) => ({ entries: all.slice(0, limit), state: null, complete: true })), needsDetails: () => false, fillDetails: vi.fn(async () => {}) };
+    const state = { route: "receive", receive: { tab: "public" }, activity: { key: activityKey(unlocked), entries: all.slice(0, 50), loaded: true, limit: 50, history, names: new Map(), shielded: [] } };
+    await draw(state);
+    history.read.mockImplementationOnce(() => held.promise);
+    dom.document.body.querySelectorAll(".request-row button").find((b) => visibleText(b) === "See payment").click();
+    // At once, saying it's looked for.
+    expect([state.route, state.txDetailHash]).toEqual(["tx", "a1".repeat(32)]);
+    dom.document.body.replaceChildren(...txDetailsView(unlocked, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
+    expect(visibleText(dom.document.body)).toContain("Looking for this transaction…");
+
+    // Gone to Send before the read ends: they stay there.
+    state.route = "send";
+    held.resolve({ entries: all.slice(0, 50), state: null, complete: true });
+    await vi.waitFor(() => expect(state.txDetailRow?.reading).toBe(false));
+    expect(state.route).toBe("send");
+  });
+
+  it("shows a request an earlier version kept for an unnamed custom node on any such node, unchecked, and takes it off", async () => {
+    // Codex's: kept as "custom" or "local", they vanished once chains were told apart.
+    items[KEY] = {
+      [ACCOUNT]: [kept({ id: "old", lux: "5000000000", memo: "old", network: "custom" }), kept({ id: "here", lux: "1250000000", memo: "Factura 33", network: "local" })],
+    };
+    const entries = [paidIn("b1".repeat(32), "5000000000", "old", T0 + HOUR), paidIn("a1".repeat(32), "1250000000", "Factura 33", T0 + HOUR)];
+    const on = (nodeUrl, chainId) => ({ ...unlocked, nodeUrl, chainId });
+    const drawOn = async (ov) => {
+      const state = { receive: { tab: "public" }, activity: { key: activityKey(ov), entries: entries.map((entry) => ({ ...entry })), names: new Map() } };
+      const actions = { render: vi.fn(async () => dom.document.body.replaceChildren(...receiveView(ov, { state, actions }))), showToast: vi.fn() };
+      await actions.render();
+      await vi.waitFor(() => expect(state.requests?.loaded).toBe(true));
+      await actions.render();
+      return state;
+    };
+
+    // On a custom node: the earlier custom one, never matched to the payment that looks like its own.
+    await drawOn(on("https://node-42.example", 42));
+    expect(shown()).toEqual([{ amount: "5 DUSK", state: "Not checked", match: "Made by an earlier version for a custom node it didn't name, so payments aren't checked against it.", buttons: ["Remove"] }]);
+    // On this machine's node: the earlier local one, as its own.
+    await drawOn(on("http://127.0.0.1:8080", 0));
+    expect(shown().map((row) => [row.amount, row.state])).toEqual([["1.25 DUSK", "Paid"]]);
+
+    await drawOn(on("https://node-43.example", 43));
+    dom.document.body.querySelectorAll(".request-row button").find((b) => visibleText(b) === "Remove").click();
+    await vi.waitFor(() => expect(items[KEY][ACCOUNT].map((r) => r.id)).toEqual(["here"]));
   });
 
   it("keeps the requests of a node outside the listed networks by the chain it signs for, apart from another's", async () => {

@@ -16,7 +16,7 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { h } from "../../lib/dom.js";
-import { activityRows, activitySince, lookForPayments, selected } from "../activity.js";
+import { activityKey, activityRows, activitySince, lookForPayments, selected } from "../activity.js";
 import { whenAtText } from "./txRow.js";
 
 /** How often the history is read again while a request shown waits. */
@@ -112,18 +112,37 @@ function matchedLine(match, again, hidden) {
   return [hidden ? `Same memo${when}. Check it's this one.` : `Same memo${when}, for ${formatDuskExact(String(match.lux ?? 0n))} DUSK. Check it's this one.`];
 }
 
-function requestRow(request, match, { hidden, address, state, actions, walletId, rowOf, rowBack }) {
+function requestRow(request, match, { hidden, address, state, actions, walletId, rowOf, rowBack, context, earlier = false }) {
   // The payments with all a request asks, after the one that paid it: paid twice, or more.
   const again = match?.state === "paid" ? (match.more ?? []).filter((payment) => payment.matched === "amount-memo") : [];
-  const [word, tone] = again.length ? ["Paid twice", "warn"] : match?.state === "paid" ? ["Paid", "ok"] : match?.state === "check" ? ["Check", "warn"] : ["Waiting", "muted"];
+  const [word, tone] = earlier
+    ? ["Not checked", "muted"]
+    : again.length
+      ? ["Paid twice", "warn"]
+      : match?.state === "paid"
+        ? ["Paid", "ok"]
+        : match?.state === "check"
+          ? ["Check", "warn"]
+          : ["Waiting", "muted"];
   const payments = match?.hash ? [{ at: match.at, hash: match.hash }, ...again] : [];
-  const open = async (hash, at) => {
-    // Its row, as found here or read back to its time: past Activity's page, the details have no other.
-    state.txDetailRow = rowOf(hash) ?? (await rowBack(hash, at)) ?? null;
+  // Opens a payment's details at once, with its row as found here (Activity's
+  // page has none past it), read back to its time where it isn't, for the
+  // transaction still selected in the context it was found in.
+  const open = (hash, at) => {
+    const known = rowOf(hash);
+    const supplied = (state.txDetailRow = { context, hash, reading: !known, row: known ?? null });
     state.txDetailHash = hash;
     state.txDetailFrom = "receive";
     state.route = "tx";
     actions?.render?.()?.catch?.(() => {});
+    if (known) return;
+    rowBack(hash, at)
+      .catch(() => undefined)
+      .then((row) => {
+        if (state.txDetailRow !== supplied) return;
+        Object.assign(supplied, { reading: false, row: row ?? null });
+        if (state.route === "tx" && state.txDetailHash === hash) actions?.render?.()?.catch?.(() => {});
+      });
   };
   const remove = () =>
     forgetRequest(walletId, request.id)
@@ -139,7 +158,7 @@ function requestRow(request, match, { hidden, address, state, actions, walletId,
       request.memo ? h("span", { class: "request-row__memo" }, ["“", safeTextEl(request.memo), "” · "]) : null,
       `${request.to === address ? "Shielded" : "Public"}, asked ${whenAtText(request.at)}`,
     ].filter(Boolean)),
-    h("p", { class: "request-row__match" }, matchedLine(match, again, hidden)),
+    h("p", { class: "request-row__match" }, earlier ? ["Made by an earlier version for a custom node it didn't name, so payments aren't checked against it."] : matchedLine(match, again, hidden)),
     h("div", { class: "request-row__actions" }, [
       ...payments.map(({ at, hash }, i) =>
         h("button", { class: "text-btn chain-link", type: "button", text: payments.length > 1 ? `Payment ${i + 1}` : "See payment", onclick: () => open(hash, at) })
@@ -158,8 +177,14 @@ export function requestsSection(ov, { state, actions } = {}) {
   const { account, profileIndex } = selected(ov);
   const address = String(ov?.addresses?.[profileIndex] ?? "");
   const network = requestNetwork(ov);
-  const mine = kept.list.filter((request) => request.network === network && (request.to === account || (address && request.to === address)));
-  if (!mine.length) return null;
+  const kind = network.split(":")[0];
+  // Kept before custom chains were told apart: a local one is this machine's;
+  // a custom one names no chain, so it's shown on any custom node, not matched.
+  const earlier = (request) => request.network === "custom" && kind === "custom";
+  const ours = (request) => request.network === network || (request.network === "local" && kind === "local") || earlier(request);
+  const shown = kept.list.filter((request) => ours(request) && (request.to === account || (address && request.to === address)));
+  if (!shown.length) return null;
+  const mine = shown.filter((request) => !earlier(request));
   // Back to the oldest request not paid yet, a payment a little before it too (app-core's skew).
   const open = mine.filter((request) => !request.paid);
   const since = open.length ? Math.min(...open.map((request) => request.at)) - CLOCK_SKEW_MS : null;
@@ -184,6 +209,12 @@ export function requestsSection(ov, { state, actions } = {}) {
   const hidden = balancesHidden(ov);
   return h("section", { class: "box receive-requests" }, [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Requests" })]),
-    h("ul", { class: "group request-list" }, mine.map((request) => requestRow(request, matches.get(request.id), { hidden, address, state, actions, walletId: kept.walletId, rowOf, rowBack }))),
+    h(
+      "ul",
+      { class: "group request-list" },
+      shown.map((request) =>
+        requestRow(request, earlier(request) ? undefined : matches.get(request.id), { hidden, address, state, actions, walletId: kept.walletId, rowOf, rowBack, context: activityKey(ov), earlier: earlier(request) })
+      )
+    ),
   ]);
 }
