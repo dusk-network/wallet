@@ -446,6 +446,21 @@ describe("text that reads as something it isn't", () => {
     expect(buttons()).toEqual(["Reject", "Sign"]);
   });
 
+  it("says when a number may not read as its digits do, in a message to sign and a memo, and nothing of hidden characters", async () => {
+    // Marek's: N'Ko's 0001 shows as "߁000", and an Arabic-Indic zero makes 105 look like 1·5.
+    const bytes = new TextEncoder().encode("Pay \u07c0\u07c0\u07c0\u07c1 DUSK");
+    await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
+    expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Text needs review");
+    expect(app.querySelector(".callout.warn .muted").textContent).toBe("A number here is in digits that read right to left. Check it digit by digit. Only sign it if you trust this site.");
+
+    await render("send_tx", transfer(BOB, { memo: "Invoice \u07c0\u07c0\u07c0\u07c1 paid 1\u06605" }));
+    const flags = [...row("Memo").querySelectorAll(".safe-text__flag")].map((el) => el.textContent);
+    expect(flags).toEqual(["A number here mixes digits of different scripts, and some read right to left. Check it digit by digit."]);
+
+    await render("sign_auth", { chainId: "dusk:2", nonce: "n1", statement: "Pay 1\u06605 DUSK" });
+    expect(app.querySelector(".callout.warn .muted").textContent).toBe("A number here mixes digits of different scripts. Check it digit by digit. Only sign in if you trust this site.");
+  });
+
   it("shows it so before the wallet is unlocked too", async () => {
     await render("sign_message", signRequest(), { isUnlocked: false, accounts: [], duskNames: {} });
     expect(visibleText(head())).toContain("I agree to pay \\u202e0001\\u202c DUSK");

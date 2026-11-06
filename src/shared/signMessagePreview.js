@@ -1,4 +1,4 @@
-import { sanitizeStringForDisplay, textNeedsReview } from "./safeText.js";
+import { sanitizeStringForDisplay, textChecks, textNeedsReview } from "./safeText.js";
 
 export const SIGN_MESSAGE_PREVIEW_MAX_CHARS = 500;
 export const SIGN_MESSAGE_PREVIEW_MAX_BYTES = 4096;
@@ -66,6 +66,7 @@ export function describeSignMessagePreview(bytes) {
     text: display,
     truncated,
     needsReview: textNeedsReview(flags),
+    checks: Object.freeze(textChecks(flags)),
     label: truncated ? "Readable message preview (truncated)" : "Readable message",
   });
 }

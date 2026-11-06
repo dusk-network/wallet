@@ -1008,6 +1008,14 @@ describe("review", () => {
     expect(sent[0].params.memo).toBe(memo);
   });
 
+  it("says on Review when a memo's number may not read as its digits do", async () => {
+    // Marek's memo, from a link: an Arabic-Indic zero in 105.
+    review({ to: ALICE.account, privacy: "public", memo: "Invoice 1\u06605" }, overview());
+    await settle();
+    const row = dom.document.body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
+    expect(row.querySelectorAll(".safe-text__flag").map((el) => el.textContent)).toEqual(["A number here mixes digits of different scripts. Check it digit by digit."]);
+  });
+
   it("shows the fee at the network's price and the total with Back and Confirm, and Custom fee for gas of your own", async () => {
     // The node asks 2 LUX; a transfer returns its hash.
     const send = async (message) =>
