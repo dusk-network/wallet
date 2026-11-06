@@ -187,6 +187,26 @@ describe("integration: inpage provider discovery", () => {
     expect(window.duskWallet.profiles).toEqual([profile]);
   });
 
+  it("knows the wallet's network only once connected: from the connect answer as it resolves, and none after a disconnect", async () => {
+    // E09: before it connects, a site is told nothing of the wallet's network.
+    const window = await runInpageScript();
+    const provider = window.duskWallet;
+    dispatchWalletMessage(window, { type: "DUSK_PROVIDER_STATE", state: { isConnected: false, profiles: [], chainId: null } });
+    expect(provider.chainId).toBeNull();
+
+    const profile = { profileId: "account:0:acct0", account: "acct0" };
+    const connecting = provider.request({ method: "dusk_requestProfiles" }).then((profiles) => [profiles, provider.chainId]);
+    dispatchWalletMessage(window, {
+      type: "DUSK_RPC_RESPONSE",
+      id: lastRpcRequest(window).id,
+      response: { result: [profile], state: { chainId: "dusk:2", isConnected: true, profiles: [profile] } },
+    });
+    await expect(connecting).resolves.toEqual([[profile], "dusk:2"]);
+
+    dispatchWalletMessage(window, { type: "DUSK_PROVIDER_EVENT", name: "disconnect", data: { code: 4900, message: "Disconnected" } });
+    expect(provider.chainId).toBeNull();
+  });
+
   it("distinguishes disconnected, connected locked, and connected unlocked profile state", async () => {
     const window = await runInpageScript();
     const provider = window.duskWallet;

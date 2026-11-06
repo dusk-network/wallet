@@ -93,6 +93,12 @@ export async function handleRpc(origin, request) {
     return moved ? getPermissionForOrigin(origin, walletId) : null;
   };
 
+  // Whether the site is connected, as its provider state says (dappEvents.js), locked or not.
+  const isConnected = async () => {
+    const status = await getEngineStatus();
+    return permissionProfileState(await permissionFor(status), status).isValid;
+  };
+
   const MAX_CALLDATA_BYTES = DAPP_LIMITS.maxFnArgsBytes;
   const MAX_U64 = 18446744073709551615n;
 
@@ -496,6 +502,8 @@ export async function handleRpc(origin, request) {
 
   switch (method) {
     case "dusk_getCapabilities": {
+      // Before a site connects, it learns nothing of the wallet: not its version, nor the network it's on.
+      const known = await isConnected();
       const settings = await getSettings();
       const nodeUrl = String(settings?.nodeUrl ?? "");
       const chainId = chainIdFromNodeUrl(nodeUrl);
@@ -512,10 +520,7 @@ export async function handleRpc(origin, request) {
       // Capabilities are public (no permission required).
       return Object.freeze({
         provider: "dusk-wallet",
-        walletVersion,
-        chainId,
-        nodeUrl,
-        networkName,
+        ...(known ? { walletVersion, chainId, nodeUrl, networkName } : {}),
         methods: [...DAPP_RPC_METHODS],
         txKinds: [...DAPP_TX_KINDS],
         limits: { ...DAPP_LIMITS },
@@ -570,6 +575,8 @@ export async function handleRpc(origin, request) {
     }
 
     case "dusk_chainId": {
+      // A site learns the network as it connects: null before.
+      if (!(await isConnected())) return null;
       const settings = await getSettings();
       return chainIdFromNodeUrl(settings?.nodeUrl ?? "");
     }

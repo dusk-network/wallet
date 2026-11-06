@@ -179,14 +179,31 @@ async function buildProviderState(origin) {
     await namesForOrigins([origin], perms, status, String(nodeUrl))
   );
 
+  // A valid permission remains connected while locked, but exposes no profile.
+  const isConnected = permission.isValid;
+  // Before it connects, a site learns nothing of the wallet's network: that comes with the connection.
   return {
-    chainId,
-    networkName,
-    nodeUrl,
-    // A valid permission remains connected while locked, but exposes no profile.
-    isConnected: permission.isValid,
+    chainId: isConnected ? chainId : null,
+    networkName: isConnected ? networkName : null,
+    nodeUrl: isConnected ? nodeUrl : null,
+    isConnected,
     profiles: permission.profile ? [permission.profile] : [],
   };
+}
+
+/**
+ * The provider state `origin` sees now, as a page's port gets it: the
+ * wallet's network only once the site is connected.
+ *
+ * @param {string} origin
+ */
+export const providerStateFor = (origin) => readCurrent(() => buildProviderState(origin));
+
+// The origins with a port whose site is connected: the only ones told of the wallet's network.
+async function connectedOrigins() {
+  const status = await getEngineStatus();
+  const perms = await getPermissions(await siteWalletId(status));
+  return [...portsByOrigin.keys()].filter((origin) => permissionProfileState(perms?.[origin], status).isValid);
 }
 
 /**
@@ -397,7 +414,8 @@ export async function handleVerifiedNamesDiff(oldNames, newNames) {
 }
 
 /**
- * Broadcast chainChanged (and a Dusk-specific nodeChanged) to all ports.
+ * Broadcast chainChanged (and a Dusk-specific nodeChanged) to the ports of
+ * connected sites: one not connected learns the network as it connects.
  */
 export async function broadcastChainChangedAll() {
   // Serialize broadcasts so rapid consecutive calls don't race and double-emit.
@@ -420,14 +438,16 @@ export async function broadcastChainChangedAll() {
       _lastBroadcastNodeUrl = nodeUrl;
       _lastBroadcastNetworkName = networkName;
 
+      const told = await connectedOrigins();
+
       // Emit MetaMask-style chainChanged only when the chainId actually changes.
       if (chainChanged) {
-        broadcastToAll("chainChanged", chainId);
+        for (const origin of told) broadcastToOrigin(origin, "chainChanged", chainId);
       }
 
       // Emit Dusk-specific node change only when the nodeUrl changes.
       if (nodeChanged) {
-        broadcastToAll("duskNodeChanged", { chainId, nodeUrl, networkName });
+        for (const origin of told) broadcastToOrigin(origin, "duskNodeChanged", { chainId, nodeUrl, networkName });
       }
     })
     .catch(() => {});

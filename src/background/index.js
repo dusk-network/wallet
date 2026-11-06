@@ -42,6 +42,7 @@ import {
   broadcastProfilesChangedAll,
   broadcastWalletChanged,
   bindPortsForSenderOrigin,
+  providerStateFor,
   registerDappPort,
   registerStorageChangeForwarder,
 } from "./dappEvents.js";
@@ -584,6 +585,8 @@ const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET
 
 // For when a site last used its connection: anything but what any page can ask.
 const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId"]);
+// What connects a site: its answer brings the provider state with it.
+const CONNECTS = new Set(["dusk_requestProfiles", "dusk_requestShieldedAddress"]);
 
 function noteConnectionUse(origin, request) {
   if (OPEN_TO_ALL.has(String(request?.method ?? ""))) return;
@@ -734,7 +737,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const activityContext = await prepareDappActivityContext(message.request);
         const result = await handleRpc(origin, message.request).finally(() => noteConnectionUse(origin, message.request));
         await updateDappActivity(message.request, activityContext);
-        sendResponse({ id, result });
+        // A connection's answer brings the site the wallet's network, read once it's connected.
+        sendResponse(CONNECTS.has(String(message.request?.method ?? "")) ? { id, result, state: await providerStateFor(origin) } : { id, result });
         return;
       }
 

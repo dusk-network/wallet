@@ -133,6 +133,14 @@ provider = {
 
 The provider starts emitting events after the first `request()` call or `on()` subscription.
 
+A site learns nothing of the wallet's network before it connects: `chainId` is
+`null` until then, `dusk_chainId` answers `null`, `dusk_getCapabilities`
+leaves out the wallet's version and network, and `chainChanged` and
+`duskNodeChanged` go only to connected sites. The answer to
+`dusk_requestProfiles` or `dusk_requestShieldedAddress` brings the network:
+`chainId` is set as the request resolves, and `connect` follows with it. After
+a disconnect, `chainId` is `null` again.
+
 ---
 
 ## Types
@@ -166,7 +174,7 @@ const numericChainId = Number(match[1]);
 
 Get a machine-readable description of the provider surface (supported methods, tx kinds, limits).
 
-This method does **not** require connection permission.
+This method does **not** require connection permission. Only a connected site gets `walletVersion`, `chainId`, `nodeUrl` and `networkName` in it.
 
 ```js
 const caps = await dusk.request({ method: "dusk_getCapabilities" });
@@ -227,11 +235,11 @@ const result = await dusk.request({
 
 ### `dusk_chainId`
 
-Get current chain ID (CAIP-2, `dusk:<id>`).
+Get current chain ID (CAIP-2, `dusk:<id>`): `null` until the site connects.
 
 ```js
 const chainId = await dusk.request({ method: "dusk_chainId" });
-// → "dusk:2" (testnet)
+// → "dusk:2" (testnet), or null before connecting
 ```
 
 ---
@@ -584,8 +592,8 @@ dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 | `connect` | `{ chainId }` | Permission granted, or the user switched to a wallet the site is connected to |
 | `disconnect` | `{ code: 4900, message }` | Permission revoked, the connection reached the end the user set for it, or the user switched to a wallet the site isn't connected to |
 | `profilesChanged` | `DuskProfile[]` | Lock/unlock, connect/disconnect, selected profile or wallet changes, profile grant changes, or the profile's `.dusk` name changes |
-| `chainChanged` | `ChainId` | Network changed (different chain ID) |
-| `duskNodeChanged` | `{ chainId, nodeUrl, networkName }` | Node URL changed (even same chain) |
+| `chainChanged` | `ChainId` | Network changed (different chain ID), to connected sites |
+| `duskNodeChanged` | `{ chainId, nodeUrl, networkName }` | Node URL changed (even same chain), to connected sites |
 
 ---
 

@@ -24,6 +24,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Told a site nothing of the wallet's network or version before it connects; the network comes with the connection.
 - Counted what's staked, natively and with Sozu, in Home's total balance, read with the public balance, and showed it beside the rest.
 - Gave Sozu's rate as stDUSK grew over the last 30 days, on Liquid staking and Staking, where the chain says it.
 - Made Activity's Export a file for accountants and tax tools, in Koinly's universal CSV: a quarter or any dates, your profile's name on it, transfers between your profiles marked, stDUSK and fees for staking, and euro values and Excel's accents when asked.

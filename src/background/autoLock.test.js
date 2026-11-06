@@ -75,6 +75,7 @@ const mocks = vi.hoisted(() => {
     })),
     broadcastProfilesChangedAll: vi.fn(async () => {}),
     broadcastWalletChanged: vi.fn(async () => {}),
+    providerStateFor: vi.fn(async () => ({ chainId: "dusk:2", isConnected: true, networkName: "Testnet", nodeUrl: "https://testnet.nodes.dusk.network", profiles: [] })),
     handleRpc: vi.fn(async (_origin, request) => {
       if (request?.method === "dusk_switchNetwork") {
         const nextNodeUrl = String(request?.params?.nodeUrl ?? "").trim();
@@ -170,6 +171,7 @@ vi.mock("./dappEvents.js", () => ({
   broadcastProfilesChangedAll: mocks.broadcastProfilesChangedAll,
   broadcastWalletChanged: mocks.broadcastWalletChanged,
   bindPortsForSenderOrigin: vi.fn(() => {}),
+  providerStateFor: mocks.providerStateFor,
   registerDappPort: vi.fn(() => {}),
   registerStorageChangeForwarder: vi.fn(() => {}),
 }));
@@ -749,6 +751,16 @@ describe("background auto-lock activity", () => {
     } finally {
       mocks.engineCall.mockImplementation(before);
     }
+  });
+
+  it("sends a site its provider state with the answer that connects it, and with no other", async () => {
+    // E09: the network comes with the connection, so the page knows it as the request resolves.
+    const ask = (method) => sendBackgroundMessage({ type: "DUSK_RPC_REQUEST", id: method, request: { method } }, { url: "https://dapp.example/page" });
+    for (const method of ["dusk_requestProfiles", "dusk_requestShieldedAddress"]) {
+      await expect(ask(method)).resolves.toMatchObject({ id: method, result: { method }, state: { chainId: "dusk:2", isConnected: true } });
+    }
+    expect(mocks.providerStateFor).toHaveBeenCalledWith("https://dapp.example");
+    expect(await ask("dusk_profiles")).toEqual({ id: "dusk_profiles", result: { method: "dusk_profiles" } });
   });
 
   it("saves a custom node with the chain ID it gives, read before it's saved", async () => {
