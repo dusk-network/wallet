@@ -212,6 +212,22 @@ describe("background rpc handler", () => {
     await expect(ask("dusk_chainId")).resolves.toBe("dusk:2");
   });
 
+  it("dusk_openPaymentLink opens Send with a web wallet's own request link, needing no connection, on a press", async () => {
+    // N21: Sofia's "Open in the Dusk extension" on the web wallet's page.
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+    vaultValue = { v: 1 };
+    const link = "https://apps.testnet.dusk.network/wallet/dashboard/send?to=abc&amount=1&network=testnet";
+    const handOver = (context) => handleRpc("https://apps.testnet.dusk.network", { method: "dusk_openPaymentLink", params: { link } }, context);
+
+    await expect(handOver({ pressed: true })).resolves.toBe(true);
+    expect(tabsCreate).toHaveBeenLastCalledWith({ url: expect.stringContaining(`full.html?route=send&link=${encodeURIComponent(link)}`) });
+    expect(getPermissionForOrigin).not.toHaveBeenCalledWith("https://apps.testnet.dusk.network", expect.anything());
+    await expect(handOver({ pressed: false })).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+    // Listed for a page to find before it offers it.
+    expect((await handleRpc("https://apps.testnet.dusk.network", { method: "dusk_getCapabilities" })).methods).toContain("dusk_openPaymentLink");
+  });
+
   it.each([
     ["HTTPS", "https://dapp.example"],
     ["localhost HTTP", "http://localhost:5173"],

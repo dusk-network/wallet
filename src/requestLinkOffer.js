@@ -53,6 +53,8 @@
   }
 
   function showOffer(link) {
+    // A web wallet that offers the extension itself (dusk_openPaymentLink) says so in its head: no second offer.
+    if (document.querySelector('meta[name="dusk-wallet-request-handoff"]')) return;
     const host = document.createElement("dusk-wallet-offer");
     // Closed: the page can neither restyle it nor press its buttons.
     const root = host.attachShadow({ mode: "closed" });

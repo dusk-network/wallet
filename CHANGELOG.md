@@ -17,6 +17,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
 - Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei, and put those fees in the export.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
+- Added `dusk_openPaymentLink`, for the web wallet's own button to open a request link in the extension's Send.
 - Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
 - Listed the requests made in Receive, each Waiting, Paid, Check or Paid twice, with its payments to open.
 - Added a search to Activity: by name, address, memo, transaction ID or amount.

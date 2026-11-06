@@ -584,7 +584,7 @@ async function paysFor(params, accountIndex, status) {
 const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS"]);
 
 // For when a site last used its connection: anything but what any page can ask.
-const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId"]);
+const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId", "dusk_openPaymentLink"]);
 // What connects a site: its answer brings the provider state with it.
 const CONNECTS = new Set(["dusk_requestProfiles", "dusk_requestShieldedAddress"]);
 
@@ -735,7 +735,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
         const id = message.id;
         const activityContext = await prepareDappActivityContext(message.request);
-        const result = await handleRpc(origin, message.request).finally(() => noteConnectionUse(origin, message.request));
+        // Whether the page had a person's press as it asked: the content script's word, never the page's.
+        const pressed = typeof message.pressed === "boolean" ? message.pressed : undefined;
+        const result = await handleRpc(origin, message.request, { pressed }).finally(() => noteConnectionUse(origin, message.request));
         await updateDappActivity(message.request, activityContext);
         // A connection's answer brings the site the wallet's network, read once it's connected.
         sendResponse(CONNECTS.has(String(message.request?.method ?? "")) ? { id, result, state: await providerStateFor(origin) } : { id, result });

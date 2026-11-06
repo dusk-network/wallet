@@ -329,6 +329,7 @@ window.dispatchEvent(new Event("dusk:requestProvider"));
 | `dusk_signTypedData` | Sign structured typed data the wallet renders |
 | `dusk_signAuth` | Sign a login/auth envelope |
 | `dusk_disconnect` | Revoke permission |
+| `dusk_openPaymentLink` | Open Send, filled in, with a web wallet's own request link |
 
 See [provider-api.md](provider-api.md) for full documentation.
 

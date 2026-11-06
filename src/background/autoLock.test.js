@@ -763,6 +763,15 @@ describe("background auto-lock activity", () => {
     expect(await ask("dusk_profiles")).toEqual({ id: "dusk_profiles", result: { method: "dusk_profiles" } });
   });
 
+  it("passes on whether the page had a press as it handed a request over, as the content script says, never the page", async () => {
+    const page = { url: "https://apps.testnet.dusk.network/wallet/dashboard/send?to=abc" };
+    const handOver = (pressed) => sendBackgroundMessage({ type: "DUSK_RPC_REQUEST", id: "h", pressed, request: { method: "dusk_openPaymentLink", params: { link: page.url, pressed: true } } }, page);
+    for (const [said, passed] of [[true, true], [false, false], ["yes", undefined], [undefined, undefined]]) {
+      await handOver(said);
+      expect(mocks.handleRpc).toHaveBeenLastCalledWith("https://apps.testnet.dusk.network", expect.objectContaining({ method: "dusk_openPaymentLink" }), { pressed: passed });
+    }
+  });
+
   it("saves a custom node with the chain ID it gives, read before it's saved", async () => {
     mocks.readChainId.mockResolvedValueOnce(2);
     const response = await sendBackgroundMessage({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: "https://my-node.example" });

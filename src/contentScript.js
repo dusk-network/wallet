@@ -205,6 +205,8 @@ window.addEventListener("message", (event) => {
     id,
     origin: window.location.origin,
     request,
+    // Whether the page had a person's press as it asked, where the browser says: a hand-over takes one.
+    ...(request?.method === "dusk_openPaymentLink" && typeof globalThis.navigator?.userActivation?.isActive === "boolean" ? { pressed: globalThis.navigator.userActivation.isActive } : {}),
   })
     .then((response) => {
       const payload = {

@@ -155,7 +155,7 @@ No provider method reads it.
 | `dusk_requestProfiles` | No (grants it) | Yes (prompt) |
 | `dusk_profiles` | Yes (returns `[]` otherwise) | Yes (returns `[]` otherwise) |
 | `dusk_requestShieldedAddress` | No (grants or upgrades it) | Yes (prompt) |
-| `dusk_chainId` | No | No |
+| `dusk_chainId` | No (`null` until connected) | No |
 | `dusk_switchNetwork` | Yes | No |
 | `dusk_getPublicBalance` | Yes | Yes |
 | `dusk_estimateGas` | Yes | No |
@@ -165,6 +165,7 @@ No provider method reads it.
 | `dusk_signTypedData` | Yes | Yes |
 | `dusk_signAuth` | Yes | Yes |
 | `dusk_disconnect` | No | No |
+| `dusk_openPaymentLink` | No (a network's own web wallet, its own Send's link, on a press) | No (Send asks to unlock) |
 
 `dusk_signMessage` and `dusk_signAuth` sign domain-separated Moonlight memo
 envelopes. They are not raw BLS digest-signing methods and must not be used for

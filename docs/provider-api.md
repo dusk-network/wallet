@@ -577,6 +577,30 @@ Emits `disconnect`.
 
 ---
 
+### `dusk_openPaymentLink`
+
+Hand a request link over to the wallet's own Send, filled in, for the person
+to review and confirm there. It needs no connection, and tells the page
+nothing of the wallet. Only a network's own web wallet (or one on this
+machine) may ask, only for a link to its own Send, and only from a press of
+the person's.
+
+```js
+const opened = await dusk.request({
+  method: "dusk_openPaymentLink",
+  params: { link: location.href }
+});
+// → true once Send opened; false with no wallet in the extension to pay it with
+```
+
+Throws `-32602` for a link that isn't a request link to the asking web
+wallet's own Send, and `4100` when the browser says the page had no press as
+it asked. A page that offers this itself can turn off the extension's own
+offer card with `<meta name="dusk-wallet-request-handoff" content="1">` in
+its head.
+
+---
+
 ## Events
 
 ```js

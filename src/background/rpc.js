@@ -49,6 +49,7 @@ import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
 import { siteWalletId } from "./siteWallet.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { readCurrent, siteNames } from "./siteNames.js";
+import { handOverRequestLink } from "./requestLinks.js";
 import { getTxEpoch, putTxMeta } from "../shared/txStore.js";
 import { submittedTxMeta } from "../shared/txRecord.js";
 import { normalizeContractId, watchToken, watchNft } from "../shared/assetsStore.js";
@@ -58,7 +59,7 @@ import {
 import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
-export async function handleRpc(origin, request) {
+export async function handleRpc(origin, request, { pressed } = {}) {
   origin = String(origin ?? "").trim();
   if (!isAllowedDappOrigin(origin)) {
     throw rpcError(
@@ -572,6 +573,11 @@ export async function handleRpc(origin, request) {
         profileId: profile.profileId,
         chainId: chainIdFromNodeUrl((await getSettings())?.nodeUrl ?? ""),
       };
+    }
+
+    case "dusk_openPaymentLink": {
+      // Not a connection's: a web wallet hands over its own request, to be reviewed in Send.
+      return handOverRequestLink(origin, firstParamObject(params)?.link, { pressed });
     }
 
     case "dusk_chainId": {

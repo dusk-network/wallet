@@ -33,6 +33,7 @@ export const DAPP_RPC_METHODS = Object.freeze([
   "dusk_signTypedData",
   "dusk_signAuth",
   "dusk_disconnect",
+  "dusk_openPaymentLink",
 ]);
 
 // Methods a dApp may call but that are deliberately refused, so the caller gets a
