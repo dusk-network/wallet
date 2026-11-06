@@ -59,17 +59,22 @@ describe("walletReset", () => {
     expect(await pending()).toBe(false);
   });
 
-  it("keeps the contacts of a wallet restored in place of the old one, and only those", async () => {
+  it("keeps the contacts and requests of a wallet restored in place of the old one, and only those", async () => {
     const { storage, STORAGE_KEYS } = await import("./storage.js");
     const { contactsNamespace } = await import("./contactsCrypto.js");
+    const requests = await import("./paymentRequests.js");
     const [mine, theirs] = await Promise.all([contactsNamespace("acct-restored"), contactsNamespace("acct-other")]);
     await storage.set({ [STORAGE_KEYS.CONTACTS]: { [mine]: { v: 1 }, [theirs]: { v: 1 } } });
+    for (const id of ["acct-restored", "acct-other"]) await requests.rememberRequest(id, { lux: 5n, memo: id, network: "testnet", to: id });
     await reset.beginReset();
     await reset.finishReset({ keepContactsOf: "acct-restored" });
     expect((await storage.get(STORAGE_KEYS.CONTACTS))[STORAGE_KEYS.CONTACTS]).toEqual({ [mine]: { v: 1 } });
+    expect((await requests.listRequests("acct-restored")).map((r) => r.memo)).toEqual(["acct-restored"]);
+    await expect(requests.listRequests("acct-other")).resolves.toEqual([]);
     // A plain reset keeps none.
     await reset.finishReset();
     expect(await storage.get(STORAGE_KEYS.CONTACTS)).toEqual({});
+    await expect(requests.listRequests("acct-restored")).resolves.toEqual([]);
   });
 
   describe("what's left of a wallet and its node", () => {
@@ -225,6 +230,7 @@ describe("walletReset", () => {
     const assets = await import("./assetsStore.js");
     const arrivals = await import("./bridgeArrival.js");
     const notes = await import("./shieldedStore.js");
+    const requests = await import("./paymentRequests.js");
     const { contactsNamespace } = await import("./contactsCrypto.js");
     const { getSiteRecords, noteSiteRequest } = await import("./siteRecords.js");
     const wallets = { gone: ["gone0", "gone1"], kept: ["kept0", "kept1"] };
@@ -240,6 +246,7 @@ describe("walletReset", () => {
       await notes.putShieldedMeta("testnet", id, 1, { cursorBlock: "5" });
       await activity.commitActivityStep(activity.activityOwnerKey("testnet", accounts[1]), [{ hash: `${w}`.padEnd(64, "0"), blockHeight: 1 }], () => ({ covered: [] }));
       await activity.putShieldedHistoryRecord(`testnet::${id}::0`, { entries: [] });
+      await requests.rememberRequest(id, { lux: null, memo: w, network: "testnet", to: id });
     }
     const [gonePlace, keptPlace] = await Promise.all([contactsNamespace("gone0"), contactsNamespace("kept0")]);
     await storage.set({ [STORAGE_KEYS.CONTACTS]: { [gonePlace]: { v: 1 }, [keptPlace]: { v: 1 } } });
@@ -267,6 +274,8 @@ describe("walletReset", () => {
     await expect(activity.listActivityEntries(activity.activityOwnerKey("testnet", "kept1"))).resolves.toHaveLength(1);
     await expect(activity.getShieldedHistoryRecord("testnet::gone0::0")).resolves.toBeNull();
     await expect(activity.getShieldedHistoryRecord("testnet::kept0::0")).resolves.toMatchObject({ entries: [] });
+    await expect(requests.listRequests("gone0")).resolves.toEqual([]);
+    expect((await requests.listRequests("kept0")).map((r) => r.memo)).toEqual(["kept"]);
     // Nothing of a reset: the stores' reset counts stay.
     await expect(txs.getTxEpoch()).resolves.toBe(epoch);
   });

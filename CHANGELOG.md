@@ -18,6 +18,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei, and put those fees in the export.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
 - Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
+- Listed the requests made in Receive, each Waiting, Paid, Check or Paid twice, with its payments to open.
+- Added a search to Activity: by name, address, memo, transaction ID or amount.
 - Gave the export's values in euros where the browser's region pays in them, and in US dollars elsewhere.
 
 ### Changed

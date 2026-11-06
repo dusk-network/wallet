@@ -4479,6 +4479,11 @@ p.tx-empty {
   gap: 6px;
 }
 
+/* Activity's search, over the filters */
+input.activity-search {
+  width: 100%;
+}
+
 /* Export: which period, what to add, what the file is, Save CSV */
 .group.activity-export {
   display: flex;
@@ -4836,6 +4841,64 @@ details.receive-request > summary {
   margin-left: auto;
   color: var(--text-subtle);
   font-size: 12.5px;
+}
+
+/* Receive's requests: each with what came in for it */
+.request-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.request-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.request-row + .request-row {
+  border-top: 1px solid var(--line);
+}
+
+.request-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.request-row__sub,
+.request-row__match {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.request-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* Colour only where it's done, or asks for a look */
+.request-state {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.request-state--ok {
+  color: var(--ok);
+}
+
+.request-state--warn {
+  color: var(--warn);
+}
+
+.request-state--muted {
+  color: var(--text-muted);
 }
 
 /* -------------------------------------------------------

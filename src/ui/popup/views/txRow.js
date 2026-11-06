@@ -60,6 +60,13 @@ export function dayLabel(ms, now = Date.now()) {
   return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}${year}`;
 }
 
+/** When, in a sentence: "at 14:32", "yesterday at 14:32", "on Thu 5 Nov at 14:32". */
+export function whenAtText(ms, now = Date.now()) {
+  const day = dayLabel(ms, now);
+  const at = `at ${clockText(ms)}`;
+  return day === "Today" ? at : day === "Yesterday" ? `yesterday ${at}` : `on ${day} ${at}`;
+}
+
 /** When, on Home's short list: "Just now", "5 min ago", "14:32", "Yesterday", "24 Oct". */
 export function recentText(ms, now = Date.now()) {
   const ago = now - ms;

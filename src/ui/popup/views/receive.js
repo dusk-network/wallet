@@ -9,6 +9,8 @@ import { decimalInput, fieldLabel, textInput } from "../../components/FormContro
 import { segmented } from "../../components/Segmented.js";
 import { formatDuskPlain } from "@dusk-network/app-core/amounts";
 import { makePaymentLink } from "@dusk-network/app-core/payment-links";
+import { rememberRequest } from "../../../shared/paymentRequests.js";
+import { requestKept, requestNetwork, requestsSection } from "./requests.js";
 import { amountForInput } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
@@ -141,6 +143,20 @@ export function receiveView(ov, { state, actions } = {}) {
   const linkErr = h("div", { class: "field-error", role: "alert", hidden: true });
   const linkNote = h("div", { class: "muted" });
 
+  // The requests made here, drawn again on their own as one is kept, so what's pressed stays as it is.
+  const requestsHost = h("div", { class: "receive-requests-host" });
+  const drawRequests = () => requestsHost.replaceChildren(...[requestsSection(ov, { state, actions })].filter(Boolean));
+  // Keeps what's asked in the list as it leaves the wallet: copied, shared or downloaded.
+  const keepRequest = () => {
+    if (!wantRequest) return;
+    rememberRequest(String(ov?.accounts?.[0] ?? ""), { lux: curLux, memo: curMemo, network: requestNetwork(ov), to: curRecipient })
+      .then((list) => {
+        requestKept(state, list);
+        drawRequests();
+      })
+      .catch(() => {});
+  };
+
   // The request link's copy, which Enter in the memo presses; on once the QR holds a request.
   const copyRequestBtn = copyButton({
     value: () => (wantRequest ? curLink : ""),
@@ -149,6 +165,7 @@ export function receiveView(ov, { state, actions } = {}) {
     className: "btn-outline",
     failText: "Copy failed",
     onFail: actions?.showToast,
+    onCopied: keepRequest,
   });
 
   // What the QR asks for, once it holds a request.
@@ -191,6 +208,9 @@ export function receiveView(ov, { state, actions } = {}) {
   let curUri = "";
   let curQrValue = recipient || "";
   let wantRequest = false;
+  // What the request asks, as its link says it.
+  let curLux = null;
+  let curMemo = "";
   let qrMenuOpen = false;
 
   const qrMenu = h("div", { class: "qr-context-menu", style: "display:none" });
@@ -200,6 +220,7 @@ export function receiveView(ov, { state, actions } = {}) {
     try {
       await downloadQrPng(curQrValue, qrFilename({ request: wantRequest, tab }));
       actions?.showToast?.("Downloaded QR PNG");
+      keepRequest();
     } catch (e) {
       actions?.showToast?.(e?.message ?? "QR download failed", 2500);
     }
@@ -266,6 +287,7 @@ export function receiveView(ov, { state, actions } = {}) {
                 text: shareValue,
               });
               actions?.showToast?.("Shared");
+              keepRequest();
               return;
             } catch (e) {
               if (e?.name === "AbortError") return;
@@ -274,6 +296,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
           const ok = await copyToClipboard(shareValue);
           actions?.showToast?.(ok ? "Share not available — copied" : "Copy failed");
+          if (ok) keepRequest();
         },
       })
     : null;
@@ -322,6 +345,8 @@ export function receiveView(ov, { state, actions } = {}) {
 
     const memoVal = String(memoInput.value ?? "").trim();
     const hasReq = !!memoVal || made.lux !== null;
+    curLux = made.lux;
+    curMemo = memoVal;
     const asked = curLink;
 
     curUri = made.dusk;
@@ -354,6 +379,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // Initial
   update();
+  drawRequests();
 
   return [
     subnav({
@@ -370,6 +396,7 @@ export function receiveView(ov, { state, actions } = {}) {
       nameNote,
       btnRow,
       requestDetails,
+      requestsHost,
       qrMenu,
     ]),
   ].filter(Boolean);

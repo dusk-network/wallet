@@ -51,10 +51,9 @@ import {
 import { openQrScanModal } from "../../components/QrScanModal.js";
 import { readRequestLink, walletChainOf } from "../../lib/requestLink.js";
 import { contactAlikeText } from "../../lib/contactNames.js";
-import { clockText } from "../../lib/time.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
-import { dayLabel } from "./txRow.js";
+import { whenAtText } from "./txRow.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
 import { networkTextOf } from "../../../shared/nodeNetwork.js";
@@ -1095,11 +1094,6 @@ export function sendFormView(ov, { state, actions } = {}) {
  * When a payment went, from now: "at 14:32", "yesterday at 14:32" or "on Fri 24 Oct at 14:32".
  * @param {number} ms
  */
-function whenSentText(ms) {
-  const day = dayLabel(ms);
-  const at = `at ${clockText(ms)}`;
-  return day === "Today" ? at : day === "Yesterday" ? `yesterday ${at}` : `on ${day} ${at}`;
-}
 
 const refusedRequest = (draft, problem = "") => ({ ...draft, to: "", duskName: undefined, requestChainId: undefined, refusedChainId: draft?.requestChainId, refusedProblem: problem || undefined, filledFrom: undefined });
 
@@ -1219,7 +1213,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           h("div", { class: "callout-title" }, [
             "You sent ",
             balance(balancesHidden(ov) && Boolean(d.amountMasked), formatDuskExact(d.amountLux)),
-            ` DUSK to ${own ? "yourself" : contactName() || duskName?.name || shortAddress(toAddr)}${String(d.memo ?? "").trim() ? " with this memo" : ""} ${whenSentText(madeAgain.time)}.`,
+            ` DUSK to ${own ? "yourself" : contactName() || duskName?.name || shortAddress(toAddr)}${String(d.memo ?? "").trim() ? " with this memo" : ""} ${whenAtText(madeAgain.time)}.`,
           ]),
         ])
       : null;

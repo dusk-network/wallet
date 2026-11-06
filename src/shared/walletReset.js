@@ -28,6 +28,7 @@ import { clearShieldedStore, forgetWalletNotes } from "./shieldedStore.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { clearTxs, forgetWalletTxs } from "./txStore.js";
 import { clearWallets } from "./wallets.js";
+import { forgetWalletRequests, keepOnlyRequestsOf } from "./paymentRequests.js";
 
 /**
  * Note that a reset began, before anything is cleared: for a restore, with
@@ -54,6 +55,7 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     contacts,
     keepOnlyAccountNamesOf(keepContactsOf),
     keepOnlyAssetsOf(keepContactsOf),
+    keepOnlyRequestsOf(keepContactsOf),
     clearWallets(),
     clearSettings(),
     clearSiteRecords(),
@@ -115,6 +117,7 @@ export async function forgetWalletData({ walletId, accounts }) {
     forgetWalletAssets(id),
     forgetWalletContacts(id),
     forgetWalletNotes(id),
+    forgetWalletRequests(id),
     forgetWalletActivity({ walletId: id, accounts }),
   ]);
   return results.every((r) => r.status === "fulfilled");
