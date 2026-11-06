@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { keptArrivals } from "../shared/bridgeArrival.js";
 import { TX_KIND } from "../shared/constants.js";
 import { installFakeDom, settle, visibleText } from "./testing/fakeDom.js";
+import { recordedEvm, recordedMigration } from "./testing/recordedEvm.js";
+import { entryOf } from "../shared/fixtures/rows.js";
+import { activityKey } from "./popup/activity.js";
 import { dateText } from "./lib/time.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
 
@@ -16,6 +19,8 @@ let dom;
 
 beforeEach(() => {
   dom = installFakeDom();
+  // No test reaches a chain: one that reads one says what it answers.
+  vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
 });
 
 afterEach(() => {
@@ -254,6 +259,53 @@ describe("transaction details", () => {
     expect(paid.rows).toContain(`Ethereum transaction${migration.slice(0, 6)}…${migration.slice(-4)}Copy`);
     expect(paid.rows.filter((r) => r.startsWith("Memo"))).toEqual([]);
     expect([back.lead, back.name, back.via]).toEqual(["Bridge", "From Ethereum", `Ethereum migration payouts · ${payouts.slice(0, 6)}…${payouts.slice(-6)}`]);
+  });
+
+  it("says what a migration paid on its own chain once that chain answers, its approval too, to the wei", async () => {
+    // Nandini's: the extension showed no fee there at all for a way back.
+    const MAINNET = "https://nodes.dusk.network";
+    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
+    const chain = recordedEvm(route.chain.rpcUrl);
+    vi.stubGlobal("fetch", chain.fetch);
+    const { migration, payout } = recordedMigration;
+    const tx = { hash: HASH, nodeUrl: MAINNET, status: "executed", kind: TX_KIND.TRANSFER, direction: "in", from: route.payoutAccount, amount: payout.value, memo: migration };
+    const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home", addressBook: { loaded: true, items: [] } };
+    const draw = () => {
+      dom.document.body.replaceChildren(...txDetailsView({ nodeUrl: MAINNET, txs: [tx] }, { state, actions }));
+      return dom.document.body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText);
+    };
+    const actions = { render: vi.fn(async () => draw()), showToast: vi.fn() };
+    const fees = (rows) => rows.filter((row) => row.startsWith("Fee on"));
+
+    // Read from BNB Smart Chain's RPC once the details open: no fee until it answers.
+    expect(fees(draw())).toEqual([]);
+    await vi.waitFor(() => expect(actions.render).toHaveBeenCalled());
+    const rows = draw();
+    expect(fees(rows)).toEqual(["Fee on BNB Smart Chain0.00000474855 BNB · approval and migration"]);
+    expect(rows).toContain("Sent1,041.53106263 BEP20 DUSK");
+    expect(rows).toContain(`BNB Smart Chain transaction${migration.slice(0, 6)}…${migration.slice(-4)}Copy`);
+    // Asked again a minute on at most, not each time the details draw.
+    const asked = chain.calls.length;
+    draw();
+    expect(chain.calls.length).toBe(asked);
+  });
+
+  it("takes a payout's memo of bytes for no migration, though it reads as one", () => {
+    // Codex's: 32 bytes read as 0x and 64 hex digits.
+    const MAINNET = "https://nodes.dusk.network";
+    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
+    const ov = { accounts: ["me".padEnd(64, "x")], isUnlocked: true, nodeUrl: MAINNET, selectedAccountIndex: 0, txs: [] };
+    // As the archive's history gives it: the memo's bytes as 0x hex, marked as bytes.
+    const payout = (memoBinary) => entryOf({ counterparty: route.payoutAccount, direction: "in", hash: HASH, memo: `0x${"5e".repeat(32)}`, memoBinary, value: "5000000000" }, MAINNET);
+    const rowsWith = (memoBinary) => {
+      const state = { route: "tx", txDetailHash: HASH, addressBook: { loaded: true, items: [] }, activity: { entries: [payout(memoBinary)], history: { fillDetails: vi.fn(async () => {}), needsDetails: vi.fn(() => false) }, key: activityKey(ov) } };
+      dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: {} }));
+      return dom.document.body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText).filter((row) => row.startsWith("BNB Smart Chain transaction") || row.startsWith("Memo"));
+    };
+
+    expect(rowsWith(true)).toEqual([`Memo0x${"5e".repeat(32)}`]);
+    // The same memo as text names the migration.
+    expect(rowsWith(false)).toEqual(["BNB Smart Chain transaction0x5e5e…5e5eCopy"]);
   });
 
   it("shows no ledger for a bridge transfer the network dropped: it never ran", () => {

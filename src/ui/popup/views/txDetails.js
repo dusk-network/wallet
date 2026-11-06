@@ -1,4 +1,4 @@
-import { transferLedger } from "@dusk-network/app-core/bridge";
+import { migrationsOf, transferLedger } from "@dusk-network/app-core/bridge";
 
 import { formatDuskExact, formatFee, groupThousands } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
@@ -20,6 +20,7 @@ import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js
 import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, txIconSvg } from "./txRow.js";
 import { reasonText } from "./sent.js";
 import { activityRows, loadActivityDetail } from "../activity.js";
+import { migrationFactOf } from "../migrationFacts.js";
 
 // A transaction's details: a centred summary (who, how much, its status),
 // then its date, memo, fee, the profile it left or reached, and its ID, which
@@ -139,16 +140,20 @@ function explorerButton(url, actions, text = "View in Dusk explorer") {
 // (transferLedger): what it sent and the bridge's fee, then the network's, which
 // `feeRow` says, then what arrives, or is on its way. What arrives is said only
 // while it can: not of what the bridge doesn't pay, or past the week it's looked for.
-// One that failed, or was dropped before it ran, sent nothing.
-function ledgerRows(tx, desc, nodeUrl, hidden) {
+// One that failed, or was dropped before it ran, sent nothing. A migration's
+// payout says what the migration paid on its own chain (`evm`), to the wei,
+// and which transactions that counts.
+function ledgerRows(tx, desc, nodeUrl, hidden, evm) {
   const received = desc.arrival ? desc.payout?.received ?? depositLux(tx) : undefined;
-  const ledger = transferLedger({ row: tx, received, failed: desc.unsent });
+  const ledger = transferLedger({ row: tx, received, failed: desc.unsent, evm });
   if (!ledger) return null;
-  const row = (label, line) => (line ? kv(label, h("span", {}, [balance(hidden, line.exact), ` ${line.coin}`])) : null);
+  const row = (label, line, note) =>
+    line ? kv(label, h("span", {}, [balance(hidden, line.exact), ` ${line.coin}`, note ? h("span", { class: "kv-muted", text: ` · ${note}` }) : null].filter(Boolean))) : null;
   const coming = ledger.received && (!ledger.received.expected || desc.payout || awaitingArrival(tx, nodeUrl));
+  const counts = ledger.gas?.parts ? (ledger.gas.parts.includes("approval") ? "approval and migration" : "migration") : "";
   return {
     before: [row("Sent", ledger.sent), row("Bridge fee", ledger.bridgeFee)],
-    after: [coming ? row(ledger.received.expected ? "You receive" : "Received", ledger.received) : null],
+    after: [coming ? row(ledger.received.expected ? "You receive" : "Received", ledger.received) : null, evm ? row(`Fee on ${tx.route.chain.name}`, ledger.gas, counts) : null],
   };
 }
 
@@ -296,12 +301,13 @@ export function txDetailsView(ov, { state, actions } = {}) {
       copyWords(hash, `Copy ${chain} transaction ID`, "Couldn't copy the transaction ID"),
     ]);
   const arrivalRow = desc.arrival ? chainTxRow(arrivalChain, desc.arrival, arrivalLink) : null;
-  // A migration's payout names the migration in its memo: its transaction there.
-  const memo = String(tx?.memo ?? "").trim();
-  const migrated = tx?.route && tx.route.kind !== "service" && /^0x[0-9a-fA-F]{64}$/.test(memo);
-  const migratedRow = migrated ? chainTxRow(tx.route.chain.name, memo, `${String(tx.route.chain.explorerUrl ?? "").replace(/\/+$/, "")}/tx/${memo}`) : null;
+  // A migration's payout names the migration in its memo, as text: its transaction there, and what it paid there.
+  const [migration] = migrationsOf([tx]);
+  const migrated = Boolean(migration);
+  const migratedRow = migrated ? chainTxRow(tx.route.chain.name, migration.hash, `${String(tx.route.chain.explorerUrl ?? "").replace(/\/+$/, "")}/tx/${migration.hash}`) : null;
+  const evm = migrated ? migrationFactOf(ov, tx, { render: actions?.render }) : undefined;
 
-  const ledger = ledgerRows(tx, desc, nodeUrl, hidden);
+  const ledger = ledgerRows(tx, desc, nodeUrl, hidden, evm);
   const rows = h("div", { class: "group" }, [
     when ? kv("Date", dateText(when)) : null,
     desc.arrivedAt ? kv("Arrived", dateText(desc.arrivedAt)) : null,

@@ -1,11 +1,12 @@
 import { CSV_COLUMNS } from "@dusk-network/app-core/export";
-import { networks } from "@dusk-network/networks";
+import { networks, routes } from "@dusk-network/networks";
 import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 import { entryOf } from "../shared/fixtures/rows.js";
 import { accessibleName, installFakeDom, isShown, settle, visibleText } from "./testing/fakeDom.js";
+import { recordedEvm, recordedMigration } from "./testing/recordedEvm.js";
 import { activityView } from "./popup/views/activityView.js";
 import { activityKey } from "./popup/activity.js";
 import { handedExportKey, saveHandedExport } from "./popup/activityExport.js";
@@ -112,7 +113,7 @@ function setup({ status = null, contacts = [], entries = WHOLE, ov: over = {}, h
     txs: LOCAL,
     ...over,
   };
-  const read = entries.map((fields) => entryOf(fields, NODE));
+  const read = entries.map((fields) => entryOf(fields, ov.nodeUrl));
   const history = {
     sync: vi.fn(async () => ({})),
     read: vi.fn(async () => ({ entries: read, state: { finalized: 5_000_000, headAt: AT }, complete: true, coveredTo: 0 })),
@@ -129,7 +130,7 @@ function setup({ status = null, contacts = [], entries = WHOLE, ov: over = {}, h
       account: ACCOUNT,
       profileIndex: 0,
       walletId: ACCOUNT,
-      nodeUrl: NODE,
+      nodeUrl: ov.nodeUrl,
       entries: [],
       names: new Map(),
       loaded: true,
@@ -554,6 +555,41 @@ describe("Activity's Export", () => {
     button("Save CSV").click();
     await settle();
     expect(await firstBytes(1)).toEqual([0xef, 0xbb, 0xbf]);
+  });
+
+  it("adds what a migration paid on its own chain, its approval too, by its payout, and says when that chain can't be read", async () => {
+    // Nandini's: the file had the payout on Dusk, and nothing of the fees paid on BNB Smart Chain.
+    page("/full.html");
+    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
+    const { approval, migration, owner, payout } = recordedMigration;
+    const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: payout.at, blockHeight: 5_684_134 }];
+    const MAINNET = "https://nodes.dusk.network";
+    const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+    const exportAll = async () => {
+      button("Export").click();
+      button("Save CSV").click();
+      await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+      const toast = actions.showToast.mock.calls.at(-1)[0];
+      actions.showToast.mockClear();
+      return { lines: await linesOf(saved.length - 1), toast };
+    };
+    const paidThere = (lines) => lines.filter((l) => l["Sent Currency"] === "BNB").map((l) => [l.TxHash, l["Sent Amount"], l.Tag, l["Account Name"], l.Account]);
+
+    // BNB Smart Chain's RPC can't be read: the payout alone, and the toast says what's missing.
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+    const down = await exportAll();
+    expect(paidThere(down.lines)).toEqual([]);
+    expect(down.lines.find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
+    expect(down.toast).toContain("1 migration's fee on BNB Smart Chain couldn't be read: export again to add it.");
+
+    // Read: the approval and the migration, each a cost of its own, in BNB, from the address that paid it.
+    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
+    const up = await exportAll();
+    expect(paidThere(up.lines)).toEqual([
+      [approval, "0.0000023109", "cost", "BNB Smart Chain", owner],
+      [migration, "0.00000243765", "cost", "BNB Smart Chain", owner],
+    ]);
+    expect(up.toast).not.toContain("couldn't be read");
   });
 
   it("makes a stake with Sozu a trade of DUSK for stDUSK, with its deposit fee, as the pool's event says it", async () => {

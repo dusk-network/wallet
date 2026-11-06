@@ -15,6 +15,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed a Sozu stake's position on Liquid staking: put in, taken out, worth now, deposit fees and rewards so far.
 - Said what an amount brings in a year with Sozu as it's typed, and one line of what the rate is made of under it.
 - Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
+- Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei, and put those fees in the export.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
 - Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
 - Gave the export's values in euros where the browser's region pays in them, and in US dollars elsewhere.
