@@ -444,7 +444,7 @@ describe("transaction details", () => {
     const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: "فاتورة 12 · Rechnung" });
     const memo = [...body.querySelectorAll(".kv")].find((row) => visibleText(row).startsWith("Memo"));
     // Its characters as they are, a right-to-left word set apart for the screen (app-core 0.7.2's displayText).
-    expect(visibleText(memo).replace(/[\u2068\u2069]/g, "")).toBe("Memoفاتورة 12 · Rechnung");
+    expect(visibleText(memo).replace(/[\u2066\u2068\u2069]/g, "")).toBe("Memoفاتورة 12 · Rechnung");
     expect(memo.querySelector(".safe-text__flag")).toBeNull();
   });
 });

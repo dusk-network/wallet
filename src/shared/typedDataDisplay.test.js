@@ -395,7 +395,7 @@ describe("flattenTypedMessage", () => {
     const plain = "العربية 123 456 😀";
     const shown = sanitizeStringForDisplay(plain);
     // Its characters as they are, unflagged, a right-to-left word set apart for the screen (app-core 0.7.2's displayText).
-    expect([shown.display.replace(/[\u2068\u2069]/g, ""), shown.flags]).toEqual([plain, []]);
+    expect([shown.display.replace(/[\u2066\u2068\u2069]/g, ""), shown.flags]).toEqual([plain, []]);
   });
 
   it.each([0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xad])("visibly escapes invisible formatting U+%s without losing it", code => {

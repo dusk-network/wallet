@@ -7,7 +7,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { networks, routes } from "@dusk-network/networks";
 import { duskEvmContracts } from "@dusk-network/networks/duskevm";
-import { displayText } from "@dusk-network/app-core/text";
 
 import { bytesToHex, toBytes } from "../shared/bytes.js";
 import { readDrc20Call } from "../shared/drc20Calls.js";
@@ -497,19 +496,16 @@ describe("text that reads as something it isn't", () => {
     expect(visibleText(app)).not.toContain(RLO);
   });
 
-  // app-core 0.7.2 sets right-to-left words apart; until it's the one installed, this has nothing to show.
-  const setsApart = displayText("\u05d0", { isolate: true }).text !== "\u05d0";
-
-  it.runIf(setsApart)("shows a message and a memo with right-to-left words in the order of their bytes", async () => {
-    const [open, close] = ["\u2068", "\u2069"];
+  it("shows a message and a memo with right-to-left words in the order of their bytes", async () => {
+    const [line, open, close] = ["\u2066", "\u2068", "\u2069"];
     const bytes = new TextEncoder().encode("Pay \u05d0 10 \u05d0 1000 \u05d0 DUSK");
     await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
     // Each word set apart, so neither number moves: nothing's hidden, nothing to flag.
-    expect(app.querySelector(".ap-message").textContent).toBe(`Pay ${open}\u05d0${close} 10 ${open}\u05d0${close} 1000 ${open}\u05d0${close} DUSK`);
+    expect(app.querySelector(".ap-message").textContent).toBe(`${line}Pay ${open}\u05d0${close} 10 ${open}\u05d0${close} 1000 ${open}\u05d0${close} DUSK${close}`);
     expect(app.querySelector(".callout.warn")).toBeNull();
 
     await render("send_tx", transfer(BOB, { memo: "=HYPERLINK(1) pay \u05d0 10 \u05d0 1000" }));
-    expect(row("Memo").querySelector(".safe-text > span").textContent).toBe(`=HYPERLINK(1) pay ${open}\u05d0${close} 10 ${open}\u05d0${close} 1000`);
+    expect(row("Memo").querySelector(".safe-text > span").textContent).toBe(`${line}=HYPERLINK(1) pay ${open}\u05d0${close} 10 ${open}\u05d0${close} 1000${close}`);
   });
 
   it("says when a message goes on past its box, for as long as there's more below", async () => {
