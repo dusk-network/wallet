@@ -13,7 +13,7 @@
 
 import { activityRows as rowsOf, settleSends } from "@dusk-network/app-core/activity";
 import { StaleHistoryError } from "@dusk-network/app-core/history";
-import { sozuFacts } from "@dusk-network/app-core/sozu";
+import { sozuFacts, sozuGrowth } from "@dusk-network/app-core/sozu";
 
 import { activityHistory, archiveAt, historyArchiverUrl, noteActivityUnavailable } from "../../shared/activityHistory.js";
 import { keptArrivals } from "../../shared/bridgeArrival.js";
@@ -412,6 +412,23 @@ const sozuFactsKept = new Map();
 export function sozuFactsOf(ov, rows) {
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
   return sozuFacts({ archive, account: selected(ov).account, rows, cache: sozuFactsKept }).catch(() => undefined);
+}
+
+// How Sozu's stDUSK grew lately, by pool, as app-core reads it from the chain:
+// read once an hour in this popup, for every screen that shows Sozu's rate.
+const sozuGrowthKept = new Map();
+
+/**
+ * How Sozu's stDUSK grew over the last 30 days, from the pool its status names
+ * (app-core's sozuGrowth): null where it can't be read, or before the status is.
+ * @param {object} ov - the overview
+ * @param {object | null | undefined} status - Sozu's status, as the engine reads it
+ * @param {number | null} [tipHeight] - the node's height, where it's known
+ */
+export function sozuGrowthOf(ov, status, tipHeight = null) {
+  if (!status?.contracts?.pool) return Promise.resolve(null);
+  const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
+  return sozuGrowth({ archive, cache: sozuGrowthKept, pool: status.contracts.pool, status, tipHeight }).catch(() => null);
 }
 
 /** How long a detail lookup that brought nothing waits before it is asked again. */
