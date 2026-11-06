@@ -1,6 +1,10 @@
 import { h } from "../../lib/dom.js";
 import { passwordInput } from "../../components/FormControls.js";
 
+// A wrong password says what to try: the password as typed, then the recovery phrase.
+export const WRONG_PASSWORD_TEXT = "Wrong password. Check Caps Lock, or restore with your recovery phrase below.";
+const unlockError = (message) => (/^Incorrect password$/.test(String(message ?? "")) ? WRONG_PASSWORD_TEXT : message);
+
 export function lockedView({ state, actions } = {}) {
   const pwd = passwordInput({
     id: "unlock-password",
@@ -61,7 +65,7 @@ export function lockedView({ state, actions } = {}) {
         pwd.value = "";
         await actions?.render?.({ forceRefresh: true });
       } catch (err) {
-        if (pwd.isConnected) showError(err?.message ?? String(err));
+        if (pwd.isConnected) showError(unlockError(err?.message ?? String(err)));
       } finally {
         pwd.value = "";
         busy = false;

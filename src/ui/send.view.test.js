@@ -11,6 +11,7 @@ import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { noteChainId } from "../shared/nodeNetwork.js";
 import { shortAddress } from "./lib/strings.js";
+import { clockText } from "./lib/time.js";
 import { fakeEvent, installFakeDom, isShown, pastClickGuard, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
 import { parseDuskQrPayload } from "./components/QrScanModal.js";
@@ -1835,5 +1836,51 @@ describe("a request link", () => {
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent("https://phish.example/x")}` });
     vi.resetModules();
     expect((await import("./popup/state.js")).state.draft).toBeNull();
+  });
+});
+
+describe("a payment made already", () => {
+  const draft = (over = {}) => ({ to: ALICE.account, privacy: "public", amountDusk: "0.013", amountLux: "13000000", memo: "Order 1044", ...over });
+  const sentRecord = (over = {}) => ({ hash: "ab".repeat(32), kind: TX_KIND.TRANSFER, privacy: "public", to: ALICE.account, amount: "13000000", memo: "Order 1044", status: "executed", submittedAt: Date.now() - 60_000, profileIndex: 0, ...over });
+  const confirm = (d, txs, ov = overview()) => mount({ route: "confirm", addressBook: { loaded: true, items: [{ name: "Alice", address: ALICE.account }] }, draft: d }, { ...ov, txs });
+  const again = () => {
+    const el = dom.document.body.querySelector(".review-again");
+    return el ? visibleText(el) : "";
+  };
+
+  it("is said on Review, with when it went, and Confirm still goes", () => {
+    // Sofia's: the same request link paid, then pasted again.
+    const at = Date.now() - 60_000;
+    confirm(draft(), [sentRecord({ submittedAt: at })]);
+    expect(again()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(false);
+  });
+
+  it("is said of the same memo whenever it went, and of the same payment without one only moments after", () => {
+    const yesterday = Date.now() - 24 * 60 * 60_000;
+    confirm(draft(), [sentRecord({ submittedAt: yesterday })]);
+    expect(again()).toMatch(/^You sent 0\.013 DUSK to Alice with this memo (yesterday at|on .+ at) /);
+
+    confirm(draft({ memo: "" }), [sentRecord({ memo: undefined, submittedAt: Date.now() - 30_000 })]);
+    expect(again()).toBe(`You sent 0.013 DUSK to Alice at ${clockText(Date.now() - 30_000)}.`);
+    confirm(draft({ memo: "" }), [sentRecord({ memo: undefined, submittedAt: Date.now() - 11 * 60_000 })]);
+    expect(again()).toBe("");
+  });
+
+  it("is nothing for another amount, recipient or memo, or one that failed", () => {
+    for (const record of [sentRecord({ amount: "14000000" }), sentRecord({ to: BOB.account }), sentRecord({ memo: "Order 1045" }), sentRecord({ status: "failed" })]) {
+      confirm(draft(), [record]);
+      expect(again()).toBe("");
+    }
+  });
+});
+
+describe("a send to yourself", () => {
+  it("says so on Review too: it only costs a fee", () => {
+    // Sofia's: the form said it, and Review showed just the address.
+    mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: OWN.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } });
+    expect(visibleText(dom.document.body.querySelector(".review-self-note"))).toBe("This is your own account. Sending to yourself only costs a fee.");
+    mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } });
+    expect(dom.document.body.querySelector(".review-self-note")).toBeNull();
   });
 });

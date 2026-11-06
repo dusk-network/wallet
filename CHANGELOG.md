@@ -16,6 +16,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said what an amount brings in a year with Sozu as it's typed, and one line of what the rate is made of under it.
 - Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
+- Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
 
 ### Changed
 
@@ -29,6 +30,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said when a number in a message to sign, a sign-in or a memo mixes digits of different scripts or reads right to left.
 - Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
 - Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
+- Repeated on Review that a send goes to your own account, and said what to try after a wrong password.
 - Kept another wallet's shielded history out of Activity and Export when the wallet changes during a read; an Export it changes under saves nothing and says so.
 - Said under a .dusk name when a node the wallet doesn't know checked it, and kept that node's answers from the network's own node's.
 - Said plainly on Home when the balance can't be read, instead of showing what the node said.

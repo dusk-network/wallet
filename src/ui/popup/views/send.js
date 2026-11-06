@@ -51,6 +51,10 @@ import {
 import { openQrScanModal } from "../../components/QrScanModal.js";
 import { readRequestLink, walletChainOf } from "../../lib/requestLink.js";
 import { contactAlikeText } from "../../lib/contactNames.js";
+import { clockText } from "../../lib/time.js";
+import { sentAlready } from "@dusk-network/app-core/requests";
+import { activityRows } from "../activity.js";
+import { dayLabel } from "./txRow.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
 import { networkTextOf } from "../../../shared/nodeNetwork.js";
@@ -1087,6 +1091,16 @@ export function sendFormView(ov, { state, actions } = {}) {
  * @param {object} draft
  * @returns {object}
  */
+/**
+ * When a payment went, from now: "at 14:32", "yesterday at 14:32" or "on Fri 24 Oct at 14:32".
+ * @param {number} ms
+ */
+function whenSentText(ms) {
+  const day = dayLabel(ms);
+  const at = `at ${clockText(ms)}`;
+  return day === "Today" ? at : day === "Yesterday" ? `yesterday ${at}` : `on ${day} ${at}`;
+}
+
 const refusedRequest = (draft, problem = "") => ({ ...draft, to: "", duskName: undefined, requestChainId: undefined, refusedChainId: draft?.requestChainId, refusedProblem: problem || undefined, filledFrom: undefined });
 
 /**
@@ -1195,6 +1209,20 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     toNames.hidden = !unique.length;
     if (toNameNote) toNameNote.hidden = Boolean(service) || !(duskName?.name || verifiedName);
   };
+
+  // The same payment, made already: moments ago, or with this memo whenever,
+  // as a request paid once. Said, not stopped: it can be meant.
+  const madeAgain = sentAlready(activityRows(ov, state), { lux: safeBigInt(d.amountLux, 0n), memo: String(d.memo ?? ""), to: toAddr });
+  const againNote =
+    madeAgain && madeAgain.time !== null
+      ? h("div", { class: "callout warn review-again", role: "alert" }, [
+          h("div", { class: "callout-title" }, [
+            "You sent ",
+            balance(balancesHidden(ov) && Boolean(d.amountMasked), formatDuskExact(d.amountLux)),
+            ` DUSK to ${own ? "yourself" : contactName() || duskName?.name || shortAddress(toAddr)}${String(d.memo ?? "").trim() ? " with this memo" : ""} ${whenSentText(madeAgain.time)}.`,
+          ]),
+        ])
+      : null;
 
   // Save to Contacts, unless it's saved already or it's this wallet's own.
   const saveContactBtn = h("button", {
@@ -1367,6 +1395,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         kv("From", h("span", {}, [withReviewWallet(fromName, actions?.review), h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
         d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", safeTextEl(d.memo), "kv--wrap") : null,
       ].filter(Boolean)),
+      // As the form said it: it goes, for a fee.
+      own ? h("div", { class: "send-self-note review-self-note", text: `This is your own ${toAddr === ownAccount ? "account" : "shielded address"}. Sending to yourself only costs a fee.` }) : null,
+      againNote,
       toNameNote,
       ...serviceNotes
         .filter((n) => n.kind !== "fee")
