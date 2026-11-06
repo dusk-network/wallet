@@ -43,6 +43,10 @@ describe("a request link from the web wallet's Send", () => {
       ["https://phish.example/wallet/dashboard/send?to=abc", { url: "https://phish.example/" }],
       ["dusk:public-abc", onWalletPage],
       [undefined, onWalletPage],
+      // A link that says a field twice, or with a user part before its host, which could be read two ways.
+      [`${LINK}&network=mainnet`, onWalletPage],
+      ["https://apps.testnet.dusk.network/wallet/dashboard/send?to=abc&to=def", onWalletPage],
+      ["https://apps.dusk.network@apps.testnet.dusk.network/wallet/dashboard/send?to=abc", onWalletPage],
     ]) {
       await expect(offersRequestLink({ link }, sender)).resolves.toBe(false);
       await expect(openRequestLink({ link }, sender)).resolves.toBe(false);
