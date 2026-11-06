@@ -58,6 +58,20 @@ export function withdrawalCost(feeLux) {
 }
 
 /**
+ * The start of a text shown safe (safeText.js), cut by its characters: a
+ * right-to-left run it cuts through still ends before the "…".
+ * @param {string} text
+ * @param {number} max
+ */
+function startOf(text, max) {
+  const chars = Array.from(text);
+  if (chars.length <= max) return text;
+  const cut = chars.slice(0, max);
+  const open = cut.filter((c) => c === "\u2068").length - cut.filter((c) => c === "\u2069").length;
+  return `${cut.join("")}${"\u2069".repeat(Math.max(0, open))}…`;
+}
+
+/**
  * The title of a request's approval, and what it is about.
  *
  * - `amount`: `{ value, unit }` for a request that moves DUSK, or a
@@ -101,7 +115,7 @@ export function requestSummary(kind, params = {}, { own = [] } = {}) {
       const text = preview?.kind === "text" ? String(preview.text ?? "") : "";
       return {
         title: "Sign a message?",
-        sub: text ? (text.length > 80 ? `${text.slice(0, 80)}…` : text) : `${Number(p.messageLen ?? 0) || 0} bytes, not readable text`,
+        sub: text ? startOf(text, 80) : `${Number(p.messageLen ?? 0) || 0} bytes, not readable text`,
       };
     }
     case "sign_auth":

@@ -124,6 +124,16 @@ describe("transaction details", () => {
     expect([visibleText(id), Boolean(id.querySelector("button.copy-ico"))]).toEqual([`· ${pool.slice(0, 6)}…${pool.slice(-6)}`, true]);
   });
 
+  it("shows a call's function as its memo would be: what reorders it as its code, and flagged", () => {
+    const [rlo, pop] = ["\u202e", "\u202c"];
+    const view = details({ kind: TX_KIND.CONTRACT_CALL, contractId: "ab".repeat(32), fnName: `pay${rlo}evol_ot${pop}`, status: "executed" });
+    const method = view.body.querySelectorAll(".kv").find((row) => row.querySelector(".kv-label").textContent === "Method");
+    expect(method.querySelector(".safe-text > span").textContent).toBe("pay\\u202eevol_ot\\u202c");
+    expect(method.querySelector(".safe-text__flag")).not.toBeNull();
+    expect(view.name).toBe("Call pay\\u202eevol_ot\\u202c");
+    expect(visibleText(view.body)).not.toContain(rlo);
+  });
+
   it("says what a Dusk Domains call did, on its own network", () => {
     // The testnet release's store contract, where names are registered.
     const STORE = releases.testnet.contracts.find((c) => c.role === "store").contractId;
@@ -433,7 +443,8 @@ describe("transaction details", () => {
   it("shows a plain memo as it is, unflagged, in any script", () => {
     const { body } = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", memo: "فاتورة 12 · Rechnung" });
     const memo = [...body.querySelectorAll(".kv")].find((row) => visibleText(row).startsWith("Memo"));
-    expect(visibleText(memo)).toBe("Memoفاتورة 12 · Rechnung");
+    // Its characters as they are, a right-to-left word set apart for the screen (app-core 0.7.2's displayText).
+    expect(visibleText(memo).replace(/[\u2066\u2068\u2069]/g, "")).toBe("Memoفاتورة 12 · Rechnung");
     expect(memo.querySelector(".safe-text__flag")).toBeNull();
   });
 });

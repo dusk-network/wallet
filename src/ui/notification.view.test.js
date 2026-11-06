@@ -481,6 +481,58 @@ describe("text that reads as something it isn't", () => {
     expect(mocks.pending.params.memo).toBe(memo);
   });
 
+  it("shows a call's function as a memo is: what reorders it as its code, and flagged", async () => {
+    await render("send_tx", {
+      kind: "contract_call",
+      privacy: "public",
+      contractId: `0x${"11".repeat(32)}`,
+      fnName: `pay${RLO}evol_ot${POP}`,
+      fnArgs: "0x00",
+      chainId: "dusk:2",
+      nodeUrl: TESTNET,
+    });
+    expect(row("Method").querySelector(".safe-text > span").textContent).toBe("pay\\u202eevol_ot\\u202c");
+    expect(row("Method").querySelector(".safe-text__flag")).not.toBeNull();
+    expect(visibleText(app)).not.toContain(RLO);
+  });
+
+  it("shows a message and a memo with right-to-left words in the order of their bytes", async () => {
+    const [line, open, close] = ["\u2066", "\u2068", "\u2069"];
+    const bytes = new TextEncoder().encode("Pay \u05d0 10 \u05d0 1000 \u05d0 DUSK");
+    await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
+    // Each word set apart, so neither number moves: nothing's hidden, nothing to flag.
+    expect(app.querySelector(".ap-message").textContent).toBe(`${line}Pay ${open}\u05d0${close} 10 ${open}\u05d0${close} 1000 ${open}\u05d0${close} DUSK${close}`);
+    expect(app.querySelector(".callout.warn")).toBeNull();
+
+    await render("send_tx", transfer(BOB, { memo: "=HYPERLINK(1) pay \u05d0 10 \u05d0 1000" }));
+    expect(row("Memo").querySelector(".safe-text > span").textContent).toBe(`${line}=HYPERLINK(1) pay ${open}\u05d0${close} 10 ${open}\u05d0${close} 1000${close}`);
+  });
+
+  it("says when a message goes on past its box, for as long as there's more below", async () => {
+    const bytes = new TextEncoder().encode(`Login to site${"\n".repeat(60)}I transfer all funds`);
+    await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
+    const box = app.querySelector(".ap-message");
+    const goesOn = () => {
+      const line = app.querySelector(".ap-goes-on");
+      return isShown(line) ? line.textContent : "";
+    };
+    // As the window lays it out: 1,326 px of text in a box of 180.
+    Object.assign(box, { scrollHeight: 1326, clientHeight: 180, scrollTop: 0 });
+    dom.window.dispatchEvent(fakeEvent("resize"));
+    expect(goesOn()).toBe("The message goes on below. Scroll it to read all of it.");
+    // Read to the end, it has nothing more to say.
+    box.scrollTop = 1146;
+    box.dispatchEvent(fakeEvent("scroll"));
+    expect(goesOn()).toBe("");
+
+    // A message that fits says nothing.
+    const short = new TextEncoder().encode("Sign in to the shop");
+    await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: short.length, messagePreview: describeSignMessagePreview(short) });
+    Object.assign(app.querySelector(".ap-message"), { scrollHeight: 45, clientHeight: 45, scrollTop: 0 });
+    dom.window.dispatchEvent(fakeEvent("resize"));
+    expect(goesOn()).toBe("");
+  });
+
   it("leaves a plain memo as it is, and neutralizes what a site writes about itself", async () => {
     await render("send_tx", transfer(BOB, { memo: "Order 1042" }));
     expect(row("Memo").textContent).toBe("Order 1042");
@@ -1525,9 +1577,13 @@ describe("a node that isn't a network's own", () => {
       expect(visibleText(strip)).toBe(`Custom node · ${new URL(HOSTILE).host}`.concat(chainId === 2 ? " · What you sign here counts on Testnet." : " · What you sign here counts on Devnet."));
       expect(visibleText(strip)).not.toContain("no value");
     }
-    await render("send_tx", transfer(BOB, { nodeUrl: HOSTILE, networkName: "Custom" }), { nodeUrl: HOSTILE, networkName: "Custom", chainId: 1 });
+    await render("send_tx", transfer(BOB, { chainId: "dusk:3070325578", nodeUrl: HOSTILE, networkName: "Custom" }), { nodeUrl: HOSTILE, networkName: "Custom", chainId: 1 });
     expect(visibleText(panel.querySelector(".testnet-strip"))).toContain("What you sign here counts on Mainnet.");
     expect(row("Network").textContent).toBe(`Custom · ${new URL(HOSTILE).host}`);
+    // Details name the chain the signature carries, and the ID sites see apart from it.
+    expect(row("Signs for").textContent).toBe("Mainnet (chain 1)");
+    expect(row("Chain ID sites see").textContent).toBe("dusk:3070325578");
+    expect(row("Chain ID")).toBeUndefined();
   });
 
   it("says why it can't be signed, in plain words, and offers only Reject, for what's signed of every kind", async () => {

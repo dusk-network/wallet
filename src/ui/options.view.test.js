@@ -485,6 +485,44 @@ describe("the network", () => {
     expect(view.state.settings.nodeDraft).toBeNull();
   });
 
+  it("is Custom while its prover or archiver is someone else's, and the network chosen again puts its own back", async () => {
+    const view = await settings({ nodeUrl: "https://testnet.nodes.dusk.network", proverUrl: "https://testnet.provers.dusk.network", archiverUrl: "https://hostile-node.example" });
+    expect(dom.document.body.querySelector("select#network").value).toBe("custom");
+    view.actions.send.mockImplementation(async () => ({ ok: true }));
+    await choose("testnet");
+    expect(view.actions.send).toHaveBeenCalledWith({
+      type: "DUSK_UI_SET_NODE_URL",
+      nodeUrl: "https://testnet.nodes.dusk.network",
+      proverUrl: "https://testnet.provers.dusk.network",
+      archiverUrl: "https://testnet.nodes.dusk.network",
+    });
+  });
+
+  it("refuses plain http to another computer, as a site's switch does, and takes it on this one", async () => {
+    const testnet = { nodeUrl: "https://testnet.nodes.dusk.network", proverUrl: "https://testnet.provers.dusk.network", archiverUrl: "https://testnet.nodes.dusk.network" };
+    const saved = (view) => view.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SET_NODE_URL");
+    for (const [name, typed, problem] of [
+      ["Prover URL", "http://hostile-node.example", "The prover URL must start with https://, unless it's on this computer."],
+      ["Archiver URL", "http://192.168.1.20:8080", "The archiver URL must start with https://, unless it's on this computer."],
+      ["Node URL", "https://user:pass@node.example", "Invalid node URL format"],
+    ]) {
+      const view = await settings(testnet);
+      typeInto(field(name), typed);
+      saveButton().click();
+      await settle();
+      expect(shownText(view.section("Network"))).toContain(problem);
+      expect(saved(view)).toEqual([]);
+    }
+
+    const view = await settings(testnet);
+    view.actions.send.mockImplementation(async () => ({ ok: true }));
+    const sends = () => saved(view);
+    typeInto(field("Prover URL"), "http://127.0.0.1:8080");
+    saveButton().click();
+    await settle();
+    expect(sends()).toEqual([[expect.objectContaining({ nodeUrl: "https://testnet.nodes.dusk.network", proverUrl: "http://127.0.0.1:8080" })]]);
+  });
+
   it("drops what wasn't saved on leaving Settings, so coming back says what the wallet is on", async () => {
     const view = await settings({ nodeUrl: "https://nodes.dusk.network" });
     await choose("custom");

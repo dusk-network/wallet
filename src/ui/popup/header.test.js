@@ -71,6 +71,49 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("the network at the top", () => {
+  const pill = (dom) => {
+    const el = dom.document.createElement("button");
+    el.id = "network-pill";
+    el.appendChild(Object.assign(dom.document.createElement("span"), { className: "network-pill__label" }));
+    dom.document.body.appendChild(el);
+    return () => el.querySelector(".network-pill__label").textContent;
+  };
+  const panel = (dom) => {
+    const el = dom.document.createElement("div");
+    el.className = "panel";
+    dom.document.body.appendChild(el);
+    return () => {
+      const strip = el.querySelector(".testnet-strip");
+      return strip ? visibleText(strip) : "";
+    };
+  };
+
+  it("is Custom, saying whose, while the prover or the archiver isn't the network's own", async () => {
+    const { dom, renderHeader } = await setup("popup");
+    const [label, strip] = [pill(dom), panel(dom)];
+    const own = { ...overview, proverUrl: "https://testnet.provers.dusk.network", archiverUrl: "https://testnet.nodes.dusk.network" };
+    renderHeader(own);
+    expect([label(), strip()]).toEqual(["Testnet", "Testnet · Test DUSK has no value"]);
+
+    renderHeader({ ...own, proverUrl: "http://hostile-node.example", archiverUrl: "https://hostile-node.example" });
+    expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK has no value · Proofs and history from hostile-node.example"]);
+    // It wraps, as a custom node's does, rather than cut off the host.
+    expect(dom.document.body.querySelector(".testnet-strip").classList.contains("testnet-strip--wrap")).toBe(true);
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    expect(css).toMatch(/\.testnet-strip\.testnet-strip--wrap \{\s*white-space: normal;/);
+    renderHeader({ ...own, archiverUrl: "https://archive.example" });
+    expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK has no value · History from archive.example"]);
+
+    // Mainnet's own node says nothing, unless what it uses with it is someone else's.
+    const mainnet = { ...overview, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network", proverUrl: "https://provers.dusk.network", archiverUrl: "https://nodes.dusk.network" };
+    renderHeader(mainnet);
+    expect([label(), strip()]).toEqual(["Mainnet", ""]);
+    renderHeader({ ...mainnet, proverUrl: "https://prover.example" });
+    expect([label(), strip()]).toEqual(["Custom", "Mainnet · Proofs from prover.example"]);
+  });
+});
+
 describe("header", () => {
   it.each(Object.keys(VIEWS))("holds the account chip and Settings, no ▾ button or Refresh (%s)", async (view) => {
     const { host, renderHeader } = await setup(view);

@@ -286,7 +286,13 @@ body[data-runtime="tauri"].page--full .panel {
   white-space: nowrap;
 }
 
-/* Text someone else chose, and a line under it when it had hidden characters */
+/* Text someone else chose, and a line under it when it had hidden characters.
+   It reads left to right on its own, so nothing beside it can move its digits. */
+.safe-text > span:first-child {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 .safe-text__flag {
   display: block;
   margin-top: 2px;
@@ -297,6 +303,11 @@ body[data-runtime="tauri"].page--full .panel {
 
 /* A node that isn't a network's own says which it is, in neutral words, its
    whole host showing: the end of a host is what names it. */
+.testnet-strip.testnet-strip--wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .testnet-strip.node-strip {
   border-bottom-color: var(--border);
   background: var(--surface-1);
@@ -2839,13 +2850,15 @@ body.page--popup .brand-mark {
 .srp-word-index {
   width: 18px;
   text-align: right;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--muted-foreground);
 }
 
+/* The words to write down, as large as the web wallet's */
 .srp-word-text {
-  font-size: 12px;
+  font-size: 18px;
+  line-height: 1.25;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -3542,6 +3555,35 @@ body[data-runtime="tauri"].page--full .panel {
 
 .receive-field .receive-copy {
   margin-left: auto;
+}
+
+/* The address in full, to read and compare: its first and last six stand out,
+   as in the web wallet, and it wraps anywhere but in its last six. */
+.full-address {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.full-address b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.full-address__tail {
+  white-space: nowrap;
+}
+
+.receive-field--address {
+  padding: 10px 12px;
+}
+
+.receive-field--address .receive-field__address {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
 }
 
 /* What people reach through the name, said under it */

@@ -13,7 +13,8 @@
 // noted until that wallet's vault is: one cut short in between leaves no
 // vault, and the next wallet made here keeps those contacts only if it's
 // the same wallet. That wallet's profile labels and tokens stay with them, and
-// everything else goes as with a reset, the network included.
+// so does the network when it's one of Dusk's own (listedSettings): everything
+// else goes as with a reset, a custom node included.
 
 import { forgetAccountNames, keepOnlyAccountNamesOf } from "./accountNames.js";
 import { clearActivityStore, forgetWalletActivity } from "./activityStore.js";

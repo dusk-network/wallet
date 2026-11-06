@@ -9,6 +9,7 @@
 
 import { formatDusk, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
+import { safeText } from "../../../shared/safeText.js";
 import { isEvmAddress } from "../../../shared/bridgeCalls.js";
 import { ARRIVAL_WINDOW_MS, depositTime, keptArrivals, payoutOf } from "../../../shared/bridgeArrival.js";
 import { listAddressBook } from "../../../shared/addressBook.js";
@@ -132,7 +133,8 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const dir = tx?.direction;
   const value = tx?.value ?? 0n;
   const asset = tx?.sent?.asset && typeof tx.sent.asset === "object" ? tx.sent.asset : null;
-  const fn = String(tx?.fnName ?? asset?.action ?? "");
+  // A function's name as whoever called it chose it: what reorders text shows as its code.
+  const fn = safeText(String(tx?.fnName ?? asset?.action ?? "")).text;
   // The other side: a saved contact's own name, with its .dusk name (as
   // verified, else as typed when sending) beside it; else the .dusk name;
   // else what the network's file calls it; else its short address.

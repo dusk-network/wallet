@@ -7,6 +7,7 @@ import { nameCheckNote } from "../../../shared/nodeNetwork.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { joinedAddress, passesForDuskName } from "../../lib/recipient.js";
+import { looksAlike } from "../../lib/lookAlike.js";
 import { waiting } from "../../components/Waiting.js";
 import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
@@ -453,13 +454,21 @@ export function addressBookView(ov, { state, actions } = {}) {
       },
     });
     const nameError = fieldError(`contact-name-error-${n}`);
-    // A name in use: only the address would tell the two apart in a payment. It can be saved.
+    // A name in use, or one that looks like it in other letters: only the
+    // address would tell the two apart in a payment. It can be saved.
     const nameNote = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
     const updateName = () => {
       const typed = nameKey(nameInput.value);
-      const other = typed ? (Array.isArray(ab.items) ? ab.items : []).find((e) => e?.id !== ab.editId && nameKey(e?.name) === typed) : null;
-      nameNote.textContent = other ? `You already have a contact called ${String(other.name).trim()}, at ${shortAddress(String(other.address ?? ""))}.` : "";
-      nameNote.hidden = !other;
+      const others = typed ? (Array.isArray(ab.items) ? ab.items : []).filter((e) => e?.id !== ab.editId) : [];
+      const same = others.find((e) => nameKey(e?.name) === typed);
+      const alike = same ? null : others.find((e) => looksAlike(nameInput.value, e?.name));
+      const at = (e) => `${String(e.name).trim()}, at ${shortAddress(String(e.address ?? ""))}`;
+      nameNote.textContent = same
+        ? `You already have a contact called ${at(same)}.`
+        : alike
+          ? `This looks like your contact ${at(alike)}, but uses different letters.`
+          : "";
+      nameNote.hidden = !same && !alike;
     };
 
     const addrInput = textInput({

@@ -1,4 +1,4 @@
-import { isLocalNode, listedNetwork, networkLabelOf } from "./nodeNetwork.js";
+import { isLocalNode, listedNetwork, networkLabelOf, outsideEndpoints } from "./nodeNetwork.js";
 
 // Shared network helpers.
 
@@ -13,6 +13,16 @@ export function detectPresetIdFromNodeUrl(nodeUrl) {
   const net = listedNetwork(nodeUrl);
   if (net) return net.name;
   return isLocalNode(nodeUrl) ? "local" : "custom";
+}
+
+/**
+ * The preset the wallet's addresses are: the node's, unless its prover or
+ * archiver is someone else's, which makes them custom.
+ * @param {{ nodeUrl?: string, proverUrl?: string, archiverUrl?: string }} endpoints
+ * @returns {"local"|"testnet"|"devnet"|"mainnet"|"custom"}
+ */
+export function detectPresetId(endpoints = {}) {
+  return outsideEndpoints(endpoints).length ? "custom" : detectPresetIdFromNodeUrl(endpoints.nodeUrl ?? "");
 }
 
 /**

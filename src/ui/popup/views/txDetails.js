@@ -99,7 +99,7 @@ function technicalRows(tx, ov, nodeUrl, showToast, hidden) {
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
     tx?.source !== "sent" && ["executed", "failed"].includes(tx?.status) ? kv("Finality", "Final") : null,
     tx?.kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", contractValue(String(tx.contractId), nodeUrl || ov?.nodeUrl, showToast)) : null,
-    tx?.fnName ? kv("Method", mono(String(tx.fnName))) : null,
+    tx?.fnName ? kv("Method", safeTextEl(String(tx.fnName), { mono: true })) : null,
     tx?.blockHash ? kv("Block hash", mono(String(tx.blockHash), shortAddress(String(tx.blockHash)))) : null,
     at("Submitted", tx?.submittedAt),
     at("Seen in mempool", watch.mempoolSeenAt),

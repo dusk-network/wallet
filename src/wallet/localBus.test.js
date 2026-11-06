@@ -387,6 +387,24 @@ describe("contacts", () => {
       expect(localStorage.getItem("dusk_reset_pending_v1")).toBeNull();
     });
 
+    it("keep the network it was on, one of Dusk's own, and go back to Mainnet from any other node", async () => {
+      const { getSettings, setSettings } = await import("../shared/settings.js");
+      let localSend = await walletA();
+      await setSettings({ nodeUrl: "https://testnet.nodes.dusk.network", proverUrl: "https://testnet.provers.dusk.network", chainId: 2 });
+      await expect(localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" })).resolves.toMatchObject({ ok: true });
+      expect(await getSettings()).toMatchObject({
+        nodeUrl: "https://testnet.nodes.dusk.network",
+        proverUrl: "https://testnet.provers.dusk.network",
+        archiverUrl: "https://testnet.nodes.dusk.network",
+        chainId: 2,
+      });
+
+      localSend = await walletA();
+      await setSettings({ nodeUrl: "https://my-node.example", proverUrl: "https://my-node.example", archiverUrl: "https://my-node.example", chainId: 2 });
+      await expect(localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" })).resolves.toMatchObject({ ok: true });
+      expect((await getSettings()).nodeUrl).toBe("https://nodes.dusk.network");
+    });
+
     it("leave everything as it was for a phrase that isn't one", async () => {
       const localSend = await walletA();
       const txs = await import("../shared/txStore.js");
@@ -425,6 +443,21 @@ describe("a custom node's chain ID, on the desktop app", () => {
     expect(configure).toHaveBeenLastCalledWith(expect.objectContaining({ nodeUrl: NODE, chainId: 2 }));
     await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ nodeUrl: NODE, chainId: 2 });
     expect(infoReads(fetch)).toBe(1);
+  });
+
+  it("refuses a node, prover or archiver over plain http on another computer, and saves nothing", async () => {
+    const fetch = vi.fn(async () => new Response('{"chain_id":2}'));
+    vi.stubGlobal("fetch", fetch);
+    const { localSend } = await import("./localBus.js");
+    for (const [message, problem] of [
+      [{ nodeUrl: "http://hostile-node.example" }, "The node URL must start with https://, unless it's on this computer."],
+      [{ nodeUrl: NODE, proverUrl: "http://hostile-node.example" }, "The prover URL must start with https://, unless it's on this computer."],
+      [{ nodeUrl: NODE, archiverUrl: "ftp://hostile-node.example" }, "Invalid archiver URL format"],
+    ]) {
+      await expect(localSend({ type: "DUSK_UI_SET_NODE_URL", ...message })).resolves.toMatchObject({ error: { message: problem } });
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(localSend({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: "http://localhost:8080" })).resolves.toMatchObject({ ok: true, nodeUrl: "http://localhost:8080" });
   });
 
   it("is asked again as the wallet draws when the node couldn't say when chosen, at most every 30 seconds", async () => {

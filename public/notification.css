@@ -289,6 +289,8 @@ ul.ap-facts {
 }
 
 .ap-message {
+  direction: ltr;
+  unicode-bidi: isolate;
   max-height: 180px;
   overflow: auto;
   padding: 12px 14px;

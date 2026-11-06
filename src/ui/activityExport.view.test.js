@@ -532,7 +532,8 @@ describe("Activity's Export", () => {
   it("makes a stake with Sozu a trade of DUSK for stDUSK, with its deposit fee, as the pool's event says it", async () => {
     page("/full.html");
     const pool = networks.testnet.sozu.fallbacks.pool;
-    // What the pool's deposit event holds: amount, fee, stake and supply, as little-endian u64s.
+    // What the pool's deposit event holds: amount, fee, stake and supply, as
+    // little-endian u64s, then the account it names, a key, to 8 bytes.
     const u64 = (n) => {
       const bytes = [];
       let left = BigInt(n);
@@ -544,7 +545,7 @@ describe("Activity's Export", () => {
     };
     const hash = "d1".repeat(32);
     archive.query.mockImplementation(async () => ({
-      h0: { json: [{ origin: hash, events: [{ target: pool, topic: "deposit", data: [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n].map(u64).join("") }] }] },
+      h0: { json: [{ origin: hash, events: [{ target: pool, topic: "deposit", data: `${[100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n].map(u64).join("")}01${"ab".repeat(193)}${"00".repeat(6)}` }] }] },
     }));
     setup({ entries: [{ hash, kind: TX_KIND.CONTRACT_CALL, contractId: pool, counterparty: pool, fnName: "sozu_stake", value: "100000000000", fee: "5000000", timestamp: AT, blockHeight: 4_700_000 }] });
     button("Export").click();

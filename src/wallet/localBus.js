@@ -11,6 +11,8 @@ import { clearAllPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
+import { listedSettings } from "../shared/nodeNetwork.js";
+import { endpointProblem } from "../shared/securityPolicy.js";
 import { chainIdForChoice, readChainId } from "../shared/networkStatus.js";
 import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
@@ -268,6 +270,8 @@ export async function localSend(message) {
         }
         if (isUnlocked()) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Lock the wallet first");
         const walletId = await walletIdOf(String(mnemonic));
+        // Mainnet, Testnet or Devnet stays: a restore isn't a move to another network.
+        const network = listedSettings(String((await getSettings())?.nodeUrl ?? ""));
         lock();
         // Noted with the wallet it makes until that wallet's vault is.
         await beginReset({ keepContactsOf: walletId });
@@ -276,6 +280,7 @@ export async function localSend(message) {
         await clearVault();
         const restored = await createVault(mnemonic, password);
         await endReset();
+        if (network) await setSettings(network);
         await ensureEngineConfigured();
         await unlockWallets({ wallets: [{ ...restored, mnemonic: String(mnemonic) }], walletKey: restored.id });
         await keepWalletShown(unlockedNow());
@@ -305,29 +310,9 @@ export async function localSend(message) {
         message?.archiverUrl !== undefined && message?.archiverUrl !== null
           ? String(message.archiverUrl).trim()
           : "";
-      try {
-        // eslint-disable-next-line no-new
-        new URL(nodeUrl);
-      } catch {
-        throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid node URL");
-      }
-
-      if (proverUrl) {
-        try {
-          // eslint-disable-next-line no-new
-          new URL(proverUrl);
-        } catch {
-          throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid prover URL");
-        }
-      }
-      if (archiverUrl) {
-        try {
-          // eslint-disable-next-line no-new
-          new URL(archiverUrl);
-        } catch {
-          throw rpcError(ERROR_CODES.INVALID_PARAMS, "Invalid archiver URL");
-        }
-      }
+      // Each an https address, or plain http on this computer only, as the extension takes them.
+      const problem = endpointProblem(nodeUrl, "node") || (proverUrl && endpointProblem(proverUrl, "prover")) || (archiverUrl && endpointProblem(archiverUrl, "archiver"));
+      if (problem) throw rpcError(ERROR_CODES.INVALID_PARAMS, problem);
 
       // The chain ID the node signs for, fixed with it, as the background fixes it.
       const chainId = await chainIdForChoice(nodeUrl, { accept: Number.isInteger(message?.acceptChain) ? message.acceptChain : null });

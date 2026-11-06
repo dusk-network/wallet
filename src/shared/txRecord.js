@@ -1,8 +1,11 @@
 // A sent transaction's first record, as Activity and the watchers start from
 // it (txStore.js): the wallet that sent it, who asked, on which node and network, the profile that paid, what
 // it sends and to whom, its gas, and the shielded notes it reserves. The
-// wallet's own sends add the stake's owner, how they were paid, the token and
-// the .dusk name typed for the recipient; a site's add what its call says.
+// wallet's own sends add the stake's owner, how they were paid, the token,
+// the .dusk name typed for the recipient and what a Sozu unstake brings back;
+// a site's add what its call says.
+
+import { SOZU_FN } from "@dusk-network/networks/sozu";
 
 import { normalizeNullifiers } from "./bytes.js";
 import { TX_KIND } from "./constants.js";
@@ -61,15 +64,29 @@ export function submittedTxMeta(params, { walletId, origin, nodeUrl, profileInde
 }
 
 /**
+ * What a Sozu unstake brings back in its own transaction: the amount it asks
+ * the pool for, which its record moves from the start, as the chain's row
+ * will. The call itself sends nothing along.
+ * @param {object} params
+ * @param {object | undefined} asset
+ */
+function sozuUnstakeMoves(params, asset) {
+  const amount = String(params?.fnArgsAmountLux ?? "");
+  return asset?.kind === "sozu" && params?.fnName === SOZU_FN.UNSTAKE && /^\d+$/.test(amount) ? { amount, deposit: undefined } : {};
+}
+
+/**
  * What only the wallet's own sends record, from the popup's message.
  * @param {object} params - the transaction as it was sent
  * @param {{ asset?: object, toName?: string }} message
  */
 export function walletSendFields(params, message) {
+  const asset = message?.asset && typeof message.asset === "object" ? message.asset : undefined;
   return {
     ownerProfileIndex: params?.ownerProfileIndex != null ? Number(params.ownerProfileIndex) || 0 : undefined,
     payment: params?.payment ? String(params.payment) : undefined,
-    asset: message?.asset && typeof message.asset === "object" ? message.asset : undefined,
+    asset,
     toName: typedRecipientName(message?.toName),
+    ...sozuUnstakeMoves(params, asset),
   };
 }

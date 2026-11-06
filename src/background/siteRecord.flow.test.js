@@ -185,6 +185,36 @@ describe("what's kept of what a site asked", () => {
     expect(recordOf().asked.map((entry) => entry.at)).toEqual(Array.from({ length: SITE_ASKED_KEPT }, (_, i) => 99 + SITE_ASKED_KEPT - i));
   });
 
+  it("keeps what was refused when a site asks and cancels at once, again and again", async () => {
+    await approveOrigin(SITE, { accountIndex: 0, profileId: `account:0:${ACCOUNT}` }, ACCOUNT);
+    for (const [method, params] of [["dusk_sendTransaction", pay()], ["dusk_sendTransaction", call()], ["dusk_signMessage", { message: "0x6869" }]]) {
+      const asked = await ask(method, params);
+      asked.reject();
+      await asked.outcome;
+    }
+    // Marek's: connect, then disconnect before anyone answers, 32 times over.
+    await handleRpc(SITE, { method: "dusk_disconnect" });
+    for (let i = 0; i < 32; i += 1) {
+      const asked = await ask("dusk_requestProfiles");
+      await handleRpc(SITE, { method: "dusk_disconnect" });
+      await asked.outcome;
+    }
+    await vi.waitFor(() => expect(recordOf().asked.filter((entry) => entry.answer === "cancelled").length).toBeGreaterThan(20));
+    const asked = await askedOf();
+    expect(asked).toHaveLength(SITE_ASKED_KEPT);
+    expect(asked.filter((entry) => entry.at(-1) === "rejected")).toEqual([
+      ["sign_message", "rejected"],
+      ["contract_call", "swap_tokens", "rejected"],
+      ["transfer", "rejected"],
+    ]);
+
+    // Nor can other sites that only cancelled push out the record of one that was refused.
+    for (let at = 1; at <= SITES_KEPT + 5; at += 1) {
+      await noteSiteRequest(ACCOUNT, `https://c${at}.example`, { kind: "connect", answer: "cancelled", at: Date.now() + at });
+    }
+    expect(recordOf()?.asked.filter((entry) => entry.answer === "rejected")).toHaveLength(3);
+  });
+
   it("keeps a wallet's sites within what's kept: those never approved go first", async () => {
     await noteSiteRequest(ACCOUNT, "https://allowed.example", { kind: "connect", answer: "approved", at: 1 });
     for (let at = 2; at <= SITES_KEPT + 10; at += 1) {

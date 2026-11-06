@@ -1084,6 +1084,23 @@ describe("liquid staking", () => {
     expect(visibleText(body.querySelectorAll(".group.info .list-row")[1])).toBe("Sozu keeps 15% of rewards0.25% on deposits · No fee to unstake");
   });
 
+  it("says what Max keeps of a stake, as native staking does, and on Review that the deposit fee doesn't come back", async () => {
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    popup(state);
+    const maxNote = () => {
+      const note = body.querySelector(".sozu-max");
+      return note && isShown(note) ? visibleText(note) : "";
+    };
+    button("Max").click();
+    expect(maxNote()).toBe("Max keeps 0.015 DUSK: up to 0.005 for this fee and 0.01 to unstake later.");
+    // An amount typed instead keeps nothing back.
+    typeInto(field("Stake amount"), "100");
+    expect(maxNote()).toBe("");
+    button("Review stake").click();
+    await settle();
+    expect(visibleText(body.querySelector(".sozu-fee-gone"))).toBe("The deposit fee of 0.25 DUSK doesn't come back.");
+  });
+
   it("refuses a stake under the least that gets stDUSK at the rate now, after the fee", () => {
     const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
     popup(state);
@@ -1552,8 +1569,8 @@ describe("liquid staking", () => {
       "Deposit fee0.25% · 0.25 DUSK",
       "FromProfile 1 · Public",
     ]);
-    // Nothing on what a failed call costs; Sozu is named a third party above.
-    expect(body.querySelectorAll(".row > .stake-cap")).toEqual([]);
+    // Nothing on what a failed call costs, only that the deposit fee stays with Sozu; Sozu is named a third party above.
+    expect(body.querySelectorAll(".row > .stake-cap").map(visibleText)).toEqual(["The deposit fee of 0.25 DUSK doesn't come back."]);
     expect(visibleText(body)).not.toMatch(/whole (gas )?limit/);
     button("Confirm").click();
     await settle();

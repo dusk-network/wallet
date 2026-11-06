@@ -11,7 +11,7 @@ import { getMinimumGas } from "../../shared/txDefaults.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { networkFor } from "@dusk-network/networks";
-import { chainIdForNode, networkTextOf, noteChainId } from "../../shared/nodeNetwork.js";
+import { chainIdForNode, chainWords, networkTextOf, noteChainId } from "../../shared/nodeNetwork.js";
 import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist.js";
 import { safeText, textNeedsReview } from "../../shared/safeText.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
@@ -90,6 +90,28 @@ function show(body, actions = []) {
 
 function renderError(text) {
   show([h("div", { class: "err", role: "alert", text })]);
+}
+
+/**
+ * Under a box of a site's text that scrolls, a line that says it goes on, for
+ * as long as there's more of it below the box's edge: blank lines can push
+ * the rest of a message out of sight.
+ * @param {HTMLElement} box - the box, once it's on the page
+ * @param {string} what - "message", "statement"
+ */
+function goesOnNote(box, what) {
+  const line = h("p", { class: "ap-sub ap-goes-on", role: "note", hidden: true, text: `The ${what} goes on below. Scroll it to read all of it.` });
+  const check = () => {
+    if (!box.isConnected) {
+      window.removeEventListener?.("resize", check);
+      return;
+    }
+    line.hidden = !(box.scrollHeight - box.scrollTop - box.clientHeight > 1);
+  };
+  box.addEventListener("scroll", check);
+  window.addEventListener?.("resize", check);
+  requestAnimationFrame(check);
+  return line;
 }
 
 // The network the request is on, in the header beside the wallet's name, and
@@ -366,9 +388,11 @@ export async function renderNotification() {
   // signature's chain, or the wallet's.
   const nodeUrl = String(params?.nodeUrl ?? pending.nodeUrl ?? "");
   const chainRefused = String(pending.chainRefusal ?? "");
+  // The wallet's prover and archiver, which go with its own node.
+  const endpoints = nodeUrl === String(pending.nodeUrl ?? "") ? { proverUrl: String(pending.proverUrl ?? ""), archiverUrl: String(pending.archiverUrl ?? "") } : {};
   showNetwork(
     String(params?.networkName ?? "") || chainName(params?.chainId) || String(pending.networkName ?? "") || (nodeUrl ? networkNameFromNodeUrl(nodeUrl) : ""),
-    { nodeUrl, chainId: pending.chainId ?? null }
+    { nodeUrl, chainId: pending.chainId ?? null, ...endpoints }
   );
 
   const accountsArr = Array.isArray(accounts) ? accounts : [];
@@ -809,13 +833,15 @@ export async function renderNotification() {
 
     let message;
     if (preview?.kind === "text") {
+      const box = h("div", {
+        class: "ap-message",
+        text: String(preview.text ?? ""),
+        title: preview.truncated ? "Preview shortened; the hash covers the full message." : undefined,
+      });
       message = h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-message-title" }, [
         sectionTitle(preview.truncated ? "Message, shortened" : "Message", "ap-message-title"),
-        h("div", {
-          class: "ap-message",
-          text: String(preview.text ?? ""),
-          title: preview.truncated ? "Preview shortened; the hash covers the full message." : undefined,
-        }),
+        box,
+        goesOnNote(box, "message"),
         preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash below covers the full message." }) : null,
         preview.needsReview ? warning(TEXT_REVIEW_TITLE, "This message has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign it if you trust this site.") : null,
       ]);
@@ -857,6 +883,7 @@ export async function renderNotification() {
     const chainId = String(params?.chainId ?? "");
     const nonce = String(params?.nonce ?? "");
     const statement = safeText(String(params?.statement ?? "").trim(), { keepLines: true });
+    const statementBox = statement.text ? h("div", { class: "ap-message", text: statement.text }) : null;
     const nonceShown = safeText(nonce).text;
     const expiresAt = String(params?.expiresAt ?? "").trim();
 
@@ -864,10 +891,11 @@ export async function renderNotification() {
       [
         site,
         requestHead({ title: "Sign in to this site?" }),
-        statement.text
+        statementBox
           ? h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-statement-title" }, [
               sectionTitle("The site's statement", "ap-statement-title"),
-              h("div", { class: "ap-message", text: statement.text }),
+              statementBox,
+              goesOnNote(statementBox, "statement"),
               statement.flagged ? warning(TEXT_REVIEW_TITLE, "This statement has hidden characters that can change how it reads. They show here as � or \\u codes. Only sign in if you trust this site.") : null,
             ])
           : null,
@@ -1081,10 +1109,13 @@ export async function renderNotification() {
     const myName = nameOf(activeAccount);
     const me = myName ? `your name ${myName}` : "your account";
 
-    // The network's lines, which most people skip.
+    // The network's lines, which most people skip: the chain the signature
+    // carries, and apart from it the ID sites are told, a custom node's own.
+    const signsFor = chainIdForNode(nodeUrl);
     const networkRows = () => [
       kv("Network", networkName || "Unknown"),
-      txChainId ? kv("Chain ID", mono(txChainId)) : null,
+      signsFor !== null ? kv("Signs for", chainWords(signsFor)) : null,
+      txChainId ? kv("Chain ID sites see", mono(txChainId)) : null,
       nodeUrl ? kv("Node", mono(nodeUrl), { stack: true }) : null,
     ];
 
@@ -1309,7 +1340,8 @@ export async function renderNotification() {
           [
             ...networkRows(),
             kv("Contract ID", mono(contractShown), { stack: true }),
-            kv("Method", mono(fnName || "(none)")),
+            // The site's name for it, as a memo is shown: what reorders text shows as its code.
+            kv("Method", fnName ? safeTextEl(fnName, { mono: true }) : mono("(none)")),
             kv("Call data", mono(callData), { stack: true }),
           ],
           { className: "group--inset" }

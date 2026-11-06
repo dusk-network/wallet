@@ -3,7 +3,7 @@ import { wordlist } from "@scure/bip39/wordlists/english";
 import { h } from "../../lib/dom.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
-import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
+import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, reviewActions, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -326,7 +326,8 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
       h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
       srpGridEl(mnemonic, { blurred: !state.onboard.reveal }),
       h("div", { class: "phrase-tools" }, [toggle, copyBtn]),
-      next,
+      // In view at the bottom however small the window, as Confirm is on a Review.
+      reviewActions(next),
     ].filter(Boolean)),
   ];
 }

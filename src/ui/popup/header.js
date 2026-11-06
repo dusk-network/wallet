@@ -8,7 +8,7 @@ import { platform } from "../../platform/index.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
 import { profileLabelOf, walletNameOf } from "../components/ProfileName.js";
 import { syncTestnetStrip } from "../components/TestnetStrip.js";
-import { listedChainId } from "../../shared/nodeNetwork.js";
+import { listedChainId, outsideEndpoints } from "../../shared/nodeNetwork.js";
 
 /**
  * Get a CSS class for network status indicator.
@@ -55,13 +55,16 @@ export function createHeaderRenderer({
     // Update network pill label in header
     const networkPill = document.getElementById("network-pill");
     const networkLabel = networkPill?.querySelector(".network-pill__label");
-    // While a switch runs, the pill names the network it goes to.
+    // While a switch runs, the pill names the network it goes to. A prover or
+    // an archiver that isn't the network's own makes it Custom.
+    const endpoints = { nodeUrl: ov?.nodeUrl, proverUrl: ov?.proverUrl, archiverUrl: ov?.archiverUrl };
     if (networkLabel && !networkPill.classList.contains("is-switching")) {
-      networkLabel.textContent = ov?.networkName ?? "Network";
+      networkLabel.textContent = ov?.networkName && outsideEndpoints(endpoints).length ? "Custom" : (ov?.networkName ?? "Network");
     }
 
-    // A test network says so above the header, and a custom node which it is.
-    syncTestnetStrip(document.querySelector(".panel"), ov?.networkName, { nodeUrl: ov?.nodeUrl, chainId: ov?.chainId, refusal: ov?.chainRefusal });
+    // A test network says so above the header, a custom node which it is, and
+    // another's prover or archiver whose.
+    syncTestnetStrip(document.querySelector(".panel"), ov?.networkName, { ...endpoints, chainId: ov?.chainId, refusal: ov?.chainRefusal });
 
     // Update network status indicator
     const nodeStatus = ov?.networkStatus?.nodeStatus ?? "unknown";
