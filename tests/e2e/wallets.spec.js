@@ -119,7 +119,7 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
 test("moves nothing with a wrong password, then moves on the right one", async ({ page }) => {
   await page.goto("/");
   await unlock(page, `${twelve.password}!`);
-  await expect(page.locator("#unlock-error")).toHaveText("Incorrect password");
+  await expect(page.locator("#unlock-error")).toHaveText("Wrong password. Check Caps Lock, or restore with your recovery phrase below.");
   expect(await stored(page, "dusk_vault_v1")).toEqual(twelve.vault);
   expect(await stored(page, "dusk_vault_v2")).toBeNull();
 

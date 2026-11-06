@@ -137,7 +137,7 @@ test("rerendering an in-flight unlock keeps it busy, blocks duplicates and allow
   expect(await page.evaluate(() => window.unlockRequests.length)).toBe(1);
   await page.evaluate(() => window.unlockReply.resolve({ error: { message: "Incorrect password" } }));
   // Said under the field, not in a toast.
-  await expect(page.locator("#unlock-error")).toHaveText("Incorrect password");
+  await expect(page.locator("#unlock-error")).toHaveText("Wrong password. Check Caps Lock, or restore with your recovery phrase below.");
   await expect(page.locator(".toast")).toHaveCount(0);
   await expect(input).toBeEnabled();
   await expect(input).toHaveValue("");
