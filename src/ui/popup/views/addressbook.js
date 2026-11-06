@@ -7,7 +7,6 @@ import { nameCheckNote } from "../../../shared/nodeNetwork.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
 import { joinedAddress, passesForDuskName } from "../../lib/recipient.js";
-import { looksAlike } from "../../lib/lookAlike.js";
 import { waiting } from "../../components/Waiting.js";
 import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
@@ -18,6 +17,7 @@ import { fieldLabel, searchInput, textInput } from "../../components/FormControl
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
 import { ownProfileName } from "../../components/ProfileName.js";
+import { contactAlikeText, contactNameClash } from "../../lib/contactNames.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
 import { contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
@@ -88,9 +88,6 @@ function ownText(ov, recipient) {
   if (recipient && recipient === own.address) return "That's this profile's own shielded address.";
   return "";
 }
-
-// A name as a person reads it: without its case, accents or extra spaces.
-const nameKey = (name) => String(name ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ");
 
 const fieldError = (id) => h("div", { class: "field-error", id, role: "alert", hidden: true });
 const setFieldError = (input, error, text) => {
@@ -282,6 +279,8 @@ export function addressBookView(ov, { state, actions } = {}) {
         { class: "group" },
         filtered.map((entry) => {
           const addr = String(entry?.address ?? "");
+          // One whose name looks like another's shows its address, not its .dusk name, and says so.
+          const alike = contactAlikeText(ov, entry, items);
           return h(
             "button",
             {
@@ -298,7 +297,8 @@ export function addressBookView(ov, { state, actions } = {}) {
               contactAvatar(String(entry?.name ?? "")),
               h("span", { class: "row-main" }, [
                 h("span", { class: "row-title", text: String(entry?.name ?? "") || "(No name)" }),
-                h("span", { class: entry?.duskName ? "row-sub" : "row-sub mono", text: rowLine(entry) }),
+                h("span", { class: entry?.duskName && !alike ? "row-sub" : "row-sub mono", text: alike ? rowLine({ ...entry, duskName: null }) : rowLine(entry) }),
+                alike ? h("span", { class: "row-sub contact-alike", text: alike }) : null,
               ]),
               h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
             ]
@@ -455,20 +455,21 @@ export function addressBookView(ov, { state, actions } = {}) {
     });
     const nameError = fieldError(`contact-name-error-${n}`);
     // A name in use, or one that looks like it in other letters: only the
-    // address would tell the two apart in a payment. It can be saved.
+    // address would tell the two apart in a payment. It can be saved. One
+    // that is, or looks like, a profile's would read as that profile on
+    // Review: it can't be, for anyone else's address.
     const nameNote = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
+    const profileClashText = (clash) =>
+      clash.same ? `That's the name of your profile ${clash.entry.name}. Choose another name.` : `That looks like the name of your profile ${clash.entry.name}. Choose another name.`;
+    const clashNow = () =>
+      contactNameClash(ov, nameInput.value, { address: normalizeRecipient(addrInput.value), contacts: Array.isArray(ab.items) ? ab.items : [], except: ab.editId ?? undefined });
     const updateName = () => {
-      const typed = nameKey(nameInput.value);
-      const others = typed ? (Array.isArray(ab.items) ? ab.items : []).filter((e) => e?.id !== ab.editId) : [];
-      const same = others.find((e) => nameKey(e?.name) === typed);
-      const alike = same ? null : others.find((e) => looksAlike(nameInput.value, e?.name));
+      const clash = String(nameInput.value ?? "").trim() ? clashNow() : null;
       const at = (e) => `${String(e.name).trim()}, at ${shortAddress(String(e.address ?? ""))}`;
-      nameNote.textContent = same
-        ? `You already have a contact called ${at(same)}.`
-        : alike
-          ? `This looks like your contact ${at(alike)}, but uses different letters.`
-          : "";
-      nameNote.hidden = !same && !alike;
+      setFieldError(nameInput, nameError, clash?.kind === "profile" ? profileClashText(clash) : "");
+      nameNote.textContent =
+        clash?.kind !== "contact" ? "" : clash.same ? `You already have a contact called ${at(clash.entry)}.` : `This looks like your contact ${at(clash.entry)}, but uses different letters.`;
+      nameNote.hidden = clash?.kind !== "contact";
     };
 
     const addrInput = textInput({
@@ -479,6 +480,8 @@ export function addressBookView(ov, { state, actions } = {}) {
         ab.editAddress = String(e?.target?.value ?? "");
         setFieldError(addrInput, addrError, "");
         updateAddress();
+        // A profile's name is its own address's to take.
+        updateName();
       },
     });
     const addrError = fieldError(`contact-address-error-${n}`);
@@ -608,6 +611,12 @@ export function addressBookView(ov, { state, actions } = {}) {
           if (own) {
             setFieldError(addrInput, addrError, own);
             addrInput.focus();
+            return;
+          }
+          const clash = contactNameClash(ov, name, { address: t.address, contacts: Array.isArray(ab.items) ? ab.items : [], except: ab.editId ?? undefined });
+          if (clash?.kind === "profile") {
+            setFieldError(nameInput, nameError, profileClashText(clash));
+            nameInput.focus();
             return;
           }
           const other = (Array.isArray(ab.items) ? ab.items : []).find((e) => e?.address === t.address && e?.id !== ab.editId);

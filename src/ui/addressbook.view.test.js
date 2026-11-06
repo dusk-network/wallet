@@ -70,6 +70,31 @@ function mount(addressBook = {}, ov = { nodeUrl: NODE, accounts: [OWN], selected
 // A real account with one character changed: the right length, but no key.
 const MISTYPED = "2131Xe28JCogeQqgK4VTjtDwY5GJ5oFSUQgQobAiFbUKcXK2BzpJdoj4iGam2HGgkbnbykjqPVWmy3S83TDgqfPmtLgBv56ZzeuhHbuFy9bCerhU4JTwEi2oCxxPKSx5983T";
 
+describe("contacts whose names look like another's", () => {
+  it("say so in the list and the picker, each with its address, as Sofia's three Estudio Marta", () => {
+    const items = [
+      { id: "1", name: "Estudio Marta", address: ACCOUNT, type: "account" },
+      { id: "2", name: "Estudio M\u0430rta", address: ADDRESS, type: "address", duskName: "marta.dusk" },
+      { id: "3", name: "estudio marta.", address: OWN.slice(0, -1) + "x", type: "account" },
+      { id: "4", name: "Bob", address: ADDRESS.slice(0, -1) + "y", type: "address" },
+      // Saved before a profile's name was refused.
+      { id: "5", name: "Profile 1", address: ACCOUNT.slice(0, -1) + "z", type: "account" },
+    ];
+    for (const mode of ["manage", "pick"]) {
+      mount({ items, mode });
+      const rows = dom.document.body.querySelectorAll(".contact-row").map((row) => row.querySelectorAll(".row-sub").map((el) => el.textContent));
+      expect(rows, mode).toEqual([
+        [`${shortAddress(ACCOUNT)} · Public`, "Looks like another contact"],
+        // Its address, not its .dusk name, beside the name it looks like.
+        [`${shortAddress(ADDRESS)} · Shielded`, "Looks like another contact"],
+        [`${shortAddress(items[2].address)} · Public`, "Looks like another contact"],
+        [`${shortAddress(items[3].address)} · Shielded`],
+        [`${shortAddress(items[4].address)} · Public`, "Looks like your profile's name"],
+      ]);
+    }
+  });
+});
+
 describe("contacts", () => {
   it("reads the list once a visit: one that failed says why, and a locked wallet shows its unlock form", async () => {
     listAddressBook.mockRejectedValueOnce(new Error("Couldn't read your contacts"));
@@ -284,6 +309,28 @@ describe("contacts", () => {
       view.button("Save").click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Rainy day", address: CAROL }), expect.anything());
+    });
+
+    it("won't save a contact named like a profile of yours, as Review would read it as that profile, but for that profile's own address", async () => {
+      // Marek's: "Profile 2" with someone else's address read "To Profile 2" on Review, as his own did.
+      const ov = { nodeUrl: NODE, accounts: [OWN, BOB], addresses: [ADDRESS_OWN, ADDRESS_SECOND], selectedAccountIndex: 0, txs: [] };
+      const view = edit({}, ov);
+      typeInto(view.field("Address"), CAROL);
+      typeInto(view.field("Name"), "Profile 2");
+      expect(view.error("Name")).toBe("That's the name of your profile Profile 2. Choose another name.");
+      typeInto(view.field("Name"), "ProfiIe  2");
+      expect(view.error("Name")).toBe("That looks like the name of your profile Profile 2. Choose another name.");
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+
+      // Profile 2's own account may be saved by its name.
+      typeInto(view.field("Name"), "Profile 2");
+      typeInto(view.field("Address"), BOB);
+      expect(view.error("Name")).toBe("");
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Profile 2", address: BOB }), expect.anything());
     });
 
     it("says this profile's own address as it's typed, under the field, and won't save it", async () => {

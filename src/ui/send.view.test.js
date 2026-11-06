@@ -554,6 +554,23 @@ describe("what the To field says about what's typed", () => {
     expect(form.to.value).toBe(BOB.account);
     expect(form.pill()).toBe("Public");
   });
+
+  it("says which contacts' names look like another's, with each one's address", () => {
+    // Sofia's: two "Estudio Marta", one in a Cyrillic а, told apart only by the address.
+    const state = newState();
+    state.addressBook.items = [
+      { name: "Estudio Marta", address: ALICE.account },
+      { name: "Estudio M\u0430rta", address: BOB.account },
+      { name: "Estudio Sol", address: BOB.address },
+    ];
+    const form = mount(state);
+    typeInto(form.to, "estudio");
+    expect(form.nameBox().querySelectorAll("button").map((b) => b.textContent)).toEqual([
+      `Your contact Estudio Marta · ${shortAddress(ALICE.account)} · looks like another contact`,
+      `Your contact Estudio M\u0430rta · ${shortAddress(BOB.account)} · looks like another contact`,
+      `Your contact Estudio Sol · ${shortAddress(BOB.address)}`,
+    ]);
+  });
 });
 
 describe("a memo too long for the network", () => {
@@ -779,8 +796,20 @@ describe("names on Send and Review", () => {
       ov
     );
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings");
+    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Your profile Savings");
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
+
+    // Marek's: a contact named like it, for someone else, never reads the same on Review.
+    mount(
+      {
+        route: "confirm",
+        addressBook: { loaded: true, items: [{ name: "Savings", address: ALICE.account }] },
+        draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+      },
+      ov
+    );
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings");
   });
 
   it("offers no Save to Contacts for this wallet's own account or address", () => {

@@ -50,6 +50,7 @@ import {
 
 import { openQrScanModal } from "../../components/QrScanModal.js";
 import { readRequestLink, walletChainOf } from "../../lib/requestLink.js";
+import { contactAlikeText } from "../../lib/contactNames.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
 import { networkTextOf } from "../../../shared/nodeNetwork.js";
@@ -599,12 +600,16 @@ export function sendFormView(ov, { state, actions } = {}) {
       .slice(0, 3);
   };
 
-  // "Your contact Jan · 26FCH7…", which puts the contact's address in the field.
+  // "Your contact Jan · 26FCH7…", which puts the contact's address in the field;
+  // one whose name looks like another's says so, its address beside it.
   const contactButton = (contact) =>
     h("button", {
       class: "text-btn text-btn--inline name-suggestion",
       type: "button",
-      text: `Your contact ${String(contact.name).trim()} · ${shortAddress(contact.address)}`,
+      text: [
+        `Your contact ${String(contact.name).trim()} · ${shortAddress(contact.address)}`,
+        contactAlikeText(ov, contact, Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).toLowerCase(),
+      ].filter(Boolean).join(" · "),
       onclick: () => {
         to.value = contact.address;
         onRecipientInput();
@@ -1175,8 +1180,10 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     const hit = (Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).find(
       (e) => String(e?.address ?? "").trim().toLowerCase() === key
     );
-    // Or another profile of this wallet's, which needs no saving.
-    return String(hit?.name ?? "").trim() || (own ? "" : ownProfileName(ov, toAddr));
+    // Or another profile of this wallet's, which needs no saving: said as yours,
+    // so a contact named like it never reads the same.
+    const profile = own ? "" : ownProfileName(ov, toAddr);
+    return profile ? `Your profile ${profile}` : String(hit?.name ?? "").trim();
   };
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
