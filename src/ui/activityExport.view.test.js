@@ -592,6 +592,33 @@ describe("Activity's Export", () => {
     expect(up.toast).not.toContain("couldn't be read");
   });
 
+  it("puts a migration's fees in the period of their own day, though its payout came the day after", async () => {
+    // Codex's: a 30 September fee was left out of Q3, and put in Q4 with its payout.
+    vi.setSystemTime(new Date("2026-11-10T09:00:00Z"));
+    page("/full.html");
+    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
+    const { approval, migration, owner, payout } = recordedMigration;
+    const nextDay = Date.UTC(2026, 10, 6, 0, 30);
+    const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: nextDay, blockHeight: 5_684_134 }];
+    const MAINNET = "https://nodes.dusk.network";
+    const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
+    button("Export").click();
+    pickPeriod("dates");
+    for (const id of ["activity-export-from", "activity-export-to"]) {
+      const input = body().querySelector(`#${id}`);
+      input.value = "2026-11-05";
+      input.dispatchEvent(new Event("input"));
+    }
+    button("Save CSV").click();
+    await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+    // The approval and the migration of 5 November, and not the payout of the 6th.
+    expect((await linesOf()).map((l) => [l.TxHash, l["Sent Currency"] || l["Received Currency"], l.Account])).toEqual([
+      [approval, "BNB", owner],
+      [migration, "BNB", owner],
+    ]);
+  });
+
   it("makes a stake with Sozu a trade of DUSK for stDUSK, with its deposit fee, as the pool's event says it", async () => {
     page("/full.html");
     const pool = networks.testnet.sozu.fallbacks.pool;

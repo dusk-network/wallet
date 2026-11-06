@@ -132,8 +132,9 @@ export async function makeExport(ov, choices, { state }) {
   const { account, profileIndex } = selected(ov);
   // A stake whose stDUSK can't be read yet says so in its line.
   const facts = await sozuFactsOf(ov, rows);
-  // What each migration paid on its own chain, its approval too, on lines of their own.
-  const evm = await migrationFactsOf(ov, period ? rows.filter((row) => row.time >= period.from && row.time < period.to) : rows);
+  // What each migration paid on its own chain, its approval too, on lines of their own, each in the period
+  // of its own time: a payout after the period can have fees in it, one before it can't.
+  const evm = await migrationFactsOf(ov, period ? rows.filter((row) => row.time >= period.from) : rows);
   const made = await accountingCsv({
     rows,
     profile: { name: profileLabelOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
