@@ -401,7 +401,8 @@ describe("the requests made here", () => {
   const T0 = Date.UTC(2026, 10, 5, 9, 0);
   const HOUR = 3_600_000;
   // What came in, as the archive's history gives it.
-  const paidIn = (hash, value, memo, at) => entryOf({ counterparty: "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz", direction: "in", hash, memo, timestamp: at, value });
+  const paidIn = (hash, value, memo, at, blockHeight = 4_687_000) =>
+    entryOf({ blockHeight, counterparty: "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz", direction: "in", hash, memo, timestamp: at, value });
   const kept = (fields) => ({ at: T0, id: fields.id, lux: null, memo: "", network: "testnet", to: ACCOUNT, ...fields });
   const shown = () =>
     dom.document.body.querySelectorAll(".request-row").map((row) => ({
@@ -477,5 +478,45 @@ describe("the requests made here", () => {
     dom.document.body.querySelectorAll(".request-row")[1].querySelectorAll("button").find((b) => visibleText(b) === "Remove").click();
     await vi.waitFor(() => expect(shown().map((row) => row.amount)).toEqual(["1.25 DUSK", "Any amount"]));
     expect(items[KEY][ACCOUNT].map((r) => r.id)).toEqual(["a", "c", "d", "e"]);
+  });
+
+  it("finds a payment past the page Activity shows: one paid while closed, with more than a page after it", async () => {
+    // Codex's: 60 newer payments left it off the page, and the request said Waiting.
+    items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "1250000000", memo: "Factura 33" })] };
+    const paid = paidIn("a1".repeat(32), "1250000000", "Factura 33", T0 + HOUR, 4_700_000);
+    const after = Array.from({ length: 60 }, (_, i) => paidIn(`${i}`.padStart(64, "f"), "1000000", `n${i}`, T0 + 2 * HOUR + i * 60_000, 4_700_100 + i));
+    // Newest first, as the store gives them.
+    const all = [paid, ...after].sort((x, y) => y.blockHeight - x.blockHeight);
+    const history = { read: vi.fn(async ({ limit }) => ({ entries: all.slice(0, limit), state: null, complete: true })), needsDetails: () => false, fillDetails: vi.fn(async () => {}) };
+    const state = { receive: { tab: "public" }, activity: { key: activityKey(unlocked), entries: all.slice(0, 50), loaded: true, limit: 50, history, names: new Map(), shielded: [] } };
+    await draw(state);
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Paid"]));
+    expect(history.read).toHaveBeenCalledWith({ limit: 100 });
+  });
+
+  it("reads the shielded history again as it looks, once the notes synced since, for a request to the shielded address", async () => {
+    // Codex's: kept open, Receive read only the public history again.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    items[KEY] = { [ACCOUNT]: [kept({ id: "s", lux: "1250000000", to: ADDRESS })] };
+    const payment = { hash: "5e".repeat(32), kind: "transfer", direction: "in", value: "1250000000", success: true, timestamp: T0 + HOUR, blockHeight: 4_700_000 };
+    const send = vi.fn(async ({ type }) => (type === "DUSK_UI_GET_SHIELDED_HISTORY" ? { result: { walletId: ACCOUNT, nodeUrl: overview.nodeUrl, profileIndex: 0, entries: [payment] } } : {}));
+    const history = { read: vi.fn(async () => ({ entries: [], state: null, complete: true })), sync: vi.fn(async () => {}), needsDetails: () => false, fillDetails: vi.fn(async () => {}) };
+    const ov = { ...unlocked, shieldedSync: { state: "done", updatedAt: 1 } };
+    const state = {
+      route: "receive",
+      overview: ov,
+      receive: { tab: "shielded" },
+      activity: { key: activityKey(ov), walletId: ACCOUNT, nodeUrl: ov.nodeUrl, profileIndex: 0, account: ACCOUNT, entries: [], loaded: true, limit: 50, history, names: new Map(), checked: new Set(), shielded: [], shieldedAsked: true, shieldedReadAt: Date.now(), send, epoch: Promise.resolve(1), txEpoch: Promise.resolve(1) },
+    };
+    const actions = { render: vi.fn(async () => dom.document.body.replaceChildren(...receiveView(ov, { state, actions }))), showToast: vi.fn() };
+    await actions.render();
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Waiting"]));
+
+    // The notes synced after the shielded history was read: the overview the look asks for says so.
+    ov.shieldedSync = { state: "done", updatedAt: Date.now() + 1 };
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Check"]));
+    expect(actions.render).toHaveBeenCalledWith({ forceRefresh: true });
+    expect(send).toHaveBeenCalledWith({ type: "DUSK_UI_GET_SHIELDED_HISTORY" });
   });
 });

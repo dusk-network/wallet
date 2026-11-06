@@ -93,4 +93,14 @@ describe("a request the web wallet hands over (dusk_openPaymentLink)", () => {
     // Not from another page on this machine.
     await expect(handOverRequestLink("http://localhost:4000", local, { pressed: true })).rejects.toMatchObject({ code: -32602 });
   });
+
+  it("refuses a link on this machine that Send would refuse, rather than rebuild it into one Send takes", async () => {
+    // Codex's: amount=1 and amountLux 5,000 DUSK came out as a link for 5,000 DUSK.
+    const twice = `http://localhost:5173/dashboard/send?to=${ACCOUNT}&amount=1&amountLux=5000000000000&network=testnet`;
+    await expect(handOverRequestLink("http://localhost:5173", twice, { pressed: true })).rejects.toMatchObject({ code: -32602, message: "This link asks for two different amounts. Ask for a new one." });
+    expect(tabsCreate).not.toHaveBeenCalled();
+    // The same amount said both ways is one amount.
+    await expect(handOverRequestLink("http://localhost:5173", twice.replace("amount=1&", "amount=5000&"), { pressed: true })).resolves.toBe(true);
+    expect(opened()).toEqual([`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=5000&network=testnet`]);
+  });
 });
