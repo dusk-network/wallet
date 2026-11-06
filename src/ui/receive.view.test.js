@@ -536,7 +536,7 @@ describe("the requests made here", () => {
     expect(state.route).toBe("send");
   });
 
-  it("shows a request an earlier version kept for an unnamed custom node on any such node, unchecked, and takes it off", async () => {
+  it("shows a request an earlier version kept for an unnamed custom or local node on any such node, unchecked, and takes it off", async () => {
     // Codex's: kept as "custom" or "local", they vanished once chains were told apart.
     items[KEY] = {
       [ACCOUNT]: [kept({ id: "old", lux: "5000000000", memo: "old", network: "custom" }), kept({ id: "here", lux: "1250000000", memo: "Factura 33", network: "local" })],
@@ -552,12 +552,16 @@ describe("the requests made here", () => {
       return state;
     };
 
+    const unchecked = (amount) => ({ amount, state: "Not checked", match: "Made by an earlier version for a node it didn't name, so payments aren't checked against it.", buttons: ["Remove"] });
     // On a custom node: the earlier custom one, never matched to the payment that looks like its own.
     await drawOn(on("https://node-42.example", 42));
-    expect(shown()).toEqual([{ amount: "5 DUSK", state: "Not checked", match: "Made by an earlier version for a custom node it didn't name, so payments aren't checked against it.", buttons: ["Remove"] }]);
-    // On this machine's node: the earlier local one, as its own.
-    await drawOn(on("http://127.0.0.1:8080", 0));
-    expect(shown().map((row) => [row.amount, row.state])).toEqual([["1.25 DUSK", "Paid"]]);
+    expect(shown()).toEqual([unchecked("5 DUSK")]);
+    // On this machine's nodes, whatever chain each signs for: the earlier local one, the same way (Codex's: one of chain 43 paid it).
+    for (const chainId of [0, 43]) {
+      await drawOn(on("http://127.0.0.1:8080", chainId));
+      expect(shown()).toEqual([unchecked("1.25 DUSK")]);
+    }
+    expect(items[KEY][ACCOUNT].some((r) => r.paid)).toBe(false);
 
     await drawOn(on("https://node-43.example", 43));
     dom.document.body.querySelectorAll(".request-row button").find((b) => visibleText(b) === "Remove").click();

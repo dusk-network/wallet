@@ -158,7 +158,7 @@ function requestRow(request, match, { hidden, address, state, actions, walletId,
       request.memo ? h("span", { class: "request-row__memo" }, ["“", safeTextEl(request.memo), "” · "]) : null,
       `${request.to === address ? "Shielded" : "Public"}, asked ${whenAtText(request.at)}`,
     ].filter(Boolean)),
-    h("p", { class: "request-row__match" }, earlier ? ["Made by an earlier version for a custom node it didn't name, so payments aren't checked against it."] : matchedLine(match, again, hidden)),
+    h("p", { class: "request-row__match" }, earlier ? ["Made by an earlier version for a node it didn't name, so payments aren't checked against it."] : matchedLine(match, again, hidden)),
     h("div", { class: "request-row__actions" }, [
       ...payments.map(({ at, hash }, i) =>
         h("button", { class: "text-btn chain-link", type: "button", text: payments.length > 1 ? `Payment ${i + 1}` : "See payment", onclick: () => open(hash, at) })
@@ -178,10 +178,10 @@ export function requestsSection(ov, { state, actions } = {}) {
   const address = String(ov?.addresses?.[profileIndex] ?? "");
   const network = requestNetwork(ov);
   const kind = network.split(":")[0];
-  // Kept before custom chains were told apart: a local one is this machine's;
-  // a custom one names no chain, so it's shown on any custom node, not matched.
-  const earlier = (request) => request.network === "custom" && kind === "custom";
-  const ours = (request) => request.network === network || (request.network === "local" && kind === "local") || earlier(request);
+  // Kept before chains were told apart, for a custom node or one on this
+  // machine: it names no chain, so it's shown on any such node, never matched.
+  const earlier = (request) => (request.network === "custom" || request.network === "local") && request.network === kind;
+  const ours = (request) => request.network === network || earlier(request);
   const shown = kept.list.filter((request) => ours(request) && (request.to === account || (address && request.to === address)));
   if (!shown.length) return null;
   const mine = shown.filter((request) => !earlier(request));
