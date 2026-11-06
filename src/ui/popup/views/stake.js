@@ -468,17 +468,15 @@ function rewardRates(ov, { state, actions }) {
               (res) => ofNetwork(result(res)),
               () => null
             )),
-    ]).then(async ([native, status]) => {
+    ]).then(([native, status]) => {
       if (state.rewardRates !== rates) return;
       Object.assign(rates, { native: typeof native === "number" ? native : null, sozuFee: status?.fees?.reward ?? null });
       if (rates.native !== null) actions?.render?.().catch(() => {});
-      // How stDUSK grew lately, as Liquid staking measures it: the same rate on both screens.
-      const growth = await sozuGrowthOf(ov, status);
-      if (state.rewardRates !== rates || !growth) return;
-      rates.growth = growth;
-      actions?.render?.().catch(() => {});
+      measureGrowth(ov, status, { state, actions });
     });
   }
+  // Or Liquid staking's status, where it came in while this read none.
+  measureGrowth(ov, heldStatus, { state, actions });
   // Sozu's fee as Liquid staking read it last, else as asked here.
   const sozuFee = held ?? state.rewardRates.sozuFee;
   const native = state.rewardRates.native;
@@ -487,6 +485,19 @@ function rewardRates(ov, { state, actions }) {
     native: native !== null ? `About ${ratePercent(native)} a year lately, across the network. Not promised.` : null,
     sozu: sozu !== null ? `About ${ratePercent(sozu)} a year after Sozu's ${feePercent(sozuFee, amountLocale())}. Not promised.` : null,
   };
+}
+
+// How stDUSK grew lately, as Liquid staking measures it, read once a status
+// names the pool: the same rate on both screens.
+function measureGrowth(ov, status, { state, actions }) {
+  const rates = state.rewardRates;
+  if (!rates || rates.growthAsked || !status?.contracts?.pool) return;
+  rates.growthAsked = true;
+  sozuGrowthOf(ov, status).then((growth) => {
+    if (state.rewardRates !== rates || !growth) return;
+    rates.growth = growth;
+    actions?.render?.().catch(() => {});
+  });
 }
 
 // A Sozu stake or unstake of this profile's that isn't in a block yet.

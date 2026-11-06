@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { accessibleName, installFakeDom, settle, typeInto, visibleText } from "../testing/fakeDom.js";
 import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
+import { sozuArchive } from "../testing/sozuArchive.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
@@ -303,30 +304,8 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
 });
 
 describe("Sozu's rate, as its stDUSK grew", () => {
-  // The pool's restakes, as the archive lists them: one near the tip, one 30 days before.
   const TIP = 4_800_000;
-  const DAY = 86_400_000;
-  const NOW = Date.UTC(2026, 10, 6, 12);
-  const u64 = (n) => Array.from({ length: 8 }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn).toString(16).padStart(2, "0")).join("");
-  const reward = (stake, supply) => `${"00".repeat(40)}${u64(stake)}${u64(supply)}${"00".repeat(8)}`;
-  const restakes = [
-    { height: TIP - 100, id: "a1".repeat(32), at: NOW - 600_000, stake: 3_071_932_000_000n, supply: 1_000_000_000_000n },
-    { height: TIP - 30 * 8_640, id: "b2".repeat(32), at: NOW - 600_000 - 30 * DAY, stake: 3_020_000_000_000n, supply: 1_000_000_000_000n },
-  ];
-  const archive = vi.fn(async (_url, init) => {
-    const query = String(init?.body ?? "");
-    const data = /tip: block\(height: -1\)/.test(query) ? { tip: { header: { height: TIP } } } : {};
-    for (const [, alias, from, to] of query.matchAll(/(\w+): blockTxs\(range: \[(\d+), (\d+)\]/g)) {
-      data[alias] = restakes
-        .filter((r) => r.height >= Number(from) && r.height <= Number(to))
-        .map((r) => ({ blockHeight: r.height, blockTimestamp: r.at / 1000, err: null, id: r.id, tx: { json: JSON.stringify({ call: { contract: SOZU.contracts.pool, fn_name: "recycle" } }) } }));
-    }
-    for (const [, alias, height] of query.matchAll(/(\w+): contractEvents\(height: (\d+)\)/g)) {
-      const r = restakes.find((each) => each.height === Number(height));
-      data[alias] = { json: r ? [{ data: reward(r.stake, r.supply), origin: r.id, reverted: false, source: SOZU.contracts.pool, topic: "reward" }] : [] };
-    }
-    return new Response(JSON.stringify({ data }), { headers: { "content-type": "application/json" } });
-  });
+  const archive = sozuArchive({ pool: SOZU.contracts.pool, tip: TIP, now: Date.UTC(2026, 10, 6, 12), from: 3_020_000_000_000n, to: 3_071_932_000_000n });
 
   it("is what stDUSK did over the last 30 days, and its line says so, in place of the estimate's working", async () => {
     // Lena's: "15,5 DUSK a block to stakers" matched nothing the chain says.

@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
+import { sozuArchiveQuery } from "../../testing/sozuArchive.js";
 import { accessibleName, installFakeDom, isShown, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "../../testing/fakeDom.js";
 import { networks } from "@dusk-network/networks";
 import { entryOf } from "../../../shared/fixtures/rows.js";
@@ -21,9 +22,11 @@ vi.mock("../../../shared/duskNames.js", async (importOriginal) => ({
   lookupPrimaryName: vi.fn(async () => null),
 }));
 // The archive has no event of a stake here: its deposit fee is what the rate comes to now.
+// A test can give it the pool's restakes (sozuArchiveQuery).
+const archive = vi.hoisted(() => ({ query: async () => ({}) }));
 vi.mock("../../../shared/activityHistory.js", async (importOriginal) => ({
   ...(await importOriginal()),
-  archiveAt: () => ({ query: async () => ({}) }),
+  archiveAt: () => ({ query: (text) => archive.query(text) }),
 }));
 
 const ACCOUNT =
@@ -118,6 +121,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  archive.query = async () => ({});
 });
 
 // Draws Staking, its Review and Sent as app.js routes them, and redraws on
@@ -208,6 +212,23 @@ describe("staking overview", () => {
     // Sozu's fee as Liquid staking read it, without reading Sozu again.
     expect(actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_GET_SOZU_STATUS")).toHaveLength(0);
     expect(body.textContent).not.toMatch(/\bEarn\b/);
+  });
+
+  it("gives Sozu's rate as stDUSK grew, as Liquid staking does, also where Sozu's status came in as it loaded", async () => {
+    // Lena's: Staking said 77% from the estimate while Liquid staking said 107% from the chain.
+    // A pool of its own: what the popup keeps of its growth for an hour stays with this test.
+    const grown = "7a".repeat(32);
+    archive.query = sozuArchiveQuery({ pool: grown, now: Date.now(), from: 3_020_000_000_000n, to: 3_071_932_000_000n });
+    const loading = sozu({ loaded: false, loading: true, status: null });
+    const state = { route: "stake", staking: staking(), sozu: loading };
+    const { draw } = popup(state, ov(), { rewardRate: 0.8615 });
+    const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
+    await vi.waitFor(() => expect(subs()[0]).toEqual(["About 86% a year lately, across the network. Not promised."]));
+    // Liquid staking's read is done: its status names the pool.
+    const done = sozu();
+    Object.assign(state.sozu, { ...done, status: { ...done.status, contracts: { ...done.status.contracts, pool: grown } } });
+    draw();
+    await vi.waitFor(() => expect(subs()[1]).toEqual(["About 21% a year after Sozu's 10%. Not promised."]));
   });
 
   it("works Sozu's rate out from native staking's as shown, so both wallets give the same figure", async () => {
