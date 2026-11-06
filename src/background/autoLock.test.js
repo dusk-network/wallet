@@ -719,6 +719,38 @@ describe("background auto-lock activity", () => {
     });
   });
 
+  it("reads what's staked in the same go as the public balance, natively and with Sozu, and none of it when a read fails", async () => {
+    await sendBackgroundMessage({ type: "DUSK_UI_UNLOCK", password: "pw" });
+    const before = mocks.engineCall.getMockImplementation();
+    const answers = (sozu) => async (method) => {
+      if (method === "engine_walletId") return "acct0";
+      if (method === "dusk_getPublicBalance") return { nonce: "1", value: "1150500000" };
+      if (method === "dusk_getStakeInfo") return { amount: { eligibility: "1", locked: "5000000000", total: "1005000000000", value: "1000000000000" }, reward: "7" };
+      if (method === "dusk_getSozuStatus") return sozu();
+      return true;
+    };
+    try {
+      // Eligible and locked, rewards aside, and what the Sozu stake is worth now.
+      mocks.engineCall.mockImplementation(answers(() => ({ configured: true, position: { poolBalanceLux: "1790000000", stDuskBalanceLux: "1384000000" } })));
+      expect((await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" })).staked).toEqual({ lux: "1006790000000", native: "1005000000000", sozu: "1790000000" });
+      // No Sozu on the network is none of it.
+      mocks.engineCall.mockImplementation(answers(() => ({ configured: false })));
+      expect((await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" })).staked).toEqual({ lux: "1005000000000", native: "1005000000000", sozu: "0" });
+      // A position that couldn't be read, or a read that failed: not known, so no total counts it.
+      mocks.engineCall.mockImplementation(answers(() => ({ configured: true, position: null })));
+      expect((await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" })).staked).toBeNull();
+      mocks.engineCall.mockImplementation(
+        answers(() => {
+          throw new Error("Sozu timed out");
+        })
+      );
+      const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+      expect([overview.staked, overview.balance]).toEqual([null, { nonce: "1", value: "1150500000" }]);
+    } finally {
+      mocks.engineCall.mockImplementation(before);
+    }
+  });
+
   it("saves a custom node with the chain ID it gives, read before it's saved", async () => {
     mocks.readChainId.mockResolvedValueOnce(2);
     const response = await sendBackgroundMessage({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: "https://my-node.example" });

@@ -49,8 +49,11 @@ export function homeView(ov, { state, actions } = {}) {
         ? shieldLuxBI - shieldSpendBI
         : 0n
       : 0n;
+  // What's staked, natively and with Sozu, read with the public balance: the
+  // total counts it, and is the total only once it's read.
+  const stakedLux = /^\d+$/.test(String(ov?.staked?.lux ?? "")) ? BigInt(ov.staked.lux) : null;
   const hasTotal = hasBalance && typeof shieldLuxBI === "bigint";
-  const totalLux = hasTotal ? pubLux + shieldLuxBI : null;
+  const totalLux = hasTotal ? pubLux + shieldLuxBI + (stakedLux ?? 0n) : null;
   const totalFull = hasTotal ? formatDuskExact(totalLux) : null;
   const totalDusk = hasTotal ? formatDusk(totalLux) : null;
 
@@ -85,7 +88,7 @@ export function homeView(ov, { state, actions } = {}) {
   // Home hero shows the total once shielded is available.
   const heroAmt = hasTotal ? totalDusk : balDusk;
   const heroAmtTitle = hasTotal ? totalFull : balFull;
-  const heroLabel = hasTotal ? "Total balance" : "Public balance";
+  const heroLabel = !hasTotal ? "Public balance" : stakedLux !== null ? "Total balance" : "Public and shielded";
 
   // Refresh, moved here from the header, sits with the balance it reloads.
   const refreshBtn = h("button", {
@@ -129,7 +132,7 @@ export function homeView(ov, { state, actions } = {}) {
     refreshBtn,
   ]);
 
-  // "Public 1,484.92 DUSK · Shielded 0 DUSK" under the total.
+  // "Public 1,484.92 DUSK · Shielded 0 DUSK · Staked 1.79 DUSK" under the total.
   const unit = (amount) => (amount === "—" ? null : " DUSK");
   const balanceSplit = h("div", { class: "balance-split" }, [
     h("div", { class: "balance-split-item" }, [
@@ -150,6 +153,16 @@ export function homeView(ov, { state, actions } = {}) {
             balance(hidden, shieldDusk),
             unit(shieldDusk),
           ].filter(Boolean)),
+        ])
+      : null,
+    // Staked natively and with Sozu, which the total counts.
+    stakedLux !== null && stakedLux > 0n
+      ? h("div", { class: "balance-split-item" }, [
+          h("span", { class: "balance-split-label", text: "Staked" }),
+          h("span", { class: "balance-split-value", title: hidden ? undefined : groupThousands(formatDuskExact(stakedLux)) }, [
+            balance(hidden, formatDusk(stakedLux)),
+            " DUSK",
+          ]),
         ])
       : null,
   ].filter(Boolean));
@@ -243,6 +256,7 @@ export function homeView(ov, { state, actions } = {}) {
     hasBalance &&
     pubLux === 0n &&
     shieldLuxBI === 0n &&
+    !stakedLux &&
     shieldedSync?.state !== "syncing" &&
     !activityRows(ov, state).length &&
     !(assets?.tokens?.length || assets?.nfts?.length);
