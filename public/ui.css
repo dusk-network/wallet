@@ -286,7 +286,13 @@ body[data-runtime="tauri"].page--full .panel {
   white-space: nowrap;
 }
 
-/* Text someone else chose, and a line under it when it had hidden characters */
+/* Text someone else chose, and a line under it when it had hidden characters.
+   It reads left to right on its own, so nothing beside it can move its digits. */
+.safe-text > span:first-child {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 .safe-text__flag {
   display: block;
   margin-top: 2px;
