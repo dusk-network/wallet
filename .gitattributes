@@ -1,0 +1,3 @@
+# Check out every file as it was committed, on every machine: builds come out
+# byte for byte the same.
+* text=auto eol=lf
