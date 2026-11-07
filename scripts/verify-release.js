@@ -51,16 +51,19 @@ export function compareRelease(released, rebuilt, folder) {
   return problems;
 }
 
-/**
- * How to run npm, with the arguments given, from npm's own script beside this
- * Node, as Node: on Windows npm and npx are .cmd files, which only a shell
- * runs. With a version, that npm, as npx gets it.
- */
-export function npmCommand(version, args) {
-  const home = dirname(process.execPath);
-  const cli = ["node_modules/npm/bin/npm-cli.js", "../lib/node_modules/npm/bin/npm-cli.js"]
-    .map((path) => join(home, path))
+/** npm's own script beside this Node, where it's there. */
+const npmBeside = () =>
+  ["node_modules/npm/bin/npm-cli.js", "../lib/node_modules/npm/bin/npm-cli.js"]
+    .map((path) => join(dirname(process.execPath), path))
     .find((path) => existsSync(path));
+
+/**
+ * How to run npm with the arguments given: from npm's own script, as this
+ * Node, where it's beside it, since on Windows npm and npx are .cmd files,
+ * which only a shell runs; npm on the PATH otherwise. With a version, that
+ * npm, as npx gets it.
+ */
+export function npmCommand(version, args, cli = npmBeside()) {
   const own = version ? ["exec", "--yes", `--package=npm@${version}`, "--", "npm", ...args] : args;
 
   return cli ? [process.execPath, [cli, ...own]] : ["npm", own];

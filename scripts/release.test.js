@@ -106,19 +106,13 @@ describe("checking a release", () => {
     expect(compareRelease(changed, undefined, folder)).toEqual(["popup.js: differs"]);
   });
 
-  it("runs npm as a script of this Node's, which on Windows a .cmd launcher can't be run without a shell", () => {
-    const [command, args] = npmCommand(undefined, ["--version"]);
+  it("runs npm from its own script, as this Node, where it's beside it, and from the PATH otherwise", () => {
+    const ci = ["exec", "--yes", "--package=npm@11.18.0", "--", "npm", "ci"];
+    const beside = "/node/lib/node_modules/npm/bin/npm-cli.js";
 
-    expect(command).toBe(process.execPath);
-    expect(execFileSync(command, args, { encoding: "utf8" })).toMatch(/^\d+\.\d+\.\d+\n$/);
-    expect(npmCommand("11.18.0", ["ci"])[1].slice(1)).toEqual([
-      "exec",
-      "--yes",
-      "--package=npm@11.18.0",
-      "--",
-      "npm",
-      "ci",
-    ]);
+    expect(npmCommand("11.18.0", ["ci"], beside)).toEqual([process.execPath, [beside, ...ci]]);
+    expect(npmCommand("11.18.0", ["ci"], null)).toEqual(["npm", ci]);
+    expect(npmCommand(undefined, ["run", "build:chrome"], null)).toEqual(["npm", ["run", "build:chrome"]]);
   });
 
   it("checks out every file as it was committed, whatever the machine's line endings", () => {
