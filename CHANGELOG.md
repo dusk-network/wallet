@@ -37,6 +37,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Refused a request link that says a field twice or has a user part before its host, and one for another network the moment it's put in, saying only why.
 - Said when a number in a message to sign, a sign-in or a memo mixes digits of different scripts or reads right to left.
+- Said when a number in a message to sign, a sign-in or a memo is in digits that look like other digits, as Bengali's ৪, a 4 that looks like an 8.
 - Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
 - Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
 - Repeated on Review that a send goes to your own account, and said what to try after a wrong password.
