@@ -16,10 +16,10 @@ import { contractValueEl, copyContractButton } from "../../components/ContractVa
 import { copyButton as copyWordsButton } from "../../components/CopyButton.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
-import { txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
+import { stDuskLines, txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
 import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, txIconSvg } from "./txRow.js";
 import { reasonText } from "./sent.js";
-import { activityKey, activityRows, loadActivityDetail } from "../activity.js";
+import { activityKey, activityRows, loadActivityDetail, sozuFactOf } from "../activity.js";
 import { migrationFactOf } from "../migrationFacts.js";
 import { waiting } from "../../components/Waiting.js";
 
@@ -316,8 +316,11 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const evm = migrated ? migrationFactOf(ov, tx, { render: actions?.render }) : undefined;
 
   const ledger = ledgerRows(tx, desc, nodeUrl, hidden, evm);
+  // A stake's or an unstake's stDUSK with Sozu, once the pool's event is read.
+  const stDusk = stDuskLines(tx?.sozu ? sozuFactOf(ov, tx, { render: actions?.render }) : undefined, hidden);
   const rows = h("div", { class: "group" }, [
     when ? kv("Date", dateText(when)) : null,
+    ...stDusk.map(({ label, value }) => kv(label, value)),
     desc.arrivedAt ? kv("Arrived", dateText(desc.arrivedAt)) : null,
     evmRow,
     ...(ledger?.before ?? []),

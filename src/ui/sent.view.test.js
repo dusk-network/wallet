@@ -107,6 +107,27 @@ const reviewState = () => ({
   draft: { to: OTHER, privacy: "public", amountDusk: "1500", amountLux: dusk(1500), memo: "Lunch" },
 });
 
+describe("a stake or an unstake with Sozu, completed", () => {
+  // Lena's: Completed said its block, its ID and its fee, and nothing of the stDUSK.
+  const fact = (kind, stDusk) => ({ kind, amount: dusk(100), fee: 0n, stDusk, pool: { stake: 2_000_000_000_000n, supply: 1_000_000_000_000n } });
+  const completed = (kind, sozuFact, ov = overview()) => {
+    const sent = { id: 1, title: kind === "stake" ? "Stake with Sozu" : "Unstake from Sozu", amountLux: dusk(100), sozu: kind, phase: "sent", status: "executed", hash: HASH, blockHeight: "4796264", feePaid: "2136028", startedAt: Date.now(), sentAt: Date.now(), nodeUrl: NODE };
+    body.replaceChildren(...sentView(ov, { state: { route: "sent", sent }, actions: { render: vi.fn(async () => {}) }, sozu: sozuFact }));
+  };
+
+  it("says what it got or gave back in stDUSK, to the lux, and what one stDUSK was worth", () => {
+    completed("stake", fact("stake", 49_875_000_000n));
+    expect(rows().slice(0, 2)).toEqual(["You got49.875 stDUSK", "Rate1 stDUSK = 2 DUSK"]);
+    completed("unstake", fact("unstake", 63_297_959n));
+    expect(rows().slice(0, 2)).toEqual(["You gave back0.063297959 stDUSK", "Rate1 stDUSK = 2 DUSK"]);
+    // Hidden with the balances; and nothing until the pool's event is read.
+    completed("stake", fact("stake", 49_875_000_000n), overview({ hideBalances: true }));
+    expect(rows().slice(0, 2)).toEqual(["You got•••• stDUSK", "Rate1 stDUSK = 2 DUSK"]);
+    completed("stake", undefined);
+    expect(rows().some((row) => /stDUSK/.test(row))).toBe(false);
+  });
+});
+
 describe("after Confirm", () => {
   it("shows a memo in the order it was written, what it hides flagged", async () => {
     const rlo = String.fromCodePoint(0x202e);
