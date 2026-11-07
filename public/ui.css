@@ -4882,6 +4882,30 @@ details.receive-request > summary {
   gap: 12px;
 }
 
+/* A request paid more than once: each payment on a line, what it brought and when, then what to do */
+.request-row__payments {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.request-payment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: 12.5px;
+}
+
+.request-payment__actions {
+  display: flex;
+  gap: 12px;
+}
+
 /* Colour only where it's done, or asks for a look */
 .request-state {
   font-size: 12.5px;

@@ -41,6 +41,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Refused a contact's or a profile's name with hidden characters, and showed a contact saved with them by their codes, saying so.
 - Refused a dusk: link for another network by the network its query names, and a link whose memo has a line break.
 - Emptied the whole form when a link is refused, and said why for each refused link.
+- Said what came in on every Paid request, one of any amount too.
+- Listed each payment of a request paid twice with what it brought and when, and Send back on the extra one.
 - Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
 - Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
 - Repeated on Review that a send goes to your own account, and said what to try after a wrong password.

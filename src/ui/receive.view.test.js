@@ -462,15 +462,21 @@ describe("the requests made here", () => {
     const actions = await draw(state);
 
     expect(shown()).toEqual([
-      { amount: "1.25 DUSK", state: "Paid", match: `Amount and memo match a payment ${whenAtText(T0 + HOUR)}.`, buttons: ["See payment", "Remove"] },
+      { amount: "1.25 DUSK", state: "Paid", match: `Amount and memo match a payment of 1.25 DUSK ${whenAtText(T0 + HOUR)}.`, buttons: ["See payment", "Remove"] },
       { amount: "2 DUSK", state: "Check", match: `Same amount ${whenAtText(T0 + 2 * HOUR)}, with another memo: "Other". Check it's this one.`, buttons: ["See payment", "Remove"] },
-      { amount: "Any amount", state: "Paid twice", match: "Amount and memo match 2 payments.", buttons: ["Payment 1", "Payment 2", "Remove"] },
+      { amount: "Any amount", state: "Paid twice", match: "Its memo matches 2 payments.", buttons: ["Remove"] },
     ]);
-    // What paid stays paid, kept with its request.
-    await vi.waitFor(() => expect(items[KEY][ACCOUNT].find((r) => r.id === "a").paid).toEqual({ at: T0 + HOUR, hash: "a1".repeat(32) }));
+    // What paid stays paid, kept with its request and what it paid.
+    await vi.waitFor(() => expect(items[KEY][ACCOUNT].find((r) => r.id === "a").paid).toEqual({ at: T0 + HOUR, hash: "a1".repeat(32), lux: "1250000000" }));
 
+    // Paid twice: each payment, what it brought and when, to see; the second to send back.
+    const payments = () => dom.document.body.querySelectorAll(".request-row")[2].querySelectorAll(".request-row__payments li");
+    expect(payments().map((li) => [visibleText(li.querySelector(".request-payment__what")), li.querySelectorAll("button").map(visibleText)])).toEqual([
+      [`0.7 DUSK ${whenAtText(T0 + 3 * HOUR)}`, ["See payment"]],
+      [`0.3 DUSK ${whenAtText(T0 + 4 * HOUR)}`, ["See payment", "Send back"]],
+    ]);
     // A payment opens in its details, and comes back here.
-    dom.document.body.querySelectorAll(".request-row")[2].querySelectorAll("button").find((b) => visibleText(b) === "Payment 2").click();
+    payments()[1].querySelectorAll("button").find((b) => visibleText(b) === "See payment").click();
     expect([state.route, state.txDetailHash, state.txDetailFrom]).toEqual(["tx", "c2".repeat(32), "receive"]);
 
     // Remove takes one off, here and where it's kept.
@@ -479,6 +485,48 @@ describe("the requests made here", () => {
     dom.document.body.querySelectorAll(".request-row")[1].querySelectorAll("button").find((b) => visibleText(b) === "Remove").click();
     await vi.waitFor(() => expect(shown().map((row) => row.amount)).toEqual(["1.25 DUSK", "Any amount"]));
     expect(items[KEY][ACCOUNT].map((r) => r.id)).toEqual(["a", "c", "d", "e"]);
+  });
+
+  it("says what came in on every Paid request, one of any amount too, also once its payment is too far back to read", async () => {
+    // Marek's: a request of any amount paid with its memo and one lux said Paid, and nothing of how much.
+    items[KEY] = {
+      [ACCOUNT]: [
+        kept({ id: "a", memo: "r18 open" }),
+        // Sofia's: kept paid by an earlier visit, its payment off the page now.
+        kept({ id: "b", memo: "Anticipo Proyecto Sol", paid: { at: T0 + 2 * HOUR, hash: "b1".repeat(32), lux: "20000000" } }),
+      ],
+    };
+    const entries = [paidIn("a1".repeat(32), "1", "r18 open", T0 + HOUR)];
+    const state = { receive: { tab: "public" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
+    await draw(state);
+    expect(shown().map(({ state: word, match }) => [word, match])).toEqual([
+      ["Paid", `Its memo matches a payment of 0.000000001 DUSK ${whenAtText(T0 + HOUR)}.`],
+      ["Paid", `Its memo matches a payment of 0.02 DUSK ${whenAtText(T0 + 2 * HOUR)}.`],
+    ]);
+    await vi.waitFor(() => expect(items[KEY][ACCOUNT].find((r) => r.id === "a").paid).toEqual({ at: T0 + HOUR, hash: "a1".repeat(32), lux: "1" }));
+
+    // With balances hidden, what came in is too.
+    const hiddenState = { receive: { tab: "public" }, activity: state.activity };
+    const actions = { render: vi.fn(async () => dom.document.body.replaceChildren(...receiveView({ ...unlocked, hideBalances: true }, { state: hiddenState, actions }))), showToast: vi.fn() };
+    await actions.render();
+    await vi.waitFor(() => expect(hiddenState.requests?.loaded).toBe(true));
+    await actions.render();
+    expect(shown().map(({ match }) => match)).toEqual([`Its memo matches a payment of •••• DUSK ${whenAtText(T0 + HOUR)}.`, `Its memo matches a payment of •••• DUSK ${whenAtText(T0 + 2 * HOUR)}.`]);
+  });
+
+  it("sends back a payment that paid a request again: to whoever sent it, what it brought, with the request's memo", async () => {
+    // Sofia's: paid twice, and no way to refund but filling Send in by hand.
+    items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "16000000", memo: "Factura 2026-074 Ilustración" })] };
+    const SENDER = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+    const entries = [paidIn("a1".repeat(32), "16000000", "Factura 2026-074 Ilustración", T0 + HOUR), paidIn("a2".repeat(32), "16000000", "Factura 2026-074 Ilustración", T0 + 2 * HOUR)];
+    const state = { route: "receive", receive: { tab: "public" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
+    await draw(state);
+    expect(shown()[0]).toMatchObject({ state: "Paid twice", match: "Amount and memo match 2 payments." });
+    const back = dom.document.body.querySelectorAll(".request-row__payments button").find((b) => visibleText(b) === "Send back");
+    expect(accessibleName(back)).toBe(`Send back the payment of 0.016 DUSK ${whenAtText(T0 + 2 * HOUR)}`);
+    back.click();
+    expect(state.route).toBe("send");
+    expect(state.draft).toMatchObject({ to: SENDER, amountDusk: "0.016", memo: "Refund: Factura 2026-074 Ilustración" });
   });
 
   it("finds a payment past the page Activity shows: one paid while closed, with more than a page after it", async () => {
