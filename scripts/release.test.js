@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { compareRelease } from "./verify-release.js";
+import { compareRelease, npmCommand } from "./verify-release.js";
 import { unzip, zip } from "./zip.js";
 
 const FILES = {
@@ -58,18 +58,33 @@ describe("release zips", () => {
     }
   });
 
-  it("from elsewhere are refused where a name reaches out of the build, or a file holds more than the zip says", () => {
-    const named = zip(build(["zz/x.js"], 0o644, new Date(), { "zz/x.js": "x" }));
-    const escaping = Buffer.from(named.toString("latin1").replaceAll("zz/x.js", "../x.js"), "latin1");
-    const packed = zip(build(Object.keys(FILES)));
-    const bomb = Buffer.from(packed);
+  it("from elsewhere are refused unless any reader would read them alike, and within bounds", () => {
+    const files = { "popup.js": "go();\n", "qopup.js": "go();\n", "zz.js": "evil();\n" };
+    const packed = zip(build(Object.keys(files), 0o644, new Date(), files));
+    const renamed = (from, to) => Buffer.from(packed.toString("latin1").replaceAll(from, to), "latin1");
+    const counting = (count) => {
+      const bytes = Buffer.from(packed);
+      bytes.writeUInt16LE(count, bytes.length - 14);
+      bytes.writeUInt16LE(count, bytes.length - 12);
+      return bytes;
+    };
+    // A file's inflated size, said otherwise before its data and in the listing.
+    const sized = (bytes, name, size) => {
+      const said = Buffer.from(bytes);
+      said.writeUInt32LE(size, said.indexOf(name) - 30 + 22);
+      said.writeUInt32LE(size, said.lastIndexOf(name) - 46 + 24);
+      return said;
+    };
 
-    // The central directory's own record of chunks/b.js, 46 bytes before its name, says 1 byte.
-    bomb.writeUInt32LE(1, packed.lastIndexOf(Buffer.from("chunks/b.js")) - 46 + 24);
-
-    expect(() => unzip(escaping)).toThrow("names oddly");
-    expect(() => unzip(bomb)).toThrow();
-    expect(unzip(packed).size).toBe(5);
+    expect([...unzip(packed).keys()]).toEqual(["popup.js", "qopup.js", "zz.js"]);
+    expect(() => unzip(renamed("zz.js", "../zz"))).toThrow("named oddly");
+    expect(() => unzip(renamed("qopup.js", "popup.js"))).toThrow("or twice");
+    expect(() => unzip(renamed("qopup.js", "Popup.js"))).toThrow("or twice");
+    expect(() => unzip(counting(2))).toThrow("lists its files oddly");
+    expect(() => unzip(sized(packed, "zz.js", 1))).toThrow("other than it says");
+    expect(() => unzip(sized(sized(packed, "popup.js", 2 ** 27), "zz.js", 2 ** 27))).toThrow(
+      "more than 256 MiB"
+    );
   });
 });
 
@@ -80,11 +95,30 @@ describe("checking a release", () => {
     const changed = zip(build(Object.keys(FILES), 0o644, new Date(), { ...FILES, "popup.js": "steal();\n" }));
 
     expect(compareRelease(ours, ours, folder)).toEqual([]);
-    expect(compareRelease(Buffer.concat([ours, Buffer.from([0])]), ours, folder)).toEqual([
+    const rezipped = Buffer.from(ours);
+
+    // The same files, zipped as on another system: other bytes.
+    rezipped.writeUInt16LE(0x0014, rezipped.readUInt32LE(rezipped.length - 6) + 4);
+    expect(compareRelease(rezipped, ours, folder)).toEqual([
       "its 5 files are the rebuild's, zipped differently",
     ]);
     expect(compareRelease(ours, undefined, folder)).toEqual([]);
     expect(compareRelease(changed, undefined, folder)).toEqual(["popup.js: differs"]);
+  });
+
+  it("runs npm as a script of this Node's, which on Windows a .cmd launcher can't be run without a shell", () => {
+    const [command, args] = npmCommand(undefined, ["--version"]);
+
+    expect(command).toBe(process.execPath);
+    expect(execFileSync(command, args, { encoding: "utf8" })).toMatch(/^\d+\.\d+\.\d+\n$/);
+    expect(npmCommand("11.18.0", ["ci"])[1].slice(1)).toEqual([
+      "exec",
+      "--yes",
+      "--package=npm@11.18.0",
+      "--",
+      "npm",
+      "ci",
+    ]);
   });
 
   it("checks out every file as it was committed, whatever the machine's line endings", () => {

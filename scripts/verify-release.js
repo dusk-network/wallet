@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { unzip, zipNames } from "./zip.js";
 
@@ -49,6 +49,21 @@ export function compareRelease(released, rebuilt, folder) {
   }
 
   return problems;
+}
+
+/**
+ * How to run npm, with the arguments given, from npm's own script beside this
+ * Node, as Node: on Windows npm and npx are .cmd files, which only a shell
+ * runs. With a version, that npm, as npx gets it.
+ */
+export function npmCommand(version, args) {
+  const home = dirname(process.execPath);
+  const cli = ["node_modules/npm/bin/npm-cli.js", "../lib/node_modules/npm/bin/npm-cli.js"]
+    .map((path) => join(home, path))
+    .find((path) => existsSync(path));
+  const own = version ? ["exec", "--yes", `--package=npm@${version}`, "--", "npm", ...args] : args;
+
+  return cli ? [process.execPath, [cli, ...own]] : ["npm", own];
 }
 
 // Run, not imported by the tests.
@@ -106,14 +121,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // At least the npm the tag asks for, which Node's own may not be.
     const { engines } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
     const floor = engines?.npm?.match(/^>=\s*(\d+\.\d+\.\d+)$/)?.[1];
-    const [command, ...first] = floor ? ["npx", "--yes", `npm@${floor}`] : ["npm"];
     // The build reads DUSK_ settings for local debugging: none of them here.
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([key]) => !/^(DUSK_|NODE_ENV$|NODE_OPTIONS$)/.test(key))
     );
     const npm = (...npmArgs) => {
       try {
-        execFileSync(command, [...first, ...npmArgs], { cwd: dir, env, stdio: ["ignore", "ignore", "pipe"] });
+        execFileSync(...npmCommand(floor, npmArgs), { cwd: dir, env, stdio: ["ignore", "ignore", "pipe"] });
       } catch (error) {
         // What npm or the build said, only when it fails.
         process.stderr.write(error.stderr ?? "");
