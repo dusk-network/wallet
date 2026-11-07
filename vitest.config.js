@@ -8,7 +8,7 @@ export default defineConfig({
     env: { LC_ALL: "en_US.UTF-8", LANG: "en_US.UTF-8", LANGUAGE: "en" },
     setupFiles: ["./src/shared/fixtures/language.js"],
     // Include test files
-    include: ["src/**/*.test.js"],
+    include: ["src/**/*.test.js", "scripts/**/*.test.js"],
     // Enable globals like describe, it, expect without imports (optional)
     globals: false,
     // Coverage configuration

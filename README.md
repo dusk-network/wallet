@@ -69,6 +69,22 @@ npm run build:firefox
 
 Then load `dist-firefox/` as a temporary add-on in `about:debugging`.
 
+### Verify a release
+
+A release's Chrome and Firefox zips rebuild byte for byte from its tag, and its
+release notes list their SHA-256. To rebuild a release and compare it with the
+zips it published, from a clone of this repository, with the Node version in
+`.nvmrc`:
+
+```bash
+node scripts/verify-release.js <tag>
+```
+
+The script builds the tag in a new worktree with `npm ci`, zips each build as
+the release workflow does, and compares the zips byte for byte, then file by
+file where they differ. A release zipped before `scripts/zip.js` compares file
+by file. `--from <folder>` compares with zips you downloaded instead.
+
 ## For dApp Developers
 
 The extension announces an EIP-1193-style provider through Dusk discovery events. Dusk isn't EVM, but the provider patterns are familiar.

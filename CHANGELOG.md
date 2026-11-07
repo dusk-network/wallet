@@ -22,6 +22,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Listed the requests made in Receive, each Waiting, Paid, Check or Paid twice, with its payments to open.
 - Added a search to Activity: by name, address, memo, transaction ID or amount.
 - Gave the export's values in euros where the browser's region pays in them, and in US dollars elsewhere.
+- Made a release's zips rebuild byte for byte from its tag, with their SHA-256 in the release notes.
 
 ### Changed
 
