@@ -322,11 +322,19 @@ export function sendFormView(ov, { state, actions } = {}) {
   // A link read (readRequestLink), as it's pasted, scanned or opened.
   const applyRequest = (read, { source = "request" } = {}) => {
     // For another network, or one that can't be read, it fills in nothing:
-    // the recipient empties, what was typed in the other fields stays, and
-    // the reason alone is said.
+    // the whole form empties, so nothing an earlier link or a person put in
+    // reads as this one's, and the reason alone is said.
     if (!read?.link) {
       to.value = "";
-      state.draft = refusedRequest({ ...(state.draft || {}), requestChainId: read?.reason === "other-network" ? read.chainId : undefined }, read?.reason === "other-network" ? "" : read?.problem);
+      field.setValue("");
+      memo.value = "";
+      checkMemo();
+      state.draft = {
+        ...refusedRequest({ ...(state.draft || {}), requestChainId: read?.reason === "other-network" ? read.chainId : undefined }, read?.reason === "other-network" ? "" : read?.problem),
+        amountDusk: "",
+        amountMasked: false,
+        memo: "",
+      };
       sayRefused({ chainId: state.draft.refusedChainId, problem: state.draft.refusedProblem });
       sayFilled("");
       updateToType();

@@ -1487,8 +1487,8 @@ describe("a request for another network", () => {
     return el && isShown(el) ? el.textContent : "";
   };
 
-  it("fills in nothing: the recipient empties, what was typed stays, and it says why", async () => {
-    // A Mainnet request link put in To on Testnet, over a form being filled in.
+  it("fills in nothing: the whole form empties, and it says why", async () => {
+    // A Mainnet request link put in To on Testnet, over a form being filled in: nothing of it stays to read as the link's.
     const state = newState();
     const form = mount(state);
     typeInto(form.to, BOB.account);
@@ -1498,8 +1498,8 @@ describe("a request for another network", () => {
     await settle();
 
     expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
-    expect([form.to.value, form.amount.value]).toEqual(["", "0.5"]);
-    expect(state.draft).toMatchObject({ to: "", amountDusk: "0.5", memo: "" });
+    expect([form.to.value, form.amount.value]).toEqual(["", ""]);
+    expect(state.draft).toMatchObject({ to: "", amountDusk: "", memo: "" });
     expect(filled()).toBe("");
 
     // Review goes nowhere, and Send drawn again still says why.
@@ -1746,18 +1746,20 @@ describe("a request link", () => {
     return el && el.style.display !== "none" ? el.textContent : "";
   };
 
-  it("refuses a link that says a field twice, or has a user part before its host, with that alone", async () => {
-    // Marek's: each would fill in its first value without a word.
-    for (const link of [
-      httpsLink(`to=${ALICE.account}&amount=0.001&network=testnet&network=mainnet`),
-      httpsLink(`to=${ALICE.account}&to=${BOB.account}&amount=0.001`),
-      `https://apps.dusk.network@apps.testnet.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.001`,
+  it("refuses a link that says a field twice, or has a user part before its host, saying which", async () => {
+    // Marek's: each would fill in its first value without a word. Sofia's: say what's wrong, for its sender to fix.
+    for (const [link, why] of [
+      [httpsLink(`to=${ALICE.account}&amount=0.001&network=testnet&network=mainnet`), "This link says the network twice. Ask for a new one."],
+      [httpsLink(`to=${ALICE.account}&to=${BOB.account}&amount=0.001`), "This link says the recipient twice. Ask for a new one."],
+      [httpsLink(`to=${ALICE.account}&amount=0.01&amount=0.01`), "This link says the amount twice. Ask for a new one."],
+      [httpsLink(`to=${ALICE.account}&memo=One&memo=One`), "This link says the memo twice. Ask for a new one."],
+      [`https://apps.dusk.network@apps.testnet.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.001`, "This link has something before the site's address. Ask for a new one."],
     ]) {
       const state = newState();
       const form = mount(state);
       paste(form, link);
       await settle();
-      expect(refusal(), link).toEqual(["That link can't be read. Ask for a new one."]);
+      expect(refusal(), link).toEqual([why]);
       expect([form.to.value, form.amount.value, state.draft.to]).toEqual(["", "", ""]);
     }
 
@@ -1815,13 +1817,66 @@ describe("a request link", () => {
     await settle();
     expect(dom.document.body.querySelector(".err").textContent).toBe("Not a valid address. Check it and try again.");
 
-    // One to the wallet's Send that names no recipient can't be read.
+    // One to the wallet's Send that names no recipient says so.
     const empty = mount(newState());
     empty.to.value = httpsLink("amount=1");
     empty.to.dispatchEvent(fakeEvent("blur"));
     await settle();
     expect(empty.amount.value).toBe("");
-    expect(refusal()).toEqual(["That link can't be read. Ask for a new one."]);
+    expect(refusal()).toEqual(["This link doesn't say who to pay. Ask for a new one."]);
+  });
+
+  const memoField = () => dom.document.body.querySelectorAll("input").find((i) => i.getAttribute("placeholder") === "Optional");
+
+  it("clears the whole form when a link is refused, what an earlier link filled in too", async () => {
+    // Chen's: a mainnet QR after a testnet one cleared To and kept the testnet one's amount and memo.
+    const { openQrScanModal } = await import("./components/QrScanModal.js");
+    const state = newState();
+    const form = mount(state);
+    openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:2?amount=0.03&memo=Chicken+rice+Sat`);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    expect([form.to.value, form.amount.value, memoField().value]).toEqual([ALICE.account, "0.03", "Chicken rice Sat"]);
+
+    openQrScanModal.mockResolvedValueOnce(`dusk:public-${BOB.account}@dusk:1?amount=1&memo=Rent`);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
+    expect(state.draft).toMatchObject({ to: "", amountDusk: "", memo: "" });
+
+    // So does one that can't be read, after what was typed.
+    typeInto(form.amount, "5");
+    typeInto(memoField(), "Typed");
+    paste(form, httpsLink(`to=${ALICE.account}&memo=One&memo=Two`));
+    await settle();
+    expect(refusal()).toEqual(["This link says the memo twice. Ask for a new one."]);
+    expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
+  });
+
+  it("refuses a dusk: link for another network by the network its query names, as an https link", async () => {
+    // Marek's: a link that said Testnet filled in a Mainnet send, and one that said Mainnet a Testnet send.
+    const onTestnet = mount(newState());
+    paste(onTestnet, `dusk:public-${ALICE.account}?amount=0.001&network=mainnet`);
+    await settle();
+    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect([onTestnet.to.value, onTestnet.amount.value]).toEqual(["", ""]);
+
+    const onMainnet = mount(newState(), overview({ nodeUrl: "https://nodes.dusk.network" }));
+    paste(onMainnet, `dusk:public-${ALICE.account}?amount=0.001&network=testnet`);
+    await settle();
+    expect(refusal()).toEqual(["This request is for Testnet. You are on Mainnet."]);
+    expect([onMainnet.to.value, onMainnet.amount.value]).toEqual(["", ""]);
+  });
+
+  it("refuses a link whose memo has a line break, saying so, rather than sending it on one line", async () => {
+    // Marek's: "line one\nline two" became "line oneline two", which matches no request made with the break.
+    const state = newState();
+    const form = mount(state);
+    paste(form, httpsLink(`to=${ALICE.account}&amount=0.001&memo=line%20one%0Aline%20two`));
+    await settle();
+    expect(refusal()).toEqual(["This link's memo has a line break, which Send can't take. Ask for a new one."]);
+    expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
   });
 
   it("fills in the page it opened, a tab of its own, as the form any request fills in", async () => {
@@ -1841,7 +1896,7 @@ describe("a request link", () => {
     const refused = (await import("./popup/state.js")).state;
     const unread = mount(refused);
     expect([unread.to.value, unread.amount.value]).toEqual(["", ""]);
-    expect(refusal()).toEqual(["That link can't be read. Ask for a new one."]);
+    expect(refusal()).toEqual(["This link names two networks, Testnet and Mainnet. Ask for a new one."]);
 
     // No link, or a page opened with something that isn't one: an empty form.
     vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send" });
