@@ -4333,6 +4333,20 @@ button.tx-open:focus-visible::after {
   white-space: nowrap;
 }
 
+/* A row's memo under its name, two lines at most: its details have all of it.
+   It reads left to right on its own, as text someone else chose does. */
+.tx-memo {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 /* An icon button with a name: Copy beside an address */
 button.copy-ico {
   position: relative;

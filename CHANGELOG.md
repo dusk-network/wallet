@@ -43,6 +43,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Emptied the whole form when a link is refused, and said why for each refused link.
 - Said what came in on every Paid request, one of any amount too.
 - Listed each payment of a request paid twice with what it brought and when, and Send back on the extra one.
+- Found what's searched typed without its accents, in Activity and Contacts, and an amount typed with either decimal mark.
+- Showed each Activity row's memo under its name.
 - Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
 - Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
 - Repeated on Review that a send goes to your own account, and said what to try after a wrong password.

@@ -118,6 +118,20 @@ describe("contacts", () => {
     listAddressBook.mockClear();
   });
 
+  it("finds a contact by its name typed without its accents, or its address", () => {
+    // Sofia's: a search needs no accent typed.
+    const items = [{ id: "1", name: "Ilustraci\u00f3n Sol", address: ACCOUNT, type: "account" }, { id: "2", name: "Bob", address: ADDRESS, type: "address" }];
+    const titles = (query) => {
+      const view = mount({ items, query });
+      void view;
+      return dom.document.body.querySelectorAll(".contact-row .row-title").map((el) => el.textContent);
+    };
+    expect(titles("ilustracion")).toEqual(["Ilustraci\u00f3n Sol"]);
+    expect(titles("ILUSTRACIÓN sol")).toEqual(["Ilustraci\u00f3n Sol"]);
+    expect(titles(ADDRESS.slice(10, 30))).toEqual(["Bob"]);
+    expect(titles("carla")).toEqual([]);
+  });
+
   it("lists contacts by name with their address and first letter, and leaves Delete all to Settings", async () => {
     let view = mount();
     expect(dom.document.body.querySelector('input[type="search"]').getAttribute("aria-label")).toBe("Search contacts");

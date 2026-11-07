@@ -1,4 +1,5 @@
 import { NAME_HIDES, nameHides } from "@dusk-network/app-core/names";
+import { searchKey } from "@dusk-network/app-core/text";
 import { isAccount } from "@dusk-network/networks/account";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { isDuskName } from "@duskdomains/sdk/names";
@@ -199,10 +200,11 @@ export function addressBookView(ov, { state, actions } = {}) {
   };
 
   const renderList = () => {
-    const q = lower(ab.query);
+    // In any case, and with or without accents (app-core's searchKey).
+    const q = searchKey(ab.query);
     const items = Array.isArray(ab.items) ? ab.items : [];
     const filtered = q
-      ? items.filter((e) => [e?.name, e?.address, e?.duskName].some((v) => lower(v).includes(q)))
+      ? items.filter((e) => [e?.name, e?.address, e?.duskName].some((v) => searchKey(v).includes(q)))
       : items;
 
     // The title names the list, so the search has no label of its own.

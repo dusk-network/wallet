@@ -475,6 +475,18 @@ export function contactNames(state, actions, ov) {
   return (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? ownProfileName(ov, address);
 }
 
+/**
+ * A row's memo as it shows under its name, as web History shows it: what can't
+ * be seen in it as its codes, line breaks too (safeText.js); "" for none, for a
+ * memo of bytes, and for a bridge transfer's, which is an address or a hash.
+ * @param {object} tx - an Activity row
+ */
+function rowMemo(tx) {
+  if (tx?.route || tx?.entry?.memoBinary === true) return "";
+  const memo = String(tx?.memo ?? "").trim();
+  return memo ? safeText(memo).text : "";
+}
+
 function pulseClass(state, hash) {
   const p = state?.txPulse;
   if (!p || !hash || String(p.hash) !== hash || Date.now() - Number(p.at || 0) > 2500) return "";
@@ -494,9 +506,10 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
   const desc = describeTx(tx, { contactName, nodeUrl });
   const hash = String(tx?.hash ?? "");
   const sub = subText(desc, when(tx), { hidden, spoken: true });
+  const memo = rowMemo(tx);
   // What the row says, for the button that opens it.
   const spoken = !desc.amount ? "" : hidden && !desc.amount.text ? "amount hidden" : amountText(desc.amount, false);
-  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, sub, spoken, desc.unsent ? "" : desc.statusWord].filter(Boolean).join(", ");
+  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, sub, spoken, desc.unsent ? "" : desc.statusWord, memo ? `memo ${memo}` : ""].filter(Boolean).join(", ");
 
   const open = () => {
     if (!state || !hash) return;
@@ -535,6 +548,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
       ].filter(Boolean)),
       // The button's name says these already.
       sub ? subEl(desc, when(tx), hidden) : null,
+      memo ? h("div", { class: "row-sub tx-memo", "aria-hidden": "true", text: memo }) : null,
     ].filter(Boolean)),
     h("div", { class: "tx-right", "aria-hidden": "true" }, [
       amountEl(desc.amount, hidden),

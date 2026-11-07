@@ -3,6 +3,9 @@
 // filters, Show more for older history, and Export for an accountant
 // (activityExport.js).
 
+import { amountsMeant } from "@dusk-network/app-core/amounts";
+import { searchKey } from "@dusk-network/app-core/text";
+
 import { explorerAccountUrl } from "../../../shared/explorer.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
@@ -88,17 +91,22 @@ export function recentActivitySection(ov, { state, actions } = {}) {
 }
 
 /**
- * Whether a row has what's searched for, in any case: its name, contact or
- * .dusk name, address, memo as text, or transaction ID, and its amount while
- * balances show.
+ * Whether a row has what's searched for, in any case and with or without its
+ * accents (app-core's searchKey): its name, contact or .dusk name, address,
+ * memo as text, or transaction ID; and while balances show, its amount: of
+ * DUSK by the amounts what's typed can mean, with either decimal mark
+ * (app-core's amountsMeant), and a token's as it shows.
  */
 export function inSearch(tx, desc, query, { hidden = false } = {}) {
-  if (!query) return true;
-  const amount = hidden || !desc.amount ? [] : [desc.amount.value, desc.amount.exact, desc.amount.plain];
+  const q = searchKey(query);
+  if (!q) return true;
   const memo = tx?.entry?.memoBinary === true ? "" : tx?.memo;
-  return [desc.name, desc.alias, desc.address, desc.recipient, desc.lead, tx?.counterparty, memo, tx?.hash, ...amount].some((field) =>
-    String(field ?? "").toLowerCase().includes(query)
-  );
+  const has = (field) => searchKey(field).includes(q);
+  if ([desc.name, desc.alias, desc.address, desc.recipient, desc.lead, tx?.counterparty, memo, tx?.hash].some(has)) return true;
+  if (hidden || !desc.amount) return false;
+  if (desc.amount.unit !== "DUSK" || desc.amount.text) return [desc.amount.value, desc.amount.exact, desc.amount.plain].some(has);
+  const lux = typeof tx?.value === "bigint" ? tx.value : null;
+  return lux !== null && amountsMeant(query).some(({ from, to }) => lux >= from && lux < to);
 }
 
 /**
@@ -110,7 +118,7 @@ export function activityView(ov, { state, actions } = {}) {
   const contactName = contactNames(state, actions, ov);
   const filter = ACTIVITY_FILTERS.some((f) => f.id === state?.activityFilter) ? state.activityFilter : "all";
   const nodeUrl = String(ov?.nodeUrl ?? "");
-  const query = String(state?.activitySearch ?? "").trim().toLowerCase();
+  const query = String(state?.activitySearch ?? "").trim();
   const rows = activityRows(ov, state).filter((tx) => {
     const desc = describeTx(tx, { contactName, nodeUrl });
     return inFilter(desc, filter) && inSearch(tx, desc, query, { hidden });

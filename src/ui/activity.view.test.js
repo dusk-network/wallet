@@ -347,6 +347,47 @@ describe("the Activity view", () => {
     expect(search("")).toEqual(all);
   });
 
+  it("finds a memo or a name typed without its accents, and shows each row's memo under it", () => {
+    // Sofia's and Amelie's: "ilustracion" found nothing, and the rows that matched said no memo.
+    const { state, draw } = setup({ route: "activity" });
+    const memos = ["Factura 2026-074 Ilustraci\u00f3n", "Le go\u00fbter du mercredi", "Fac\u202etura"];
+    state.activity.entries = state.activity.entries.map((entry, i) => (i < memos.length ? { ...entry, memo: memos[i] } : entry));
+    draw();
+    const search = (text) => {
+      const field = body().querySelector('input[aria-label="Search activity"]');
+      field.value = text;
+      field.dispatchEvent(new Event("input"));
+      return body().querySelectorAll(".tx-row").map((row) => visibleText(row.querySelector(".tx-memo") ?? row));
+    };
+    expect(search("ilustracion")).toEqual(["Factura 2026-074 Ilustraci\u00f3n"]);
+    expect(search("ILUSTRACIÓN")).toEqual(["Factura 2026-074 Ilustraci\u00f3n"]);
+    expect(search("gouter")).toEqual(["Le go\u00fbter du mercredi"]);
+    // What can't be seen in a memo shows as its code, as everywhere a memo shows, and its button says it.
+    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", "Fac\\u202etura"]);
+    expect(visibleText(body())).not.toContain("\u202e");
+    const opened = body().querySelectorAll(".tx-row button.tx-open").map(accessibleName);
+    expect(opened.every((name) => /, memo /.test(name))).toBe(true);
+  });
+
+  it("finds an amount typed with either decimal mark, in the browser's language", () => {
+    // Lena's: under German, "0.2" and "0.05" found nothing where "0,2" and "0,05" did.
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
+    const { state, draw } = setup({ route: "activity" });
+    const [first, second, ...rest] = state.activity.entries;
+    state.activity.entries = [{ ...first, value: "200000000" }, { ...second, value: "50000000" }, ...rest];
+    draw();
+    const search = (text) => {
+      const field = body().querySelector('input[aria-label="Search activity"]');
+      field.value = text;
+      field.dispatchEvent(new Event("input"));
+      return body().querySelectorAll(".tx-row .tx-amount").map(visibleText);
+    };
+    expect(search("0.2")).toEqual(search("0,2"));
+    expect(search("0.2").some((amount) => amount.includes("0,2"))).toBe(true);
+    expect(search("0.05")).toEqual(search("0,05"));
+    expect(search("0.05").some((amount) => amount.includes("0,05"))).toBe(true);
+  });
+
   it("finds no row by its amount while balances are hidden, and says what's still to read", () => {
     const { state, draw } = setup({ complete: false, hidden: true, route: "activity" });
     state.activitySearch = "1,100";
