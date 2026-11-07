@@ -1,3 +1,4 @@
+import { NAME_HIDES, nameHides } from "@dusk-network/app-core/names";
 import { networks } from "@dusk-network/networks";
 
 import { formatDuskExact, formatFee } from "../../../shared/amount.js";
@@ -131,14 +132,32 @@ export function optionsView(ov, { state, actions } = {}) {
               "aria-label": `Profile ${i + 1} name`,
               value: drafts[i] ?? saved,
             });
+            // A name with what can't be seen in it could read as another's: it's refused, and said under its field.
+            const error = h("div", { class: "field-error", id: `profile-name-error-${i}`, role: "alert", hidden: true });
+            const showError = (text) => {
+              error.textContent = text;
+              error.hidden = !text;
+              if (text) {
+                input.setAttribute("aria-invalid", "true");
+                input.setAttribute("aria-describedby", error.id);
+              } else {
+                input.removeAttribute("aria-invalid");
+                input.removeAttribute("aria-describedby");
+              }
+            };
             input.addEventListener("input", () => {
               drafts[i] = input.value;
+              showError("");
             });
             const save = async () => {
               const value = input.value;
               const label = labelOf(value);
               if (label === saved) {
                 if (drafts[i] === value) delete drafts[i];
+                return;
+              }
+              if (nameHides(label)) {
+                showError(NAME_HIDES);
                 return;
               }
               const before = saved;
@@ -165,7 +184,7 @@ export function optionsView(ov, { state, actions } = {}) {
             const line = named(i, h("span", { class: "settings-profile-line" }), () =>
               [verified.get(i) || `Profile ${i + 1}`, acct ? shortAddress(String(acct)) : ""].filter(Boolean).join(" · ")
             );
-            return h("div", { class: "settings-label" }, [line, input]);
+            return h("div", { class: "settings-label" }, [line, input, error]);
           }),
         ])
       : null;

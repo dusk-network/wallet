@@ -139,6 +139,15 @@ describe("Activity's rows", () => {
     expect(rows()[2]).toBe("Old meReceived · Yesterday+1,000 DUSK");
   });
 
+  it("name a contact saved with hidden characters by their codes, never turned around", () => {
+    // Marek's: an override at the start made a stranger's account read as "Profile 2".
+    const { state, draw } = setup();
+    state.addressBook.items = [{ name: "\u202e2 eliforP", address: SENDER }];
+    draw();
+    expect(rows()[2]).toBe("\\u202e2 eliforPReceived · Yesterday+1,000 DUSK");
+    expect(visibleText(body())).not.toContain("\u202e");
+  });
+
   it("name a profile of another wallet here after its wallet, and no one else", () => {
     const { ov, draw } = setup();
     ov.wallets = [

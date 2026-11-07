@@ -104,6 +104,28 @@ describe("profile names", () => {
     expect(setAccountName).not.toHaveBeenCalled();
   });
 
+  it("refuse a name with hidden characters, saying so under its field, and save nothing", async () => {
+    // Marek's override, which made a contact read as "Profile 2": a profile's own name can't hold one either.
+    setAccountName.mockClear();
+    const view = await settings();
+    const shownError = () => {
+      const id = label(2).getAttribute("aria-describedby");
+      return id ? dom.document.getElementById(id).textContent : "";
+    };
+    typeInto(label(2), "\u202eecilA");
+    label(2).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(setAccountName).not.toHaveBeenCalled();
+    expect(shownError()).toBe("This name has hidden characters. Type it again without them.");
+    expect(view.actions.showToast).not.toHaveBeenCalledWith("Name saved.");
+
+    typeInto(label(2), "Alice");
+    expect(shownError()).toBe("");
+    label(2).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(setAccountName).toHaveBeenCalledWith(ACCOUNTS[0], 1, "Alice");
+  });
+
   it("save once when the field is left with both a change and a blur, and not when nothing changed", async () => {
     setAccountName.mockClear();
     await settings({ accountNames: { 0: "Main" } });

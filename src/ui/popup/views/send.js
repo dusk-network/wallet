@@ -50,7 +50,7 @@ import {
 
 import { openQrScanModal } from "../../components/QrScanModal.js";
 import { readRequestLink, walletChainOf } from "../../lib/requestLink.js";
-import { contactAlikeText } from "../../lib/contactNames.js";
+import { contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
 import { whenAtText } from "./txRow.js";
@@ -474,7 +474,8 @@ export function sendFormView(ov, { state, actions } = {}) {
       const hit = contactsIndex?.get(String(addr).toLowerCase());
       // A saved contact, or another profile of this wallet's.
       const profile = addr === ownAccount || addr === ownAddress ? "" : ownProfileName(ov, addr);
-      const name = String(hit?.name ?? "").trim() || profile;
+      // A contact's name as the wallet shows it, what can't be seen in it as its codes.
+      const name = contactNameText(hit?.name) || profile;
       if (!name) {
         hideContactBadge();
         return;
@@ -610,7 +611,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       class: "text-btn text-btn--inline name-suggestion",
       type: "button",
       text: [
-        `Your contact ${String(contact.name).trim()} · ${shortAddress(contact.address)}`,
+        `Your contact ${contactNameText(contact.name)} · ${shortAddress(contact.address)}`,
         contactAlikeText(ov, contact, Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).toLowerCase(),
       ].filter(Boolean).join(" · "),
       onclick: () => {
@@ -1191,7 +1192,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     // Or another profile of this wallet's, which needs no saving: said as yours,
     // so a contact named like it never reads the same.
     const profile = own ? "" : ownProfileName(ov, toAddr);
-    return profile ? `Your profile ${profile}` : String(hit?.name ?? "").trim();
+    return profile ? `Your profile ${profile}` : contactNameText(hit?.name);
   };
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });

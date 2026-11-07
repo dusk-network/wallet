@@ -20,6 +20,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton as copyIconButton } from "../../components/CopyButton.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
 import { ownProfileName } from "../../components/ProfileName.js";
+import { contactNameText } from "../../lib/contactNames.js";
 import { MONTHS, clockText, dateText } from "../../lib/time.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
 
@@ -456,7 +457,8 @@ export function contactNames(state, actions, ov) {
   if (ab?.loaded && Array.isArray(ab.items)) {
     for (const entry of ab.items) {
       const addr = String(entry?.address ?? "").trim().toLowerCase();
-      const name = String(entry?.name ?? "").trim();
+      // As the wallet shows a name: what can't be seen in it as its codes.
+      const name = contactNameText(entry?.name);
       if (addr && name) byAddress.set(addr, name);
     }
   } else if (state && !ab?.loading) {

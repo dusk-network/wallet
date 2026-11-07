@@ -10,6 +10,7 @@ import { screenShown } from "../lib/clickGuard.js";
 import { createToaster } from "../components/Toast.js";
 import { balancesHidden } from "../components/Balance.js";
 import { ownProfileName } from "../components/ProfileName.js";
+import { contactNameText } from "../lib/contactNames.js";
 import { txStatusToast } from "./txToast.js";
 import { createNetworkMenuController } from "../components/NetworkMenu.js";
 import { createAccountMenuController } from "../components/AccountMenu.js";
@@ -607,7 +608,7 @@ function txStatusToastFor(hash, status) {
   const contacts = state.addressBook?.loaded && Array.isArray(state.addressBook.items) ? state.addressBook.items : [];
   const contactName = (addr) => {
     const key = String(addr ?? "").toLowerCase();
-    return String(contacts.find((c) => String(c?.address ?? "").toLowerCase() === key)?.name ?? "").trim() || ownProfileName(ov, addr);
+    return contactNameText(contacts.find((c) => String(c?.address ?? "").toLowerCase() === key)?.name) || ownProfileName(ov, addr);
   };
   const onView = hash
     ? () => {

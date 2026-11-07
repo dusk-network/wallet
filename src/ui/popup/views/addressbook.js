@@ -1,3 +1,4 @@
+import { NAME_HIDES, nameHides } from "@dusk-network/app-core/names";
 import { isAccount } from "@dusk-network/networks/account";
 import { ProfileGenerator } from "@dusk/w3sper";
 import { isDuskName } from "@duskdomains/sdk/names";
@@ -17,7 +18,7 @@ import { fieldLabel, searchInput, textInput } from "../../components/FormControl
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
 import { ownProfileName } from "../../components/ProfileName.js";
-import { contactAlikeText, contactNameClash } from "../../lib/contactNames.js";
+import { HIDDEN_NAME_NOTE, HIDDEN_NAME_ROW, contactAlikeText, contactNameClash, contactNameText } from "../../lib/contactNames.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
 import { contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
@@ -67,7 +68,8 @@ const lower = (v) => String(v ?? "").trim().toLowerCase();
  * @param {string} [className]
  */
 export function contactAvatar(name, className = "row-icon contact-letter") {
-  const letter = Array.from(String(name ?? "").trim())[0]?.toUpperCase() ?? "";
+  // A name with hidden characters, saved before they were refused, has none: its first may be one.
+  const letter = nameHides(name) ? "" : (Array.from(String(name ?? "").trim())[0]?.toUpperCase() ?? "");
   return letter
     ? h("span", { class: className, "aria-hidden": "true", text: letter })
     : h("span", { class: className, "aria-hidden": "true", html: iconSvg("contacts") });
@@ -279,8 +281,10 @@ export function addressBookView(ov, { state, actions } = {}) {
         { class: "group" },
         filtered.map((entry) => {
           const addr = String(entry?.address ?? "");
-          // One whose name looks like another's shows its address, not its .dusk name, and says so.
+          // One whose name looks like another's shows its address, not its .dusk name, and says so;
+          // one saved with hidden characters in its name shows them as codes, and says so too.
           const alike = contactAlikeText(ov, entry, items);
+          const hides = nameHides(entry?.name);
           return h(
             "button",
             {
@@ -296,9 +300,10 @@ export function addressBookView(ov, { state, actions } = {}) {
             [
               contactAvatar(String(entry?.name ?? "")),
               h("span", { class: "row-main" }, [
-                h("span", { class: "row-title", text: String(entry?.name ?? "") || "(No name)" }),
+                h("span", { class: "row-title", text: contactNameText(entry?.name) || "(No name)" }),
                 h("span", { class: entry?.duskName && !alike ? "row-sub" : "row-sub mono", text: alike ? rowLine({ ...entry, duskName: null }) : rowLine(entry) }),
                 alike ? h("span", { class: "row-sub contact-alike", text: alike }) : null,
+                hides ? h("span", { class: "row-sub contact-alike", text: HIDDEN_NAME_ROW }) : null,
               ]),
               h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
             ]
@@ -364,10 +369,12 @@ export function addressBookView(ov, { state, actions } = {}) {
     }
 
     const copyBtn = copyButton({ value: addr, label: "Copy address", failText: "Couldn't copy the address", onFail: actions?.showToast });
+    // Saved with hidden characters in its name, before they were refused: shown as codes, and said.
+    const hiddenName = nameHides(entry?.name) ? h("p", { class: "field-error contact-hidden-name", role: "note", text: HIDDEN_NAME_NOTE }) : null;
 
     const hero = h("div", { class: "tx-hero contact-hero" }, [
       contactAvatar(String(entry?.name ?? ""), "row-icon tx-hero-icon contact-letter"),
-      h("h2", { class: "tx-hero-name", text: String(entry?.name ?? "") || "(No name)" }),
+      h("h2", { class: "tx-hero-name", text: contactNameText(entry?.name) || "(No name)" }),
       entry.duskName ? h("div", { class: "tx-hero-lead", text: entry.duskName }) : null,
       h("div", { class: "tx-hero-addr" }, [h("span", { class: "mono", title: addr, text: shortAddress(addr) }), copyBtn]),
       h("span", { class: "tag", text: typeLabel(typ) }),
@@ -435,7 +442,7 @@ export function addressBookView(ov, { state, actions } = {}) {
 
     return [
       subnav({ title: "Contact", onBack: back }),
-      h("div", { class: "row contact-detail" }, [hero, nameCheck, actionsRow, activity, explorer].filter(Boolean)),
+      h("div", { class: "row contact-detail" }, [hero, hiddenName, nameCheck, actionsRow, activity, explorer].filter(Boolean)),
     ];
   };
 
@@ -464,8 +471,16 @@ export function addressBookView(ov, { state, actions } = {}) {
     const clashNow = () =>
       contactNameClash(ov, nameInput.value, { address: normalizeRecipient(addrInput.value), contacts: Array.isArray(ab.items) ? ab.items : [], except: ab.editId ?? undefined });
     const updateName = () => {
-      const clash = String(nameInput.value ?? "").trim() ? clashNow() : null;
-      const at = (e) => `${String(e.name).trim()}, at ${shortAddress(String(e.address ?? ""))}`;
+      const typed = String(nameInput.value ?? "").trim();
+      // What can't be seen can make it read as another name: refused, before any other check.
+      if (nameHides(typed)) {
+        setFieldError(nameInput, nameError, NAME_HIDES);
+        nameNote.textContent = "";
+        nameNote.hidden = true;
+        return;
+      }
+      const clash = typed ? clashNow() : null;
+      const at = (e) => `${contactNameText(e.name)}, at ${shortAddress(String(e.address ?? ""))}`;
       setFieldError(nameInput, nameError, clash?.kind === "profile" ? profileClashText(clash) : "");
       nameNote.textContent =
         clash?.kind !== "contact" ? "" : clash.same ? `You already have a contact called ${at(clash.entry)}.` : `This looks like your contact ${at(clash.entry)}, but uses different letters.`;
@@ -594,6 +609,11 @@ export function addressBookView(ov, { state, actions } = {}) {
           nameInput.focus();
           return;
         }
+        if (nameHides(name)) {
+          setFieldError(nameInput, nameError, NAME_HIDES);
+          nameInput.focus();
+          return;
+        }
         saveBtn.disabled = true;
         try {
           const t = await target();
@@ -621,7 +641,7 @@ export function addressBookView(ov, { state, actions } = {}) {
           }
           const other = (Array.isArray(ab.items) ? ab.items : []).find((e) => e?.address === t.address && e?.id !== ab.editId);
           if (other) {
-            setFieldError(addrInput, addrError, `This address is already saved as ${other.name}.`);
+            setFieldError(addrInput, addrError, `This address is already saved as ${contactNameText(other.name)}.`);
             addrInput.focus();
             return;
           }

@@ -759,6 +759,20 @@ describe("names on Send and Review", () => {
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
   });
 
+  it("names a contact saved with hidden characters by their codes, on the form and on Review", async () => {
+    // Marek's: an override at the start made a stranger's account read as "Profile 2".
+    const items = [{ name: "\u202e2 eliforP", address: ALICE.account }];
+    const form = mount({ ...newState(), addressBook: { loaded: true, items } });
+    typeInto(form.to, ALICE.account);
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".to-chip"))).toBe("\\u202e2 eliforP");
+
+    mount({ route: "confirm", addressBook: { loaded: true, items }, draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } });
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("\\u202e2 eliforP");
+    expect(visibleText(dom.document.body)).not.toContain("\u202e");
+  });
+
   it("names the wallet beside the profile with more than one wallet, the one the Review was drawn for", async () => {
     lookupPrimaryName.mockImplementation(async (account) => (account === OWN.account ? "me.dusk" : null));
     const draft = (to, privacy) => ({ to, privacy, amountDusk: "1", amountLux: "1000000000", memo: "" });

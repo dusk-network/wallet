@@ -1,6 +1,20 @@
 import { nameClash } from "@dusk-network/app-core/names";
 
+import { safeText } from "../../shared/safeText.js";
 import { profileLabelOf } from "../components/ProfileName.js";
+
+/**
+ * A contact's name as the wallet shows it: what can't be seen in it shows as
+ * its codes, as a memo's does (safeText.js), so a right-to-left override can't
+ * make "\u202eecilA" read as "Alice". Such names are refused now; this is for
+ * one saved before.
+ * @param {unknown} name
+ */
+export const contactNameText = (name) => safeText(String(name ?? "").trim()).text;
+
+/** What a contact saved with hidden characters in its name says of itself, in a list and on its page. */
+export const HIDDEN_NAME_ROW = "Its name has hidden characters";
+export const HIDDEN_NAME_NOTE = "This name has hidden characters, shown here as codes. Edit the contact to type it again, or delete it.";
 
 /**
  * This wallet's profiles, by their names on this device, with their account
