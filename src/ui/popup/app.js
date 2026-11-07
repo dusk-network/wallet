@@ -771,6 +771,35 @@ function installTxStatusListener() {
 
 installTxStatusListener();
 
+// --- The connection -------------------------------------------------------
+// Offline, as the browser says at once: the header and Home say so, the
+// balance read last staying. Back online: read again at once, not at the next
+// turn, and the node checked again, for the header not to go on with what a
+// check said while offline. A balance the node couldn't give, online, is read
+// again 30 seconds on.
+const BALANCE_RETRY_MS = 30_000;
+let balanceRetryTimer = null;
+function scheduleBalanceRetry(ov) {
+  clearTimeout(balanceRetryTimer);
+  balanceRetryTimer = null;
+  if (!ov?.isUnlocked || !ov?.balanceError || globalThis.navigator?.onLine === false) return;
+  balanceRetryTimer = setTimeout(() => {
+    balanceRetryTimer = null;
+    render({ forceRefresh: true }).catch(() => {});
+  }, BALANCE_RETRY_MS);
+}
+try {
+  window.addEventListener("offline", () => render().catch(() => {}));
+  window.addEventListener("online", () => {
+    render({ forceRefresh: true }).catch(() => {});
+    send({ type: "DUSK_UI_CHECK_NETWORK" })
+      .then(() => render({ forceRefresh: true }))
+      .catch(() => {});
+  });
+} catch {
+  // ignore
+}
+
 // --- Auto-lock activity ------------------------------------------------------
 // The wallet is in use while someone uses it: the popup opening, then a
 // press or a key in it, at most one ping every 30 seconds. An open popup
@@ -999,6 +1028,7 @@ export async function render({ forceRefresh = false } = {}) {
   // Keep shielded sync progress visible while on the dashboard.
   scheduleShieldedPoll(ov);
   schedulePendingTxPoll(ov);
+  scheduleBalanceRetry(ov);
   scheduleArrivalCheck(ov);
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });
