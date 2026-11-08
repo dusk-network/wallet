@@ -51,6 +51,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Told a site that never connected, or whose connection ended, nothing as the wallet switches network.
 - Opened one Send for each press when the web wallet hands a request over, however often it asks.
 - Took a request from a page on this machine only while the wallet's node is there too, and only one that says its network.
+- Kept Home's breakdown of Public, Shielded and Staked from starting a line with its dot when it wraps.
 - Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
 - Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
 - Repeated on Review that a send goes to your own account, and said what to try after a wrong password.

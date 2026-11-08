@@ -1788,11 +1788,18 @@ button.balance-refresh:hover {
 }
 
 /* "Public 1,484.92 · Shielded 0" on one line */
+/* "Public … · Shielded … · Staked …": each part has its dot in a gutter
+   before it, out of view where the part starts a line, so no line starts
+   with a dot however the parts wrap. */
 .balance-split {
+  --split-dot: 14px;
+  --split-gap: 5px;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   row-gap: 2px;
+  margin-left: calc(-1 * (var(--split-dot) + var(--split-gap)));
+  clip-path: inset(0 0 0 calc(var(--split-dot) + var(--split-gap)));
   font-size: 13px;
 }
 
@@ -1800,12 +1807,13 @@ button.balance-refresh:hover {
   min-width: 0;
   display: inline-flex;
   align-items: baseline;
-  gap: 5px;
+  gap: var(--split-gap);
 }
 
-.balance-split-item + .balance-split-item::before {
+.balance-split-item::before {
   content: "·" / "";
-  margin: 0 5px;
+  flex: 0 0 var(--split-dot);
+  text-align: center;
   color: var(--text-subtle);
 }
 
