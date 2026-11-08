@@ -177,6 +177,25 @@ function ensurePort() {
   return dappPort;
 }
 
+// The person's presses on the page, as the browser marks them (trusted, which
+// no page's own event is): a hand-over takes one, so one press opens one Send
+// however often the page asks during it.
+let presses = 0;
+let pressesTaken = 0;
+for (const type of ["pointerdown", "keydown"]) {
+  window.addEventListener(type, (event) => {
+    if (event?.isTrusted === true) presses += 1;
+  }, { capture: true, passive: true });
+}
+
+// Whether the page had a press of the person's as it handed a request over,
+// one no hand-over took yet, and as the browser says, where it says.
+function takePress() {
+  const fresh = presses > pressesTaken;
+  pressesTaken = presses;
+  return fresh && globalThis.navigator?.userActivation?.isActive !== false;
+}
+
 window.addEventListener("message", (event) => {
   // Only accept messages from the same window
   if (event.source !== window) return;
@@ -205,8 +224,8 @@ window.addEventListener("message", (event) => {
     id,
     origin: window.location.origin,
     request,
-    // Whether the page had a person's press as it asked, where the browser says: a hand-over takes one.
-    ...(request?.method === "dusk_openPaymentLink" && typeof globalThis.navigator?.userActivation?.isActive === "boolean" ? { pressed: globalThis.navigator.userActivation.isActive } : {}),
+    // Whether the page had a press of the person's as it asked: a hand-over takes one.
+    ...(request?.method === "dusk_openPaymentLink" ? { pressed: takePress() } : {}),
   })
     .then((response) => {
       const payload = {

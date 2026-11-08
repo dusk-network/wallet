@@ -45,6 +45,11 @@ class FakeWindow {
       cb({ source, data });
     }
   }
+
+  // A press on the page: the person's, as the browser marks it, or the page's own.
+  press(type = "pointerdown", isTrusted = true) {
+    for (const cb of this.#listeners.get(type) ?? []) cb({ type, isTrusted });
+  }
 }
 
 async function runContentScript({ navigator } = {}) {
@@ -129,14 +134,30 @@ describe("contentScript message bridge", () => {
       const { window, sentMessages } = await runContentScript({ navigator: { userActivation: { isActive } } });
       const ask = (id, method) =>
         window.dispatchMessage({ target: "DUSK_WALLET_EXTENSION", walletId: DUSK_WALLET_ID, type: "DUSK_RPC_REQUEST", id, pressed: !isActive, request: { method, params: { pressed: !isActive } } });
+      window.press();
       ask("req-1", "dusk_openPaymentLink");
       ask("req-2", "dusk_profiles");
       expect(sentMessages.map((m) => [m.id, m.pressed])).toEqual([["req-1", isActive], ["req-2", undefined]]);
     }
-    // A browser that can't say: nothing said.
-    const { window, sentMessages } = await runContentScript();
-    window.dispatchMessage({ target: "DUSK_WALLET_EXTENSION", walletId: DUSK_WALLET_ID, type: "DUSK_RPC_REQUEST", id: "req-3", request: { method: "dusk_openPaymentLink" } });
-    expect(sentMessages.map((m) => "pressed" in m)).toEqual([false]);
+  });
+
+  it("takes one press of the person's for one hand-over, however often the page asks in it", async () => {
+    // Marek's: one click called dusk_openPaymentLink four times, and four Send tabs opened.
+    for (const navigator of [{ userActivation: { isActive: true } }, undefined]) {
+      const { window, sentMessages } = await runContentScript({ navigator });
+      let n = 0;
+      const ask = () => window.dispatchMessage({ target: "DUSK_WALLET_EXTENSION", walletId: DUSK_WALLET_ID, type: "DUSK_RPC_REQUEST", id: `req-${++n}`, request: { method: "dusk_openPaymentLink" } });
+      ask();
+      window.press();
+      for (let i = 0; i < 4; i += 1) ask();
+      // The page's own events are no press.
+      window.press("pointerdown", false);
+      window.press("keydown", false);
+      ask();
+      window.press("keydown");
+      ask();
+      expect(sentMessages.map((m) => m.pressed), JSON.stringify(navigator)).toEqual([false, true, false, false, false, false, true]);
+    }
   });
 
   it("derives origin from the content-script window instead of page payload fields", async () => {
