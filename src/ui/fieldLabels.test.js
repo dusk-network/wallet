@@ -77,7 +77,7 @@ describe("field labels", () => {
     let body = await show(sendFormView(ov, { state, actions: actions() }));
     expect(fieldNames(body)).toEqual(["To", "Amount", "Memo"]);
 
-    typeInto(body.querySelector(".to-input-wrap input"), ACCOUNT);
+    typeInto(body.querySelector(".to-input-wrap textarea"), ACCOUNT);
     expect(fieldNames(body)).toEqual(["To", "Amount", "Memo"]);
 
     // Review's gas fields wait under Custom fee, closed.

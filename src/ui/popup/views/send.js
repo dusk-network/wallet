@@ -26,7 +26,7 @@ import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
 import { ownProfileName, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
-import { fieldLabel, reviewActions, submitOnGasEnter, textInput } from "../../components/FormControls.js";
+import { fieldLabel, reviewActions, submitOnGasEnter, textInput, wrappingInput } from "../../components/FormControls.js";
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
@@ -96,7 +96,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   }
   const draft = state.draft || {};
 
-  const to = textInput({
+  // On more lines as it grows: the whole address to check, not its end.
+  const to = wrappingInput({
     placeholder: duskNamesNetwork(ov?.nodeUrl)
       ? "Account, shielded address or .dusk name"
       : "Account or shielded address",

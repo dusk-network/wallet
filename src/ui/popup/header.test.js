@@ -251,6 +251,24 @@ describe("header", () => {
     expect([label.textContent, pill.className]).toEqual(["Mainnet", "network-pill"]);
   });
 
+  it("opens the network choice from the pill before there's a wallet and while it's locked, as Settings does", async () => {
+    const netMenu = { isOpen: false, open: vi.fn(), close: vi.fn() };
+    const dom = installFakeDom({ pathname: "/popup.html" });
+    vi.resetModules();
+    const { createHeaderRenderer } = await import("./header.js");
+    const pill = dom.document.createElement("button");
+    pill.id = "network-pill";
+    dom.document.body.appendChild(pill);
+    const renderHeader = createHeaderRenderer({ headerActionsHost: dom.document.createElement("div"), netMenu, acctMenu: null, onOpenOptions: vi.fn() });
+    for (const ov of [{ hasVault: false, isUnlocked: false, networkName: "Mainnet" }, { ...overview, isUnlocked: false }]) {
+      netMenu.open.mockClear();
+      renderHeader(ov);
+      expect(pill.disabled).toBe(false);
+      pill.click();
+      expect(netMenu.open).toHaveBeenCalledWith(pill, ov);
+    }
+  });
+
   it.each(Object.keys(VIEWS))("says above the header that test DUSK has no value, on a test network only (%s)", async (view) => {
     const { dom, renderHeader } = await setup(view);
     // The page's panel, its header first, as popup.html and full.html have it.

@@ -28,7 +28,10 @@ const ANSWERS = Object.freeze({
   rejected: "Rejected",
   closed: "Window closed",
   expired: "Not answered in time",
-  cancelled: "Cancelled",
+  // Ended by a lock, a switch or the site, before anyone answered: not the person's own.
+  cancelled: "Ended before an answer",
+  // The wallet couldn't show it, so no one saw it.
+  not_shown: "Couldn't be shown",
 });
 
 // "Contract call: approve", by its function's name as the site gave it.

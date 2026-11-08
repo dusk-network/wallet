@@ -97,6 +97,7 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
         onclick: () => finish(null),
         title: "Close",
         "aria-label": "Close",
+        "data-back": "",
       }),
     ]);
 

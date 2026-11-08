@@ -7,6 +7,8 @@ import { h, setChildren } from "../lib/dom.js";
 import { siteName } from "../lib/strings.js";
 import { MOTION } from "../lib/motion.js";
 import { screenShown } from "../lib/clickGuard.js";
+import { installSystemBack } from "../lib/systemBack.js";
+import { installKeyboardRoom, isPhone } from "../lib/keyboard.js";
 import { createToaster } from "../components/Toast.js";
 import { balancesHidden } from "../components/Balance.js";
 import { ownProfileName } from "../components/ProfileName.js";
@@ -17,6 +19,7 @@ import { createAccountMenuController } from "../components/AccountMenu.js";
 import { createHeaderRenderer } from "./header.js";
 import { send as rawSend } from "../../wallet/bus.js";
 import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
+import { ERROR_CODES } from "../../shared/errors.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
 import { activityRows, ensureActivity, refreshActivitySoon, selected, sozuFactOfHash } from "./activity.js";
@@ -30,7 +33,7 @@ import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { sozuConfirmView } from "./views/sozu.js";
-import { noteTxStatus, reviewOf, sentAnnouncement, sentView } from "./views/sent.js";
+import { noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -66,6 +69,10 @@ document.documentElement.classList.add("dark");
 try {
   document.body.dataset.runtime = getRuntimeKind();
   document.body.dataset.view = isPopupView ? "popup" : isFullView ? "full" : "app";
+  // A phone shows the popup as a page of its own (Firefox for Android): it fills it.
+  if (isPopupView && isPhone()) {
+    document.body.dataset.phone = "true";
+  }
 } catch {
   // ignore
 }
@@ -76,6 +83,8 @@ const headerActionsHost = document.getElementById("header-actions");
 const toaster = createToaster();
 const fullNav = document.querySelector(".full-nav");
 const ext = getExtensionApi();
+// On a phone, what's typed in stays above the keyboard (keyboard.js).
+const keyboard = installKeyboardRoom();
 
 function isWalletLockedResponse(value) {
   const err = value?.error ?? value;
@@ -298,6 +307,7 @@ function setApp(children) {
     sameScreen = screen === lastScreen;
     if (!sameScreen) {
       lastScreen = screen;
+      keyboard.reset();
       const scroller = app.closest?.(".panel-content");
       if (scroller) scroller.scrollTop = 0;
       // The full view scrolls the page itself.
@@ -325,6 +335,7 @@ function setApp(children) {
     mounted = children;
     if (focused) refocusControl(focused);
   }
+  systemBack.sync();
 }
 
 // The focused control in #app (a button, a disclosure or a field), by its
@@ -429,8 +440,12 @@ function activeSiteInfo(ov) {
   };
 }
 
+// Screens that move money, or say what moved: no Connect over them, where a
+// stray press on a phone connects whatever site is open.
+const NO_SITE_BAR = new Set([...REVIEW_ROUTES, "send", "convert", "stake", "asset_token", "sent", "send_password"]);
+
 function activeSiteBar(ov) {
-  if (!ov?.isUnlocked) return null;
+  if (!ov?.isUnlocked || NO_SITE_BAR.has(state.route)) return null;
   const site = activeSiteInfo(ov);
   if (!site) return null;
 
@@ -439,12 +454,21 @@ function activeSiteBar(ov) {
     text: site.connected ? "Disconnect" : "Connect",
     onclick: async () => {
       try {
-        // For the wallet the bar was drawn for, or for none.
-        const res = await send({
+        // For the wallet the bar was drawn for, or for none. Connect asks in
+        // the site's approval first, as the site's own request does.
+        const answer = send({
           type: site.connected ? "DUSK_UI_DISCONNECT_ORIGIN" : "DUSK_UI_CONNECT_ORIGIN",
           origin: site.origin,
           walletId: String(ov.accounts?.[0] ?? ""),
         });
+        // On a phone the approval opens in a tab this page covers: it goes.
+        if (!site.connected && document.body?.dataset?.phone === "true") {
+          window.close();
+          return;
+        }
+        const res = await answer;
+        // Rejected in the approval: nothing to say.
+        if (res?.error?.code === ERROR_CODES.USER_REJECTED) return;
         if (res?.error) throw new Error(res.error.message ?? "Couldn't change the site's connection");
         showToast(site.connected ? "Site disconnected." : "Site connected.");
         state.needsRefresh = true;
@@ -795,6 +819,62 @@ try {
     send({ type: "DUSK_UI_CHECK_NETWORK" })
       .then(() => render({ forceRefresh: true }))
       .catch(() => {});
+    resumeWatching();
+  });
+} catch {
+  // ignore
+}
+
+// --- Coming back to the wallet ----------------------------------------------
+// A phone stops the page, and with it what was following a send, once the
+// wallet is left (Home, another app, no signal): the send may have gone into a
+// block meanwhile, unheard. Back, each send still on its way is looked up by
+// its ID at once, then every 10 seconds while one is, for 3 minutes.
+const RESUME_EVERY_MS = 10_000;
+const RESUME_FOR_MS = 180_000;
+// Sends older than this aren't looked for: Activity has them.
+const RESUME_SENT_WITHIN_MS = 60 * 60_000;
+let resumeTimer = null;
+let resumeUntil = 0;
+
+function sendsOnTheirWay() {
+  const ov = state.overview;
+  if (!ov?.isUnlocked) return [];
+  const hashes = new Set();
+  if (state.route === "sent" && state.sent?.hash && !sentIsFinal(state.sent, ov)) hashes.add(String(state.sent.hash));
+  for (const tx of Array.isArray(ov.txs) ? ov.txs : []) {
+    const status = String(tx?.status ?? "").toLowerCase();
+    if (["submitted", "mempool", "unknown"].includes(status) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS) {
+      hashes.add(String(tx?.hash ?? ""));
+    }
+  }
+  return [...hashes].filter(Boolean).slice(0, 5);
+}
+
+async function lookUpSends() {
+  clearTimeout(resumeTimer);
+  resumeTimer = null;
+  const hashes = sendsOnTheirWay();
+  if (!hashes.length) return;
+  await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
+  state.needsRefresh = true;
+  await render({ forceRefresh: true }).catch(() => {});
+  if (Date.now() < resumeUntil && document.visibilityState !== "hidden" && sendsOnTheirWay().length) {
+    resumeTimer = setTimeout(lookUpSends, RESUME_EVERY_MS);
+  }
+}
+
+function resumeWatching() {
+  resumeUntil = Date.now() + RESUME_FOR_MS;
+  lookUpSends().catch(() => {});
+}
+
+try {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") resumeWatching();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event?.persisted) resumeWatching();
   });
 } catch {
   // ignore
@@ -920,12 +1000,29 @@ const acctMenu = createAccountMenuController({
   onCopy: showToast,
 });
 
+// --- The phone's Back button ---------------------------------------------------
+// One step back inside the wallet (systemBack.js): an open menu closes, then
+// a dialog (its [data-back]: Cancel or Close), else the screen's own Back.
+const systemBack = installSystemBack({
+  backStep: () => {
+    if (netMenu.isOpen) return () => netMenu.close();
+    if (acctMenu.isOpen) return () => acctMenu.close();
+    const overlay = Array.from(document.querySelectorAll(".qrscan-overlay")).at(-1);
+    const control = overlay ? overlay.querySelector("[data-back]") : app?.querySelector(".subnav-back, [data-back]");
+    return control && !control.disabled ? () => control.click() : null;
+  },
+});
+// A menu or a dialog a press opened has a way back too.
+document.addEventListener("click", () => setTimeout(() => systemBack.sync(), 0), true);
+
 // --- Header actions -------------------------------------------------------
 async function onRefresh() {
   netMenu.close();
   acctMenu.close();
   state.needsRefresh = true;
   await render({ forceRefresh: true });
+  // A send on its way is looked up again too.
+  resumeWatching();
 }
 
 async function onOpenOptions() {

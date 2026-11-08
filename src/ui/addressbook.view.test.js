@@ -170,6 +170,24 @@ describe("contacts", () => {
     expect(view.state.addressBook).toMatchObject({ view: "edit", editAddress: "alice.dusk", editName: "alice.dusk" });
   });
 
+  it("finds recent recipients with the search too, as Sofia's 'norte' looks for one", () => {
+    const txs = [
+      { kind: TX_KIND.TRANSFER, to: ACCOUNT, toName: "alice.dusk", hash: "ab".repeat(32), status: "executed", submittedAt: 2 },
+      { kind: TX_KIND.TRANSFER, to: ADDRESS, hash: "cd".repeat(32), status: "executed", submittedAt: 1 },
+    ];
+    const recent = (query) => {
+      mount({ mode: "pick", pickReturnRoute: "send", items: [{ id: "9", name: "Norte Café", address: OWN.replace("21n5", "21n6"), type: "account" }], query }, { nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs });
+      const section = dom.document.body.querySelectorAll(".contacts-section")[0];
+      return section ? section.querySelectorAll(".contact-row .row-title").map((el) => el.textContent) : [];
+    };
+    expect(recent("")).toEqual(["alice.dusk", shortAddress(ADDRESS)]);
+    expect(recent("ALICE")).toEqual(["alice.dusk"]);
+    expect(recent(ADDRESS.slice(5, 25))).toEqual([shortAddress(ADDRESS)]);
+    // Nothing recent matches: Recent goes, and the contact it finds is first.
+    expect(recent("norte")).toEqual([]);
+    expect(dom.document.body.querySelectorAll(".contact-row .row-title").map((el) => el.textContent)).toEqual(["Norte Café"]);
+  });
+
   it("saves a contact from a .dusk name, with the name and when it was checked", async () => {
     const view = mount({ view: "edit", editId: null, editReturnView: "list" });
     expect(view.buttons()).toEqual(["← Back", "Save"]);

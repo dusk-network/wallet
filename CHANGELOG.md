@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Declared Firefox for Android, from version 142, so the add-on can be listed for phones.
 - Added a record per site to Settings' Connected sites: when it was last used, what it asked for and how you answered, also once it's disconnected, with Forget.
 - Added connections that end after 1, 7 or 30 days, for each site and for new sites.
 - Added an optional password on any send above an amount you choose, in Settings, off by default: the wallet's own sends and a site's, checked against the vault.
@@ -26,6 +27,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Opened a site's approval in a tab where the browser has no windows, as in Firefox for Android.
+- Made the popup's Connect ask in the site's approval, and kept it off Send, Shield, Stake, every Review and Sent.
+- Opened the network choice from the pill before a wallet is set up and while it's locked, as Settings does.
+- Asked before Reset in the wallet's own dialog rather than the browser's.
+- Let Send's To field wrap onto more lines, so the whole address shows.
 - Told a site nothing of the wallet's network or version before it connects; the network comes with the connection.
 - Counted what's staked, natively and with Sozu, in Home's total balance, read with the public balance, and showed it beside the rest.
 - Gave Sozu's rate as stDUSK grew over the last 30 days, on Liquid staking and Staking, where the chain says it.
@@ -35,6 +41,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Made a phone's Back button go one screen back inside the wallet, keeping what's typed, rather than closing it.
+- Kept the field being typed in, and its button, above a phone's keyboard.
+- Looked a payment up again as the wallet comes back after being left mid-send, so it no longer waits for a block that came.
+- Kept Home's balance labels from running into their amounts on a phone.
+- Filled the phone's width with the popup in Firefox for Android.
+- Stopped Backspace in an empty recovery-word box from deleting the words before it.
+- Started a payment request over when the profile, wallet or network changes.
+- Made the contact search find recent recipients too.
+- Opened Liquid staking on Stake after an unstake.
+- Told a site the wallet couldn't show its request, rather than that it was cancelled, and said so in Connected sites.
 - Refused a request link that says a field twice or has a user part before its host, and one for another network the moment it's put in, saying only why.
 - Said when a number in a message to sign, a sign-in or a memo mixes digits of different scripts or reads right to left.
 - Said when a number in a message to sign, a sign-in or a memo is in digits that look like other digits, as Bengali's ৪, a 4 that looks like an 8.

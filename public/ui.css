@@ -167,6 +167,13 @@ body.page--popup {
   min-height: var(--panel-min-height);
 }
 
+/* On a phone (Firefox for Android) the popup is a page of its own, as wide
+   as the phone, either way up: it fills it. */
+body.page--popup[data-phone] {
+  width: auto;
+  min-height: 100%;
+}
+
 body.page--notification {
   /*
     Notification windows have an explicit size set by chrome.windows.create.
@@ -180,6 +187,9 @@ body.page--notification {
   width: 100%;
   min-height: 0;
   height: 100vh;
+  /* In a phone's tab, the height shown under its toolbar: the buttons at
+     the bottom stay on the screen. */
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -410,6 +420,9 @@ body[data-runtime="tauri"].page--full .panel {
   display: flex;
   flex-direction: column;
   gap: var(--section-gap);
+  /* Room under a screen's end, while a phone's keyboard covers it, to
+     scroll what's typed in above the keyboard (keyboard.js). */
+  padding-bottom: var(--keyboard-room, 0px);
 }
 
 .full-nav,
@@ -622,6 +635,19 @@ textarea[aria-invalid="true"] {
   min-width: 0;
 }
 
+/* A one-line field that wraps as it grows (wrappingInput), e.g. Send's To:
+   an address breaks anywhere, and shows whole. */
+textarea.wrap-input {
+  display: block;
+  min-height: 0;
+  resize: none;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  field-sizing: content;
+}
+
+.to-input-wrap.has-chip > textarea,
 .to-input-wrap.has-chip > input {
   padding-left: calc(12px + var(--chip-w, 0px) + 10px);
 }
@@ -1803,22 +1829,25 @@ button.balance-refresh:hover {
   font-size: 13px;
 }
 
+/* Each part one run of text, its label, then its amount where the label's
+   letters end: laid out as a box of three, a phone's own mono font drew the
+   label's last letter under the amount. */
 .balance-split-item {
-  min-width: 0;
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--split-gap);
+  flex: none;
+  white-space: nowrap;
 }
 
 .balance-split-item::before {
   content: "·" / "";
-  flex: 0 0 var(--split-dot);
+  display: inline-block;
+  width: var(--split-dot);
+  margin-right: var(--split-gap);
   text-align: center;
   color: var(--text-subtle);
 }
 
 .balance-split-label {
-  min-width: 0;
+  margin-right: var(--split-gap);
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: var(--ledger-size);
@@ -3735,7 +3764,10 @@ body[data-runtime="tauri"] .qrscan-overlay {
 }
 
 /* The password again, over a Review, on the overlay the QR scan has */
-.send-password {
+/* The wallet's own dialogs: the password on big sends, a question before
+   something that can't be undone (ConfirmDialog.js). */
+.send-password,
+.wallet-dialog {
   width: min(360px, 100%);
   padding: 18px;
   display: flex;
@@ -3747,13 +3779,15 @@ body[data-runtime="tauri"] .qrscan-overlay {
   animation: modalIn 180ms ease;
 }
 
-.send-password__title {
+.send-password__title,
+.wallet-dialog__title {
   margin: 0;
   font-size: 16px;
   font-weight: 500;
 }
 
-.send-password__actions {
+.send-password__actions,
+.wallet-dialog__actions {
   display: grid;
   grid-template-columns: 1fr 2fr;
   gap: 8px;

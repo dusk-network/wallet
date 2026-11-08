@@ -536,6 +536,11 @@ class FakeDocument {
   removeEventListener(type, fn) {
     removeListener(this, type, fn);
   }
+
+  // The page's own events, such as visibilitychange.
+  dispatchEvent(event) {
+    return dispatch(this, event);
+  }
 }
 
 /**

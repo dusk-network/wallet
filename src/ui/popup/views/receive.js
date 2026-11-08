@@ -45,12 +45,15 @@ export function receiveView(ov, { state, actions } = {}) {
   // The network a request is for: the chain this node signs for, or for one that hasn't said, its own ID.
   const chainId = Number.isInteger(ov?.chainId) ? ov.chainId : chainIdFromNodeUrl(ov?.nodeUrl ?? "");
 
-  // Persist request fields while the user navigates around.
+  // Persist request fields while the user navigates around, for the profile,
+  // wallet and network they were typed for: a switch of any starts them over.
+  if (state.receive && state.receive.context !== state.context) state.receive = null;
   const r = (state.receive ??= {
     tab: "public",
     requestOpen: false,
     amountDusk: "",
     memo: "",
+    context: state.context,
   });
   const tab = r.tab === "shielded" ? "shielded" : "public";
 

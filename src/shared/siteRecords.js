@@ -11,7 +11,8 @@
 // site. A contract call keeps its function's name, as the site gave it, cut short.
 //
 // Bounded: a site's newest requests, and past that the oldest of what no one
-// answered goes first (what the site cancelled, what wasn't answered in time),
+// answered goes first (what the site cancelled, what wasn't answered in time
+// or couldn't be shown),
 // then the oldest refusal, then the oldest approval. A site can't push out
 // what it was refused or allowed by asking again and again, and cancelling at
 // once. The same goes for a wallet's sites: a site with neither goes first,
@@ -100,7 +101,7 @@ function requestRecord(kind, params) {
  * note takes its place in line as it's made.
  * @param {string | Promise<string>} walletId - the wallet it was for
  * @param {string} origin
- * @param {{ kind: string, params?: object, answer: "approved"|"rejected"|"closed"|"expired"|"cancelled", at?: number }} request
+ * @param {{ kind: string, params?: object, answer: "approved"|"rejected"|"closed"|"expired"|"cancelled"|"not_shown", at?: number }} request
  */
 export function noteSiteRequest(walletId, origin, { kind, params, answer, at = Date.now() }) {
   return mutate(async (all) => {

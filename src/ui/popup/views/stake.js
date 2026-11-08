@@ -364,6 +364,12 @@ function setScreen(st, screen, actions) {
   actions?.render?.().catch(() => {});
 }
 
+// Liquid staking as a way to stake: on its Stake tab, whatever an unstake left it on.
+function stakeWithSozu(state, st, actions) {
+  if (state?.sozu) state.sozu.action = "deposit";
+  setScreen(st, SCREEN_LIQUID, actions);
+}
+
 function listRow({ icon, title, subs = [], onClick, chevron = true, extra = null }) {
   const children = [
     h("span", { class: "row-icon", html: iconSvg(icon) }),
@@ -631,7 +637,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
       icon: "drop",
       title: ["Liquid staking", h("span", { class: "tag", text: "Sozu · third party" })],
       subs: ["Any amount · No node needed", "You get stDUSK for your share", rates.sozu],
-      onClick: () => setScreen(st, SCREEN_LIQUID, actions),
+      onClick: () => stakeWithSozu(state, st, actions),
     }),
   ]);
 
@@ -905,7 +911,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
         class: "text-btn stake-liquid-link chain-link",
         type: "button",
         text: `Less than ${fmtLux(minLux)} DUSK? Use liquid staking (Sozu, third party)`,
-        onclick: () => setScreen(st, SCREEN_LIQUID, actions),
+        onclick: () => stakeWithSozu(state, st, actions),
       })
     : null;
 

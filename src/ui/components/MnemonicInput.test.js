@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import bip39Vectors from "../../shared/fixtures/bip39-vectors.json";
-import { fakeEvent, installFakeDom, isShown, typeInto } from "../testing/fakeDom.js";
+import { fakeEvent, installFakeDom, isShown, press, typeInto } from "../testing/fakeDom.js";
 import { createMnemonicInput } from "./MnemonicInput.js";
 
 // Public BIP39 test phrases only.
@@ -143,6 +143,25 @@ describe("the recovery phrase's word boxes", () => {
     typeInto(box(9), OTHER.replace("worth", "wurth"));
     expect(words()).toEqual(OTHER.replace("worth", "wurth").split(" "));
     expect(onCheck).toHaveBeenLastCalledWith("Word 7 isn't a recovery word. Check its spelling.");
+  });
+
+  it("keeps the words before an emptied box however often Backspace is pressed in it", () => {
+    const { box, words } = mount();
+    paste(box(1), OTHER);
+    // Backspace as the browser does it: what the box doesn't stop deletes
+    // the focused box's last letter, or the whole word when it's selected.
+    const backspace = () => {
+      const field = dom.document.activeElement;
+      if (!press(field, "Backspace")) return;
+      const whole = field.selectionStart === 0 && field.selectionEnd === field.value.length;
+      typeInto(field, whole ? "" : field.value.slice(0, -1));
+    };
+    box(6).focus();
+    for (let i = 0; i < 40; i++) backspace();
+    const left = OTHER.split(" ");
+    left[5] = "";
+    expect(words()).toEqual(left);
+    expect(dom.document.activeElement).toBe(box(6));
   });
 
   it("says the same on asking (problem), for the form's submit", () => {

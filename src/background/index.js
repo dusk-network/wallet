@@ -21,7 +21,8 @@ import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { askNodeChainId, chainRefusal, listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem, isAllowedDappOrigin } from "../shared/securityPolicy.js";
-import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
+import { classifyTxPresence } from "../shared/txLifecycle.js";
+import { isShieldedTxMeta, recheckTx, reconcileTxPresence } from "../shared/txReconcile.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 
 import {
@@ -238,13 +239,6 @@ async function updateDappActivity(request, context = null) {
   await updateActivity();
 }
 
-function isShieldedTxMeta(meta) {
-  return (
-    String(meta?.privacy ?? "") === "shielded" ||
-    (Array.isArray(meta?.pendingNullifiers) && meta.pendingNullifiers.length > 0)
-  );
-}
-
 async function emitUiTxStatus(payload) {
   try {
     await runtimeSendMessage({
@@ -284,152 +278,6 @@ function emitUiWalletsChanged() {
 
 // The store's reset count an engine event carries: its send's (see engine/runtime.js).
 const eventEpoch = (message) => (Number.isInteger(message?.epoch) ? message.epoch : undefined);
-
-/**
- * @param {string} hash
- * @param {{ preserveRemoved?: boolean, epoch?: number }} [opts] - `epoch`: the
- *   store's reset count when the work began; after a reset since, nothing is kept
- */
-async function reconcileTxPresence(hash, { preserveRemoved = false, epoch } = {}) {
-  const meta = await getTxMeta(hash);
-  // Nothing kept to reconcile: cleared by a reset, or never this wallet's.
-  if (!meta) return { status: "unknown", origin: "Wallet", nodeUrl: "", error: "" };
-  const patchTxMeta = (h, patch) => patchStored(h, patch, { epoch });
-  const settings = await getSettings();
-  const nodeUrl = meta?.nodeUrl ?? settings?.nodeUrl ?? "";
-  const origin = meta?.origin ?? "Wallet";
-  const now = Date.now();
-  const terminalStatus = meta?.status === "executed" || meta?.status === "failed"
-    ? meta.status
-    : "";
-
-  if (!nodeUrl && terminalStatus) {
-    await patchTxMeta(hash, { lastCheckedAt: now });
-    return {
-      status: terminalStatus,
-      ok: terminalStatus === "executed",
-      origin,
-      nodeUrl,
-      error: meta?.error || "",
-    };
-  }
-
-  if (!nodeUrl) {
-    const status = preserveRemoved ? meta?.status ?? "unknown" : "unknown";
-    await patchTxMeta(hash, {
-      status,
-      lastCheckedAt: now,
-      recoveryReason: "node_url_missing",
-    });
-    return { status, origin, nodeUrl, error: "node_url_missing" };
-  }
-
-  const presence = await classifyTxPresence(nodeUrl, hash) ?? {
-    state: "unavailable",
-    error: "reconciliation_unavailable",
-  };
-  if (presence.state === "executed_success") {
-    const finalized = finalizedTxMetadata(presence.tx);
-    const failed = terminalStatus === "failed";
-    await patchTxMeta(hash, {
-      ...finalized,
-      status: failed ? "failed" : "executed",
-      error: failed ? meta?.error : undefined,
-      executedAt: now,
-      lastCheckedAt: now,
-      reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
-      reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
-    });
-    return {
-      status: failed ? "failed" : "executed",
-      ok: !failed,
-      origin,
-      nodeUrl,
-      error: failed ? meta?.error || "" : "",
-      ...finalized,
-    };
-  }
-
-  if (presence.state === "executed_failed") {
-    const finalized = finalizedTxMetadata(presence.tx);
-    await patchTxMeta(hash, {
-      ...finalized,
-      status: "failed",
-      error: presence.error || undefined,
-      executedAt: now,
-      lastCheckedAt: now,
-      reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
-      reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
-    });
-    return {
-      status: "failed",
-      ok: false,
-      origin,
-      nodeUrl,
-      error: presence.error || "",
-      ...finalized,
-    };
-  }
-
-  if (terminalStatus) {
-    await patchTxMeta(hash, { lastCheckedAt: now });
-    return {
-      status: terminalStatus,
-      ok: terminalStatus === "executed",
-      origin,
-      nodeUrl,
-      error: meta?.error || "",
-    };
-  }
-
-  if (presence.state === "mempool") {
-    await patchTxMeta(hash, {
-      status: "mempool",
-      error: undefined,
-      mempoolSeenAt: now,
-      lastCheckedAt: now,
-      reservationStatus: isShieldedTxMeta(meta) ? "pending" : meta?.reservationStatus,
-    });
-    return { status: "mempool", origin, nodeUrl };
-  }
-
-  if (presence.state === "not_found") {
-    const confirmedRemoved = preserveRemoved && (
-      meta?.recoveryReason === "removed_unconfirmed" || meta?.status === "removed"
-    );
-    const status = confirmedRemoved ? "removed" : "unknown";
-    await patchTxMeta(hash, {
-      status,
-      lastCheckedAt: now,
-      recoveryReason: preserveRemoved
-        ? confirmedRemoved ? "removed" : "removed_unconfirmed"
-        : "not_found",
-      reservationStatus: confirmedRemoved && isShieldedTxMeta(meta)
-        ? "recoverable"
-        : meta?.reservationStatus,
-      removedAt: confirmedRemoved ? now : meta?.removedAt,
-      reservationUpdatedAt:
-        confirmedRemoved && isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
-    });
-    return { status, origin, nodeUrl };
-  }
-
-  const confirmedRemoved = preserveRemoved && meta?.status === "removed";
-  const status = confirmedRemoved ? "removed" : "unknown";
-  await patchTxMeta(hash, {
-    status,
-    lastCheckedAt: now,
-    recoveryReason: preserveRemoved
-      ? confirmedRemoved ? "removed" : "removed_unconfirmed"
-      : presence.error || "reconciliation_unavailable",
-  });
-  return {
-    status,
-    origin,
-    nodeUrl,
-    error: presence.error || "reconciliation_unavailable",
-  };
-}
 
 // A send still marked on its way that no watcher follows: the engine's watcher
 // gives up after 180 s and says so, and is gone with a browser restart. So it
@@ -866,19 +714,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "hash is required");
         }
 
-        const epoch = await getTxEpoch();
-        const meta = await getTxMeta(hash);
-        const reconciled = await reconcileTxPresence(hash, {
-          preserveRemoved:
-            meta?.status === "removed" || meta?.recoveryReason === "removed_unconfirmed",
-          epoch,
-        });
-        emitUiTxStatus({
-          hash,
-          status: reconciled.status || meta?.status || "unknown",
-          ok: reconciled.status === "executed" ? true : reconciled.status === "failed" ? false : undefined,
-          error: reconciled.error,
-        }).catch(() => {});
+        const { reconciled, event } = await recheckTx(hash);
+        emitUiTxStatus(event).catch(() => {});
         sendResponse({ ok: true, result: reconciled });
         return;
       }
@@ -1106,43 +943,21 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      // UI connects the active tab origin to the currently selected account.
+      // The popup's Connect, for the site in front: through the site's own
+      // approval, which shows which profile it gets and what it can do, as a
+      // site's request does, and goes in the site's record.
       if (message?.type === "DUSK_UI_CONNECT_ORIGIN") {
         const origin = String(message.origin ?? "").trim();
         if (!origin) {
           throw rpcError(ERROR_CODES.INVALID_PARAMS, "origin is required");
         }
-
-        await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-          const status = await getEngineStatusStrict();
-          if (!status.isUnlocked) {
-            throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-          }
-          // For the wallet the page showed, or for none.
-          assertScreenWallet(message, status);
-
-          const accounts = Array.isArray(status.accounts) ? status.accounts : [];
-          const idxRaw =
-            status.selectedAccountIndex !== undefined && status.selectedAccountIndex !== null
-              ? Number(status.selectedAccountIndex)
-              : Number((await getSettings())?.selectedAccountIndex ?? 0);
-          const idx = Math.max(
-            0,
-            Math.min(Math.floor(idxRaw) || 0, Math.max(0, accounts.length - 1))
-          );
-          const account = accounts[idx] ?? "";
-          if (!account) {
-            throw rpcError(ERROR_CODES.UNAUTHORIZED, "No wallet profile is available");
-          }
-
-          cancelPendingApprovals(origin, "Connected profile changed");
-          await approveOrigin(origin, {
-            profileId: `account:${idx}:${account}`,
-            accountIndex: idx,
-            lastsMs: await siteLastsMs(String(accounts[0] ?? ""), origin, (await getSettings()).newSiteLastsMs),
-            grants: { publicAccount: true, shieldedReceiveAddress: false },
-          }, String(accounts[0] ?? ""));
-        });
+        const status = await getEngineStatusStrict();
+        if (!status.isUnlocked) {
+          throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        }
+        // For the wallet the page showed, or for none.
+        assertScreenWallet(message, status);
+        await handleRpc(origin, { method: "dusk_requestProfiles", params: [] });
         sendResponse({ ok: true });
         return;
       }

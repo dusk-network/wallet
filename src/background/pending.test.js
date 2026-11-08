@@ -1,15 +1,44 @@
 import { describe, expect, it, vi } from "vitest";
 
 let onRemovedCb = null;
+let onTabRemovedCb = null;
 const windowsRemove = vi.fn(async () => {});
+// The browser's: with windows (a desktop), or without (Firefox for Android).
+const browserHas = vi.hoisted(() => ({ windows: true }));
+const tabs = vi.hoisted(() => ({
+  create: null,
+  remove: null,
+  update: null,
+}));
+const notes = vi.hoisted(() => []);
+
+vi.mock("../shared/siteRecords.js", () => ({
+  noteSiteRequest: async (walletId, origin, request) => {
+    notes.push({ origin, ...request });
+  },
+}));
 
 vi.mock("../platform/extensionApi.js", () => {
+  tabs.create = vi.fn(async () => ({ id: 77 }));
+  tabs.remove = vi.fn(async () => {});
+  tabs.update = vi.fn(async () => {});
   return {
     getExtensionApi: () => ({
-      windows: {
+      ...(browserHas.windows
+        ? {
+            windows: {
+              onRemoved: {
+                addListener: (cb) => {
+                  onRemovedCb = cb;
+                },
+              },
+            },
+          }
+        : {}),
+      tabs: {
         onRemoved: {
           addListener: (cb) => {
-            onRemovedCb = cb;
+            onTabRemovedCb = cb;
           },
         },
       },
@@ -17,6 +46,11 @@ vi.mock("../platform/extensionApi.js", () => {
     runtimeGetURL: (path) => `chrome-extension://test/${String(path ?? "")}`,
     windowsCreate: vi.fn(async () => ({ id: 999 })),
     windowsRemove,
+    tabsCreate: (...args) => tabs.create(...args),
+    tabsRemove: (...args) => tabs.remove(...args),
+    tabsUpdate: (...args) => tabs.update(...args),
+    // The tab the person is on: the site's.
+    tabsQuery: async () => [{ id: 5 }],
   };
 });
 
@@ -136,5 +170,51 @@ describe("pending approvals", () => {
     pending.cancelPendingApprovals("https://example.com", "Wallet locked");
     await expect(first).rejects.toMatchObject({ code: 4001, message: "Wallet locked" });
     ridSpy.mockRestore();
+  });
+
+  describe("where windows can't be made, as in Firefox for Android", () => {
+    it("shows the request in a tab, and once it's answered closes it and brings the site's tab back", async () => {
+      browserHas.windows = false;
+      vi.resetModules();
+      const pending = await import("./pending.js");
+      const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("rid-tab");
+      try {
+        const answer = pending.requestUserApproval("connect", "https://site.example", {});
+        await new Promise((r) => setTimeout(r, 0));
+        expect(tabs.create).toHaveBeenCalledWith({ url: "chrome-extension://test/notification.html?rid=rid-tab", active: true });
+        expect(pending.getPending("rid-tab")).toMatchObject({ tabId: 77 });
+        pending.resolvePendingDecision({ rid: "rid-tab", decision: "approve", approvedParams: { accountIndex: 0 } });
+        await expect(answer).resolves.toEqual({ accountIndex: 0 });
+        expect(tabs.remove).toHaveBeenCalledWith(77);
+        expect(tabs.update).toHaveBeenCalledWith(5, { active: true });
+
+        // Its tab closed by the person: a refusal, as a closed window is.
+        ridSpy.mockReturnValue("rid-closed");
+        const closed = pending.requestUserApproval("sign_message", "https://site.example", {});
+        await new Promise((r) => setTimeout(r, 0));
+        onTabRemovedCb(77);
+        await expect(closed).rejects.toMatchObject({ code: 4001 });
+      } finally {
+        ridSpy.mockRestore();
+        browserHas.windows = true;
+      }
+    });
+
+    it("tells the site the wallet couldn't show it, not that the person cancelled, and keeps that in the site's record", async () => {
+      browserHas.windows = false;
+      vi.resetModules();
+      notes.length = 0;
+      const pending = await import("./pending.js");
+      tabs.create.mockRejectedValueOnce(new Error("No tabs here"));
+      try {
+        const answer = pending.requestUserApproval("connect", "https://site.example", {}, { walletId: "acct0" });
+        await expect(answer).rejects.toMatchObject({ code: -32603, message: pending.NOT_SHOWN_TEXT });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(notes).toEqual([{ origin: "https://site.example", kind: "connect", params: {}, answer: "not_shown" }]);
+        expect(pending.pendingApprovals.size).toBe(0);
+      } finally {
+        browserHas.windows = true;
+      }
+    });
   });
 });

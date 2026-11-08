@@ -4,6 +4,10 @@ import { activeWalletId } from "../shared/wallets.js";
 import {
   getExtensionApi,
   runtimeGetURL,
+  tabsCreate,
+  tabsQuery,
+  tabsRemove,
+  tabsUpdate,
   windowsCreate,
   windowsRemove,
 } from "../platform/extensionApi.js";
@@ -19,7 +23,10 @@ import {
  * one its window shows first (bindPendingWallet). Its window shows no other,
  * and what it approves acts for no other (rpc.js checks `shown` again).
  *
- * @type {Map<string, { kind: string, origin: string, params: any, shown: { walletId: string }, createdAt:number, windowId?: number, resolve: (v:any)=>void, reject:(e:any)=>void }>}
+ * Its window (`windowId`), or where windows can't be made its tab (`tabId`),
+ * with the tab the person was on (`backTo`), which comes back once it's done.
+ *
+ * @type {Map<string, { kind: string, origin: string, params: any, shown: { walletId: string }, createdAt:number, windowId?: number, tabId?: number, backTo?: number, resolve: (v:any)=>void, reject:(e:any)=>void }>}
  */
 export const pendingApprovals = new Map();
 
@@ -34,13 +41,47 @@ function keepAnswer(entry, answer) {
   noteSiteRequest(walletId, entry.origin, { kind: entry.kind, params: entry.params, answer }).catch(() => {});
 }
 
-function rejectPending(rid, entry, message, answer = "cancelled") {
+// Its window or its tab goes; a tab's site comes back to the front.
+function closeShown(entry) {
+  if (entry.windowId !== undefined) windowsRemove(entry.windowId).catch(() => {});
+  if (entry.tabId !== undefined) {
+    tabsRemove(entry.tabId).catch(() => {});
+    if (entry.backTo !== undefined) tabsUpdate(entry.backTo, { active: true }).catch(() => {});
+  }
+}
+
+// `code`: the person's refusal, or a wallet that couldn't ask at all (INTERNAL).
+function rejectPending(rid, entry, message, answer = "cancelled", code = ERROR_CODES.USER_REJECTED) {
   if (!entry) return;
   pendingApprovals.delete(rid);
   clearTimeout(entry.timer);
-  if (entry.windowId !== undefined) windowsRemove(entry.windowId).catch(() => {});
+  closeShown(entry);
   keepAnswer(entry, answer);
-  entry.reject(rpcError(ERROR_CODES.USER_REJECTED, message));
+  entry.reject(rpcError(code, message));
+}
+
+/** What a site hears when the wallet couldn't show its request: not a refusal. */
+export const NOT_SHOWN_TEXT = "The wallet couldn't show this request. Nothing was approved.";
+
+// A window of its own, the size of the popup; where windows can't be made
+// (Firefox for Android has no windows), a tab, in front of the one the person
+// was on. Null when neither opens.
+async function showApproval(url) {
+  if (getExtensionApi()?.windows) {
+    try {
+      const win = await windowsCreate({ url, type: "popup", width: 380, height: 620 });
+      return { windowId: win?.id };
+    } catch {
+      // A tab, then.
+    }
+  }
+  try {
+    const [front] = (await tabsQuery({ active: true, currentWindow: true }).catch(() => [])) ?? [];
+    const tab = await tabsCreate({ url, active: true });
+    return { tabId: tab?.id, backTo: front?.id };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -76,25 +117,17 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
     `notification.html?rid=${encodeURIComponent(rid)}`
   );
 
-  // Best effort: open a popup-style window.
-  let win;
-  try {
-    win = await windowsCreate({
-      url,
-      type: "popup",
-      width: 380,
-      height: 620,
-    });
-  } catch {
-    rejectPending(rid, pendingApprovals.get(rid), "Could not open approval window");
-  }
-
-  // If the user closes the approval window, reject the pending request.
+  const where = await showApproval(url);
   const entry = pendingApprovals.get(rid);
-  if (entry && win?.id !== undefined) {
-    entry.windowId = win.id;
-  } else if (!entry && win?.id !== undefined) {
-    windowsRemove(win.id).catch(() => {});
+  if (!where) {
+    // Never shown, so never refused: the site hears the wallet couldn't ask.
+    rejectPending(rid, entry, NOT_SHOWN_TEXT, "not_shown", ERROR_CODES.INTERNAL);
+  } else if (entry) {
+    // Closed by the person, the request is rejected (onRemoved below).
+    Object.assign(entry, Object.fromEntries(Object.entries(where).filter(([, id]) => id !== undefined)));
+  } else {
+    // Over while it opened: it goes.
+    closeShown(where);
   }
 
   return promise;
@@ -105,6 +138,16 @@ const ext = getExtensionApi();
 ext?.windows?.onRemoved?.addListener((windowId) => {
   for (const [rid, entry] of pendingApprovals.entries()) {
     if (entry.windowId === windowId) {
+      rejectPending(rid, entry, "User closed the approval window", "closed");
+    }
+  }
+});
+
+ext?.tabs?.onRemoved?.addListener?.((tabId) => {
+  for (const [rid, entry] of pendingApprovals.entries()) {
+    if (entry.tabId === tabId) {
+      // Gone already: only the site's tab comes back.
+      entry.tabId = undefined;
       rejectPending(rid, entry, "User closed the approval window", "closed");
     }
   }
@@ -162,6 +205,8 @@ function decided(rid, entry, message) {
   const { decision } = message;
   pendingApprovals.delete(rid);
   clearTimeout(entry.timer);
+  // A tab doesn't close itself as a window does.
+  if (entry.tabId !== undefined) closeShown(entry);
   keepAnswer(entry, decision === "approve" ? "approved" : "rejected");
 
   if (decision === "approve") {

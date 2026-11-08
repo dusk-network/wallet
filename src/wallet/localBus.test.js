@@ -149,6 +149,22 @@ describe("local sends", () => {
     await expect(getTxMeta("cc".repeat(32))).resolves.toMatchObject({ kind: "stake", profileIndex: 1 });
   });
 
+  it("are looked up again by their ID when the page asks, as the app comes back, and the page hears how they went", async () => {
+    localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://testnet.nodes.dusk.network", chainId: 2 }));
+    const { localSend } = await import("./localBus.js");
+    const { getTxMeta } = await import("../shared/txStore.js");
+    engine.sendTransaction.mockResolvedValueOnce({ hash: "f1".repeat(32), nonce: 1n });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1" } });
+    // The watcher heard nothing while the app was away; the node has it in a block.
+    const block = { tx: { id: "f1".repeat(32), err: null, gasSpent: "2135802", blockHash: "aa", blockHeight: 4802949, blockTimestamp: 1794150000, tx: { gasPrice: "1" } } };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(block), { status: 200 })));
+    const told = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent: told });
+    await expect(localSend({ type: "DUSK_UI_RECHECK_TX", hash: "f1".repeat(32) })).resolves.toMatchObject({ ok: true, result: { status: "executed" } });
+    await expect(getTxMeta("f1".repeat(32))).resolves.toMatchObject({ status: "executed", feePaid: "2135802", blockHeight: "4802949" });
+    expect(told.mock.calls.map(([event]) => event.detail)).toEqual([{ type: "DUSK_UI_TX_STATUS", hash: "f1".repeat(32), status: "executed", ok: true, error: "" }]);
+  });
+
   it("keep the network they were sent on, by the chain ID the node's settings keep", async () => {
     localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://my-node.example", chainId: 2 }));
     const { localSend } = await import("./localBus.js");

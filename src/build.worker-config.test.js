@@ -38,6 +38,14 @@ describe("what a site can load of the extension's own files", () => {
   });
 });
 
+describe("Firefox for Android", () => {
+  it("is declared, from the version that reads what data the add-on collects, so it can be listed for phones", async () => {
+    const firefox = JSON.parse(await readFile(path.resolve(process.cwd(), "config", "manifest.firefox.json"), "utf8"));
+    expect(firefox.browser_specific_settings.gecko_android).toEqual({ strict_min_version: "142.0" });
+    expect(firefox.browser_specific_settings.gecko.data_collection_permissions).toBeTruthy();
+  });
+});
+
 describe("extension worker build config", () => {
   it("configures extension-hosted workers for Chrome and Firefox builds", async () => {
     const plugin = await readFile(
