@@ -474,6 +474,29 @@ describe("pending approvals", () => {
       }
     });
 
+    it.each([
+      ["its approval closed", () => onTabRemovedCb(77), "User closed the approval window"],
+      ["the wallet's state changed", (pending) => pending.cancelPendingApprovals(null, "Network changed"), "Network changed"],
+    ])("ends a request being taken up when %s while that was written", async (_, end, message) => {
+      try {
+        const pending = await stoppedWhileWaiting();
+        let release;
+        session.gate = () => new Promise((r) => (release = r));
+        const answer = pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true, context: CONTEXT });
+        await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+        end(pending);
+        session.gate = null;
+        release();
+        const outcome = await Promise.race([answer.catch((e) => e), new Promise((r) => setTimeout(() => r("still waiting"), 50))]);
+        expect(outcome).toMatchObject({ code: 4001, message });
+        expect(pending.pendingApprovals.size).toBe(0);
+        await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4001, message });
+      } finally {
+        session.gate = null;
+        browserHas.windows = true;
+      }
+    });
+
     it("leaves nothing waiting when taking a request up couldn't be written", async () => {
       try {
         const pending = await stoppedWhileWaiting();

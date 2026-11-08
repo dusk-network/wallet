@@ -139,16 +139,22 @@ const endKept = (rid, entry, ended) =>
       })
     : Promise.resolve();
 
+// Being taken up after a stop, its write not done: what ends it meanwhile
+// (closed, cancelled) is kept here, and ends it then instead.
+const resuming = new Map();
+
 // Ended while the background was stopped (closed, cancelled, the wallet
 // changed): its approval goes, and its site hears why as it asks again.
-const endKeptWhere = (match, ended) =>
-  changeKept((all) => {
+function endKeptWhere(match, ended) {
+  for (const taking of resuming.values()) if (!taking.ended && match(taking.record)) taking.ended = ended;
+  return changeKept((all) => {
     for (const record of Object.values(all)) {
       if (record.ended || pendingApprovals.has(record.rid) || !match(record)) continue;
       record.ended = ended;
       closeShown(record);
     }
   }).catch(() => {});
+}
 
 /**
  * A request kept while it waits, still in its time: its approval's window
@@ -295,19 +301,28 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
     let taken = null;
     let ended = null;
     let stale = null;
-    await changeKept((all) => {
-      const kept = Object.values(all).find((r) => r.key === key && fresh(r));
-      if (!kept) ended = { code: 4900, message: LOST_TEXT };
-      else if (kept.ended) ended = kept.ended;
-      else if (pendingApprovals.has(kept.rid)) ended = { code: ERROR_CODES.USER_REJECTED, message: "Another approval is already pending" };
-      else if (kept.origin !== origin || kept.kind !== kind || !sameAsked(kept.context, context)) {
-        ended = kept.ended = { code: ERROR_CODES.UNAUTHORIZED, message: "Wallet changed while awaiting approval" };
-        closeShown(kept);
-      } else if (!sameAsked(kept.params, params)) {
-        delete all[kept.rid];
-        stale = kept;
-      } else taken = kept;
-    });
+    let taking = null;
+    try {
+      await changeKept((all) => {
+        const kept = Object.values(all).find((r) => r.key === key && fresh(r));
+        if (!kept) ended = { code: 4900, message: LOST_TEXT };
+        else if (kept.ended) ended = kept.ended;
+        else if (pendingApprovals.has(kept.rid)) ended = { code: ERROR_CODES.USER_REJECTED, message: "Another approval is already pending" };
+        else if (kept.origin !== origin || kept.kind !== kind || !sameAsked(kept.context, context)) {
+          ended = kept.ended = { code: ERROR_CODES.UNAUTHORIZED, message: "Wallet changed while awaiting approval" };
+          closeShown(kept);
+        } else if (!sameAsked(kept.params, params)) {
+          delete all[kept.rid];
+          stale = kept;
+        } else {
+          taken = kept;
+          resuming.set(kept.rid, (taking = { record: kept, ended: null }));
+        }
+      });
+    } finally {
+      if (taking) resuming.delete(taken.rid);
+    }
+    if (taking?.ended) ended = taking.ended;
     if (ended) throw rpcError(ended.code, ended.message);
     // Waiting here only once that's written: a failed write leaves nothing to answer.
     if (taken && !pendingApprovals.has(taken.rid)) {
