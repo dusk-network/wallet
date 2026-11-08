@@ -65,20 +65,6 @@
       "run_at": "document_start"
     }
   ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "chunks/*",
-        "assets/*"
-      ],
-      "matches": [
-        "http://*/*",
-        "https://*/*",
-        "ws://*/*",
-        "wss://*/*"
-      ]
-    }
-  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self';"
   },
