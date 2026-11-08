@@ -10,6 +10,7 @@ import { screenShown } from "../lib/clickGuard.js";
 import { createToaster } from "../components/Toast.js";
 import { balancesHidden } from "../components/Balance.js";
 import { ownProfileName } from "../components/ProfileName.js";
+import { contactNameText } from "../lib/contactNames.js";
 import { txStatusToast } from "./txToast.js";
 import { createNetworkMenuController } from "../components/NetworkMenu.js";
 import { createAccountMenuController } from "../components/AccountMenu.js";
@@ -18,7 +19,7 @@ import { send as rawSend } from "../../wallet/bus.js";
 import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
-import { activityRows, ensureActivity, refreshActivitySoon, selected } from "./activity.js";
+import { activityRows, ensureActivity, refreshActivitySoon, selected, sozuFactOfHash } from "./activity.js";
 import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
@@ -607,7 +608,7 @@ function txStatusToastFor(hash, status) {
   const contacts = state.addressBook?.loaded && Array.isArray(state.addressBook.items) ? state.addressBook.items : [];
   const contactName = (addr) => {
     const key = String(addr ?? "").toLowerCase();
-    return String(contacts.find((c) => String(c?.address ?? "").toLowerCase() === key)?.name ?? "").trim() || ownProfileName(ov, addr);
+    return contactNameText(contacts.find((c) => String(c?.address ?? "").toLowerCase() === key)?.name) || ownProfileName(ov, addr);
   };
   const onView = hash
     ? () => {
@@ -769,6 +770,35 @@ function installTxStatusListener() {
 }
 
 installTxStatusListener();
+
+// --- The connection -------------------------------------------------------
+// Offline, as the browser says at once: the header and Home say so, the
+// balance read last staying. Back online: read again at once, not at the next
+// turn, and the node checked again, for the header not to go on with what a
+// check said while offline. A balance the node couldn't give, online, is read
+// again 30 seconds on.
+const BALANCE_RETRY_MS = 30_000;
+let balanceRetryTimer = null;
+function scheduleBalanceRetry(ov) {
+  clearTimeout(balanceRetryTimer);
+  balanceRetryTimer = null;
+  if (!ov?.isUnlocked || !ov?.balanceError || globalThis.navigator?.onLine === false) return;
+  balanceRetryTimer = setTimeout(() => {
+    balanceRetryTimer = null;
+    render({ forceRefresh: true }).catch(() => {});
+  }, BALANCE_RETRY_MS);
+}
+try {
+  window.addEventListener("offline", () => render().catch(() => {}));
+  window.addEventListener("online", () => {
+    render({ forceRefresh: true }).catch(() => {});
+    send({ type: "DUSK_UI_CHECK_NETWORK" })
+      .then(() => render({ forceRefresh: true }))
+      .catch(() => {});
+  });
+} catch {
+  // ignore
+}
 
 // --- Auto-lock activity ------------------------------------------------------
 // The wallet is in use while someone uses it: the popup opening, then a
@@ -998,6 +1028,7 @@ export async function render({ forceRefresh = false } = {}) {
   // Keep shielded sync progress visible while on the dashboard.
   scheduleShieldedPoll(ov);
   schedulePendingTxPoll(ov);
+  scheduleBalanceRetry(ov);
   scheduleArrivalCheck(ov);
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });
@@ -1116,7 +1147,9 @@ export async function render({ forceRefresh = false } = {}) {
   // After Confirm: the transaction's steps. Without one (a new popup), home.
   if (state.route === "sent") {
     if (state.sent) {
-      setApp(sentView(ov, { state, actions }));
+      // A stake or an unstake with Sozu, completed: what it got or gave back, once its pool's event is read.
+      const sozu = state.sent.sozu && state.sent.hash ? sozuFactOfHash(ov, state, state.sent.hash, { render }) : undefined;
+      setApp(sentView(ov, { state, actions, sozu }));
       return;
     }
     state.route = "home";

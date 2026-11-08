@@ -23,6 +23,21 @@ describe("the offer on the web wallet", () => {
   });
 });
 
+describe("what a site can load of the extension's own files", () => {
+  it("is nothing in Chrome, and in Firefox the provider script its content script injects, so no site can tell the build by its files", async () => {
+    // Marek's: a page that never connected fetched chunks/strings.js and loaded chunks/core.js; a hash of them names the build.
+    const manifest = async (...file) => JSON.parse(await readFile(path.resolve(process.cwd(), ...file), "utf8"));
+    const chrome = await manifest("public", "manifest.json");
+    const firefox = await manifest("config", "manifest.firefox.json");
+    expect(chrome.web_accessible_resources ?? []).toEqual([]);
+    expect(firefox.web_accessible_resources.flatMap((entry) => entry.resources)).toEqual(["inpage.js"]);
+    // The one it injects, into a page as a script of the page's: in Chrome, the provider runs in the page's world from the manifest.
+    const content = await readFile(path.resolve(process.cwd(), "src", "contentScript.js"), "utf8");
+    expect([...content.matchAll(/runtimeGetURL\("([^"]+)"\)/g)].map(([, file]) => file)).toEqual(["inpage.js"]);
+    expect(chrome.content_scripts.find((entry) => entry.js.includes("inpage.js"))?.world).toBe("MAIN");
+  });
+});
+
 describe("extension worker build config", () => {
   it("configures extension-hosted workers for Chrome and Firefox builds", async () => {
     const plugin = await readFile(

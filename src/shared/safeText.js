@@ -31,19 +31,21 @@ export function sanitizeStringForDisplay(raw, maxChars = 2048, { keepLines = fal
 export const textNeedsReview = (flags = []) => flags.some((flag) => flag !== "truncated");
 
 // What's about a text's numbers alone: nothing in it is changed or hidden.
-const NUMBER_FLAGS = new Set(["mixed_digits", "rtl_digits"]);
+const NUMBER_FLAGS = new Set(["mixed_digits", "rtl_digits", "lookalike_digits"]);
 
 /**
  * What text with these flags asks a person to check: hidden characters, shown
  * as their codes; a number whose digits mix scripts, as 1٠5 with an
- * Arabic-Indic zero; a number in digits that read right to left, as N'Ko's.
+ * Arabic-Indic zero; a number in digits that read right to left, as N'Ko's;
+ * a number in digits that look like other digits, as Bengali's ৪, a 4.
  * @param {string[]} [flags]
- * @returns {{ hidden: boolean, mixedDigits: boolean, rtlDigits: boolean }}
+ * @returns {{ hidden: boolean, mixedDigits: boolean, rtlDigits: boolean, lookalikeDigits: boolean }}
  */
 export const textChecks = (flags = []) => ({
   hidden: flags.some((flag) => flag !== "truncated" && !NUMBER_FLAGS.has(flag)),
   mixedDigits: flags.includes("mixed_digits"),
   rtlDigits: flags.includes("rtl_digits"),
+  lookalikeDigits: flags.includes("lookalike_digits"),
 });
 
 /**

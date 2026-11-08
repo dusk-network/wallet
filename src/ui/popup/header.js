@@ -66,8 +66,9 @@ export function createHeaderRenderer({
     // another's prover or archiver whose.
     syncTestnetStrip(document.querySelector(".panel"), ov?.networkName, { ...endpoints, chainId: ov?.chainId, refusal: ov?.chainRefusal });
 
-    // Update network status indicator
-    const nodeStatus = ov?.networkStatus?.nodeStatus ?? "unknown";
+    // Update network status indicator: offline as soon as the browser says so, before any read fails.
+    const browserOffline = globalThis.navigator?.onLine === false;
+    const nodeStatus = browserOffline ? "offline" : (ov?.networkStatus?.nodeStatus ?? "unknown");
     let statusDot = networkPill?.querySelector(".net-status-dot");
     if (networkPill && !statusDot) {
       // Create status dot if it doesn't exist
@@ -89,9 +90,11 @@ export function createHeaderRenderer({
       // Set title for tooltip
       const statusTitles = {
         online: "Network online",
-        offline: ov?.networkStatus?.nodeError
-          ? `Network offline: ${ov.networkStatus.nodeError}`
-          : "Network offline",
+        offline: browserOffline
+          ? "You're offline"
+          : ov?.networkStatus?.nodeError
+            ? `Network offline: ${ov.networkStatus.nodeError}`
+            : "Network offline",
         checking: "Checking network…",
         unknown: "Network status unknown",
       };

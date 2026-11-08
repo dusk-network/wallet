@@ -69,9 +69,7 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "inpage.js",
-        "chunks/*",
-        "assets/*"
+        "inpage.js"
       ],
       "matches": [
         "http://*/*",

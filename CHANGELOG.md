@@ -37,6 +37,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Refused a request link that says a field twice or has a user part before its host, and one for another network the moment it's put in, saying only why.
 - Said when a number in a message to sign, a sign-in or a memo mixes digits of different scripts or reads right to left.
+- Said when a number in a message to sign, a sign-in or a memo is in digits that look like other digits, as Bengali's ৪, a 4 that looks like an 8.
+- Refused a contact's or a profile's name with hidden characters, and showed a contact saved with them by their codes, saying so.
+- Refused a dusk: link for another network by the network its query names, and a link whose memo has a line break.
+- Emptied the whole form when a link is refused, and said why for each refused link.
+- Said what came in on every Paid request, one of any amount too.
+- Listed each payment of a request paid twice with what it brought and when, and Send back on the extra one.
+- Found what's searched typed without its accents, in Activity and Contacts, and an amount typed with either decimal mark.
+- Showed each Activity row's memo under its name.
+- Said what a stake or an unstake with Sozu got or gave back in stDUSK, and the rate, on Completed and in its details.
+- Said at once when the connection drops, kept the balance read last as maybe out of date, and read it again by itself once back.
+- Kept the extension's own files from sites: no page can load them, but for the provider script Firefox puts in it.
+- Told a site that never connected, or whose connection ended, nothing as the wallet switches network.
+- Opened one Send for each press when the web wallet hands a request over, however often it asks.
+- Took a request from a page on this machine only while the wallet's node is there too, and only one that says its network.
+- Kept Home's breakdown of Public, Shielded and Staked from starting a line with its dot when it wraps.
 - Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
 - Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
 - Repeated on Review that a send goes to your own account, and said what to try after a wrong password.

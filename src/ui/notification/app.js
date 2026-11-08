@@ -57,7 +57,7 @@ const TEXT_REVIEW_TITLE = "Text needs review";
 /**
  * What a site's text asks a person to check before they act, in words: its
  * hidden characters, and numbers that may not read as their digits say.
- * @param {{ hidden?: boolean, mixedDigits?: boolean, rtlDigits?: boolean }} checks - safeText's
+ * @param {{ hidden?: boolean, mixedDigits?: boolean, rtlDigits?: boolean, lookalikeDigits?: boolean }} checks - safeText's
  * @param {string} what - "message", "statement"
  * @param {string} act - "sign it", "sign in"
  */

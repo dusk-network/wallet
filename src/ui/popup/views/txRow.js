@@ -20,6 +20,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton as copyIconButton } from "../../components/CopyButton.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
 import { ownProfileName } from "../../components/ProfileName.js";
+import { contactNameText } from "../../lib/contactNames.js";
 import { MONTHS, clockText, dateText } from "../../lib/time.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
 
@@ -456,7 +457,8 @@ export function contactNames(state, actions, ov) {
   if (ab?.loaded && Array.isArray(ab.items)) {
     for (const entry of ab.items) {
       const addr = String(entry?.address ?? "").trim().toLowerCase();
-      const name = String(entry?.name ?? "").trim();
+      // As the wallet shows a name: what can't be seen in it as its codes.
+      const name = contactNameText(entry?.name);
       if (addr && name) byAddress.set(addr, name);
     }
   } else if (state && !ab?.loading) {
@@ -471,6 +473,18 @@ export function contactNames(state, actions, ov) {
       });
   }
   return (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? ownProfileName(ov, address);
+}
+
+/**
+ * A row's memo as it shows under its name, as web History shows it: what can't
+ * be seen in it as its codes, line breaks too (safeText.js); "" for none, for a
+ * memo of bytes, and for a bridge transfer's, which is an address or a hash.
+ * @param {object} tx - an Activity row
+ */
+function rowMemo(tx) {
+  if (tx?.route || tx?.entry?.memoBinary === true) return "";
+  const memo = String(tx?.memo ?? "").trim();
+  return memo ? safeText(memo).text : "";
 }
 
 function pulseClass(state, hash) {
@@ -492,9 +506,10 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
   const desc = describeTx(tx, { contactName, nodeUrl });
   const hash = String(tx?.hash ?? "");
   const sub = subText(desc, when(tx), { hidden, spoken: true });
+  const memo = rowMemo(tx);
   // What the row says, for the button that opens it.
   const spoken = !desc.amount ? "" : hidden && !desc.amount.text ? "amount hidden" : amountText(desc.amount, false);
-  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, sub, spoken, desc.unsent ? "" : desc.statusWord].filter(Boolean).join(", ");
+  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, sub, spoken, desc.unsent ? "" : desc.statusWord, memo ? `memo ${memo}` : ""].filter(Boolean).join(", ");
 
   const open = () => {
     if (!state || !hash) return;
@@ -533,6 +548,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
       ].filter(Boolean)),
       // The button's name says these already.
       sub ? subEl(desc, when(tx), hidden) : null,
+      memo ? h("div", { class: "row-sub tx-memo", "aria-hidden": "true", text: memo }) : null,
     ].filter(Boolean)),
     h("div", { class: "tx-right", "aria-hidden": "true" }, [
       amountEl(desc.amount, hidden),

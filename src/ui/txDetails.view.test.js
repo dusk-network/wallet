@@ -290,6 +290,34 @@ describe("transaction details", () => {
     expect(chain.calls.length).toBe(asked);
   });
 
+  it("says what a stake with Sozu got in stDUSK, to the lux, and what one stDUSK was worth, once the pool's event is read", async () => {
+    // Lena's: the web wallet says it, and the extension said none.
+    const { pool } = networks.testnet.sozu.fallbacks;
+    const u64 = (n) => Array.from({ length: 8 }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn).toString(16).padStart(2, "0")).join("");
+    // The pool's deposit event: amount, fee, stake and supply, then the account it names.
+    const deposit = `${[100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n].map(u64).join("")}01${"ab".repeat(193)}${"00".repeat(6)}`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: { h0: { json: [{ origin: HASH, events: [{ target: pool, topic: "deposit", data: deposit }] }] } } }), { headers: { "content-type": "application/json" } }))
+    );
+    const draw = (hidden) => {
+      const ov = { accounts: ["me".padEnd(64, "x")], isUnlocked: true, nodeUrl: NODE, selectedAccountIndex: 0, txs: [], hideBalances: hidden };
+      const stake = entryOf({ hash: HASH, kind: "contract_call", contractId: pool, counterparty: pool, fnName: "sozu_stake", value: "100000000000", blockHeight: 4_700_000 });
+      const state = { route: "tx", txDetailHash: HASH, addressBook: { loaded: true, items: [] }, activity: { entries: [stake], history: { fillDetails: vi.fn(async () => {}), needsDetails: vi.fn(() => false) }, key: activityKey(ov) } };
+      const actions = { render: vi.fn(async () => paint()), showToast: vi.fn() };
+      const paint = () => dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
+      paint();
+      return () => dom.document.body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText);
+    };
+    const rows = draw(false);
+    await vi.waitFor(() => expect(rows()).toContain("You got49.875 stDUSK"));
+    expect(rows()).toContain("Rate1 stDUSK = 2 DUSK");
+    // What it got hides with the balances; the rate says nothing of what's held.
+    const hiddenRows = draw(true);
+    await vi.waitFor(() => expect(hiddenRows()).toContain("You got•••• stDUSK"));
+    expect(hiddenRows()).toContain("Rate1 stDUSK = 2 DUSK");
+  });
+
   it("takes a payout's memo of bytes for no migration, though it reads as one", () => {
     // Codex's: 32 bytes read as 0x and 64 hex digits.
     const MAINNET = "https://nodes.dusk.network";

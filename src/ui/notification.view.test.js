@@ -461,6 +461,24 @@ describe("text that reads as something it isn't", () => {
     expect(app.querySelector(".callout.warn .muted").textContent).toBe("A number here mixes digits of different scripts. Check it digit by digit. Only sign in if you trust this site.");
   });
 
+  it("says when a number's digits look like other digits than they are, in a message to sign and a memo", async () => {
+    // Marek's: Bengali's 4 looks like 8, Gurmukhi's 44 like 88, Oriya's 2 and Malayalam's 7 like 9.
+    const lookalike = "A number here is in digits that look like other digits than they are. Check it digit by digit.";
+    for (const message of ["Pay \u09ea DUSK to unlock", "Pay \u0a6a\u0a6a DUSK", "Pay \u0b68 DUSK", "Pay \u0d6d DUSK"]) {
+      const bytes = new TextEncoder().encode(message);
+      await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
+      expect(app.querySelector(".callout.warn .callout-title").textContent, message).toBe("Text needs review");
+      expect(app.querySelector(".callout.warn .muted").textContent, message).toBe(`${lookalike} Only sign it if you trust this site.`);
+    }
+
+    await render("send_tx", transfer(BOB, { memo: "Factura \u09ea, or 1\u06605" }));
+    expect([...row("Memo").querySelectorAll(".safe-text__flag")].map((el) => el.textContent)).toEqual([
+      "A number here mixes digits of different scripts, and some look like other digits than they are. Check it digit by digit.",
+    ]);
+    await render("sign_auth", { chainId: "dusk:2", nonce: "n1", statement: "Pay \u09ea DUSK" });
+    expect(app.querySelector(".callout.warn .muted").textContent).toBe(`${lookalike} Only sign in if you trust this site.`);
+  });
+
   it("shows it so before the wallet is unlocked too", async () => {
     await render("sign_message", signRequest(), { isUnlocked: false, accounts: [], duskNames: {} });
     expect(visibleText(head())).toContain("I agree to pay \\u202e0001\\u202c DUSK");

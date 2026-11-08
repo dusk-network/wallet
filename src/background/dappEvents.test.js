@@ -109,8 +109,39 @@ describe("dappEvents", () => {
     expect(events(ports.one)).toEqual([["disconnect", { code: 4900, message: "Disconnected" }], ["profilesChanged", []]]);
     expect(events(ports.both)).toEqual([["profilesChanged", [{ profileId: "account:0:w2a0", account: "w2a0" }]]]);
     expect(events(ports.two)).toEqual([["connect", { chainId: "dusk:2" }], ["profilesChanged", [{ profileId: "account:1:w2a1", account: "w2a1" }]]]);
-    expect(events(ports.none)).toEqual([["profilesChanged", []]]);
+    // Never connected to either: nothing to tell it.
+    expect(events(ports.none)).toEqual([]);
     expect(JSON.stringify(Object.values(ports).map((p) => p.messages))).not.toMatch(/w1a/);
+  });
+
+  it("tells a site that never connected, or whose connection ended, nothing as the wallet switches network", async () => {
+    // Marek's: two or three raw profilesChanged [] a round of Testnet > Mainnet > Testnet, to a site that never connected.
+    const connected = { profileId: "account:0:acct0", accountIndex: 0, grants: { publicAccount: true }, updatedAt: 1 };
+    permissions = { "https://one.example": connected, "https://left.example": connected };
+    const ev = await import("./dappEvents.js");
+    const [one, left, never] = ["one", "left", "never"].map((site, i) => new FakePort(`https://${site}.example`, i + 1));
+    for (const port of [one, left, never]) ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+    for (const port of [one, left, never]) port.messages.length = 0;
+    const events = (port) => port.messages.filter((m) => m.type === "DUSK_PROVIDER_EVENT").map((m) => [m.name, m.data]);
+
+    // One disconnects: told so once, its profile gone.
+    const before = permissions;
+    permissions = { "https://one.example": connected };
+    await ev.handlePermissionsDiff(before, permissions);
+    expect(events(left)).toEqual([["disconnect", { code: 4900, message: "Disconnected" }], ["profilesChanged", []]]);
+    expect(events(never)).toEqual([]);
+    left.messages.length = 0;
+
+    for (const nodeUrl of ["https://nodes.dusk.network", "https://testnet.nodes.dusk.network", "https://nodes.dusk.network"]) {
+      const old = settings;
+      settings = { nodeUrl };
+      await ev.handleSettingsDiff(old, settings);
+    }
+    expect(never.messages).toEqual([]);
+    expect(left.messages).toEqual([]);
+    // The one connected hears of each switch.
+    expect(events(one).filter(([name]) => name === "chainChanged").map(([, chain]) => chain)).toEqual(["dusk:1", "dusk:2", "dusk:1"]);
   });
 
   it("does not leak all profiles when accountIndex is out of bounds", async () => {
@@ -142,12 +173,12 @@ describe("dappEvents", () => {
       nodeUrl: null,
     });
 
-    // profilesChanged should also emit [] (not the full list).
+    // Nor any profile later (not the full list): it isn't connected, so it hears nothing at all.
     await ev.broadcastProfilesChangedAll();
     const profileMsgs = port.messages.filter(
       (m) => m?.type === "DUSK_PROVIDER_EVENT" && m?.name === "profilesChanged"
     );
-    expect(profileMsgs.at(-1)?.data).toEqual([]);
+    expect(profileMsgs).toEqual([]);
   });
 
   it("tells only connected sites of a change of network or node, and gives a connected site its network", async () => {
@@ -780,14 +811,16 @@ describe("dappEvents", () => {
     });
 
     it.each([
-      ["locks", lock, []],
-      ["revokes the site's grant", regrant({}), []],
+      ["locks", lock, [], 2],
+      // Its connection ended: told once, and nothing again while it isn't connected.
+      ["revokes the site's grant", regrant({}), [], 1],
       [
         "switches the site's profile",
         regrant({ "https://dapp.example": connected(1) }),
         [{ profileId: "account:1:acct1", account: "acct1" }],
+        2,
       ],
-    ])("sends sites only profiles read after the wallet %s", async (_, change, profiles) => {
+    ])("sends sites only profiles read after the wallet %s", async (_, change, profiles, told) => {
       permissions = { "https://dapp.example": connected(0) };
       verifiedNames = { testnet: { acct0: check("alice.dusk") } };
       const ev = await import("./dappEvents.js");
@@ -810,9 +843,9 @@ describe("dappEvents", () => {
       await Promise.all(updates);
 
       // The update to every site and the first state are read again, so each
-      // page only gets the profiles the change left it: from the change, and
-      // from the update read again.
-      expect(profileEvents(port).map((event) => event.data)).toEqual([profiles, profiles]);
+      // page only gets the profiles the change left it: from the change, and,
+      // while it's connected, from the update read again.
+      expect(profileEvents(port).map((event) => event.data)).toEqual(Array.from({ length: told }, () => profiles));
       const states = () =>
         late.messages.filter((m) => m?.type === "DUSK_PROVIDER_STATE").map((m) => m.state.profiles);
       await vi.waitFor(() => expect(states()).toEqual([profiles]));

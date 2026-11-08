@@ -9,6 +9,7 @@ import { makePaymentLink, parsePaymentLink, readPaymentLink } from "@dusk-networ
 import { runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { isLocalHttpHostname } from "../shared/securityPolicy.js";
+import { getSettings } from "../shared/settings.js";
 import { loadVault } from "../shared/vault.js";
 
 const originOf = (url) => {
@@ -16,6 +17,15 @@ const originOf = (url) => {
     return new URL(String(url ?? "")).origin;
   } catch {
     return "";
+  }
+};
+
+// Whether an address is on this machine.
+const onThisMachine = (url) => {
+  try {
+    return isLocalHttpHostname(new URL(String(url ?? "")).hostname);
+  } catch {
+    return false;
   }
 };
 
@@ -54,22 +64,21 @@ export async function openRequestLink(message, sender) {
 }
 
 // A web wallet's own request link, as Send reads it: a network's web wallet's
-// as it is, for Send to read and refuse as it does any; one on this machine's
-// as its network's would be, once it reads as Send reads one (`problem`: what
-// Send would say of it), as what's rebuilt says no more than it reads to.
-function siteLinkOf(origin, raw) {
+// as it is, for Send to read and refuse as it does any; one on this machine's,
+// while the wallet's node is on this machine too, as its network's would be,
+// once it reads as Send reads one (`problem`: what Send would say of it) and
+// says the network it's for, which what's rebuilt keeps, saying no more than
+// it reads to. Any other page on this machine is no web wallet.
+async function siteLinkOf(origin, raw) {
   const link = String(raw ?? "");
   if (!origin || originOf(link) !== origin) return {};
   if (parsePaymentLink(link)?.form === "https") return { link };
-  let local = false;
-  try {
-    local = isLocalHttpHostname(new URL(origin).hostname);
-  } catch {
-    local = false;
-  }
   const at = link.indexOf("/dashboard/send");
-  const read = local && at > 0 ? readPaymentLink(link, { walletUrl: link.slice(0, at) }) : null;
+  if (!onThisMachine(origin) || at <= 0) return {};
+  if (!onThisMachine((await getSettings())?.nodeUrl)) return { problem: "params.link from this machine needs the wallet on a node on this machine" };
+  const read = readPaymentLink(link, { walletUrl: link.slice(0, at) });
   if (!read?.link || read.link.form !== "https") return { problem: read?.problem ?? "" };
+  if (!read.link.chainId) return { problem: "params.link must say the network it's for" };
   const { chainId, label, lux, memo, to } = read.link;
   const made = makePaymentLink({ amountLux: lux === null ? "" : String(lux), label, memo, network: chainId, to });
   return made.ok ? { link: made.https ?? made.dusk } : { problem: Object.values(made.problems)[0] ?? "" };
@@ -86,7 +95,7 @@ function siteLinkOf(origin, raw) {
  * @returns {Promise<boolean>} whether Send opened
  */
 export async function handOverRequestLink(origin, link, { pressed } = {}) {
-  const { link: own, problem } = siteLinkOf(origin, link);
+  const { link: own, problem } = await siteLinkOf(origin, link);
   if (!own) throw rpcError(ERROR_CODES.INVALID_PARAMS, problem || "params.link must be a request link to this web wallet's own Send");
   if (pressed === false) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Hand a request over from a press of the person's");
   if (!(await loadVault())) return false;

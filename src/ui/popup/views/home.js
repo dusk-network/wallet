@@ -11,6 +11,9 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 
 // In the wallet's words: what a node says of it is that node's to choose.
 const BALANCE_UNREAD = "Couldn't read your balance from this node. Try again in a moment.";
+// A balance read before, kept while it can't be read again, as the web wallet says it.
+const BALANCE_STALE = "Your balance may be out of date.";
+const BALANCE_OFFLINE = "Your balance may be out of date until you're back online.";
 const SHIELDED_UNREAD = "Couldn't read your shielded balance from this node. Try again in a moment.";
 
 export function homeView(ov, { state, actions } = {}) {
@@ -74,7 +77,8 @@ export function homeView(ov, { state, actions } = {}) {
     shieldStatus = "Sync failed";
   }
 
-  if (shieldedError && shieldedSync?.state !== "syncing") {
+  // One read before stays, under the balance's own line: it isn't unavailable.
+  if (shieldedError && shieldedSync?.state !== "syncing" && !ov?.shieldedStale) {
     shieldStatus = "Unavailable";
   }
 
@@ -240,9 +244,14 @@ export function homeView(ov, { state, actions } = {}) {
       [balance(hidden, heroText), heroAmt === "—" ? null : h("span", { class: "balance-unit", text: " DUSK" })].filter(Boolean)
     ),
     balanceSplit,
-    ov?.balanceError
-      ? h("div", { class: "muted", text: BALANCE_UNREAD })
-      : null,
+    // Offline, as the browser says at once; or read before, kept while the node can't give it; or not read at all.
+    globalThis.navigator?.onLine === false
+      ? h("div", { class: "muted balance-stale", role: "status", text: BALANCE_OFFLINE })
+      : ov?.balanceStale || ov?.shieldedStale
+        ? h("div", { class: "muted balance-stale", role: "status", text: BALANCE_STALE })
+        : ov?.balanceError
+          ? h("div", { class: "muted", text: BALANCE_UNREAD })
+          : null,
   ].filter(Boolean));
 
   // Activity: the newest rows, the full list behind See all.

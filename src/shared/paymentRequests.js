@@ -89,14 +89,19 @@ export function rememberRequest(walletId, { lux, memo, network, to }) {
 export const forgetRequest = (walletId, id) => change(walletId, (list) => (list.some((kept) => kept.id === id) ? list.filter((kept) => kept.id !== id) : list));
 
 /**
- * Keeps what paid each request matchRequests calls paid.
+ * Keeps what paid each request matchRequests calls paid, with what it paid,
+ * for that to be said once the payment is too far back to read: also for one
+ * kept paid before that was kept with it.
  * @param {string} walletId
  * @param {Map<string, import("@dusk-network/app-core/requests").RequestMatch>} matches
  */
 export function keepRequestsPaid(walletId, matches) {
   const paid = (kept) => {
     const match = matches.get(kept.id);
-    return match?.state === "paid" && !kept.paid && match.hash && match.at ? { at: match.at, hash: match.hash } : null;
+    if (match?.state !== "paid" || !match.hash || !match.at) return null;
+    const lux = typeof match.lux === "bigint" ? { lux: String(match.lux) } : {};
+    if (!kept.paid) return { at: match.at, hash: match.hash, ...lux };
+    return !kept.paid.lux && lux.lux && kept.paid.hash === match.hash ? { ...kept.paid, ...lux } : null;
   };
   return change(walletId, (list) => (list.some(paid) ? list.map((kept) => (paid(kept) ? { ...kept, paid: paid(kept) } : kept)) : list));
 }

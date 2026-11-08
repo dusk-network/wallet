@@ -34,7 +34,8 @@ import { noteTxStatus } from "./views/sent.js";
 /** Rows read for the History view at first, and how many more Show more adds. */
 export const ACTIVITY_PAGE = 50;
 // Routes that show Activity, and Receive for what came in for its requests: a sync step redraws only these.
-const ROUTES = new Set(["home", "activity", "tx", "receive"]);
+// The views that show activity; and the Sent screen, which says what a stake with Sozu got once its row comes.
+const ROUTES = new Set(["home", "activity", "tx", "receive", "sent"]);
 // The wait after a transaction went through before the archive is asked for it.
 const AFTER_TX_MS = 10_000;
 
@@ -466,6 +467,56 @@ const sozuFactsKept = new Map();
 export function sozuFactsOf(ov, rows) {
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
   return sozuFacts({ archive, account: selected(ov).account, rows, cache: sozuFactsKept }).catch(() => undefined);
+}
+
+/** How long a stake's or an unstake's Sozu facts not read yet wait before they're asked again: the archive can lag the block. */
+export const SOZU_FACT_AGAIN_MS = 60_000;
+// By activity and hash: what the pool's event said, or when a read that found none ended.
+const sozuFactReads = new Map();
+
+/**
+ * What a stake or an unstake with Sozu did, for its details and its Completed
+ * screen: undefined until the pool's event is read, and for a row that isn't
+ * one that went through as the chain's history has it. Asked at most once a
+ * minute while it isn't found, `render` drawing again a minute on, as nothing
+ * else may; and once it's found.
+ * @param {object} ov - the overview
+ * @param {object | undefined} row - an activity row
+ * @param {{ render?: () => Promise<unknown> }} [options]
+ * @returns {import("@dusk-network/app-core/sozu").SozuFact | undefined}
+ */
+export function sozuFactOf(ov, row, { render } = {}) {
+  if (!row?.sozu || row.status !== "executed" || row.source !== "public") return undefined;
+  const key = `${activityKey(ov)}\n${row.hash}`;
+  const last = sozuFactReads.get(key);
+  if (last?.fact || last?.reading || (last && Date.now() - last.at < SOZU_FACT_AGAIN_MS)) return last.fact;
+  const read = { at: Date.now(), fact: undefined, reading: true };
+  sozuFactReads.set(key, read);
+  sozuFactsOf(ov, [row])
+    .then((facts) => {
+      read.fact = facts?.get(row.hash);
+    })
+    .catch(() => {})
+    .finally(() => {
+      Object.assign(read, { at: Date.now(), reading: false });
+      if (sozuFactReads.get(key) !== read) return;
+      if (read.fact) render?.()?.catch?.(() => {});
+      else setTimeout(() => render?.()?.catch?.(() => {}), SOZU_FACT_AGAIN_MS);
+    });
+  return undefined;
+}
+
+/**
+ * What a stake or an unstake with Sozu the wallet sent did, by its hash, once
+ * the chain's history has it (sozuFactOf).
+ * @param {object} ov
+ * @param {object} state
+ * @param {string} hash
+ * @param {{ render?: () => Promise<unknown> }} [options]
+ */
+export function sozuFactOfHash(ov, state, hash, options) {
+  const row = hash ? activityRows(ov, state).find((each) => each.hash === hash && each.source === "public") : undefined;
+  return sozuFactOf(ov, row, options);
 }
 
 // How Sozu's stDUSK grew lately, by pool, as app-core reads it from the chain:

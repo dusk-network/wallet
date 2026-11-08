@@ -5,7 +5,7 @@ import { openUrl } from "../../../platform/index.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
-import { txErrorText } from "./txDisplay.js";
+import { stDuskLines, txErrorText } from "./txDisplay.js";
 import { zonedClockText } from "../../lib/time.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
@@ -397,9 +397,11 @@ const STATE_WORDS = { done: "Done: ", current: "Now: ", failed: "Failed: ", unkn
 
 /**
  * The Sent screen: what was sent, its steps, its transaction ID and fee, and
- * Done. Amounts and the fee hide with Hide balances.
+ * Done. Amounts and the fee hide with Hide balances. A stake or an unstake
+ * with Sozu says what it got or gave back in stDUSK once it completed and the
+ * pool's event is read (`sozu`, what app.js reads by its hash).
  */
-export function sentView(ov, { state, actions } = {}) {
+export function sentView(ov, { state, actions, sozu } = {}) {
   const sent = state?.sent;
   if (!sent) return [];
   const hidden = balancesHidden(ov);
@@ -482,6 +484,7 @@ export function sentView(ov, { state, actions } = {}) {
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
   const details = h("div", { class: "group" }, [
+    ...(sent.sozu && status === "executed" ? stDuskLines(sozu, hidden) : []).map(({ label, value }) => kv(label, value)),
     sent.hash
       ? kv("Transaction ID", [h("span", { class: "mono", title: sent.hash, text: shortAddress(sent.hash) }), copyBtn])
       : null,

@@ -1,3 +1,8 @@
+import { stDuskWorth } from "@dusk-network/app-core/sozu";
+
+import { formatDuskExact } from "../../../shared/amount.js";
+import { balance } from "../../components/Balance.js";
+
 /**
  * A status in one word, the same in Activity and a transaction's details:
  * Pending until the network runs it, then Completed or Failed. Dropped (the
@@ -69,4 +74,22 @@ export function txRecoveryReasonLabel(reason) {
   }
 
   return raw;
+}
+
+/**
+ * What a stake or an unstake with Sozu got or gave back in stDUSK, to the lux,
+ * hidden with the balances, and what one stDUSK was worth then (app-core's
+ * stDuskWorth), as the web wallet says them: for a transaction's details and
+ * its Completed screen. None without what the pool's event says (`fact`).
+ * @param {import("@dusk-network/app-core/sozu").SozuFact | undefined} fact
+ * @param {boolean} hidden - balancesHidden(ov)
+ * @returns {{ label: string, value: Array<string|HTMLElement> | string }[]}
+ */
+export function stDuskLines(fact, hidden) {
+  if (!fact) return [];
+  const worth = stDuskWorth(fact.pool);
+  return [
+    { label: fact.kind === "stake" ? "You got" : "You gave back", value: [balance(hidden, formatDuskExact(String(fact.stDusk))), " stDUSK"] },
+    ...(worth === null ? [] : [{ label: "Rate", value: `1 stDUSK = ${formatDuskExact(String(worth))} DUSK` }]),
+  ];
 }

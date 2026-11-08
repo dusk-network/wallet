@@ -6,11 +6,17 @@ export const HIDDEN_CHARACTERS_TEXT = "Hidden characters that can change how thi
 
 /**
  * What a text's numbers ask a person to check, in words; "" for nothing.
- * @param {{ mixedDigits?: boolean, rtlDigits?: boolean }} [checks] - safeText's
+ * @param {{ mixedDigits?: boolean, rtlDigits?: boolean, lookalikeDigits?: boolean }} [checks] - safeText's
  */
-export function numbersText({ mixedDigits = false, rtlDigits = false } = {}) {
-  if (!mixedDigits && !rtlDigits) return "";
-  const what = mixedDigits && rtlDigits ? "mixes digits of different scripts, and some read right to left" : mixedDigits ? "mixes digits of different scripts" : "is in digits that read right to left";
+export function numbersText({ mixedDigits = false, rtlDigits = false, lookalikeDigits = false } = {}) {
+  // The first that holds says what the number is in; the others what some of its digits do.
+  const parts = [
+    mixedDigits ? "mixes digits of different scripts" : "",
+    rtlDigits ? (mixedDigits ? "some read right to left" : "is in digits that read right to left") : "",
+    lookalikeDigits ? (mixedDigits || rtlDigits ? "some look like other digits than they are" : "is in digits that look like other digits than they are") : "",
+  ].filter(Boolean);
+  if (!parts.length) return "";
+  const what = parts.length > 2 ? `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}` : parts.join(", and ");
   return `A number here ${what}. Check it digit by digit.`;
 }
 

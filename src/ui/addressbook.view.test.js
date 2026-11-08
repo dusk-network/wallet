@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { clearAddressBook, listAddressBook, markAddressBookNameChecked, upsertAddressBookEntry } from "../shared/addressBook.js";
+import { NAME_HIDES } from "@dusk-network/app-core/names";
+import { clearAddressBook, listAddressBook, markAddressBookNameChecked, removeAddressBookEntry, upsertAddressBookEntry } from "../shared/addressBook.js";
 import { lookupDuskName } from "../shared/duskNames.js";
 import { noteChainId } from "../shared/nodeNetwork.js";
 import { TX_KIND } from "../shared/constants.js";
@@ -115,6 +116,20 @@ describe("contacts", () => {
     expect(listAddressBook).toHaveBeenCalledTimes(1);
     expect(locked.actions.render).toHaveBeenCalledWith({ forceRefresh: true });
     listAddressBook.mockClear();
+  });
+
+  it("finds a contact by its name typed without its accents, or its address", () => {
+    // Sofia's: a search needs no accent typed.
+    const items = [{ id: "1", name: "Ilustraci\u00f3n Sol", address: ACCOUNT, type: "account" }, { id: "2", name: "Bob", address: ADDRESS, type: "address" }];
+    const titles = (query) => {
+      const view = mount({ items, query });
+      void view;
+      return dom.document.body.querySelectorAll(".contact-row .row-title").map((el) => el.textContent);
+    };
+    expect(titles("ilustracion")).toEqual(["Ilustraci\u00f3n Sol"]);
+    expect(titles("ILUSTRACIÓN sol")).toEqual(["Ilustraci\u00f3n Sol"]);
+    expect(titles(ADDRESS.slice(10, 30))).toEqual(["Bob"]);
+    expect(titles("carla")).toEqual([]);
   });
 
   it("lists contacts by name with their address and first letter, and leaves Delete all to Settings", async () => {
@@ -267,8 +282,8 @@ describe("contacts", () => {
       const view = edit();
       const name = view.field("Name");
       const alike = `This looks like your contact Alice, at ${shortAddress(ACCOUNT)}, but uses different letters.`;
-      // Cyrillic А and е, Greek Α, a capital I for the l, a 1, and a space that takes no room.
-      for (const typed of ["\u0410lice", "Alic\u0435", "\u0391LICE", "AIice", "A1ice", "Ali\u200bce"]) {
+      // Cyrillic А and е, Greek Α, a capital I for the l, and a 1.
+      for (const typed of ["\u0410lice", "Alic\u0435", "\u0391LICE", "AIice", "A1ice"]) {
         typeInto(name, typed);
         expect(shownNote(), typed).toEqual([alike]);
       }
@@ -281,6 +296,29 @@ describe("contacts", () => {
       view.button("Save").click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "\u0410lice", address: BOB }), expect.anything());
+    });
+
+    it("refuses a name with hidden characters, as it's typed and on Save", async () => {
+      // Marek's: an override at the start reads as "Profile 2" and "Alice", and a space that takes no room.
+      const view = edit();
+      const name = view.field("Name");
+      for (const typed of ["\u202e2 eliforP", "\u202eecilA", "Ali\u200bce"]) {
+        typeInto(name, typed);
+        expect(view.error("Name"), typed).toBe(NAME_HIDES);
+        expect(name.getAttribute("aria-invalid"), typed).toBe("true");
+        expect(shownNote(), typed).toEqual([]);
+      }
+      typeInto(view.field("Address"), BOB);
+      view.button("Save").click();
+      await settle();
+      expect(view.error("Name")).toBe(NAME_HIDES);
+      expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+
+      typeInto(name, "Alicia");
+      expect(view.error("Name")).toBe("");
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Alicia", address: BOB }), expect.anything());
     });
 
     it("doesn't warn a contact of its own name, as it's edited", () => {
@@ -354,6 +392,42 @@ describe("contacts", () => {
       await settle();
       expect(shownNote()).toEqual(["That's your own profile: Savings."]);
     });
+  });
+
+  it("shows a contact saved with hidden characters by their codes, says so, and lets it be deleted", async () => {
+    // Marek's, saved before such names were refused: it read as "Alice", over a stranger's address.
+    const stranger = { id: "9", name: "\u202eecilA", address: ADDRESS, type: "address" };
+    const view = mount({ items: [ALICE, stranger] });
+    const [, row] = dom.document.body.querySelectorAll(".contact-row");
+    expect(row.querySelector(".row-title").textContent).toBe("\\u202eecilA");
+    expect(row.querySelectorAll(".row-sub").map((el) => el.textContent)).toEqual([`${shortAddress(ADDRESS)} · Shielded`, "Its name has hidden characters"]);
+    // No letter for a name that starts with what can't be seen.
+    expect(row.querySelector(".row-icon").textContent).toBe("");
+    expect(visibleText(dom.document.body)).not.toContain("\u202e");
+
+    row.click();
+    expect(dom.document.body.querySelector(".tx-hero-name").textContent).toBe("\\u202eecilA");
+    expect(visibleText(dom.document.body.querySelector(".contact-hidden-name"))).toBe(
+      "This name has hidden characters, shown here as codes. Edit the contact to type it again, or delete it."
+    );
+    expect(visibleText(dom.document.body)).not.toContain("\u202e");
+
+    view.button("Edit").click();
+    expect(view.error("Name")).toBe(NAME_HIDES);
+    vi.stubGlobal("confirm", () => true);
+    removeAddressBookEntry.mockClear();
+    view.button("Delete contact").click();
+    await settle();
+    expect(removeAddressBookEntry).toHaveBeenCalledWith("9", expect.anything());
+  });
+
+  it("says an address is saved already by its contact's name, hidden characters as codes", async () => {
+    const view = mount({ view: "edit", editId: null, items: [{ id: "9", name: "\u202eecilA", address: ACCOUNT, type: "account" }] });
+    typeInto(view.field("Name"), "Alice");
+    typeInto(view.field("Address"), ACCOUNT);
+    view.button("Save").click();
+    await settle();
+    expect(view.error("Address")).toBe("This address is already saved as \\u202eecilA.");
   });
 
   it("edits a contact by its .dusk name, with Delete for a saved one and Back to leave", () => {

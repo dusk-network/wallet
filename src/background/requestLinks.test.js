@@ -9,11 +9,17 @@ vi.mock("../platform/extensionApi.js", () => ({
   tabsCreate: vi.fn(async () => ({})),
 }));
 vi.mock("../shared/vault.js", () => ({ loadVault: vi.fn(async () => ({ version: 2 })) }));
+// The wallet's node, as Settings has it: a test on this machine says so.
+const node = vi.hoisted(() => ({ url: "https://testnet.nodes.dusk.network" }));
+vi.mock("../shared/settings.js", () => ({ getSettings: vi.fn(async () => ({ nodeUrl: node.url })) }));
 
 const LINK = "https://apps.testnet.dusk.network/wallet/dashboard/send?to=abc&amount=1&network=testnet";
 const onWalletPage = { url: LINK };
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  node.url = "https://testnet.nodes.dusk.network";
+});
 afterEach(() => loadVault.mockImplementation(async () => ({ version: 2 })));
 
 describe("a request link from the web wallet's Send", () => {
@@ -86,7 +92,8 @@ describe("a request the web wallet hands over (dusk_openPaymentLink)", () => {
     expect(tabsCreate).not.toHaveBeenCalled();
   });
 
-  it("opens a web wallet's on this machine as its network's own link, for Send to read", async () => {
+  it("opens a web wallet's on this machine, with the wallet on a node on this machine, as its network's own link, for Send to read", async () => {
+    node.url = "http://127.0.0.1:8080";
     const local = `http://localhost:5173/dashboard/send?to=${ACCOUNT}&amount=1.5&memo=Factura+33&network=testnet`;
     await expect(handOverRequestLink("http://localhost:5173", local, { pressed: true })).resolves.toBe(true);
     expect(opened()).toEqual([`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1.5&memo=Factura+33&network=testnet`]);
@@ -94,7 +101,24 @@ describe("a request the web wallet hands over (dusk_openPaymentLink)", () => {
     await expect(handOverRequestLink("http://localhost:4000", local, { pressed: true })).rejects.toMatchObject({ code: -32602 });
   });
 
+  it("takes nothing from a page on this machine while the wallet is on a network's node, and nothing that doesn't say its network", async () => {
+    // Marek's: any page on localhost counted as the web wallet, and its link came out with no network.
+    const page = "http://localhost:9999";
+    const noNetwork = `${page}/wallet/dashboard/send?to=${ACCOUNT}&amount=0.15`;
+    const local = `${page}/wallet/dashboard/send?to=${ACCOUNT}&amount=0.15&network=dusk:0`;
+    for (const link of [noNetwork, local]) {
+      await expect(handOverRequestLink(page, link, { pressed: true })).rejects.toMatchObject({ code: -32602 });
+    }
+    node.url = "http://localhost:8080";
+    await expect(handOverRequestLink(page, noNetwork, { pressed: true })).rejects.toMatchObject({ code: -32602, message: "params.link must say the network it's for" });
+    expect(tabsCreate).not.toHaveBeenCalled();
+    // On the wallet's own node on this machine, a link of its network opens, keeping it.
+    await expect(handOverRequestLink(page, local, { pressed: true })).resolves.toBe(true);
+    expect(opened()).toEqual([`dusk:public-${ACCOUNT}@dusk:0?amount=0.15`]);
+  });
+
   it("refuses a link on this machine that Send would refuse, rather than rebuild it into one Send takes", async () => {
+    node.url = "http://127.0.0.1:8080";
     // Codex's: amount=1 and amountLux 5,000 DUSK came out as a link for 5,000 DUSK.
     const twice = `http://localhost:5173/dashboard/send?to=${ACCOUNT}&amount=1&amountLux=5000000000000&network=testnet`;
     await expect(handOverRequestLink("http://localhost:5173", twice, { pressed: true })).rejects.toMatchObject({ code: -32602, message: "This link asks for two different amounts. Ask for a new one." });
