@@ -36,7 +36,7 @@ import {
 import { handleRpc } from "./rpc.js";
 import { assertSendPassword, sendPasswordLimit, sendPasswordTerms } from "../shared/sendPassword.js";
 import { offersRequestLink, openRequestLink } from "./requestLinks.js";
-import { bindPendingWallet, cancelPendingApprovals, getPending, resolvePendingDecision } from "./pending.js";
+import { askKeptAgain, bindPendingWallet, cancelPendingApprovals, checkResume, decideKept, getPending, keptApproval, requestKey, resolvePendingDecision } from "./pending.js";
 import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNames.js";
 import {
   broadcastChainChangedAll,
@@ -582,10 +582,17 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
 
         const id = message.id;
+        // The site's request, by its tab, frame and ID. Asked again after the
+        // background stopped (`resume`), it only takes up an approval still
+        // waiting (pending.js): anything else may have gone already, and runs
+        // again never.
+        const approvalKey = requestKey(sender?.tab?.id, sender?.frameId, id);
+        const resume = message.resume === true;
+        if (resume) await checkResume(approvalKey);
         const activityContext = await prepareDappActivityContext(message.request);
         // Whether the page had a person's press as it asked: the content script's word, never the page's.
         const pressed = typeof message.pressed === "boolean" ? message.pressed : undefined;
-        const result = await handleRpc(origin, message.request, { pressed }).finally(() => noteConnectionUse(origin, message.request));
+        const result = await handleRpc(origin, message.request, { pressed, approvalKey, resume }).finally(() => noteConnectionUse(origin, message.request));
         await updateDappActivity(message.request, activityContext);
         // A connection's answer brings the site the wallet's network, read once it's connected.
         sendResponse(CONNECTS.has(String(message.request?.method ?? "")) ? { id, result, state: await providerStateFor(origin) } : { id, result });
@@ -724,7 +731,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       if (message?.type === "DUSK_GET_PENDING") {
         const entry = getPending(message.rid);
         if (!entry) {
-          sendResponse(null);
+          // Kept through a stop of the background, until its site asks again.
+          const kept = await keptApproval(message.rid);
+          if (kept) askKeptAgain(message.rid);
+          sendResponse(kept ? { waking: true } : null);
           return;
         }
 
@@ -1190,8 +1200,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI approves or rejects a pending request
       if (message?.type === "DUSK_PENDING_DECISION") {
-        const res = await resolvePendingDecision(message);
-        sendResponse(res);
+        // Answered while the background was stopped, before its site asked
+        // again: a refusal is final now; an approval waits a moment for it.
+        const kept = getPending(message.rid) ? null : await decideKept(message.rid, message.decision);
+        sendResponse(kept ?? (await resolvePendingDecision(message)));
         return;
       }
 
@@ -1497,3 +1509,6 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
   // Keep the message channel open for async sendResponse.
   return true;
 });
+
+// Back after a stop: each site whose approval still waits asks again.
+askKeptAgain().catch(() => {});

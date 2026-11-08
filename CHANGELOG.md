@@ -49,6 +49,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept a site's approval through Firefox for Android stopping the wallet in the background, so Approve still works; if it can't, the approval and the site say the request ended.
+- Rejected an approval with the phone's Back.
+- Said a misspelled recovery word by Import wallet too.
 - Fixed import and unlock that never finished in the app.
 - Fixed Download QR in the app, which said "Failed to render QR".
 - Showed the network's real status in the app.

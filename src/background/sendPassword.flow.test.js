@@ -244,7 +244,7 @@ describe("a site's send", () => {
 
   it("is rejected as ever by Reject, with nothing asked", async () => {
     const { outcome, rid } = await ask(transfer(6n * DUSK));
-    expect(resolvePendingDecision({ rid, decision: "reject" })).toEqual({ ok: true });
+    expect(await resolvePendingDecision({ rid, decision: "reject" })).toEqual({ ok: true });
     expect((await outcome).error).toMatchObject({ code: 4001 });
     expect(sends()).toHaveLength(0);
   });

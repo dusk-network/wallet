@@ -45,7 +45,7 @@ import {
   getEngineStatusStrict,
   invalidateEngineConfig,
 } from "./engineHost.js";
-import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
+import { cancelPendingApprovals, requestUserApproval as askForApproval } from "./pending.js";
 import { siteWalletId } from "./siteWallet.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { readCurrent, siteNames } from "./siteNames.js";
@@ -59,7 +59,27 @@ import {
 import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
-export async function handleRpc(origin, request, { pressed } = {}) {
+export async function handleRpc(origin, request, { pressed, approvalKey = "", resume = false } = {}) {
+  // Each approval this request asks for, by the site's request (`approvalKey`):
+  // asked again after the background stopped (`resume`), it takes up the one
+  // still open (pending.js).
+  // Taken up only for the wallet, profile, network and site it was asked for.
+  const requestUserApproval = async (...ask) => {
+    if (approvalKey) ask[4] = { ...(ask[4] ?? {}), key: approvalKey, resume, context: await askedFor() };
+    return askForApproval(...ask);
+  };
+  const askedFor = async () => {
+    const [settings, status] = await Promise.all([getSettings(), getEngineStatus()]);
+    const perm = await permissionFor(status);
+    return {
+      origin,
+      walletId: status?.isUnlocked ? String(status.accounts?.[0] ?? "") : "",
+      nodeUrl: String(settings?.nodeUrl ?? ""),
+      chainId: settings?.chainId ?? null,
+      profileId: perm?.profileId ?? null,
+      accountIndex: perm?.accountIndex ?? null,
+    };
+  };
   origin = String(origin ?? "").trim();
   if (!isAllowedDappOrigin(origin)) {
     throw rpcError(

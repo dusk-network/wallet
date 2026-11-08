@@ -82,6 +82,10 @@ export function runtimeGetContexts(options) {
   return callApi(raw?.runtime?.getContexts, [options], raw?.runtime);
 }
 
+export function tabsSendMessage(tabId, message, options) {
+  return callApi(raw?.tabs?.sendMessage, [tabId, message, options ?? {}], raw?.tabs);
+}
+
 export function tabsCreate(options) {
   return callApi(raw?.tabs?.create, [options], raw?.tabs);
 }

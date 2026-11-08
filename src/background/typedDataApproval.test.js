@@ -13,7 +13,7 @@ import { cancelPendingApprovals, pendingApprovals, resolvePendingDecision } from
 // Real RPC, queue, permission/settings logic, lifecycle mutex and BLS signer.
 // Only platform persistence/windows and the engine host/status boundary are mocked.
 const mocks = vi.hoisted(() => ({
-  store: {}, status: {}, engineCall: vi.fn(), windowsCreate: vi.fn(),
+  store: {}, session: {}, status: {}, engineCall: vi.fn(), windowsCreate: vi.fn(),
 }));
 vi.mock("../platform/storage.js", () => ({ kv: {
   get: async key => structuredClone({ [key]: mocks.store[key] }),
@@ -25,6 +25,10 @@ vi.mock("../platform/extensionApi.js", () => ({
   windowsCreate: mocks.windowsCreate,
   windowsRemove: async () => {},
   tabsCreate: async () => {},
+  // The browser's session storage, which outlives the background's stops.
+  storageSessionGet: async key => ({ [key]: structuredClone(mocks.session[key]) }),
+  storageSessionSet: async items => { Object.assign(mocks.session, structuredClone(items)); },
+  tabsSendMessage: async () => {},
 }));
 vi.mock("./engineHost.js", () => ({
   engineCall: mocks.engineCall,
@@ -76,10 +80,10 @@ function approval(origin) {
   return entry;
 }
 
-function approve(origin) {
+async function approve(origin) {
   const [rid] = approval(origin);
   // Typed-data approval is a decision only, not permission to replace the captured digest/profile.
-  expect(resolvePendingDecision({ rid, decision: "approve", approvedParams: { digestHex: "0x" + "ff".repeat(32), profileIndex: 255 } })).toEqual({ ok: true });
+  expect(await resolvePendingDecision({ rid, decision: "approve", approvedParams: { digestHex: "0x" + "ff".repeat(32), profileIndex: 255 } })).toEqual({ ok: true });
 }
 
 beforeEach(async () => {
@@ -88,6 +92,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   requests = [];
   mocks.store = {};
+  mocks.session = {};
   mocks.status = { isUnlocked: true, accounts: ["acct0", "acct1"], selectedAccountIndex: 0 };
   mocks.windowsCreate.mockImplementation(async () => ({ id: mocks.windowsCreate.mock.calls.length }));
   mocks.engineCall.mockImplementation(async (method, { digestHex, profileIndex }) => {
@@ -125,7 +130,7 @@ describe("typed-data RPC with the real approval queue", () => {
       expect(mocks.windowsCreate.mock.calls.some(([window]) => new URL(window.url).searchParams.get("rid") === rid)).toBe(true);
     }
 
-    approve(origins[1]);
+    await approve(origins[1]);
     const secondResult = await second;
     expect(pendingApprovals.size).toBe(1);
     expect(approval(origins[0])[1].params.digestHex).toBe(expected[0]);
@@ -133,7 +138,7 @@ describe("typed-data RPC with the real approval queue", () => {
     // Global UI selection does not rebind an origin's granted profile.
     await setSettings({ selectedAccountIndex: 1 });
     mocks.status.selectedAccountIndex = 1;
-    approve(origins[0]);
+    await approve(origins[0]);
     const firstResult = await first;
     expect(hashTypedDataHex).toHaveBeenCalledTimes(2); // Once per request, never again after approval.
     expect(mocks.engineCall).toHaveBeenCalledTimes(2);
@@ -164,7 +169,7 @@ describe("typed-data RPC with the real approval queue", () => {
     expect(mocks.windowsCreate).toHaveBeenCalledTimes(1);
     expect(mocks.engineCall).not.toHaveBeenCalled();
     expect(approval(origins[0])[1].params.digestHex).toBe(expected);
-    approve(origins[0]);
+    await approve(origins[0]);
     await expect(first).resolves.toMatchObject({ digestHex: expected });
     expect(mocks.engineCall).toHaveBeenCalledExactlyOnceWith("dusk_signTypedData", expect.objectContaining({ digestHex: expected, profileIndex: 0 }));
   });
@@ -182,7 +187,7 @@ describe("typed-data RPC with the real approval queue", () => {
       if (change === "lock") mocks.status.isUnlocked = false;
       if (change === "wallet") mocks.status.accounts = ["replacement-wallet"];
       expect(pendingApprovals.size).toBe(1);
-      approve(origins[0]);
+      await approve(origins[0]);
       await expect(pending).rejects.toMatchObject({ code: 4100, message: "Wallet changed while awaiting approval" });
       expect(mocks.engineCall).not.toHaveBeenCalled();
     }
@@ -198,12 +203,33 @@ describe("typed-data RPC with the real approval queue", () => {
       await approveOrigin(origins[0], { accountIndex: 1, profileId: "account:1:acct1" }, "acct0");
     });
     try {
-      approve(origins[0]);
+      await approve(origins[0]);
       expect(pendingApprovals.size).toBe(0); // Cancellation can no longer reach the settled approval.
       await vi.advanceTimersByTimeAsync(0);
       expect(mocks.engineCall).not.toHaveBeenCalled();
     } finally { release(); await change; }
     await expect(pending).rejects.toMatchObject({ code: 4100, message: "Wallet changed while awaiting approval" });
+    expect(mocks.engineCall).not.toHaveBeenCalled();
+  });
+
+  it("never takes a request up after a stop of the background for another profile than it was asked for", async () => {
+    const approvalKey = "7:0:req-1";
+    const first = handleRpc(origins[0], { method: "dusk_signTypedData", params: params() }, { approvalKey });
+    void first.catch(() => {}); // Its background stops below: it never answers.
+    await vi.waitFor(() => expect(pendingApprovals.size).toBe(1));
+    const [rid, entry] = approval(origins[0]);
+    await vi.waitFor(() => expect(mocks.session.dusk_pending_approvals_v1?.[rid]).toBeDefined());
+    // The background stops: what it held goes; what's kept stays.
+    clearTimeout(entry.timer);
+    pendingApprovals.clear();
+    await approveOrigin(origins[0], { accountIndex: 1, profileId: "account:1:acct1" }, "acct0");
+    const resumed = handleRpc(origins[0], { method: "dusk_signTypedData", params: params() }, { approvalKey, resume: true });
+    requests.push(resumed);
+    void resumed.catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    // As the probe did: an approval taken up, approved.
+    if (pendingApprovals.has(rid)) await approve(origins[0]);
+    await expect(resumed).rejects.toMatchObject({ code: 4100, message: "Wallet changed while awaiting approval" });
     expect(mocks.engineCall).not.toHaveBeenCalled();
   });
 });

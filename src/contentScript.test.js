@@ -52,14 +52,15 @@ class FakeWindow {
   }
 }
 
-async function runContentScript({ navigator } = {}) {
+async function runContentScript({ navigator, answer, timers = setTimeout } = {}) {
   const source = await readFile(contentScriptUrl, "utf8");
   const window = new FakeWindow();
   const sentMessages = [];
   const ports = [];
+  // The background's answer to each message: "ok", unless a test says otherwise.
   const sendMessage = vi.fn((message, cb) => {
     sentMessages.push(message);
-    cb({ id: message.id, result: "ok" });
+    cb(answer ? answer(message, sentMessages.length) : { id: message.id, result: "ok" });
   });
   const connect = vi.fn(() => {
     const port = new FakePort();
@@ -67,10 +68,13 @@ async function runContentScript({ navigator } = {}) {
     return port;
   });
 
+  // What the background sends this tab (tabs.sendMessage).
+  const listeners = [];
   const chrome = {
     runtime: {
       sendMessage,
       connect,
+      onMessage: { addListener: (cb) => listeners.push(cb) },
       getURL: (path) => `chrome-extension://wallet/${String(path ?? "")}`,
     },
   };
@@ -83,11 +87,14 @@ async function runContentScript({ navigator } = {}) {
     Error,
     String,
     Boolean,
+    setTimeout: timers,
+    clearTimeout,
     globalThis: { chrome, navigator },
   });
 
   vm.runInContext(source, context);
-  return { window, sentMessages, sendMessage, connect, ports };
+  const fromBackground = (msg) => listeners.forEach((cb) => cb(msg, {}, () => {}));
+  return { window, sentMessages, sendMessage, connect, ports, fromBackground };
 }
 
 describe("contentScript message bridge", () => {
@@ -269,6 +276,44 @@ describe("contentScript message bridge", () => {
     expect(connect).not.toHaveBeenCalled();
   });
 
+  it("asks again when the wallet's background stopped before it answered, as Firefox for Android stops it, and passes on that answer", async () => {
+    // Sofia's: the first ask gets nothing back; asked again, the approval still open answers.
+    const { window, sentMessages } = await runContentScript({
+      answer: (message, n) => (n === 1 ? undefined : { id: message.id, result: { hash: "ab".repeat(32) } }),
+    });
+    window.dispatchMessage({ target: "DUSK_WALLET_EXTENSION", walletId: DUSK_WALLET_ID, type: "DUSK_RPC_REQUEST", id: "req-7", request: { method: "dusk_sendTransaction" } });
+    await vi.waitFor(() => expect(window.posted.at(-1)?.msg?.type).toBe("DUSK_RPC_RESPONSE"));
+    expect(sentMessages.map((m) => [m.id, m.resume])).toEqual([["req-7", undefined], ["req-7", true]]);
+    expect(window.posted.at(-1).msg.response).toEqual({ id: "req-7", result: { hash: "ab".repeat(32) } });
+  });
+
+  it("asks again as the background, back, tells it to, in a tab behind its approval where no timer runs", async () => {
+    // Firefox for Android: the site's tab sits behind the approval, its timers held.
+    const { window, sentMessages, fromBackground } = await runContentScript({
+      answer: (message, n) => (n === 1 ? undefined : { id: message.id, result: { hash: "cd".repeat(32) } }),
+      timers: () => 0,
+    });
+    window.dispatchMessage({ target: "DUSK_WALLET_EXTENSION", walletId: DUSK_WALLET_ID, type: "DUSK_RPC_REQUEST", id: "req-9", request: { method: "dusk_sendTransaction" } });
+    await vi.waitFor(() => expect(sentMessages).toHaveLength(1));
+    // Another request's word moves nothing.
+    fromBackground({ type: "DUSK_ASK_AGAIN", id: "req-other" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sentMessages).toHaveLength(1);
+    fromBackground({ type: "DUSK_ASK_AGAIN", id: "req-9" });
+    await vi.waitFor(() => expect(window.posted.at(-1)?.msg?.type).toBe("DUSK_RPC_RESPONSE"));
+    expect(sentMessages.map((m) => [m.id, m.resume])).toEqual([["req-9", undefined], ["req-9", true]]);
+    expect(window.posted.at(-1).msg.response).toEqual({ id: "req-9", result: { hash: "cd".repeat(32) } });
+  });
+
+  it("tells the site plainly when nothing can take its request up, never an answer with nothing in it", async () => {
+    const { window } = await runContentScript({
+      answer: (message, n) => (n === 1 ? undefined : { error: { code: 4900, message: "The wallet stopped before it answered." } }),
+    });
+    window.dispatchMessage({ target: "DUSK_WALLET_EXTENSION", walletId: DUSK_WALLET_ID, type: "DUSK_RPC_REQUEST", id: "req-8", request: { method: "dusk_sendTransaction" } });
+    await vi.waitFor(() => expect(window.posted.at(-1)?.msg?.type).toBe("DUSK_RPC_RESPONSE"));
+    expect(window.posted.at(-1).msg.response).toEqual({ error: { code: 4900, message: "The wallet stopped before it answered." } });
+  });
+
   it("scopes RPC responses to Dusk Wallet", async () => {
     const { window } = await runContentScript();
 
@@ -280,7 +325,7 @@ describe("contentScript message bridge", () => {
       request: { method: "dusk_chainId" },
     });
 
-    await Promise.resolve();
+    await vi.waitFor(() => expect(window.posted.at(-1)?.msg?.type).toBe("DUSK_RPC_RESPONSE"));
 
     expect(window.posted.at(-1)).toEqual({
       msg: {
