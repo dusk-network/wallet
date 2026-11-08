@@ -146,6 +146,17 @@ export function wrappingInput({ value = "", onEnter, ...attrs } = {}) {
   });
   field.addEventListener("focus", fit);
   if (typeof requestAnimationFrame === "function") requestAnimationFrame(fit);
+  // Narrower or wider (a contact's chip beside the text, the phone turned),
+  // its lines change: fitted again. Only the width: fitting sets the height.
+  if (typeof ResizeObserver === "function") {
+    let width = -1;
+    new ResizeObserver(([entry]) => {
+      const now = entry?.contentRect?.width ?? -1;
+      if (now === width) return;
+      width = now;
+      fit();
+    }).observe(field);
+  }
   if (onEnter) installPrimaryEnter(field, onEnter);
   return field;
 }

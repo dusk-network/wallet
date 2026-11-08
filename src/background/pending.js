@@ -5,6 +5,7 @@ import {
   getExtensionApi,
   runtimeGetURL,
   tabsCreate,
+  tabsGet,
   tabsQuery,
   tabsRemove,
   tabsUpdate,
@@ -41,13 +42,19 @@ function keepAnswer(entry, answer) {
   noteSiteRequest(walletId, entry.origin, { kind: entry.kind, params: entry.params, answer }).catch(() => {});
 }
 
-// Its window or its tab goes; a tab's site comes back to the front.
+// Its window or its tab goes; a tab's site comes back to the front, only
+// when that tab is the one in front: not over the page or the other
+// approval the person went to meanwhile.
 function closeShown(entry) {
   if (entry.windowId !== undefined) windowsRemove(entry.windowId).catch(() => {});
-  if (entry.tabId !== undefined) {
-    tabsRemove(entry.tabId).catch(() => {});
-    if (entry.backTo !== undefined) tabsUpdate(entry.backTo, { active: true }).catch(() => {});
-  }
+  if (entry.tabId === undefined) return;
+  const { tabId, backTo } = entry;
+  tabsGet(tabId)
+    .catch(() => null)
+    .then((tab) => {
+      tabsRemove(tabId).catch(() => {});
+      if (backTo !== undefined && tab?.active) tabsUpdate(backTo, { active: true }).catch(() => {});
+    });
 }
 
 // `code`: the person's refusal, or a wallet that couldn't ask at all (INTERNAL).

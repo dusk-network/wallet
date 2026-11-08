@@ -7,6 +7,7 @@ const windowsRemove = vi.fn(async () => {});
 const browserHas = vi.hoisted(() => ({ windows: true }));
 const tabs = vi.hoisted(() => ({
   create: null,
+  get: null,
   remove: null,
   update: null,
 }));
@@ -20,6 +21,8 @@ vi.mock("../shared/siteRecords.js", () => ({
 
 vi.mock("../platform/extensionApi.js", () => {
   tabs.create = vi.fn(async () => ({ id: 77 }));
+  // The approval's tab, in front unless a test says not.
+  tabs.get = vi.fn(async (id) => ({ id, active: true }));
   tabs.remove = vi.fn(async () => {});
   tabs.update = vi.fn(async () => {});
   return {
@@ -47,6 +50,7 @@ vi.mock("../platform/extensionApi.js", () => {
     windowsCreate: vi.fn(async () => ({ id: 999 })),
     windowsRemove,
     tabsCreate: (...args) => tabs.create(...args),
+    tabsGet: (...args) => tabs.get(...args),
     tabsRemove: (...args) => tabs.remove(...args),
     tabsUpdate: (...args) => tabs.update(...args),
     // The tab the person is on: the site's.
@@ -185,6 +189,7 @@ describe("pending approvals", () => {
         expect(pending.getPending("rid-tab")).toMatchObject({ tabId: 77 });
         pending.resolvePendingDecision({ rid: "rid-tab", decision: "approve", approvedParams: { accountIndex: 0 } });
         await expect(answer).resolves.toEqual({ accountIndex: 0 });
+        await new Promise((r) => setTimeout(r, 0));
         expect(tabs.remove).toHaveBeenCalledWith(77);
         expect(tabs.update).toHaveBeenCalledWith(5, { active: true });
 
@@ -198,6 +203,24 @@ describe("pending approvals", () => {
         ridSpy.mockRestore();
         browserHas.windows = true;
       }
+    });
+
+    it("leaves the person where they are when one they left unanswered ends: its tab goes, theirs stays in front", async () => {
+      browserHas.windows = false;
+      vi.resetModules();
+      const pending = await import("./pending.js");
+      tabs.remove.mockClear();
+      tabs.update.mockClear();
+      // They went to another page, or another site's approval.
+      tabs.get.mockResolvedValueOnce({ id: 77, active: false });
+      const answer = pending.requestUserApproval("sign_message", "https://site.example", {}, { walletId: "acct0" });
+      await new Promise((r) => setTimeout(r, 0));
+      pending.cancelPendingApprovals(null, "Network changed");
+      await expect(answer).rejects.toMatchObject({ code: 4001 });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(tabs.remove).toHaveBeenCalledWith(77);
+      expect(tabs.update).not.toHaveBeenCalled();
+      browserHas.windows = true;
     });
 
     it("tells the site the wallet couldn't show it, not that the person cancelled, and keeps that in the site's record", async () => {
