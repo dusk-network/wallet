@@ -386,6 +386,8 @@ describe("the Activity view", () => {
     expect(search("0.2").some((amount) => amount.includes("0,2"))).toBe(true);
     expect(search("0.05")).toEqual(search("0,05"));
     expect(search("0.05").some((amount) => amount.includes("0,05"))).toBe(true);
+    // On the way to typing it, 0,05 stays found (Codex's: "0.0" found nothing until the 5).
+    for (const typed of ["0", "0.0", "0,0"]) expect(search(typed).some((amount) => amount.includes("0,05")), typed).toBe(true);
   });
 
   it("finds no row by its amount while balances are hidden, and says what's still to read", () => {
