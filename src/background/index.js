@@ -36,7 +36,7 @@ import {
 import { handleRpc } from "./rpc.js";
 import { assertSendPassword, sendPasswordLimit, sendPasswordTerms } from "../shared/sendPassword.js";
 import { offersRequestLink, openRequestLink } from "./requestLinks.js";
-import { bindPendingWallet, cancelPendingApprovals, checkResume, getPending, keptApproval, resolvePendingDecision } from "./pending.js";
+import { askKeptAgain, bindPendingWallet, cancelPendingApprovals, checkResume, getPending, keptApproval, requestKey, resolvePendingDecision } from "./pending.js";
 import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNames.js";
 import {
   broadcastChainChangedAll,
@@ -586,7 +586,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // background stopped (`resume`), it only takes up an approval still
         // waiting (pending.js): anything else may have gone already, and runs
         // again never.
-        const approvalKey = `${sender?.tab?.id ?? ""}:${sender?.frameId ?? 0}:${id}`;
+        const approvalKey = requestKey(sender?.tab?.id, sender?.frameId, id);
         const resume = message.resume === true;
         if (resume) await checkResume(approvalKey);
         const activityContext = await prepareDappActivityContext(message.request);
@@ -732,7 +732,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const entry = getPending(message.rid);
         if (!entry) {
           // Kept through a stop of the background, until its site asks again.
-          sendResponse((await keptApproval(message.rid)) ? { waking: true } : null);
+          const kept = await keptApproval(message.rid);
+          if (kept) askKeptAgain(message.rid);
+          sendResponse(kept ? { waking: true } : null);
           return;
         }
 
@@ -1201,6 +1203,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // Answered while the background was stopped: its site hasn't asked
         // again yet; the approval waits a moment for it.
         if (!getPending(message.rid) && (await keptApproval(message.rid))) {
+          askKeptAgain(message.rid);
           sendResponse({ ok: false, error: { code: "waking", message: "The wallet is picking this request up again." } });
           return;
         }
@@ -1511,3 +1514,6 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
   // Keep the message channel open for async sendResponse.
   return true;
 });
+
+// Back after a stop: each site whose approval still waits asks again.
+askKeptAgain().catch(() => {});

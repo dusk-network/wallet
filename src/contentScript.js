@@ -205,6 +205,23 @@ function takePress() {
 const RESUME_FOR_MS = 6 * 60_000;
 const NO_ANSWER = /out of scope|receiving end does not exist|message port closed|disconnected|message manager|context invalidated/i;
 
+// It asks again in a moment, or as soon as the background, back, says to: in
+// a tab behind its approval Firefox for Android runs no timer.
+const askAgain = new Map();
+extApi?.runtime?.onMessage?.addListener?.((msg) => {
+  if (msg?.type === "DUSK_ASK_AGAIN") askAgain.get(msg.id)?.();
+});
+const nextTry = (id) =>
+  new Promise((resolve) => {
+    const go = () => {
+      clearTimeout(timer);
+      askAgain.delete(id);
+      resolve();
+    };
+    const timer = setTimeout(go, 500);
+    askAgain.set(id, go);
+  });
+
 async function answerOf(message) {
   const until = Date.now() + RESUME_FOR_MS;
   for (let resume = false; ; resume = true) {
@@ -217,7 +234,7 @@ async function answerOf(message) {
     if (Date.now() > until) {
       return { error: { code: 4900, message: "The wallet stopped before it answered. Check its Activity before you try again." } };
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await nextTry(message.id);
   }
 }
 

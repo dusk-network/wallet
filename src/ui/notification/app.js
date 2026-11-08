@@ -248,7 +248,8 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // The phone's Back rejects the request, as closing its tab does: one history
-// entry for it, put up at the first press, as browsers skip one put up before.
+// entry for it, put up once a press counts (a click, a key let go), as
+// browsers skip one put up before. Back before any press: pending.js.
 if (isPhone()) {
   let backGuard = false;
   const guardBack = () => {
@@ -256,8 +257,8 @@ if (isPhone()) {
     backGuard = true;
     window.history?.pushState?.({ duskApproval: true }, "");
   };
-  document.addEventListener("pointerdown", guardBack, true);
-  document.addEventListener("keydown", guardBack, true);
+  document.addEventListener("click", guardBack, true);
+  document.addEventListener("keyup", guardBack, true);
   window.addEventListener("popstate", () => {
     if (approvalLive) decide("reject").catch(() => ended());
   });

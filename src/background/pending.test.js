@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 let onRemovedCb = null;
 let onTabRemovedCb = null;
+let onTabActivatedCb = null;
 const windowsRemove = vi.fn(async () => {});
 // The browser's: with windows (a desktop), or without (Firefox for Android).
 const browserHas = vi.hoisted(() => ({ windows: true }));
@@ -10,6 +11,7 @@ const tabs = vi.hoisted(() => ({
   get: null,
   remove: null,
   update: null,
+  send: null,
 }));
 const notes = vi.hoisted(() => []);
 // The browser's session storage: it outlives the background's stops.
@@ -27,6 +29,7 @@ vi.mock("../platform/extensionApi.js", () => {
   tabs.get = vi.fn(async (id) => ({ id, active: true }));
   tabs.remove = vi.fn(async () => {});
   tabs.update = vi.fn(async () => {});
+  tabs.send = vi.fn(async () => {});
   return {
     getExtensionApi: () => ({
       ...(browserHas.windows
@@ -46,6 +49,11 @@ vi.mock("../platform/extensionApi.js", () => {
             onTabRemovedCb = cb;
           },
         },
+        onActivated: {
+          addListener: (cb) => {
+            onTabActivatedCb = cb;
+          },
+        },
       },
     }),
     runtimeGetURL: (path) => `chrome-extension://test/${String(path ?? "")}`,
@@ -55,6 +63,7 @@ vi.mock("../platform/extensionApi.js", () => {
     storageSessionSet: async (items) => Object.assign(session.items, structuredClone(items)),
     tabsCreate: (...args) => tabs.create(...args),
     tabsGet: (...args) => tabs.get(...args),
+    tabsSendMessage: (...args) => tabs.send(...args),
     tabsRemove: (...args) => tabs.remove(...args),
     tabsUpdate: (...args) => tabs.update(...args),
     // The tab the person is on: the site's.
@@ -189,7 +198,7 @@ describe("pending approvals", () => {
       try {
         const answer = pending.requestUserApproval("connect", "https://site.example", {});
         await new Promise((r) => setTimeout(r, 0));
-        expect(tabs.create).toHaveBeenCalledWith({ url: "chrome-extension://test/notification.html?rid=rid-tab", active: true, openerTabId: 5 });
+        expect(tabs.create).toHaveBeenCalledWith({ url: "chrome-extension://test/notification.html?rid=rid-tab", active: true });
         expect(pending.getPending("rid-tab")).toMatchObject({ tabId: 77 });
         pending.resolvePendingDecision({ rid: "rid-tab", decision: "approve", approvedParams: { accountIndex: 0 } });
         await expect(answer).resolves.toEqual({ accountIndex: 0 });
@@ -205,6 +214,26 @@ describe("pending approvals", () => {
         await expect(closed).rejects.toMatchObject({ code: 4001 });
       } finally {
         ridSpy.mockRestore();
+        browserHas.windows = true;
+      }
+    });
+
+    it("cancels a request as the person goes back to its site's tab without an answer, as Back before any press does there", async () => {
+      browserHas.windows = false;
+      vi.resetModules();
+      const pending = await import("./pending.js");
+      tabs.remove.mockClear();
+      try {
+        const answer = pending.requestUserApproval("send_tx", "https://site.example", {}, { walletId: "acct0" });
+        await new Promise((r) => setTimeout(r, 0));
+        // Another tab moves nothing; the site's tab (5) ends it.
+        onTabActivatedCb({ tabId: 9 });
+        expect(pending.pendingApprovals.size).toBe(1);
+        onTabActivatedCb({ tabId: 5 });
+        await expect(answer).rejects.toMatchObject({ code: 4001 });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(tabs.remove).toHaveBeenCalledWith(77);
+      } finally {
         browserHas.windows = true;
       }
     });
@@ -232,8 +261,7 @@ describe("pending approvals", () => {
       vi.resetModules();
       notes.length = 0;
       const pending = await import("./pending.js");
-      // With the site's tab as its opener, and without.
-      tabs.create.mockRejectedValueOnce(new Error("No tabs here")).mockRejectedValueOnce(new Error("No tabs here"));
+      tabs.create.mockRejectedValueOnce(new Error("No tabs here"));
       try {
         const answer = pending.requestUserApproval("connect", "https://site.example", {}, { walletId: "acct0" });
         await expect(answer).rejects.toMatchObject({ code: -32603, message: pending.NOT_SHOWN_TEXT });
@@ -284,6 +312,23 @@ describe("pending approvals", () => {
       }
     });
 
+    it("tells its site to ask again, its tab behind the approval, until the request is taken up", async () => {
+      try {
+        const pending = await stoppedWhileWaiting();
+        tabs.send.mockClear();
+        await pending.askKeptAgain();
+        expect(tabs.send).toHaveBeenCalledWith(7, { type: "DUSK_ASK_AGAIN", id: "req-9" }, { frameId: 0 });
+        pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true });
+        await new Promise((r) => setTimeout(r, 0));
+        // Taken up: nothing more to ask.
+        tabs.send.mockClear();
+        await pending.askKeptAgain("rid-kept");
+        expect(tabs.send).not.toHaveBeenCalled();
+      } finally {
+        browserHas.windows = true;
+      }
+    });
+
     it("tells its site the approval was closed, when it was closed while the background was stopped", async () => {
       try {
         const pending = await stoppedWhileWaiting();
@@ -291,6 +336,17 @@ describe("pending approvals", () => {
         // As a closed approval does, never one nobody can answer.
         await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4001, message: "User closed the approval window" });
         await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4900 });
+      } finally {
+        browserHas.windows = true;
+      }
+    });
+
+    it("tells its site it was cancelled when the person went back to the site's tab while the background was stopped", async () => {
+      try {
+        const pending = await stoppedWhileWaiting();
+        onTabActivatedCb({ tabId: 5 });
+        await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4001 });
+        expect(tabs.remove).toHaveBeenCalledWith(77);
       } finally {
         browserHas.windows = true;
       }

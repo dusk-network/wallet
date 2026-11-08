@@ -8,6 +8,7 @@ import {
   storageSessionSet,
   tabsCreate,
   tabsGet,
+  tabsSendMessage,
   tabsQuery,
   tabsRemove,
   tabsUpdate,
@@ -136,6 +137,24 @@ export async function checkResume(key) {
   }
 }
 
+/** The site's request, by its tab, frame and ID: what a request asked again is matched by. */
+export const requestKey = (tabId, frameId, id) => `${tabId ?? ""}:${frameId ?? 0}:${id}`;
+
+/**
+ * Back after a stop, tells each site whose request still waits for its
+ * approval (or the one of `rid`) to ask again: its tab, behind the approval,
+ * runs no timer on Firefox for Android, so it wouldn't by itself.
+ * @param {string} [rid]
+ */
+export async function askKeptAgain(rid) {
+  await keptWrites;
+  for (const record of Object.values(await keptAll())) {
+    if ((rid && record.rid !== rid) || !fresh(record) || record.closed || pendingApprovals.has(record.rid)) continue;
+    const [, tabId, frameId, id] = /^(\d+):(\d+):(.+)$/s.exec(String(record.key ?? "")) ?? [];
+    if (tabId) tabsSendMessage(Number(tabId), { type: "DUSK_ASK_AGAIN", id }, { frameId: Number(frameId) }).catch(() => {});
+  }
+}
+
 // Its approval closed while the background was stopped: nothing answers it.
 const closedKept = (match) =>
   changeKept((all) => {
@@ -173,13 +192,7 @@ async function showApproval(url) {
   }
   try {
     const [front] = (await tabsQuery({ active: true, currentWindow: true }).catch(() => [])) ?? [];
-    // Opened from the site's tab, the phone's Back closes it, which rejects
-    // the request, and shows the site again; where a browser won't take the
-    // opener, without.
-    const tab =
-      front?.id !== undefined
-        ? await tabsCreate({ url, active: true, openerTabId: front.id }).catch(() => tabsCreate({ url, active: true }))
-        : await tabsCreate({ url, active: true });
+    const tab = await tabsCreate({ url, active: true });
     return { tabId: tab?.id, backTo: front?.id };
   } catch {
     return null;
@@ -276,6 +289,23 @@ ext?.tabs?.onRemoved?.addListener?.((tabId) => {
     }
   }
   closedKept((record) => record.tabId === tabId);
+});
+
+// Back on an approval before any press goes to Firefox for Android's home,
+// not back a page; then at its site's tab again, the request is cancelled,
+// as the approval's own Back does (notification/app.js). Approvals in a tab
+// only: a window's site tab may come to the front with the window open.
+ext?.tabs?.onActivated?.addListener?.(({ tabId } = {}) => {
+  for (const [rid, entry] of pendingApprovals.entries()) {
+    if (entry.tabId !== undefined && entry.backTo === tabId) rejectPending(rid, entry, "User rejected the request");
+  }
+  changeKept((all) => {
+    for (const record of Object.values(all)) {
+      if (record.tabId === undefined || record.backTo !== tabId || record.closed || pendingApprovals.has(record.rid)) continue;
+      record.closed = true;
+      closeShown(record);
+    }
+  });
 });
 
 export function getPending(rid) {

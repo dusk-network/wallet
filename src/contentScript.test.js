@@ -52,7 +52,7 @@ class FakeWindow {
   }
 }
 
-async function runContentScript({ navigator, answer } = {}) {
+async function runContentScript({ navigator, answer, timers = setTimeout } = {}) {
   const source = await readFile(contentScriptUrl, "utf8");
   const window = new FakeWindow();
   const sentMessages = [];
@@ -68,10 +68,13 @@ async function runContentScript({ navigator, answer } = {}) {
     return port;
   });
 
+  // What the background sends this tab (tabs.sendMessage).
+  const listeners = [];
   const chrome = {
     runtime: {
       sendMessage,
       connect,
+      onMessage: { addListener: (cb) => listeners.push(cb) },
       getURL: (path) => `chrome-extension://wallet/${String(path ?? "")}`,
     },
   };
@@ -84,12 +87,14 @@ async function runContentScript({ navigator, answer } = {}) {
     Error,
     String,
     Boolean,
-    setTimeout,
+    setTimeout: timers,
+    clearTimeout,
     globalThis: { chrome, navigator },
   });
 
   vm.runInContext(source, context);
-  return { window, sentMessages, sendMessage, connect, ports };
+  const fromBackground = (msg) => listeners.forEach((cb) => cb(msg, {}, () => {}));
+  return { window, sentMessages, sendMessage, connect, ports, fromBackground };
 }
 
 describe("contentScript message bridge", () => {
@@ -280,6 +285,24 @@ describe("contentScript message bridge", () => {
     await vi.waitFor(() => expect(window.posted.at(-1)?.msg?.type).toBe("DUSK_RPC_RESPONSE"));
     expect(sentMessages.map((m) => [m.id, m.resume])).toEqual([["req-7", undefined], ["req-7", true]]);
     expect(window.posted.at(-1).msg.response).toEqual({ id: "req-7", result: { hash: "ab".repeat(32) } });
+  });
+
+  it("asks again as the background, back, tells it to, in a tab behind its approval where no timer runs", async () => {
+    // Firefox for Android: the site's tab sits behind the approval, its timers held.
+    const { window, sentMessages, fromBackground } = await runContentScript({
+      answer: (message, n) => (n === 1 ? undefined : { id: message.id, result: { hash: "cd".repeat(32) } }),
+      timers: () => 0,
+    });
+    window.dispatchMessage({ target: "DUSK_WALLET_EXTENSION", walletId: DUSK_WALLET_ID, type: "DUSK_RPC_REQUEST", id: "req-9", request: { method: "dusk_sendTransaction" } });
+    await vi.waitFor(() => expect(sentMessages).toHaveLength(1));
+    // Another request's word moves nothing.
+    fromBackground({ type: "DUSK_ASK_AGAIN", id: "req-other" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sentMessages).toHaveLength(1);
+    fromBackground({ type: "DUSK_ASK_AGAIN", id: "req-9" });
+    await vi.waitFor(() => expect(window.posted.at(-1)?.msg?.type).toBe("DUSK_RPC_RESPONSE"));
+    expect(sentMessages.map((m) => [m.id, m.resume])).toEqual([["req-9", undefined], ["req-9", true]]);
+    expect(window.posted.at(-1).msg.response).toEqual({ id: "req-9", result: { hash: "cd".repeat(32) } });
   });
 
   it("tells the site plainly when nothing can take its request up, never an answer with nothing in it", async () => {

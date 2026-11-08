@@ -165,6 +165,8 @@ vi.mock("./pending.js", () => ({
   getPending: vi.fn(() => null),
   // Nothing kept through a stop of the background here.
   keptApproval: vi.fn(async () => null),
+  askKeptAgain: vi.fn(async () => {}),
+  requestKey: (tabId, frameId, id) => `${tabId ?? ""}:${frameId ?? 0}:${id}`,
   checkResume: vi.fn(async () => {
     throw Object.assign(new Error("The wallet stopped before it answered, as Firefox stops it in the background. Check its Activity before you try again."), { code: 4900 });
   }),

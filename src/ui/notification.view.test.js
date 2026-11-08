@@ -161,12 +161,15 @@ describe("a request the wallet stopped for, as Firefox for Android stops it whil
     expect([tries, dom.window.close.mock.calls.length]).toEqual([3, 1]);
   });
 
-  it("rejects it with the phone's Back, once a press put up its entry", async () => {
+  it("rejects it with the phone's Back, once a press that counts put up its entry", async () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:144.0) Gecko/144.0 Firefox/159.0" });
     const pushState = vi.fn();
     dom.window.history = { pushState };
     await render("connect", { requestedProfiles: true });
+    // Not as a finger lands: Firefox for Android marks the press after, and skips the entry.
     dom.document.dispatchEvent(fakeEvent("pointerdown"));
+    expect(pushState).not.toHaveBeenCalled();
+    dom.document.dispatchEvent(fakeEvent("click"));
     expect(pushState).toHaveBeenCalledTimes(1);
     dom.window.dispatchEvent(fakeEvent("popstate"));
     await vi.waitFor(() => expect(decision("reject")).toBeTruthy());
