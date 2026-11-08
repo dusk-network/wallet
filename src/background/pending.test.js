@@ -404,6 +404,8 @@ describe("pending approvals", () => {
         // Given up on by its window instead: the site hears it may have gone.
         const again = await stoppedWhileWaiting();
         await expect(again.decideKept("rid-kept", "abandon")).resolves.toEqual({ ok: true });
+        // Its window stays, to say so.
+        expect(tabs.remove).not.toHaveBeenCalled();
         await expect(again.checkResume(KEY)).rejects.toMatchObject({ code: 4900, message: expect.stringContaining("Check its Activity") });
       } finally {
         browserHas.windows = true;
@@ -441,6 +443,48 @@ describe("pending approvals", () => {
         };
         await expect(failing.resolvePendingDecision({ rid: "rid-kept", decision: "approve", approvedParams: null })).resolves.toMatchObject({ ok: false, error: { code: "ended", message: failing.NOT_NOTED_TEXT } });
         await expect(second).rejects.toMatchObject({ code: -32603, message: failing.NOT_NOTED_TEXT });
+        // Its window stays, to say nothing went.
+        await new Promise((r) => setTimeout(r, 0));
+        expect(tabs.remove).not.toHaveBeenCalled();
+      } finally {
+        session.gate = null;
+        browserHas.windows = true;
+      }
+    });
+
+    it("takes up one asked while locked for the wallet its approval then unlocked", async () => {
+      try {
+        browserHas.windows = false;
+        session.items = {};
+        vi.resetModules();
+        const before = await import("./pending.js");
+        vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValueOnce("rid-locked");
+        before.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "" }, { key: KEY, context: { ...CONTEXT, walletId: "" } }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 0));
+        // Unlocked in its window, then the background stops.
+        expect(before.bindPendingWallet("rid-locked", "acct0")).toBe(true);
+        await new Promise((r) => setTimeout(r, 0));
+        vi.resetModules();
+        const pending = await import("./pending.js");
+        pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true, context: CONTEXT });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(pending.getPending("rid-locked")).toMatchObject({ origin: SITE, tabId: 77 });
+      } finally {
+        browserHas.windows = true;
+      }
+    });
+
+    it("leaves nothing waiting when taking a request up couldn't be written", async () => {
+      try {
+        const pending = await stoppedWhileWaiting();
+        session.gate = async () => {
+          throw new Error("QuotaExceededError");
+        };
+        const answer = pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true, context: CONTEXT });
+        await expect(answer).rejects.toThrow("QuotaExceededError");
+        // No Approve left to answer nothing, and the site free to ask again.
+        expect(pending.getPending("rid-kept")).toBeNull();
+        expect(pending.pendingApprovals.size).toBe(0);
       } finally {
         session.gate = null;
         browserHas.windows = true;

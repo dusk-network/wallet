@@ -195,7 +195,8 @@ export async function decideKept(rid, decision) {
     askKeptAgain(rid).catch(() => {});
     return { ok: false, error: { code: "waking", message: "The wallet is picking this request up again." } };
   }
-  closeShown(found);
+  // Given up on, its window stays to say so.
+  if (decision !== "abandon") closeShown(found);
   keepAnswer({ origin: found.origin, kind: found.kind, params: found.params, shown: { walletId: found.walletId } }, decision === "abandon" ? "cancelled" : "rejected");
   return { ok: true };
 }
@@ -305,13 +306,15 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
       } else if (!sameAsked(kept.params, params)) {
         delete all[kept.rid];
         stale = kept;
-      } else {
-        const { rid, createdAt, windowId, tabId, backTo } = kept;
-        taken = wait(rid, { kind, origin, params, shown, beforeApprove, key, context, createdAt, windowId, tabId, backTo });
-      }
+      } else taken = kept;
     });
     if (ended) throw rpcError(ended.code, ended.message);
-    if (taken) return taken;
+    // Waiting here only once that's written: a failed write leaves nothing to answer.
+    if (taken && !pendingApprovals.has(taken.rid)) {
+      const { rid, createdAt, windowId, tabId, backTo } = taken;
+      return wait(rid, { kind, origin, params, shown, beforeApprove, key, context, createdAt, windowId, tabId, backTo });
+    }
+    if (taken) throw rpcError(ERROR_CODES.USER_REJECTED, "Another approval is already pending");
     if (stale) closeShown(stale);
   }
 
@@ -389,7 +392,12 @@ export function bindPendingWallet(rid, walletId) {
   if (!entry) return false;
   const id = String(walletId ?? "");
   if (!id) return true;
-  if (!entry.shown.walletId) entry.shown.walletId = id;
+  if (!entry.shown.walletId) {
+    entry.shown.walletId = id;
+    // Asked while locked: the wallet it's for from now on, kept through a stop too.
+    if (entry.context && !entry.context.walletId) entry.context = { ...entry.context, walletId: id };
+    keep(rid, entry);
+  }
   if (entry.shown.walletId === id) return true;
   rejectPending(rid, entry, "Wallet changed while awaiting approval");
   return false;
@@ -433,7 +441,7 @@ async function decided(rid, entry, message) {
     try {
       await noted;
     } catch {
-      closeShown(entry);
+      // Its window stays, to say nothing went.
       keepAnswer(entry, "cancelled");
       entry.reject(rpcError(ERROR_CODES.INTERNAL, NOT_NOTED_TEXT));
       return { ok: false, error: { code: "ended", message: NOT_NOTED_TEXT } };
