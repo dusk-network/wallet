@@ -34,7 +34,8 @@ import { noteTxStatus } from "./views/sent.js";
 /** Rows read for the History view at first, and how many more Show more adds. */
 export const ACTIVITY_PAGE = 50;
 // Routes that show Activity, and Receive for what came in for its requests: a sync step redraws only these.
-const ROUTES = new Set(["home", "activity", "tx", "receive"]);
+// The views that show activity; and the Sent screen, which says what a stake with Sozu got once its row comes.
+const ROUTES = new Set(["home", "activity", "tx", "receive", "sent"]);
 // The wait after a transaction went through before the archive is asked for it.
 const AFTER_TX_MS = 10_000;
 
@@ -477,7 +478,8 @@ const sozuFactReads = new Map();
  * What a stake or an unstake with Sozu did, for its details and its Completed
  * screen: undefined until the pool's event is read, and for a row that isn't
  * one that went through as the chain's history has it. Asked at most once a
- * minute while it isn't found; `render` draws again once it is.
+ * minute while it isn't found, `render` drawing again a minute on, as nothing
+ * else may; and once it's found.
  * @param {object} ov - the overview
  * @param {object | undefined} row - an activity row
  * @param {{ render?: () => Promise<unknown> }} [options]
@@ -497,7 +499,9 @@ export function sozuFactOf(ov, row, { render } = {}) {
     .catch(() => {})
     .finally(() => {
       Object.assign(read, { at: Date.now(), reading: false });
-      if (read.fact && sozuFactReads.get(key) === read) render?.()?.catch?.(() => {});
+      if (sozuFactReads.get(key) !== read) return;
+      if (read.fact) render?.()?.catch?.(() => {});
+      else setTimeout(() => render?.()?.catch?.(() => {}), SOZU_FACT_AGAIN_MS);
     });
   return undefined;
 }

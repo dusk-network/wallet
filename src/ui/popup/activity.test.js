@@ -114,6 +114,13 @@ describe("ensureActivity", () => {
     expect(render).not.toHaveBeenCalled();
   });
 
+  it("redraws the Sent screen too, which says what a stake got once its row comes", async () => {
+    // Lena's: Completed never said the stDUSK, as nothing drew it again when the history had the stake.
+    fakeArchive();
+    const { render } = await popup(overview(), "sent");
+    await until(() => render.mock.calls.length > 0);
+  });
+
   it("starts over for another account, and drops the last one's late answers", async () => {
     fakeArchive();
     const state = { route: "home" };
@@ -538,6 +545,37 @@ describe("shielded history retries", () => {
     held[1]();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(send).toHaveBeenCalledTimes(before + 1);
+  });
+});
+
+describe("what a stake with Sozu did", () => {
+  it("asks the archive again a minute on by itself where it didn't list the stake yet, as nothing may draw the screen again", async () => {
+    const { networks } = await import("@dusk-network/networks");
+    const { rowsOf, ACCOUNT, TESTNET } = await import("../../shared/fixtures/rows.js");
+    const { pool } = networks.testnet.sozu.fallbacks;
+    const u64 = (n) => Array.from({ length: 8 }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn).toString(16).padStart(2, "0")).join("");
+    const hash = "d1".repeat(32);
+    const deposit = `${[100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n].map(u64).join("")}01${"ab".repeat(193)}${"00".repeat(6)}`;
+    let listed = false;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: { h0: { json: listed ? [{ origin: hash, events: [{ target: pool, topic: "deposit", data: deposit }] }] : [] } } }), { headers: { "content-type": "application/json" } })));
+    const [row] = rowsOf({ entries: [{ hash, kind: "contract_call", contractId: pool, counterparty: pool, fnName: "sozu_stake", value: "100000000000", blockHeight: 4_700_000 }] });
+    const ov = { accounts: [ACCOUNT], isUnlocked: true, nodeUrl: TESTNET, selectedAccountIndex: 0 };
+    const held = [];
+    const realSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...rest) => (ms === activity.SOZU_FACT_AGAIN_MS ? held.push(fn) : realSetTimeout(fn, ms, ...rest)));
+    let fact;
+    const render = vi.fn(async () => {
+      fact = activity.sozuFactOf(ov, row, { render });
+    });
+
+    expect(activity.sozuFactOf(ov, row, { render })).toBeUndefined();
+    // Not listed yet: a minute on, the screen is drawn again, and that asks again.
+    await until(() => held.length === 1);
+    listed = true;
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + activity.SOZU_FACT_AGAIN_MS + 1);
+    held[0]();
+    await until(() => fact !== undefined);
+    expect(fact).toMatchObject({ kind: "stake", stDusk: 49_875_000_000n });
   });
 });
 
