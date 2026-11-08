@@ -4,6 +4,8 @@ import { activeWalletId } from "../shared/wallets.js";
 import {
   getExtensionApi,
   runtimeGetURL,
+  storageSessionGet,
+  storageSessionSet,
   tabsCreate,
   tabsGet,
   tabsQuery,
@@ -57,10 +59,97 @@ function closeShown(entry) {
     });
 }
 
+// --- Kept through a stop --------------------------------------------------
+// Firefox for Android stops the background a while after Firefox leaves the
+// screen (a call, another app), and with it what it held of a request waiting
+// for its approval: the site's answer and the approval's Approve. So each
+// waiting request is kept in session storage too, by the site's own request
+// (`key`: its tab, frame and ID). The site's content script asks again once
+// the background is back (`resume`), and the request takes up the approval
+// still open, the same one: its params unchanged, its time left. A request
+// that can't be taken up says so, to the site and on its approval.
+
+const KEPT_KEY = "dusk_pending_approvals_v1";
+let keptWrites = Promise.resolve();
+
+/** What a site hears when the wallet stopped before it answered, and nothing can take it up. */
+const LOST_TEXT = "The wallet stopped before it answered, as Firefox stops it in the background. Check its Activity before you try again.";
+
+async function keptAll() {
+  try {
+    const all = (await storageSessionGet(KEPT_KEY))?.[KEPT_KEY];
+    return all && typeof all === "object" ? all : {};
+  } catch {
+    return {};
+  }
+}
+
+// One change at a time, in the order asked.
+function changeKept(change) {
+  keptWrites = keptWrites
+    .then(async () => {
+      const all = await keptAll();
+      change(all);
+      await storageSessionSet({ [KEPT_KEY]: all });
+    })
+    .catch(() => {});
+  return keptWrites;
+}
+
+const keep = (rid, entry) =>
+  changeKept((all) => {
+    const { key, origin, kind, params, createdAt, windowId, tabId, backTo } = entry;
+    all[rid] = { rid, key, origin, kind, params, createdAt, windowId, tabId, backTo };
+  });
+const forget = (rid) =>
+  changeKept((all) => {
+    delete all[rid];
+  });
+
+// A kept request still in its time, by its approval's ID, or by the site's request.
+const fresh = (record) => record && Date.now() - Number(record.createdAt) < APPROVAL_TTL_MS;
+
+/**
+ * A request kept while it waits, still in its time: its approval's window
+ * and what it asked. Null for none.
+ * @param {string} rid
+ */
+export async function keptApproval(rid) {
+  await keptWrites;
+  const record = (await keptAll())[String(rid ?? "")];
+  return fresh(record) ? record : null;
+}
+
+/**
+ * Asked again after a stop, the site's request `key` goes on only when its
+ * approval still waits, kept through it. Else this throws what its site
+ * hears: closed meanwhile, or nothing kept, as it may have gone already.
+ * @param {string} key
+ */
+export async function checkResume(key) {
+  await keptWrites;
+  const record = Object.values(await keptAll()).find((r) => r.key === key && fresh(r));
+  if (!record) throw rpcError(4900, LOST_TEXT);
+  if (record.closed) {
+    forget(record.rid);
+    throw rpcError(ERROR_CODES.USER_REJECTED, "User closed the approval window");
+  }
+}
+
+// Its approval closed while the background was stopped: nothing answers it.
+const closedKept = (match) =>
+  changeKept((all) => {
+    for (const record of Object.values(all)) if (match(record) && !pendingApprovals.has(record.rid)) record.closed = true;
+  });
+
+// The same request, asked again: what its approval shows is what it asks now.
+const sameAsked = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 // `code`: the person's refusal, or a wallet that couldn't ask at all (INTERNAL).
 function rejectPending(rid, entry, message, answer = "cancelled", code = ERROR_CODES.USER_REJECTED) {
   if (!entry) return;
   pendingApprovals.delete(rid);
+  forget(rid);
   clearTimeout(entry.timer);
   closeShown(entry);
   keepAnswer(entry, answer);
@@ -84,7 +173,13 @@ async function showApproval(url) {
   }
   try {
     const [front] = (await tabsQuery({ active: true, currentWindow: true }).catch(() => [])) ?? [];
-    const tab = await tabsCreate({ url, active: true });
+    // Opened from the site's tab, the phone's Back closes it, which rejects
+    // the request, and shows the site again; where a browser won't take the
+    // opener, without.
+    const tab =
+      front?.id !== undefined
+        ? await tabsCreate({ url, active: true, openerTabId: front.id }).catch(() => tabsCreate({ url, active: true }))
+        : await tabsCreate({ url, active: true });
     return { tabId: tab?.id, backTo: front?.id };
   } catch {
     return null;
@@ -102,7 +197,7 @@ async function showApproval(url) {
  *   an approval must pass first: thrown, the request goes on waiting, and its
  *   window says why
  */
-export async function requestUserApproval(kind, origin, params, shown = { walletId: "" }, { beforeApprove } = {}) {
+export async function requestUserApproval(kind, origin, params, shown = { walletId: "" }, { beforeApprove, key = "", resume = false } = {}) {
   if (
     pendingApprovals.size >= MAX_PENDING ||
     [...pendingApprovals.values()].some((entry) => entry.origin === origin)
@@ -110,15 +205,35 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
     throw rpcError(ERROR_CODES.USER_REJECTED, "Another approval is already pending");
   }
 
+  // Waiting, with its time left; kept for a stop of the background.
+  const wait = (rid, entry) =>
+    new Promise((resolve, reject) => {
+      Object.assign(entry, { resolve, reject });
+      entry.timer = setTimeout(
+        () => rejectPending(rid, entry, "Approval request expired", "expired"),
+        Math.max(0, entry.createdAt + APPROVAL_TTL_MS - Date.now())
+      );
+      pendingApprovals.set(rid, entry);
+      keep(rid, entry);
+    });
+
+  // Asked again after a stop: the approval still open takes it up, when it
+  // shows what's asked now. Else that one goes, and a new one asks.
+  if (resume && key) {
+    await keptWrites;
+    const kept = Object.values(await keptAll()).find((r) => r.key === key && r.origin === origin && r.kind === kind && fresh(r) && !r.closed);
+    if (kept && !pendingApprovals.has(kept.rid)) {
+      if (sameAsked(kept.params, params)) {
+        const { rid, createdAt, windowId, tabId, backTo } = kept;
+        return wait(rid, { kind, origin, params, shown, beforeApprove, key, createdAt, windowId, tabId, backTo });
+      }
+      forget(kept.rid);
+      closeShown(kept);
+    }
+  }
+
   const rid = crypto.randomUUID();
-  const promise = new Promise((resolve, reject) => {
-    const entry = { kind, origin, params, shown, beforeApprove, createdAt: Date.now(), resolve, reject };
-    entry.timer = setTimeout(
-      () => rejectPending(rid, entry, "Approval request expired", "expired"),
-      APPROVAL_TTL_MS
-    );
-    pendingApprovals.set(rid, entry);
-  });
+  const promise = wait(rid, { kind, origin, params, shown, beforeApprove, key, createdAt: Date.now() });
 
   const url = runtimeGetURL(
     `notification.html?rid=${encodeURIComponent(rid)}`
@@ -132,6 +247,7 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
   } else if (entry) {
     // Closed by the person, the request is rejected (onRemoved below).
     Object.assign(entry, Object.fromEntries(Object.entries(where).filter(([, id]) => id !== undefined)));
+    keep(rid, entry);
   } else {
     // Over while it opened: it goes.
     closeShown(where);
@@ -148,6 +264,7 @@ ext?.windows?.onRemoved?.addListener((windowId) => {
       rejectPending(rid, entry, "User closed the approval window", "closed");
     }
   }
+  closedKept((record) => record.windowId === windowId);
 });
 
 ext?.tabs?.onRemoved?.addListener?.((tabId) => {
@@ -158,6 +275,7 @@ ext?.tabs?.onRemoved?.addListener?.((tabId) => {
       rejectPending(rid, entry, "User closed the approval window", "closed");
     }
   }
+  closedKept((record) => record.tabId === tabId);
 });
 
 export function getPending(rid) {
@@ -211,6 +329,8 @@ export function resolvePendingDecision(message) {
 function decided(rid, entry, message) {
   const { decision } = message;
   pendingApprovals.delete(rid);
+  // Answered: a stop after this takes nothing up again, whatever came of it.
+  forget(rid);
   clearTimeout(entry.timer);
   // A tab doesn't close itself as a window does.
   if (entry.tabId !== undefined) closeShown(entry);

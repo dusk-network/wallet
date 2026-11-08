@@ -147,6 +147,28 @@ describe("setting up and unlocking", () => {
     expect(state.route).toBe("home");
   });
 
+  it("says a misspelled word by Import wallet too, where a phone shows it, not only above the words", async () => {
+    const state = { route: "onboard_import", onboard: onboard() };
+    const body = show(onboardingImportView({ state, actions: actions() }));
+    // Sofia's: word 7 misspelled, both passwords in, Import at the bottom.
+    typeInto(field(body, "Word 1"), MNEMONIC);
+    typeInto(field(body, "Word 7"), "abandn");
+    typeInto(field(body, "Password"), "long enough");
+    typeInto(field(body, "Confirm password"), "long enough");
+    const importBtn = button(body, "Import wallet");
+    importBtn.click();
+    await settle();
+    const said = body.querySelectorAll("[role=alert]").filter((el) => !el.hidden).map((el) => el.textContent);
+    expect(said).toEqual(["Word 7 isn't a recovery word. Check its spelling.", "Word 7 isn't a recovery word. Check its spelling."]);
+    // Once over the words, once by the button: the form's own line, right above it.
+    const row = importBtn.parentNode;
+    const byButton = row.children.slice(0, row.children.indexOf(importBtn)).filter((el) => el.getAttribute("role") === "alert" && !el.hidden).at(-1);
+    expect(byButton?.textContent).toBe("Word 7 isn't a recovery word. Check its spelling.");
+    // Fixed: it goes from beside the button too.
+    typeInto(field(body, "Word 7"), "abandon");
+    expect(body.querySelectorAll("[role=alert]").filter((el) => !el.hidden).map((el) => el.textContent)).toEqual([]);
+  });
+
   it("asks for the words written down, and says when they don't match", async () => {
     const state = { route: "onboard_create_confirm", onboard: onboard() };
     const acts = actions();

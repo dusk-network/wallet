@@ -12,6 +12,8 @@ const tabs = vi.hoisted(() => ({
   update: null,
 }));
 const notes = vi.hoisted(() => []);
+// The browser's session storage: it outlives the background's stops.
+const session = vi.hoisted(() => ({ items: {} }));
 
 vi.mock("../shared/siteRecords.js", () => ({
   noteSiteRequest: async (walletId, origin, request) => {
@@ -49,6 +51,8 @@ vi.mock("../platform/extensionApi.js", () => {
     runtimeGetURL: (path) => `chrome-extension://test/${String(path ?? "")}`,
     windowsCreate: vi.fn(async () => ({ id: 999 })),
     windowsRemove,
+    storageSessionGet: async (key) => ({ [key]: structuredClone(session.items[key]) }),
+    storageSessionSet: async (items) => Object.assign(session.items, structuredClone(items)),
     tabsCreate: (...args) => tabs.create(...args),
     tabsGet: (...args) => tabs.get(...args),
     tabsRemove: (...args) => tabs.remove(...args),
@@ -185,7 +189,7 @@ describe("pending approvals", () => {
       try {
         const answer = pending.requestUserApproval("connect", "https://site.example", {});
         await new Promise((r) => setTimeout(r, 0));
-        expect(tabs.create).toHaveBeenCalledWith({ url: "chrome-extension://test/notification.html?rid=rid-tab", active: true });
+        expect(tabs.create).toHaveBeenCalledWith({ url: "chrome-extension://test/notification.html?rid=rid-tab", active: true, openerTabId: 5 });
         expect(pending.getPending("rid-tab")).toMatchObject({ tabId: 77 });
         pending.resolvePendingDecision({ rid: "rid-tab", decision: "approve", approvedParams: { accountIndex: 0 } });
         await expect(answer).resolves.toEqual({ accountIndex: 0 });
@@ -228,7 +232,8 @@ describe("pending approvals", () => {
       vi.resetModules();
       notes.length = 0;
       const pending = await import("./pending.js");
-      tabs.create.mockRejectedValueOnce(new Error("No tabs here"));
+      // With the site's tab as its opener, and without.
+      tabs.create.mockRejectedValueOnce(new Error("No tabs here")).mockRejectedValueOnce(new Error("No tabs here"));
       try {
         const answer = pending.requestUserApproval("connect", "https://site.example", {}, { walletId: "acct0" });
         await expect(answer).rejects.toMatchObject({ code: -32603, message: pending.NOT_SHOWN_TEXT });
@@ -240,4 +245,69 @@ describe("pending approvals", () => {
       }
     });
   });
+
+  describe("through a stop of the background, as Firefox for Android stops it while Firefox is away", () => {
+    const SITE = "https://testnet.dusk.domains";
+    const KEY = "7:0:req-9";
+
+    // One waiting in its tab, then the background gone, with what it held, and back.
+    async function stoppedWhileWaiting(params = { amount: "1" }) {
+      browserHas.windows = false;
+      session.items = {};
+      vi.resetModules();
+      const before = await import("./pending.js");
+      vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValueOnce("rid-kept");
+      before.requestUserApproval("send_tx", SITE, params, { walletId: "acct0" }, { key: KEY });
+      await new Promise((r) => setTimeout(r, 0));
+      vi.resetModules();
+      tabs.create.mockClear();
+      tabs.remove.mockClear();
+      return import("./pending.js");
+    }
+
+    it("takes the request up again as its site asks again, in the approval still open, whose Approve then works", async () => {
+      try {
+        const pending = await stoppedWhileWaiting();
+        // Back, before its site asks again: kept, not lost.
+        await expect(pending.keptApproval("rid-kept")).resolves.toMatchObject({ origin: SITE, tabId: 77 });
+        await expect(pending.checkResume(KEY)).resolves.toBeUndefined();
+        const answer = pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(tabs.create).not.toHaveBeenCalled();
+        expect(pending.getPending("rid-kept")).toMatchObject({ origin: SITE, tabId: 77 });
+        expect(pending.resolvePendingDecision({ rid: "rid-kept", decision: "approve", approvedParams: { gas: null } })).toEqual({ ok: true });
+        await expect(answer).resolves.toEqual({ gas: null });
+        // Answered: nothing takes it up again, whatever came of it.
+        await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4900, message: expect.stringContaining("Check its Activity") });
+      } finally {
+        browserHas.windows = true;
+      }
+    });
+
+    it("tells its site the approval was closed, when it was closed while the background was stopped", async () => {
+      try {
+        const pending = await stoppedWhileWaiting();
+        onTabRemovedCb(77);
+        // As a closed approval does, never one nobody can answer.
+        await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4001, message: "User closed the approval window" });
+        await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4900 });
+      } finally {
+        browserHas.windows = true;
+      }
+    });
+
+    it("asks anew, closing the old approval, when what's asked changed meanwhile", async () => {
+      try {
+        const pending = await stoppedWhileWaiting({ amount: "1" });
+        pending.requestUserApproval("send_tx", SITE, { amount: "2" }, { walletId: "acct0" }, { key: KEY, resume: true });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(tabs.remove).toHaveBeenCalledWith(77);
+        expect(tabs.create).toHaveBeenCalledTimes(1);
+        expect(pending.getPending("rid-kept")).toBeNull();
+      } finally {
+        browserHas.windows = true;
+      }
+    });
+  });
 });
+

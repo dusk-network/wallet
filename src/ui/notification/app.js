@@ -23,6 +23,7 @@ import { syncTestnetStrip } from "../components/TestnetStrip.js";
 import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
 import { guarded, screenShown } from "../lib/clickGuard.js";
+import { isPhone } from "../lib/keyboard.js";
 import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js";
 import { fieldError, fieldLabel, passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
@@ -236,7 +237,31 @@ document.addEventListener("visibilitychange", () => {
     return;
   }
   startActivityHeartbeat();
+  // Back from a call or another app: still waiting, or it says it isn't.
+  if (approvalLive && rid) {
+    untilTakenUp(() => send({ type: "DUSK_GET_PENDING", rid }), (p) => p?.waking)
+      .then((pending) => {
+        if (approvalLive && (!pending || pending.waking)) ended();
+      })
+      .catch(() => {});
+  }
 });
+
+// The phone's Back rejects the request, as closing its tab does: one history
+// entry for it, put up at the first press, as browsers skip one put up before.
+if (isPhone()) {
+  let backGuard = false;
+  const guardBack = () => {
+    if (backGuard || !approvalLive) return;
+    backGuard = true;
+    window.history?.pushState?.({ duskApproval: true }, "");
+  };
+  document.addEventListener("pointerdown", guardBack, true);
+  document.addEventListener("keydown", guardBack, true);
+  window.addEventListener("popstate", () => {
+    if (approvalLive) decide("reject").catch(() => ended());
+  });
+}
 
 document.addEventListener(
   "click",
@@ -246,10 +271,41 @@ document.addEventListener(
   { passive: true }
 );
 
+// A request this window no longer answers: the wallet stopped meanwhile (Firefox
+// for Android stops it in the background) and nothing took it up, or it was
+// handled elsewhere. Said, with nothing to press: never a dead Approve.
+export const ENDED_TEXT = "This request isn't waiting any more, so nothing was approved or sent. Close this tab and ask the site again.";
+
+function ended() {
+  approvalLive = false;
+  stopActivityHeartbeat();
+  renderError(ENDED_TEXT);
+}
+
+// A request kept through a stop of the wallet's background waits for its
+// site to ask again, a few seconds at most: `ask` again until it's taken up.
+const WAKING_TRIES = 15;
+async function untilTakenUp(ask, waking) {
+  let answer = await ask();
+  for (let i = 0; waking(answer) && i < WAKING_TRIES; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    answer = await ask();
+  }
+  return answer;
+}
+
 // The answer, and the window goes, unless the wallet refused what came with it:
-// then it says why, and the request goes on waiting.
+// then it says why, and the request goes on waiting. One that isn't waiting
+// any more says so.
 async function decide(decision, approvedParams, withAnswer = {}) {
-  const res = await send({ type: "DUSK_PENDING_DECISION", rid, decision, ...(decision === "approve" ? { approvedParams, ...withAnswer } : {}) });
+  const res = await untilTakenUp(
+    () => send({ type: "DUSK_PENDING_DECISION", rid, decision, ...(decision === "approve" ? { approvedParams, ...withAnswer } : {}) }),
+    (answer) => answer?.error?.code === "waking"
+  );
+  if (res?.ok === false && (res.error === "Unknown request" || res.error?.code === "waking")) {
+    ended();
+    return;
+  }
   if (res?.error?.message) throw Object.assign(new Error(res.error.message), { refused: true, data: res.error.data });
   window.close();
 }
@@ -363,7 +419,9 @@ export async function renderNotification() {
     return;
   }
 
-  const pending = await send({ type: "DUSK_GET_PENDING", rid });
+  // One kept through a stop of the wallet's background waits for its site to ask again.
+  let pending = await untilTakenUp(() => send({ type: "DUSK_GET_PENDING", rid }), (p) => p?.waking);
+  if (pending?.waking) pending = null;
   // The node's network, by the chain ID it gave, for what the window knows only by the node.
   noteChainId(pending?.nodeUrl, pending?.chainId);
   if (!pending) {

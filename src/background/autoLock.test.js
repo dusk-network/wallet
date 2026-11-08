@@ -163,6 +163,11 @@ vi.mock("./rpc.js", () => ({
 vi.mock("./pending.js", () => ({
   cancelPendingApprovals: mocks.cancelPendingApprovals,
   getPending: vi.fn(() => null),
+  // Nothing kept through a stop of the background here.
+  keptApproval: vi.fn(async () => null),
+  checkResume: vi.fn(async () => {
+    throw Object.assign(new Error("The wallet stopped before it answered, as Firefox stops it in the background. Check its Activity before you try again."), { code: 4900 });
+  }),
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
 }));
 
@@ -768,8 +773,17 @@ describe("background auto-lock activity", () => {
     const handOver = (pressed) => sendBackgroundMessage({ type: "DUSK_RPC_REQUEST", id: "h", pressed, request: { method: "dusk_openPaymentLink", params: { link: page.url, pressed: true } } }, page);
     for (const [said, passed] of [[true, true], [false, false], ["yes", undefined], [undefined, undefined]]) {
       await handOver(said);
-      expect(mocks.handleRpc).toHaveBeenLastCalledWith("https://apps.testnet.dusk.network", expect.objectContaining({ method: "dusk_openPaymentLink" }), { pressed: passed });
+      expect(mocks.handleRpc).toHaveBeenLastCalledWith("https://apps.testnet.dusk.network", expect.objectContaining({ method: "dusk_openPaymentLink" }), expect.objectContaining({ pressed: passed }));
     }
+  });
+
+  it("never runs a request again that its site asks again after a stop of the background, unless its approval still waits", async () => {
+    const page = { url: "https://testnet.dusk.domains/names/sofia", tab: { id: 7 }, frameId: 0 };
+    mocks.handleRpc.mockClear();
+    const response = await sendBackgroundMessage({ type: "DUSK_RPC_REQUEST", id: "req-9", resume: true, request: { method: "dusk_sendTransaction", params: {} } }, page);
+    // It may have gone already: the site hears so plainly, and nothing runs.
+    expect(response).toMatchObject({ error: { code: 4900, message: expect.stringContaining("Check its Activity") } });
+    expect(mocks.handleRpc).not.toHaveBeenCalled();
   });
 
   it("saves a custom node with the chain ID it gives, read before it's saved", async () => {

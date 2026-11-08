@@ -41,6 +41,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept a site's approval through Firefox for Android stopping the wallet in the background, so Approve still works; if it can't, the approval and the site say the request ended.
+- Rejected an approval with the phone's Back.
+- Said a misspelled recovery word by Import wallet too.
 - Made a phone's Back button go one screen back inside the wallet, keeping what's typed, rather than closing it.
 - Kept the field being typed in, and its button, above a phone's keyboard.
 - Looked a payment up again as the wallet comes back after being left mid-send, so it no longer waits for a block that came.

@@ -45,7 +45,7 @@ import {
   getEngineStatusStrict,
   invalidateEngineConfig,
 } from "./engineHost.js";
-import { cancelPendingApprovals, requestUserApproval } from "./pending.js";
+import { cancelPendingApprovals, requestUserApproval as askForApproval } from "./pending.js";
 import { siteWalletId } from "./siteWallet.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { readCurrent, siteNames } from "./siteNames.js";
@@ -59,7 +59,14 @@ import {
 import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
-export async function handleRpc(origin, request, { pressed } = {}) {
+export async function handleRpc(origin, request, { pressed, approvalKey = "", resume = false } = {}) {
+  // Each approval this request asks for, by the site's request (`approvalKey`):
+  // asked again after the background stopped (`resume`), it takes up the one
+  // still open (pending.js).
+  const requestUserApproval = (...ask) => {
+    if (approvalKey) ask[4] = { ...(ask[4] ?? {}), key: approvalKey, resume };
+    return askForApproval(...ask);
+  };
   origin = String(origin ?? "").trim();
   if (!isAllowedDappOrigin(origin)) {
     throw rpcError(

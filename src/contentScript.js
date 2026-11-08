@@ -196,6 +196,31 @@ function takePress() {
   return fresh && globalThis.navigator?.userActivation?.isActive !== false;
 }
 
+// The wallet's answer to a site's request. Firefox for Android stops the
+// wallet's background a while after Firefox leaves the screen, and a request
+// waiting for its approval then gets no answer at all (or Chrome's "message
+// port closed"): asked again (`resume`), the request takes up the approval
+// still open (background/pending.js), or hears plainly that it can't, within
+// the 5 minutes an approval waits. Never no answer, which a site reads as one.
+const RESUME_FOR_MS = 6 * 60_000;
+const NO_ANSWER = /out of scope|receiving end does not exist|message port closed|disconnected|message manager|context invalidated/i;
+
+async function answerOf(message) {
+  const until = Date.now() + RESUME_FOR_MS;
+  for (let resume = false; ; resume = true) {
+    try {
+      const response = await runtimeSendMessage(resume ? { ...message, resume: true } : message);
+      if (response !== undefined) return response;
+    } catch (err) {
+      if (!NO_ANSWER.test(String(err?.message ?? err))) throw err;
+    }
+    if (Date.now() > until) {
+      return { error: { code: 4900, message: "The wallet stopped before it answered. Check its Activity before you try again." } };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
 window.addEventListener("message", (event) => {
   // Only accept messages from the same window
   if (event.source !== window) return;
@@ -219,7 +244,7 @@ window.addEventListener("message", (event) => {
 
   const request = msg.request;
 
-  runtimeSendMessage({
+  answerOf({
     type: "DUSK_RPC_REQUEST",
     id,
     origin: window.location.origin,

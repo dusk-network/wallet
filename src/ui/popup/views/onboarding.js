@@ -467,8 +467,17 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
     hint: "Paste the whole phrase into any box.",
     onComplete: () => fields.pwd.focus(),
     // After a paste, and as the focus leaves the words: what's wrong with them.
-    onCheck: (text) => phraseError.show(text),
+    // Typing again takes back what the button said of them too.
+    onCheck: (text) => {
+      phraseError.show(text);
+      if (!text && phraseSaidAtButton) {
+        phraseSaidAtButton = false;
+        err.show("");
+      }
+    },
   });
+  // Whether the button's line says what's wrong with the words.
+  let phraseSaidAtButton = false;
   const phraseError = fieldError(mnemonicInput.el, { markInvalid: false });
   // Beside other wallets, the password they share; else a new one, twice.
   const fields = adding
@@ -503,6 +512,9 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
     const problem = m ? mnemonicInput.problem() : "Enter your recovery phrase.";
     if (problem) {
       phraseError.show(problem);
+      // Said by the button too: on a phone the words are far above it.
+      err.show(problem);
+      phraseSaidAtButton = true;
       return null;
     }
     return m;

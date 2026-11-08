@@ -139,6 +139,40 @@ function expectNamedAccount(el, name, account) {
   expect(visibleText(named)).toBe(`${name}${shortAddress(account)}`);
 }
 
+describe("a request the wallet stopped for, as Firefox for Android stops it while Firefox is away", () => {
+  it("says it isn't waiting any more when Approve finds it gone: never a dead Approve that closes on nothing", async () => {
+    await render("connect", { requestedProfiles: true });
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: "Unknown request" });
+    pastClickGuard();
+    approve().click();
+    await vi.waitFor(() => expect(visibleText(app)).toContain("This request isn't waiting any more, so nothing was approved or sent."));
+    expect(dom.window.close).not.toHaveBeenCalled();
+    expect(bar()?.querySelector(".btn-primary") ?? null).toBeNull();
+  });
+
+  it("takes the answer once its site has asked again, the wallet picking the request up meanwhile", async () => {
+    await render("connect", { requestedProfiles: true });
+    let tries = 0;
+    mocks.answers.DUSK_PENDING_DECISION = () => (++tries < 3 ? { ok: false, error: { code: "waking", message: "The wallet is picking this request up again." } } : { ok: true });
+    pastClickGuard();
+    approve().click();
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect([tries, dom.window.close.mock.calls.length]).toEqual([3, 1]);
+  });
+
+  it("rejects it with the phone's Back, once a press put up its entry", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:144.0) Gecko/144.0 Firefox/159.0" });
+    const pushState = vi.fn();
+    dom.window.history = { pushState };
+    await render("connect", { requestedProfiles: true });
+    dom.document.dispatchEvent(fakeEvent("pointerdown"));
+    expect(pushState).toHaveBeenCalledTimes(1);
+    dom.window.dispatchEvent(fakeEvent("popstate"));
+    await vi.waitFor(() => expect(decision("reject")).toBeTruthy());
+  });
+});
+
 describe("connect approval", () => {
   it("offers each profile as a card with its label, its checked .dusk name and its short account", async () => {
     await render("connect", { requestedProfiles: true });
