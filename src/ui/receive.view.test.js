@@ -526,7 +526,16 @@ describe("the requests made here", () => {
     expect(accessibleName(back)).toBe(`Send back the payment of 0.016 DUSK ${whenAtText(T0 + 2 * HOUR)}`);
     back.click();
     expect(state.route).toBe("send");
-    expect(state.draft).toMatchObject({ to: SENDER, amountDusk: "0.016", memo: "Refund: Factura 2026-074 Ilustración" });
+    expect(state.draft).toMatchObject({ to: SENDER, amountDusk: "0.016", amountMasked: false, memo: "Refund: Factura 2026-074 Ilustración" });
+
+    // With balances hidden, the amount it fills in stays hidden on Send and Review.
+    const hiddenState = { route: "receive", receive: { tab: "public" }, activity: state.activity };
+    const actions = { render: vi.fn(async () => dom.document.body.replaceChildren(...receiveView({ ...unlocked, hideBalances: true }, { state: hiddenState, actions }))), showToast: vi.fn() };
+    await actions.render();
+    await vi.waitFor(() => expect(hiddenState.requests?.loaded).toBe(true));
+    await actions.render();
+    dom.document.body.querySelectorAll(".request-row__payments button").find((b) => visibleText(b) === "Send back").click();
+    expect(hiddenState.draft).toMatchObject({ to: SENDER, amountDusk: "0.016", amountMasked: true });
   });
 
   it("finds a payment past the page Activity shows: one paid while closed, with more than a page after it", async () => {

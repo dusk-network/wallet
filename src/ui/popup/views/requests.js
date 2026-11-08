@@ -152,8 +152,9 @@ function requestRow(request, match, { hidden, address, state, actions, walletId,
       });
   };
   // Send, filled in to pay a payment that paid it again back: to whoever sent it, what it brought, the request's memo.
+  // With balances hidden, the amount stays hidden on Send and Review, as Max's does.
   const sendBack = ({ lux, memo, to }) => {
-    state.draft = { to, amountDusk: amountForInput(formatDuskPlain(lux)), memo };
+    state.draft = { to, amountDusk: amountForInput(formatDuskPlain(lux)), amountMasked: hidden, memo };
     state.route = "send";
     actions?.render?.()?.catch?.(() => {});
   };
