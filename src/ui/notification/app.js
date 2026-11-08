@@ -23,7 +23,7 @@ import { syncTestnetStrip } from "../components/TestnetStrip.js";
 import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
 import { guarded, screenShown } from "../lib/clickGuard.js";
-import { isPhone } from "../lib/keyboard.js";
+import { isPhone } from "../lib/device.js";
 import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js";
 import { fieldError, fieldLabel, passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
