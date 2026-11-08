@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Brought back the app for Android and desktop (Tauri), in `apps/tauri`.
+- Opened `dusk:` payment links in the Android app's Send, filled in.
+- Shared an address or a request from the Android app through the phone's share sheet.
 - Declared Firefox for Android, from version 142, so the add-on can be listed for phones.
 - Added a record per site to Settings' Connected sites: when it was last used, what it asked for and how you answered, also once it's disconnected, with Forget.
 - Added connections that end after 1, 7 or 30 days, for each site and for new sites.
@@ -27,6 +30,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Saved Activity's export and a QR code to the phone's Downloads in the Android app, saying so.
+- Opened the explorer and other sites in the phone's browser from the app, never in the wallet's window.
+- Kept the Android app's screens out of screenshots and the app switcher.
+- Said things for a phone in the Android app: no browser, connected sites, Caps Lock or right-click.
+- Put the Android app in the background from its first screen with Back, rather than closing it.
 - Opened a site's approval in a tab where the browser has no windows, as in Firefox for Android.
 - Made the popup's Connect ask in the site's approval, and kept it off Send, Shield, Stake, every Review and Sent.
 - Opened the network choice from the pill before a wallet is set up and while it's locked, as Settings does.
@@ -41,6 +49,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Fixed import and unlock that never finished in the app.
+- Fixed Download QR in the app, which said "Failed to render QR".
+- Showed the network's real status in the app.
+- Started the Android app below the phone's status bar, its icons light on the dark page.
+- Said a lost connection in words on a send's steps.
 - Made a phone's Back button go one screen back inside the wallet, keeping what's typed, rather than closing it.
 - Kept the field being typed in, and its button, above a phone's keyboard.
 - Looked a payment up again as the wallet comes back after being left mid-send, so it no longer waits for a block that came.

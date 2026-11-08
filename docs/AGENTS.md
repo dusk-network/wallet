@@ -230,6 +230,8 @@ transfers already require this field at the provider boundary.
 | `@tauri-apps/plugin-store` | Persistent storage |
 | `@tauri-apps/plugin-stronghold` | Encrypted secret storage |
 | `@tauri-apps/plugin-fs` | File system access |
+| `@tauri-apps/plugin-opener` | Links open in the phone's or computer's browser |
+| `@tauri-apps/plugin-deep-link` | `dusk:` payment links open the app's Send |
 
 ---
 

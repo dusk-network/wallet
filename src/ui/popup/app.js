@@ -8,7 +8,8 @@ import { siteName } from "../lib/strings.js";
 import { MOTION } from "../lib/motion.js";
 import { screenShown } from "../lib/clickGuard.js";
 import { installSystemBack } from "../lib/systemBack.js";
-import { installKeyboardRoom, isPhone } from "../lib/keyboard.js";
+import { installKeyboardRoom } from "../lib/keyboard.js";
+import { isPhone } from "../lib/device.js";
 import { createToaster } from "../components/Toast.js";
 import { balancesHidden } from "../components/Balance.js";
 import { ownProfileName } from "../components/ProfileName.js";
@@ -26,6 +27,8 @@ import { activityRows, ensureActivity, refreshActivitySoon, selected, sozuFactOf
 import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
+import { requestDraftOf } from "../lib/requestLink.js";
+import { listenForLinks, moveAppToBack } from "../../platform/native.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
@@ -55,7 +58,7 @@ import {
 import { lockedView } from "./views/locked.js";
 import { changePasswordView, removeWalletView, sendPasswordView } from "./views/wallets.js";
 import { cancelSendPassword } from "../components/SendPasswordDialog.js";
-import { getRuntimeKind, isExtensionRuntime } from "../../platform/runtime.js";
+import { getRuntimeKind, isExtensionRuntime, isTauriRuntime } from "../../platform/runtime.js";
 import {
   getExtensionApi,
   runtimeGetURL,
@@ -1003,17 +1006,22 @@ const acctMenu = createAccountMenuController({
 // --- The phone's Back button ---------------------------------------------------
 // One step back inside the wallet (systemBack.js): an open menu closes, then
 // a dialog (its [data-back]: Cancel or Close), else the screen's own Back.
+const overlays = () => Array.from(document.querySelectorAll(".qrscan-overlay"));
 const systemBack = installSystemBack({
+  // Which screen, by its route and its title, and how many dialogs and menus are open.
+  screenKey: () =>
+    [state.route, app?.querySelector(".subnav-title")?.textContent ?? "", overlays().length, netMenu?.isOpen, acctMenu?.isOpen].join("|"),
+  // The app on a phone goes to the background from its first screen, as other
+  // apps do, rather than closing and asking for the password again.
+  onFirst: isTauriRuntime() && isPhone() ? moveAppToBack : undefined,
   backStep: () => {
     if (netMenu.isOpen) return () => netMenu.close();
     if (acctMenu.isOpen) return () => acctMenu.close();
-    const overlay = Array.from(document.querySelectorAll(".qrscan-overlay")).at(-1);
+    const overlay = overlays().at(-1);
     const control = overlay ? overlay.querySelector("[data-back]") : app?.querySelector(".subnav-back, [data-back]");
     return control && !control.disabled ? () => control.click() : null;
   },
 });
-// A menu or a dialog a press opened has a way back too.
-document.addEventListener("click", () => setTimeout(() => systemBack.sync(), 0), true);
 
 // --- Header actions -------------------------------------------------------
 async function onRefresh() {
@@ -1316,6 +1324,19 @@ export async function render({ forceRefresh = false } = {}) {
   // default: home
   setApp(homeView(ov, { state, actions }));
 }
+
+// --- Payment links opened in the app ---------------------------------------------
+// A dusk: link from another app, a chat or a QR reader: Send, filled in from it
+// as a link pasted into Send fills it, and refused there for another network;
+// after the unlock, when the wallet is locked.
+listenForLinks((url) => {
+  const draft = requestDraftOf(`?link=${encodeURIComponent(url)}`);
+  if (!draft) return;
+  netMenu.close();
+  acctMenu.close();
+  Object.assign(state, { draft, route: "send", needsRefresh: true });
+  render({ forceRefresh: true }).catch(() => {});
+});
 
 export function mountPopup() {
   render()

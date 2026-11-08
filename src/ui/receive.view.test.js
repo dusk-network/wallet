@@ -395,6 +395,22 @@ describe("receive", () => {
     }
   });
 
+  it("shares through the phone's share sheet in the app, where it only copied before, and says long-press for the QR's menu", async () => {
+    // The app on a phone: its WebView, and Tauri's bridge to the wrapper.
+    dom.document.body.dataset.runtime = "tauri";
+    dom.window.matchMedia = () => ({ matches: true });
+    const invoke = vi.fn(async () => null);
+    dom.window.__TAURI_INTERNALS__ = { invoke };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const view = await receive("public");
+    // A phone has no right-click: the QR's menu is a long press.
+    expect(dom.document.body.querySelector(".receive-qr-card").title).toBe("Long-press for QR options");
+    view.button("Share").click();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("share_text", { text: ACCOUNT, title: "Dusk address" }, undefined));
+    await settle();
+    expect(dom.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
   it("starts a request over when the profile switches, rather than asking for it on the other one", async () => {
     const { switchContext } = await import("./popup/context.js");
     const state = {};

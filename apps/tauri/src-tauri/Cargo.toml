@@ -1,0 +1,58 @@
+[package]
+name = "dusk-wallet-tauri"
+version = "0.1.0"
+description = "Dusk Wallet"
+authors = ["Dusk"]
+edition = "2021"
+
+[lib]
+name = "dusk_wallet_tauri"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Official Tauri plugins
+tauri-plugin-store = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-stronghold = "2"
+# Links open in the phone's browser; dusk: links and the web wallet's request
+# links open the app. The versions the JS packages have: the Tauri CLI wants
+# each plugin's crate and package on one minor, and these on Tauri 2.9.
+tauri-plugin-opener = "=2.5.3"
+tauri-plugin-deep-link = "=2.4.6"
+
+[features]
+# This feature is used for production builds where the `custom-protocol` is used.
+# It is added by default by the Tauri bundler.
+custom-protocol = ["tauri/custom-protocol"]
+
+# Debug builds, the emulator's among them, compile the vault's key stretching
+# as release builds do: unoptimised, scrypt (the snapshot's age encryption)
+# took about 40 s to open the vault on the emulator, a quarter-second Argon2 aside.
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.rust-argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.chacha20]
+opt-level = 3
+[profile.dev.package.poly1305]
+opt-level = 3
+[profile.dev.package.chacha20poly1305]
+opt-level = 3
+

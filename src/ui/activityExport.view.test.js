@@ -241,6 +241,22 @@ describe("Activity's Export", () => {
     expect(body().querySelector("#activity-export")).toBeNull();
   });
 
+  it("saves it in the phone's Downloads in the app, and says where, where a download made no file", async () => {
+    page("/index.html");
+    const invoke = vi.fn(async (cmd) => (cmd === "save_download" ? true : null));
+    dom.window.__TAURI_INTERNALS__ = { invoke };
+    const { actions } = setup();
+    button("Export").click();
+    button("Save CSV").click();
+    await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+    const [cmd, args] = invoke.mock.calls.find(([c]) => c === "save_download");
+    expect([cmd, args.name, args.mime]).toEqual(["save_download", "dusk-estudio-sofia-testnet-all.csv", "text/csv"]);
+    expect(new TextDecoder().decode(Uint8Array.from(args.bytes)).split("\r\n")[0]).toBe(CSV_COLUMNS.join(","));
+    // No download besides, which the app's WebView never makes a file of.
+    expect(saved).toHaveLength(0);
+    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(/^CSV saved to Downloads as dusk-estudio-sofia-testnet-all\.csv: \d+ lines\./);
+  });
+
   it("marks a transfer between the person's own profiles, which isn't income", async () => {
     page("/full.html");
     setup();

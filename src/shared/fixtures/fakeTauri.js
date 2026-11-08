@@ -9,8 +9,9 @@ export const APP_DATA = "/app-data";
 export function fakeTauri() {
   const files = new Map();
   const loaded = new Map();
-  // Tests set these to fail a step: hooks.save(path), hooks.load(path).
-  const hooks = { save: null, load: null };
+  // Tests set these to fail a step: hooks.save(path), hooks.load(path),
+  // hooks.unload(path) (refused as the app's capabilities refuse a command).
+  const hooks = { save: null, load: null, unload: null };
 
   const live = (path) => {
     const state = loaded.get(path);
@@ -60,6 +61,7 @@ export function fakeTauri() {
       return new Stronghold(path);
     }
     async unload() {
+      await hooks.unload?.(this.path);
       loaded.delete(this.path);
     }
     async loadClient(name) {

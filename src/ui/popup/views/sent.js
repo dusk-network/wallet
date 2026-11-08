@@ -61,6 +61,8 @@ export function reasonText(error) {
   // What the wallet's transaction builder says, in words.
   if (/failed to deserialize/i.test(text)) return "The wallet couldn't read the address. Check it and try again.";
   if (/failed to (archive|unarchive)|unknown error code/i.test(text)) return "The wallet couldn't build this transaction.";
+  // The node's connection, as the browser reports it: no signal, or a node down.
+  if (/websocket|failed to connect to node|failed to fetch|networkerror/i.test(text)) return "The connection to the network was lost.";
   // The wallet's own words on a node it won't sign for, whole.
   if (/nothing was signed/i.test(text)) return text;
   // A node's reply never shows as it came: JSON, cut off in the middle.

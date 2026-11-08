@@ -9,19 +9,13 @@
 // (#app's padding, ui.css) to scroll that far; the room stays until the next
 // screen, so nothing moves under a finger as the keyboard closes.
 
+import { isPhone } from "./device.js";
+
 // Fields that bring up no keyboard.
 const UNTYPED = new Set(["checkbox", "radio", "range", "file", "button", "submit", "reset", "color", "image", "hidden"]);
 const MARGIN = 12;
 // Less than this under the visual viewport is a toolbar, not a keyboard.
 const KEYBOARD_MIN = 80;
-
-/**
- * Whether this is a phone or a tablet, whose keyboard is on the screen: by the
- * browser's own name for its system, as touch media queries vary with what an
- * emulator or a tablet has plugged in.
- * @param {Navigator} [nav]
- */
-export const isPhone = (nav = globalThis.navigator) => /Android|iPhone|iPad|iPod/i.test(String(nav?.userAgent ?? ""));
 
 const isTyped = (el) =>
   (el?.localName === "textarea" || (el?.localName === "input" && !UNTYPED.has(String(el.getAttribute?.("type") ?? "text").toLowerCase()))) &&

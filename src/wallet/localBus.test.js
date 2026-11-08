@@ -107,6 +107,14 @@ vi.mock("../shared/walletEngine.js", () => ({
   startShieldedSync: vi.fn(async () => {}),
 }));
 
+// The node, prover and archiver checks the overview starts: none, but in the
+// tests of them, so no test reaches a real network or counts their reads.
+const statusChecks = vi.hoisted(() => ({ real: false }));
+vi.mock("../shared/networkStatus.js", async (importOriginal) => {
+  const real = await importOriginal();
+  return { ...real, checkAllEndpoints: (endpoints) => (statusChecks.real ? real.checkAllEndpoints(endpoints) : real.getNetworkStatus()) };
+});
+
 function memoryStorage() {
   const store = new Map();
   return {
@@ -432,6 +440,35 @@ describe("contacts", () => {
       await expect(localSend({ type: "DUSK_UI_UNLOCK", password: "password123" })).resolves.toMatchObject({ ok: true });
       expect((await contacts({ op: "list" })).map((e) => e.name)).toEqual([LABEL]);
     });
+  });
+});
+
+describe("the network's status, in the app", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    engine.unlocked = false;
+    statusChecks.real = true;
+  });
+
+  afterEach(() => {
+    statusChecks.real = false;
+  });
+
+  it("is checked as the wallet draws, and the page drawn again with what the check found, as the extension's dot says it", async () => {
+    localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://testnet.nodes.dusk.network", chainId: 2 }));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response('{"chain_id":2}')));
+    const told = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent: told });
+    const { localSend } = await import("./localBus.js");
+    // Never checked: unknown, and a check starts.
+    await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ networkStatus: { nodeStatus: expect.stringMatching(/unknown|checking/) } });
+    await vi.waitFor(() => expect(told.mock.calls.map(([event]) => event.detail.type)).toContain("DUSK_UI_NETWORK_CHANGED"));
+    await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ networkStatus: { nodeStatus: "online" } });
+
+    // Without a signal, asked now, as the page asks back online: offline.
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
+    await expect(localSend({ type: "DUSK_UI_CHECK_NETWORK" })).resolves.toMatchObject({ networkStatus: { nodeStatus: "offline" } });
+    await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ networkStatus: { nodeStatus: "offline" } });
   });
 });
 

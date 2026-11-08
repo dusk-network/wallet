@@ -13,7 +13,7 @@ import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem } from "../shared/securityPolicy.js";
-import { chainIdForChoice, readChainId } from "../shared/networkStatus.js";
+import { chainIdForChoice, checkAllEndpoints, getNetworkStatus, isStatusStale, readChainId, resetNetworkStatus, statusChainRefusal } from "../shared/networkStatus.js";
 import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
@@ -113,6 +113,23 @@ async function ensureEngineConfigured() {
       });
   }
   return settings;
+}
+
+// The node, prover and archiver, checked as the wallet draws, as the
+// extension's background checks them: at most every 5 minutes, and after 30
+// seconds while something fails. The page draws again once a check is done,
+// for the header's dot to say what it found.
+async function networkStatusFor(settings, { failing }) {
+  const status = await getNetworkStatus();
+  if (isStatusStale(status, failing || status.nodeStatus === "offline" ? 30_000 : 5 * 60_000)) {
+    const said = (s) => [s?.nodeStatus, s?.proverStatus, s?.archiverStatus, s?.nodeChainId].join("|");
+    checkAllEndpoints({ nodeUrl: settings.nodeUrl, proverUrl: settings.proverUrl, archiverUrl: settings.archiverUrl })
+      .then((next) => {
+        if (said(next) !== said(status)) tellPage({ type: "DUSK_UI_NETWORK_CHANGED" });
+      })
+      .catch(() => {});
+  }
+  return status;
 }
 
 function engineStatus() {
@@ -317,6 +334,8 @@ export async function localSend(message) {
 
       // The chain ID the node signs for, fixed with it, as the background fixes it.
       const chainId = await chainIdForChoice(nodeUrl, { accept: Number.isInteger(message?.acceptChain) ? message.acceptChain : null });
+      // What a check said of the network before is for that one.
+      await resetNetworkStatus();
       const nextSettings = await setSettings({
         nodeUrl,
         chainId,
@@ -420,6 +439,7 @@ export async function localSend(message) {
         }
       }
 
+      const networkStatus = await networkStatusFor(settings, { failing: Boolean(balanceError) || !Number.isInteger(settings.chainId) });
       return {
         hasVault: Boolean(vault),
         isUnlocked: status.isUnlocked,
@@ -441,7 +461,9 @@ export async function localSend(message) {
         sendPasswordLimit: (await sendPasswordLimit())?.toString() ?? null,
         customGas: settings.customGas ?? null,
         chainId: settings.chainId,
+        chainRefusal: statusChainRefusal(networkStatus, settings.nodeUrl, settings.chainId),
         networkName: networkNameFromNodeUrl(settings.nodeUrl),
+        networkStatus,
         activeOrigin,
         activeConnected,
         txs,
@@ -452,6 +474,12 @@ export async function localSend(message) {
         // Every wallet the vault holds, those another password opens too.
         walletsHere: await countVaultWallets().catch(() => null),
       };
+    }
+
+    // The network checked now, as when the phone is back online.
+    if (message?.type === "DUSK_UI_CHECK_NETWORK") {
+      const settings = await getSettings();
+      return { ok: true, networkStatus: await checkAllEndpoints({ nodeUrl: settings.nodeUrl, proverUrl: settings.proverUrl, archiverUrl: settings.archiverUrl }) };
     }
 
     // A send looked up again by its ID, as the extension's background does:
