@@ -2,7 +2,10 @@ import { h } from "../../lib/dom.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { subnav } from "../../components/Subnav.js";
 import { copyButton, resetCopied } from "../../components/CopyButton.js";
-import { downloadQrPng, qrCodeEl } from "../../components/QrCode.js";
+import { downloadQrPng, qrCodeEl, qrPngBlob } from "../../components/QrCode.js";
+import { saveToDownloads, shareText } from "../../../platform/native.js";
+import { isTauriRuntime } from "../../../platform/runtime.js";
+import { isPhone } from "../../lib/device.js";
 import { duskNameEl } from "../../components/DuskName.js";
 import { fullAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
@@ -221,8 +224,14 @@ export function receiveView(ov, { state, actions } = {}) {
   const downloadCurrentQr = async () => {
     if (!curQrValue) return;
     try {
-      await downloadQrPng(curQrValue, qrFilename({ request: wantRequest, tab }));
-      actions?.showToast?.("Downloaded QR PNG");
+      const name = qrFilename({ request: wantRequest, tab });
+      // The app saves it in the phone's Downloads; a page, as a download.
+      if (isTauriRuntime() && (await saveToDownloads(name, "image/png", new Uint8Array(await (await qrPngBlob(curQrValue)).arrayBuffer())))) {
+        actions?.showToast?.(`QR saved to Downloads as ${name}`);
+      } else {
+        await downloadQrPng(curQrValue, name);
+        actions?.showToast?.("Downloaded QR PNG");
+      }
       keepRequest();
     } catch (e) {
       actions?.showToast?.(e?.message ?? "QR download failed", 2500);
@@ -269,7 +278,8 @@ export function receiveView(ov, { state, actions } = {}) {
   });
   qrMenu.appendChild(downloadMenuItem);
 
-  qrCard.title = "Right-click for QR options";
+  // A phone's long press opens the same menu as a right-click.
+  qrCard.title = isPhone() ? "Long-press for QR options" : "Right-click for QR options";
   qrCard.addEventListener("contextmenu", (e) => {
     showQrMenu(e);
   });
@@ -282,7 +292,11 @@ export function receiveView(ov, { state, actions } = {}) {
           const shareValue = wantRequest && curLink ? curLink : curRecipient;
           if (!shareValue) return;
 
-          // Prefer native share sheet when available.
+          // The phone's share sheet: the app's own, else the browser's.
+          if (await shareText(shareValue, wantRequest && curLink ? "Dusk payment request" : "Dusk address")) {
+            keepRequest();
+            return;
+          }
           if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
             try {
               await navigator.share({

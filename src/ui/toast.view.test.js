@@ -193,6 +193,12 @@ describe("unlock", () => {
     // Typing again clears it.
     pwd.dispatchEvent(fakeEvent("input"));
     expect([error.hidden, pwd.getAttribute("aria-invalid")]).toEqual([true, null]);
+
+    // A phone's keyboard has no Caps Lock, as Chen's app said it had.
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    dom.document.querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
+    await settle();
+    expect(error.textContent).toBe("Wrong password. Try again, or restore with your recovery phrase below.");
   });
 });
 

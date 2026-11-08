@@ -10,6 +10,8 @@
     "store:default",
     "stronghold:default",
     "fs:default",
+    "opener:default",
+    "deep-link:default",
     {
       "identifier": "fs:allow-exists",
       "allow": [

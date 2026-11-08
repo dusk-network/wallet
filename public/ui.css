@@ -3473,8 +3473,15 @@ body[data-runtime="tauri"] {
   }
 }
 
+/* The app draws under a phone's status bar: the wallet starts below it (the
+   test network's strip first, then the header), the page's dark under the
+   clock, whose icons the app makes light. */
+body[data-runtime="tauri"] .panel {
+  padding-top: max(env(safe-area-inset-top, 0px), var(--dusk-safe-top-min));
+}
+
 body[data-runtime="tauri"] .panel-header {
-  padding-top: calc(14px + max(env(safe-area-inset-top, 0px), var(--dusk-safe-top-min)));
+  padding-top: 14px;
 }
 
 @media (max-width: 420px) {

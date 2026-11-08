@@ -15,6 +15,7 @@ import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.j
 import { networkForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
+import { thisDevice } from "../../lib/device.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress, siteName } from "../../lib/strings.js";
 import { dateText } from "../../lib/time.js";
@@ -839,6 +840,8 @@ export function optionsView(ov, { state, actions } = {}) {
     ]
   );
 
+  // What a reset takes with the wallets: the app has no connected sites.
+  const resetKept = platform.capabilities.dapp ? "contacts, names, activity and connected sites" : "contacts, names and activity";
   const resetBtn = h("button", {
     class: "btn-destructive",
     type: "button",
@@ -846,7 +849,7 @@ export function optionsView(ov, { state, actions } = {}) {
     onclick: async () => {
       const sure = await askConfirm({
         title: "Reset wallet?",
-        text: "This removes every wallet here, with its contacts, names, activity and connected sites. Your funds stay on Dusk. You need each recovery phrase to use them again.",
+        text: `This removes every wallet here, with its ${resetKept}. Your funds stay on Dusk. You need each recovery phrase to use them again.`,
         action: "Reset wallet",
         destructive: true,
       });
@@ -914,7 +917,7 @@ export function optionsView(ov, { state, actions } = {}) {
     section("Reset", [
       h("p", {
         class: "settings-note",
-        text: "Removes every wallet, with its contacts, names, activity and connected sites, from this browser, and goes back to Mainnet. Your funds stay on Dusk. You need each recovery phrase to use them again.",
+        text: `Removes every wallet, with its ${resetKept}, from ${thisDevice()}, and goes back to Mainnet. Your funds stay on Dusk. You need each recovery phrase to use them again.`,
       }),
       resetBtn,
     ], "settings-section--danger"),
