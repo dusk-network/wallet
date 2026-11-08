@@ -36,7 +36,7 @@ import {
 import { handleRpc } from "./rpc.js";
 import { assertSendPassword, sendPasswordLimit, sendPasswordTerms } from "../shared/sendPassword.js";
 import { offersRequestLink, openRequestLink } from "./requestLinks.js";
-import { askKeptAgain, bindPendingWallet, cancelPendingApprovals, checkResume, getPending, keptApproval, requestKey, resolvePendingDecision } from "./pending.js";
+import { askKeptAgain, bindPendingWallet, cancelPendingApprovals, checkResume, decideKept, getPending, keptApproval, requestKey, resolvePendingDecision } from "./pending.js";
 import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNames.js";
 import {
   broadcastChainChangedAll,
@@ -1200,15 +1200,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI approves or rejects a pending request
       if (message?.type === "DUSK_PENDING_DECISION") {
-        // Answered while the background was stopped: its site hasn't asked
-        // again yet; the approval waits a moment for it.
-        if (!getPending(message.rid) && (await keptApproval(message.rid))) {
-          askKeptAgain(message.rid);
-          sendResponse({ ok: false, error: { code: "waking", message: "The wallet is picking this request up again." } });
-          return;
-        }
-        const res = await resolvePendingDecision(message);
-        sendResponse(res);
+        // Answered while the background was stopped, before its site asked
+        // again: a refusal is final now; an approval waits a moment for it.
+        const kept = getPending(message.rid) ? null : await decideKept(message.rid, message.decision);
+        sendResponse(kept ?? (await resolvePendingDecision(message)));
         return;
       }
 

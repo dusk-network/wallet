@@ -65,10 +65,13 @@ function closeShown(entry) {
 // screen (a call, another app), and with it what it held of a request waiting
 // for its approval: the site's answer and the approval's Approve. So each
 // waiting request is kept in session storage too, by the site's own request
-// (`key`: its tab, frame and ID). The site's content script asks again once
-// the background is back (`resume`), and the request takes up the approval
-// still open, the same one: its params unchanged, its time left. A request
-// that can't be taken up says so, to the site and on its approval.
+// (`key`: its tab, frame and ID), with what it was asked for (`context`: the
+// wallet, profile, network and site). The site's content script asks again
+// once the background is back (`resume`), and the request takes up the
+// approval still open, the same one: its params and context unchanged, its
+// time left. An answer, or any end, is kept as final (`ended`), and a site
+// asking again hears it; an approval is kept so before anything is signed or
+// sent, or nothing is.
 
 const KEPT_KEY = "dusk_pending_approvals_v1";
 let keptWrites = Promise.resolve();
@@ -76,65 +79,125 @@ let keptWrites = Promise.resolve();
 /** What a site hears when the wallet stopped before it answered, and nothing can take it up. */
 const LOST_TEXT = "The wallet stopped before it answered, as Firefox stops it in the background. Check its Activity before you try again.";
 
+/** What an approval says, and its site hears, when the wallet couldn't keep it as answered: nothing goes. */
+export const NOT_NOTED_TEXT = "The wallet couldn't note your approval, so nothing was signed or sent. Ask the site again.";
+
+const REJECTED = { code: ERROR_CODES.USER_REJECTED, message: "User rejected the request" };
+const CLOSED = { code: ERROR_CODES.USER_REJECTED, message: "User closed the approval window" };
+
+async function readKept() {
+  const all = (await storageSessionGet(KEPT_KEY))?.[KEPT_KEY];
+  return all && typeof all === "object" ? all : {};
+}
+
 async function keptAll() {
   try {
-    const all = (await storageSessionGet(KEPT_KEY))?.[KEPT_KEY];
-    return all && typeof all === "object" ? all : {};
+    return await readKept();
   } catch {
     return {};
   }
 }
 
-// One change at a time, in the order asked.
+// A kept request still in its time.
+const fresh = (record) => Boolean(record) && Date.now() - Number(record.createdAt) < APPROVAL_TTL_MS;
+
+// One change at a time, in the order asked, each whole: `change` sees what's
+// kept and what waits here (pendingApprovals) at once. What it returns comes
+// back once written; a failed read or write rejects, never writes a guess.
 function changeKept(change) {
-  keptWrites = keptWrites
-    .then(async () => {
-      const all = await keptAll();
-      change(all);
-      await storageSessionSet({ [KEPT_KEY]: all });
-    })
-    .catch(() => {});
-  return keptWrites;
+  const done = keptWrites.then(async () => {
+    const all = await readKept();
+    for (const [rid, record] of Object.entries(all)) {
+      if (!(Date.now() - Number(record?.createdAt) < 2 * APPROVAL_TTL_MS)) delete all[rid];
+    }
+    const result = change(all);
+    await storageSessionSet({ [KEPT_KEY]: all });
+    return result;
+  });
+  keptWrites = done.catch(() => {});
+  return done;
 }
 
-const keep = (rid, entry) =>
-  changeKept((all) => {
-    const { key, origin, kind, params, createdAt, windowId, tabId, backTo } = entry;
-    all[rid] = { rid, key, origin, kind, params, createdAt, windowId, tabId, backTo };
-  });
-const forget = (rid) =>
-  changeKept((all) => {
-    delete all[rid];
-  });
+// What's kept of a request: never its answer.
+function recordOf(rid, entry) {
+  const { key, origin, kind, params, context, createdAt, windowId, tabId, backTo } = entry;
+  return { rid, key, origin, kind, params, context, walletId: entry.shown?.walletId ?? "", createdAt, windowId, tabId, backTo };
+}
 
-// A kept request still in its time, by its approval's ID, or by the site's request.
-const fresh = (record) => record && Date.now() - Number(record.createdAt) < APPROVAL_TTL_MS;
+// Only a site's request (`key`) is asked again.
+function keep(rid, entry) {
+  if (!entry.key) return;
+  changeKept((all) => {
+    if (!all[rid]?.ended) all[rid] = recordOf(rid, entry);
+  }).catch(() => {});
+}
+
+const endKept = (rid, entry, ended) =>
+  entry.key
+    ? changeKept((all) => {
+        all[rid] = { ...(all[rid] ?? recordOf(rid, entry)), ended };
+      })
+    : Promise.resolve();
+
+// Ended while the background was stopped (closed, cancelled, the wallet
+// changed): its approval goes, and its site hears why as it asks again.
+const endKeptWhere = (match, ended) =>
+  changeKept((all) => {
+    for (const record of Object.values(all)) {
+      if (record.ended || pendingApprovals.has(record.rid) || !match(record)) continue;
+      record.ended = ended;
+      closeShown(record);
+    }
+  }).catch(() => {});
 
 /**
  * A request kept while it waits, still in its time: its approval's window
- * and what it asked. Null for none.
+ * and what it asked. Null for none, or one over.
  * @param {string} rid
  */
 export async function keptApproval(rid) {
   await keptWrites;
   const record = (await keptAll())[String(rid ?? "")];
-  return fresh(record) ? record : null;
+  return fresh(record) && !record.ended ? record : null;
 }
 
 /**
  * Asked again after a stop, the site's request `key` goes on only when its
  * approval still waits, kept through it. Else this throws what its site
- * hears: closed meanwhile, or nothing kept, as it may have gone already.
+ * hears: how it ended, or, nothing kept, that it may have gone already.
  * @param {string} key
  */
 export async function checkResume(key) {
   await keptWrites;
   const record = Object.values(await keptAll()).find((r) => r.key === key && fresh(r));
   if (!record) throw rpcError(4900, LOST_TEXT);
-  if (record.closed) {
-    forget(record.rid);
-    throw rpcError(ERROR_CODES.USER_REJECTED, "User closed the approval window");
+  if (record.ended) throw rpcError(record.ended.code, record.ended.message);
+}
+
+/**
+ * An answer to an approval whose request is kept through a stop and not
+ * asked again yet: a refusal (or `abandon`, the window giving up on it) is
+ * final at once, and its site hears it as it asks again; an approval waits
+ * for that ("waking"). Null when none is kept so.
+ * @param {string} rid
+ * @param {string} decision
+ */
+export async function decideKept(rid, decision) {
+  let found = null;
+  await changeKept((all) => {
+    const record = all[String(rid ?? "")];
+    if (!fresh(record) || record.ended || pendingApprovals.has(record.rid)) return;
+    found = record;
+    if (decision !== "approve") record.ended = decision === "abandon" ? { code: 4900, message: LOST_TEXT } : REJECTED;
+  }).catch(() => {});
+  if (!found) return null;
+  if (decision === "approve") {
+    askKeptAgain(rid).catch(() => {});
+    return { ok: false, error: { code: "waking", message: "The wallet is picking this request up again." } };
   }
+  closeShown(found);
+  keepAnswer({ origin: found.origin, kind: found.kind, params: found.params, shown: { walletId: found.walletId } }, decision === "abandon" ? "cancelled" : "rejected");
+  return { ok: true };
 }
 
 /** The site's request, by its tab, frame and ID: what a request asked again is matched by. */
@@ -149,17 +212,11 @@ export const requestKey = (tabId, frameId, id) => `${tabId ?? ""}:${frameId ?? 0
 export async function askKeptAgain(rid) {
   await keptWrites;
   for (const record of Object.values(await keptAll())) {
-    if ((rid && record.rid !== rid) || !fresh(record) || record.closed || pendingApprovals.has(record.rid)) continue;
+    if ((rid && record.rid !== rid) || !fresh(record) || record.ended || pendingApprovals.has(record.rid)) continue;
     const [, tabId, frameId, id] = /^(\d+):(\d+):(.+)$/s.exec(String(record.key ?? "")) ?? [];
     if (tabId) tabsSendMessage(Number(tabId), { type: "DUSK_ASK_AGAIN", id }, { frameId: Number(frameId) }).catch(() => {});
   }
 }
-
-// Its approval closed while the background was stopped: nothing answers it.
-const closedKept = (match) =>
-  changeKept((all) => {
-    for (const record of Object.values(all)) if (match(record) && !pendingApprovals.has(record.rid)) record.closed = true;
-  });
 
 // The same request, asked again: what its approval shows is what it asks now.
 const sameAsked = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -168,7 +225,7 @@ const sameAsked = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? nu
 function rejectPending(rid, entry, message, answer = "cancelled", code = ERROR_CODES.USER_REJECTED) {
   if (!entry) return;
   pendingApprovals.delete(rid);
-  forget(rid);
+  endKept(rid, entry, { code, message }).catch(() => {});
   clearTimeout(entry.timer);
   closeShown(entry);
   keepAnswer(entry, answer);
@@ -206,11 +263,12 @@ async function showApproval(url) {
  * @param {any} params
  * @param {{ walletId: string }} [shown] - the wallet the request is for, ""
  *   until its window shows one; kept by reference, so the caller sees it bound
- * @param {{ beforeApprove?: (answer: object) => Promise<unknown> }} [opts] - what
- *   an approval must pass first: thrown, the request goes on waiting, and its
- *   window says why
+ * @param {{ beforeApprove?: (answer: object) => Promise<unknown>, key?: string, resume?: boolean, context?: object }} [opts]
+ *   - `beforeApprove`: what an approval must pass first: thrown, the request
+ *   goes on waiting, and its window says why; `key`, `resume`, `context`: the
+ *   site's request, asked again after a stop, and what it's asked for (above)
  */
-export async function requestUserApproval(kind, origin, params, shown = { walletId: "" }, { beforeApprove, key = "", resume = false } = {}) {
+export async function requestUserApproval(kind, origin, params, shown = { walletId: "" }, { beforeApprove, key = "", resume = false, context = null } = {}) {
   if (
     pendingApprovals.size >= MAX_PENDING ||
     [...pendingApprovals.values()].some((entry) => entry.origin === origin)
@@ -218,7 +276,7 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
     throw rpcError(ERROR_CODES.USER_REJECTED, "Another approval is already pending");
   }
 
-  // Waiting, with its time left; kept for a stop of the background.
+  // Waiting, with its time left.
   const wait = (rid, entry) =>
     new Promise((resolve, reject) => {
       Object.assign(entry, { resolve, reject });
@@ -227,26 +285,39 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
         Math.max(0, entry.createdAt + APPROVAL_TTL_MS - Date.now())
       );
       pendingApprovals.set(rid, entry);
-      keep(rid, entry);
     });
 
   // Asked again after a stop: the approval still open takes it up, when it
-  // shows what's asked now. Else that one goes, and a new one asks.
+  // shows what's asked now, for the same wallet, profile, network and site.
+  // Changed params ask anew; anything else changed ends it.
   if (resume && key) {
-    await keptWrites;
-    const kept = Object.values(await keptAll()).find((r) => r.key === key && r.origin === origin && r.kind === kind && fresh(r) && !r.closed);
-    if (kept && !pendingApprovals.has(kept.rid)) {
-      if (sameAsked(kept.params, params)) {
+    let taken = null;
+    let ended = null;
+    let stale = null;
+    await changeKept((all) => {
+      const kept = Object.values(all).find((r) => r.key === key && fresh(r));
+      if (!kept) ended = { code: 4900, message: LOST_TEXT };
+      else if (kept.ended) ended = kept.ended;
+      else if (pendingApprovals.has(kept.rid)) ended = { code: ERROR_CODES.USER_REJECTED, message: "Another approval is already pending" };
+      else if (kept.origin !== origin || kept.kind !== kind || !sameAsked(kept.context, context)) {
+        ended = kept.ended = { code: ERROR_CODES.UNAUTHORIZED, message: "Wallet changed while awaiting approval" };
+        closeShown(kept);
+      } else if (!sameAsked(kept.params, params)) {
+        delete all[kept.rid];
+        stale = kept;
+      } else {
         const { rid, createdAt, windowId, tabId, backTo } = kept;
-        return wait(rid, { kind, origin, params, shown, beforeApprove, key, createdAt, windowId, tabId, backTo });
+        taken = wait(rid, { kind, origin, params, shown, beforeApprove, key, context, createdAt, windowId, tabId, backTo });
       }
-      forget(kept.rid);
-      closeShown(kept);
-    }
+    });
+    if (ended) throw rpcError(ended.code, ended.message);
+    if (taken) return taken;
+    if (stale) closeShown(stale);
   }
 
   const rid = crypto.randomUUID();
-  const promise = wait(rid, { kind, origin, params, shown, beforeApprove, key, createdAt: Date.now() });
+  const promise = wait(rid, { kind, origin, params, shown, beforeApprove, key, context, createdAt: Date.now() });
+  keep(rid, pendingApprovals.get(rid));
 
   const url = runtimeGetURL(
     `notification.html?rid=${encodeURIComponent(rid)}`
@@ -277,7 +348,7 @@ ext?.windows?.onRemoved?.addListener((windowId) => {
       rejectPending(rid, entry, "User closed the approval window", "closed");
     }
   }
-  closedKept((record) => record.windowId === windowId);
+  endKeptWhere((record) => record.windowId === windowId, CLOSED);
 });
 
 ext?.tabs?.onRemoved?.addListener?.((tabId) => {
@@ -288,7 +359,7 @@ ext?.tabs?.onRemoved?.addListener?.((tabId) => {
       rejectPending(rid, entry, "User closed the approval window", "closed");
     }
   }
-  closedKept((record) => record.tabId === tabId);
+  endKeptWhere((record) => record.tabId === tabId, CLOSED);
 });
 
 // Back on an approval before any press goes to Firefox for Android's home,
@@ -297,15 +368,9 @@ ext?.tabs?.onRemoved?.addListener?.((tabId) => {
 // only: a window's site tab may come to the front with the window open.
 ext?.tabs?.onActivated?.addListener?.(({ tabId } = {}) => {
   for (const [rid, entry] of pendingApprovals.entries()) {
-    if (entry.tabId !== undefined && entry.backTo === tabId) rejectPending(rid, entry, "User rejected the request");
+    if (entry.tabId !== undefined && entry.backTo === tabId) rejectPending(rid, entry, REJECTED.message);
   }
-  changeKept((all) => {
-    for (const record of Object.values(all)) {
-      if (record.tabId === undefined || record.backTo !== tabId || record.closed || pendingApprovals.has(record.rid)) continue;
-      record.closed = true;
-      closeShown(record);
-    }
-  });
+  endKeptWhere((record) => record.tabId !== undefined && record.backTo === tabId, REJECTED);
 });
 
 export function getPending(rid) {
@@ -356,17 +421,29 @@ export function resolvePendingDecision(message) {
   return decided(rid, entry, message);
 }
 
-function decided(rid, entry, message) {
+async function decided(rid, entry, message) {
   const { decision } = message;
+  const approve = decision === "approve";
   pendingApprovals.delete(rid);
-  // Answered: a stop after this takes nothing up again, whatever came of it.
-  forget(rid);
   clearTimeout(entry.timer);
+  // Answered for good before anything is signed or sent: a stop after this
+  // takes nothing up again, whatever came of it. Not kept so, nothing goes.
+  const noted = endKept(rid, entry, approve ? { code: 4900, message: LOST_TEXT } : REJECTED);
+  if (approve) {
+    try {
+      await noted;
+    } catch {
+      closeShown(entry);
+      keepAnswer(entry, "cancelled");
+      entry.reject(rpcError(ERROR_CODES.INTERNAL, NOT_NOTED_TEXT));
+      return { ok: false, error: { code: "ended", message: NOT_NOTED_TEXT } };
+    }
+  } else noted.catch(() => {});
   // A tab doesn't close itself as a window does.
   if (entry.tabId !== undefined) closeShown(entry);
-  keepAnswer(entry, decision === "approve" ? "approved" : "rejected");
+  keepAnswer(entry, approve ? "approved" : "rejected");
 
-  if (decision === "approve") {
+  if (approve) {
     // Optionally accept user edited parameters (e.g. gas overrides).
     // If none were provided, resolve with null.
     entry.resolve(
@@ -377,7 +454,7 @@ function decided(rid, entry, message) {
     return { ok: true };
   }
 
-  entry.reject(rpcError(ERROR_CODES.USER_REJECTED, "User rejected the request"));
+  entry.reject(rpcError(REJECTED.code, REJECTED.message));
   return { ok: true };
 }
 
@@ -396,4 +473,9 @@ export function cancelPendingApprovals(origin, reason = "Wallet state changed", 
     if (Array.isArray(wallets) && !wallets.includes(String(entry.shown?.walletId || open || ""))) continue;
     rejectPending(rid, entry, reason);
   }
+  // And those kept through a stop, not asked again yet: never taken up after it.
+  endKeptWhere(
+    (record) => (!origin || record.origin === origin) && (!Array.isArray(wallets) || wallets.includes(String(record.walletId || open || ""))),
+    { code: ERROR_CODES.USER_REJECTED, message: reason }
+  );
 }

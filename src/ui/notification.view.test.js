@@ -145,7 +145,7 @@ describe("a request the wallet stopped for, as Firefox for Android stops it whil
     mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: "Unknown request" });
     pastClickGuard();
     approve().click();
-    await vi.waitFor(() => expect(visibleText(app)).toContain("This request isn't waiting any more, so nothing was approved or sent."));
+    await vi.waitFor(() => expect(visibleText(app)).toContain("This request isn't waiting any more, and this window can't tell whether it went through."));
     expect(dom.window.close).not.toHaveBeenCalled();
     expect(bar()?.querySelector(".btn-primary") ?? null).toBeNull();
   });
@@ -159,6 +159,28 @@ describe("a request the wallet stopped for, as Firefox for Android stops it whil
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     await vi.advanceTimersByTimeAsync(3_000);
     expect([tries, dom.window.close.mock.calls.length]).toEqual([3, 1]);
+  });
+
+  it("ends it for good when its site never asks again, so nothing takes it up later, and says so", async () => {
+    await render("connect", { requestedProfiles: true });
+    mocks.answers.DUSK_PENDING_DECISION = (msg) => (msg.decision === "abandon" ? { ok: true } : { ok: false, error: { code: "waking", message: "The wallet is picking this request up again." } });
+    pastClickGuard();
+    approve().click();
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(decision("abandon")).toBeTruthy();
+    expect(visibleText(app)).toContain("This request isn't waiting any more, and this window can't tell whether it went through.");
+    expect(bar()?.querySelector(".btn-primary") ?? null).toBeNull();
+  });
+
+  it("says plainly that nothing went when the wallet couldn't note the approval, with nothing left to press", async () => {
+    await render("connect", { requestedProfiles: true });
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: { code: "ended", message: "The wallet couldn't note your approval, so nothing was signed or sent. Ask the site again." } });
+    pastClickGuard();
+    approve().click();
+    await vi.waitFor(() => expect(visibleText(app)).toContain("The wallet couldn't note your approval, so nothing was signed or sent."));
+    expect(dom.window.close).not.toHaveBeenCalled();
+    expect(bar()?.querySelector(".btn-primary") ?? null).toBeNull();
   });
 
   it("rejects it with the phone's Back, once a press that counts put up its entry", async () => {

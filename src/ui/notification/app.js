@@ -241,7 +241,8 @@ document.addEventListener("visibilitychange", () => {
   if (approvalLive && rid) {
     untilTakenUp(() => send({ type: "DUSK_GET_PENDING", rid }), (p) => p?.waking)
       .then((pending) => {
-        if (approvalLive && (!pending || pending.waking)) ended();
+        if (approvalLive && pending?.waking) giveUp();
+        else if (approvalLive && !pending) ended();
       })
       .catch(() => {});
   }
@@ -274,13 +275,21 @@ document.addEventListener(
 
 // A request this window no longer answers: the wallet stopped meanwhile (Firefox
 // for Android stops it in the background) and nothing took it up, or it was
-// handled elsewhere. Said, with nothing to press: never a dead Approve.
-export const ENDED_TEXT = "This request isn't waiting any more, so nothing was approved or sent. Close this tab and ask the site again.";
+// handled elsewhere, maybe approved and sent. Said, with nothing to press:
+// never a dead Approve.
+export const ENDED_TEXT = "This request isn't waiting any more, and this window can't tell whether it went through. Check Activity before you ask the site again.";
 
-function ended() {
+function ended(text = ENDED_TEXT) {
   approvalLive = false;
   stopActivityHeartbeat();
-  renderError(ENDED_TEXT);
+  renderError(text);
+}
+
+// Its site never asked again: the wallet ends it for good, and the site hears
+// so if it asks later, rather than taking up a window that answers nothing.
+function giveUp() {
+  send({ type: "DUSK_PENDING_DECISION", rid, decision: "abandon" }).catch(() => {});
+  ended();
 }
 
 // A request kept through a stop of the wallet's background waits for its
@@ -303,8 +312,13 @@ async function decide(decision, approvedParams, withAnswer = {}) {
     () => send({ type: "DUSK_PENDING_DECISION", rid, decision, ...(decision === "approve" ? { approvedParams, ...withAnswer } : {}) }),
     (answer) => answer?.error?.code === "waking"
   );
-  if (res?.ok === false && (res.error === "Unknown request" || res.error?.code === "waking")) {
-    ended();
+  if (res?.error?.code === "waking") {
+    giveUp();
+    return;
+  }
+  // Over: gone meanwhile, or the wallet couldn't note the approval (pending.js).
+  if (res?.ok === false && (res.error === "Unknown request" || res.error?.code === "ended")) {
+    ended(res.error?.message);
     return;
   }
   if (res?.error?.message) throw Object.assign(new Error(res.error.message), { refused: true, data: res.error.data });
@@ -421,8 +435,11 @@ export async function renderNotification() {
   }
 
   // One kept through a stop of the wallet's background waits for its site to ask again.
-  let pending = await untilTakenUp(() => send({ type: "DUSK_GET_PENDING", rid }), (p) => p?.waking);
-  if (pending?.waking) pending = null;
+  const pending = await untilTakenUp(() => send({ type: "DUSK_GET_PENDING", rid }), (p) => p?.waking);
+  if (pending?.waking) {
+    giveUp();
+    return;
+  }
   // The node's network, by the chain ID it gave, for what the window knows only by the node.
   noteChainId(pending?.nodeUrl, pending?.chainId);
   if (!pending) {

@@ -15,7 +15,8 @@ const tabs = vi.hoisted(() => ({
 }));
 const notes = vi.hoisted(() => []);
 // The browser's session storage: it outlives the background's stops.
-const session = vi.hoisted(() => ({ items: {} }));
+// `gate`, when set, runs before each write: to hold it, or to fail it.
+const session = vi.hoisted(() => ({ items: {}, gate: null }));
 
 vi.mock("../shared/siteRecords.js", () => ({
   noteSiteRequest: async (walletId, origin, request) => {
@@ -60,7 +61,10 @@ vi.mock("../platform/extensionApi.js", () => {
     windowsCreate: vi.fn(async () => ({ id: 999 })),
     windowsRemove,
     storageSessionGet: async (key) => ({ [key]: structuredClone(session.items[key]) }),
-    storageSessionSet: async (items) => Object.assign(session.items, structuredClone(items)),
+    storageSessionSet: async (items) => {
+      if (session.gate) await session.gate(items);
+      Object.assign(session.items, structuredClone(items));
+    },
     tabsCreate: (...args) => tabs.create(...args),
     tabsGet: (...args) => tabs.get(...args),
     tabsSendMessage: (...args) => tabs.send(...args),
@@ -277,15 +281,18 @@ describe("pending approvals", () => {
   describe("through a stop of the background, as Firefox for Android stops it while Firefox is away", () => {
     const SITE = "https://testnet.dusk.domains";
     const KEY = "7:0:req-9";
+    // What it was asked for: the wallet, profile, network and site.
+    const CONTEXT = { origin: SITE, walletId: "acct0", nodeUrl: "https://testnet.nodes.dusk.network", chainId: 2, profileId: "account:0:acct0", accountIndex: 0 };
 
     // One waiting in its tab, then the background gone, with what it held, and back.
     async function stoppedWhileWaiting(params = { amount: "1" }) {
       browserHas.windows = false;
       session.items = {};
+      session.gate = null;
       vi.resetModules();
       const before = await import("./pending.js");
       vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValueOnce("rid-kept");
-      before.requestUserApproval("send_tx", SITE, params, { walletId: "acct0" }, { key: KEY });
+      before.requestUserApproval("send_tx", SITE, params, { walletId: "acct0" }, { key: KEY, context: CONTEXT }).catch(() => {});
       await new Promise((r) => setTimeout(r, 0));
       vi.resetModules();
       tabs.create.mockClear();
@@ -299,11 +306,11 @@ describe("pending approvals", () => {
         // Back, before its site asks again: kept, not lost.
         await expect(pending.keptApproval("rid-kept")).resolves.toMatchObject({ origin: SITE, tabId: 77 });
         await expect(pending.checkResume(KEY)).resolves.toBeUndefined();
-        const answer = pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true });
+        const answer = pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true, context: CONTEXT });
         await new Promise((r) => setTimeout(r, 0));
         expect(tabs.create).not.toHaveBeenCalled();
         expect(pending.getPending("rid-kept")).toMatchObject({ origin: SITE, tabId: 77 });
-        expect(pending.resolvePendingDecision({ rid: "rid-kept", decision: "approve", approvedParams: { gas: null } })).toEqual({ ok: true });
+        expect(await pending.resolvePendingDecision({ rid: "rid-kept", decision: "approve", approvedParams: { gas: null } })).toEqual({ ok: true });
         await expect(answer).resolves.toEqual({ gas: null });
         // Answered: nothing takes it up again, whatever came of it.
         await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4900, message: expect.stringContaining("Check its Activity") });
@@ -318,7 +325,7 @@ describe("pending approvals", () => {
         tabs.send.mockClear();
         await pending.askKeptAgain();
         expect(tabs.send).toHaveBeenCalledWith(7, { type: "DUSK_ASK_AGAIN", id: "req-9" }, { frameId: 0 });
-        pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true });
+        pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true, context: CONTEXT });
         await new Promise((r) => setTimeout(r, 0));
         // Taken up: nothing more to ask.
         tabs.send.mockClear();
@@ -335,7 +342,6 @@ describe("pending approvals", () => {
         onTabRemovedCb(77);
         // As a closed approval does, never one nobody can answer.
         await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4001, message: "User closed the approval window" });
-        await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4900 });
       } finally {
         browserHas.windows = true;
       }
@@ -352,10 +358,99 @@ describe("pending approvals", () => {
       }
     });
 
+    it.each([["wallet", { walletId: "acct1" }], ["profile", { profileId: "account:1:acct1", accountIndex: 1 }], ["network", { nodeUrl: "https://my-node.example" }], ["site", { origin: "https://other.example" }]])(
+      "never takes it up for another %s than it was asked for, and ends it", async (_, changed) => {
+        try {
+          const pending = await stoppedWhileWaiting();
+          const answer = pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true, context: { ...CONTEXT, ...changed } });
+          const outcome = await Promise.race([answer.catch((e) => e), new Promise((r) => setTimeout(() => r("taken up"), 20))]);
+          expect(outcome).toMatchObject({ code: 4100, message: "Wallet changed while awaiting approval" });
+          expect(pending.getPending("rid-kept")).toBeNull();
+          expect(tabs.remove).toHaveBeenCalledWith(77);
+          await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4100 });
+        } finally {
+          browserHas.windows = true;
+        }
+      }
+    );
+
+    it("ends one kept through a stop on a change of the wallet's state, and its site hears why as it asks again", async () => {
+      try {
+        const pending = await stoppedWhileWaiting();
+        // Another site's change, or another wallet's, leaves it.
+        pending.cancelPendingApprovals("https://other.example", "Site disconnected");
+        pending.cancelPendingApprovals(null, "Site disconnected", { wallets: ["acct9"] });
+        await expect(pending.checkResume(KEY)).resolves.toBeUndefined();
+        pending.cancelPendingApprovals(null, "Network changed");
+        await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4001, message: "Network changed" });
+        expect(tabs.remove).toHaveBeenCalledWith(77);
+      } finally {
+        browserHas.windows = true;
+      }
+    });
+
+    it("keeps a refusal made before its site asks again as final at once, and the site hears it then", async () => {
+      try {
+        const pending = await stoppedWhileWaiting();
+        // An approval waits for the site; a refusal doesn't.
+        tabs.send.mockClear();
+        await expect(pending.decideKept("rid-kept", "approve")).resolves.toMatchObject({ ok: false, error: { code: "waking" } });
+        await vi.waitFor(() => expect(tabs.send).toHaveBeenCalled());
+        await expect(pending.decideKept("rid-kept", "reject")).resolves.toEqual({ ok: true });
+        expect(tabs.remove).toHaveBeenCalledWith(77);
+        const answer = pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true, context: CONTEXT });
+        await expect(answer).rejects.toMatchObject({ code: 4001, message: "User rejected the request" });
+        expect(pending.pendingApprovals.size).toBe(0);
+        // Given up on by its window instead: the site hears it may have gone.
+        const again = await stoppedWhileWaiting();
+        await expect(again.decideKept("rid-kept", "abandon")).resolves.toEqual({ ok: true });
+        await expect(again.checkResume(KEY)).rejects.toMatchObject({ code: 4900, message: expect.stringContaining("Check its Activity") });
+      } finally {
+        browserHas.windows = true;
+      }
+    });
+
+    it("lets nothing go before the approval is kept as answered: held, it waits; failed, nothing goes", async () => {
+      try {
+        const pending = await stoppedWhileWaiting();
+        const answer = pending.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true, context: CONTEXT });
+        await new Promise((r) => setTimeout(r, 0));
+        let release;
+        session.gate = () => new Promise((r) => (release = r));
+        const decided = pending.resolvePendingDecision({ rid: "rid-kept", decision: "approve", approvedParams: null });
+        let released = false;
+        answer.then(() => (released = true), () => {});
+        await new Promise((r) => setTimeout(r, 10));
+        // The write held, as a stop now would leave it: nothing let go.
+        expect(released).toBe(false);
+        session.gate = null;
+        release();
+        await expect(decided).resolves.toEqual({ ok: true });
+        await expect(answer).resolves.toBeNull();
+        // Back again after a stop: never taken up a second time.
+        vi.resetModules();
+        const after = await import("./pending.js");
+        await expect(after.checkResume(KEY)).rejects.toMatchObject({ code: 4900 });
+
+        // The write failing: the approval doesn't go through.
+        const failing = await stoppedWhileWaiting();
+        const second = failing.requestUserApproval("send_tx", SITE, { amount: "1" }, { walletId: "acct0" }, { key: KEY, resume: true, context: CONTEXT });
+        await new Promise((r) => setTimeout(r, 0));
+        session.gate = async () => {
+          throw new Error("QuotaExceededError");
+        };
+        await expect(failing.resolvePendingDecision({ rid: "rid-kept", decision: "approve", approvedParams: null })).resolves.toMatchObject({ ok: false, error: { code: "ended", message: failing.NOT_NOTED_TEXT } });
+        await expect(second).rejects.toMatchObject({ code: -32603, message: failing.NOT_NOTED_TEXT });
+      } finally {
+        session.gate = null;
+        browserHas.windows = true;
+      }
+    });
+
     it("asks anew, closing the old approval, when what's asked changed meanwhile", async () => {
       try {
         const pending = await stoppedWhileWaiting({ amount: "1" });
-        pending.requestUserApproval("send_tx", SITE, { amount: "2" }, { walletId: "acct0" }, { key: KEY, resume: true });
+        pending.requestUserApproval("send_tx", SITE, { amount: "2" }, { walletId: "acct0" }, { key: KEY, resume: true, context: CONTEXT });
         await new Promise((r) => setTimeout(r, 0));
         expect(tabs.remove).toHaveBeenCalledWith(77);
         expect(tabs.create).toHaveBeenCalledTimes(1);
