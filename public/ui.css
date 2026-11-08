@@ -4923,9 +4923,11 @@ details.receive-request > summary {
   font-size: 12.5px;
 }
 
+/* On the right, also on a line of their own */
 .request-payment__actions {
   display: flex;
   gap: 12px;
+  margin-left: auto;
 }
 
 /* Colour only where it's done, or asks for a look */
