@@ -277,6 +277,20 @@ describe("after Confirm", () => {
     expect(state.draft).toMatchObject({ to: OTHER });
   });
 
+  it("says a lost connection in words, not the socket's, as Sofia's offline Confirm showed it", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    (await app.confirm()).resolve({ error: { message: "WebSocket connection failed to wss://testnet.nodes.dusk.network/on (readyState=3)" } });
+    await settle();
+    expect(steps()[0]).toEqual([
+      "unknown",
+      "Not confirmed",
+      "The connection to the network was lost. It may still have reached the network: check Activity before you send it again.",
+    ]);
+    expect(visibleText(body)).not.toMatch(/WebSocket|readyState|wss:/);
+  });
+
   it("keeps a send the network didn't take on the Sent screen, with Back to the review as it was", async () => {
     const state = reviewState();
     const app = popup(state);

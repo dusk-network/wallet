@@ -49,9 +49,14 @@ const flush = async () => {
 
 // The popup on `route` with wallet A open; `t.open` is what the wallet's
 // overview says, `t.deliver` the wallet's own messages to the popup.
-async function popupOn(route, extra = {}, answer = async () => undefined, { history } = {}) {
+async function popupOn(route, extra = {}, answer = async () => undefined, { history, tauri } = {}) {
   const dom = installFakeDom({ pathname: "/popup.html" });
   if (history) dom.window.history = history(dom.window);
+  // The app on an Android phone: Tauri's bridge to the wrapper.
+  if (tauri) {
+    dom.window.__TAURI_INTERNALS__ = tauri;
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) AppleWebKit/537.36 Chrome/156.0 Mobile Safari/537.36" });
+  }
   dom.document.body.innerHTML = "";
   const header = dom.document.createElement("div");
   header.id = "header-actions";
@@ -298,17 +303,48 @@ function pageHistory(win) {
       at++;
     },
     back() {
-      if (at === 0) {
+      this.go(-1);
+    },
+    go(delta) {
+      if (at + delta < 0) {
         this.closed = true;
         return;
       }
-      at--;
+      at += delta;
       setTimeout(() => win.dispatchEvent(fakeEvent("popstate", { state: entries[at] })), 0);
     },
   };
 }
 
 describe("the phone's Back button", () => {
+  it("keeps one entry for each step in: the page's own Back takes one, and none goes up while no one presses anything", async () => {
+    let history;
+    const t = await popupOn(
+      "send",
+      { addressBook: { loaded: true, items: [] }, draft: { to: B, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } },
+      undefined,
+      { history: (win) => (history = pageHistory(win)) }
+    );
+    const button = (text) => t.app.querySelectorAll("button").find((b) => b.textContent === text);
+    button("Review").click();
+    await flush();
+    expect(history.at).toBe(2);
+    button("← Back").click();
+    await flush();
+    expect([t.state.route, history.at]).toEqual(["send", 1]);
+    button("Review").click();
+    await flush();
+    expect(history.at).toBe(2);
+
+    // The person's Back, then the wallet drawing again on its own: no entry goes up,
+    // which a WebView would skip, closing the app on the next Back.
+    history.back();
+    await flush();
+    await t.render({ forceRefresh: true });
+    await flush();
+    expect([t.state.route, history.at]).toEqual(["send", 1]);
+  });
+
   it("goes one screen back inside the wallet, Review to the Send form with what was typed, and leaves only from Home", async () => {
     let history;
     const t = await popupOn(
@@ -327,7 +363,8 @@ describe("the phone's Back button", () => {
     button("Review").click();
     await flush();
     expect(state.route).toBe("confirm");
-    expect(history.at).toBe(1);
+    // A step in: one entry more.
+    expect(history.at).toBe(2);
 
     history.back();
     await flush();
@@ -376,3 +413,75 @@ describe("coming back to the wallet during a payment", () => {
     expect(t.app.textContent).not.toContain("Waiting for a block");
   });
 });
+
+// Tauri's bridge to the app's wrapper: what each command answers, and the
+// events the wrapper sends (`emit`).
+function tauriBridge(answers = {}) {
+  const handlers = [];
+  const invoke = vi.fn(async (cmd, args) => {
+    if (cmd === "plugin:event|listen") return handlers.push(args.handler) - 1;
+    return typeof answers[cmd] === "function" ? answers[cmd](args) : (answers[cmd] ?? null);
+  });
+  return { invoke, transformCallback: (fn) => (handlers.push(fn), handlers.length - 1), emit: (payload) => handlers.forEach((fn) => typeof fn === "function" && fn({ payload })) };
+}
+
+describe("the app on a phone", () => {
+  const LINK = `dusk:public-${B}@dusk:2?amount=0.01&memo=Deep+link+test`;
+
+  it("opens Send filled in from a dusk: link it was opened with, and from one opened while it runs", async () => {
+    const bridge = tauriBridge({ "plugin:deep-link|get_current": [LINK] });
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge });
+    await flush();
+    const fields = () => t.app.querySelectorAll("input, textarea").map((f) => f.value);
+    expect(t.state.route).toBe("send");
+    expect(t.app.querySelector(".to-input-wrap textarea").value).toBe(B);
+    expect(fields()).toContain("Deep link test");
+    expect(fields()).toContain("0.01");
+
+    // Another, from a chat, as the app runs: Send again, with that one's.
+    t.state.route = "home";
+    await t.render();
+    bridge.emit([LINK.replace("0.01", "0.02").replace("Deep+link+test", "Second")]);
+    await flush();
+    expect([t.state.route, fields().includes("0.02"), fields().includes("Second")]).toEqual(["send", true, true]);
+  });
+
+  it("goes back one screen at a time from two screens in, then to the background, never closing", async () => {
+    let history;
+    const bridge = tauriBridge({ move_to_back: true });
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge, history: (win) => (history = pageHistory(win)) });
+    const button = (text) => [...t.dom.document.querySelectorAll("button")].find((b) => b.textContent === text || b.getAttribute("aria-label") === text);
+    // Home, Settings, then Contacts: an entry for each.
+    button("Settings").click();
+    await flush();
+    button("Contacts").click();
+    await flush();
+    expect([t.state.route, history.at]).toEqual(["contacts", 3]);
+    // Back's own click on ← Back is no press of the person's: one entry a Back.
+    history.back();
+    await flush();
+    expect([t.state.route, history.at]).toEqual(["options", 2]);
+    history.back();
+    await flush();
+    expect([t.state.route, history.at]).toEqual(["home", 1]);
+    history.back();
+    await vi.waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith("move_to_back", {}, undefined));
+    expect(history.closed).toBe(false);
+  });
+
+  it("goes to the background from its first screen, kept as it is, rather than closing", async () => {
+    let history;
+    const bridge = tauriBridge({ move_to_back: true });
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge, history: (win) => (history = pageHistory(win)) });
+    // The first screen has its entry too, for Back to come to the wallet.
+    expect(history.at).toBe(1);
+    history.back();
+    await vi.waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith("move_to_back", {}, undefined));
+    expect([t.state.route, history.closed]).toEqual(["home", false]);
+    // Back in the app, its first press puts the entry up again, for the next Back.
+    t.app.click();
+    await flush();
+    expect(history.at).toBe(1);
+  });
+});
+

@@ -622,6 +622,18 @@ describe("about", () => {
     expect(actions.showToast).not.toHaveBeenCalled();
   });
 
+  it("says Reset for a phone in the app, which has no browser and no connected sites, as Chen and Sofia read it", async () => {
+    dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const app = await settings({}, { app: true });
+    expect(visibleText(app.section("Reset").querySelector(".settings-note"))).toBe(
+      "Removes every wallet, with its contacts, names and activity, from this phone, and goes back to Mainnet. Your funds stay on Dusk. You need each recovery phrase to use them again."
+    );
+    app.section("Reset").querySelector("button").click();
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".wallet-dialog .settings-note"))).not.toMatch(/browser|connected sites/);
+  });
+
   it("keeps them on a custom node, and in the desktop app, which has no version to show", async () => {
     const custom = await settings({ nodeUrl: "https://my-node.example" });
     expect(legal(custom.section).map((b) => b.textContent)).toEqual(["Terms of use", "Privacy policy"]);

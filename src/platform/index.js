@@ -2,6 +2,7 @@ import { getRuntimeKind, isExtensionRuntime, isTauriRuntime } from "./runtime.js
 import { kv } from "./storage.js";
 import { assetUrl } from "./assets.js";
 import { tabsCreate } from "./extensionApi.js";
+import { openInBrowser } from "./native.js";
 
 const kind = getRuntimeKind();
 
@@ -13,6 +14,9 @@ const kind = getRuntimeKind();
  */
 export async function openUrl(url) {
   if (!url) return false;
+  // The app opens it in the phone's browser: window.open would put the site
+  // in the wallet's own window, in its place.
+  if (isTauriRuntime()) return openInBrowser(url);
   try {
     await tabsCreate({ url });
     if (isExtensionRuntime()) {

@@ -1,9 +1,12 @@
 import { h } from "../../lib/dom.js";
 import { passwordInput } from "../../components/FormControls.js";
+import { isPhone } from "../../lib/device.js";
 
 // A wrong password says what to try: the password as typed, then the recovery phrase.
 export const WRONG_PASSWORD_TEXT = "Wrong password. Check Caps Lock, or restore with your recovery phrase below.";
-const unlockError = (message) => (/^Incorrect password$/.test(String(message ?? "")) ? WRONG_PASSWORD_TEXT : message);
+// A phone's keyboard has no Caps Lock.
+const wrongPasswordText = () => (isPhone() ? "Wrong password. Try again, or restore with your recovery phrase below." : WRONG_PASSWORD_TEXT);
+const unlockError = (message) => (/^Incorrect password$/.test(String(message ?? "")) ? wrongPasswordText() : message);
 
 export function lockedView({ state, actions } = {}) {
   const pwd = passwordInput({
