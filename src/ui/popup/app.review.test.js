@@ -49,8 +49,9 @@ const flush = async () => {
 
 // The popup on `route` with wallet A open; `t.open` is what the wallet's
 // overview says, `t.deliver` the wallet's own messages to the popup.
-async function popupOn(route, extra = {}, answer = async () => undefined) {
+async function popupOn(route, extra = {}, answer = async () => undefined, { history } = {}) {
   const dom = installFakeDom({ pathname: "/popup.html" });
+  if (history) dom.window.history = history(dom.window);
   dom.document.body.innerHTML = "";
   const header = dom.document.createElement("div");
   header.id = "header-actions";
@@ -276,5 +277,102 @@ describe("a Copy button that says Copied", () => {
     await t.render();
     await flush();
     expect(t.dom.document.activeElement).toBe(copyAddress());
+  });
+});
+
+// The page's history as a browser keeps it: Back (`back`) goes to the entry
+// before, with a popstate; with none before, it closes the wallet.
+function pageHistory(win) {
+  const entries = [{}];
+  let at = 0;
+  return {
+    closed: false,
+    get length() {
+      return entries.length;
+    },
+    get at() {
+      return at;
+    },
+    pushState(state) {
+      entries.splice(at + 1, Infinity, state);
+      at++;
+    },
+    back() {
+      if (at === 0) {
+        this.closed = true;
+        return;
+      }
+      at--;
+      setTimeout(() => win.dispatchEvent(fakeEvent("popstate", { state: entries[at] })), 0);
+    },
+  };
+}
+
+describe("the phone's Back button", () => {
+  it("goes one screen back inside the wallet, Review to the Send form with what was typed, and leaves only from Home", async () => {
+    let history;
+    const t = await popupOn(
+      "send",
+      { addressBook: { loaded: true, items: [] }, draft: { to: B, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } },
+      undefined,
+      { history: (win) => (history = pageHistory(win)) }
+    );
+    const { app, state } = t;
+    const button = (text) => app.querySelectorAll("button").find((b) => b.textContent === text);
+    const memo = () => app.querySelectorAll("input").find((i) => accessibleName(i) === "Memo");
+    // A screen with a way back stands one entry above the page's own.
+    expect(history.at).toBe(1);
+    memo().value = "Lunch for Léa";
+    memo().dispatchEvent(fakeEvent("input"));
+    button("Review").click();
+    await flush();
+    expect(state.route).toBe("confirm");
+    expect(history.at).toBe(1);
+
+    history.back();
+    await flush();
+    expect(state.route).toBe("send");
+    expect([app.querySelector(".to-input-wrap textarea").value, memo().value]).toEqual([B, "Lunch for Léa"]);
+    expect([history.at, history.closed]).toEqual([1, false]);
+
+    history.back();
+    await flush();
+    expect(state.route).toBe("home");
+    // Home has no way back: Back leaves the wallet, as before.
+    expect(history.at).toBe(0);
+    history.back();
+    expect(history.closed).toBe(true);
+  });
+});
+
+describe("coming back to the wallet during a payment", () => {
+  it("looks the payment up by its ID, and says Completed with its real fee, though nothing was heard while away", async () => {
+    const HASH = "9f".repeat(32);
+    const t = await popupOn(
+      "sent",
+      { addressBook: { loaded: true, items: [] }, sent: { phase: "sent", status: "submitted", hash: HASH, title: "Send", amountLux: "30000000", feeCapLux: "2500000", sentAt: Date.now(), startedAt: Date.now() } },
+      async (message, t) => {
+        // The node has it in a block: the wallet writes that on its record and says so.
+        if (message.type === "DUSK_UI_RECHECK_TX" && message.hash === HASH) {
+          t.open = { ...t.open, txs: [{ hash: HASH, status: "executed", submittedAt: Date.now() - 40_000, feePaid: "2135802", blockHeight: "4802949" }] };
+          t.deliver({ type: "DUSK_UI_TX_STATUS", hash: HASH, status: "executed", ok: true });
+          return { ok: true };
+        }
+        return undefined;
+      }
+    );
+    t.open = { ...t.open, txs: [{ hash: HASH, status: "submitted", submittedAt: Date.now() - 40_000 }] };
+    await t.render({ forceRefresh: true });
+    expect(t.app.textContent).toContain("Waiting for a block");
+    expect(t.asked("DUSK_UI_RECHECK_TX")).toEqual([]);
+
+    // Home pressed, then back after the block: the page shows again.
+    t.dom.document.visibilityState = "visible";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await flush();
+    expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH]);
+    expect(t.app.textContent).toContain("In block 4,802,949");
+    expect(t.app.textContent).toContain("0.002135802");
+    expect(t.app.textContent).not.toContain("Waiting for a block");
   });
 });

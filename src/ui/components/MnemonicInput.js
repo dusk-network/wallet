@@ -243,13 +243,9 @@ export function createMnemonicInput({
       }
       return;
     }
-    if (e.key === "Backspace" && !String(inputs[i].value ?? "")) {
-      if (i > 0) {
-        e.preventDefault();
-        focusIndex(i - 1);
-      }
-      return;
-    }
+    // Backspace stops at the start of its box: in an empty one it moves
+    // nowhere, so a held key or one press too many never runs back through
+    // the words before it.
   }
 
   const grid = h(

@@ -48,8 +48,8 @@ export function createHeaderRenderer({
     const hasVault = Boolean(ov?.hasVault);
     const isUnlocked = Boolean(ov?.isUnlocked);
     // Only show/enable wallet actions when we actually have a wallet loaded.
-    // In setup/locked states, switching networks and refreshing balances is
-    // either meaningless or confusing.
+    // In setup/locked states, profiles and balances are meaningless; the
+    // network isn't.
     const walletReady = hasVault && isUnlocked;
 
     // Update network pill label in header
@@ -102,18 +102,16 @@ export function createHeaderRenderer({
     }
 
     if (networkPill) {
-      // Disable the pill (and close any open menu) until the wallet is unlocked.
-      networkPill.disabled = !walletReady;
-      networkPill.classList.toggle("is-disabled", !walletReady);
-      if (!walletReady && netMenu?.isOpen) netMenu.close();
+      // The network can be picked before there's a wallet, and while it's
+      // locked, as Settings picks it: the pill opens the same choice always.
+      networkPill.disabled = false;
+      networkPill.classList.remove("is-disabled");
       if (!walletReady && acctMenu?.isOpen) acctMenu.close();
 
-      networkPill.onclick = walletReady
-        ? () => {
-            if (netMenu?.isOpen) netMenu.close();
-            else netMenu?.open(networkPill, ov);
-          }
-        : null;
+      networkPill.onclick = () => {
+        if (netMenu?.isOpen) netMenu.close();
+        else netMenu?.open(networkPill, latest);
+      };
     }
 
     // Named as the page it opens.

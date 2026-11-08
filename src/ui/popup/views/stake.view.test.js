@@ -181,6 +181,21 @@ describe("staking while it loads", () => {
 });
 
 describe("staking overview", () => {
+  it("opens Liquid staking on Stake, also after an unstake left it on Unstake, as Lena's stake again", async () => {
+    const state = { route: "stake", staking: staking(), sozu: sozu({ position: { poolBalanceLux: dusk(3), stDuskBalanceLux: dusk(1) } }) };
+    popup(state);
+    buttonStarting("Unstake from Sozu").click();
+    await settle();
+    expect(body.querySelector(".sozu-action-tabs .is-active").textContent).toBe("Unstake");
+    button("← Back").click();
+    await settle();
+    // Stake → Liquid staking, and the cheaper way under the minimum.
+    body.querySelectorAll(".stake-choices > button")[1].click();
+    await settle();
+    expect(body.querySelector(".sozu-action-tabs .is-active").textContent).toBe("Stake");
+    expect(accessibleName(body.querySelector(".amount-entry input, input"))).toBe("Stake amount");
+  });
+
   it("says what each choice pays a year in the browser's number format", async () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
     try {

@@ -161,7 +161,7 @@ function mount(state, ov = overview(), send = async () => ({})) {
   const radios = () => dom.document.body.querySelectorAll("[role=radio]");
   return {
     actions,
-    to: $(".to-input-wrap input"),
+    to: $(".to-input-wrap textarea"),
     amount: $("input.amount-field__input"),
     review: $("button.btn-primary"),
     radios,
@@ -209,7 +209,7 @@ describe("send form", () => {
 
     // Without .dusk names on the network, the field takes an account or an address.
     mount(newState(), overview({ nodeUrl: "http://127.0.0.1:8080" }));
-    expect(body.querySelector(".to-input-wrap input").getAttribute("placeholder")).toBe("Account or shielded address");
+    expect(body.querySelector(".to-input-wrap textarea").getAttribute("placeholder")).toBe("Account or shielded address");
   });
 });
 

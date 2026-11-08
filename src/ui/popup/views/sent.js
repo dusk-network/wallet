@@ -520,6 +520,8 @@ export function sentView(ov, { state, actions, sozu } = {}) {
         },
       })
     : null;
+  // The phone's Back: back to review when nothing went, else Done.
+  (notSent ? back : done).setAttribute("data-back", "");
   const explorer = explorerUrl
     ? h(
         "button",

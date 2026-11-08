@@ -394,6 +394,25 @@ describe("receive", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("starts a request over when the profile switches, rather than asking for it on the other one", async () => {
+    const { switchContext } = await import("./popup/context.js");
+    const state = {};
+    switchContext(state);
+    await receive("public", { state });
+    const fields = () => dom.document.body.querySelectorAll(".receive-request .advanced-body input");
+    typeInto(fields()[0], "0.03");
+    typeInto(fields()[1], "Invoice 2026-081");
+    Object.assign(state.receive, { requestOpen: true, amountDusk: "0.03", memo: "Invoice 2026-081" });
+    await receive("public", { state, ov: { ...overview, accounts: [ACCOUNT, ADDRESS], selectedAccountIndex: 0 } });
+    expect(fields().map((f) => f.value)).toEqual(["0.03", "Invoice 2026-081"]);
+
+    // Profile 2 picked from the header: a switch, as the popup marks it.
+    switchContext(state);
+    await receive("public", { state, ov: { ...overview, accounts: [ACCOUNT, ADDRESS], selectedAccountIndex: 1 } });
+    expect(fields().map((f) => f.value)).toEqual(["", ""]);
+    expect(state.receive.requestOpen).toBe(false);
+  });
 });
 
 describe("the requests made here", () => {

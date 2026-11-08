@@ -225,7 +225,8 @@ export function addressBookView(ov, { state, actions } = {}) {
       onclick: () => startEdit(null),
     });
 
-    // In pick mode, the recent recipients of this profile's sends, with Save.
+    // In pick mode, the recent recipients of this profile's sends, with Save:
+    // with a search, those it finds, as it finds contacts.
     const recentGroup = (() => {
       if (ab.mode !== "pick") return null;
       const saved = new Set(items.map((e) => lower(e?.address)));
@@ -239,6 +240,7 @@ export function addressBookView(ov, { state, actions } = {}) {
         const key = lower(d.address);
         if (saved.has(key) || d.address === own.account || d.address === own.address) continue;
         if (recent.some((r) => lower(r.address) === key)) continue;
+        if (q && ![d.name, d.address].some((v) => searchKey(v).includes(q))) continue;
         recent.push(d);
       }
       if (!recent.length) return null;

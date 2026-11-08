@@ -26,6 +26,7 @@ import {
   waitForTxExecution,
 } from "../shared/txExecution.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
+import { recheckTx } from "../shared/txReconcile.js";
 import { engineContactsVault, handleUiCommand } from "./uiCommands.js";
 import { assertSendPassword, sendPasswordLimit } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
@@ -451,6 +452,16 @@ export async function localSend(message) {
         // Every wallet the vault holds, those another password opens too.
         walletsHere: await countVaultWallets().catch(() => null),
       };
+    }
+
+    // A send looked up again by its ID, as the extension's background does:
+    // the page hears what came of it.
+    if (message?.type === "DUSK_UI_RECHECK_TX") {
+      const hash = String(message.hash ?? "").trim();
+      if (!hash) throw rpcError(ERROR_CODES.INVALID_PARAMS, "hash is required");
+      const { reconciled, event } = await recheckTx(hash);
+      tellPage({ type: "DUSK_UI_TX_STATUS", ...event });
+      return { ok: true, result: reconciled };
     }
 
     // UI initiated transaction (from the wallet popup)

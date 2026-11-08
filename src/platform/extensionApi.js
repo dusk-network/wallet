@@ -94,6 +94,14 @@ export function tabsGet(tabId) {
   return callApi(raw?.tabs?.get, [tabId], raw?.tabs);
 }
 
+export function tabsUpdate(tabId, options) {
+  return callApi(raw?.tabs?.update, [tabId, options], raw?.tabs);
+}
+
+export function tabsRemove(tabId) {
+  return callApi(raw?.tabs?.remove, [tabId], raw?.tabs, { allowLastError: true });
+}
+
 export function tabsHide(tabIds) {
   return callApi(raw?.tabs?.hide, [tabIds], raw?.tabs);
 }

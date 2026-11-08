@@ -172,7 +172,7 @@ describe("hidden balances", () => {
   it("hide what Send has available after fees, while Max fills in the real amount", async () => {
     const state = { route: "send", draft: null, addressBook: { loaded: true, items: [] } };
     await show(sendFormView(overview(HIDDEN), { state, actions: actions() }));
-    const to = body.querySelector(".to-input-wrap input");
+    const to = body.querySelector(".to-input-wrap textarea");
     const amount = body.querySelector("input.amount-field__input");
     const max = () => body.querySelector(".amount-avail button");
 

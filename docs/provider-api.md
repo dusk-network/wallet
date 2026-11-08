@@ -631,7 +631,7 @@ dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 | `4900` | DISCONNECTED | Extension unavailable |
 | `-32601` | METHOD_NOT_FOUND | Unknown method |
 | `-32602` | INVALID_PARAMS | Bad parameters |
-| `-32603` | INTERNAL | Something broke |
+| `-32603` | INTERNAL | Something broke, such as a prompt the wallet couldn't show: nothing was approved, and the user didn't refuse |
 
 Errors are thrown as `Error` objects with `.code`, `.message`, and optional `.data`.
 

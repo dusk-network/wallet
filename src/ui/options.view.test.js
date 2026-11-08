@@ -218,7 +218,7 @@ describe("settings", () => {
         ["Sign a message", "Window closed", dateText(AT + 1)],
         ["Connect", "Approved", dateText(AT)],
         ["Switch network", "Not answered in time", dateText(AT - 1)],
-        ["Import an NFT", "Cancelled", dateText(AT - 2)],
+        ["Import an NFT", "Ended before an answer", dateText(AT - 2)],
       ]);
       // Nothing a site chose reads as something else.
       expect(row.textContent).not.toContain("\u202E");
@@ -332,6 +332,33 @@ describe("settings", () => {
     );
   });
 
+  it("asks before a reset in the wallet's own dialog, not the browser's, and Cancel resets nothing", async () => {
+    const view = await settings();
+    const browserConfirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", browserConfirm);
+    const reset = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Reset wallet" && !b.closest(".wallet-dialog"));
+    const dialog = () => dom.document.body.querySelector(".wallet-dialog");
+    const resets = () => view.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_RESET_WALLET");
+
+    reset().click();
+    await settle();
+    expect(browserConfirm).not.toHaveBeenCalled();
+    expect([dialog().getAttribute("role"), visibleText(dialog())]).toEqual([
+      "alertdialog",
+      "Reset wallet?This removes every wallet here, with its contacts, names, activity and connected sites. Your funds stay on Dusk. You need each recovery phrase to use them again.CancelReset wallet",
+    ]);
+    expect(dom.document.activeElement.textContent).toBe("Cancel");
+    dialog().querySelector("button").click();
+    await settle();
+    expect([dialog(), resets()]).toEqual([null, []]);
+
+    reset().click();
+    await settle();
+    dialog().querySelector(".btn-destructive").click();
+    await settle();
+    expect(resets()).toHaveLength(1);
+  });
+
   it("starts each switch of profile, network or wallet before asking the wallet, so a check begun before it can tell", async () => {
     const view = await settings();
     // The popup's context each time the wallet is asked.
@@ -354,6 +381,8 @@ describe("settings", () => {
     buttonOf("Lock wallet").click();
     await settle();
     buttonOf("Reset wallet").click();
+    await settle();
+    dom.document.body.querySelector(".wallet-dialog .btn-destructive").click();
     await settle();
     expect(asked.map(([type, context]) => [type, context?.reason])).toEqual([
       ["DUSK_UI_SET_ACCOUNT_INDEX", "switch"],

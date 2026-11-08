@@ -22,6 +22,7 @@ import { subnav } from "../../components/Subnav.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { setNetworkSwitching } from "../../components/NetworkMenu.js";
+import { askConfirm } from "../../components/ConfirmDialog.js";
 import { fieldLabel, integerInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
 import { switchContext } from "../context.js";
@@ -843,7 +844,13 @@ export function optionsView(ov, { state, actions } = {}) {
     type: "button",
     text: "Reset wallet",
     onclick: async () => {
-      if (!confirm("This will remove every encrypted recovery phrase from this browser profile. Continue?")) return;
+      const sure = await askConfirm({
+        title: "Reset wallet?",
+        text: "This removes every wallet here, with its contacts, names, activity and connected sites. Your funds stay on Dusk. You need each recovery phrase to use them again.",
+        action: "Reset wallet",
+        destructive: true,
+      });
+      if (!sure) return;
       try {
         switchContext(state);
         const res = await actions?.send?.({ type: "DUSK_UI_RESET_WALLET" });

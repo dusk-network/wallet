@@ -887,6 +887,24 @@ describe("background Phoenix tx lifecycle flow", () => {
       await expect(sendBackgroundMessage({ ...set, origin: "https://gone.example" }, fromPage)).resolves.toMatchObject({ error: { message: "That site isn't connected any more." } });
     });
 
+    it("connects from the popup's Connect only through the site's approval, as Marek asked, and not once it's rejected", async () => {
+      const { getPermissionForOrigin, revokeOrigin } = await import("../shared/permissions.js");
+      await revokeOrigin(SITE, "acct0");
+      mocks.requestUserApproval.mockClear();
+      mocks.requestUserApproval.mockRejectedValueOnce(Object.assign(new Error("User rejected the request"), { code: ERROR_CODES.USER_REJECTED }));
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_CONNECT_ORIGIN", origin: SITE }, fromPage)).resolves.toMatchObject({
+        error: { code: ERROR_CODES.USER_REJECTED },
+      });
+      expect(mocks.requestUserApproval).toHaveBeenCalledWith("connect", SITE, expect.objectContaining({ requestedProfiles: true }), expect.anything());
+      await expect(getPermissionForOrigin(SITE, "acct0")).resolves.toBeNull();
+
+      // Approved for the profile the approval picked.
+      mocks.requestUserApproval.mockResolvedValueOnce({ accountIndex: 0 });
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_CONNECT_ORIGIN", origin: SITE }, fromPage)).resolves.toEqual({ ok: true });
+      await expect(getPermissionForOrigin(SITE, "acct0")).resolves.toMatchObject({ accountIndex: 0 });
+      await revokeOrigin(SITE, "acct0");
+    });
+
     it("lasts as new sites do when it's connected from the popup too", async () => {
       const { getPermissionForOrigin, revokeOrigin } = await import("../shared/permissions.js");
       await revokeOrigin(SITE, "acct0");

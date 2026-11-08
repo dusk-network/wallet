@@ -100,6 +100,67 @@ export function textInput({ numericMode, onEnter, ...attrs } = {}) {
   return input;
 }
 
+// The `value` accessor a field's prototypes give it.
+function valueAccessor(el) {
+  for (let proto = Object.getPrototypeOf(el); proto; proto = Object.getPrototypeOf(proto)) {
+    const own = Object.getOwnPropertyDescriptor(proto, "value");
+    if (own?.get && own?.set) return own;
+  }
+  return null;
+}
+
+/**
+ * A one-line field that wraps onto more lines as what's in it grows, so a
+ * long address shows whole, start to end, rather than its end alone: a
+ * textarea that takes no line breaks (a paste's are dropped, as a one-line
+ * field drops them), Enter doing what `onEnter` says.
+ * @param {{ value?: string, onEnter?: (e: Event) => void, [attr: string]: any }} [opts]
+ * @returns {HTMLTextAreaElement}
+ */
+export function wrappingInput({ value = "", onEnter, ...attrs } = {}) {
+  const field = h("textarea", { rows: "1", ...attrs, class: ["wrap-input", attrs.class].filter(Boolean).join(" ") });
+  const own = valueAccessor(field);
+  // As tall as its lines, borders and all; once it's on the page.
+  const fit = () => {
+    if (!field.isConnected || !field.style) return;
+    field.style.height = "auto";
+    const lines = Number(field.scrollHeight) || 0;
+    if (lines > 0) field.style.height = `${lines + ((Number(field.offsetHeight) || 0) - (Number(field.clientHeight) || 0))}px`;
+  };
+  if (own) {
+    Object.defineProperty(field, "value", {
+      configurable: true,
+      get() {
+        return own.get.call(this);
+      },
+      set(next) {
+        own.set.call(this, String(next ?? "").replace(/[\r\n]+/g, ""));
+        fit();
+      },
+    });
+  }
+  field.value = value;
+  field.addEventListener("input", () => {
+    if (/[\r\n]/.test(field.value)) field.value = field.value;
+    else fit();
+  });
+  field.addEventListener("focus", fit);
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(fit);
+  // Narrower or wider (a contact's chip beside the text, the phone turned),
+  // its lines change: fitted again. Only the width: fitting sets the height.
+  if (typeof ResizeObserver === "function") {
+    let width = -1;
+    new ResizeObserver(([entry]) => {
+      const now = entry?.contentRect?.width ?? -1;
+      if (now === width) return;
+      width = now;
+      fit();
+    }).observe(field);
+  }
+  if (onEnter) installPrimaryEnter(field, onEnter);
+  return field;
+}
+
 export function decimalInput(attrs = {}) {
   return textInput({ ...attrs, numericMode: "decimal" });
 }

@@ -72,5 +72,17 @@ describe("connected site status", () => {
     site = { activeOrigin: "https://app.example:8443", activeConnected: false };
     await render({ forceRefresh: true });
     expect(visibleText(bar().querySelector(".site-bar-copy"))).toBe("Not connectedapp.example:8443");
+
+    // Not over a screen that moves money, where a stray press on a phone would connect the site open.
+    const { state } = await import("./popup/state.js");
+    for (const route of ["send", "confirm", "stake", "sent"]) {
+      state.route = route;
+      state.sent = route === "sent" ? { phase: "sent", status: "submitted", hash: "ab".repeat(32) } : null;
+      await render({ forceRefresh: true });
+      expect([route, bar()]).toEqual([route, null]);
+    }
+    state.route = "home";
+    await render({ forceRefresh: true });
+    expect(bar()).toBeTruthy();
   });
 });

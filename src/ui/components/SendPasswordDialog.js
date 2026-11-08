@@ -46,7 +46,7 @@ export function askSendPassword({ limit, always = false, check }) {
       opener?.focus?.();
       resolve(answer);
     };
-    const cancel = h("button", { class: "btn-outline", type: "button", text: "Cancel", onclick: () => finish(null) });
+    const cancel = h("button", { class: "btn-outline", type: "button", text: "Cancel", "data-back": "", onclick: () => finish(null) });
     const confirmBtn = h("button", { class: "btn-primary", type: "button", text: "Confirm", onclick: () => submit() });
     const submit = async () => {
       if (busy) return;
