@@ -446,6 +446,29 @@ describe("the app on a phone", () => {
     expect([t.state.route, fields().includes("0.02"), fields().includes("Second")]).toEqual(["send", true, true]);
   });
 
+  it("goes back one screen at a time from two screens in, then to the background, never closing", async () => {
+    let history;
+    const bridge = tauriBridge({ move_to_back: true });
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge, history: (win) => (history = pageHistory(win)) });
+    const button = (text) => [...t.dom.document.querySelectorAll("button")].find((b) => b.textContent === text || b.getAttribute("aria-label") === text);
+    // Home, Settings, then Contacts: an entry for each.
+    button("Settings").click();
+    await flush();
+    button("Contacts").click();
+    await flush();
+    expect([t.state.route, history.at]).toEqual(["contacts", 3]);
+    // Back's own click on ← Back is no press of the person's: one entry a Back.
+    history.back();
+    await flush();
+    expect([t.state.route, history.at]).toEqual(["options", 2]);
+    history.back();
+    await flush();
+    expect([t.state.route, history.at]).toEqual(["home", 1]);
+    history.back();
+    await vi.waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith("move_to_back", {}, undefined));
+    expect(history.closed).toBe(false);
+  });
+
   it("goes to the background from its first screen, kept as it is, rather than closing", async () => {
     let history;
     const bridge = tauriBridge({ move_to_back: true });

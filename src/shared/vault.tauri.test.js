@@ -50,7 +50,23 @@ describe("desktop vault (Stronghold)", () => {
     tauri.loaded.clear();
     tauri.hooks.save = null;
     tauri.hooks.load = null;
+    tauri.hooks.unload = null;
     kv.items = {};
+  });
+
+  it("never unlocks as if the vault closed when it didn't: its records would stay readable without the password", async () => {
+    startFromMain();
+    let vault = await restart();
+    await vault.unlockVault(recorded.password);
+    // Unloading refused, as the app refused stronghold|destroy.
+    tauri.hooks.unload = async () => {
+      throw new Error("stronghold.destroy not allowed");
+    };
+    const said = vi.spyOn(console, "error").mockImplementation(() => {});
+    vault = await restart();
+    await expect(vault.unlockVault(recorded.password)).rejects.toThrow("The wallet vault couldn't be closed. Close the app and open it again.");
+    expect(said).toHaveBeenCalledWith("The wallet vault didn't close:", "stronghold.destroy not allowed");
+    said.mockRestore();
   });
 
   it("moves main's one phrase to a key of its own on unlock, then removes main's key", async () => {

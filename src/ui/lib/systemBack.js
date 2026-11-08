@@ -43,6 +43,8 @@ export function installSystemBack({ backStep, screenKey, onFirst, win = globalTh
   let afterBack = false;
   // The last press was a way back (← Back, Cancel, Done, Escape): its step takes an entry.
   let pressedBack = false;
+  // Back's own step under way: the click it makes on ← Back isn't a press.
+  let stepping = false;
   let shown = screenKey();
 
   const first = () => Boolean(onFirst) && !firstFailed;
@@ -94,7 +96,12 @@ export function installSystemBack({ backStep, screenKey, onFirst, win = globalTh
     // A screen the step draws syncs as it's drawn; a menu or a dialog it
     // closes, a moment on. Without one, Back went where the browser takes it.
     if (step) {
-      step();
+      stepping = true;
+      try {
+        step();
+      } finally {
+        stepping = false;
+      }
       setTimeout(sync, 0);
     } else if (first()) {
       onFirst()
@@ -110,6 +117,7 @@ export function installSystemBack({ backStep, screenKey, onFirst, win = globalTh
 
   // A press: entries may go up again; one on a way back takes its step's entry.
   const pressed = (back) => {
+    if (stepping) return;
     afterBack = false;
     pressedBack = back;
     setTimeout(sync, 0);

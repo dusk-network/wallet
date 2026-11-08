@@ -54,6 +54,7 @@ const UNLOCK_BACKOFF_MAX_MS = 60_000;
 const NO_VAULT = "No wallet vault found. Import a mnemonic first.";
 const NOT_SAVED = "The wallet vault couldn't be saved. Try again.";
 const NOT_CHECKED = "The wallet vault couldn't be checked. Lock the wallet and unlock it again.";
+const NOT_CLOSED = "The wallet vault couldn't be closed. Close the app and open it again.";
 const UNSUPPORTED = "Unsupported vault format. Confirm you have your recovery phrase, then use Settings → Reset wallet and import it again.";
 
 /** The one sentence an import of a phrase that's already here gets. */
@@ -398,11 +399,16 @@ async function strongholdSession(password, fn, { create = false, check = false }
     }
     return await fn(client.getStore(), stronghold);
   } finally {
+    // Unloading takes its decrypted records out of the app. One that didn't
+    // unload isn't closed: said, and the session fails, whatever it did.
+    let closed = true;
     try {
       await stronghold.unload();
-    } catch {
-      // ignore
+    } catch (err) {
+      closed = false;
+      console.error("The wallet vault didn't close:", err?.message ?? err);
     }
+    if (!closed) throw new Error(NOT_CLOSED);
   }
 }
 
