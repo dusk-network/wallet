@@ -94,6 +94,7 @@ function isWebOrigin(origin) {
  */
 async function initPortForOrigin(port, origin) {
   const state = await readCurrent(() => buildProviderState(origin));
+  toldProfiles.set(port, JSON.stringify(state.profiles));
   safePost(port, { type: "DUSK_PROVIDER_STATE", state });
 
   // If the site is already connected, emit connect.
@@ -138,6 +139,23 @@ function safePost(port, msg) {
   } catch {
     // ignore
   }
+}
+
+/**
+ * The profiles each port was told of last, as its state or a profilesChanged.
+ * A site that isn't connected is told again only when they change for it, as
+ * when its connection ends: one that never connected, or whose connection
+ * ended, hears nothing of what the wallet does meanwhile, a switch of network
+ * among it. A connected site is told as ever.
+ * @type {WeakMap<chrome.runtime.Port, string>}
+ */
+const toldProfiles = new WeakMap();
+
+function postProfiles(port, profiles, { connected = true } = {}) {
+  const said = JSON.stringify(profiles);
+  if (!connected && toldProfiles.get(port) === said) return;
+  toldProfiles.set(port, said);
+  safePost(port, { type: "DUSK_PROVIDER_EVENT", name: "profilesChanged", data: profiles });
 }
 
 /**
@@ -347,9 +365,7 @@ export async function broadcastProfilesChangedAll() {
       names
     );
     const visible = permission.profile ? [permission.profile] : [];
-    for (const port of set) {
-      safePost(port, { type: "DUSK_PROVIDER_EVENT", name: "profilesChanged", data: visible });
-    }
+    for (const port of set) postProfiles(port, visible, { connected: permission.isValid });
   }
 }
 
@@ -370,7 +386,7 @@ export async function broadcastProfilesChangedForOrigin(origin) {
       await namesForOrigins([origin], perms, status)
     );
   });
-  broadcastToOrigin(origin, "profilesChanged", permission.profile ? [permission.profile] : []);
+  for (const port of portsByOrigin.get(origin) ?? []) postProfiles(port, permission.profile ? [permission.profile] : [], { connected: permission.isValid });
 }
 
 /**
@@ -407,9 +423,7 @@ export async function handleVerifiedNamesDiff(oldNames, newNames) {
       names
     );
     if (!profile || check(oldNames, profile.account) === check(newNames, profile.account)) continue;
-    for (const port of set) {
-      safePost(port, { type: "DUSK_PROVIDER_EVENT", name: "profilesChanged", data: [profile] });
-    }
+    for (const port of set) postProfiles(port, [profile]);
   }
 }
 

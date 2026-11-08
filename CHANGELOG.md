@@ -48,6 +48,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said what a stake or an unstake with Sozu got or gave back in stDUSK, and the rate, on Completed and in its details.
 - Said at once when the connection drops, kept the balance read last as maybe out of date, and read it again by itself once back.
 - Kept the extension's own files from sites: no page can load them, but for the provider script Firefox puts in it.
+- Told a site that never connected, or whose connection ended, nothing as the wallet switches network.
 - Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
 - Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
 - Repeated on Review that a send goes to your own account, and said what to try after a wrong password.
