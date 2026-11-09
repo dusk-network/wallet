@@ -1253,7 +1253,7 @@ export async function render({ forceRefresh = false } = {}) {
   if (state.route === "sent") {
     if (state.sent) {
       // A stake or an unstake with Sozu, completed: what it got or gave back, once its pool's event is read.
-      const sozu = state.sent.sozu && state.sent.hash ? sozuFactOfSent(ov, state, state.sent, { render }) : undefined;
+      const sozu = state.sent.sozu && state.sent.hash ? sozuFactOfSent(ov, state, state.sent, { render, refresh: () => refreshActivitySoon({ state, render }, 0) }) : undefined;
       setApp(sentView(ov, { state, actions, sozu }));
       return;
     }

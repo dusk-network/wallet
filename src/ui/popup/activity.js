@@ -539,18 +539,27 @@ export function sozuFactOf(ov, row, { render, soon = false, inBlock = false } = 
   return undefined;
 }
 
+/** While Completed's stake isn't in the final history yet: the history is read again this often, this many times (3 minutes). */
+export const SOZU_FINAL_AGAIN_MS = 10_000;
+export const SOZU_FINAL_TRIES = 18;
+// By activity and hash: how often the history was read again for it, and whether a read waits.
+const finalLooks = new Map();
+
 /**
  * What a stake or an unstake with Sozu the wallet sent did, for its Completed
- * screen: read from its block's events as it goes through (the block the
- * wallet's watcher heard it in, `sent.blockHeight`), or as the chain's history
- * lists it; asked again every few seconds till then.
+ * screen: as the chain's final history lists it; till then, from its block's
+ * events as it went through (the block the wallet's watcher heard it in,
+ * `sent.blockHeight`), marked not final (`final: false`), and the history
+ * read again (`refresh`) every 10 seconds for a few minutes, as its block may
+ * yet drop out.
  * @param {object} ov
  * @param {object} state
  * @param {object} sent - the Sent screen's transaction (state.sent)
- * @param {{ render?: () => Promise<unknown> }} [options]
+ * @param {{ render?: () => Promise<unknown>, refresh?: () => void }} [options]
  */
 export function sozuFactOfSent(ov, state, sent, options) {
   const listed = sent?.hash ? activityRows(ov, state).find((each) => each.hash === sent.hash && each.source === "public") : undefined;
+  if (!listed && sent?.hash) lookForFinal(ov, sent, options?.refresh);
   // Final as failed, as a block that dropped out can leave it: the screen
   // says so, and nothing of what its block said.
   if (listed?.status === "failed") {
@@ -565,7 +574,23 @@ export function sozuFactOfSent(ov, state, sent, options) {
   const pool = String(sent?.pool ?? "");
   if (status !== "executed" || !Number.isSafeInteger(height) || height <= 0 || !pool) return undefined;
   const row = { hash: sent.hash, sozu: sent.sozu, status, source: "public", blockHeight: height, contractId: pool, value: safeBigInt(sent.amountLux, 0n) };
-  return sozuFactOf(ov, row, { ...options, soon: true, inBlock: true });
+  const early = sozuFactOf(ov, row, { ...options, soon: true, inBlock: true });
+  return early && { ...early, final: false };
+}
+
+// The history read again a while on, once at a time, a few minutes at most.
+function lookForFinal(ov, sent, refresh) {
+  if (!refresh) return;
+  const key = `${activityKey(ov)}\n${sent.hash}`;
+  const look = finalLooks.get(key) ?? { tries: 0, waiting: false };
+  finalLooks.set(key, look);
+  if (look.waiting || look.tries >= SOZU_FINAL_TRIES) return;
+  look.waiting = true;
+  setTimeout(() => {
+    look.waiting = false;
+    look.tries++;
+    refresh();
+  }, SOZU_FINAL_AGAIN_MS);
 }
 
 // How Sozu's stDUSK grew lately, by pool, as app-core reads it from the chain:

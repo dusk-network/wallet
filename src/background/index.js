@@ -666,7 +666,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           error,
           nodeUrl: reconciled.nodeUrl,
         }).catch(() => {});
-        emitUiTxStatus({ hash, ...reconciled, status: finalStatus, ok, error, ...(blockHeight ? { blockHeight } : {}) }).catch(() => {});
+        // Its block as the node has it now, gone in again elsewhere; else the watcher's.
+        emitUiTxStatus({ hash, ...reconciled, blockHeight: reconciled.blockHeight || blockHeight, status: finalStatus, ok, error }).catch(() => {});
         return;
       }
 

@@ -618,6 +618,38 @@ describe("what a stake with Sozu got, on its Completed screen", () => {
   });
 });
 
+describe("what a stake with Sozu got, while the final history doesn't list it", () => {
+  it("is marked not final, and the history is read again every 10 seconds, a few minutes at most", async () => {
+    const { networks } = await import("@dusk-network/networks");
+    const { ACCOUNT, TESTNET } = await import("../../shared/fixtures/rows.js");
+    const { pool } = networks.testnet.sozu.fallbacks;
+    const u64 = (n) => Array.from({ length: 8 }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn).toString(16).padStart(2, "0")).join("");
+    const deposit = `${[100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n].map(u64).join("")}01${"ab".repeat(193)}${"00".repeat(6)}`;
+    const hash = "d4".repeat(32);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: { h0: { json: [{ origin: hash, source: pool, topic: "deposit", data: deposit, reverted: false }] } } }), { headers: { "content-type": "application/json" } })));
+    const ov = { accounts: [ACCOUNT], isUnlocked: true, nodeUrl: TESTNET, selectedAccountIndex: 0 };
+    const sent = { hash, sozu: "stake", pool, amountLux: "100000000000", phase: "sent", status: "executed", blockHeight: "4700003" };
+    const held = [];
+    const realSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...rest) => (ms === activity.SOZU_FINAL_AGAIN_MS ? held.push(fn) : realSetTimeout(fn, ms, ...rest)));
+    // The history read again: here, nothing new in it.
+    const refresh = vi.fn();
+    let fact;
+    const render = vi.fn(async () => {
+      fact = activity.sozuFactOfSent(ov, {}, sent, { render, refresh });
+    });
+    activity.sozuFactOfSent(ov, {}, sent, { render, refresh });
+    await until(() => fact !== undefined);
+    expect(fact).toMatchObject({ stDusk: 49_875_000_000n, final: false });
+    // Each read again draws the screen again, which waits for the next: no more than a few minutes' worth.
+    for (let i = 0; i < activity.SOZU_FINAL_TRIES + 3 && held.length; i++) {
+      held.shift()();
+      activity.sozuFactOfSent(ov, {}, sent, { render, refresh });
+    }
+    expect(refresh).toHaveBeenCalledTimes(activity.SOZU_FINAL_TRIES);
+  });
+});
+
 describe("what a stake with Sozu got, read before its block is final", () => {
   it("keeps it apart from what the final history says, which takes its place and is the one kept", async () => {
     const { networks } = await import("@dusk-network/networks");

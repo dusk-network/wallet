@@ -398,7 +398,12 @@ function stepMark(stepState) {
 // What a completed stake or unstake with Sozu got or gave back, or, its
 // pool's event not read yet, that it's coming: never nothing.
 function sozuLines(sent, fact, hidden) {
-  if (fact) return stDuskLines(fact, hidden);
+  if (fact) {
+    const lines = stDuskLines(fact, hidden);
+    // From its block, not the final history yet: so far.
+    if (fact.final === false && lines[0]) lines[0] = { ...lines[0], value: [...[].concat(lines[0].value), " so far"] };
+    return lines;
+  }
   return [{ label: sent.sozu === "unstake" ? "You gave back" : "You got", value: "stDUSK and rate coming in a moment" }];
 }
 

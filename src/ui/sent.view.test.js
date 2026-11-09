@@ -125,6 +125,11 @@ describe("a stake or an unstake with Sozu, completed", () => {
     expect(rows().slice(0, 2)).toEqual(["You got•••• stDUSK", "Rate1 stDUSK = 2 DUSK"]);
   });
 
+  it("says what its block said is so far, till the final history says it", () => {
+    completed("stake", { ...fact("stake", 49_875_000_000n), final: false });
+    expect(rows().slice(0, 2)).toEqual(["You got49.875 stDUSK so far", "Rate1 stDUSK = 2 DUSK"]);
+  });
+
   it("says the stDUSK and rate are coming while its pool's event isn't read yet, never nothing", () => {
     completed("stake", undefined);
     expect(rows()[0]).toBe("You gotstDUSK and rate coming in a moment");
