@@ -52,6 +52,7 @@ import { serializeError, serializeStakeInfo } from "../shared/transport.js";
 import { bytesToTransportHex, normalizeNullifiers } from "../shared/bytes.js";
 import { keepPrimaryNamesWith, lookupPrimaryName, lookupRecipientName } from "../shared/duskNames.js";
 import {
+  executionBlockHeight,
   executionEventError,
   executionEventOk,
   waitForTxExecution,
@@ -137,6 +138,8 @@ async function watchTxExecuted(hash, epoch) {
         hash,
         ok,
         error,
+        // Its block, for what reads its events there as it completes (a stake's stDUSK).
+        blockHeight: executionBlockHeight(event),
       });
     } catch {
       // ignore

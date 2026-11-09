@@ -61,6 +61,18 @@ export async function waitForTxExecution(executedPromise, removedPromise, onRemo
   return executed;
 }
 
+/**
+ * The block a transaction went through in, as its execution event says it
+ * (the node's `block_height`): a decimal string, or null where it doesn't.
+ */
+export function executionBlockHeight(event) {
+  for (const layer of eventLayers(event)) {
+    const height = String(layer.block_height ?? layer.blockHeight ?? "");
+    if (/^[1-9]\d*$/.test(height)) return height;
+  }
+  return null;
+}
+
 export function executionEventError(event) {
   try {
     const layers = eventLayers(event);

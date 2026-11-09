@@ -23,7 +23,7 @@ import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
 import { ERROR_CODES } from "../../shared/errors.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
-import { activityRows, ensureActivity, refreshActivitySoon, selected, sozuFactOfHash } from "./activity.js";
+import { activityRows, ensureActivity, refreshActivitySoon, selected, sozuFactOfSent } from "./activity.js";
 import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
@@ -1259,7 +1259,7 @@ export async function render({ forceRefresh = false } = {}) {
   if (state.route === "sent") {
     if (state.sent) {
       // A stake or an unstake with Sozu, completed: what it got or gave back, once its pool's event is read.
-      const sozu = state.sent.sozu && state.sent.hash ? sozuFactOfHash(ov, state, state.sent.hash, { render }) : undefined;
+      const sozu = state.sent.sozu && state.sent.hash ? sozuFactOfSent(ov, state, state.sent, { render, refresh: () => refreshActivitySoon({ state, render }, 0) }) : undefined;
       setApp(sentView(ov, { state, actions, sozu }));
       return;
     }

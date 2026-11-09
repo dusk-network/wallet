@@ -77,7 +77,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Listed each payment of a request paid twice with what it brought and when, and Send back on the extra one.
 - Found what's searched typed without its accents, in Activity and Contacts, and an amount typed with either decimal mark.
 - Showed each Activity row's memo under its name.
-- Said what a stake or an unstake with Sozu got or gave back in stDUSK, and the rate, on Completed and in its details.
+- Said what a stake or an unstake with Sozu got or gave back in stDUSK, and the rate, on Completed as soon as it went through, and in its details.
 - Said at once when the connection drops, kept the balance read last as maybe out of date, and read it again by itself once back.
 - Kept the extension's own files from sites: no page can load them, but for the provider script Firefox puts in it.
 - Told a site that never connected, or whose connection ended, nothing as the wallet switches network.

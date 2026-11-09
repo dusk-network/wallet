@@ -260,18 +260,34 @@ describe("background Phoenix tx lifecycle flow", () => {
     const hash = "0xexecuted";
     await seedTxMeta(hash);
 
-    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true });
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true, blockHeight: "4700000" });
 
     const { getTxMeta } = await import("../shared/txStore.js");
     await expect(getTxMeta(hash)).resolves.toMatchObject({
       status: "executed",
       reservationStatus: "spent",
       pendingNullifiers: ["aa"],
+      // Its block, for Completed to read a stake's stDUSK there as it goes through.
+      blockHeight: "4700000",
     });
 
     await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual(
-      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed" })
+      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed", blockHeight: "4700000" })
     ));
+  });
+
+  it("tells the UI the block the node has it in now, where it went in again in another", async () => {
+    const hash = "0xreincluded";
+    await seedTxMeta(hash);
+    mocks.classifyTxPresence.mockResolvedValueOnce({ state: "executed_success", tx: { id: hash, blockHeight: 4_700_005, gasSpent: "1", tx: { gasPrice: "1" } } });
+
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true, blockHeight: "4700000" });
+
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual(expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed" })));
+    const told = mocks.sentMessages.find((m) => m.type === "DUSK_UI_TX_STATUS" && m.hash === hash);
+    await expect(getTxMeta(hash)).resolves.toMatchObject({ blockHeight: "4700005" });
+    expect(told.blockHeight).toBe("4700005");
   });
 
   it("marks failed finalized shielded tx reservations spent", async () => {
