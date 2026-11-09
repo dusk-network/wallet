@@ -260,17 +260,19 @@ describe("background Phoenix tx lifecycle flow", () => {
     const hash = "0xexecuted";
     await seedTxMeta(hash);
 
-    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true });
+    await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash, ok: true, blockHeight: "4700000" });
 
     const { getTxMeta } = await import("../shared/txStore.js");
     await expect(getTxMeta(hash)).resolves.toMatchObject({
       status: "executed",
       reservationStatus: "spent",
       pendingNullifiers: ["aa"],
+      // Its block, for Completed to read a stake's stDUSK there as it goes through.
+      blockHeight: "4700000",
     });
 
     await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual(
-      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed" })
+      expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash, status: "executed", blockHeight: "4700000" })
     ));
   });
 

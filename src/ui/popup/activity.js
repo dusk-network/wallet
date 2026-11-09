@@ -23,13 +23,14 @@ import {
   getCounterpartyNames,
   putCounterpartyNames,
 } from "../../shared/activityStore.js";
+import { safeBigInt } from "../../shared/amount.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { nameFactsFor } from "../../shared/knownCalls.js";
 import { chainIdForNode, networkForNode } from "../../shared/nodeNetwork.js";
 import { lookupRecipientNames } from "../../shared/duskNames.js";
 import { forgetTxs, getTxEpoch, listTxs, patchTxMeta } from "../../shared/txStore.js";
 import { VERIFIED_NAME_TTL_MS, duskNamesScope } from "../../shared/verifiedNames.js";
-import { noteTxStatus } from "./views/sent.js";
+import { noteTxStatus, sentStatus } from "./views/sent.js";
 
 /** Rows read for the History view at first, and how many more Show more adds. */
 export const ACTIVITY_PAGE = 50;
@@ -464,13 +465,43 @@ const sozuFactsKept = new Map();
  * @param {object[]} rows - the account's rows
  * @returns {Promise<Map<string, import("@dusk-network/app-core/sozu").SozuFact> | undefined>}
  */
-export function sozuFactsOf(ov, rows) {
+export function sozuFactsOf(ov, rows, { inBlock = false } = {}) {
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
+  // What an accepted block says may yet change with it: never kept with the final.
+  if (inBlock) return sozuFacts({ archive: blockEventsOf(archive), account: selected(ov).account, rows }).catch(() => undefined);
   return sozuFacts({ archive, account: selected(ov).account, rows, cache: sozuFactsKept }).catch(() => undefined);
+}
+
+// The account's history lists a transaction once its block is final; its
+// block's events (contractEvents) have it as the block is accepted. Asked for
+// the history of one block, this answers with that block's events, each
+// transaction's (`origin`) together, as the history gives them.
+function blockEventsOf(archive) {
+  return {
+    async query(text) {
+      const asked = [...String(text).matchAll(/(h\d+): moonlightHistory\([^)]*?fromBlock: (\d+)/g)];
+      if (!asked.length) return archive.query(text);
+      const data = await archive.query(`query { ${asked.map(([, alias, height]) => `${alias}: contractEvents(height: ${height}) { json }`).join(" ")} }`);
+      return Object.fromEntries(
+        asked.map(([, alias]) => {
+          const txs = new Map();
+          for (const event of Array.isArray(data?.[alias]?.json) ? data[alias].json : []) {
+            const origin = String(event?.origin ?? "").toLowerCase();
+            if (!txs.has(origin)) txs.set(origin, { origin, events: [] });
+            txs.get(origin).events.push({ ...event, target: event.target ?? event.source });
+          }
+          return [alias, { json: [...txs.values()] }];
+        })
+      );
+    },
+  };
 }
 
 /** How long a stake's or an unstake's Sozu facts not read yet wait before they're asked again: the archive can lag the block. */
 export const SOZU_FACT_AGAIN_MS = 60_000;
+/** On its Completed screen, as it just went through: asked again this soon, this many times, then a minute on. */
+export const SOZU_FACT_SOON_MS = 3_000;
+const SOZU_FACT_SOON_TRIES = 20;
 // By activity and hash: what the pool's event said, or when a read that found none ended.
 const sozuFactReads = new Map();
 
@@ -485,14 +516,16 @@ const sozuFactReads = new Map();
  * @param {{ render?: () => Promise<unknown> }} [options]
  * @returns {import("@dusk-network/app-core/sozu").SozuFact | undefined}
  */
-export function sozuFactOf(ov, row, { render } = {}) {
+export function sozuFactOf(ov, row, { render, soon = false, inBlock = false } = {}) {
   if (!row?.sozu || row.status !== "executed" || row.source !== "public") return undefined;
-  const key = `${activityKey(ov)}\n${row.hash}`;
+  // Read from its block as accepted (`inBlock`), apart from the final history's.
+  const key = `${inBlock ? "block" : "final"}\n${activityKey(ov)}\n${row.hash}`;
   const last = sozuFactReads.get(key);
-  if (last?.fact || last?.reading || (last && Date.now() - last.at < SOZU_FACT_AGAIN_MS)) return last.fact;
-  const read = { at: Date.now(), fact: undefined, reading: true };
+  const again = (tries) => (soon && tries < SOZU_FACT_SOON_TRIES ? SOZU_FACT_SOON_MS : SOZU_FACT_AGAIN_MS);
+  if (last?.fact || last?.reading || (last && Date.now() - last.at < again(last.tries))) return last.fact;
+  const read = { at: Date.now(), fact: undefined, reading: true, tries: (last?.tries ?? 0) + 1 };
   sozuFactReads.set(key, read);
-  sozuFactsOf(ov, [row])
+  sozuFactsOf(ov, [row], { inBlock })
     .then((facts) => {
       read.fact = facts?.get(row.hash);
     })
@@ -501,22 +534,38 @@ export function sozuFactOf(ov, row, { render } = {}) {
       Object.assign(read, { at: Date.now(), reading: false });
       if (sozuFactReads.get(key) !== read) return;
       if (read.fact) render?.()?.catch?.(() => {});
-      else setTimeout(() => render?.()?.catch?.(() => {}), SOZU_FACT_AGAIN_MS);
+      else setTimeout(() => render?.()?.catch?.(() => {}), again(read.tries));
     });
   return undefined;
 }
 
 /**
- * What a stake or an unstake with Sozu the wallet sent did, by its hash, once
- * the chain's history has it (sozuFactOf).
+ * What a stake or an unstake with Sozu the wallet sent did, for its Completed
+ * screen: read from its block's events as it goes through (the block the
+ * wallet's watcher heard it in, `sent.blockHeight`), or as the chain's history
+ * lists it; asked again every few seconds till then.
  * @param {object} ov
  * @param {object} state
- * @param {string} hash
+ * @param {object} sent - the Sent screen's transaction (state.sent)
  * @param {{ render?: () => Promise<unknown> }} [options]
  */
-export function sozuFactOfHash(ov, state, hash, options) {
-  const row = hash ? activityRows(ov, state).find((each) => each.hash === hash && each.source === "public") : undefined;
-  return sozuFactOf(ov, row, options);
+export function sozuFactOfSent(ov, state, sent, options) {
+  const listed = sent?.hash ? activityRows(ov, state).find((each) => each.hash === sent.hash && each.source === "public") : undefined;
+  // Final as failed, as a block that dropped out can leave it: the screen
+  // says so, and nothing of what its block said.
+  if (listed?.status === "failed") {
+    noteTxStatus(sent, { hash: sent.hash, status: "failed", error: listed.error || "It didn't go through in the end." });
+    return undefined;
+  }
+  // Listed: the final history's, once read, in place of its block's.
+  const final = listed ? sozuFactOf(ov, listed, { ...options, soon: true }) : undefined;
+  if (final) return final;
+  const { status, blockHeight } = sentStatus(sent, ov);
+  const height = Number(blockHeight);
+  const pool = String(sent?.pool ?? "");
+  if (status !== "executed" || !Number.isSafeInteger(height) || height <= 0 || !pool) return undefined;
+  const row = { hash: sent.hash, sozu: sent.sozu, status, source: "public", blockHeight: height, contractId: pool, value: safeBigInt(sent.amountLux, 0n) };
+  return sozuFactOf(ov, row, { ...options, soon: true, inBlock: true });
 }
 
 // How Sozu's stDUSK grew lately, by pool, as app-core reads it from the chain:

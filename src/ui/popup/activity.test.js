@@ -579,6 +579,92 @@ describe("what a stake with Sozu did", () => {
   });
 });
 
+describe("what a stake with Sozu got, on its Completed screen", () => {
+  it("reads it from its block's events as it goes through, before the history lists it, asking again every few seconds", async () => {
+    const { networks } = await import("@dusk-network/networks");
+    const { ACCOUNT, TESTNET } = await import("../../shared/fixtures/rows.js");
+    const { pool } = networks.testnet.sozu.fallbacks;
+    const u64 = (n) => Array.from({ length: 8 }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn).toString(16).padStart(2, "0")).join("");
+    const hash = "d2".repeat(32);
+    const deposit = `${[100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n].map(u64).join("")}01${"ab".repeat(193)}${"00".repeat(6)}`;
+    // The block's events, as the node has them once it's accepted: another transaction's too.
+    let accepted = false;
+    const asked = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      asked.push(String(init?.body ?? ""));
+      const json = accepted && /contractEvents\(height: 4700001\)/.test(String(init?.body)) ? [{ origin: "ee".repeat(32), source: pool, topic: "deposit", data: deposit, reverted: false }, { origin: hash, source: pool, topic: "deposit", data: deposit, reverted: false }] : [];
+      return new Response(JSON.stringify({ data: { h0: { json } } }), { headers: { "content-type": "application/json" } });
+    }));
+    const ov = { accounts: [ACCOUNT], isUnlocked: true, nodeUrl: TESTNET, selectedAccountIndex: 0 };
+    // Completed's: its watcher heard it go through in block 4,700,001; the history doesn't list it yet.
+    const sent = { hash, sozu: "stake", pool, amountLux: "100000000000", phase: "sent", status: "executed", blockHeight: "4700001" };
+    const held = [];
+    const realSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...rest) => (ms === activity.SOZU_FACT_SOON_MS ? held.push(fn) : realSetTimeout(fn, ms, ...rest)));
+    let fact;
+    const render = vi.fn(async () => {
+      fact = activity.sozuFactOfSent(ov, {}, sent, { render });
+    });
+
+    expect(activity.sozuFactOfSent(ov, {}, sent, { render })).toBeUndefined();
+    // Not there on the first ask: a few seconds on, asked again, and found.
+    await until(() => held.length === 1);
+    accepted = true;
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + activity.SOZU_FACT_SOON_MS + 1);
+    held[0]();
+    await until(() => fact !== undefined);
+    expect(fact).toMatchObject({ kind: "stake", stDusk: 49_875_000_000n });
+    expect(asked.every((body) => /contractEvents\(height: 4700001\)/.test(body))).toBe(true);
+  });
+});
+
+describe("what a stake with Sozu got, read before its block is final", () => {
+  it("keeps it apart from what the final history says, which takes its place and is the one kept", async () => {
+    const { networks } = await import("@dusk-network/networks");
+    const { entryOf, rowsOf, ACCOUNT, TESTNET } = await import("../../shared/fixtures/rows.js");
+    const { pool } = networks.testnet.sozu.fallbacks;
+    const u64 = (n) => Array.from({ length: 8 }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn).toString(16).padStart(2, "0")).join("");
+    const deposit = (stake) => `${[100_000_000_000n, 250_000_000n, stake, 1_000_000_000_000n].map(u64).join("")}01${"ab".repeat(193)}${"00".repeat(6)}`;
+    const hash = "d3".repeat(32);
+    // Its block as first accepted, then the chain's final one: another pool state.
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const body = String(init?.body ?? "");
+      const json = body.includes("contractEvents")
+        ? [{ origin: hash, source: pool, topic: "deposit", data: deposit(2_000_000_000_000n), reverted: false }]
+        : [{ origin: hash, events: [{ target: pool, topic: "deposit", data: deposit(3_000_000_000_000n) }] }];
+      return new Response(JSON.stringify({ data: { h0: { json } } }), { headers: { "content-type": "application/json" } });
+    }));
+    const fields = { hash, kind: "contract_call", contractId: pool, counterparty: pool, fnName: "sozu_stake", value: "100000000000", blockHeight: 4_700_002 };
+    const [row] = rowsOf({ entries: [fields] });
+    const ov = { accounts: [ACCOUNT], isUnlocked: true, nodeUrl: TESTNET, selectedAccountIndex: 0 };
+    // Completed's, as its watcher heard it go through, the history not listing it yet.
+    const sent = { hash, sozu: "stake", pool, amountLux: "100000000000", phase: "sent", status: "executed", blockHeight: "4700002" };
+    let early;
+    const render = vi.fn(async () => {
+      early = activity.sozuFactOfSent(ov, {}, sent, { render });
+    });
+    activity.sozuFactOfSent(ov, {}, sent, { render });
+    await until(() => early !== undefined);
+    expect(early.stDusk).toBe(49_875_000_000n);
+    // Details and exports read the final history's, never the block's kept.
+    expect((await activity.sozuFactsOf(ov, [row]))?.get(hash)?.stDusk).toBe(33_250_000_000n);
+    let final;
+    const again = vi.fn(async () => {
+      final = activity.sozuFactOf(ov, row, { render: again });
+    });
+    activity.sozuFactOf(ov, row, { render: again });
+    await until(() => final !== undefined);
+    expect(final.stDusk).toBe(33_250_000_000n);
+    // Listed now: Completed says the final history's.
+    const listed = { activity: { key: activity.activityKey(ov), entries: [entryOf(fields)] } };
+    expect(activity.sozuFactOfSent(ov, listed, sent, { render })?.stDusk).toBe(33_250_000_000n);
+    // Final as failed instead, its block dropped: nothing of the block's, and the screen says it failed.
+    const failed = { activity: { key: activity.activityKey(ov), entries: [entryOf({ ...fields, success: false })] } };
+    expect(activity.sozuFactOfSent(ov, failed, sent, { render })).toBeUndefined();
+    expect(sent.status).toBe("failed");
+  });
+});
+
 describe("loadActivityDetail", () => {
   it("asks again a while after a lookup that brought nothing, not before", async () => {
     const node = fakeArchive();

@@ -395,13 +395,21 @@ function stepMark(stepState) {
   return h("span", { class: "step-mark" });
 }
 
+// What a completed stake or unstake with Sozu got or gave back, or, its
+// pool's event not read yet, that it's coming: never nothing.
+function sozuLines(sent, fact, hidden) {
+  if (fact) return stDuskLines(fact, hidden);
+  return [{ label: sent.sozu === "unstake" ? "You gave back" : "You got", value: "stDUSK and rate coming in a moment" }];
+}
+
 const STATE_WORDS = { done: "Done: ", current: "Now: ", failed: "Failed: ", unknown: "Unclear: ", upcoming: "Next: " };
 
 /**
  * The Sent screen: what was sent, its steps, its transaction ID and fee, and
  * Done. Amounts and the fee hide with Hide balances. A stake or an unstake
  * with Sozu says what it got or gave back in stDUSK once it completed and the
- * pool's event is read (`sozu`, what app.js reads by its hash).
+ * pool's event is read (`sozu`, what app.js reads from its block), and that
+ * they're coming till then.
  */
 export function sentView(ov, { state, actions, sozu } = {}) {
   const sent = state?.sent;
@@ -486,7 +494,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
   const details = h("div", { class: "group" }, [
-    ...(sent.sozu && status === "executed" ? stDuskLines(sozu, hidden) : []).map(({ label, value }) => kv(label, value)),
+    ...(sent.sozu && status === "executed" ? sozuLines(sent, sozu, hidden) : []).map(({ label, value }) => kv(label, value)),
     sent.hash
       ? kv("Transaction ID", [h("span", { class: "mono", title: sent.hash, text: shortAddress(sent.hash) }), copyBtn])
       : null,

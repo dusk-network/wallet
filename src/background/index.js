@@ -624,6 +624,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const observedOk = message.ok !== false;
         const observedError = message.error ? String(message.error) : "";
         const observedStatus = observedOk ? "executed" : "failed";
+        const blockHeight = /^[1-9]\d*$/.test(String(message.blockHeight ?? "")) ? String(message.blockHeight) : undefined;
         let reconciled = {
           status: observedStatus,
           origin: "Wallet",
@@ -641,6 +642,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
               status: observedStatus,
               executedAt: now,
               lastCheckedAt: now,
+              ...(blockHeight ? { blockHeight } : {}),
               error: observedOk ? undefined : observedError || undefined,
               reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta?.reservationStatus,
               reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta?.reservationUpdatedAt,
@@ -664,7 +666,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           error,
           nodeUrl: reconciled.nodeUrl,
         }).catch(() => {});
-        emitUiTxStatus({ hash, ...reconciled, status: finalStatus, ok, error }).catch(() => {});
+        emitUiTxStatus({ hash, ...reconciled, status: finalStatus, ok, error, ...(blockHeight ? { blockHeight } : {}) }).catch(() => {});
         return;
       }
 

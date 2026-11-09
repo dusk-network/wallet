@@ -131,6 +131,15 @@ describe("the contacts' key", () => {
 });
 
 describe("a send's watcher", () => {
+  it("passes on the block its transaction went through in, as the node's event says it", async () => {
+    mocks.runtimeSendMessage.mockClear();
+    mocks.waitTxExecuted.mockResolvedValueOnce({ payload: { block_height: 4_700_000, gas_spent: 2_000_000, err: null } });
+    await engineCall("dusk_sendTransaction", { kind: "transfer", amount: "1", txEpoch: 4 });
+    await vi.waitFor(() =>
+      expect(mocks.runtimeSendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_TX_EXECUTED", hash: "0xsent", blockHeight: "4700000" }))
+    );
+  });
+
   it("hands the send's store count back with its events, and not to the send", async () => {
     mocks.runtimeSendMessage.mockClear();
     const response = await engineCall("dusk_sendTransaction", { kind: "transfer", amount: "1", txEpoch: 4 });

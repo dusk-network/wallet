@@ -1095,8 +1095,9 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         title,
         amountLux: draftNeeds.toString(),
         line,
-        // For Completed to say what it got or gave back in stDUSK.
+        // For Completed to say what it got or gave back in stDUSK, from its pool's event.
         sozu: isStake ? "stake" : "unstake",
+        pool: params.contractId,
         from: isStake ? "from your public balance" : "",
         feeCapLux: (safeBigInt(sentGas.limit, 0n) * safeBigInt(sentGas.price, 0n)).toString(),
       },

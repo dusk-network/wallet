@@ -120,11 +120,16 @@ describe("a stake or an unstake with Sozu, completed", () => {
     expect(rows().slice(0, 2)).toEqual(["You got49.875 stDUSK", "Rate1 stDUSK = 2 DUSK"]);
     completed("unstake", fact("unstake", 63_297_959n));
     expect(rows().slice(0, 2)).toEqual(["You gave back0.063297959 stDUSK", "Rate1 stDUSK = 2 DUSK"]);
-    // Hidden with the balances; and nothing until the pool's event is read.
+    // Hidden with the balances.
     completed("stake", fact("stake", 49_875_000_000n), overview({ hideBalances: true }));
     expect(rows().slice(0, 2)).toEqual(["You got•••• stDUSK", "Rate1 stDUSK = 2 DUSK"]);
+  });
+
+  it("says the stDUSK and rate are coming while its pool's event isn't read yet, never nothing", () => {
     completed("stake", undefined);
-    expect(rows().some((row) => /stDUSK/.test(row))).toBe(false);
+    expect(rows()[0]).toBe("You gotstDUSK and rate coming in a moment");
+    completed("unstake", undefined);
+    expect(rows()[0]).toBe("You gave backstDUSK and rate coming in a moment");
   });
 });
 
