@@ -559,7 +559,9 @@ const finalLooks = new Map();
  */
 export function sozuFactOfSent(ov, state, sent, options) {
   const listed = sent?.hash ? activityRows(ov, state).find((each) => each.hash === sent.hash && each.source === "public") : undefined;
-  if (!listed && sent?.hash) lookForFinal(ov, sent, options?.refresh);
+  const { status, blockHeight } = sentStatus(sent, ov);
+  // Once it went through: from then on, a few minutes for the history to list it.
+  if (!listed && sent?.hash && status === "executed") lookForFinal(ov, sent, options?.refresh);
   // Final as failed, as a block that dropped out can leave it: the screen
   // says so, and nothing of what its block said.
   if (listed?.status === "failed") {
@@ -569,7 +571,6 @@ export function sozuFactOfSent(ov, state, sent, options) {
   // Listed: the final history's, once read, in place of its block's.
   const final = listed ? sozuFactOf(ov, listed, { ...options, soon: true }) : undefined;
   if (final) return final;
-  const { status, blockHeight } = sentStatus(sent, ov);
   const height = Number(blockHeight);
   const pool = String(sent?.pool ?? "");
   if (status !== "executed" || !Number.isSafeInteger(height) || height <= 0 || !pool) return undefined;

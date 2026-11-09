@@ -634,6 +634,9 @@ describe("what a stake with Sozu got, while the final history doesn't list it", 
     vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...rest) => (ms === activity.SOZU_FINAL_AGAIN_MS ? held.push(fn) : realSetTimeout(fn, ms, ...rest)));
     // The history read again: here, nothing new in it.
     const refresh = vi.fn();
+    // Waiting in the mempool first, its screen drawn again and again: nothing of the few minutes goes.
+    for (let i = 0; i < 5; i++) activity.sozuFactOfSent(ov, {}, { ...sent, status: "submitted", blockHeight: undefined }, { refresh });
+    expect(held).toHaveLength(0);
     let fact;
     const render = vi.fn(async () => {
       fact = activity.sozuFactOfSent(ov, {}, sent, { render, refresh });
