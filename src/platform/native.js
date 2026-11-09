@@ -76,6 +76,23 @@ export async function listenForLinks(onLink) {
 }
 
 /**
+ * Android's Back button in the app, handed to `onBack` (Tauri's back-button
+ * event) instead of going back in the page's history or closing the app.
+ * False outside the app, or where it can't be listened to.
+ * @param {() => void} onBack
+ */
+export async function listenForBack(onBack) {
+  if (!isTauriRuntime()) return false;
+  try {
+    const { onBackButtonPress } = await import("@tauri-apps/api/app");
+    await onBackButtonPress(() => onBack());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Puts the app in the background as it is, as Home does, rather than closing
  * it as Back on its first screen would. False outside the app, or where it couldn't.
  */

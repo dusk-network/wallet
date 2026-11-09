@@ -445,43 +445,51 @@ describe("the app on a phone", () => {
     await flush();
     expect([t.state.route, fields().includes("0.02"), fields().includes("Second")]).toEqual(["send", true, true]);
   });
+});
 
-  it("goes back one screen at a time from two screens in, then to the background, never closing", async () => {
+// The phone's Back in the app, as Android hands it to the wallet (Tauri's
+// back-button event, here a fake): through what people do, into screens,
+// Back, the background, back in, a press between, Android answering late.
+// Back takes one screen back at a time; on the first screen the app goes to
+// the background; the page's history is never touched, and nothing closes.
+describe("the phone's Back in the app, as Android hands it over", () => {
+  const ROWS = [
+    ["two screens in, back out, then to the background", "at once", [["settings", "options"], ["contacts", "contacts"], ["back", "options"], ["back", "home"], ["back", "home"]], 1],
+    ["to the background, back in, Back with no press, twice (Lena's)", "at once", [["back", "home"], ["back", "home"], ["back", "home"]], 3],
+    ["a press between two Backs to the background", "at once", [["back", "home"], ["tap", "home"], ["back", "home"]], 2],
+    ["back in, two screens in and out, to the background again", "at once", [["back", "home"], ["settings", "options"], ["contacts", "contacts"], ["back", "options"], ["back", "home"], ["back", "home"], ["back", "home"]], 3],
+    ["into Settings before Android answers (Sol's)", "on answer", [["back", "home"], ["settings", "options"], ["answer", "options"], ["back", "home"], ["back", "home"]], 2],
+    ["into Settings and Back before Android answers (the delta review's)", "on answer", [["back", "home"], ["settings", "options"], ["back", "home"], ["answer", "home"], ["back", "home"]], 2],
+    ["Android answering after the next Back too", "on answer", [["back", "home"], ["back", "home"], ["answer", "home"], ["answer", "home"], ["back", "home"]], 3],
+  ];
+
+  it.each(ROWS)("%s", async (_, when, steps, toBackground) => {
     let history;
-    const bridge = tauriBridge({ move_to_back: true });
+    let backButton;
+    const waiting = [];
+    const bridge = tauriBridge({
+      // Android's Back, from the moment the wallet listens to it.
+      "plugin:app|register_listener": (args) => {
+        if (args?.event === "back-button") backButton = args.handler;
+        return null;
+      },
+      move_to_back: () => (when === "at once" ? true : new Promise((resolve) => waiting.push(resolve))),
+    });
     const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge, history: (win) => (history = pageHistory(win)) });
+    await vi.waitFor(() => expect(backButton).toBeDefined());
     const button = (text) => [...t.dom.document.querySelectorAll("button")].find((b) => b.textContent === text || b.getAttribute("aria-label") === text);
-    // Home, Settings, then Contacts: an entry for each.
-    button("Settings").click();
-    await flush();
-    button("Contacts").click();
-    await flush();
-    expect([t.state.route, history.at]).toEqual(["contacts", 3]);
-    // Back's own click on ← Back is no press of the person's: one entry a Back.
-    history.back();
-    await flush();
-    expect([t.state.route, history.at]).toEqual(["options", 2]);
-    history.back();
-    await flush();
-    expect([t.state.route, history.at]).toEqual(["home", 1]);
-    history.back();
-    await vi.waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith("move_to_back", {}, undefined));
-    expect(history.closed).toBe(false);
-  });
-
-  it("goes to the background from its first screen, kept as it is, rather than closing", async () => {
-    let history;
-    const bridge = tauriBridge({ move_to_back: true });
-    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge, history: (win) => (history = pageHistory(win)) });
-    // The first screen has its entry too, for Back to come to the wallet.
-    expect(history.at).toBe(1);
-    history.back();
-    await vi.waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith("move_to_back", {}, undefined));
-    expect([t.state.route, history.closed]).toEqual(["home", false]);
-    // Back in the app, its first press puts the entry up again, for the next Back.
-    t.app.click();
-    await flush();
-    expect(history.at).toBe(1);
+    const done = [];
+    for (const [step, route] of steps) {
+      if (step === "settings") button("Settings").click();
+      if (step === "contacts") button("Contacts").click();
+      if (step === "tap") t.app.click();
+      if (step === "back") backButton.onmessage({ canGoBack: false });
+      if (step === "answer") waiting.shift()?.(true);
+      await flush();
+      done.push(step);
+      expect([done.join(" "), t.state.route, history.length, history.closed]).toEqual([done.join(" "), route, 1, false]);
+    }
+    expect(bridge.invoke.mock.calls.filter(([cmd]) => cmd === "move_to_back")).toHaveLength(toBackground);
   });
 });
 
