@@ -39,6 +39,64 @@ import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
 const autoLockLabel = (minutes) =>
   AUTO_LOCK_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} minutes`;
 
+// Settings' Unlock with fingerprint: the switch, and while it's being turned
+// on, the password, checked against the vault, then the fingerprint.
+function fingerprintRow({ actions }) {
+  const fingerSwitch = h("input", { id: "fingerprint-unlock", type: "checkbox" });
+  const row = h("div", { class: "settings-fingerprint", hidden: true }, [
+    h("label", { class: "settings-switch", for: "fingerprint-unlock" }, [fingerSwitch, h("span", { text: "Unlock with fingerprint" })]),
+  ]);
+  let ask = null;
+  const closeAsk = () => {
+    ask?.remove();
+    ask = null;
+  };
+  const openAsk = () => {
+    const pwd = passwordInput({ id: "fingerprint-password", autocomplete: "current-password", onEnter: () => turnOn.click() });
+    const error = h("div", { class: "field-error", id: "fingerprint-error", role: "alert", hidden: true });
+    const sayError = (text) => {
+      error.textContent = text || "";
+      error.hidden = !text;
+    };
+    pwd.addEventListener("input", () => sayError(""));
+    const turnOn = h("button", {
+      class: "btn-outline",
+      type: "button",
+      text: "Turn on",
+      onclick: async () => {
+        sayError("");
+        const password = pwd.value;
+        if (!password) return sayError("Enter your password.");
+        turnOn.disabled = true;
+        try {
+          const res = await actions?.send?.({ type: "DUSK_UI_CHECK_PASSWORD", password });
+          if (res?.error) throw new Error(/^Incorrect password$/.test(String(res.error.message ?? "")) ? "Wrong password." : res.error.message);
+          const on = await turnFingerprintOn(password);
+          pwd.value = "";
+          closeAsk();
+          if (on.ok) return actions?.showToast?.("Fingerprint unlock is on.");
+          fingerSwitch.checked = false;
+          if (on.reason !== "password") actions?.showToast?.("Fingerprint unlock couldn't be turned on.", 2500);
+        } catch (e) {
+          sayError(e?.message ?? String(e));
+        } finally {
+          turnOn.disabled = false;
+        }
+      },
+    });
+    ask = h("div", { class: "settings-fingerprint-ask" }, [fieldLabel(pwd, "Your password, to turn it on"), pwd, error, turnOn]);
+    row.append(ask);
+    pwd.focus?.();
+  };
+  fingerSwitch.addEventListener("change", async () => {
+    if (fingerSwitch.checked) return openAsk();
+    closeAsk();
+    await turnFingerprintOff();
+    actions?.showToast?.("Fingerprint unlock is off.");
+  });
+  return row;
+}
+
 export function optionsView(ov, { state, actions } = {}) {
   const currentNodeUrl = String(ov?.nodeUrl ?? "").trim();
   const currentProverUrl = String(ov?.proverUrl ?? "").trim();
@@ -422,69 +480,13 @@ export function optionsView(ov, { state, actions } = {}) {
 
   // Fingerprint unlock, in the app on a phone that can guard the password with
   // one (platform/fingerprint.js): turned on with the password, then a
-  // fingerprint; off at once. Shown once the phone says it can.
-  const fingerSwitch = h("input", { id: "fingerprint-unlock", type: "checkbox" });
-  const fingerPwd = passwordInput({ id: "fingerprint-password", autocomplete: "current-password", placeholder: "Password", onEnter: () => fingerOn.click() });
-  const fingerError = h("div", { class: "field-error", id: "fingerprint-error", role: "alert", hidden: true });
-  const sayFingerError = (text) => {
-    fingerError.textContent = text || "";
-    fingerError.hidden = !text;
-  };
-  fingerPwd.addEventListener("input", () => sayFingerError(""));
-  const fingerOn = h("button", {
-    class: "btn-outline",
-    type: "button",
-    text: "Turn on",
-    onclick: async () => {
-      sayFingerError("");
-      const password = fingerPwd.value;
-      if (!password) return sayFingerError("Enter your password.");
-      fingerOn.disabled = true;
-      try {
-        const res = await actions?.send?.({ type: "DUSK_UI_CHECK_PASSWORD", password });
-        if (res?.error) throw new Error(/^Incorrect password$/.test(String(res.error.message ?? "")) ? "Wrong password." : res.error.message);
-        const on = await turnFingerprintOn(password);
-        fingerPwd.value = "";
-        if (!on.ok) {
-          fingerSwitch.checked = false;
-          fingerAsk.hidden = true;
-          if (on.reason !== "password") actions?.showToast?.("Fingerprint unlock couldn't be turned on.", 2500);
-          return;
-        }
-        fingerAsk.hidden = true;
-        actions?.showToast?.("Fingerprint unlock is on.");
-      } catch (e) {
-        sayFingerError(e?.message ?? String(e));
-      } finally {
-        fingerOn.disabled = false;
-      }
-    },
-  });
-  const fingerAsk = h("div", { class: "settings-fingerprint-ask", hidden: true }, [
-    fieldLabel(fingerPwd, "Your password, to turn it on"),
-    fingerPwd,
-    fingerError,
-    fingerOn,
-  ]);
-  fingerSwitch.addEventListener("change", async () => {
-    if (fingerSwitch.checked) {
-      fingerAsk.hidden = false;
-      fingerPwd.focus?.();
-      return;
-    }
-    fingerAsk.hidden = true;
-    fingerPwd.value = "";
-    await turnFingerprintOff();
-    actions?.showToast?.("Fingerprint unlock is off.");
-  });
-  const fingerRow = h("div", { class: "settings-fingerprint", hidden: true }, [
-    h("label", { class: "settings-switch", for: "fingerprint-unlock" }, [fingerSwitch, h("span", { text: "Unlock with fingerprint" })]),
-    fingerAsk,
-  ]);
-  if (inApp && ov?.isUnlocked) {
+  // fingerprint; off at once. Shown once the phone says it can; the password's
+  // field is there only while it's being turned on.
+  const fingerRow = inApp && ov?.isUnlocked ? fingerprintRow({ actions }) : null;
+  if (fingerRow) {
     fingerprintStatus().then(({ available, on }) => {
       if (!available && !on) return;
-      fingerSwitch.checked = on;
+      fingerRow.querySelector("#fingerprint-unlock").checked = on;
       fingerRow.hidden = false;
     });
   }

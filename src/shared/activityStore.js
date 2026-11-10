@@ -241,15 +241,29 @@ export async function listActivityEntries(ownerKey, { limit = 200, before } = {}
   const upper = Number.isFinite(before) ? [ownerKey, before] : [ownerKey, Infinity];
   const range = IDBKeyRange.bound([ownerKey, -Infinity], upper, false, Number.isFinite(before));
   const out = [];
+  const failed = (req) => () => req.error || new Error("Activity store read failed");
+  // A block at a time, newest first: its height's key, then all its entries in
+  // one read, in the order a cursor gives them, then on to the block below. A
+  // block with many of the account's entries is one read, not one step each.
   await new Promise((resolve, reject) => {
-    const req = index.openCursor(range, "prev");
+    const req = index.openKeyCursor(range, "prev");
+    req.onerror = () => reject(failed(req)());
     req.onsuccess = () => {
       const cursor = req.result;
       if (!cursor || out.length >= limit) return resolve();
-      out.push(cursor.value);
-      cursor.continue();
+      const key = cursor.key;
+      const block = index.getAll(IDBKeyRange.only(key));
+      block.onerror = () => reject(failed(block)());
+      block.onsuccess = () => {
+        for (const entry of block.result.reverse()) {
+          if (out.length >= limit) break;
+          out.push(entry);
+        }
+        if (out.length >= limit) return resolve();
+        // Heights are whole block numbers: the next key down is the block below.
+        cursor.continue([key[0], key[1] - 0.5]);
+      };
     };
-    req.onerror = () => reject(req.error || new Error("Activity store read failed"));
   });
   return out;
 }
