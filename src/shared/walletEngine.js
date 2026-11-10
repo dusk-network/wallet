@@ -26,6 +26,7 @@ import { parseSozuPoolState } from "./sozuAdapter.js";
 import { blockedRecipient } from "./recipientBlocklist.js";
 import { askNodeChainId, chainIdForNode, chainRefusal, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
 import { nodeRefusalText, propagationError } from "./nodeRefusal.js";
+import { connectionLost } from "./sendOutcome.js";
 
 import {
   clearNotes,
@@ -1463,14 +1464,62 @@ function sayRefusalsPlainly(network) {
   for (const step of ["preverify", "propagate"]) {
     const call = txs?.[step];
     if (typeof call !== "function") continue;
-    txs[step] = (...args) =>
-      call.apply(txs, args).catch((error) => {
+    txs[step] = (...args) => {
+      // From here it may reach the node, whatever comes back.
+      if (step === "propagate" && args[0] && typeof args[0] === "object") handedOver.add(args[0]);
+      return call.apply(txs, args).catch((error) => {
         if (error?.name === "TypeError" || error?.name === "AbortError") throw error;
         // Before propagation nothing has gone out. After it, only the node's own word is a refusal.
         throw new Error(step === "propagate" ? propagationError(error?.message ?? error) : nodeRefusalText(error?.message ?? error));
       });
+    };
   }
+  return sayWhetherItWent(network);
+}
+
+// The transactions handed to the node to propagate, by their bytes.
+const handedOver = new WeakSet();
+
+// A send that fails says whether it went out, in its error's `data.sent`: false
+// when it failed before it was handed to the node, nothing signed reaching it;
+// "unknown", with its ID (`data.hash`), when it failed as or after it was, so
+// the transaction can be looked up by its ID once the node answers again.
+function sayWhetherItWent(network) {
+  const execute = network?.execute;
+  if (typeof execute !== "function") return network;
+  network.execute = async function (tx) {
+    // What the builder builds, as w3sper's execute builds it: the transaction handed over.
+    let built = typeof tx?.build === "function" ? null : tx;
+    const build = built ? null : tx.build;
+    const ownBuild = Boolean(build) && Object.prototype.hasOwnProperty.call(tx, "build");
+    if (build) {
+      tx.build = async function (...args) {
+        built = await build.apply(this, args);
+        return built;
+      };
+    }
+    try {
+      return await execute.call(this, tx);
+    } catch (error) {
+      const went = built?.buffer && handedOver.has(built.buffer);
+      throw markSent(error, went ? { sent: "unknown", hash: String(built.hash ?? "") || undefined } : { sent: false });
+    } finally {
+      if (ownBuild) tx.build = build;
+      else if (build) delete tx.build;
+    }
+  };
   return network;
+}
+
+// An error with what's known of whether its send went out added to its data.
+function markSent(error, said) {
+  const err = error instanceof Error ? error : new Error(String(error?.message ?? error));
+  try {
+    err.data = { ...(err.data && typeof err.data === "object" ? err.data : {}), ...said };
+  } catch {
+    // A frozen error says what it says.
+  }
+  return err;
 }
 
 /**
@@ -3391,6 +3440,11 @@ export function sendTransaction(params) {
     return sendTransactionUnlocked(
       params && typeof params === "object" ? { ...params, profileIndex } : params
     ).finally(forgetSharedReads);
+  }).catch((error) => {
+    // Only the hand-over sends (sayWhetherItWent), and what follows it reads
+    // nothing of the node: a connection that failed otherwise sent nothing.
+    if (error?.data?.sent === undefined && connectionLost(error?.message)) throw markSent(error, { sent: false });
+    throw error;
   });
 }
 

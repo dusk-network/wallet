@@ -149,6 +149,35 @@ describe("a node that changes its answer between its label and a signature", () 
   });
 });
 
+describe("a send that fails, and whether it went out", () => {
+  it("says nothing went out when the node can't be reached before it's signed, as with no signal", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.drops = /\/account$/;
+    const error = await engine.sendTransaction(KINDS["a public transfer"]()).catch((e) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.data).toMatchObject({ sent: false });
+    expect(node.signed).toEqual([]);
+  });
+
+  it("says it may have gone, with its ID to look it up by, when its hand-over gets no answer", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.drops = /\/propagate$/;
+    const error = await engine.sendTransaction(KINDS["a public transfer"]()).catch((e) => e);
+    expect(error.data).toMatchObject({ sent: "unknown", hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    // Checked by the node before the hand-over, which got no answer.
+    expect(node.signed).toHaveLength(1);
+  });
+
+  it("says nothing of it for a send that went", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const sent = await engine.sendTransaction(KINDS["a public transfer"]());
+    expect(sent.hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
 describe("a known network's own node", () => {
   it("gets its chain ID from the networks file, whatever it says or doesn't", async () => {
     const kept = await addNode(TESTNET);

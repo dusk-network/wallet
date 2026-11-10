@@ -49,12 +49,15 @@ export function fakeNode(nodeUrl) {
     signed: [],
     // What it answers a transaction with instead of taking it, as a body and status.
     refuses: null,
+    // The paths whose requests never get an answer, as with no signal: a RegExp.
+    drops: null,
     balance: { nonce: 0n, value: 10n ** 13n },
     stake: {},
     async fetch(input, init = {}) {
       const url = new URL(String(input), "https://wallet.invalid");
       if (url.origin === "https://wallet.invalid") return new Response(await publicFile(url.pathname.slice(1)));
       if (url.origin !== origin) throw new TypeError(`Nothing but ${origin} answers in this test, not ${url.href}`);
+      if (node.drops?.test(url.pathname)) throw new TypeError("Failed to fetch");
       if (url.pathname === "/on/node/info") {
         node.asked += 1;
         const id = typeof node.says === "function" ? node.says(node.asked) : node.says;

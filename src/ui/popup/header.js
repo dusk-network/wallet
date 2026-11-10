@@ -101,6 +101,21 @@ export function createHeaderRenderer({
       statusDot.title = statusTitles[nodeStatus] ?? statusTitles.unknown;
     }
 
+    // Said beside the dot in a word, not by its colour alone: offline, as the
+    // browser says, or a node that doesn't answer.
+    const problem = browserOffline ? "Offline" : nodeStatus === "offline" ? "Can't reach" : "";
+    let word = networkPill?.querySelector(".network-pill__word");
+    if (networkPill && !word) {
+      word = document.createElement("span");
+      word.className = "network-pill__word";
+      networkLabel?.after?.(word) ?? networkPill.appendChild(word);
+    }
+    if (word) {
+      word.textContent = problem;
+      word.hidden = !problem;
+      word.title = problem ? statusDot?.title ?? "" : "";
+    }
+
     if (networkPill) {
       // The network can be picked before there's a wallet, and while it's
       // locked, as Settings picks it: the pill opens the same choice always.

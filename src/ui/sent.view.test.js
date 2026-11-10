@@ -287,18 +287,55 @@ describe("after Confirm", () => {
     expect(state.draft).toMatchObject({ to: OTHER });
   });
 
-  it("says a lost connection in words, not the socket's, as Sofia's offline Confirm showed it", async () => {
+  it("says a send that couldn't reach the network wasn't sent, in words, not the socket's, as Chen's offline Confirm showed it", async () => {
     const state = reviewState();
     const app = popup(state);
     await settle();
     (await app.confirm()).resolve({ error: { message: "WebSocket connection failed to wss://testnet.nodes.dusk.network/on (readyState=3)" } });
     await settle();
-    expect(steps()[0]).toEqual([
-      "unknown",
-      "Not confirmed",
-      "The connection to the network was lost. It may still have reached the network: check Activity before you send it again.",
-    ]);
+    expect(steps()[0]).toEqual(["failed", "Not sent", "Couldn't reach the network. No fee was charged."]);
+    expect(rows().at(-1)).toBe("Network feeNone charged");
     expect(visibleText(body)).not.toMatch(/WebSocket|readyState|wss:/);
+    // The engine's word that nothing went out, whatever its error says.
+    const again = reviewState();
+    const second = popup(again);
+    await settle();
+    (await second.confirm()).resolve({ error: { message: "Engine call timed out", data: { sent: false } } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", "Engine call timed out. No fee was charged."]);
+  });
+
+  it("keeps a send handed over without a clear answer by its ID, and says Completed with its fee once the node has it", async () => {
+    const state = reviewState();
+    const ov = overview();
+    const app = popup(state, ov);
+    await settle();
+    (await app.confirm()).resolve({ error: { message: "Failed to fetch", data: { sent: "unknown", hash: HASH } } });
+    await settle();
+    expect(steps()[0]).toEqual(["unknown", "Not confirmed", "Couldn't reach the network. It may still have reached the network: check Activity before you send it again."]);
+    expect(rows()).toContain("Transaction ID3e6a0e…ae84baCopy");
+    // Looked up once the signal is back: in a block, with its fee.
+    expect(noteTxStatus(state.sent, { hash: HASH, status: "executed" })).toBe(true);
+    ov.txs = [{ hash: HASH, status: "executed", feePaid: "2136028", blockHeight: "4817567" }];
+    app.draw();
+    expect(steps()).toEqual([
+      ["done", "Sending", expect.stringContaining("from your public balance")],
+      ["done", "Sent to the network", ""],
+      ["done", "Completed", "In block 4,817,567"],
+    ]);
+    expect(rows().at(-1)).toBe("Network fee0.002136028 DUSK");
+  });
+
+  it("says there's no connection while a send waits for its block offline, not how long blocks take", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    (await app.confirm()).resolve({ ok: true, result: { hash: HASH } });
+    await settle();
+    expect(steps()[1]).toEqual(["current", "Sent to the network", "Waiting for a block, usually about 10 seconds"]);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    app.draw();
+    expect(steps()[1]).toEqual(["current", "Sent to the network", "No connection. It's looked up again once you're back online."]);
   });
 
   it("keeps a send the network didn't take on the Sent screen, with Back to the review as it was", async () => {

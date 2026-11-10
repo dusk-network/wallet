@@ -112,7 +112,10 @@ vi.mock("../shared/assetsStore.js", () => ({
   unwatchNft: vi.fn(async () => true),
 }));
 
-vi.mock("../shared/networkStatus.js", () => ({
+vi.mock("../shared/networkStatus.js", async (importOriginal) => ({
+  // How often it checks, and what a check said, as the wallet has them.
+  checkEveryMs: (await importOriginal()).checkEveryMs,
+  statusWords: (await importOriginal()).statusWords,
   getNetworkStatus: vi.fn(async () => ({ checkedAt: 0 })),
   checkAllEndpoints: vi.fn(async () => ({ ok: true })),
   resetNetworkStatus: vi.fn(async () => {}),

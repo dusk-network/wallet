@@ -2487,6 +2487,16 @@ button.network-pill.is-disabled .network-pill__chev {
   background-color: var(--text-subtle);
 }
 
+/* What the red dot means, in a word beside the network's name. */
+.network-pill__word {
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+.network-pill__word[hidden] {
+  display: none;
+}
+
 @keyframes statusPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }

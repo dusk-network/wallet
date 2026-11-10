@@ -3,11 +3,12 @@ import { wordlist } from "@scure/bip39/wordlists/english";
 import { h } from "../../lib/dom.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
-import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, reviewActions, unlockPasswordField } from "../../components/FormControls.js";
+import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, stepActions, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
+import { askConfirm } from "../../components/ConfirmDialog.js";
 
 function generateMnemonic12() {
   const entropy = new Uint8Array(16);
@@ -327,7 +328,7 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
       srpGridEl(mnemonic, { blurred: !state.onboard.reveal }),
       h("div", { class: "phrase-tools" }, [toggle, copyBtn]),
       // In view at the bottom however small the window, as Confirm is on a Review.
-      reviewActions(next),
+      stepActions(next),
     ].filter(Boolean)),
   ];
 }
@@ -487,7 +488,13 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
 
   const busyBody = h("p", { class: "auth-note", style: "display:none", text: "Encrypting your wallet. Keep this window open." });
 
-  const nav = subnav({ title, onBack });
+  // Back with words or a password typed asks first: leaving clears them.
+  const typed = () => Boolean(mnemonicInput.getMnemonic() || fields.pwd.value || fields.pwd2?.value);
+  const leave = async () => {
+    if (typed() && !(await askConfirm({ title: "Go back?", text: "This clears the recovery phrase and password you typed.", action: "Go back", destructive: true }))) return;
+    onBack();
+  };
+  const nav = subnav({ title, onBack: leave });
   const backBtn = nav.querySelector("button");
 
   let busy = false;

@@ -142,6 +142,33 @@ describe("what's kept of what a site asked", () => {
     for (const secret of ["7654321", OTHER, "for the rent", message, Buffer.from(message).toString("hex"), "abab", "cdcd", "0x1234"]) expect(kept).not.toContain(secret);
   });
 
+  it("notes an approved send that didn't go out as not sent, and one that may not have as not confirmed", async () => {
+    await approveOrigin(SITE, { accountIndex: 0, profileId: `account:0:${ACCOUNT}` }, ACCOUNT);
+    // Marek's, approved offline: the engine couldn't reach the node.
+    mocks.engineCall.mockImplementation(async (method) => {
+      if (method === "dusk_sendTransaction") throw Object.assign(new Error("Failed to fetch"), { data: { sent: false } });
+      return method === "dusk_getCachedGasPrice" ? { median: "1" } : true;
+    });
+    const offline = await ask("dusk_sendTransaction", pay());
+    offline.approve();
+    await expect(offline.outcome).resolves.toMatchObject({ error: { message: "Failed to fetch" } });
+    await vi.waitFor(() => expect(recordOf().asked[0]).toMatchObject({ what: "transfer", answer: "failed" }));
+
+    mocks.engineCall.mockImplementation(async (method) => {
+      if (method === "dusk_sendTransaction") throw Object.assign(new Error("Failed to fetch"), { data: { sent: "unknown", hash: "ef".repeat(32) } });
+      return method === "dusk_getCachedGasPrice" ? { median: "1" } : true;
+    });
+    const unclear = await ask("dusk_sendTransaction", call());
+    unclear.approve();
+    await unclear.outcome;
+    await vi.waitFor(() => expect(recordOf().asked[0]).toMatchObject({ what: "contract_call", answer: "unconfirmed" }));
+    // The one before stays as it was said.
+    expect(await askedOf()).toEqual([
+      ["contract_call", "swap_tokens", "unconfirmed"],
+      ["transfer", "failed"],
+    ]);
+  });
+
   it("notes one not answered in time, and one the wallet ended", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const unanswered = await ask("dusk_requestProfiles");

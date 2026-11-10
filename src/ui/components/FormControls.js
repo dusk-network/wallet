@@ -1,5 +1,6 @@
 import { h } from "../lib/dom.js";
 import { installNumericInputGuard, installPrimaryEnter } from "../lib/inputGuards.js";
+import { holdWhileOffline } from "../lib/offline.js";
 
 let fieldIds = 0;
 
@@ -190,12 +191,24 @@ const offForGas = new WeakSet();
 
 /**
  * The end of a Review, which stays in view however long the Review is (ui.css):
- * what stops it, then Confirm, so an off Confirm never hides why.
+ * what stops it, then Confirm, so an off Confirm never hides why. Confirm is
+ * held while the browser is offline, saying so.
  * @param {HTMLButtonElement} button
  * @param {...(HTMLElement|null)} reasons
  * @returns {HTMLElement}
  */
 export function reviewActions(button, ...reasons) {
+  const offline = holdWhileOffline(button, { text: "You're offline. Confirm once you're back online." });
+  return stepActions(button, ...reasons, offline);
+}
+
+/**
+ * A step's button at its end, in view as a Review's is, with what stops it above.
+ * @param {HTMLButtonElement} button
+ * @param {...(HTMLElement|null)} reasons
+ * @returns {HTMLElement}
+ */
+export function stepActions(button, ...reasons) {
   return h("div", { class: "review-actions" }, [...reasons.filter(Boolean), h("div", { class: "btnrow" }, [button])]);
 }
 

@@ -14,6 +14,7 @@ import { walletNameOf } from "../../components/ProfileName.js";
 import { askSendPassword } from "../../components/SendPasswordDialog.js";
 import { SEND_PASSWORD_WAITS } from "../../../shared/errors.js";
 import { safeTextEl } from "../../components/SafeText.js";
+import { connectionLost, sendRefused, sentOf } from "../../../shared/sendOutcome.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
 // with a toast: Sending while the wallet signs it and hands it to the network,
@@ -24,30 +25,15 @@ import { safeTextEl } from "../../components/SafeText.js";
 
 const FINAL = new Set(["executed", "failed", "removed"]);
 
-// Errors that mean the wallet or the node refused the transaction before it
-// ran: nothing went out, so there is no fee. Anything else (a reply that got
-// lost, a timeout, a failure after the hand-over) may have reached the network.
-// "Wallet changed while …" is the engine finding another network, profile or
-// wallet than the one the transaction was reviewed on; "nothing was signed" is
-// the engine refusing a node that contradicts the chain it's fixed to; "waits
-// for your password" the wallet refusing a send above the amount chosen.
-const REFUSED =
-  /waits for your password|nothing was signed|not accepted|wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed|failed to (archive|unarchive|deserialize)|unknown error code/i;
-
 // Why a send stopped before it went to the wallet: a switch started meanwhile.
 const SWITCHED = "The network, profile or wallet changed meanwhile.";
 
-/**
- * Whether a send's error says it was refused before it ran (true), rather
- * than leaving open whether it reached the network.
- * @param {string} error
- */
-export function sendRefused(error) {
-  const text = String(error ?? "").trim();
-  return Boolean(text) && REFUSED.test(text);
-}
+export { sendRefused };
 
 let sentSeq = 0;
+
+// Offline, as the browser says.
+const offline = () => globalThis.navigator?.onLine === false;
 
 // "13:21 CET": when it was sent, with the time zone it shows in.
 function clock(ts) {
@@ -62,7 +48,7 @@ export function reasonText(error) {
   if (/failed to deserialize/i.test(text)) return "The wallet couldn't read the address. Check it and try again.";
   if (/failed to (archive|unarchive)|unknown error code/i.test(text)) return "The wallet couldn't build this transaction.";
   // The node's connection, as the browser reports it: no signal, or a node down.
-  if (/websocket|failed to connect to node|failed to fetch|networkerror/i.test(text)) return "The connection to the network was lost.";
+  if (connectionLost(text)) return "Couldn't reach the network.";
   // The wallet's own words on a node it won't sign for, whole.
   if (/nothing was signed/i.test(text)) return text;
   // A node's reply never shows as it came: JSON, cut off in the middle.
@@ -84,10 +70,12 @@ export function sentStatus(sent, ov) {
   const recorded = String(rec?.status ?? "").toLowerCase();
   // A final word wins, from whichever source has one.
   const status = FINAL.has(own) ? own : FINAL.has(recorded) ? recorded : own || recorded || "submitted";
+  // A send whose hand-over gave no clear answer, that the node has after all: it went.
+  const found = sent?.phase === "unconfirmed" && Boolean(sent?.hash) && ["executed", "failed", "mempool"].includes(status);
   return {
-    phase: sent?.phase ?? "sending",
+    phase: found ? "sent" : (sent?.phase ?? "sending"),
     status,
-    error: sent?.error || rec?.error || "",
+    error: (found ? "" : sent?.error) || rec?.error || "",
     feePaid: sent?.feePaid ?? rec?.feePaid ?? null,
     blockHeight: sent?.blockHeight ?? rec?.blockHeight ?? null,
   };
@@ -172,8 +160,9 @@ export function sentSteps(sent, ov) {
     {
       label: "Sent to the network",
       state: "current",
-      sub:
-        status === "unknown"
+      sub: offline()
+        ? "No connection. It's looked up again once you're back online."
+        : status === "unknown"
           ? "Taking longer than usual. It can still go through; the explorer shows where it is."
           : "Waiting for a block, usually about 10 seconds",
     },
@@ -349,7 +338,10 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     sent.phase = "not_sent";
   } else if (res?.error || !res?.ok) {
     sent.error = String(res?.error?.message ?? "");
-    sent.phase = sendRefused(sent.error) ? "not_sent" : "unconfirmed";
+    // Nothing went out, or it may have: then by its ID, to look it up once the node answers.
+    const went = sentOf(res?.error ?? { message: sent.error });
+    sent.phase = went === false ? "not_sent" : "unconfirmed";
+    if (went === "unknown" && res?.error?.data?.hash) sent.hash = String(res.error.data.hash);
   } else {
     sent.phase = "sent";
     sent.status = "submitted";

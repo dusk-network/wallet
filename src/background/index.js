@@ -63,7 +63,7 @@ import {
   putTxMeta,
   listTxs,
 } from "../shared/txStore.js";
-import { submittedTxMeta, walletSendFields } from "../shared/txRecord.js";
+import { sendingProfile, submittedTxMeta, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { SEND_PASSWORD_COMMANDS, assertScreenWallet, engineContactsVault, handleUiCommand } from "../wallet/uiCommands.js";
 import { handleWalletCommand, keepWalletShown, openWalletName, walletsShown } from "../wallet/walletCommands.js";
@@ -75,6 +75,8 @@ import {
   statusChainRefusal,
   resetNetworkStatus,
   isStatusStale,
+  checkEveryMs,
+  statusWords,
 } from "../shared/networkStatus.js";
 import {
   alarmsClear,
@@ -1365,15 +1367,16 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const networkStatus = await getNetworkStatus();
         const refusal = statusChainRefusal(networkStatus, settings.nodeUrl, chainId);
         const failing = Boolean(balanceError) || Boolean(refusal) || networkStatus?.nodeStatus === "offline" || !Number.isInteger(chainId);
-        if (isStatusStale(networkStatus, failing ? 30_000 : 5 * 60_000)) {
+        if (isStatusStale(networkStatus, checkEveryMs(networkStatus, { failing, read: Boolean(balance) && !balanceError }))) {
           checkAllEndpoints({
             nodeUrl: settings.nodeUrl,
             proverUrl: settings.proverUrl,
             archiverUrl: settings.archiverUrl,
           })
-            .then(async () => {
+            .then(async (next) => {
               const now = await getSettings();
-              if (now.nodeUrl === settings.nodeUrl && now.chainId !== chainId) {
+              // The chain ID read, or the node said otherwise than the popup shows: it draws again.
+              if (now.nodeUrl === settings.nodeUrl && (now.chainId !== chainId || statusWords(next) !== statusWords(networkStatus))) {
                 await runtimeSendMessage({ type: "DUSK_UI_NETWORK_CHANGED" }).catch(() => {});
               }
             })
@@ -1463,7 +1466,15 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           // Above the amount chosen in Settings, only with the password checked for it.
           const { nodeUrl } = await getSettings();
           await assertSendPassword(baseParams, { ticket: message.sendTicket, walletId: String(status.accounts?.[0] ?? ""), nodeUrl });
-          const result = await engineCall("dusk_sendTransaction", { ...baseParams, txEpoch });
+          const result = await engineCall("dusk_sendTransaction", { ...baseParams, txEpoch }).catch(async (error) => {
+            // Handed over with no clear answer: kept, to be looked up by its ID.
+            const hash = error?.data?.sent === "unknown" ? String(error.data.hash ?? "") : "";
+            if (hash) {
+              const sent = { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex: sendingProfile(baseParams, status, await getSettings()) };
+              await putTxMeta(hash, unclearTxMeta(baseParams, sent, walletSendFields(baseParams, message)), { epoch: txEpoch }).catch(() => {});
+            }
+            throw error;
+          });
           return { status, txEpoch, baseParams, result };
         });
 
@@ -1474,13 +1485,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           const nodeUrl = settings?.nodeUrl ?? "";
 
           if (hash) {
-            // The profile that paid: a stake's own may not be the one selected.
-            const profileIndex =
-              baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
-                ? Number(baseParams.profileIndex) || 0
-                : status?.selectedAccountIndex !== undefined && status?.selectedAccountIndex !== null
-                ? Number(status.selectedAccountIndex) || 0
-                : Number(settings?.selectedAccountIndex ?? 0) || 0;
+            const profileIndex = sendingProfile(baseParams, status, settings);
             await putTxMeta(
               hash,
               submittedTxMeta(baseParams, { walletId: String(status?.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message)),

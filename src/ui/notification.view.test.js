@@ -198,6 +198,30 @@ describe("a request the wallet stopped for, as Firefox for Android stops it whil
   });
 });
 
+describe("a site's send while offline", () => {
+  // Marek's: approved offline, it closed as if done, and nothing went.
+  it("says so and holds Approve until the connection is back", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    await render("send_tx", transfer(BOB));
+    const offline = () => bar().querySelectorAll(".offline-note").filter(isShown).map((n) => n.textContent);
+    expect(approve().disabled).toBe(true);
+    expect(offline()).toEqual(["You're offline. Approve once you're back online."]);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
+    dom.window.dispatchEvent(fakeEvent("online"));
+    expect(approve().disabled).toBe(false);
+    expect(offline()).toEqual([]);
+  });
+
+  it("asks nothing of a connection, which sends nothing", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    await render("connect", { requestedProfiles: true });
+    expect(bar().querySelectorAll(".offline-note")).toEqual([]);
+    pastClickGuard();
+    approve().click();
+    await vi.waitFor(() => expect(decision("approve")).toBeTruthy());
+  });
+});
+
 describe("connect approval", () => {
   it("offers each profile as a card with its label, its checked .dusk name and its short account", async () => {
     await render("connect", { requestedProfiles: true });

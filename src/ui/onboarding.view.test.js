@@ -234,9 +234,41 @@ describe("setting up and unlocking", () => {
     typeInto(field(app, "Word 1"), "abandon");
     await render({ forceRefresh: true });
     expect(field(app, "Word 1").value).toBe("abandon");
+    // A word typed: Back asks first.
     button(app, "← Back").click();
     await settle();
+    button(dom.document.body, "Go back").click();
+    await settle();
     expect(app.querySelector("h1").textContent).toBe("Unlock your wallet");
+  });
+
+  it("asks before Back clears the words and passwords typed on Import, and keeps them on Cancel", async () => {
+    const state = { route: "onboard_import", onboard: { mode: "import" } };
+    const acts = actions();
+    const body = show(onboardingImportView({ state, actions: acts }));
+    // Nothing typed: Back goes at once.
+    button(body, "← Back").click();
+    await settle();
+    expect(state.route).toBe("onboard_welcome");
+
+    state.route = "onboard_import";
+    typeInto(field(body, "Word 1"), MNEMONIC);
+    typeInto(field(body, "Password"), "long enough");
+    button(body, "← Back").click();
+    await settle();
+    const dialog = body.querySelector("[role=alertdialog]");
+    expect(visibleText(dialog)).toBe("Go back?This clears the recovery phrase and password you typed.CancelGo back");
+    button(dialog, "Cancel").click();
+    await settle();
+    expect(state.route).toBe("onboard_import");
+    expect(body.querySelector("[role=alertdialog]")).toBeNull();
+    expect([field(body, "Word 12").value, field(body, "Password").value]).toEqual(["about", "long enough"]);
+
+    button(body, "← Back").click();
+    await settle();
+    button(body.querySelector("[role=alertdialog]"), "Go back").click();
+    await settle();
+    expect(state.route).toBe("onboard_welcome");
   });
 });
 
@@ -421,6 +453,9 @@ describe("adding a wallet beside the ones here", () => {
     expect(errorOf(body.querySelector("[role=group]"))).toBe(DUP);
     expect(state.route).toBe("wallet_add_import");
     button(body, "← Back").click();
+    await settle();
+    button(body, "Go back").click();
+    await settle();
     expect(state.route).toBe("wallet_add");
   });
 });

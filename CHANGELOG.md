@@ -49,6 +49,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Looked each send left waiting through a lost signal up again once the signal returns, and said Completed with its fee, or Not sent.
+- Said Not sent for a send that couldn't reach the network.
+- Said Offline on a Review and on a site's approval, holding Confirm and Approve until the connection is back.
+- Said Offline in the Android app as soon as the phone loses its signal.
+- Noted a site's approved send that didn't go out as Approved, not sent, in Connected sites.
+- Said Offline or Can't reach beside the network's dot, and checked the network again once it answers.
+- Ended "Checking network…" on setup once the network was checked.
+- Asked before Back clears the recovery phrase and password typed on Import.
+- Read the balance again as the Android app comes back to the front.
+- Kept a setup form's words and passwords through the wallet drawing again.
 - Kept a site's approval through Firefox for Android stopping the wallet in the background, so Approve still works; if it can't, the approval and the site say the request ended.
 - Rejected an approval with the phone's Back.
 - Said a misspelled recovery word by Import wallet too.

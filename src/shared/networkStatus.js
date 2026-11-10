@@ -414,6 +414,22 @@ export function statusChainRefusal(status, nodeUrl, pinned) {
  * @param {number} maxAgeMs - Maximum age before considered stale (default: 30s)
  * @returns {boolean}
  */
+/**
+ * How old a check may be before the next overview checks again: 5 minutes,
+ * 30 seconds while something fails (`failing`), and 5 seconds once the node
+ * answers a read (`read`) while the last check said it was offline: back, it
+ * says so at once rather than a red dot that stays.
+ * @param {NetworkStatusState | null | undefined} status
+ * @param {{ failing?: boolean, read?: boolean }} [now]
+ */
+export function checkEveryMs(status, { failing = false, read = false } = {}) {
+  if (status?.nodeStatus === "offline") return read ? 5_000 : 30_000;
+  return failing ? 30_000 : 5 * 60_000;
+}
+
+/** What a check said, to tell whether another said otherwise. */
+export const statusWords = (status) => [status?.nodeStatus, status?.proverStatus, status?.archiverStatus, status?.nodeChainId].join("|");
+
 export function isStatusStale(status, maxAgeMs = 30000) {
   if (!status?.lastChecked) return true;
   return Date.now() - status.lastChecked > maxAgeMs;

@@ -25,6 +25,9 @@ const ASKED = Object.freeze({
 
 const ANSWERS = Object.freeze({
   approved: "Approved",
+  // Approved, and its send failed: nothing went out, or it may not have.
+  failed: "Approved, not sent",
+  unconfirmed: "Approved, not confirmed",
   rejected: "Rejected",
   closed: "Window closed",
   expired: "Not answered in time",

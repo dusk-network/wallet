@@ -443,6 +443,44 @@ describe("a Review when who pays changes", () => {
   });
 });
 
+describe("a Review while offline", () => {
+  // Chen's and Sofía's: the dot said nothing and Confirm went, offline.
+  it("says so and holds Confirm, and lets it go once the connection is back", async () => {
+    const state = newState();
+    const ov = overview();
+    const form = mount(state, ov);
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "1");
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
+
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    const review = mount(state, ov);
+    await settle();
+    const confirm = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const offline = () => [...dom.document.body.querySelectorAll(".offline-note")].filter(isShown).map((n) => n.textContent);
+    expect(confirm().disabled).toBe(true);
+    expect(offline()).toEqual(["You're offline. Confirm once you're back online."]);
+    confirm().click();
+    await settle();
+    expect(review.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);
+
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
+    dom.window.dispatchEvent(new Event("online"));
+    expect(confirm().disabled).toBe(false);
+    expect(offline()).toEqual([]);
+
+    // Off again for the connection, and what else holds it stays held once back.
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    dom.window.dispatchEvent(new Event("offline"));
+    confirm().disabled = true;
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
+    dom.window.dispatchEvent(new Event("online"));
+    expect(confirm().disabled).toBe(true);
+  });
+});
+
 describe("what Max fills in, with Hide balances", () => {
   const shown = () => [...dom.document.body.querySelectorAll(".amount-field input")].find((input) => !input.hidden);
 

@@ -36,7 +36,7 @@ const USE_EVERY_MS = 60_000;
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 // How long an answer stays as more come: the person's own longest, an approval longest of all.
-const KEEP_RANK = Object.freeze({ approved: 2, rejected: 1, closed: 1 });
+const KEEP_RANK = Object.freeze({ approved: 2, failed: 2, unconfirmed: 2, rejected: 1, closed: 1 });
 const rankOf = (entry) => KEEP_RANK[entry?.answer] ?? 0;
 const sitesOf = (all, id) => (isObject(all[id]) ? all[id] : {});
 const siteOf = (sites, origin) => (isObject(sites[origin]) ? sites[origin] : {});
@@ -101,7 +101,7 @@ function requestRecord(kind, params) {
  * note takes its place in line as it's made.
  * @param {string | Promise<string>} walletId - the wallet it was for
  * @param {string} origin
- * @param {{ kind: string, params?: object, answer: "approved"|"rejected"|"closed"|"expired"|"cancelled"|"not_shown", at?: number }} request
+ * @param {{ kind: string, params?: object, answer: "approved"|"failed"|"unconfirmed"|"rejected"|"closed"|"expired"|"cancelled"|"not_shown", at?: number }} request
  */
 export function noteSiteRequest(walletId, origin, { kind, params, answer, at = Date.now() }) {
   return mutate(async (all) => {
@@ -115,6 +115,26 @@ export function noteSiteRequest(walletId, origin, { kind, params, answer, at = D
       asked.splice(asked.findLastIndex((entry) => rankOf(entry) === least), 1);
     }
     return { ...all, [id]: bounded({ ...sites, [origin]: { ...site, asked } }) };
+  });
+}
+
+/**
+ * Says how a site's approved send went, on its record: "failed" when nothing
+ * went out, "unconfirmed" when it may not have. The approval is the site's
+ * newest one since `since`: a site has one waiting at a time.
+ * @param {string} walletId
+ * @param {string} origin
+ * @param {{ since: number, answer: "failed"|"unconfirmed" }} outcome
+ */
+export function noteSiteSendFailed(walletId, origin, { since, answer }) {
+  const id = String(walletId ?? "");
+  return mutate((all) => {
+    const site = siteOf(sitesOf(all, id), origin);
+    const asked = Array.isArray(site.asked) ? site.asked : [];
+    const at = asked.findIndex((entry) => entry?.answer === "approved" && Number(entry.at) >= since);
+    if (!id || at < 0) return all;
+    const next = asked.map((entry, i) => (i === at ? { ...entry, answer } : entry));
+    return { ...all, [id]: { ...sitesOf(all, id), [origin]: { ...site, asked: next } } };
   });
 }
 
