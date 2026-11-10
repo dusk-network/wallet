@@ -25,7 +25,7 @@ import { runtimeSendMessage } from "../platform/extensionApi.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
 import { blockedRecipient } from "./recipientBlocklist.js";
 import { askNodeChainId, chainIdForNode, chainRefusal, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
-import { ALREADY_THERE, NO_CLEAR_ANSWER, nodeRefusalText, propagationError } from "./nodeRefusal.js";
+import { isRefusal, nodeRefusalText, propagationError } from "./nodeRefusal.js";
 import { connectionLost } from "./sendOutcome.js";
 
 import {
@@ -1469,11 +1469,12 @@ function sayRefusalsPlainly(network) {
       if (step === "propagate" && args[0] && typeof args[0] === "object") handedOver.add(args[0]);
       return call.apply(txs, args).catch((error) => {
         if (error?.name === "TypeError" || error?.name === "AbortError") throw error;
-        // Before propagation nothing has gone out. After it, only the node's own word is a refusal:
-        // then nothing went out either (sayWhetherItWent), where no clear answer may have.
+        // Before propagation nothing has gone out. After it, only the node's own refusal of the
+        // transaction, in Rusk's words, says nothing went out (sayWhetherItWent); any other
+        // answer, a gateway's JSON among them, may have let it through.
         if (step !== "propagate") throw new Error(nodeRefusalText(error?.message ?? error));
-        const said = propagationError(error?.message ?? error);
-        throw said === NO_CLEAR_ANSWER || said === ALREADY_THERE ? new Error(said) : markSent(new Error(said), { sent: false });
+        const said = new Error(propagationError(error?.message ?? error));
+        throw isRefusal(error?.message ?? error) ? markSent(said, { sent: false }) : said;
       });
     };
   }

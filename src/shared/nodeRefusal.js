@@ -51,10 +51,33 @@ export const NO_CLEAR_ANSWER = "The node gave no clear answer, so this may still
 /** What a send says when the network turns out to have it already. */
 export const ALREADY_THERE = "The network has this transaction already. Check Activity.";
 
+// Rusk's refusal of a transaction, as map_check_tx_error writes it (rusk
+// 1.7.3, src/lib/http/chain.rs): "Tx <its ID> not accepted: <why>", as
+// {"error":"Invalid input: …"} behind HTTP 400 since 1.7, in plain text
+// before. The whys that turn this transaction down, as TxAcceptanceError says
+// them (node/src/mempool.rs); "exists in the mempool" or "ledger" means the
+// network has it, and Rusk's own failures say "Internal server error".
+const RUSK_REFUSAL = /^(?:Invalid input: )?Tx [0-9a-f]{64} not accepted: (.+)$/s;
+const REFUSED_BECAUSE =
+  /^(?:this transaction's spendId exists in the mempool|this transaction is invalid\b|gas (?:price|limit) lower than minimum\b|transaction format .+ is not supported for live ingress|Maximum future nonce retry queue size exceeded|Maximum queued future Moonlight transactions per account exceeded|Missing intermediate nonce|this transaction is too large to be serialized|Maximum transaction size exceeded|Transaction blob id \w+ is missing sidecar|No blobs provided|Transaction has too many blobs|Invalid blob:)/;
+
+/**
+ * Whether an error is the node turning the transaction down, in Rusk's own
+ * refusal: then it didn't take it. Anything else, JSON or not, a gateway's
+ * timeout among them, says nothing of whether it went.
+ * @param {unknown} message
+ * @returns {boolean}
+ */
+export function isRefusal(message) {
+  const why = RUSK_REFUSAL.exec(replyOf(String(message ?? "").trim()))?.[1] ?? "";
+  return REFUSED_BECAUSE.test(why);
+}
+
 /**
  * What to say of an error from sending a transaction out. Only the node's own
- * word on the transaction is a refusal: a gateway's timeout or a server error
- * says nothing of whether it got there, and the network having it means it did.
+ * refusal of the transaction is one (isRefusal): a gateway's timeout or a
+ * server error says nothing of whether it got there, and the network having
+ * it means it did.
  * @param {unknown} message
  * @returns {string}
  */
@@ -62,5 +85,5 @@ export function propagationError(message) {
   const text = String(message ?? "").trim();
   const reply = replyOf(text);
   if (/exists in the (mempool|ledger)|already (exists|known)/i.test(reply)) return ALREADY_THERE;
-  return isNodeReply(text) || REFUSALS.some(([re]) => re.test(reply)) ? nodeRefusalText(text) : NO_CLEAR_ANSWER;
+  return isRefusal(text) ? nodeRefusalText(text) : NO_CLEAR_ANSWER;
 }
