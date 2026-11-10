@@ -413,10 +413,10 @@ const STATE_WORDS = { done: "Done: ", current: "Now: ", failed: "Failed: ", unkn
  */
 function noticeOffer({ state, actions }) {
   if (!isPhone()) return null;
-  // Where notices stand, read again for each send: a payment's arrival can
-  // settle what a tap only asked. Notices being off is said on one send's Sent.
-  const send = String(state.sent?.hash ?? state.sent?.startedAt ?? "");
-  if (state.notices?.for !== send) state.notices = { for: send, state: undefined };
+  // Where notices stand, read again for each send: Android answers after the
+  // tap, and its settings can change it. Notices being off is said on one
+  // send's Sent, kept as its hash comes.
+  if (state.notices?.for !== state.sent) state.notices = { for: state.sent, state: undefined };
   const notices = state.notices;
   const el = h("div", { class: "sent-notices" });
   const draw = () => {

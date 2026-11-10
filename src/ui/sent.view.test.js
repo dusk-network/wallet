@@ -600,9 +600,9 @@ describe("the steps", () => {
 // Hein's: arrival notices on a phone, asked for by the person, never by the wallet.
 describe("Tell me when it arrives, on a phone", () => {
   const ANDROID = "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0";
-  const draw = async (states, { phone = true } = {}) => {
+  const draw = async (states, { phone = true, sent = {} } = {}) => {
     if (phone) vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: ANDROID });
-    const state = { sent: { phase: "sent", hash: HASH, status: "submitted", feeCapLux: "2500000", title: "Send", amountLux: "1000000", sentAt: Date.now() } };
+    const state = { sent: { phase: "sent", hash: HASH, status: "submitted", feeCapLux: "2500000", title: "Send", amountLux: "1000000", sentAt: Date.now(), ...sent } };
     const asked = [];
     const actions = {
       send: vi.fn(async (m) => {
@@ -655,8 +655,19 @@ describe("Tell me when it arrives, on a phone", () => {
     expect(later.ask()).toBeUndefined();
   });
 
-  // Firefox's no is learned as the payment arrives: the next send's Sent says it, not "you'll get one".
-  it("reads where notices stand again for the next send, after an arrival settled what the tap asked", async () => {
+  // Seen on Firefox for Android: said as the send went out, and gone as its hash came, so never seen.
+  it("says notices are off for the whole of a send's Sent, its hash coming", async () => {
+    const shown = await draw(["off", "off-said"], { sent: { phase: "sending", hash: "", status: "", sentAt: 0 } });
+    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
+    // The network took it: the same send, now with its hash.
+    Object.assign(shown.state.sent, { phase: "sent", hash: HASH, status: "submitted", sentAt: Date.now() });
+    await shown.show();
+    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
+    expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES")).toHaveLength(1);
+  });
+
+  // Firefox's no comes after the tap, as it takes its notice away: the next send's Sent says it, not "you'll get one".
+  it("reads where notices stand again for the next send, after the tap", async () => {
     const shown = await draw([null, "asked", "off"]);
     shown.ask().click();
     await settle();

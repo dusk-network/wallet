@@ -51,26 +51,17 @@ import { siteWalletId } from "./siteWallet.js";
 
 import {
   askPhoneNotices,
-  settlePhoneNotices,
   notifyTxSubmitted,
   notifyTxExecuted,
   registerTxNotificationHandlers,
 } from "./txNotify.js";
 import { noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
-
-// A send settled, however the wallet learned it (its engine's watcher, a
-// look-up, a sync): on a phone, what a tap on Tell me when it arrives asked is
-// settled with it. Only the watcher's outcome shows as a notice (DUSK_TX_EXECUTED).
-onTxSettled(() => {
-  settlePhoneNotices().catch(() => {});
-});
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
   getTxEpoch,
   getTxMeta,
   patchTxMeta as patchStored,
-  onTxSettled,
   putTxMeta,
   listTxs,
 } from "../shared/txStore.js";

@@ -88,7 +88,8 @@ let askingChain = null;
 let chainAskedAt = -Infinity;
 
 // A payment's arrival as a notice, in the app on a phone: once the person
-// asked for notices (phoneNotices.js), and only while they're away from it.
+// asked for notices (phoneNotices.js) and while Android lets the app show
+// them, read each time, and only while they're away from it.
 async function noticeArrival({ hash, ok, nodeUrl }) {
   if (!isPhone() || globalThis.document?.visibilityState !== "hidden") return;
   if (!(await mayNotify(appNoticesAllowed))) return;
@@ -498,16 +499,16 @@ export async function localSend(message) {
       };
     }
 
-    // The network checked now, as when the phone is back online.
     // Arrival notices on a phone: where they stand, the question Android asks
     // when the person taps Tell me when it arrives, and Sent having said they're off.
-    if (message?.type === "DUSK_UI_NOTICES") return { ok: true, state: await noticesState() };
-    if (message?.type === "DUSK_UI_NOTICES_ASK") return { ok: true, state: await askForNotices(askAppNotices) };
+    if (message?.type === "DUSK_UI_NOTICES") return { ok: true, state: await noticesState(appNoticesAllowed) };
+    if (message?.type === "DUSK_UI_NOTICES_ASK") return { ok: true, state: await askForNotices(askAppNotices, appNoticesAllowed) };
     if (message?.type === "DUSK_UI_NOTICES_SAID") {
       await saidNoticesOff();
       return { ok: true };
     }
 
+    // The network checked now, as when the phone is back online.
     if (message?.type === "DUSK_UI_CHECK_NETWORK") {
       const settings = await getSettings();
       return { ok: true, networkStatus: await checkAllEndpoints({ nodeUrl: settings.nodeUrl, proverUrl: settings.proverUrl, archiverUrl: settings.archiverUrl }) };

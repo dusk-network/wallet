@@ -82,15 +82,12 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
       answer(invoke, false)
       return
     }
-    if (notices.getNotificationChannel(channel) == null) {
-      notices.createNotificationChannel(NotificationChannel(channel, "Payments", NotificationManager.IMPORTANCE_DEFAULT))
-    }
     val open = activity.packageManager.getLaunchIntentForPackage(activity.packageName)
       ?.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     val tap = open?.let { PendingIntent.getActivity(activity, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
     // The Dusk mark's shape, as the status bar draws a notice's icon.
     val mark = activity.resources.getIdentifier("ic_launcher_foreground", "mipmap", activity.packageName)
-    val notice = Notification.Builder(activity, channel)
+    val notice = builder(notices)
       .setSmallIcon(Icon.createWithResource(activity, if (mark != 0) mark else activity.applicationInfo.icon))
       .setContentTitle(args.title)
       .setContentText(args.body)
@@ -99,5 +96,16 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
       .build()
     notices.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notice)
     answer(invoke, true)
+  }
+
+  // Android 8 and later show a notice in a channel, made the first time; the
+  // app runs from Android 7 (minSdk 24), which has none.
+  @Suppress("DEPRECATION")
+  private fun builder(notices: NotificationManager): Notification.Builder {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return Notification.Builder(activity)
+    if (notices.getNotificationChannel(channel) == null) {
+      notices.createNotificationChannel(NotificationChannel(channel, "Payments", NotificationManager.IMPORTANCE_DEFAULT))
+    }
+    return Notification.Builder(activity, channel)
   }
 }

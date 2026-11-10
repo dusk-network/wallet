@@ -7,13 +7,13 @@ import { chainIdForNode, networkTextOf } from "../shared/nodeNetwork.js";
 import { getTxMeta } from "../shared/txStore.js";
 import { shortAddress } from "../ui/lib/strings.js";
 import { isPhone } from "../ui/lib/device.js";
-import { askForNotices, mayNotify } from "../shared/phoneNotices.js";
+import { IS_FIREFOX } from "../platform/targets.js";
+import { askForNotices, mayNotify, noticeAnswered, noticesState } from "../shared/phoneNotices.js";
 import { openWalletTab } from "./walletTab.js";
 import {
   getExtensionApi,
   notificationsClear,
   notificationsCreate,
-  notificationsGetAll,
   runtimeGetURL,
   tabsCreate,
 } from "../platform/extensionApi.js";
@@ -28,38 +28,24 @@ const notifies = () => Boolean(ext?.notifications);
 // On a phone, Firefox for Android asks Android for leave to show a notice as
 // its first one is made, again after a no. So there the wallet makes none by
 // itself: the person taps Tell me when it arrives on Sent, its first notice is
-// that question (askPhoneNotices), and a payment's arrival shows only once that
-// notice showed (phoneNotices.js). Nothing on a phone says a send went out:
-// Sent does.
+// that question (askPhoneNotices), and what Firefox then does with it says
+// whether a payment's arrival shows (registerTxNotificationHandlers,
+// phoneNotices.js). Nothing on a phone says a send went out: Sent does.
 const ASK_NOTICE = "dusk_notices_asked";
 
 /** Tell me when it arrives, tapped on a phone: Firefox asks Android, once. */
 export function askPhoneNotices() {
-  return askForNotices(async () => {
-    await notificationsCreate(ASK_NOTICE, {
+  return askForNotices(() =>
+    notificationsCreate(ASK_NOTICE, {
       type: "basic",
       iconUrl: runtimeGetURL(ICON_PATH),
       title: "Dusk Wallet",
       message: "You'll get a notice when your payment arrives.",
-    });
-    return "asked";
-  });
+    }),
+  );
 }
 
-// Whether the notice that asked still shows: then Android let Firefox show it.
-// Turned down, Firefox takes it away at once. It goes, for the arrival's.
-async function askedNoticeShows() {
-  const shown = Boolean((await notificationsGetAll().catch(() => ({})))?.[ASK_NOTICE]);
-  if (shown) await notificationsClear(ASK_NOTICE).catch(() => {});
-  return shown;
-}
-
-const mayShow = () => (isPhone() ? mayNotify(askedNoticeShows) : Promise.resolve(true));
-
-/** A send settled: on a phone, whether notices show is settled with it, once asked. */
-export async function settlePhoneNotices() {
-  if (notifies() && isPhone()) await mayNotify(askedNoticeShows);
-}
+const mayShow = () => (isPhone() ? mayNotify() : Promise.resolve(true));
 
 // Each send's outcome is said once, however many ways the wallet learns it.
 const told = new Set();
@@ -81,6 +67,16 @@ export function registerTxNotificationHandlers() {
 
   try {
     if (!notifies()) return;
+
+    // On a phone, Firefox's word on the notice that asked (askPhoneNotices):
+    // it showed, so Android let it; or it went without showing, as Firefox
+    // takes it away after a no. Gone once shown, it was swiped away.
+    ext.notifications.onShown?.addListener((id) => {
+      if (id === ASK_NOTICE) noticeAnswered("on").catch(() => {});
+    });
+    ext.notifications.onClosed?.addListener((id) => {
+      if (id === ASK_NOTICE) noticeAnswered("off").catch(() => {});
+    });
 
     // Clicking the notification opens the explorer (when possible), otherwise
     // falls back to the wallet full view.
@@ -196,10 +192,10 @@ export async function notifyTxExecuted({
 } = {}) {
   try {
     if (!notifies() || !hash) return;
+    // Told as it shows: learned another way meanwhile, it waits its turn and finds it told.
     const outcome = `${hash}:${ok ? "executed" : "failed"}`;
-    if (told.has(outcome)) return;
+    if (told.has(outcome) || !(await mayShow()) || told.has(outcome)) return;
     told.add(outcome);
-    if (!(await mayShow())) return;
 
     const sent = await sentOn(hash, nodeUrl);
     const networkName = sent.nodeUrl ? networkTextOf(sent.nodeUrl) : "";
@@ -225,17 +221,18 @@ export async function notifyTxExecuted({
     }
 
     // Buttons are optional, but if we have an explorer URL it's a huge UX win.
-    if (explorerUrl) {
+    // Firefox has none, and refuses a notice that asks for them: there the
+    // notice itself opens the explorer.
+    if (!IS_FIREFOX) {
       // @ts-ignore
-      opts.buttons = [{ title: "View in Explorer" }, { title: "Open Wallet" }];
-    } else {
-      // @ts-ignore
-      opts.buttons = [{ title: "Open Wallet" }];
+      opts.buttons = explorerUrl ? [{ title: "View in Explorer" }, { title: "Open Wallet" }] : [{ title: "Open Wallet" }];
     }
 
     const id = `dusk_tx_${hash}_${ok ? "executed" : "failed"}_${Date.now()}`;
 
     await notificationsCreate(id, opts);
+    // On a phone, the arrival takes the place of the notice that asked, once that showed.
+    if (isPhone() && (await noticesState()) === "on") await notificationsClear(ASK_NOTICE).catch(() => {});
   } catch {
     // ignore
   }

@@ -863,8 +863,9 @@ describe("arrival notices in the app on a phone", () => {
     expect(asked.filter((step) => step.startsWith("notify"))).toHaveLength(2);
   });
 
-  it("never asks again after a no, and shows nothing", async () => {
-    const asked = phone({ allowed: () => false });
+  it("never asks again after a no, and shows arrivals once notices are allowed in the phone's settings", async () => {
+    let allowed = false;
+    const asked = phone({ allowed: () => allowed });
     const { localSend } = await import("./localBus.js");
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "off" });
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "off" });
@@ -873,5 +874,11 @@ describe("arrival notices in the app on a phone", () => {
     expect(asked).toEqual(["ask"]);
     await localSend({ type: "DUSK_UI_NOTICES_SAID" });
     await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "off-said" });
+
+    // Astra's: allowed later in Android's settings, as Sent said, and arrivals still off for good.
+    allowed = true;
+    await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "on" });
+    await sendAndSettle(localSend, "d5".repeat(32));
+    await vi.waitFor(() => expect(asked).toEqual(["ask", "notify: Transaction executed"]));
   });
 });

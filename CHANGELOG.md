@@ -57,6 +57,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Showed a send's outcome as a notice in Firefox.
 - Looked each send left waiting through a lost signal up again once the signal returns, and said Completed with its fee, or Not sent.
 - Said Not sent for a send that couldn't reach the network.
 - Said Offline on a Review and on a site's approval, holding Confirm and Approve until the connection is back.
