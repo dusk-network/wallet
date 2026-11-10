@@ -25,6 +25,9 @@ const ASKED = Object.freeze({
 
 const ANSWERS = Object.freeze({
   approved: "Approved",
+  // Approved, and its send failed: nothing went out, or it may not have.
+  failed: "Approved, not sent",
+  unconfirmed: "Approved, not confirmed",
   rejected: "Rejected",
   closed: "Window closed",
   expired: "Not answered in time",
@@ -34,10 +37,12 @@ const ANSWERS = Object.freeze({
   not_shown: "Couldn't be shown",
 });
 
-// "Contract call: approve", by its function's name as the site gave it.
-const askedText = ({ what, method }) => {
-  const asked = ASKED[what] ?? "Request";
-  return method ? `${asked}: ${safeText(method).text}` : asked;
+// The approval's own words where it said more than its kind ("Bridge to
+// DuskEVM"), else "Contract call: approve", by its function's name as the site gave it.
+const askedText = ({ what, method, asked }) => {
+  if (typeof asked === "string" && asked) return safeText(asked).text;
+  const kind = ASKED[what] ?? "Request";
+  return method ? `${kind}: ${safeText(method).text}` : kind;
 };
 
 /**

@@ -1,4 +1,4 @@
-import { NAME_HIDES, nameHides } from "@dusk-network/app-core/names";
+import { NAME_HIDES, nameHides, profileNameClash } from "@dusk-network/app-core/names";
 import { networks } from "@dusk-network/networks";
 
 import { formatDuskExact, formatFee } from "../../../shared/amount.js";
@@ -10,12 +10,13 @@ import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { setAccountName } from "../../../shared/accountNames.js";
 import { siteLastSeen } from "../../../shared/siteRecords.js";
 import { normalizeWalletName, walletLabel } from "../../../shared/wallets.js";
-import { clearAddressBook } from "../../../shared/addressBook.js";
+import { clearAddressBook, listAddressBook } from "../../../shared/addressBook.js";
 import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
 import { networkForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
-import { thisDevice } from "../../lib/device.js";
+import { isPhone, thisDevice } from "../../lib/device.js";
+import { isTauriRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress, siteName } from "../../lib/strings.js";
 import { dateText } from "../../lib/time.js";
@@ -24,8 +25,10 @@ import { bracketTitle } from "../../components/BracketTitle.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { setNetworkSwitching } from "../../components/NetworkMenu.js";
 import { askConfirm } from "../../components/ConfirmDialog.js";
-import { fieldLabel, integerInput, textInput, urlInput } from "../../components/FormControls.js";
+import { fieldLabel, integerInput, passwordInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
+import { contactNameText } from "../../lib/contactNames.js";
+import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
 import { switchContext } from "../context.js";
 import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
 
@@ -35,6 +38,76 @@ import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
 
 const autoLockLabel = (minutes) =>
   AUTO_LOCK_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} minutes`;
+
+// Settings' Unlock with fingerprint: the switch, and while it's being turned
+// on, the password, checked against the vault, then the fingerprint.
+function fingerprintRow({ actions }) {
+  const fingerSwitch = h("input", { id: "fingerprint-unlock", type: "checkbox" });
+  const row = h("div", { class: "settings-fingerprint", hidden: true }, [
+    h("label", { class: "settings-switch", for: "fingerprint-unlock" }, [fingerSwitch, h("span", { text: "Unlock with fingerprint" })]),
+  ]);
+  let ask = null;
+  // A turning on under way, for the row: no switching nor another Turn on till it ends.
+  let busy = false;
+  const closeAsk = () => {
+    ask?.remove();
+    ask = null;
+  };
+  const openAsk = () => {
+    const pwd = passwordInput({ id: "fingerprint-password", autocomplete: "current-password", onEnter: () => turnOn.click() });
+    const error = h("div", { class: "field-error", id: "fingerprint-error", role: "alert", hidden: true });
+    const sayError = (text) => {
+      error.textContent = text || "";
+      error.hidden = !text;
+    };
+    pwd.addEventListener("input", () => sayError(""));
+    const turnOn = h("button", {
+      class: "btn-outline",
+      type: "button",
+      text: "Turn on",
+      onclick: async () => {
+        if (busy) return;
+        sayError("");
+        const password = pwd.value;
+        if (!password) return sayError("Enter your password.");
+        busy = true;
+        turnOn.disabled = true;
+        fingerSwitch.disabled = true;
+        try {
+          const res = await actions?.send?.({ type: "DUSK_UI_CHECK_PASSWORD", password });
+          if (res?.error) throw new Error(/^Incorrect password$/.test(String(res.error.message ?? "")) ? "Wrong password." : res.error.message);
+          const on = await turnFingerprintOn(password);
+          pwd.value = "";
+          closeAsk();
+          if (on.ok) return actions?.showToast?.("Fingerprint unlock is on.");
+          fingerSwitch.checked = false;
+          if (on.reason !== "password") actions?.showToast?.("Fingerprint unlock couldn't be turned on.", 2500);
+        } catch (e) {
+          sayError(e?.message ?? String(e));
+        } finally {
+          busy = false;
+          turnOn.disabled = false;
+          fingerSwitch.disabled = false;
+        }
+      },
+    });
+    ask = h("div", { class: "settings-fingerprint-ask" }, [fieldLabel(pwd, "Your password, to turn it on"), pwd, error, turnOn]);
+    row.append(ask);
+    pwd.focus?.();
+  };
+  fingerSwitch.addEventListener("change", async () => {
+    // Turning on: it stays as it is till that ends.
+    if (busy) {
+      fingerSwitch.checked = true;
+      return;
+    }
+    if (fingerSwitch.checked) return openAsk();
+    closeAsk();
+    await turnFingerprintOff();
+    actions?.showToast?.("Fingerprint unlock is off.");
+  });
+  return row;
+}
 
 export function optionsView(ov, { state, actions } = {}) {
   const currentNodeUrl = String(ov?.nodeUrl ?? "").trim();
@@ -123,6 +196,21 @@ export function optionsView(ov, { state, actions } = {}) {
   // Each wallet's own: another wallet's fields start from its saved labels.
   const drafts = ((state.labelDrafts ??= {})[walletId] ??= {});
   const labelOf = (s) => String(s ?? "").trim().replace(/\s+/g, " ").slice(0, 32);
+  // A profile's name can't be, or look like, another profile's or a contact's:
+  // History would show the one as the other. Each profile by the name the header
+  // shows; the contacts read once, when a name is first saved.
+  let contactsRead = null;
+  const contactsNow = () => {
+    const ab = state?.addressBook;
+    const own = ab?.loaded && Array.isArray(ab.items) && (!state?.contactsWallet || state.contactsWallet === walletId);
+    contactsRead ??= own ? Promise.resolve(ab.items) : listAddressBook({ walletId }).catch(() => []);
+    return contactsRead;
+  };
+  const clashText = (clash) => {
+    const name = clash.kind === "contact" ? contactNameText(clash.entry.name) : String(clash.entry.name);
+    if (clash.kind === "profile") return clash.same ? `Your other profile is called ${name}. Choose another name.` : `That looks like the name of your other profile ${name}. Choose another name.`;
+    return clash.same ? `You have a contact called ${name}. Choose another name.` : `That looks like your contact ${name}. Choose another name.`;
+  };
   const labelsEditor =
     ov?.isUnlocked && walletId
       ? h("div", { class: "settings-labels" }, [
@@ -151,7 +239,10 @@ export function optionsView(ov, { state, actions } = {}) {
               drafts[i] = input.value;
               showError("");
             });
-            const save = async () => {
+            // A change and a blur as the field is left: one save.
+            let saving = null;
+            const save = () => (saving ??= saveName().finally(() => (saving = null)));
+            const saveName = async () => {
               const value = input.value;
               const label = labelOf(value);
               if (label === saved) {
@@ -161,6 +252,14 @@ export function optionsView(ov, { state, actions } = {}) {
               if (nameHides(label)) {
                 showError(NAME_HIDES);
                 return;
+              }
+              if (label) {
+                const profiles = displayAccounts.map((account, j) => ({ account: String(account ?? ""), address: String(ov?.addresses?.[j] ?? ""), name: verified.get(j) || profileLabelOf(ov, j) }));
+                const clash = profileNameClash(label, { profiles, contacts: await contactsNow(), self: String(acct ?? "") });
+                if (clash) {
+                  showError(clashText(clash));
+                  return;
+                }
               }
               const before = saved;
               saved = label;
@@ -299,7 +398,7 @@ export function optionsView(ov, { state, actions } = {}) {
       class: "list-row settings-row",
       type: "button",
       onclick: async () => {
-        state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true };
+        state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true, from: "options" };
         state.route = "wallet_add";
         await actions?.render?.();
       },
@@ -351,28 +450,58 @@ export function optionsView(ov, { state, actions } = {}) {
     : null;
 
   // Auto-lock. The choice shows at once: a redraw before the overview has it
-  // doesn't put the old one back.
-  const lockChoices = AUTO_LOCK_OPTIONS.some((o) => o.value === currentAutoLock)
-    ? AUTO_LOCK_OPTIONS
-    : [...AUTO_LOCK_OPTIONS, { value: currentAutoLock, label: autoLockLabel(currentAutoLock) }];
+  // doesn't put the old one back. The app on a phone locks Immediately too,
+  // as the person leaves it, as phone wallets do.
+  const inApp = isTauriRuntime() && isPhone();
+  const leaving = inApp && ov?.lockOnLeave === true;
+  const lockChoices = [
+    ...(inApp ? [{ value: "leave", label: "Immediately" }] : []),
+    ...(AUTO_LOCK_OPTIONS.some((o) => o.value === currentAutoLock) ? AUTO_LOCK_OPTIONS : [...AUTO_LOCK_OPTIONS, { value: currentAutoLock, label: autoLockLabel(currentAutoLock) }]),
+  ];
   const autoLockSelect = h(
     "select",
     { id: "auto-lock" },
     lockChoices.map((opt) => h("option", { value: String(opt.value), text: opt.label }))
   );
-  autoLockSelect.value = String(currentAutoLock);
+  autoLockSelect.value = leaving ? "leave" : String(currentAutoLock);
+  const lockNote = h("p", { class: "settings-note" });
+  const sayLock = (onLeave) => {
+    lockNote.textContent = onLeave
+      ? "Locks the wallet as you leave the app."
+      : lockAll
+        ? "Locks every wallet after this long without use."
+        : "Locks the wallet after this long without use.";
+  };
   autoLockSelect.addEventListener("change", async () => {
-    const timeout = Number(autoLockSelect.value);
-    if (state.overview) state.overview.autoLockTimeoutMinutes = timeout;
-    if (ov && ov !== state.overview) ov.autoLockTimeoutMinutes = timeout;
+    const onLeave = autoLockSelect.value === "leave";
+    const timeout = onLeave ? currentAutoLock || 5 : Number(autoLockSelect.value);
+    for (const o of new Set([state.overview, ov].filter(Boolean))) Object.assign(o, { autoLockTimeoutMinutes: timeout }, inApp ? { lockOnLeave: onLeave } : {});
+    sayLock(onLeave);
     try {
+      if (inApp) {
+        const left = await actions?.send?.({ type: "DUSK_UI_SET_LOCK_ON_LEAVE", lockOnLeave: onLeave });
+        if (left?.error) throw new Error(left.error.message ?? "Couldn't save auto-lock");
+      }
       const res = await actions?.send?.({ type: "DUSK_UI_SET_AUTO_LOCK", autoLockTimeoutMinutes: timeout });
       if (res?.error) throw new Error(res.error.message ?? "Couldn't save auto-lock");
-      actions?.showToast?.(timeout > 0 ? `Locks after ${autoLockLabel(timeout)} without use.` : "Auto-lock is off.");
+      actions?.showToast?.(onLeave ? "Locks as you leave the app." : timeout > 0 ? `Locks after ${autoLockLabel(timeout)} without use.` : "Auto-lock is off.");
     } catch (e) {
       actions?.showToast?.(e?.message ?? String(e), 2500);
     }
   });
+
+  // Fingerprint unlock, in the app on a phone that can guard the password with
+  // one (platform/fingerprint.js): turned on with the password, then a
+  // fingerprint; off at once. Shown once the phone says it can; the password's
+  // field is there only while it's being turned on.
+  const fingerRow = inApp && ov?.isUnlocked ? fingerprintRow({ actions }) : null;
+  if (fingerRow) {
+    fingerprintStatus().then(({ available, on }) => {
+      if (!available && !on) return;
+      fingerRow.querySelector("#fingerprint-unlock").checked = on;
+      fingerRow.hidden = false;
+    });
+  }
 
   // Connected sites, each with its profile and Disconnect; Disconnect all asks first.
   // Connected sites, each with its wallet: with more than one wallet here,
@@ -858,6 +987,8 @@ export function optionsView(ov, { state, actions } = {}) {
         switchContext(state);
         const res = await actions?.send?.({ type: "DUSK_UI_RESET_WALLET" });
         if (res?.error) throw new Error(res.error.message ?? "Wallet reset failed");
+        // No wallet, no password to keep for a fingerprint.
+        await turnFingerprintOff();
         actions?.showToast?.("Wallet reset. Import again to continue.", 2500);
         state.route = "home";
         state.needsRefresh = true;
@@ -889,7 +1020,8 @@ export function optionsView(ov, { state, actions } = {}) {
     ]);
 
   return [
-    subnav({ actions: lockBtn ? [lockBtn] : [], title: "Settings", onBack: () => ((st.nodeDraft = null), (state.route = "home"), rerender()) }),
+    // Back to where Settings was opened from.
+    subnav({ actions: lockBtn ? [lockBtn] : [], title: "Settings", onBack: () => ((st.nodeDraft = null), (state.route = state.optionsFrom || "home"), (state.optionsFrom = null), rerender()) }),
     walletRows.length
       ? section("Wallets", [h("div", { class: "settings-labels" }, walletRows), h("div", { class: "group" }, [addWalletRow])])
       : null,
@@ -901,10 +1033,8 @@ export function optionsView(ov, { state, actions } = {}) {
       : null,
     section("Security", [
       h("div", { class: "settings-field" }, [fieldLabel(autoLockSelect, "Auto-lock"), h("div", { class: "select-wrap" }, [autoLockSelect])]),
-      h("p", {
-        class: "settings-note",
-        text: lockAll ? "Locks every wallet after this long without use." : "Locks the wallet after this long without use.",
-      }),
+      (sayLock(leaving), lockNote),
+      fingerRow,
       changePasswordBtn,
       changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
       sendPasswordRow ? h("div", { class: "group" }, [sendPasswordRow]) : null,

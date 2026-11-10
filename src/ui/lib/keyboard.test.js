@@ -53,7 +53,37 @@ function importScreen({ seen = 790, touch = true } = {}) {
   return { dom, scroller, word, password, confirm, button, keyboard, focus, room: () => dom.document.documentElement.style.getPropertyValue("--keyboard-room") };
 }
 
+// The same screen in a tab of Firefox for Android (full.html): the panel grows
+// with what's in it, and the page itself scrolls, as on Chen's Import and Send.
+function importTab({ seen = 434 } = {}) {
+  const page = importScreen({ seen });
+  const { dom, scroller } = page;
+  const doc = dom.document;
+  const html = doc.documentElement;
+  html.scrollTop = 0;
+  doc.scrollingElement = html;
+  // Nothing in the page scrolls but the page; the panel's content shows all it has.
+  dom.window.getComputedStyle = (el) => ({ overflowY: el === scroller ? "auto" : "visible" });
+  Object.assign(scroller, { scrollHeight: 900, clientHeight: 900 });
+  for (const el of [page.word, page.password, page.confirm, page.button]) {
+    const at = el.getBoundingClientRect();
+    el.getBoundingClientRect = () => ({ top: at.top - html.scrollTop, bottom: at.bottom - html.scrollTop });
+  }
+  return page;
+}
+
 describe("a field typed in on a phone", () => {
+  // Chen's: the box half under the keyboard, Import wallet and Review all under it.
+  it("scrolls the page where the page scrolls, the box and its button just above the keyboard", async () => {
+    const page = importTab();
+    await page.focus(page.confirm);
+    const html = page.dom.document.documentElement;
+    expect(html.scrollTop).toBeGreaterThan(0);
+    expect(page.scroller.scrollTop).toBe(0);
+    expect(page.confirm.getBoundingClientRect().top).toBeGreaterThanOrEqual(12);
+    expect(page.button.getBoundingClientRect().bottom).toBeLessThanOrEqual(434);
+  });
+
   it("goes into the top half with the button after it, where Firefox says nothing of the keyboard", async () => {
     const page = importScreen();
     await page.focus(page.confirm);
@@ -79,6 +109,22 @@ describe("a field typed in on a phone", () => {
     const desk = importScreen({ touch: false });
     await desk.focus(desk.confirm);
     expect([desk.scroller.scrollTop, desk.room()]).toEqual([0, ""]);
+  });
+
+  // Chen's, in landscape and back: the page stayed scrolled, To and Back off its top, its lower half empty.
+  it("gives the room back as the phone turns, and puts the page back where it was once the keyboard's gone", async () => {
+    const page = importScreen({ seen: 480 });
+    await page.focus(page.confirm);
+    expect(page.scroller.scrollTop).toBeGreaterThan(0);
+    expect(page.room()).not.toBe("");
+    // Turned, and the keyboard closed: nothing typed in any more.
+    page.confirm.blur?.();
+    page.dom.document.activeElement = page.dom.document.body;
+    Object.assign(page.dom.window, { innerWidth: 914, innerHeight: 414 });
+    page.dom.window.dispatchEvent(fakeEvent("resize"));
+    await settle();
+    expect(page.room()).toBe("");
+    expect(page.scroller.scrollTop).toBe(0);
   });
 
   it("gives the room back on the next screen", async () => {

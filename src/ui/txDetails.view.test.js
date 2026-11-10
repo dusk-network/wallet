@@ -90,9 +90,28 @@ describe("transaction details", () => {
     ]);
     view = details({ ...shield, status: "submitted" });
     expect([view.status, view.note]).toEqual(["Pending", "Waiting for a block, usually about 10 seconds."]);
+    // Lena's, offline: no "about 10 seconds" while nothing can come.
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    view = details({ ...shield, status: "submitted" });
+    expect([view.status, view.note]).toEqual(["Pending", "No connection. It's looked up again once you're back online."]);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
     // Completed says it all.
     view = details({ ...shield, status: "executed" });
     expect([view.status, view.note]).toEqual(["Completed", ""]);
+  });
+
+  // Lena's: "Why: watcher_unavailable".
+  it("says in words why the wallet stopped waiting, never its watcher's code", () => {
+    const sent = { kind: TX_KIND.TRANSFER, privacy: "public", to: "acct", amount: "1000000000", profileIndex: 0, status: "unknown" };
+    for (const [recoveryReason, words] of [
+      ["watcher_unavailable", "The wallet lost its connection to the network while it waited. It looks it up again once it's back."],
+      ["handover_unclear", "The connection went as it was sent. The wallet looks it up by its ID."],
+    ]) {
+      const { body } = details({ ...sent, recoveryReason });
+      const text = visibleText(body);
+      expect(text).toContain(words);
+      expect(text).not.toContain(recoveryReason);
+    }
   });
 
   it("names the contract a call went to under Technical details only, with Copy, and offers no Add token or Import NFT", async () => {

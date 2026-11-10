@@ -47,14 +47,19 @@ export function fakeNode(nodeUrl) {
     says: null,
     asked: 0,
     signed: [],
-    // What it answers a transaction with instead of taking it, as a body and status.
+    // What it answers a transaction with instead of taking it, as a body and status,
+    // at the steps `refusesAt` names: preverify and propagate, unless it says one.
     refuses: null,
+    refusesAt: /\/(preverify|propagate)$/,
+    // The paths whose requests never get an answer, as with no signal: a RegExp.
+    drops: null,
     balance: { nonce: 0n, value: 10n ** 13n },
     stake: {},
     async fetch(input, init = {}) {
       const url = new URL(String(input), "https://wallet.invalid");
       if (url.origin === "https://wallet.invalid") return new Response(await publicFile(url.pathname.slice(1)));
       if (url.origin !== origin) throw new TypeError(`Nothing but ${origin} answers in this test, not ${url.href}`);
+      if (node.drops?.test(url.pathname)) throw new TypeError("Failed to fetch");
       if (url.pathname === "/on/node/info") {
         node.asked += 1;
         const id = typeof node.says === "function" ? node.says(node.asked) : node.says;
@@ -62,7 +67,7 @@ export function fakeNode(nodeUrl) {
       }
       if (/\/on\/transactions\/(preverify|propagate)$/.test(url.pathname)) {
         node.signed.push(new Uint8Array(init.body));
-        return node.refuses === null ? new Response("ok") : new Response(node.refuses, { status: 400 });
+        return node.refuses === null || !node.refusesAt.test(url.pathname) ? new Response("ok") : new Response(node.refuses, { status: 400 });
       }
       if (url.pathname.endsWith("/account")) return new Response(bytesOf([node.balance.nonce, node.balance.value]));
       if (url.pathname.endsWith("/get_stake")) return new Response(stakeReply(node.stake));

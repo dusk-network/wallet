@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added Immediately to Auto-lock in the Android app, which locks it as you leave it.
+- Added fingerprint unlock to the Android app, offered with a new password and in Settings, with the password as the fallback.
+- Gave the Android app Dusk's icon, in the launcher and on its splash.
 - Brought back the app for Android and desktop (Tauri), in `apps/tauri`.
 - Opened `dusk:` payment links in the Android app's Send, filled in.
 - Shared an address or a request from the Android app through the phone's share sheet.
@@ -19,13 +22,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed a Sozu stake's position on Liquid staking: put in, taken out, worth now, deposit fees and rewards so far.
 - Said what an amount brings in a year with Sozu as it's typed, and one line of what the rate is made of under it.
 - Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
-- Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei, and put those fees in the export.
+- Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
 - Added `dusk_openPaymentLink`, for the web wallet's own button to open a request link in the extension's Send.
 - Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
 - Listed the requests made in Receive, each Waiting, Paid, Check or Paid twice, with its payments to open.
+- Added Copy link to each request in Receive.
+- Added Copy app link beside Share in the Android app's Receive, for the dusk: link that opens the app's Send.
+- Showed staking rewards by calendar year on Staking: native rewards claimed, and what Sozu's unstakes earned.
 - Added a search to Activity: by name, address, memo, transaction ID or amount.
-- Gave the export's values in euros where the browser's region pays in them, and in US dollars elsewhere.
+- Gave the export's values in the currency of the browser's region where CoinGecko prices DUSK in it, as Singapore dollars, and in US dollars elsewhere.
 - Made a release's zips rebuild byte for byte from its tag, with their SHA-256 in the release notes.
 
 ### Changed
@@ -43,12 +49,42 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Told a site nothing of the wallet's network or version before it connects; the network comes with the connection.
 - Counted what's staked, natively and with Sozu, in Home's total balance, read with the public balance, and showed it beside the rest.
 - Gave Sozu's rate as stDUSK grew over the last 30 days, on Liquid staking and Staking, where the chain says it.
-- Made Activity's Export a file for accountants and tax tools, in Koinly's universal CSV: a quarter or any dates, your profile's name on it, transfers between your profiles marked, stDUSK and fees for staking, and euro values and Excel's accents when asked.
+- Gave native staking's rate as the chain paid stakers over the last 30 days, and said over what days each staking rate was measured.
+- Made Activity's Export a file for accountants and tax tools, in Koinly's universal CSV: a quarter or any dates, your profile's name on it, transfers between your profiles marked, stDUSK and fees for staking, and values in your currency and Excel's accents when asked.
 - Showed an amount and its fee to the last lux in a transaction's details, on Sent and on every Review; rows and balance lines stay short.
 - Made a request link the https form, which opens the web wallet's Send filled in; Send also reads it pasted or scanned.
 
 ### Fixed
 
+- Looked each send left waiting through a lost signal up again once the signal returns, and said Completed with its fee, or Not sent.
+- Said Not sent for a send that couldn't reach the network.
+- Said Offline on a Review and on a site's approval, holding Confirm and Approve until the connection is back.
+- Said Offline in the Android app as soon as the phone loses its signal.
+- Noted a site's approved send that didn't go out as Approved, not sent, in Connected sites.
+- Said Offline or Can't reach beside the network's dot, and checked the network again once it answers.
+- Ended "Checking network…" on setup once the network was checked.
+- Asked before Back clears the recovery phrase and password typed on Import.
+- Rejected a site's approval with the phone's first Back in Firefox for Android, no tap first, and went back to the site's tab.
+- Kept a site's approval waiting while you switch tabs in Firefox for Android.
+- Opened a request link or a notice in the wallet's tab already open, rather than another.
+- Closed an approval's tab that said its request ended once you leave it, and said a connection request ended without pointing to Activity.
+- Titled the tab Firefox for Android shows for the wallet's engine "Keep open", saying closing it locks the wallet.
+- Showed no system notices on a phone, so Android never asks for them over a payment.
+- Stopped Firefox offering a strong password of its own for a new wallet password.
+- Typed recovery words on a phone in boxes the keyboard learns nothing from, with Show words.
+- Named a bridge's call in Connected sites with its approval's own words.
+- Made Reveal, Hide and Copy on the recovery phrase a finger's size.
+- Scrolled the field being typed in, and its button, above the keyboard in Firefox for Android's tab.
+- Put a contact's name over the address in Send's To, the address at the field's whole width.
+- Went back from Settings, and from Add wallet, to the screen it was opened from.
+- Showed only the message and Choose image in Scan QR without a camera.
+- Said in the app what the password on big sends covers without sites, and why the wallet stopped waiting for a send in plain words.
+- Said No connection while a send waits offline, rather than how long a block takes.
+- Gave the keyboard's room back as the phone turns, and put the page back where it was.
+- Named a saved QR by what it asks and when it was made, wrote its amount, memo and name under the code, and said the name Android saved it as.
+- Named a saved export by when it was made, and said the name Android saved it as.
+- Read the balance again as the Android app comes back to the front.
+- Kept a setup form's words and passwords through the wallet drawing again.
 - Kept a site's approval through Firefox for Android stopping the wallet in the background, so Approve still works; if it can't, the approval and the site say the request ended.
 - Rejected an approval with the phone's Back.
 - Said a misspelled recovery word by Import wallet too.
@@ -87,6 +123,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
 - Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
 - Repeated on Review that a send goes to your own account, and said what to try after a wrong password.
+- Took a paid request link off the page's address, so a reload doesn't bring the payment back ready to send.
+- Said on Send when you already paid the same payment, and named Review's button Send … again.
+- Showed Sent back, with when, rather than Send back once a request's extra payment went back.
+- Dropped "so far" from what a Sozu stake got once it's final.
+- Gave a request's payments to the second, so two in one minute differ.
+- Drew addresses and amounts without the font's contextual alternates, so an x between digits stays an x.
+- Put Review stake right under the amount, so a phone's keyboard doesn't cover it.
+- Asked which amount is meant, and which spaces to leave out of one like 1 234,5, in the web wallet's words.
+- Read a plain dusk:<address>?amount=&memo= link, and said a link's network can't be read rather than naming one twice.
+- Refused a profile's name that is, or looks like, another profile's or a contact's.
+- Showed what came in on a request of any amount in its badge, in plain colour, rather than a green Paid.
+- Said a number's look-alike digits in the web wallet's words.
+- Booked no gas of a migration's own chain in the export, as the extension connects no EVM wallet and anyone can migrate to an account.
+- Marked a contact whose name looks like another's on Send, Review and Activity, beside its address.
 - Kept another wallet's shielded history out of Activity and Export when the wallet changes during a read; an Export it changes under saves nothing and says so.
 - Said under a .dusk name when a node the wallet doesn't know checked it, and kept that node's answers from the network's own node's.
 - Said plainly on Home when the balance can't be read, instead of showing what the node said.

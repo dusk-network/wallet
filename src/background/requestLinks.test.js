@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
+import { runtimeGetURL, tabsCreate, tabsQuery, tabsUpdate, windowsGet, windowsUpdate } from "../platform/extensionApi.js";
 import { loadVault } from "../shared/vault.js";
 import { handOverRequestLink, offersRequestLink, openRequestLink } from "./requestLinks.js";
 
 vi.mock("../platform/extensionApi.js", () => ({
   runtimeGetURL: vi.fn((path) => `chrome-extension://wallet/${path}`),
   tabsCreate: vi.fn(async () => ({})),
+  // No wallet tab open, unless a test opens one.
+  tabsQuery: vi.fn(async () => []),
+  tabsUpdate: vi.fn(async () => ({})),
+  windowsGet: vi.fn(async () => ({ state: "normal" })),
+  windowsUpdate: vi.fn(async () => ({})),
 }));
 vi.mock("../shared/vault.js", () => ({ loadVault: vi.fn(async () => ({ version: 2 })) }));
 // The wallet's node, as Settings has it: a test on this machine says so.
@@ -34,6 +39,29 @@ describe("a request link from the web wallet's Send", () => {
     expect(tabsCreate).toHaveBeenCalledWith({ url: `chrome-extension://wallet/full.html?route=send&link=${encodeURIComponent(LINK)}` });
   });
 
+  // Marek's: 14 tabs in 35 minutes, a wallet tab for each link.
+  it("opens it in the wallet's tab open already, brought to the front, rather than another", async () => {
+    tabsQuery.mockResolvedValueOnce([{ id: 3, url: LINK }, { id: 6, url: "chrome-extension://wallet/notification.html?rid=r1" }, { id: 7, url: "chrome-extension://wallet/popup.html" }]);
+    await expect(openRequestLink({ link: LINK }, onWalletPage)).resolves.toBe(true);
+    expect(tabsUpdate).toHaveBeenCalledWith(7, { url: `chrome-extension://wallet/full.html?route=send&link=${encodeURIComponent(LINK)}`, active: true });
+    expect(tabsCreate).not.toHaveBeenCalled();
+  });
+
+  // Astra's: the wallet's tab in another window, maybe minimised, came forward there alone.
+  it("brings the window of the wallet's tab to the front too, where it's another, minimised or not", async () => {
+    tabsQuery.mockResolvedValueOnce([{ id: 7, windowId: 2, url: "chrome-extension://wallet/full.html" }]);
+    windowsGet.mockResolvedValueOnce({ id: 2, state: "minimized" });
+    await expect(openRequestLink({ link: LINK }, onWalletPage)).resolves.toBe(true);
+    expect(tabsUpdate).toHaveBeenCalledWith(7, { url: `chrome-extension://wallet/full.html?route=send&link=${encodeURIComponent(LINK)}`, active: true });
+    expect(windowsUpdate).toHaveBeenCalledWith(2, { focused: true, state: "normal" });
+
+    // A maximised one stays so.
+    tabsQuery.mockResolvedValueOnce([{ id: 7, windowId: 4, url: "chrome-extension://wallet/full.html" }]);
+    windowsGet.mockResolvedValueOnce({ id: 4, state: "maximized" });
+    await openRequestLink({ link: LINK }, onWalletPage);
+    expect(windowsUpdate).toHaveBeenLastCalledWith(4, { focused: true });
+  });
+
   it("is taken from the web wallet's own pages alone, also once it moved on", async () => {
     await expect(openRequestLink({ link: LINK }, { url: "https://apps.testnet.dusk.network/wallet/" })).resolves.toBe(true);
     tabsCreate.mockClear();
@@ -58,7 +86,9 @@ describe("a request link from the web wallet's Send", () => {
       await expect(openRequestLink({ link }, sender)).resolves.toBe(false);
     }
     expect(tabsCreate).not.toHaveBeenCalled();
-    expect(runtimeGetURL).toHaveBeenCalledTimes(1);
+    expect(tabsUpdate).not.toHaveBeenCalled();
+    // One look for the wallet's tab: the one link taken.
+    expect(tabsQuery).toHaveBeenCalledTimes(1);
   });
 });
 

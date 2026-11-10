@@ -428,6 +428,60 @@ function tauriBridge(answers = {}) {
 describe("the app on a phone", () => {
   const LINK = `dusk:public-${B}@dusk:2?amount=0.01&memo=Deep+link+test`;
 
+  // Chen's wish: lock when I leave the app, as phone wallets' Auto-lock: Immediately.
+  it("locks as the person leaves it with Auto-lock: Immediately, not for the share sheet, and not otherwise", async () => {
+    const bridge = tauriBridge();
+    // The wallet locks when asked, and says so.
+    const locks = async (message, t) => {
+      if (message.type !== "DUSK_UI_LOCK") return undefined;
+      t.open = { ...t.open, isUnlocked: false };
+      t.deliver({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
+      return { ok: true };
+    };
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, locks, { tauri: bridge });
+    const hide = async () => {
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+    const show = async () => {
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+    // Off, as it starts: nothing locks.
+    await hide();
+    expect(t.asked("DUSK_UI_LOCK")).toEqual([]);
+    await show();
+
+    // Immediately, in Settings: Auto-lock's first choice in the app.
+    t.state.route = "options";
+    await t.render({ forceRefresh: true });
+    const autoLock = () => t.app.querySelector("#auto-lock");
+    expect(autoLock().querySelectorAll("option").map((o) => o.textContent)).toEqual(["Immediately", "5 minutes", "15 minutes", "Off"]);
+    autoLock().value = "leave";
+    autoLock().dispatchEvent(fakeEvent("change"));
+    await flush();
+    expect(t.asked("DUSK_UI_SET_LOCK_ON_LEAVE").at(-1)).toMatchObject({ lockOnLeave: true });
+    t.open = { ...t.open, lockOnLeave: true };
+    await t.render({ forceRefresh: true });
+    expect(autoLock().value).toBe("leave");
+    expect(t.app.textContent).toContain("Locks the wallet as you leave the app.");
+
+    // The wallet's own share sheet is no leaving.
+    const { shareText } = await import("../../platform/native.js");
+    await shareText("an address");
+    await hide();
+    expect(t.asked("DUSK_UI_LOCK")).toEqual([]);
+    await show();
+    // Leaving is: back, the password is asked, not the locked Settings.
+    await hide();
+    expect(t.asked("DUSK_UI_LOCK")).toHaveLength(1);
+    await show();
+    expect(t.app.querySelector("input[type=password]")?.getAttribute("placeholder")).toBe("Password");
+    expect(t.app.textContent).not.toContain("Locks the wallet as you leave the app.");
+  });
+
   it("opens Send filled in from a dusk: link it was opened with, and from one opened while it runs", async () => {
     const bridge = tauriBridge({ "plugin:deep-link|get_current": [LINK] });
     const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge });
@@ -444,6 +498,26 @@ describe("the app on a phone", () => {
     bridge.emit([LINK.replace("0.01", "0.02").replace("Deep+link+test", "Second")]);
     await flush();
     expect([t.state.route, fields().includes("0.02"), fields().includes("Second")]).toEqual(["send", true, true]);
+
+    // Lena's: one as the app comes back on Activity, while the wallet still
+    // reads the node, which a phone just woken can take a minute to answer.
+    t.state.route = "activity";
+    await t.render();
+    const answer = t.send.getMockImplementation();
+    const node = Promise.withResolvers();
+    t.send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? (await node.promise, t.open) : answer(message)));
+    bridge.emit([LINK.replace("0.01", "0.03").replace("Deep+link+test", "Third")]);
+    await flush();
+    expect([t.app.querySelector(".subnav-title")?.textContent, fields().includes("0.03"), fields().includes("Third")]).toEqual(["Send", true, true]);
+    node.resolve();
+    await flush();
+    expect([t.app.querySelector(".subnav-title")?.textContent, fields().includes("0.03"), fields().includes("Third")]).toEqual(["Send", true, true]);
+
+    // Lena's plain shape, dusk:<account>?amount=&memo=, read as the web wallet reads it.
+    t.send.mockImplementation(answer);
+    bridge.emit([`dusk:${B}?amount=0.04&memo=Plain`]);
+    await flush();
+    expect([t.app.querySelector(".to-input-wrap textarea").value, fields().includes("0.04"), fields().includes("Plain")]).toEqual([B, true, true]);
   });
 });
 
@@ -461,6 +535,9 @@ describe("the phone's Back in the app, as Android hands it over", () => {
     ["into Settings before Android answers (Sol's)", "on answer", [["back", "home"], ["settings", "options"], ["answer", "options"], ["back", "home"], ["back", "home"]], 2],
     ["into Settings and Back before Android answers (the delta review's)", "on answer", [["back", "home"], ["settings", "options"], ["back", "home"], ["answer", "home"], ["back", "home"]], 2],
     ["Android answering after the next Back too", "on answer", [["back", "home"], ["back", "home"], ["answer", "home"], ["answer", "home"], ["back", "home"]], 3],
+    // Chen's: Back from Settings and from Add wallet went straight to the dashboard.
+    ["Settings opened from Receive, Back to Receive", "at once", [["receive", "receive"], ["settings", "options"], ["back", "receive"], ["back", "home"], ["back", "home"]], 1],
+    ["Add wallet from Settings, Back to Settings, then to where Settings was opened", "at once", [["receive", "receive"], ["settings", "options"], ["add", "wallet_add"], ["back", "options"], ["back", "receive"], ["back", "home"]], 0],
   ];
 
   it.each(ROWS)("%s", async (_, when, steps, toBackground) => {
@@ -482,6 +559,8 @@ describe("the phone's Back in the app, as Android hands it over", () => {
     for (const [step, route] of steps) {
       if (step === "settings") button("Settings").click();
       if (step === "contacts") button("Contacts").click();
+      if (step === "receive") button("Receive").click();
+      if (step === "add") [...t.app.querySelectorAll(".settings-row")].find((row) => row.textContent.includes("Add wallet")).click();
       if (step === "tap") t.app.click();
       if (step === "back") backButton.onmessage({ canGoBack: false });
       if (step === "answer") waiting.shift()?.(true);

@@ -6,6 +6,8 @@ import { explorerTxUrl } from "../shared/explorer.js";
 import { chainIdForNode, networkTextOf } from "../shared/nodeNetwork.js";
 import { getTxMeta } from "../shared/txStore.js";
 import { shortAddress } from "../ui/lib/strings.js";
+import { isPhone } from "../ui/lib/device.js";
+import { openWalletTab } from "./walletTab.js";
 import {
   getExtensionApi,
   notificationsCreate,
@@ -17,6 +19,11 @@ const ICON_PATH = "icons/dusk-128.png";
 
 let handlersInstalled = false;
 const ext = getExtensionApi();
+
+// No system notices on a phone: Firefox for Android asks Android for leave to
+// show them, over the payment or approval, again after a no. The wallet's own
+// screens say how a send went; a notice is asked for there, if ever.
+const notifies = () => Boolean(ext?.notifications) && !isPhone();
 
 // The node and network a transaction was sent on, as its record keeps them
 // (txRecord.js), for its notice and explorer link after a switch and a
@@ -34,7 +41,7 @@ export function registerTxNotificationHandlers() {
   handlersInstalled = true;
 
   try {
-    if (!ext?.notifications) return;
+    if (!notifies()) return;
 
     // Clicking the notification opens the explorer (when possible), otherwise
     // falls back to the wallet full view.
@@ -57,10 +64,7 @@ export function registerTxNotificationHandlers() {
           }
         }
 
-        const walletUrl = runtimeGetURL(
-          `full.html?route=home${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`
-        );
-        tabsCreate({ url: walletUrl }).catch(() => {});
+        openWalletTab(`full.html?route=home${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`).catch(() => {});
       } catch {
         // ignore
       }
@@ -89,10 +93,7 @@ export function registerTxNotificationHandlers() {
           }
 
           // Fallback: open wallet dashboard so the user can see the tx.
-          const walletUrl = runtimeGetURL(
-            `full.html?route=home${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`
-          );
-          tabsCreate({ url: walletUrl }).catch(() => {});
+          openWalletTab(`full.html?route=home${hash ? `&tx=${encodeURIComponent(hash)}` : ""}`).catch(() => {});
         } catch {
           // ignore
         }
@@ -110,7 +111,7 @@ export function registerTxNotificationHandlers() {
  */
 export async function notifyTxSubmitted({ hash, origin, title, nodeUrl } = {}) {
   try {
-    if (!ext?.notifications) return;
+    if (!notifies()) return;
 
     const sent = await sentOn(hash, nodeUrl);
     const networkName = sent.nodeUrl ? networkTextOf(sent.nodeUrl) : "";
@@ -155,7 +156,7 @@ export async function notifyTxExecuted({
   nodeUrl,
 } = {}) {
   try {
-    if (!ext?.notifications) return;
+    if (!notifies()) return;
     if (!hash) return;
 
     const sent = await sentOn(hash, nodeUrl);

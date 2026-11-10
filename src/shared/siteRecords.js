@@ -36,7 +36,7 @@ const USE_EVERY_MS = 60_000;
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 // How long an answer stays as more come: the person's own longest, an approval longest of all.
-const KEEP_RANK = Object.freeze({ approved: 2, rejected: 1, closed: 1 });
+const KEEP_RANK = Object.freeze({ approved: 2, failed: 2, unconfirmed: 2, rejected: 1, closed: 1 });
 const rankOf = (entry) => KEEP_RANK[entry?.answer] ?? 0;
 const sitesOf = (all, id) => (isObject(all[id]) ? all[id] : {});
 const siteOf = (sites, origin) => (isObject(sites[origin]) ? sites[origin] : {});
@@ -73,8 +73,14 @@ function bounded(sites) {
   return Object.fromEntries(entries.slice(0, SITES_KEPT));
 }
 
-// What a request is, for its record, and nothing else of it.
-function requestRecord(kind, params) {
+// What a request is, for its record, and nothing else of it: with the words
+// its approval led with (`asked`), where they say more than its kind.
+function requestRecord(kind, params, asked) {
+  const record = requestKind(kind, params);
+  return typeof asked === "string" && asked ? { ...record, asked: Array.from(asked).slice(0, METHOD_CHARS).join("") } : record;
+}
+
+function requestKind(kind, params) {
   switch (kind) {
     case "connect":
       return { what: params?.shieldedReceiveAddress ? "shielded_address" : "connect" };
@@ -101,20 +107,42 @@ function requestRecord(kind, params) {
  * note takes its place in line as it's made.
  * @param {string | Promise<string>} walletId - the wallet it was for
  * @param {string} origin
- * @param {{ kind: string, params?: object, answer: "approved"|"rejected"|"closed"|"expired"|"cancelled"|"not_shown", at?: number }} request
+ * @param {{ kind: string, params?: object, answer: "approved"|"failed"|"unconfirmed"|"rejected"|"closed"|"expired"|"cancelled"|"not_shown", asked?: string, at?: number, id?: string }} request
+ *   `asked`: the words its approval led with, kept for a bridge's calls; `id`,
+ *   the request's, for what comes of it after (noteSiteSendFailed)
  */
-export function noteSiteRequest(walletId, origin, { kind, params, answer, at = Date.now() }) {
+export function noteSiteRequest(walletId, origin, { kind, params, answer, asked, at = Date.now(), id: rid }) {
   return mutate(async (all) => {
     const id = String((await walletId) ?? "");
     if (!id || !origin) return all;
     const sites = sitesOf(all, id);
     const site = siteOf(sites, origin);
-    const asked = [{ at, ...requestRecord(kind, params), answer }, ...(Array.isArray(site.asked) ? site.asked : [])];
-    while (asked.length > SITE_ASKED_KEPT) {
-      const least = Math.min(...asked.map(rankOf));
-      asked.splice(asked.findLastIndex((entry) => rankOf(entry) === least), 1);
+    const list = [{ at, ...requestRecord(kind, params, asked), answer, ...(rid ? { id: String(rid) } : {}) }, ...(Array.isArray(site.asked) ? site.asked : [])];
+    while (list.length > SITE_ASKED_KEPT) {
+      const least = Math.min(...list.map(rankOf));
+      list.splice(list.findLastIndex((entry) => rankOf(entry) === least), 1);
     }
-    return { ...all, [id]: bounded({ ...sites, [origin]: { ...site, asked } }) };
+    return { ...all, [id]: bounded({ ...sites, [origin]: { ...site, asked: list } }) };
+  });
+}
+
+/**
+ * Says how a site's approved send went, on its record: "failed" when nothing
+ * went out, "unconfirmed" when it may not have. The approval is the one with
+ * the request's `id`: the site may have had another approved since.
+ * @param {string} walletId
+ * @param {string} origin
+ * @param {{ id: string, answer: "failed"|"unconfirmed" }} outcome
+ */
+export function noteSiteSendFailed(walletId, origin, { id: rid, answer }) {
+  const id = String(walletId ?? "");
+  return mutate((all) => {
+    const site = siteOf(sitesOf(all, id), origin);
+    const asked = Array.isArray(site.asked) ? site.asked : [];
+    const at = rid ? asked.findIndex((entry) => entry?.answer === "approved" && entry.id === String(rid)) : -1;
+    if (!id || at < 0) return all;
+    const next = asked.map((entry, i) => (i === at ? { ...entry, answer } : entry));
+    return { ...all, [id]: { ...sitesOf(all, id), [origin]: { ...site, asked: next } } };
   });
 }
 

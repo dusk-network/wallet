@@ -6,9 +6,11 @@ import { formatLuxForInput, parseDuskToLux, amountForInput } from "../../../shar
 import { walletLabel } from "../../../shared/wallets.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
-import { decimalInput, fieldError, fieldLabel, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
+import { NEW_PASSWORD, decimalInput, fieldError, fieldLabel, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
 import { subnav } from "../../components/Subnav.js";
+import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { switchContext } from "../context.js";
+import { fingerprintStatus, turnFingerprintOn } from "../../../platform/fingerprint.js";
 
 // A wrong password, or one that has to wait, is said under the password.
 const passwordRefusal = (message) => /^Incorrect password$|^Too many attempts/.test(String(message ?? ""));
@@ -115,8 +117,8 @@ export function removeWalletView(ov, { state, actions } = {}) {
 /** A new password for every wallet here: the current one, then the new one twice. */
 export function changePasswordView(ov, { state, actions } = {}) {
   const current = passwordField({ label: "Current password", placeholder: "The password you unlock with", onEnter: () => next.input.focus() });
-  const next = passwordField({ label: "New password", placeholder: "At least 8 characters", autocomplete: "new-password", onEnter: () => again.input.focus() });
-  const again = passwordField({ label: "Confirm password", placeholder: "The same password again", autocomplete: "new-password", onEnter: () => btn.click() });
+  const next = passwordField({ label: "New password", placeholder: "At least 8 characters", autocomplete: NEW_PASSWORD, onEnter: () => again.input.focus() });
+  const again = passwordField({ label: "Confirm password", placeholder: "The same password again", autocomplete: NEW_PASSWORD, onEnter: () => btn.click() });
   const err = formError();
   const fields = [current, next, again];
 
@@ -154,11 +156,17 @@ export function changePasswordView(ov, { state, actions } = {}) {
       for (const f of fields) f.input.disabled = true;
       btn.textContent = "Changing…";
       try {
-        const res = await actions?.send?.({ type: "DUSK_UI_CHANGE_PASSWORD", password: current.input.value, newPassword: next.input.value });
+        const newPassword = next.input.value;
+        const res = await actions?.send?.({ type: "DUSK_UI_CHANGE_PASSWORD", password: current.input.value, newPassword });
         if (res?.error) throw new Error(res.error.message ?? "Couldn't change the password");
         for (const f of fields) f.input.value = "";
         actions?.showToast?.("Password changed.");
         backToSettings(state, actions);
+        // Fingerprint unlock kept the old password: it keeps the new one, after a fingerprint, or it's off.
+        if ((await fingerprintStatus()).on) {
+          const on = await turnFingerprintOn(newPassword);
+          if (!on.ok) actions?.showToast?.("Fingerprint unlock is off. Turn it on again in Settings.", 3000);
+        }
       } catch (e) {
         const message = e?.message ?? String(e);
         if (passwordRefusal(message)) current.error.show(message);
@@ -261,7 +269,8 @@ export function sendPasswordView(ov, { state, actions } = {}) {
       h("label", { class: "settings-switch", for: "send-password-on" }, [on, h("span", { text: "Ask for the password on big sends" })]),
       h("p", {
         class: "settings-note",
-        text: "On sends, stakes, shielding and what sites ask, network fee included. A token's transfer, or a contract the wallet doesn't know, asks on any amount.",
+        // In the app no site asks for anything.
+        text: `On sends, stakes${isExtensionRuntime() ? ", shielding and what sites ask" : " and shielding"}, network fee included. A token's transfer, or a contract the wallet doesn't know, asks on any amount.`,
       }),
       amountRow,
       passwordRow,

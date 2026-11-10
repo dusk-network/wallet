@@ -202,7 +202,10 @@ vi.mock("../shared/assetsStore.js", () => ({
   unwatchNft: vi.fn(async () => true),
 }));
 
-vi.mock("../shared/networkStatus.js", () => ({
+vi.mock("../shared/networkStatus.js", async (importOriginal) => ({
+  // How often it checks, and what a check said, as the wallet has them.
+  checkEveryMs: (await importOriginal()).checkEveryMs,
+  statusWords: (await importOriginal()).statusWords,
   getNetworkStatus: vi.fn(async () => ({ checkedAt: 0 })),
   checkAllEndpoints: mocks.checkAllEndpoints,
   readChainId: mocks.readChainId,
@@ -842,6 +845,48 @@ describe("background auto-lock activity", () => {
       expect(checks()).toBe(before + 3);
       await overview(10_000, { node: "offline", balance: false });
       expect(checks()).toBe(before + 3);
+    } finally {
+      mocks.isStatusStale.mockReturnValue(false);
+      status.getNetworkStatus.mockResolvedValue({ checkedAt: 0 });
+    }
+  });
+
+  // Marek's: "Checking network…" on setup until the import ended.
+  it("has the popup draw again once the check a network switch started says how the network is", async () => {
+    const { isStatusStale } = await vi.importActual("../shared/networkStatus.js");
+    const status = await import("../shared/networkStatus.js");
+    mocks.isStatusStale.mockImplementation(isStatusStale);
+    mocks.settings = { ...mocks.settings, chainId: 2 };
+    status.getNetworkStatus.mockResolvedValue({ nodeStatus: "checking", proverStatus: "checking", archiverStatus: "checking", lastChecked: null });
+    mocks.checkAllEndpoints.mockImplementationOnce(async () => ({ nodeStatus: "online", proverStatus: "online", archiverStatus: "online", nodeChainId: 2 }));
+    mocks.sentMessages.length = 0;
+    try {
+      const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+      expect(overview.networkStatus.nodeStatus).toBe("checking");
+      await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_NETWORK_CHANGED" }));
+    } finally {
+      mocks.isStatusStale.mockReturnValue(false);
+      status.getNetworkStatus.mockResolvedValue({ checkedAt: 0 });
+    }
+  });
+
+  // Amélie's: back online, the balance read again, and the dot went red and stayed so.
+  it("checks again within seconds once the node answers while the last check said it was down, and has the popup draw what it says", async () => {
+    const { isStatusStale } = await vi.importActual("../shared/networkStatus.js");
+    const status = await import("../shared/networkStatus.js");
+    mocks.isStatusStale.mockImplementation(isStatusStale);
+    mocks.settings = { ...mocks.settings, chainId: 2 };
+    await sendBackgroundMessage({ type: "DUSK_UI_UNLOCK", password: "pw" });
+    const checks = () => mocks.checkAllEndpoints.mock.calls.length;
+    status.getNetworkStatus.mockResolvedValue({ nodeStatus: "offline", proverStatus: "online", archiverStatus: "online", lastChecked: mocks.now - 6_000 });
+    mocks.engineCall.mockImplementation(async (method) => (method === "engine_walletId" ? "acct0" : true));
+    mocks.checkAllEndpoints.mockImplementationOnce(async () => ({ nodeStatus: "online", proverStatus: "online", archiverStatus: "online" }));
+    mocks.sentMessages.length = 0;
+    try {
+      const before = checks();
+      await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+      expect(checks()).toBe(before + 1);
+      await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_NETWORK_CHANGED" }));
     } finally {
       mocks.isStatusStale.mockReturnValue(false);
       status.getNetworkStatus.mockResolvedValue({ checkedAt: 0 });

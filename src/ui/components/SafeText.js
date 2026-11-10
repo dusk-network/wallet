@@ -1,3 +1,5 @@
+import { numbersNote } from "@dusk-network/app-core/text";
+
 import { safeText } from "../../shared/safeText.js";
 import { h } from "../lib/dom.js";
 
@@ -5,19 +7,12 @@ import { h } from "../lib/dom.js";
 export const HIDDEN_CHARACTERS_TEXT = "Hidden characters that can change how this reads show here as � or \\u codes.";
 
 /**
- * What a text's numbers ask a person to check, in words; "" for nothing.
+ * What a text's numbers ask a person to check, in the web wallet's words
+ * (app-core's numbersNote); "" for nothing.
  * @param {{ mixedDigits?: boolean, rtlDigits?: boolean, lookalikeDigits?: boolean }} [checks] - safeText's
  */
 export function numbersText({ mixedDigits = false, rtlDigits = false, lookalikeDigits = false } = {}) {
-  // The first that holds says what the number is in; the others what some of its digits do.
-  const parts = [
-    mixedDigits ? "mixes digits of different scripts" : "",
-    rtlDigits ? (mixedDigits ? "some read right to left" : "is in digits that read right to left") : "",
-    lookalikeDigits ? (mixedDigits || rtlDigits ? "some look like other digits than they are" : "is in digits that look like other digits than they are") : "",
-  ].filter(Boolean);
-  if (!parts.length) return "";
-  const what = parts.length > 2 ? `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}` : parts.join(", and ");
-  return `A number here ${what}. Check it digit by digit.`;
+  return numbersNote([mixedDigits && "mixed_digits", rtlDigits && "rtl_digits", lookalikeDigits && "lookalike_digits"].filter(Boolean));
 }
 
 /**

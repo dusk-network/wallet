@@ -114,6 +114,14 @@ export function windowsCreate(options) {
   return callApi(raw?.windows?.create, [options], raw?.windows);
 }
 
+export function windowsGet(windowId) {
+  return callApi(raw?.windows?.get, [windowId], raw?.windows);
+}
+
+export function windowsUpdate(windowId, options) {
+  return callApi(raw?.windows?.update, [windowId, options], raw?.windows);
+}
+
 export function windowsRemove(windowId) {
   return callApi(raw?.windows?.remove, [windowId], raw?.windows, { allowLastError: true });
 }

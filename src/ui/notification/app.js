@@ -24,6 +24,7 @@ import { dateText as fullDateText } from "../lib/time.js";
 import { h, setChildren } from "../lib/dom.js";
 import { guarded, screenShown } from "../lib/clickGuard.js";
 import { isPhone } from "../lib/device.js";
+import { holdWhileOffline } from "../lib/offline.js";
 import { contractIdText, shortAddress, shortEvmAddress } from "../lib/strings.js";
 import { fieldError, fieldLabel, passwordInput, submitOnGasEnter, textInput } from "../components/FormControls.js";
 import { shortAddressEl } from "../components/ShortAddress.js";
@@ -101,6 +102,15 @@ function show(body, actions = []) {
   const kept = actions.filter(Boolean);
   setChildren(bar, kept);
   bar.hidden = kept.length === 0;
+  tellShown();
+}
+
+// The wallet hears what a request waiting here leads with, for its site's
+// record, and in a tab puts up the entry the phone's first Back takes away.
+function tellShown() {
+  if (!approvalLive || !rid) return;
+  const asked = app.querySelector(".ap-title")?.textContent ?? "";
+  send({ type: "DUSK_APPROVAL_SHOWN", rid, asked }).catch(() => {});
 }
 
 function renderError(text) {
@@ -234,6 +244,8 @@ function stopActivityHeartbeat() {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     stopActivityHeartbeat();
+    // A tab that said its request ended goes once it's left: no dead tabs to pile up.
+    if (endedSaid && isPhone()) window.close();
     return;
   }
   startActivityHeartbeat();
@@ -248,19 +260,24 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// The phone's Back rejects the request, as closing its tab does: one history
-// entry for it, put up once a press counts (a click, a key let go), as
-// browsers skip one put up before. Back before any press: pending.js.
+// The phone's Back rejects the request, as closing its tab does. In a tab,
+// the wallet puts an entry under it as it's drawn (pending.js, "#back"), which
+// Firefox for Android's first Back takes away; one the page put up itself, it
+// skips before a press. Elsewhere, one is put up once a press counts (a click,
+// a key let go).
 if (isPhone()) {
   let backGuard = false;
+  const backEntry = () => globalThis.location?.hash === "#back";
   const guardBack = () => {
-    if (backGuard || !approvalLive) return;
+    if (backGuard || !approvalLive || backEntry()) return;
     backGuard = true;
     window.history?.pushState?.({ duskApproval: true }, "");
   };
   document.addEventListener("click", guardBack, true);
   document.addEventListener("keyup", guardBack, true);
   window.addEventListener("popstate", () => {
+    // Come to the wallet's entry, not gone back from it.
+    if (backEntry()) return;
     if (approvalLive) decide("reject").catch(() => ended());
   });
 }
@@ -279,8 +296,16 @@ document.addEventListener(
 // never a dead Approve.
 export const ENDED_TEXT = "This request isn't waiting any more, and this window can't tell whether it went through. Check Activity before you ask the site again.";
 
-function ended(text = ENDED_TEXT) {
+/** The same, for a request that sends nothing: a connection, a signature. */
+export const ENDED_ASK_TEXT = "This request isn't waiting any more. Ask the site again if you still want to.";
+
+// The kind of request this window shows, and whether it said it ended.
+let shownKind = "";
+let endedSaid = false;
+
+function ended(text = shownKind === "send_tx" ? ENDED_TEXT : ENDED_ASK_TEXT) {
   approvalLive = false;
+  endedSaid = true;
   stopActivityHeartbeat();
   renderError(text);
 }
@@ -362,7 +387,7 @@ function answerFailedText(e) {
  * doesn't reach the wallet (Firefox's runtime rejects when the background is
  * gone) says so there too, and the window stays open to try again.
  */
-function decisionBar({ approveText = "Approve", approveDisabled = false, approveTitle = "", getApprovedParams } = {}) {
+function decisionBar({ approveText = "Approve", approveDisabled = false, approveTitle = "", getApprovedParams, sends = false } = {}) {
   const error = h("div", { class: "field-error ap-actions__error", role: "alert", hidden: true });
   const answer = async (decision, approvedParams, withAnswer) => {
     try {
@@ -425,7 +450,9 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
       approveBtn.textContent = approveText;
     }),
   });
-  return { nodes: [error, sendPassword.el, rejectBtn, approveBtn], approveBtn, rejectBtn, error, sendPassword };
+  // A transaction waits for the connection: offline, nothing would go out.
+  const offline = sends ? holdWhileOffline(approveBtn, { text: "You're offline. Approve once you're back online.", className: "ap-actions__error" }) : null;
+  return { nodes: [error, offline, sendPassword.el, rejectBtn, approveBtn].filter(Boolean), approveBtn, rejectBtn, error, sendPassword };
 }
 
 export async function renderNotification() {
@@ -473,6 +500,7 @@ export async function renderNotification() {
   const kindNorm = String(kind ?? "")
     .trim()
     .toLowerCase();
+  shownKind = kindNorm;
 
   // The network: a transaction's own, which it was approved for, a
   // signature's chain, or the wallet's.
@@ -1311,7 +1339,7 @@ export async function renderNotification() {
       const gasEditor = gasEditorFor(amountLux);
       // A recipient the network's file blocks: why, at the top, and no Approve.
       const blocked = blockedRecipient(to, chainIdForNode(nodeUrl));
-      const bar = decisionBar({ approveDisabled: Boolean(blocked), getApprovedParams: () => gasEditor.readOverrideGas(gas) });
+      const bar = decisionBar({ approveDisabled: Boolean(blocked), getApprovedParams: () => gasEditor.readOverrideGas(gas), sends: true });
       const pay = guardFor(gasEditor, bar, safeBigInt(amountLux, 0n), () => !blocked);
       submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => !blocked && pay.covered() });
       // To the bridge's account: the memo is the address the bridge pays
@@ -1454,6 +1482,7 @@ export async function renderNotification() {
         approveDisabled: gated,
         approveTitle: gated ? "Type MAX to enable approval" : "",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
+        sends: true,
       });
       const ackInput = textInput({
         placeholder: "Type MAX to confirm",
@@ -1471,7 +1500,7 @@ export async function renderNotification() {
     // above the call and its bytes.
     const bridge = argsOk ? bridgeCallOf(params, { own }) : null;
     if (bridge) {
-      const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas) });
+      const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas), sends: true });
       const pay = guardFor(gasEditor, bar, sendsLux);
       submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => pay.covered() });
       const summary = requestSummary("send_tx", params, { own });
@@ -1644,6 +1673,7 @@ export async function renderNotification() {
       const bar = decisionBar({
         approveText: isTransferFrom ? "Approve transfer" : "Approve",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
+        sends: true,
       });
       const pay = guardFor(gasEditor, bar, sendsLux);
       submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => pay.covered() });

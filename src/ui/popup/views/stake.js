@@ -32,8 +32,9 @@ import { fieldLabel, reviewActions, submitOnGasEnter } from "../../components/Fo
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { sozuHolding, sozuLiquidStakingView } from "./sozu.js";
-import { sozuGrowthOf } from "../activity.js";
+import { sozuHolding, sozuLiquidStakingView, stakingHistory } from "./sozu.js";
+import { rewardsByYear } from "@dusk-network/app-core/export";
+import { nativeRewardsOf, sozuGrowthOf } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -410,6 +411,42 @@ function nodeRow(actions) {
   ]);
 }
 
+// Rewards by calendar year, in this device's time zone, as a tax return asks
+// for them: native rewards claimed, and what Sozu earned that its unstakes
+// took out that year (app-core's rewardsByYear), from the profile's whole
+// public history. Their value in money is in Activity's export.
+function rewardYears(ov, { state, actions, hidden }) {
+  const history = stakingHistory(ov, { state, actions });
+  if (history.reading || !history.rows.length) return null;
+  const key = `${history.key}|${history.rows.length}|${history.facts?.size ?? 0}`;
+  if (state.rewardYears?.key !== key) {
+    const kept = (state.rewardYears = { key, years: [] });
+    rewardsByYear({ rows: history.rows, facts: history.facts, complete: Boolean(history.whole), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })
+      .then((years) => {
+        if (state.rewardYears !== kept) return;
+        kept.years = years;
+        actions?.render?.()?.catch?.(() => {});
+      })
+      .catch(() => {});
+  }
+  const years = state.rewardYears.years.filter((year) => year.claimed.lux > 0n || year.sozu?.lux > 0n);
+  if (!years.length) return null;
+  return [
+    h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
+    h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu }) =>
+      kvRow(
+        String(year),
+        [
+          claimed.lux > 0n ? [...amountParts(hidden, claimed.lux), " claimed"] : null,
+          sozu?.lux > 0n ? [...amountParts(hidden, sozu.lux), " with Sozu"] : null,
+        ]
+          .filter(Boolean)
+          .flatMap((part, i) => (i ? [" · ", ...part] : part))
+      )
+    )),
+  ];
+}
+
 function kvRow(label, value) {
   return h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 }
@@ -446,12 +483,13 @@ export function stakeFormView(ov, { state, actions } = {}) {
   return stakingOverview(ov, ctx, { state, actions });
 }
 
-// What each way of staking pays a year, beside the choice: native staking's
-// estimate across the network (one read of the node a day, rewardRate.js)
-// and Sozu's after its fee on rewards, as its status reads it, from native
-// staking's figure as shown, so both wallets give the same one. Asked once a
-// popup, node and network (a custom node's once its chain ID is read too),
-// and drawn again when the answers come.
+// What each way of staking pays a year, beside the choice, with the days it
+// was measured over: native staking's as the chain paid it over the last 30
+// days (app-core's nativeRewards), else the estimate at today's stake (one read
+// of the node a day, rewardRate.js); Sozu's as stDUSK grew, else after its fee
+// on rewards from native staking's figure as shown, so both wallets give the
+// same one. Asked once a popup, node and network (a custom node's once its
+// chain ID is read too), and drawn again when the answers come.
 function rewardRates(ov, { state, actions }) {
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
@@ -461,9 +499,18 @@ function rewardRates(ov, { state, actions }) {
   const held = heldStatus?.fees?.reward ?? null;
   const key = `${networkKey} ${nodeUrl}`;
   if (state.rewardRates?.key !== key) {
-    const rates = (state.rewardRates = { key, native: null, sozuFee: null, growth: null });
+    const rates = (state.rewardRates = { key, native: null, nativeDays: null, sozuFee: null, growth: null });
     const result = (res) => (res?.error ? null : res?.result ?? null);
     const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
+    // As the chain paid it, where that can be read: in place of the estimate.
+    Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_STAKING_FIGURES" }))
+      .then(result, () => null)
+      .then((figures) => nativeRewardsOf(ov, figures))
+      .then((measured) => {
+        if (state.rewardRates !== rates || !measured) return;
+        Object.assign(rates, { native: measured.rate, nativeDays: measured.days, measured: true });
+        actions?.render?.().catch(() => {});
+      });
     Promise.all([
       Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_REWARD_RATE" })).then(result, () => null),
       // What the overview reads of Sozu has the fee too, once it answers.
@@ -476,7 +523,9 @@ function rewardRates(ov, { state, actions }) {
             )),
     ]).then(([native, status]) => {
       if (state.rewardRates !== rates) return;
-      Object.assign(rates, { native: typeof native === "number" ? native : null, sozuFee: status?.fees?.reward ?? null });
+      // The estimate, unless what the chain paid came first.
+      if (!rates.measured) rates.native = typeof native === "number" ? native : null;
+      rates.sozuFee = status?.fees?.reward ?? null;
       if (rates.native !== null) actions?.render?.().catch(() => {});
       measureGrowth(ov, status, { state, actions });
     });
@@ -485,13 +534,18 @@ function rewardRates(ov, { state, actions }) {
   measureGrowth(ov, heldStatus, { state, actions });
   // Sozu's fee as Liquid staking read it last, else as asked here.
   const sozuFee = held ?? state.rewardRates.sozuFee;
-  const native = state.rewardRates.native;
-  const sozu = native !== null && sozuFee ? sozuRate(native, { fees: { reward: sozuFee } }, state.rewardRates.growth) : null;
+  const { native, nativeDays, growth } = state.rewardRates;
+  const sozu = native !== null && sozuFee ? sozuRate(native, { fees: { reward: sozuFee } }, growth) : null;
+  // Sozu's over the days stDUSK grew, else over native staking's.
+  const sozuDays = growth?.days ?? nativeDays;
   return {
-    native: native !== null ? `About ${ratePercent(native)} a year lately, across the network. Not promised.` : null,
-    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year after Sozu's ${feePercent(sozuFee, amountLocale())}. Not promised.` : null,
+    native: native !== null ? `About ${ratePercent(native)} a year across the network ${nativeDays ? `over ${lastDays(nativeDays)}` : "at today's stake"}. Not promised.` : null,
+    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year${sozuDays ? ` over ${lastDays(sozuDays)},` : ""} after Sozu's ${feePercent(sozuFee, amountLocale())}. Not promised.` : null,
   };
 }
+
+// "the last 30 days", as app-core's working line says a period.
+const lastDays = (days) => (days === 1 ? "the last day" : `the last ${new Intl.NumberFormat(amountLocale()).format(days)} days`);
 
 // How stDUSK grew lately, as Liquid staking measures it, read once a status
 // names the pool: the same rate on both screens.
@@ -704,6 +758,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
     subnav({ title: "Staking", onBack }),
     statusLine(st),
     summary,
+    ...(rewardYears(ov, { state, actions, hidden }) ?? []),
     h("div", { class: "section-head" }, [bracketTitle({ text: "Stake" })]),
     choices,
     available,
@@ -922,9 +977,10 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     subnav({ title: isNew ? "Native staking" : "Stake more", onBack: back }),
     statusLine(st),
     h("div", { class: "amount-entry" }, [field.el, field.error, note, available]),
-    facts,
     advanced,
+    // Review right under the amount, so both fit above a phone's keyboard.
     h("div", { class: "stake-bottom" }, [reviewBtn, liquidLink].filter(Boolean)),
+    facts,
   ].filter(Boolean);
 }
 

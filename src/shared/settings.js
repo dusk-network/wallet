@@ -84,6 +84,8 @@ export const DEFAULT_SETTINGS = {
   ipfsGateway: "https://ipfs.io/ipfs/",
   /** Show balances as •••• until the dashboard's eye button is pressed again. */
   hideBalances: false,
+  /** The app on a phone: lock as it goes to the background, when the person leaves it. */
+  lockOnLeave: false,
   /** How long a site's new connection lasts, in milliseconds: 0 until it's disconnected. */
   newSiteLastsMs: 0,
 };

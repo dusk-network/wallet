@@ -43,6 +43,7 @@ function statusNote(tx, desc, hidden) {
   }
   switch (desc.status) {
     case "pending":
+      if (globalThis.navigator?.onLine === false) return "No connection. It's looked up again once you're back online.";
       return tx?.sent?.status === "mempool" ? "Still waiting to go through. Don't retry yet." : "Waiting for a block, usually about 10 seconds.";
     case "unknown":
       // Final on chain, its outcome not looked up yet; or the wallet's own

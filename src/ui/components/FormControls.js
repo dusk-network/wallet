@@ -1,5 +1,6 @@
 import { h } from "../lib/dom.js";
 import { installNumericInputGuard, installPrimaryEnter } from "../lib/inputGuards.js";
+import { holdWhileOffline } from "../lib/offline.js";
 
 let fieldIds = 0;
 
@@ -145,6 +146,8 @@ export function wrappingInput({ value = "", onEnter, ...attrs } = {}) {
     else fit();
   });
   field.addEventListener("focus", fit);
+  // Fitted again on asking, as when what's drawn in it (a contact's chip) changes its room.
+  field.fitLines = fit;
   if (typeof requestAnimationFrame === "function") requestAnimationFrame(fit);
   // Narrower or wider (a contact's chip beside the text, the phone turned),
   // its lines change: fitted again. Only the width: fitting sets the height.
@@ -169,6 +172,13 @@ export function integerInput(attrs = {}) {
   return textInput({ ...attrs, numericMode: "integer" });
 }
 
+/**
+ * The `autocomplete` of a field for a new wallet password: not
+ * "new-password", for which Firefox for Android offers a strong password of
+ * its own over the field, one nobody wrote down.
+ */
+export const NEW_PASSWORD = "off";
+
 export function passwordInput(attrs = {}) {
   return textInput({ ...attrs, type: "password" });
 }
@@ -190,12 +200,24 @@ const offForGas = new WeakSet();
 
 /**
  * The end of a Review, which stays in view however long the Review is (ui.css):
- * what stops it, then Confirm, so an off Confirm never hides why.
+ * what stops it, then Confirm, so an off Confirm never hides why. Confirm is
+ * held while the browser is offline, saying so.
  * @param {HTMLButtonElement} button
  * @param {...(HTMLElement|null)} reasons
  * @returns {HTMLElement}
  */
 export function reviewActions(button, ...reasons) {
+  const offline = holdWhileOffline(button, { text: "You're offline. Confirm once you're back online." });
+  return stepActions(button, ...reasons, offline);
+}
+
+/**
+ * A step's button at its end, in view as a Review's is, with what stops it above.
+ * @param {HTMLButtonElement} button
+ * @param {...(HTMLElement|null)} reasons
+ * @returns {HTMLElement}
+ */
+export function stepActions(button, ...reasons) {
   return h("div", { class: "review-actions" }, [...reasons.filter(Boolean), h("div", { class: "btnrow" }, [button])]);
 }
 

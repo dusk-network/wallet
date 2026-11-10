@@ -159,6 +159,21 @@ export async function handleUiCommand(
     return { ok: true, hideBalances: next.hideBalances === true };
   }
 
+  // Fingerprint unlock is turned on with the password: checked against the
+  // vault first, as a wrong unlock is, and counted as one.
+  if (type === "DUSK_UI_CHECK_PASSWORD") {
+    const status = await getEngineStatus();
+    if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+    await checkVaultPassword(message.password, status.walletKey);
+    return { ok: true };
+  }
+
+  // The app on a phone: lock as the person leaves it (Auto-lock: Immediately).
+  if (type === "DUSK_UI_SET_LOCK_ON_LEAVE") {
+    const next = await setSettings({ lockOnLeave: message.lockOnLeave === true });
+    return { ok: true, lockOnLeave: next.lockOnLeave === true };
+  }
+
   // Custom gas from Settings, or null for the network's price.
   if (type === "DUSK_UI_SET_CUSTOM_GAS") {
     const next = await setSettings({ customGas: normalizeCustomGas(message.customGas) });

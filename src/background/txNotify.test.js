@@ -13,6 +13,9 @@ vi.mock("../platform/extensionApi.js", () => ({
   notificationsCreate: vi.fn(async (id, opts) => ext.created.push({ id, opts })),
   runtimeGetURL: (path) => `chrome-extension://wallet/${path}`,
   tabsCreate: vi.fn(async ({ url }) => ext.tabs.push(url)),
+  // The wallet's tab open already, if a test opens one.
+  tabsQuery: vi.fn(async () => ext.open),
+  tabsUpdate: vi.fn(async (id, { url }) => ext.tabs.push(`${id}:${url}`)),
 }));
 vi.mock("../shared/txStore.js", () => ({ getTxMeta: vi.fn(async () => ext.meta) }));
 
@@ -36,7 +39,7 @@ const EXPLORER = `https://explorer.testnet.dusk.network/transactions/transaction
 beforeEach(() => {
   vi.resetModules();
   // The transaction was sent on the custom node, before the network was kept with it.
-  Object.assign(ext, { clicked: null, created: [], tabs: [], meta: { nodeUrl: "https://my-node.example" } });
+  Object.assign(ext, { clicked: null, created: [], tabs: [], open: [], meta: { nodeUrl: "https://my-node.example" } });
   // A custom node of Testnet's, as Settings saved it with the chain ID it gave.
   vi.stubGlobal("localStorage", memoryStorage());
   localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://my-node.example", chainId: 2 }));
@@ -44,6 +47,30 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("on a phone", () => {
+  // Amélie's and Marek's: Android's "Allow Firefox to send you notifications?" over the payment, again after a no.
+  it("shows no notice, so Firefox for Android never asks Android for leave over a payment", async () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+    const { notifyTxExecuted, notifyTxSubmitted } = await import("./txNotify.js");
+    await notifyTxSubmitted({ hash: HASH, origin: "Wallet", nodeUrl: "https://my-node.example" });
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
+    expect(ext.created).toEqual([]);
+  });
+});
+
+describe("a notice opening the wallet", () => {
+  it("shows it in the wallet's tab open already, rather than another", async () => {
+    ext.open = [{ id: 4, url: "https://site.example/" }, { id: 8, url: "chrome-extension://wallet/full.html?route=send" }];
+    const { registerTxNotificationHandlers } = await import("./txNotify.js");
+    registerTxNotificationHandlers();
+    await ext.clicked(`dusk_tx_${HASH}_submitted_1`);
+    await vi.waitFor(() => expect(ext.tabs).toEqual([`8:chrome-extension://wallet/full.html?route=home&tx=${HASH}`]));
+    ext.open = [];
+    await ext.clicked(`dusk_tx_${HASH}_submitted_1`);
+    await vi.waitFor(() => expect(ext.tabs.at(-1)).toBe(`chrome-extension://wallet/full.html?route=home&tx=${HASH}`));
+  });
 });
 
 describe("a transaction's notification, in a worker just woken", () => {

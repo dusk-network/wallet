@@ -13,7 +13,7 @@
 
 import { activityRows as rowsOf, settleSends } from "@dusk-network/app-core/activity";
 import { StaleHistoryError } from "@dusk-network/app-core/history";
-import { sozuFacts, sozuGrowth } from "@dusk-network/app-core/sozu";
+import { nativeRewards, sozuFacts, sozuGrowth } from "@dusk-network/app-core/sozu";
 
 import { activityHistory, archiveAt, historyArchiverUrl, noteActivityUnavailable } from "../../shared/activityHistory.js";
 import { keptArrivals } from "../../shared/bridgeArrival.js";
@@ -609,6 +609,24 @@ export function sozuGrowthOf(ov, status, tipHeight = null) {
   if (!status?.contracts?.pool) return Promise.resolve(null);
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
   return sozuGrowth({ archive, cache: sozuGrowthKept, pool: status.contracts.pool, status, tipHeight }).catch(() => null);
+}
+
+// What native staking paid lately, as app-core measures it from the chain: read
+// once an hour in this popup, for every screen that shows its rate.
+const nativeRewardsKept = new Map();
+
+/**
+ * What native staking paid stakers over the last 30 days, as a rate a year at
+ * what's staked now, with its window (app-core's nativeRewards): null where it
+ * can't be read, then the estimate stands.
+ * @param {object} ov - the overview
+ * @param {{ provisioners?: object[], tipHeight?: number } | null | undefined} figures - the node's provisioners and tip
+ */
+export function nativeRewardsOf(ov, figures) {
+  if (!Array.isArray(figures?.provisioners)) return Promise.resolve(null);
+  const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
+  const network = String(ov?.chainId ?? ov?.nodeUrl ?? "");
+  return nativeRewards({ archive, cache: nativeRewardsKept, network, provisioners: figures.provisioners, tipHeight: figures.tipHeight ?? null }).catch(() => null);
 }
 
 /** How long a detail lookup that brought nothing waits before it is asked again. */

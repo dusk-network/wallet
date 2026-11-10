@@ -64,6 +64,29 @@ export function submittedTxMeta(params, { walletId, origin, nodeUrl, profileInde
 }
 
 /**
+ * The record of a send handed to the node with no clear answer: as a sent
+ * one's, not known to have gone, to be looked up by its ID.
+ * @param {object} params
+ * @param {{ walletId?: string, origin: string, nodeUrl: string, profileIndex: number }} sent
+ * @param {object} [extras]
+ */
+export function unclearTxMeta(params, sent, extras = {}) {
+  return { ...submittedTxMeta(params, sent, extras), status: "unknown", recoveryReason: "handover_unclear" };
+}
+
+/**
+ * The profile that pays a wallet's own send: the one it names, as a stake's
+ * own may not be the one selected, else the one selected.
+ * @param {object} params
+ * @param {{ selectedAccountIndex?: number }} [status] - the engine's
+ * @param {{ selectedAccountIndex?: number }} [settings]
+ */
+export function sendingProfile(params, status, settings) {
+  const named = params?.profileIndex ?? status?.selectedAccountIndex ?? settings?.selectedAccountIndex ?? 0;
+  return Number(named) || 0;
+}
+
+/**
  * What a Sozu unstake brings back in its own transaction: the amount it asks
  * the pool for, which its record moves from the start, as the chain's row
  * will. The call itself sends nothing along.

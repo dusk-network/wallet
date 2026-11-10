@@ -7,7 +7,8 @@ import {
   revokeOriginEverywhere,
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
-import { siteLastsMs } from "../shared/siteRecords.js";
+import { noteSiteSendFailed, siteLastsMs } from "../shared/siteRecords.js";
+import { sentOf } from "../shared/sendOutcome.js";
 import { assertSiteSend, proveSiteSend } from "../shared/sendPassword.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
@@ -834,6 +835,12 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
           passwordFor = await proveSiteSend(paramsAnswered(approvedParams), { password: sendPassword, walletKey, nodeUrl: approvalNodeUrl });
         },
       });
+      // Approved, and then not sent, or maybe not: its site's record says so.
+      const sayFailed = (error) => {
+        const walletId = shown.walletId || approvalContext.walletId;
+        noteSiteSendFailed(walletId, origin, { id: shown.rid, answer: sentOf(error) === false ? "failed" : "unconfirmed" }).catch(() => {});
+        throw error;
+      };
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
       const executionContext = await assertApprovalContext(approvalContext, shown);
       const finalParams = paramsAnswered(overrides);
@@ -887,7 +894,7 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
         response.nonce = result.nonce?.toString?.() ?? String(result.nonce);
       }
       return response;
-      });
+      }).catch(sayFailed);
     }
 
     case "dusk_watchAsset": {

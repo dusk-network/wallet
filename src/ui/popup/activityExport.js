@@ -15,12 +15,36 @@ import { walletLabel } from "../../shared/wallets.js";
 import { runtimeGetURL, storageSessionGet, storageSessionRemove, storageSessionSet, tabsCreate } from "../../platform/extensionApi.js";
 import { fieldLabel } from "../components/FormControls.js";
 import { profileLabelOf } from "../components/ProfileName.js";
+import { duskNamesNetwork, lookupPrimaryName } from "../../shared/duskNames.js";
 import { h } from "../lib/dom.js";
 import { saveToDownloads } from "../../platform/native.js";
+import { stamped } from "../lib/fileNames.js";
 import { ActivityChangedError, activityRows, assertActivityOpen, selected, sozuFactsOf, wholeActivity } from "./activity.js";
 import { duskPrices } from "./duskPrice.js";
-import { migrationFactsOf } from "./migrationFacts.js";
 import { defaultCurrency } from "@dusk-network/app-core/amounts";
+
+/**
+ * A currency by its name, as a value is said in it: "euros", "US dollars",
+ * "Singapore dollars"; "euro" and the like with `count` 1.
+ * @param {string} code
+ * @param {number} [count]
+ */
+export function currencyName(code, count = 2) {
+  try {
+    const parts = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "name", minimumFractionDigits: 0, maximumFractionDigits: 0 }).formatToParts(count);
+    return parts.find((part) => part.type === "currency")?.value ?? code;
+  } catch {
+    return code;
+  }
+}
+
+// The profile's name as the header shows it: its verified .dusk name, else its
+// label on this device, else "Profile N".
+async function profileNameOf(ov, profileIndex) {
+  const account = String(ov?.accounts?.[profileIndex] ?? "");
+  const name = account && duskNamesNetwork(ov?.nodeUrl) ? await lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true }).catch(() => null) : null;
+  return name || profileLabelOf(ov, profileIndex);
+}
 
 /** Where the popup leaves what one export asks for the full view to do: `{ id, choices, at }`. */
 export const handedExportKey = (id) => `dusk_activity_export_v1:${id}`;
@@ -113,7 +137,7 @@ function periodOf({ period, from, to } = {}) {
  */
 export async function makeExport(ov, choices, { state }) {
   const period = periodOf(choices);
-  // Euros where the browser's region pays in them, US dollars elsewhere.
+  // The region's own currency where CoinGecko has DUSK's price in it, US dollars elsewhere.
   const currency = defaultCurrency();
   if (!ov?.isUnlocked) throw new Error("Unlock the wallet, then export again.");
   let contactName;
@@ -133,40 +157,36 @@ export async function makeExport(ov, choices, { state }) {
   const { account, profileIndex } = selected(ov);
   // A stake whose stDUSK can't be read yet says so in its line.
   const facts = await sozuFactsOf(ov, rows);
-  // What each migration paid on its own chain, its approval too, on lines of their own, each in the period
-  // of its own time: a payout after the period can have fees in it, one before it can't.
-  const evm = await migrationFactsOf(ov, period ? rows.filter((row) => row.time >= period.from) : rows);
   const made = await accountingCsv({
     rows,
-    profile: { name: profileLabelOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
+    profile: { name: await profileNameOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
     profiles: otherProfiles(ov, profileIndex),
     period,
     price: choices.fiat ? duskPrices({ currency }) : undefined,
     currency,
     facts,
-    evm,
+    // Gas paid on a migration's own chain only from EVM addresses the app knows
+    // as the person's, those it connected or migrated from, as the web wallet
+    // does: the extension has none, and anyone can migrate to an account.
+    evmAddresses: [],
     contactName,
     network: ov?.networkName,
     bom: Boolean(choices.excel),
   });
   // The file is of what was open as it began: with anything else open now, there's none.
   await assertActivityOpen(ov, { state });
-  // A migration whose side there couldn't be read has no fee there in the file.
-  const evmUnread = [...evm.values()].filter((fact) => fact.state === "pending" || fact.state === "error");
-  const evmChains = [...new Set(evmUnread.map((fact) => rows.find((row) => row.route?.id === fact.route)?.route.chain?.name ?? "its chain"))];
-  return { ...made, currency, evmUnread: { count: evmUnread.length, chain: evmChains.length === 1 ? evmChains[0] : "their chains" }, shieldedWaiting: whole.shieldedWaiting };
+  return { ...made, currency, shieldedWaiting: whole.shieldedWaiting };
 }
 
 // What the file holds, and what it doesn't, once it's saved; where, when the
-// phone's Downloads has it.
-function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting, fileName }, { inDownloads = false } = {}) {
+// phone's Downloads has it, by the name Android gave it there.
+function savedText({ count, currency, left, unpriced, shieldedWaiting }, { savedAs = "" } = {}) {
   const out = [left.pending ? `${left.pending} on its way` : "", left.notRead ? `${left.notRead} not read yet` : ""].filter(Boolean);
   const lines = count === 1 ? "1 line" : `${count} lines`;
   return [
-    inDownloads ? `CSV saved to Downloads as ${fileName}: ${lines}.` : `CSV saved: ${lines}.`,
+    savedAs ? `CSV saved to Downloads as ${savedAs}: ${lines}.` : `CSV saved: ${lines}.`,
     out.length ? `Left out: ${out.join(", ")}.` : "",
-    unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no ${currency === "USD" ? "dollar" : "euro"} value.` : "",
-    evmUnread?.count ? `${evmUnread.count === 1 ? "1 migration's fee" : `${evmUnread.count} migrations' fees`} on ${evmUnread.chain} couldn't be read: export again to add ${evmUnread.count === 1 ? "it" : "them"}.` : "",
+    unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no ${currencyName(currency, 1)} value.` : "",
     shieldedWaiting ? "Your shielded activity is still syncing: export again once it's done." : "",
   ]
     .filter(Boolean)
@@ -177,10 +197,12 @@ function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting
 async function exportNow(ov, choices, { state, showToast }) {
   const made = await makeExport(ov, choices, { state });
   if (!made.count) return "There's nothing in that period, so nothing was saved.";
-  // The app saves it in the phone's Downloads; a page, as a download.
-  const inDownloads = await saveToDownloads(made.fileName, "text/csv", made.csv);
-  if (!inDownloads) saveTextFile(made.csv, made.fileName);
-  showToast?.(savedText(made, { inDownloads }), 6000);
+  // The app saves it in the phone's Downloads; a page, as a download. Named
+  // with when it was made, so one export never takes another's name.
+  const fileName = stamped(made.fileName);
+  const savedAs = await saveToDownloads(fileName, "text/csv", made.csv);
+  if (!savedAs) saveTextFile(made.csv, fileName);
+  showToast?.(savedText(made, { savedAs }), 6000);
   return "";
 }
 
@@ -321,7 +343,7 @@ export function activityExportPanel(ov, { state, actions }) {
     checkbox("activity-export-contacts", "Add my contact names", ex.withContacts, (on) => {
       ex.withContacts = on;
     }),
-    checkbox("activity-export-value", `Add each payment's value in ${defaultCurrency() === "USD" ? "US dollars" : "euros"}, from CoinGecko's prices`, ex.fiat, (on) => {
+    checkbox("activity-export-value", `Add each payment's value in ${currencyName(defaultCurrency())}, from CoinGecko's prices`, ex.fiat, (on) => {
       ex.fiat = on;
     }),
     checkbox("activity-export-excel", "For Excel: keep accents as it opens", ex.excel, (on) => {

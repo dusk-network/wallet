@@ -7,7 +7,7 @@ import { STORAGE_KEYS } from "../shared/storage.js";
 import { createVault } from "../shared/vault.js";
 import { noteActiveWallet } from "../shared/wallets.js";
 import { handleRpc } from "./rpc.js";
-import { cancelPendingApprovals, pendingApprovals, resolvePendingDecision } from "./pending.js";
+import { approvalShown, cancelPendingApprovals, pendingApprovals, resolvePendingDecision } from "./pending.js";
 
 // The real RPC, queue, connections and records: only storage, windows and the
 // engine are stand-ins, as a site's request meets them.
@@ -140,6 +140,68 @@ describe("what's kept of what a site asked", () => {
     // Not an amount, a recipient, a memo, a message, a contract or a hash.
     const kept = JSON.stringify(mocks.store[STORAGE_KEYS.SITE_RECORDS]);
     for (const secret of ["7654321", OTHER, "for the rent", message, Buffer.from(message).toString("hex"), "abab", "cdcd", "0x1234"]) expect(kept).not.toContain(secret);
+  });
+
+  // Astra's: a send that failed while the site's next request was approved marked that one, and left itself approved.
+  it("notes a send that failed on its own approval, not on the site's next one approved while it ran", async () => {
+    await approveOrigin(SITE, { accountIndex: 0, profileId: `account:0:${ACCOUNT}` }, ACCOUNT);
+    const sending = Promise.withResolvers();
+    mocks.engineCall.mockImplementation(async (method) => {
+      if (method === "dusk_sendTransaction") return sending.promise;
+      if (method === "dusk_signMessage") return "0xsigned";
+      return method === "dusk_getCachedGasPrice" ? { median: "1" } : true;
+    });
+    const paying = await ask("dusk_sendTransaction", pay());
+    paying.approve();
+    // While it runs, the site asks to sign, and that's approved.
+    const signing = await ask("dusk_signMessage", { message: "0x6869" });
+    signing.approve();
+    await vi.waitFor(() => expect(recordOf().asked[0]).toMatchObject({ what: "sign_message", answer: "approved" }));
+    sending.reject(Object.assign(new Error("Failed to fetch"), { data: { sent: false } }));
+    await paying.outcome;
+    await signing.outcome;
+    await vi.waitFor(() => expect(recordOf().asked.find((entry) => entry.what === "transfer")?.answer).toBe("failed"));
+    expect(await askedOf()).toEqual([
+      ["sign_message", "approved"],
+      ["transfer", "failed"],
+    ]);
+  });
+
+  it("notes an approved send that didn't go out as not sent, and one that may not have as not confirmed", async () => {
+    await approveOrigin(SITE, { accountIndex: 0, profileId: `account:0:${ACCOUNT}` }, ACCOUNT);
+    // Marek's, approved offline: the engine couldn't reach the node.
+    mocks.engineCall.mockImplementation(async (method) => {
+      if (method === "dusk_sendTransaction") throw Object.assign(new Error("Failed to fetch"), { data: { sent: false } });
+      return method === "dusk_getCachedGasPrice" ? { median: "1" } : true;
+    });
+    const offline = await ask("dusk_sendTransaction", pay());
+    offline.approve();
+    await expect(offline.outcome).resolves.toMatchObject({ error: { message: "Failed to fetch" } });
+    await vi.waitFor(() => expect(recordOf().asked[0]).toMatchObject({ what: "transfer", answer: "failed" }));
+
+    mocks.engineCall.mockImplementation(async (method) => {
+      if (method === "dusk_sendTransaction") throw Object.assign(new Error("Failed to fetch"), { data: { sent: "unknown", hash: "ef".repeat(32) } });
+      return method === "dusk_getCachedGasPrice" ? { median: "1" } : true;
+    });
+    const unclear = await ask("dusk_sendTransaction", call());
+    unclear.approve();
+    await unclear.outcome;
+    await vi.waitFor(() => expect(recordOf().asked[0]).toMatchObject({ what: "contract_call", answer: "unconfirmed" }));
+    // The one before stays as it was said.
+    expect(await askedOf()).toEqual([
+      ["contract_call", "swap_tokens", "unconfirmed"],
+      ["transfer", "failed"],
+    ]);
+  });
+
+  it("keeps a bridge call by the words its approval led with, and its function's name besides", async () => {
+    await approveOrigin(SITE, { accountIndex: 0, profileId: `account:0:${ACCOUNT}` }, ACCOUNT);
+    const bridging = await ask("dusk_sendTransaction", call("depositETHToWithValue"));
+    await approvalShown({ rid: bridging.rid, asked: "Bridge to DuskEVM" }, {});
+    bridging.reject();
+    await bridging.outcome;
+    await vi.waitFor(() => expect(recordOf()?.asked).toHaveLength(1));
+    expect(recordOf().asked[0]).toMatchObject({ what: "contract_call", method: "depositETHToWithValue", asked: "Bridge to DuskEVM", answer: "rejected" });
   });
 
   it("notes one not answered in time, and one the wallet ended", async () => {

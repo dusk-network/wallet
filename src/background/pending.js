@@ -42,7 +42,7 @@ const APPROVAL_TTL_MS = 5 * 60_000;
 // of the answer.
 function keepAnswer(entry, answer) {
   const walletId = entry.shown?.walletId || activeWalletId().catch(() => "");
-  noteSiteRequest(walletId, entry.origin, { kind: entry.kind, params: entry.params, answer }).catch(() => {});
+  noteSiteRequest(walletId, entry.origin, { kind: entry.kind, params: entry.params, answer, asked: entry.asked, id: entry.shown?.rid }).catch(() => {});
 }
 
 // Its window or its tab goes; a tab's site comes back to the front, only
@@ -120,8 +120,8 @@ function changeKept(change) {
 
 // What's kept of a request: never its answer.
 function recordOf(rid, entry) {
-  const { key, origin, kind, params, context, createdAt, windowId, tabId, backTo } = entry;
-  return { rid, key, origin, kind, params, context, walletId: entry.shown?.walletId ?? "", createdAt, windowId, tabId, backTo };
+  const { key, origin, kind, params, context, createdAt, windowId, tabId, backTo, asked } = entry;
+  return { rid, key, origin, kind, params, context, walletId: entry.shown?.walletId ?? "", createdAt, windowId, tabId, backTo, asked };
 }
 
 // Only a site's request (`key`) is asked again.
@@ -203,7 +203,7 @@ export async function decideKept(rid, decision) {
   }
   // Given up on, its window stays to say so.
   if (decision !== "abandon") closeShown(found);
-  keepAnswer({ origin: found.origin, kind: found.kind, params: found.params, shown: { walletId: found.walletId } }, decision === "abandon" ? "cancelled" : "rejected");
+  keepAnswer({ origin: found.origin, kind: found.kind, params: found.params, asked: found.asked, shown: { walletId: found.walletId } }, decision === "abandon" ? "cancelled" : "rejected");
   return { ok: true };
 }
 
@@ -284,9 +284,12 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
   }
 
   // Waiting, with its time left.
+  // The request's ID goes with what it shows (`shown.rid`): what comes of an
+  // approved send is said on that request's record, whatever the site asks after.
   const wait = (rid, entry) =>
     new Promise((resolve, reject) => {
       Object.assign(entry, { resolve, reject });
+      if (entry.shown && typeof entry.shown === "object") entry.shown.rid = rid;
       entry.timer = setTimeout(
         () => rejectPending(rid, entry, "Approval request expired", "expired"),
         Math.max(0, entry.createdAt + APPROVAL_TTL_MS - Date.now())
@@ -326,8 +329,8 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
     if (ended) throw rpcError(ended.code, ended.message);
     // Waiting here only once that's written: a failed write leaves nothing to answer.
     if (taken && !pendingApprovals.has(taken.rid)) {
-      const { rid, createdAt, windowId, tabId, backTo } = taken;
-      return wait(rid, { kind, origin, params, shown, beforeApprove, key, context, createdAt, windowId, tabId, backTo });
+      const { rid, createdAt, windowId, tabId, backTo, asked } = taken;
+      return wait(rid, { kind, origin, params, shown, beforeApprove, key, context, createdAt, windowId, tabId, backTo, asked });
     }
     if (taken) throw rpcError(ERROR_CODES.USER_REJECTED, "Another approval is already pending");
     if (stale) closeShown(stale);
@@ -380,16 +383,35 @@ ext?.tabs?.onRemoved?.addListener?.((tabId) => {
   endKeptWhere((record) => record.tabId === tabId, CLOSED);
 });
 
-// Back on an approval before any press goes to Firefox for Android's home,
-// not back a page; then at its site's tab again, the request is cancelled,
-// as the approval's own Back does (notification/app.js). Approvals in a tab
-// only: a window's site tab may come to the front with the window open.
-ext?.tabs?.onActivated?.addListener?.(({ tabId } = {}) => {
-  for (const [rid, entry] of pendingApprovals.entries()) {
-    if (entry.tabId !== undefined && entry.backTo === tabId) rejectPending(rid, entry, REJECTED.message);
+// The words an approval leads with that its site's record keeps: those of a
+// bridge's own calls, which a site names otherwise. Nothing that's in a request.
+const ASKED_WORDS = /^(Bridge to [A-Za-z][\w .()-]{0,40}|Prove a DuskEVM withdrawal|Claim a DuskEVM withdrawal)$/;
+
+/**
+ * An approval drawn, by its window: the words it leads with, for its site's
+ * record (`asked`), and for one in a tab (Firefox for Android), an entry in
+ * the tab's history under it, put there by the wallet, which the phone's first
+ * Back takes away (notification/app.js): Firefox skips one the page puts up
+ * before it's pressed. Switching tabs leaves it waiting.
+ * @param {{ rid?: string, asked?: string }} message
+ * @param {{ tab?: { id?: number, url?: string }, url?: string }} sender
+ * @returns {Promise<boolean>} whether it's waiting
+ */
+export async function approvalShown({ rid, asked } = {}, sender) {
+  const id = String(rid ?? "");
+  const entry = pendingApprovals.get(id);
+  if (!entry) return false;
+  if (typeof asked === "string" && ASKED_WORDS.test(asked) && entry.asked !== asked) {
+    entry.asked = asked;
+    keep(id, entry);
   }
-  endKeptWhere((record) => record.tabId !== undefined && record.backTo === tabId, REJECTED);
-});
+  const tabId = sender?.tab?.id;
+  if (tabId === undefined || entry.tabId !== tabId || entry.backEntry) return true;
+  entry.backEntry = true;
+  const url = String(sender?.url ?? sender?.tab?.url ?? "").split("#")[0];
+  if (url) await tabsUpdate(tabId, { url: `${url}#back` }).catch(() => {});
+  return true;
+}
 
 export function getPending(rid) {
   return pendingApprovals.get(rid) ?? null;

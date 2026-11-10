@@ -28,7 +28,7 @@ import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
 import { requestDraftOf } from "../lib/requestLink.js";
-import { listenForBack, listenForLinks, moveAppToBack } from "../../platform/native.js";
+import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
@@ -97,6 +97,18 @@ function isWalletLockedResponse(value) {
 
 // The screens of a wallet being added, removed, or a new password: unlocked only.
 const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password", "send_password"]);
+
+// The screen Settings or Add wallet opens from, for its Back to return to:
+// home from Settings' own pages and a setup.
+function cameFrom() {
+  const route = String(state.route || "home");
+  return route === "options" || WALLET_ROUTES.has(route) || ONBOARD_ROUTES.has(route) ? "home" : route;
+}
+
+function openSettings() {
+  if (state.route !== "options") state.optionsFrom = cameFrom();
+  state.route = "options";
+}
 
 function applyLockedOverviewPatch() {
   try {
@@ -815,12 +827,19 @@ function scheduleBalanceRetry(ov) {
     render({ forceRefresh: true }).catch(() => {});
   }, BALANCE_RETRY_MS);
 }
+// A Review holds its Confirm while offline by itself (offline.js): drawn
+// again, it would lose a fee being edited. The header says it all the same.
+async function renderForConnection(opts) {
+  if (!REVIEW_ROUTES.has(state.route)) return render(opts);
+  await refreshOverview(send, { force: Boolean(opts?.forceRefresh) });
+  renderHeader(state.overview);
+}
 try {
-  window.addEventListener("offline", () => render().catch(() => {}));
+  window.addEventListener("offline", () => renderForConnection().catch(() => {}));
   window.addEventListener("online", () => {
-    render({ forceRefresh: true }).catch(() => {});
+    renderForConnection({ forceRefresh: true }).catch(() => {});
     send({ type: "DUSK_UI_CHECK_NETWORK" })
-      .then(() => render({ forceRefresh: true }))
+      .then(() => renderForConnection({ forceRefresh: true }))
       .catch(() => {});
     resumeWatching();
   });
@@ -844,7 +863,8 @@ function sendsOnTheirWay() {
   const ov = state.overview;
   if (!ov?.isUnlocked) return [];
   const hashes = new Set();
-  if (state.route === "sent" && state.sent?.hash && !sentIsFinal(state.sent, ov)) hashes.add(String(state.sent.hash));
+  // The Sent screen's, on its way or handed over without a clear answer.
+  if (state.route === "sent" && state.sent?.hash && (!sentIsFinal(state.sent, ov) || state.sent.phase === "unconfirmed")) hashes.add(String(state.sent.hash));
   for (const tx of Array.isArray(ov.txs) ? ov.txs : []) {
     const status = String(tx?.status ?? "").toLowerCase();
     if (["submitted", "mempool", "unknown"].includes(status) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS) {
@@ -861,7 +881,7 @@ async function lookUpSends() {
   if (!hashes.length) return;
   await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
   state.needsRefresh = true;
-  await render({ forceRefresh: true }).catch(() => {});
+  await renderForConnection({ forceRefresh: true }).catch(() => {});
   if (Date.now() < resumeUntil && document.visibilityState !== "hidden" && sendsOnTheirWay().length) {
     resumeTimer = setTimeout(lookUpSends, RESUME_EVERY_MS);
   }
@@ -872,9 +892,33 @@ function resumeWatching() {
   lookUpSends().catch(() => {});
 }
 
+// Back in front, the balance and the shielded sync are read again at once, as
+// Refresh does: a send made meanwhile, or a sync the phone stopped, shows as it is.
+function comeBack() {
+  state.needsRefresh = true;
+  renderForConnection({ forceRefresh: true }).catch(() => {});
+  resumeWatching();
+}
+
+// The app on a phone, with Lock when I leave the app on: locked as the person
+// leaves it, unless the wallet itself sent them elsewhere for a moment. Back,
+// they're asked the password, as after Lock wallet.
+function leave() {
+  const ov = state.overview;
+  if (!appBack || !ov?.isUnlocked || ov?.lockOnLeave !== true || steppedAway()) return;
+  switchContext(state, "lock");
+  state.route = "home";
+  send({ type: "DUSK_UI_LOCK" }).catch(() => {});
+}
+
 try {
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") resumeWatching();
+    if (document.visibilityState === "hidden") {
+      leave();
+      return;
+    }
+    stepBack();
+    comeBack();
   });
   window.addEventListener("pageshow", (event) => {
     if (event?.persisted) resumeWatching();
@@ -910,7 +954,7 @@ const netMenu = createNetworkMenuController({
 
       if (preset.id === "custom") {
         // Keep navigation consistent: open the in-app Settings screen.
-        state.route = "options";
+        openSettings();
         await render();
         return;
       }
@@ -990,14 +1034,14 @@ const acctMenu = createAccountMenuController({
   onAddWallet: async () => {
     acctMenu.close();
     netMenu.close();
-    state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true };
+    state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true, from: cameFrom() };
     state.route = "wallet_add";
     await render();
   },
   onOpenOptions: async () => {
     acctMenu.close();
     netMenu.close();
-    state.route = "options";
+    openSettings();
     await render();
   },
   onCopy: showToast,
@@ -1042,7 +1086,7 @@ async function onRefresh() {
 async function onOpenOptions() {
   netMenu.close();
   acctMenu.close();
-  state.route = "options";
+  openSettings();
   await render();
 }
 
@@ -1179,8 +1223,10 @@ export async function render({ forceRefresh = false } = {}) {
       setApp(onboardingWelcomeView({ state, actions }));
       return;
     }
+    // What's typed in stays through redraws that aren't about it (a network
+    // check, the phone coming back to the wallet), as an unlocked wallet's forms do.
     if (state.route === "onboard_create_password") {
-      setApp(onboardingCreatePasswordView({ state, actions }));
+      setApp(keepForm(() => onboardingCreatePasswordView({ state, actions })));
       return;
     }
     if (state.route === "onboard_create_phrase") {
@@ -1188,11 +1234,11 @@ export async function render({ forceRefresh = false } = {}) {
       return;
     }
     if (state.route === "onboard_create_confirm") {
-      setApp(onboardingCreateConfirmView({ state, actions }));
+      setApp(keepForm(() => onboardingCreateConfirmView({ state, actions })));
       return;
     }
     if (state.route === "onboard_import") {
-      setApp(onboardingImportView({ state, actions }));
+      setApp(keepForm(() => onboardingImportView({ state, actions })));
       return;
     }
 
@@ -1334,18 +1380,27 @@ export async function render({ forceRefresh = false } = {}) {
 // --- Payment links opened in the app ---------------------------------------------
 // A dusk: link from another app, a chat or a QR reader: Send, filled in from it
 // as a link pasted into Send fills it, and refused there for another network;
-// after the unlock, when the wallet is locked.
+// after the unlock, when the wallet is locked. Send shows at once, from what
+// the wallet last read: a phone just woken can take a minute to answer, and
+// the balance follows when it does.
 listenForLinks((url) => {
   const draft = requestDraftOf(`?link=${encodeURIComponent(url)}`);
   if (!draft) return;
   netMenu.close();
   acctMenu.close();
-  Object.assign(state, { draft, route: "send", needsRefresh: true });
-  render({ forceRefresh: true }).catch(() => {});
+  Object.assign(state, { draft, route: "send" });
+  render()
+    .then(() => {
+      state.needsRefresh = true;
+      return render({ forceRefresh: true });
+    })
+    .catch(() => {});
 });
 
 export function mountPopup() {
   render()
+    // Sends left on their way while the wallet was closed are looked up now.
+    .then(() => resumeWatching())
     // A tab the popup opened to make its Activity export makes it now.
     .then(() => (isPopupView ? null : saveHandedExport({ state, render, showToast }).catch((e) => showToast(e?.message ?? String(e), 3000))))
     .catch((e) => {

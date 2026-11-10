@@ -6,7 +6,7 @@
 
 import { makePaymentLink, parsePaymentLink, readPaymentLink } from "@dusk-network/app-core/payment-links";
 
-import { runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
+import { openWalletTab } from "./walletTab.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { isLocalHttpHostname } from "../shared/securityPolicy.js";
 import { getSettings } from "../shared/settings.js";
@@ -47,8 +47,8 @@ export async function offersRequestLink(message, sender) {
   return Boolean(linkOf(message, sender)) && Boolean(await loadVault());
 }
 
-// The extension's Send on a tab of its own, with the link filled in.
-const openSend = (link) => tabsCreate({ url: runtimeGetURL(`full.html?route=send&link=${encodeURIComponent(link)}`) });
+// The extension's Send, with the link filled in, in the wallet's tab.
+const openSend = (link) => openWalletTab(`full.html?route=send&link=${encodeURIComponent(link)}`);
 
 /**
  * Opens the extension's Send on a tab of its own, with the link filled in.

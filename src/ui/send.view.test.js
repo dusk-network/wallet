@@ -443,6 +443,44 @@ describe("a Review when who pays changes", () => {
   });
 });
 
+describe("a Review while offline", () => {
+  // Chen's and Sofía's: the dot said nothing and Confirm went, offline.
+  it("says so and holds Confirm, and lets it go once the connection is back", async () => {
+    const state = newState();
+    const ov = overview();
+    const form = mount(state, ov);
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "1");
+    form.review.click();
+    await settle();
+    expect(state.route).toBe("confirm");
+
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    const review = mount(state, ov);
+    await settle();
+    const confirm = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const offline = () => [...dom.document.body.querySelectorAll(".offline-note")].filter(isShown).map((n) => n.textContent);
+    expect(confirm().disabled).toBe(true);
+    expect(offline()).toEqual(["You're offline. Confirm once you're back online."]);
+    confirm().click();
+    await settle();
+    expect(review.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);
+
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
+    dom.window.dispatchEvent(new Event("online"));
+    expect(confirm().disabled).toBe(false);
+    expect(offline()).toEqual([]);
+
+    // Off again for the connection, and what else holds it stays held once back.
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    dom.window.dispatchEvent(new Event("offline"));
+    confirm().disabled = true;
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
+    dom.window.dispatchEvent(new Event("online"));
+    expect(confirm().disabled).toBe(true);
+  });
+});
+
 describe("what Max fills in, with Hide balances", () => {
   const shown = () => [...dom.document.body.querySelectorAll(".amount-field input")].find((input) => !input.hidden);
 
@@ -572,6 +610,30 @@ describe("what the To field says about what's typed", () => {
       `Your contact Estudio Sol · ${shortAddress(BOB.address)}`,
     ]);
   });
+
+  // Sofia's: picked, the one in a Cyrillic а read as plain "Estudio Marta" on Send and on Review.
+  it("marks a contact whose name looks like another's once it's picked, on Send and on Review, beside its address", () => {
+    const state = newState();
+    state.addressBook.items = [
+      { name: "Estudio Marta", address: ALICE.account },
+      { name: "Estudio M\u0430rta", address: BOB.account },
+      { name: "Estudio Sol", address: BOB.address },
+    ];
+    const note = () => {
+      const el = dom.document.body.querySelector(".send-alike-note");
+      return isShown(el) ? el.textContent : "";
+    };
+    let form = mount(state);
+    typeInto(form.to, BOB.account);
+    expect(note()).toBe("Looks like another contact. Check the address.");
+    typeInto(form.to, BOB.address);
+    expect(note()).toBe("");
+
+    state.route = "confirm";
+    state.draft = { to: BOB.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" };
+    form = mount(state);
+    expect(form.reviewTo()).toBe(`Estudio M\u0430rta · looks like another contact${BOB.account}`);
+  });
 });
 
 describe("a memo too long for the network", () => {
@@ -658,7 +720,22 @@ describe("send's amount", () => {
     typeInto(last.amount, "0.0000000001");
     expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
     typeInto(last.amount, "1,234");
-    expect(last.amountError()).toBe("That could be two amounts: write 1234 or 1.234.");
+    expect(last.amountError()).toBe("Is that 1234 or 1.234? Write the one you mean.");
+  });
+
+  // Lena's: "1,000" asked and "1.000" didn't. In English the point is the
+  // decimal; where the comma is, "1.000" asks, in the web wallet's words.
+  it.each([
+    ["de-DE", "1.000", "Is that 1000 or 1,000? Write the one you mean."],
+    ["nl-NL", "1.000", "Is that 1000 or 1,000? Write the one you mean."],
+    ["en-GB", "1,000", "Is that 1000 or 1.000? Write the one you mean."],
+    ["es-ES", "1 234,5", "Leave out the space: 1234,5."],
+  ])("asks which amount is meant where it could be two, in the language's reading: %s %s", (language, typed, asked) => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language });
+    const form = mount(newState());
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, typed);
+    expect([form.amountError(), form.review.disabled]).toEqual([asked, true]);
   });
 
   it("keeps Review off while an amount typed won't do, and on for an empty one to say what's missing", () => {
@@ -824,7 +901,7 @@ describe("names on Send and Review", () => {
       ov
     );
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings");
+    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings · looks like your profile's name");
   });
 
   it("offers no Save to Contacts for this wallet's own account or address", () => {
@@ -1898,6 +1975,12 @@ describe("a request link", () => {
     expect([unread.to.value, unread.amount.value]).toEqual(["", ""]);
     expect(refusal()).toEqual(["This link names two networks, Testnet and Mainnet. Ask for a new one."]);
 
+    // A network written as no network is: never "two networks, Testnet and Testnet".
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(`dusk:public-${ALICE.account}@dusk:2?amount=0.001&network=dusk:02`)}` });
+    vi.resetModules();
+    mount((await import("./popup/state.js")).state);
+    expect(refusal()).toEqual(["This link's network can't be read. Ask for a new one."]);
+
     // No link, or a page opened with something that isn't one: an empty form.
     vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send" });
     vi.resetModules();
@@ -1917,12 +2000,33 @@ describe("a payment made already", () => {
     return el ? visibleText(el) : "";
   };
 
-  it("is said on Review, with when it went, and Confirm still goes", () => {
-    // Sofia's: the same request link paid, then pasted again.
+  it("is said on Review, with when it went, and its button says it sends it again, as the web wallet's does", () => {
+    // Sofia's: the same request link paid, then pasted again; Amélie's: the button still said Confirm.
     const at = Date.now() - 60_000;
     confirm(draft(), [sentRecord({ submittedAt: at })]);
     expect(again()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(false);
+    const button = dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again");
+    expect(button.disabled).toBe(false);
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm")).toBeUndefined();
+    // Not made before: Confirm.
+    confirm(draft({ memo: "Order 1045" }), [sentRecord({ submittedAt: at })]);
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm")).toBeTruthy();
+  });
+
+  // Amélie's and Sofía's: a link paid already, opened again, said nothing until Review.
+  it("is said on the form as soon as it's filled in, a link opened again too, and goes as the fields change", () => {
+    const at = Date.now() - 60_000;
+    const state = { route: "send", addressBook: { loaded: true, items: [{ name: "Alice", address: ALICE.account }] }, draft: { ...draft(), filledFrom: "link" } };
+    const form = mount(state, { ...overview(), txs: [sentRecord({ submittedAt: at })] });
+    const note = () => {
+      const el = dom.document.body.querySelector(".send-again");
+      return el && isShown(el) ? visibleText(el) : "";
+    };
+    expect(note()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
+    typeInto(form.amount, "0.014");
+    expect(note()).toBe("");
+    typeInto(form.amount, "0.013");
+    expect(note()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
   });
 
   it("is said of the same memo whenever it went, and of the same payment without one only moments after", () => {

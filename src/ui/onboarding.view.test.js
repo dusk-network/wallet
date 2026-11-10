@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { accessibleName, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import {
   onboardingCreateConfirmView,
   onboardingCreatePasswordView,
@@ -234,9 +234,41 @@ describe("setting up and unlocking", () => {
     typeInto(field(app, "Word 1"), "abandon");
     await render({ forceRefresh: true });
     expect(field(app, "Word 1").value).toBe("abandon");
+    // A word typed: Back asks first.
     button(app, "← Back").click();
     await settle();
+    button(dom.document.body, "Go back").click();
+    await settle();
     expect(app.querySelector("h1").textContent).toBe("Unlock your wallet");
+  });
+
+  it("asks before Back clears the words and passwords typed on Import, and keeps them on Cancel", async () => {
+    const state = { route: "onboard_import", onboard: { mode: "import" } };
+    const acts = actions();
+    const body = show(onboardingImportView({ state, actions: acts }));
+    // Nothing typed: Back goes at once.
+    button(body, "← Back").click();
+    await settle();
+    expect(state.route).toBe("onboard_welcome");
+
+    state.route = "onboard_import";
+    typeInto(field(body, "Word 1"), MNEMONIC);
+    typeInto(field(body, "Password"), "long enough");
+    button(body, "← Back").click();
+    await settle();
+    const dialog = body.querySelector("[role=alertdialog]");
+    expect(visibleText(dialog)).toBe("Go back?This clears the recovery phrase and password you typed.CancelGo back");
+    button(dialog, "Cancel").click();
+    await settle();
+    expect(state.route).toBe("onboard_import");
+    expect(body.querySelector("[role=alertdialog]")).toBeNull();
+    expect([field(body, "Word 12").value, field(body, "Password").value]).toEqual(["about", "long enough"]);
+
+    button(body, "← Back").click();
+    await settle();
+    button(body.querySelector("[role=alertdialog]"), "Go back").click();
+    await settle();
+    expect(state.route).toBe("onboard_welcome");
   });
 });
 
@@ -421,6 +453,9 @@ describe("adding a wallet beside the ones here", () => {
     expect(errorOf(body.querySelector("[role=group]"))).toBe(DUP);
     expect(state.route).toBe("wallet_add_import");
     button(body, "← Back").click();
+    await settle();
+    button(body, "Go back").click();
+    await settle();
     expect(state.route).toBe("wallet_add");
   });
 });
@@ -505,3 +540,107 @@ describe("removing a wallet, and a new password", () => {
   });
 });
 
+
+// Fingerprint unlock in the app on Android, as phone wallets have it: the
+// app's `fingerprint` command (android/KeystorePlugin.kt) answers here.
+describe("fingerprint unlock", () => {
+  const actions = (reply = {}) => ({ send: vi.fn(async () => reply), render: vi.fn(async () => {}), showToast: vi.fn() });
+  // The phone: `on` with a fingerprint kept, and what each prompt answers.
+  const phone = ({ available = true, on = false, unlock = { ok: true, secret: "kept password" }, enable = { ok: true } } = {}) => {
+    const asked = [];
+    const invoke = vi.fn(async (cmd, args) => {
+      if (cmd !== "fingerprint") return null;
+      asked.push([args.action, args.args?.secret]);
+      if (args.action === "status") return { ok: true, available, on };
+      if (args.action === "unlock") return typeof unlock === "function" ? unlock() : unlock;
+      if (args.action === "enable") return enable;
+      return { ok: true };
+    });
+    dom.window.__TAURI_INTERNALS__ = { invoke };
+    return { asked };
+  };
+
+  it("asks for the fingerprint by itself as the wallet opens, and unlocks with the password it kept", async () => {
+    const { asked } = phone({ on: true });
+    const acts = actions();
+    show(lockedView({ state: {}, actions: acts }));
+    await vi.waitFor(() => expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_UNLOCK", password: "kept password" }));
+    expect(asked.map(([action]) => action)).toEqual(["status", "unlock"]);
+  });
+
+  it("asks again as the app comes back to the front still locked", async () => {
+    const { asked } = phone({ on: true, unlock: { ok: false, reason: "password" } });
+    show(lockedView({ state: {}, actions: actions() }));
+    await vi.waitFor(() => expect(asked.filter(([action]) => action === "unlock")).toHaveLength(1));
+    dom.document.visibilityState = "hidden";
+    dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    dom.document.visibilityState = "visible";
+    dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await vi.waitFor(() => expect(asked.filter(([action]) => action === "unlock")).toHaveLength(2));
+  });
+
+  it("leaves the password to type when the person picks Use password, and asks again with Use fingerprint", async () => {
+    const { asked } = phone({ on: true, unlock: { ok: false, reason: "password" } });
+    const acts = actions();
+    const body = show(lockedView({ state: {}, actions: acts }));
+    await vi.waitFor(() => expect(asked.map(([action]) => action)).toEqual(["status", "unlock"]));
+    await settle();
+    expect(acts.send).not.toHaveBeenCalled();
+    expect(isShown(field(body, "Password"))).toBe(true);
+    button(body, "Use fingerprint").click();
+    await vi.waitFor(() => expect(asked.filter(([action]) => action === "unlock")).toHaveLength(2));
+  });
+
+  it("asks nothing of a phone without it, nor outside the app", async () => {
+    const { asked } = phone({ available: false, on: false });
+    const body = show(lockedView({ state: {}, actions: actions() }));
+    await vi.waitFor(() => expect(asked).toEqual([["status", undefined]]));
+    await settle();
+    expect(isShown(button(body, "Use fingerprint"))).toBe(false);
+  });
+
+  it("says so once the phone's fingerprints changed, unlocks with the password, then offers it again with that password", async () => {
+    const { asked } = phone({ on: true, unlock: { ok: false, reason: "invalidated" } });
+    const acts = actions();
+    const body = show(lockedView({ state: {}, actions: acts }));
+    await vi.waitFor(() => expect(visibleText(body)).toContain("Your fingerprints changed, so fingerprint unlock is off. Unlock with your password."));
+    expect(isShown(button(body, "Use fingerprint"))).toBe(false);
+    typeInto(field(body, "Password"), "typed password");
+    button(body, "Unlock").click();
+    await vi.waitFor(() => expect(dom.document.body.querySelector("[role=alertdialog]")).toBeTruthy());
+    expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_UNLOCK", password: "typed password" });
+    expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toContain("Turn fingerprint unlock on again?");
+    button(dom.document.body, "Turn on").click();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "typed password"]));
+  });
+
+  it("turns it off when the password kept is an old one, and says so", async () => {
+    const { asked } = phone({ on: true });
+    const acts = actions({ error: { message: "Incorrect password" } });
+    const body = show(lockedView({ state: {}, actions: acts }));
+    await vi.waitFor(() => expect(asked.map(([action]) => action)).toContain("disable"));
+    await settle();
+    expect(visibleText(body)).toContain("Your password changed, so fingerprint unlock is off. Unlock with your password.");
+  });
+
+  it("offers it beside a new wallet's password, and asks for the fingerprint once the wallet is made", async () => {
+    const { asked } = phone({ available: true });
+    const state = { route: "onboard_create_password", onboard: { mode: "create", mnemonic: null, password: "", reveal: false } };
+    const acts = actions();
+    let body = show(onboardingCreatePasswordView({ state, actions: acts }));
+    await vi.waitFor(() => expect(isShown(body.querySelector("#onboard-fingerprint").parentNode)).toBe(true));
+    expect(visibleText(body.querySelector("#onboard-fingerprint").parentNode)).toBe("Unlock with fingerprint");
+    const box = body.querySelector("#onboard-fingerprint");
+    box.checked = true;
+    box.dispatchEvent(fakeEvent("change"));
+    expect(state.onboard.fingerprint).toBe(true);
+
+    // The words written down, then the wallet made with the password.
+    Object.assign(state.onboard, { mnemonic: MNEMONIC, password: "long enough" });
+    body = show(onboardingCreateConfirmView({ state, actions: acts }));
+    typeInto(field(body, "Word 1"), MNEMONIC);
+    button(body, "Create wallet").click();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "long enough"]));
+    expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", password: "long enough" }));
+  });
+});

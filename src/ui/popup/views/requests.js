@@ -7,13 +7,15 @@
 // shielded too once its notes synced.
 
 import { formatDuskPlain } from "@dusk-network/app-core/amounts";
-import { CLOCK_SKEW_MS, matchRequests, refundOf } from "@dusk-network/app-core/requests";
+import { makePaymentLink } from "@dusk-network/app-core/payment-links";
+import { CLOCK_SKEW_MS, matchRequests, refundOf, sentAlready } from "@dusk-network/app-core/requests";
 
 import { amountForInput, formatDuskExact } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
 import { forgetRequest, keepRequestsPaid, listRequests } from "../../../shared/paymentRequests.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
+import { copyButton } from "../../components/CopyButton.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { h } from "../../lib/dom.js";
@@ -118,15 +120,61 @@ function matchedLine(request, match, again, hidden) {
   return [hidden ? `Same memo${when}. Check it's this one.` : `Same memo${when}, for ${formatDuskExact(String(match.lux ?? 0n))} DUSK. Check it's this one.`];
 }
 
-function requestRow(request, match, { hidden, address, state, actions, walletId, rows, rowOf, rowBack, context, earlier = false }) {
+/**
+ * Whether a payment out went after the payment it would pay back came in: by
+ * their blocks where both have one, else by their times; one on its way, sent
+ * from here, does. Not one whose outcome isn't known: it may never have gone.
+ * As the web wallet tells a refund from one before it.
+ * @param {object} refund - an Activity row
+ * @param {object | undefined} payment - the row of the payment it pays back
+ */
+const sentAfter = (refund, payment) =>
+  typeof refund.blockHeight !== "number"
+    ? refund.status === "pending" || refund.status === "executed"
+    : typeof payment?.blockHeight === "number"
+      ? refund.blockHeight > payment.blockHeight
+      : (refund.time ?? 0) > (payment?.time ?? 0);
+
+/**
+ * The payments that paid requests again, by their hashes: what Send back
+ * would send (app-core's refundOf), and the refund sent already, as Send
+ * would say it's sent again, sent after the payment came in. A refund is one
+ * payment's only, the newest's first.
+ * @returns {Map<string, { back: { to: string, lux: bigint, memo: string } | null, sent: object | null }>}
+ */
+function refundsOf(requests, matches, rows) {
+  const taken = new Set();
+  const owed = requests
+    .flatMap((request) => {
+      const match = matches.get(request.id);
+      const again = match?.state === "paid" ? (match.more ?? []).filter((payment) => payment.matched === "amount-memo") : [];
+      return again.map((payment) => ({ payment, request }));
+    })
+    .sort((x, y) => (y.payment.at ?? 0) - (x.payment.at ?? 0));
+  return new Map(
+    owed.map(({ payment, request }) => {
+      const back = refundOf(request, payment, rows);
+      const paidIn = rows.find((row) => row.hash === payment.hash);
+      const sent = back ? sentAlready(rows.filter((row) => !taken.has(row.hash) && sentAfter(row, paidIn)), back) : null;
+      if (sent) taken.add(sent.hash);
+      return [payment.hash, { back, sent }];
+    })
+  );
+}
+
+function requestRow(request, match, { hidden, address, state, actions, walletId, rows, rowOf, rowBack, context, refunds, linkOf, earlier = false }) {
   // The payments with all a request asks, after the one that paid it: paid twice, or more.
   const again = match?.state === "paid" ? (match.more ?? []).filter((payment) => payment.matched === "amount-memo") : [];
+  // A request of any amount says what came in, plainly: a lux is no green Paid.
+  const cameIn = typeof match?.lux === "bigint" ? [balance(hidden, formatDuskExact(String(match.lux))), " DUSK"] : ["Paid"];
   const [word, tone] = earlier
     ? ["Not checked", "muted"]
     : again.length
       ? ["Paid twice", "warn"]
       : match?.state === "paid"
-        ? ["Paid", "ok"]
+        ? match.anyAmount
+          ? [cameIn, "plain"]
+          : ["Paid", "ok"]
         : match?.state === "check"
           ? ["Check", "warn"]
           : ["Waiting", "muted"];
@@ -160,20 +208,27 @@ function requestRow(request, match, { hidden, address, state, actions, walletId,
   };
   // Paid twice or more: each payment, what it brought and when, to see, and those after the first to send back.
   const paidTimes = again.length ? [{ at: match.at, hash: match.hash, lux: match.lux }, ...again] : [];
+  // When each came in to the second: two in the same minute read apart.
   const paymentList = paidTimes.length
     ? h(
         "ul",
         { class: "request-row__payments", "aria-label": "Payments for this request" },
         paidTimes.map((payment, i) => {
-          const when = payment.at ? whenAtText(payment.at) : "at a time not known";
+          const when = payment.at ? whenAtText(payment.at, Date.now(), { seconds: true }) : "at a time not known";
           const amount = typeof payment.lux === "bigint" ? formatDuskExact(String(payment.lux)) : "";
           const said = [amount && !hidden ? `${amount} DUSK` : "", when].filter(Boolean).join(" ");
-          const refund = i ? refundOf(request, payment, rows) : null;
+          // Sent back already: when, and no Send back to send it twice.
+          const refund = i ? refunds.get(payment.hash) : null;
+          const sentBack = refund?.sent ? `Sent back ${refund.sent.time ? whenAtText(refund.sent.time, Date.now(), { seconds: true }) : ""}`.trim() : "";
           return h("li", { class: "request-payment" }, [
             h("span", { class: "request-payment__what" }, [amount ? [balance(hidden, amount), " DUSK "] : null, when].flat().filter(Boolean)),
             h("span", { class: "request-payment__actions" }, [
               h("button", { class: "text-btn chain-link", type: "button", text: "See payment", "aria-label": `See the payment of ${said}`, onclick: () => open(payment.hash, payment.at) }),
-              refund ? h("button", { class: "text-btn", type: "button", text: "Send back", "aria-label": `Send back the payment of ${said}`, onclick: () => sendBack(refund) }) : null,
+              sentBack
+                ? h("span", { class: "request-payment__sent", text: sentBack })
+                : refund?.back
+                  ? h("button", { class: "text-btn", type: "button", text: "Send back", "aria-label": `Send back the payment of ${said}`, onclick: () => sendBack(refund.back) })
+                  : null,
             ].filter(Boolean)),
           ]);
         })
@@ -187,7 +242,7 @@ function requestRow(request, match, { hidden, address, state, actions, walletId,
   return h("li", { class: "request-row" }, [
     h("div", { class: "request-row__head" }, [
       h("span", { class: "request-row__amount" }, request.lux === null ? ["Any amount"] : [balance(hidden, formatDuskExact(request.lux)), " DUSK"]),
-      h("span", { class: `request-state request-state--${tone}`, text: word }),
+      h("span", { class: `request-state request-state--${tone}` }, [word].flat()),
     ]),
     h("div", { class: "request-row__sub" }, [
       request.memo ? h("span", { class: "request-row__memo" }, ["“", safeTextEl(request.memo), "” · "]) : null,
@@ -197,8 +252,19 @@ function requestRow(request, match, { hidden, address, state, actions, walletId,
     paymentList,
     h("div", { class: "request-row__actions" }, [
       ...payments.map(({ at, hash }) => h("button", { class: "text-btn chain-link", type: "button", text: "See payment", onclick: () => open(hash, at) })),
+      // Its link to copy again, as the web wallet's list has it.
+      linkOf(request)
+        ? copyButton({
+            value: () => linkOf(request),
+            label: `Copy the link of the request for ${request.lux === null ? "any amount" : hidden ? "a hidden amount" : `${formatDuskExact(request.lux)} DUSK`}${request.memo ? `, ${request.memo}` : ""}`,
+            text: "Copy link",
+            className: "text-btn",
+            failText: "Copy failed",
+            onFail: actions?.showToast,
+          })
+        : null,
       h("button", { class: "text-btn", type: "button", text: "Remove", "aria-label": `Remove the request${request.memo ? ` "${request.memo}"` : ""}`, onclick: remove }),
-    ]),
+    ].filter(Boolean)),
   ]);
 }
 
@@ -242,13 +308,20 @@ export function requestsSection(ov, { state, actions } = {}) {
   const waiting = mine.filter((request) => matches.get(request.id)?.state !== "paid");
   if (waiting.length) lookSoon(state, actions, { shielded: waiting.some((request) => address && request.to === address) });
   const hidden = balancesHidden(ov);
+  const refunds = refundsOf(mine, matches, rows);
+  // A request's link, as it was copied: on the network it was made on, this one.
+  const chainId = Number.isInteger(ov?.chainId) ? ov.chainId : chainIdFromNodeUrl(String(ov?.nodeUrl ?? ""));
+  const linkOf = ({ lux, memo, to }) => {
+    const made = makePaymentLink({ amountLux: lux === null ? "" : String(lux), memo, network: chainId, to });
+    return made.ok ? (made.https ?? made.dusk) : "";
+  };
   return h("section", { class: "box receive-requests" }, [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Requests" })]),
     h(
       "ul",
       { class: "group request-list" },
       shown.map((request) =>
-        requestRow(request, earlier(request) ? undefined : matches.get(request.id), { hidden, address, state, actions, walletId: kept.walletId, rows, rowOf, rowBack, context: activityKey(ov), earlier: earlier(request) })
+        requestRow(request, earlier(request) ? undefined : matches.get(request.id), { hidden, address, state, actions, walletId: kept.walletId, rows, rowOf, rowBack, context: activityKey(ov), refunds, linkOf, earlier: earlier(request) })
       )
     ),
   ]);

@@ -3,11 +3,13 @@ import { wordlist } from "@scure/bip39/wordlists/english";
 import { h } from "../../lib/dom.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
-import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, reviewActions, unlockPasswordField } from "../../components/FormControls.js";
+import { NEW_PASSWORD, checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, stepActions, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
+import { askConfirm } from "../../components/ConfirmDialog.js";
+import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
 
 function generateMnemonic12() {
   const entropy = new Uint8Array(16);
@@ -44,16 +46,18 @@ function srpGridEl(mnemonic, { blurred = false } = {}) {
   return h("div", { class: "box srp-box" }, [grid]);
 }
 
-// A new password and its repeat, each with its error under it.
+// A new password and its repeat, each with its error under it. Not marked as
+// a new password: Firefox for Android offers one of its own for that, over
+// the field, and fills in a password nobody wrote down.
 function newPasswordFields({ onDone, label = "Password" }) {
   const pwd = passwordInput({
     placeholder: "At least 8 characters",
-    autocomplete: "new-password",
+    autocomplete: NEW_PASSWORD,
     onEnter: () => pwd2.focus(),
   });
   const pwd2 = passwordInput({
     placeholder: "The same password again",
-    autocomplete: "new-password",
+    autocomplete: NEW_PASSWORD,
     onEnter: () => onDone?.(),
   });
   const pwdError = fieldError(pwd);
@@ -183,9 +187,10 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
       subnav({
         title: "Add wallet",
         onBack: () => {
-          // Out of the flow: its words go.
+          // Out of the flow, back where it was opened from: its words go.
+          const from = state.onboard?.from;
           state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
-          state.route = "home";
+          state.route = from || "home";
           actions?.render?.().catch(() => {});
         },
       }),
@@ -214,8 +219,35 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
   ];
 }
 
+// Unlock with fingerprint, offered beside the password where the phone can
+// guard it with one (the app on Android): on, the fingerprint is asked once
+// the wallet is made (fingerOnWith).
+function fingerprintOffer(state) {
+  const onboard = (state.onboard ??= {});
+  const box = checkboxInput({ id: "onboard-fingerprint" });
+  box.checked = onboard.fingerprint === true;
+  box.addEventListener("change", () => {
+    onboard.fingerprint = box.checked;
+  });
+  const el = h("label", { class: "checkline", hidden: true }, [box, h("span", { text: "Unlock with fingerprint" })]);
+  fingerprintStatus().then(({ available }) => {
+    if (available) el.hidden = false;
+  });
+  return { el, wanted: () => !el.hidden && box.checked };
+}
+
+// Turns fingerprint unlock on with the new wallet's password, where it was asked for.
+function fingerOnWith(password, actions) {
+  turnFingerprintOn(password)
+    .then((on) => {
+      if (on.ok) actions?.showToast?.("Fingerprint unlock is on.");
+    })
+    .catch(() => {});
+}
+
 export function onboardingCreatePasswordView({ state, actions } = {}) {
   const fields = newPasswordFields({ onDone: () => (agree.checked ? next.click() : agree.focus()) });
+  const finger = fingerprintOffer(state);
   const agree = checkboxInput({ onEnter: () => next.click() });
   const agreeError = fieldError(agree);
   agree.addEventListener("change", () => agreeError.show(""));
@@ -264,6 +296,7 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
         h("span", { text: "I understand that my recovery phrase is the only way to restore this wallet." }),
       ]),
       agreeError.el,
+      finger.el,
       err.el,
       next,
     ]),
@@ -327,7 +360,7 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
       srpGridEl(mnemonic, { blurred: !state.onboard.reveal }),
       h("div", { class: "phrase-tools" }, [toggle, copyBtn]),
       // In view at the bottom however small the window, as Confirm is on a Review.
-      reviewActions(next),
+      stepActions(next),
     ].filter(Boolean)),
   ];
 }
@@ -420,10 +453,12 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
           await addedWallet(state, actions);
           return;
         }
+        const finger = state.onboard?.fingerprint === true;
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
         state.route = "home";
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
+        if (finger) fingerOnWith(password, actions);
       } catch (e) {
         const message = e?.message ?? String(e);
         if (adding) {
@@ -483,11 +518,19 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
   const fields = adding
     ? currentPasswordField({ onDone: () => btn.click() })
     : newPasswordFields({ onDone: () => btn.click(), label: passwordLabel });
+  // A new password, a new wallet's or a restored one's: fingerprint unlock offered with it.
+  const finger = adding ? null : fingerprintOffer(state);
   const err = formError();
 
   const busyBody = h("p", { class: "auth-note", style: "display:none", text: "Encrypting your wallet. Keep this window open." });
 
-  const nav = subnav({ title, onBack });
+  // Back with words or a password typed asks first: leaving clears them.
+  const typed = () => Boolean(mnemonicInput.getMnemonic() || fields.pwd.value || fields.pwd2?.value);
+  const leave = async () => {
+    if (typed() && !(await askConfirm({ title: "Go back?", text: "This clears the recovery phrase and password you typed.", action: "Go back", destructive: true }))) return;
+    onBack();
+  };
+  const nav = subnav({ title, onBack: leave });
   const backBtn = nav.querySelector("button");
 
   let busy = false;
@@ -546,6 +589,9 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
         state.route = "home";
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
+        // A new password: fingerprint unlock with it where asked, and the old one's gone.
+        if (finger?.wanted()) fingerOnWith(password, actions);
+        else if (type === "DUSK_UI_RESTORE_WALLET") turnFingerprintOff().catch(() => {});
       } catch (e) {
         const message = e?.message ?? String(e);
         if (adding) {
@@ -574,6 +620,7 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
       mnemonicInput.el,
       phraseError.el,
       ...fields.els,
+      finger?.el,
       err.el,
       btn,
       busyBody,

@@ -125,9 +125,10 @@ describe("a stake or an unstake with Sozu, completed", () => {
     expect(rows().slice(0, 2)).toEqual(["You got•••• stDUSK", "Rate1 stDUSK = 2 DUSK"]);
   });
 
-  it("says what its block said is so far, till the final history says it", () => {
+  // Lena's: "… stDUSK so far" on a figure that never changed, the chain's own.
+  it("says what its block said as it is, with no \"so far\", before the final history has it too", () => {
     completed("stake", { ...fact("stake", 49_875_000_000n), final: false });
-    expect(rows().slice(0, 2)).toEqual(["You got49.875 stDUSK so far", "Rate1 stDUSK = 2 DUSK"]);
+    expect(rows().slice(0, 2)).toEqual(["You got49.875 stDUSK", "Rate1 stDUSK = 2 DUSK"]);
   });
 
   it("says the stDUSK and rate are coming while its pool's event isn't read yet, never nothing", () => {
@@ -287,18 +288,73 @@ describe("after Confirm", () => {
     expect(state.draft).toMatchObject({ to: OTHER });
   });
 
-  it("says a lost connection in words, not the socket's, as Sofia's offline Confirm showed it", async () => {
+  it("says a send that couldn't reach the network wasn't sent, in words, not the socket's, as Chen's offline Confirm showed it", async () => {
     const state = reviewState();
     const app = popup(state);
     await settle();
     (await app.confirm()).resolve({ error: { message: "WebSocket connection failed to wss://testnet.nodes.dusk.network/on (readyState=3)" } });
     await settle();
-    expect(steps()[0]).toEqual([
-      "unknown",
-      "Not confirmed",
-      "The connection to the network was lost. It may still have reached the network: check Activity before you send it again.",
-    ]);
+    expect(steps()[0]).toEqual(["failed", "Not sent", "Couldn't reach the network. No fee was charged."]);
+    expect(rows().at(-1)).toBe("Network feeNone charged");
     expect(visibleText(body)).not.toMatch(/WebSocket|readyState|wss:/);
+    // The engine's word that nothing went out, whatever its error says.
+    const again = reviewState();
+    const second = popup(again);
+    await settle();
+    (await second.confirm()).resolve({ error: { message: "Engine call timed out", data: { sent: false } } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", "Engine call timed out. No fee was charged."]);
+  });
+
+  it("keeps a send handed over without a clear answer by its ID, and says Completed with its fee once the node has it", async () => {
+    const state = reviewState();
+    const ov = overview();
+    const app = popup(state, ov);
+    await settle();
+    (await app.confirm()).resolve({ error: { message: "Failed to fetch", data: { sent: "unknown", hash: HASH } } });
+    await settle();
+    expect(steps()[0]).toEqual(["unknown", "Not confirmed", "Couldn't reach the network. It may still have reached the network: check Activity before you send it again."]);
+    expect(rows()).toContain("Transaction ID3e6a0e…ae84baCopy");
+    // Looked up once the signal is back: in a block, with its fee.
+    expect(noteTxStatus(state.sent, { hash: HASH, status: "executed" })).toBe(true);
+    ov.txs = [{ hash: HASH, status: "executed", feePaid: "2136028", blockHeight: "4817567" }];
+    app.draw();
+    expect(steps()).toEqual([
+      ["done", "Sending", expect.stringContaining("from your public balance")],
+      ["done", "Sent to the network", ""],
+      ["done", "Completed", "In block 4,817,567"],
+    ]);
+    expect(rows().at(-1)).toBe("Network fee0.002136028 DUSK");
+  });
+
+  it("says there's no connection while a send waits for its block offline, not how long blocks take", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    (await app.confirm()).resolve({ ok: true, result: { hash: HASH } });
+    await settle();
+    expect(steps()[1]).toEqual(["current", "Sent to the network", "Waiting for a block, usually about 10 seconds"]);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    app.draw();
+    expect(steps()[1]).toEqual(["current", "Sent to the network", "No connection. It's looked up again once you're back online."]);
+  });
+
+  // Amélie's: after paying a link, pulling the page down brought the same payment back, ready to send.
+  it("takes the link the page was opened with off its address once it's paid, and leaves it on one not sent", async () => {
+    const replaceState = vi.fn();
+    vi.stubGlobal("history", { state: null, replaceState });
+    vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send&link=https%3A%2F%2Fapps.testnet.dusk.network%2Fwallet%2Fdashboard%2Fsend%3Fto%3Dabc&origin=x" });
+    const refused = popup(reviewState());
+    await settle();
+    (await refused.confirm()).resolve({ error: { message: "Insufficient balance" } });
+    await settle();
+    expect(replaceState).not.toHaveBeenCalled();
+
+    const app = popup(reviewState());
+    await settle();
+    (await app.confirm()).resolve({ ok: true, result: { hash: HASH } });
+    await settle();
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/full.html?origin=x");
   });
 
   it("keeps a send the network didn't take on the Sent screen, with Back to the review as it was", async () => {

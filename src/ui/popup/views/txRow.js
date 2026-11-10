@@ -20,7 +20,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton as copyIconButton } from "../../components/CopyButton.js";
 import { HIDDEN_BALANCE, balance } from "../../components/Balance.js";
 import { ownProfileName } from "../../components/ProfileName.js";
-import { contactNameText } from "../../lib/contactNames.js";
+import { contactAlikeOf, contactNameText } from "../../lib/contactNames.js";
 import { MONTHS, clockText, dateText } from "../../lib/time.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
 
@@ -62,9 +62,9 @@ export function dayLabel(ms, now = Date.now()) {
 }
 
 /** When, in a sentence: "at 14:32", "yesterday at 14:32", "on Thu 5 Nov at 14:32". */
-export function whenAtText(ms, now = Date.now()) {
+export function whenAtText(ms, now = Date.now(), { seconds = false } = {}) {
   const day = dayLabel(ms, now);
-  const at = `at ${clockText(ms)}`;
+  const at = `at ${clockText(ms, { seconds })}`;
   return day === "Today" ? at : day === "Yesterday" ? `yesterday ${at}` : `on ${day} ${at}`;
 }
 
@@ -152,7 +152,11 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     const dusk = [tx?.counterpartyName, typed].map((s) => String(s ?? "").trim()).find(Boolean) ?? "";
     if (contact) {
       const alias = dusk && dusk.toLowerCase() !== contact.toLowerCase() ? dusk : "";
-      return { name: contact, alias, address: addr || null, isAddress: false };
+      // One whose name looks like another's: its address beside it, and the mark.
+      const alike = (addr && contactName?.alike?.(addr)) || "";
+      return alike
+        ? { name: contact, alias: [alias, shortAddress(addr)].filter(Boolean).join(" · "), address: addr, isAddress: false, alike }
+        : { name: contact, alias, address: addr || null, isAddress: false };
     }
     if (dusk) return { name: dusk, address: addr || null, isAddress: false };
     const label = labelForNode(nodeUrl, addr);
@@ -454,6 +458,8 @@ export function copyButton(address, { label = "Copy address", showToast, classNa
 export function contactNames(state, actions, ov) {
   const byAddress = new Map();
   const ab = state?.addressBook;
+  // A contact whose name looks like another's says so wherever it shows.
+  const alike = contactAlikeOf(ov, ab?.loaded ? ab.items : []);
   if (ab?.loaded && Array.isArray(ab.items)) {
     for (const entry of ab.items) {
       const addr = String(entry?.address ?? "").trim().toLowerCase();
@@ -472,7 +478,8 @@ export function contactNames(state, actions, ov) {
         state.addressBook = { ...(state.addressBook || {}), loading: false };
       });
   }
-  return (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? ownProfileName(ov, address);
+  const named = (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? ownProfileName(ov, address);
+  return Object.assign(named, { alike: (address) => (byAddress.has(String(address ?? "").trim().toLowerCase()) ? alike(address) : "") });
 }
 
 /**
@@ -509,7 +516,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
   const memo = rowMemo(tx);
   // What the row says, for the button that opens it.
   const spoken = !desc.amount ? "" : hidden && !desc.amount.text ? "amount hidden" : amountText(desc.amount, false);
-  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, sub, spoken, desc.unsent ? "" : desc.statusWord, memo ? `memo ${memo}` : ""].filter(Boolean).join(", ");
+  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, desc.alike, sub, spoken, desc.unsent ? "" : desc.statusWord, memo ? `memo ${memo}` : ""].filter(Boolean).join(", ");
 
   const open = () => {
     if (!state || !hash) return;
@@ -548,6 +555,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
       ].filter(Boolean)),
       // The button's name says these already.
       sub ? subEl(desc, when(tx), hidden) : null,
+      desc.alike ? h("div", { class: "row-sub tx-alike", "aria-hidden": "true", text: desc.alike }) : null,
       memo ? h("div", { class: "row-sub tx-memo", "aria-hidden": "true", text: memo }) : null,
     ].filter(Boolean)),
     h("div", { class: "tx-right", "aria-hidden": "true" }, [

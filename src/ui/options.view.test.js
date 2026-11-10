@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAccountName } from "../shared/accountNames.js";
-import { clearAddressBook } from "../shared/addressBook.js";
+import { clearAddressBook, listAddressBook } from "../shared/addressBook.js";
 import { dateText } from "./lib/time.js";
 import { accessibleName, fakeEvent, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 vi.mock("../shared/accountNames.js", () => ({ setAccountName: vi.fn(async () => {}) }));
-vi.mock("../shared/addressBook.js", () => ({ clearAddressBook: vi.fn(async () => {}) }));
+vi.mock("../shared/addressBook.js", () => ({ clearAddressBook: vi.fn(async () => {}), listAddressBook: vi.fn(async () => []) }));
 // The first profile has a verified .dusk name, as the header shows it.
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -126,6 +126,43 @@ describe("profile names", () => {
     expect(setAccountName).toHaveBeenCalledWith(ACCOUNTS[0], 1, "Alice");
   });
 
+  // Lena's: Profile 2 named after a contact read as that contact in History.
+  it("refuse a name that is, or looks like, another profile's or a contact's, saying whose, and let a profile keep its own", async () => {
+    const MARTA = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+    listAddressBook.mockResolvedValue([
+      { id: "c1", name: "Marta", address: MARTA },
+      // A contact saved with the second profile's own account.
+      { id: "c2", name: "Spending", address: ACCOUNTS[1] },
+    ]);
+    setAccountName.mockClear();
+    await settings();
+    const shownError = (n) => {
+      const id = label(n).getAttribute("aria-describedby");
+      return id ? dom.document.getElementById(id).textContent : "";
+    };
+    for (const [n, typed, said] of [
+      // The first profile goes by its verified .dusk name, the second by its default one.
+      [2, "alice.dusk", "Your other profile is called alice.dusk. Choose another name."],
+      [1, "Profile 2", "Your other profile is called Profile 2. Choose another name."],
+      [2, "Marta", "You have a contact called Marta. Choose another name."],
+      // A Cyrillic М.
+      [2, "\u041carta", "That looks like your contact Marta. Choose another name."],
+    ]) {
+      typeInto(label(n), typed);
+      label(n).dispatchEvent(fakeEvent("blur"));
+      await settle();
+      expect(shownError(n)).toBe(said);
+    }
+    expect(setAccountName).not.toHaveBeenCalled();
+
+    // Its own name, and the name of a contact saved with its own account, are the profile's to take.
+    typeInto(label(2), "Spending");
+    label(2).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect([shownError(2), setAccountName.mock.calls.at(-1)]).toEqual(["", [ACCOUNTS[0], 1, "Spending"]]);
+    listAddressBook.mockResolvedValue([]);
+  });
+
   it("save once when the field is left with both a change and a blur, and not when nothing changed", async () => {
     setAccountName.mockClear();
     await settings({ accountNames: { 0: "Main" } });
@@ -195,6 +232,9 @@ describe("settings", () => {
       { at: AT, what: "connect", answer: "approved" },
       { at: AT - 1, what: "switch_network", answer: "expired" },
       { at: AT - 2, what: "watch_nft", answer: "cancelled" },
+      { at: AT - 3, what: "transfer", answer: "failed" },
+      { at: AT - 4, what: "transfer", answer: "unconfirmed" },
+      { at: AT - 5, what: "contract_call", method: "depositETHToWithValue", asked: "Bridge to DuskEVM", answer: "approved" },
     ];
     const siteRecords = { [ACCOUNTS[0]]: { [SITE]: { lastUsedAt: AT + 60_000, asked } } };
     const details = (el) => el.querySelector("details.settings-site__details");
@@ -219,6 +259,9 @@ describe("settings", () => {
         ["Connect", "Approved", dateText(AT)],
         ["Switch network", "Not answered in time", dateText(AT - 1)],
         ["Import an NFT", "Ended before an answer", dateText(AT - 2)],
+        ["Pay", "Approved, not sent", dateText(AT - 3)],
+        ["Pay", "Approved, not confirmed", dateText(AT - 4)],
+        ["Bridge to DuskEVM", "Approved", dateText(AT - 5)],
       ]);
       // Nothing a site chose reads as something else.
       expect(row.textContent).not.toContain("\u202E");
@@ -775,3 +818,86 @@ describe("wallets", () => {
   });
 });
 
+
+// The app on a phone: Auto-lock's Immediately, and fingerprint unlock, as phone wallets have them.
+describe("security in the app on a phone", () => {
+  const onPhone = ({ available = true, on = false } = {}) => {
+    const asked = [];
+    dom.window.__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (cmd, args) => {
+        if (cmd !== "fingerprint") return null;
+        asked.push([args.action, args.args?.secret]);
+        return args.action === "status" ? { ok: true, available, on } : { ok: true };
+      }),
+    };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) AppleWebKit/537.36 Chrome/156.0 Mobile Safari/537.36" });
+    return { asked };
+  };
+  const finger = () => dom.document.body.querySelector("#fingerprint-unlock");
+
+  it("turns fingerprint unlock on with the password, checked first, then a fingerprint; and off at once", async () => {
+    const { asked } = onPhone();
+    const view = await settings({}, { app: true });
+    await vi.waitFor(() => expect(isShown(finger())).toBe(true));
+    expect(visibleText(finger().parentNode)).toBe("Unlock with fingerprint");
+    expect(finger().checked).toBe(false);
+    finger().checked = true;
+    finger().dispatchEvent(fakeEvent("change"));
+    const pwd = dom.document.body.querySelector("#fingerprint-password");
+    expect(isShown(pwd)).toBe(true);
+
+    // A wrong password: said, and no fingerprint asked.
+    view.actions.send.mockImplementation(async (m) => (m.type === "DUSK_UI_CHECK_PASSWORD" && m.password !== "right one" ? { error: { message: "Incorrect password" } } : {}));
+    typeInto(pwd, "wrong one");
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Turn on").click();
+    await settle();
+    expect(dom.document.body.querySelector("#fingerprint-error").textContent).toBe("Wrong password.");
+    expect(asked.map(([action]) => action)).toEqual(["status"]);
+
+    typeInto(pwd, "right one");
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Turn on").click();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "right one"]));
+    expect(view.actions.showToast).toHaveBeenCalledWith("Fingerprint unlock is on.");
+
+    finger().checked = false;
+    finger().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["disable", undefined]));
+  });
+
+  // Astra's: Turn on pressed, the switch off and on while the password was checked, and Turn on again:
+  // two turnings on, each making the Keystore key anew, could leave neither working.
+  it("starts one turning on at a time, whatever's switched or pressed while one is under way", async () => {
+    const { asked } = onPhone();
+    const view = await settings({}, { app: true });
+    await vi.waitFor(() => expect(isShown(finger())).toBe(true));
+    const checked = Promise.withResolvers();
+    view.actions.send.mockImplementation(async (m) => (m.type === "DUSK_UI_CHECK_PASSWORD" ? checked.promise : {}));
+    const turnOn = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Turn on");
+    const flip = (on) => {
+      finger().checked = on;
+      finger().dispatchEvent(fakeEvent("change"));
+    };
+    flip(true);
+    typeInto(dom.document.body.querySelector("#fingerprint-password"), "right one");
+    turnOn().click();
+    // While the password is checked: off and on again, and Turn on again.
+    flip(false);
+    flip(true);
+    const again = dom.document.body.querySelector("#fingerprint-password");
+    if (again) typeInto(again, "right one");
+    turnOn()?.click();
+    checked.resolve({});
+    await settle();
+    await vi.waitFor(() => expect(asked.filter(([action]) => action === "enable")).toHaveLength(1));
+    await settle();
+    expect(asked.filter(([action]) => action === "enable" || action === "disable")).toEqual([["enable", "right one"]]);
+  });
+
+  it("offers no fingerprint unlock on a phone that can't guard the password with one", async () => {
+    const { asked } = onPhone({ available: false });
+    await settings({}, { app: true });
+    await vi.waitFor(() => expect(asked).toEqual([["status", undefined]]));
+    await settle();
+    expect(isShown(finger())).toBe(false);
+  });
+});

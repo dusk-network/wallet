@@ -149,6 +149,62 @@ describe("a node that changes its answer between its label and a signature", () 
   });
 });
 
+describe("a send that fails, and whether it went out", () => {
+  it("says nothing went out when the node can't be reached before it's signed, as with no signal", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.drops = /\/account$/;
+    const error = await engine.sendTransaction(KINDS["a public transfer"]()).catch((e) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.data).toMatchObject({ sent: false });
+    expect(node.signed).toEqual([]);
+  });
+
+  it("says it may have gone, with its ID to look it up by, when its hand-over gets no answer", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.drops = /\/propagate$/;
+    const error = await engine.sendTransaction(KINDS["a public transfer"]()).catch((e) => e);
+    expect(error.data).toMatchObject({ sent: "unknown", hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    // Checked by the node before the hand-over, which got no answer.
+    expect(node.signed).toHaveLength(1);
+  });
+
+  // Astra's: a node that checked it, then turned its hand-over down, didn't take it. Rusk 1.7.3's own
+  // refusal (map_check_tx_error, behind HTTP 400): {"error":"Invalid input: Tx <id> not accepted: <why>"}.
+  it("says nothing went out when the node turns the hand-over down in Rusk's own refusal, after checking it", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.refuses = JSON.stringify({ error: `Invalid input: Tx ${"4f".repeat(32)} not accepted: gas price lower than minimum 1` });
+    node.refusesAt = /\/propagate$/;
+    const error = await engine.sendTransaction(KINDS["a public transfer"]()).catch((e) => e);
+    expect(error.data.sent).toBe(false);
+    expect(error.message).toBe("The node refused it: the network fee is too low. Raise it under Custom fee.");
+    // Checked, then handed over and refused.
+    expect(node.signed).toHaveLength(2);
+  });
+
+  // Astra's: a gateway in front of the node answers in JSON too, after the hand-over went through it.
+  it("says it may have gone, with its ID, when what answers the hand-over is anything but the node's refusal, JSON or not", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.refusesAt = /\/propagate$/;
+    for (const answer of [JSON.stringify({ error: "Gateway Timeout" }), "Invalid nonce", JSON.stringify({ error: "Internal server error" })]) {
+      node.refuses = answer;
+      const error = await engine.sendTransaction(KINDS["a public transfer"]()).catch((e) => e);
+      expect(error.data).toMatchObject({ sent: "unknown", hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+      expect(error.message).toBe("The node gave no clear answer, so this may still go through. Check Activity before sending again.");
+    }
+  });
+
+  it("says nothing of it for a send that went", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const sent = await engine.sendTransaction(KINDS["a public transfer"]());
+    expect(sent.hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
 describe("a known network's own node", () => {
   it("gets its chain ID from the networks file, whatever it says or doesn't", async () => {
     const kept = await addNode(TESTNET);

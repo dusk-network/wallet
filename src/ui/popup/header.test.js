@@ -112,6 +112,27 @@ describe("the network at the top", () => {
     renderHeader({ ...mainnet, proverUrl: "https://prover.example" });
     expect([label(), strip()]).toEqual(["Custom", "Mainnet · Proofs from prover.example"]);
   });
+
+  // Amélie's: a red dot with no words, for as long as it stayed red.
+  it("says in a word beside the dot that it's offline or can't reach the node, and nothing once it's back", async () => {
+    const { dom, renderHeader } = await setup("popup");
+    pill(dom);
+    const word = () => {
+      const el = dom.document.querySelector("#network-pill .network-pill__word");
+      return el && !el.hidden ? visibleText(el) : "";
+    };
+    renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
+    expect(word()).toBe("");
+    renderHeader({ ...overview, networkStatus: { nodeStatus: "offline", nodeError: "Failed to fetch" } });
+    expect(word()).toBe("Can't reach");
+    expect(screenReaderText(dom.document.getElementById("network-pill"))).toBe("TestnetCan't reach");
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
+    expect(word()).toBe("Offline");
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
+    renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
+    expect(word()).toBe("");
+  });
 });
 
 describe("header", () => {

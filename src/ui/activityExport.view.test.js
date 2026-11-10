@@ -25,6 +25,13 @@ vi.mock("../platform/extensionApi.js", async (importOriginal) => ({
   tabsCreate: vi.fn(async () => ({})),
 }));
 
+// The profile's verified .dusk name, as the header reads it: none unless a test gives one.
+const primary = vi.hoisted(() => ({ name: null }));
+vi.mock("../shared/duskNames.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  lookupPrimaryName: vi.fn(async () => primary.name),
+}));
+
 // What the archive answers about each stake with Sozu.
 const archive = vi.hoisted(() => ({ query: vi.fn(async () => ({})) }));
 vi.mock("../shared/activityHistory.js", async (importOriginal) => ({
@@ -34,6 +41,8 @@ vi.mock("../shared/activityHistory.js", async (importOriginal) => ({
 
 process.env.TZ = "UTC";
 const NOW = new Date("2026-10-23T09:00:00Z");
+// When a file saved now was made, in its name (UTC here).
+const MADE = "2026-10-23-0900";
 const NODE = "https://testnet.nodes.dusk.network";
 const ACCOUNT = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
 const SAVINGS = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
@@ -92,6 +101,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   vi.clearAllMocks();
   archive.query.mockImplementation(async () => ({}));
+  primary.name = null;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -199,8 +209,8 @@ describe("Activity's Export", () => {
     expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual([
       "Period",
       "Add my contact names",
-      // An American browser's: in US dollars.
-      "Add each payment's value in US dollars, from CoinGecko's prices",
+      // A British browser's: in pounds.
+      "Add each payment's value in British pounds, from CoinGecko's prices",
       "For Excel: keep accents as it opens",
     ]);
     expect(visibleText(panel())).toContain("One profile's file for tax tools such as Koinly: exact amounts, times in UTC, transfers between your profiles marked.");
@@ -216,7 +226,7 @@ describe("Activity's Export", () => {
     await settle();
     expect(history.sync).toHaveBeenCalled();
     expect(saved).toHaveLength(1);
-    expect(saved[0].name).toBe("dusk-estudio-sofia-testnet-all.csv");
+    expect(saved[0].name).toBe(`dusk-estudio-sofia-testnet-all-${MADE}.csv`);
     expect(saved[0].blob.type).toBe("text/csv;charset=utf-8");
     const text = await saved[0].blob.text();
     expect(text.split("\r\n")[0]).toBe(CSV_COLUMNS.join(","));
@@ -241,20 +251,22 @@ describe("Activity's Export", () => {
     expect(body().querySelector("#activity-export")).toBeNull();
   });
 
-  it("saves it in the phone's Downloads in the app, and says where, where a download made no file", async () => {
+  // Chen's, Lena's and Sofía's: the message named an older file, Android having saved the new one as "(1)".
+  it("saves it in the phone's Downloads in the app, and says the name Android saved it as, where a download made no file", async () => {
     page("/index.html");
-    const invoke = vi.fn(async (cmd) => (cmd === "save_download" ? true : null));
+    // A file of that name is there already: Android adds " (1)".
+    const invoke = vi.fn(async (cmd, args) => (cmd === "save_download" ? args.name.replace(/\.csv$/, " (1).csv") : null));
     dom.window.__TAURI_INTERNALS__ = { invoke };
     const { actions } = setup();
     button("Export").click();
     button("Save CSV").click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     const [cmd, args] = invoke.mock.calls.find(([c]) => c === "save_download");
-    expect([cmd, args.name, args.mime]).toEqual(["save_download", "dusk-estudio-sofia-testnet-all.csv", "text/csv"]);
+    expect([cmd, args.name, args.mime]).toEqual(["save_download", `dusk-estudio-sofia-testnet-all-${MADE}.csv`, "text/csv"]);
     expect(new TextDecoder().decode(Uint8Array.from(args.bytes)).split("\r\n")[0]).toBe(CSV_COLUMNS.join(","));
     // No download besides, which the app's WebView never makes a file of.
     expect(saved).toHaveLength(0);
-    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(/^CSV saved to Downloads as dusk-estudio-sofia-testnet-all\.csv: \d+ lines\./);
+    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(new RegExp(`^CSV saved to Downloads as dusk-estudio-sofia-testnet-all-${MADE} \\(1\\)\\.csv: \\d+ lines\\.`));
   });
 
   it("marks a transfer between the person's own profiles, which isn't income", async () => {
@@ -286,7 +298,7 @@ describe("Activity's Export", () => {
     expect(body().querySelector("#activity-export-period").value).toBe("2026-3");
     button("Save CSV").click();
     await settle();
-    expect(saved[0].name).toBe("dusk-estudio-sofia-testnet-2026-q3.csv");
+    expect(saved[0].name).toBe(`dusk-estudio-sofia-testnet-2026-q3-${MADE}.csv`);
     expect((await linesOf()).map((l) => l.TxHash)).toEqual(["c2".repeat(32), "c3".repeat(32)]);
 
     button("Export").click();
@@ -322,7 +334,7 @@ describe("Activity's Export", () => {
     day("activity-export-from", "2026-10-23");
     button("Save CSV").click();
     await settle();
-    expect(saved[0].name).toBe("dusk-estudio-sofia-testnet-2026-10-23-to-2026-10-23.csv");
+    expect(saved[0].name).toBe(`dusk-estudio-sofia-testnet-2026-10-23-to-2026-10-23-${MADE}.csv`);
     expect((await linesOf()).map((l) => l.TxHash)).toContain("c1".repeat(32));
     expect((await linesOf()).map((l) => l.TxHash)).not.toContain("c2".repeat(32));
   });
@@ -363,6 +375,20 @@ describe("Activity's Export", () => {
     expect(saved).toHaveLength(3);
     expect(fieldError()).toBe("Couldn't read your contacts, so nothing was saved. Try again.");
     expect(actions.showToast.mock.calls.filter(([text]) => /^CSV saved/.test(text))).toHaveLength(3);
+  });
+
+  // Sofía's: the file called her "Profile 1", and a contact by its .dusk name rather than the name she saved.
+  it("names the file and its account as the header names the profile, its .dusk name, and a contact by the name saved", async () => {
+    page("/full.html");
+    primary.name = "sofia.dusk";
+    setup({ contacts: [{ name: "Marta", address: FAUCET }] });
+    button("Export").click();
+    choose("activity-export-contacts");
+    button("Save CSV").click();
+    await settle();
+    expect(saved[0].name).toBe(`dusk-sofia-dusk-testnet-all-${MADE}.csv`);
+    const sent = (await linesOf()).find((l) => l.TxHash === "a1".repeat(32));
+    expect([sent["Account Name"], sent["Counterparty Name"]]).toEqual(["sofia.dusk", "Marta"]);
   });
 
   it("reads what isn't kept yet, with the details of what it has none of", async () => {
@@ -510,7 +536,7 @@ describe("Activity's Export", () => {
     button("Save CSV").click();
     await settle();
     const lines = await linesOf(1);
-    expect(lines.find((l) => l.TxHash === "c1".repeat(32))).toMatchObject({ "Net Worth Amount": "0.63", "Net Worth Currency": "EUR" });
+    expect(lines.find((l) => l.TxHash === "c1".repeat(32))).toMatchObject({ "Net Worth Amount": "0.62500000", "Net Worth Currency": "EUR" });
     // No price near that time: its columns stay empty, and it says so.
     expect(lines.find((l) => l.TxHash === "c2".repeat(32))).toMatchObject({ "Net Worth Amount": "", "Net Worth Currency": "" });
     expect(actions.showToast.mock.calls.at(-1)[0]).toContain("2 lines have no euro value.");
@@ -535,10 +561,13 @@ describe("Activity's Export", () => {
     expect(actions.showToast.mock.calls.at(-1)[0]).toContain("no euro value");
   });
 
-  it("adds values in US dollars where the browser's region doesn't pay in euros, as Singapore's", async () => {
-    // Lena's German browser got dollars on the web wallet; the export follows the region too.
+  // Lena's German browser got dollars on the web wallet, and Wei's Singapore phone US dollars: the region's own, where CoinGecko has it.
+  it.each([
+    ["en-SG", "Singapore dollars", "sgd", "Singapore dollar"],
+    ["ro-RO", "US dollars", "usd", "US dollar"],
+  ])("adds values in the currency of the browser's region where CoinGecko prices DUSK in it, else in US dollars: %s", async (language, name, vs, one) => {
     page("/full.html");
-    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language });
     const asked = [];
     vi.stubGlobal(
       "fetch",
@@ -549,13 +578,13 @@ describe("Activity's Export", () => {
     );
     const { actions } = setup({ entries: WHOLE.slice(0, 1) });
     button("Export").click();
-    expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain("Add each payment's value in US dollars, from CoinGecko's prices");
+    expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain(`Add each payment's value in ${name}, from CoinGecko's prices`);
     choose("activity-export-value");
     button("Save CSV").click();
     await settle();
     expect(asked.length).toBeGreaterThan(0);
-    for (const url of asked) expect(url).toContain("vs_currency=usd&from=");
-    expect(actions.showToast.mock.calls.at(-1)[0]).toContain("no dollar value");
+    for (const url of asked) expect(url).toContain(`vs_currency=${vs}&from=`);
+    expect(actions.showToast.mock.calls.at(-1)[0]).toContain(`no ${one} value`);
   });
 
   it("starts the file with a BOM only for Excel", async () => {
@@ -573,66 +602,26 @@ describe("Activity's Export", () => {
     expect(await firstBytes(1)).toEqual([0xef, 0xbb, 0xbf]);
   });
 
-  it("adds what a migration paid on its own chain, its approval too, by its payout, and says when that chain can't be read", async () => {
-    // Nandini's: the file had the payout on Dusk, and nothing of the fees paid on BNB Smart Chain.
+  // Nandini's, Sofía's and Lena's: the file booked gas paid by EVM addresses that aren't theirs, as anyone can
+  // migrate to an account. The extension connects no EVM wallet and migrates from none: it books none, as the web
+  // wallet books only the addresses it connected or migrated from.
+  it("books no gas of a migration's own chain, which the extension can't tell is yours, and reads none", async () => {
     page("/full.html");
     const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
-    const { approval, migration, owner, payout } = recordedMigration;
+    const { payout, migration } = recordedMigration;
     const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: payout.at, blockHeight: 5_684_134 }];
     const MAINNET = "https://nodes.dusk.network";
     const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
-    const exportAll = async () => {
-      button("Export").click();
-      button("Save CSV").click();
-      await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
-      const toast = actions.showToast.mock.calls.at(-1)[0];
-      actions.showToast.mockClear();
-      return { lines: await linesOf(saved.length - 1), toast };
-    };
-    const paidThere = (lines) => lines.filter((l) => l["Sent Currency"] === "BNB").map((l) => [l.TxHash, l["Sent Amount"], l.Tag, l["Account Name"], l.Account]);
-
-    // BNB Smart Chain's RPC can't be read: the payout alone, and the toast says what's missing.
-    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
-    const down = await exportAll();
-    expect(paidThere(down.lines)).toEqual([]);
-    expect(down.lines.find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
-    expect(down.toast).toContain("1 migration's fee on BNB Smart Chain couldn't be read: export again to add it.");
-
-    // Read: the approval and the migration, each a cost of its own, in BNB, from the address that paid it.
-    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
-    const up = await exportAll();
-    expect(paidThere(up.lines)).toEqual([
-      [approval, "0.0000023109", "cost", "BNB Smart Chain", owner],
-      [migration, "0.00000243765", "cost", "BNB Smart Chain", owner],
-    ]);
-    expect(up.toast).not.toContain("couldn't be read");
-  });
-
-  it("puts a migration's fees in the period of their own day, though its payout came the day after", async () => {
-    // Codex's: a 30 September fee was left out of Q3, and put in Q4 with its payout.
-    vi.setSystemTime(new Date("2026-11-10T09:00:00Z"));
-    page("/full.html");
-    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
-    const { approval, migration, owner, payout } = recordedMigration;
-    const nextDay = Date.UTC(2026, 10, 6, 0, 30);
-    const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: nextDay, blockHeight: 5_684_134 }];
-    const MAINNET = "https://nodes.dusk.network";
-    const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
-    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
+    const evm = recordedEvm(route.chain.rpcUrl);
+    const fetch = vi.fn(evm.fetch);
+    vi.stubGlobal("fetch", fetch);
     button("Export").click();
-    pickPeriod("dates");
-    for (const id of ["activity-export-from", "activity-export-to"]) {
-      const input = body().querySelector(`#${id}`);
-      input.value = "2026-11-05";
-      input.dispatchEvent(new Event("input"));
-    }
     button("Save CSV").click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
-    // The approval and the migration of 5 November, and not the payout of the 6th.
-    expect((await linesOf()).map((l) => [l.TxHash, l["Sent Currency"] || l["Received Currency"], l.Account])).toEqual([
-      [approval, "BNB", owner],
-      [migration, "BNB", owner],
-    ]);
+    const lines = await linesOf();
+    expect(lines.map((l) => [l.TxHash, l["Received Amount"], l["Sent Currency"]])).toEqual([[payout.hash, "1041.53106263", ""]]);
+    expect(fetch.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith(route.chain.rpcUrl))).toEqual([]);
+    expect(actions.showToast.mock.calls.at(-1)[0]).not.toContain("couldn't be read");
   });
 
   it("makes a stake with Sozu a trade of DUSK for stDUSK, with its deposit fee, as the pool's event says it", async () => {
@@ -693,7 +682,7 @@ describe("Activity's Export", () => {
     storageSessionGet.mockImplementationOnce(async (asked) => (asked === key ? { [key]: handed } : {}));
     const tab = setup();
     await expect(saveHandedExport({ state: tab.state, render: tab.actions.render, showToast: tab.actions.showToast })).resolves.toBe(true);
-    expect(saved.map((s) => s.name)).toEqual(["dusk-estudio-sofia-testnet-2026-q3.csv"]);
+    expect(saved.map((s) => s.name)).toEqual([`dusk-estudio-sofia-testnet-2026-q3-${MADE}.csv`]);
     expect(storageSessionRemove).toHaveBeenCalledWith(key);
     expect(history.replaceState).toHaveBeenCalledWith(null, "", "/full.html?route=activity");
     expect(tab.state.activityExport.open).toBe(false);
@@ -748,11 +737,11 @@ describe("Activity's Export", () => {
     page("/full.html");
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${first.id}` });
     await saveHandedExport({ state: setup().state });
-    expect(saved.at(-1).name).toBe("dusk-estudio-sofia-testnet-2026-q3.csv");
+    expect(saved.at(-1).name).toBe(`dusk-estudio-sofia-testnet-2026-q3-${MADE}.csv`);
     expect(Object.keys(kept)).toEqual([handedExportKey(second.id)]);
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${second.id}` });
     await saveHandedExport({ state: setup().state });
-    expect(saved.at(-1).name).toBe("dusk-estudio-sofia-testnet-2026-q4.csv");
+    expect(saved.at(-1).name).toBe(`dusk-estudio-sofia-testnet-2026-q4-${MADE}.csv`);
     expect(kept).toEqual({});
     // An address that isn't an export's ID asks nothing.
     storageSessionGet.mockClear();

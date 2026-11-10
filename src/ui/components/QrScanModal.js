@@ -1,6 +1,7 @@
 import { h } from "../lib/dom.js";
 import { parsePaymentLink } from "@dusk-network/app-core/payment-links";
 import { iconSvg } from "./ActionIcon.js";
+import { stepAway } from "../../platform/native.js";
 
 const DECODER_FAILED = "The QR scanner couldn't load. Close the wallet and open it again.";
 
@@ -109,8 +110,16 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
     });
     video.setAttribute("playsinline", "true");
 
-    const videoWrap = h("div", { class: "qrscan-video-wrap" }, [video]);
-    const hintEl = h("div", { class: "qrscan-hint", text: hint });
+    // Shown once the camera plays: without one, an empty player says only
+    // "Unable to play media" (the app's WebView).
+    const videoWrap = h("div", { class: "qrscan-video-wrap", hidden: true }, [video]);
+    const hintEl = h("div", { class: "qrscan-hint", text: hint, hidden: true });
+    // No camera: its message and Choose image, nothing that waits for one.
+    const noCamera = (text) => {
+      videoWrap.hidden = true;
+      hintEl.hidden = true;
+      setErr(text);
+    };
 
     const fileInput = h("input", {
       type: "file",
@@ -119,10 +128,17 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
       style: "display:none",
     });
 
+    // The step away the phone's picker or camera question is: over once the
+    // scan closes, whatever came of it.
+    let backFromAway = () => {};
     const chooseBtn = h("button", {
       class: "btn-outline",
       text: "Choose image",
-      onclick: () => fileInput.click(),
+      onclick: () => {
+        // The phone's picker, a moment away from the wallet.
+        backFromAway = stepAway();
+        fileInput.click();
+      },
     });
 
     const cancelBtn = h("button", {
@@ -142,6 +158,7 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
     function finish(value) {
       if (done) return;
       done = true;
+      backFromAway();
       if (raf) cancelAnimationFrame(raf);
       stopStream(stream);
       try {
@@ -204,10 +221,13 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
     // Camera scanning
     async function startCamera() {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setErr("Camera not available. You can still choose an image.");
+        noCamera("Camera not available. You can still choose an image.");
         return;
       }
 
+      // The phone may ask about the camera, over the wallet: a camera allowed
+      // or refused already asks nothing, and the step away ends with the answer.
+      const asked = (backFromAway = stepAway());
       try {
         const baseVideo = {
           width: { ideal: 1280 },
@@ -225,14 +245,24 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
             video: { ...baseVideo, facingMode: { ideal: "environment" } },
             audio: false,
           });
+        } finally {
+          asked();
         }
 
         video.srcObject = stream;
         video.setAttribute("playsinline", "true");
         video.setAttribute("webkit-playsinline", "true");
         await video.play();
+        // Closed meanwhile: the camera goes with it.
+        if (done) {
+          stopStream(stream);
+          return;
+        }
+        videoWrap.hidden = false;
+        hintEl.hidden = false;
       } catch {
-        setErr("Camera permission denied or unavailable. You can still choose an image.");
+        stopStream(stream);
+        noCamera("Camera permission denied or unavailable. You can still choose an image.");
         return;
       }
 
@@ -292,7 +322,7 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
     }
 
     startCamera().catch(() => {
-      setErr("Camera not available. You can still choose an image.");
+      noCamera("Camera not available. You can still choose an image.");
     });
   });
 }

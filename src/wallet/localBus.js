@@ -13,12 +13,12 @@ import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem } from "../shared/securityPolicy.js";
-import { chainIdForChoice, checkAllEndpoints, getNetworkStatus, isStatusStale, readChainId, resetNetworkStatus, statusChainRefusal } from "../shared/networkStatus.js";
+import { chainIdForChoice, checkAllEndpoints, checkEveryMs, getNetworkStatus, isStatusStale, readChainId, resetNetworkStatus, statusChainRefusal, statusWords } from "../shared/networkStatus.js";
 import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
 import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
-import { submittedTxMeta, walletSendFields } from "../shared/txRecord.js";
+import { sendingProfile, submittedTxMeta, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import {
   executionEventError,
@@ -119,13 +119,12 @@ async function ensureEngineConfigured() {
 // extension's background checks them: at most every 5 minutes, and after 30
 // seconds while something fails. The page draws again once a check is done,
 // for the header's dot to say what it found.
-async function networkStatusFor(settings, { failing }) {
+async function networkStatusFor(settings, { failing, read }) {
   const status = await getNetworkStatus();
-  if (isStatusStale(status, failing || status.nodeStatus === "offline" ? 30_000 : 5 * 60_000)) {
-    const said = (s) => [s?.nodeStatus, s?.proverStatus, s?.archiverStatus, s?.nodeChainId].join("|");
+  if (isStatusStale(status, checkEveryMs(status, { failing, read }))) {
     checkAllEndpoints({ nodeUrl: settings.nodeUrl, proverUrl: settings.proverUrl, archiverUrl: settings.archiverUrl })
       .then((next) => {
-        if (said(next) !== said(status)) tellPage({ type: "DUSK_UI_NETWORK_CHANGED" });
+        if (statusWords(next) !== statusWords(status)) tellPage({ type: "DUSK_UI_NETWORK_CHANGED" });
       })
       .catch(() => {});
   }
@@ -439,7 +438,7 @@ export async function localSend(message) {
         }
       }
 
-      const networkStatus = await networkStatusFor(settings, { failing: Boolean(balanceError) || !Number.isInteger(settings.chainId) });
+      const networkStatus = await networkStatusFor(settings, { failing: Boolean(balanceError) || !Number.isInteger(settings.chainId), read: Boolean(balance) && !balanceError });
       return {
         hasVault: Boolean(vault),
         isUnlocked: status.isUnlocked,
@@ -458,6 +457,7 @@ export async function localSend(message) {
         nftMetadataEnabled: settings.nftMetadataEnabled !== false,
         ipfsGateway: settings.ipfsGateway ?? "",
         hideBalances: settings.hideBalances === true,
+        lockOnLeave: settings.lockOnLeave === true,
         sendPasswordLimit: (await sendPasswordLimit())?.toString() ?? null,
         customGas: settings.customGas ?? null,
         chainId: settings.chainId,
@@ -520,7 +520,15 @@ export async function localSend(message) {
         // Above the amount chosen in Settings, only with the password checked for it.
         const { nodeUrl } = await getSettings();
         await assertSendPassword(baseParams, { ticket: message.sendTicket, walletId: String(status.accounts?.[0] ?? ""), nodeUrl });
-        const result = await sendTransaction(baseParams);
+        const result = await sendTransaction(baseParams).catch(async (error) => {
+          // Handed over with no clear answer: kept, to be looked up by its ID.
+          const hash = error?.data?.sent === "unknown" ? String(error.data.hash ?? "") : "";
+          if (hash) {
+            const sent = { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex: sendingProfile(baseParams, status) };
+            await putTxMeta(hash, unclearTxMeta(baseParams, sent, walletSendFields(baseParams, message)), { epoch: txEpoch }).catch(() => {});
+          }
+          throw error;
+        });
         return { status, txEpoch, baseParams, result };
       });
       const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });
@@ -533,10 +541,7 @@ export async function localSend(message) {
         if (hash) {
           // The profile that paid, as the extension keeps it: a stake's own
           // profile may not be the one selected.
-          const profileIndex =
-            baseParams?.profileIndex !== undefined && baseParams?.profileIndex !== null
-              ? Number(baseParams.profileIndex) || 0
-              : Number(status.selectedAccountIndex ?? 0) || 0;
+          const profileIndex = sendingProfile(baseParams, status);
           const record = submittedTxMeta(baseParams, { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message));
           const { pendingNullifiers } = record;
           await putTxMeta(hash, record, { epoch: txEpoch });
