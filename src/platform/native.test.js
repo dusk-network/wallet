@@ -30,3 +30,26 @@ describe("a link the app opens", () => {
     expect(open).not.toHaveBeenCalled();
   });
 });
+
+describe("fingerprint unlock turned on", () => {
+  it("starts no second turning on while one is under way, and turns off only after it", async () => {
+    const steps = [];
+    const enabled = Promise.withResolvers();
+    const invoke = vi.fn(async (cmd, args) => {
+      steps.push(args.action);
+      return args.action === "enable" ? enabled.promise : { ok: true };
+    });
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: { invoke } });
+    vi.resetModules();
+    const { turnFingerprintOff, turnFingerprintOn } = await import("./fingerprint.js");
+    const first = turnFingerprintOn("one");
+    await expect(turnFingerprintOn("two")).resolves.toEqual({ ok: false, reason: "busy" });
+    const off = turnFingerprintOff();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(steps).toEqual(["enable"]);
+    enabled.resolve({ ok: true });
+    await expect(first).resolves.toEqual({ ok: true });
+    await off;
+    expect(steps).toEqual(["enable", "disable"]);
+  });
+});

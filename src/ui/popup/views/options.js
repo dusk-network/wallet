@@ -47,6 +47,8 @@ function fingerprintRow({ actions }) {
     h("label", { class: "settings-switch", for: "fingerprint-unlock" }, [fingerSwitch, h("span", { text: "Unlock with fingerprint" })]),
   ]);
   let ask = null;
+  // A turning on under way, for the row: no switching nor another Turn on till it ends.
+  let busy = false;
   const closeAsk = () => {
     ask?.remove();
     ask = null;
@@ -64,10 +66,13 @@ function fingerprintRow({ actions }) {
       type: "button",
       text: "Turn on",
       onclick: async () => {
+        if (busy) return;
         sayError("");
         const password = pwd.value;
         if (!password) return sayError("Enter your password.");
+        busy = true;
         turnOn.disabled = true;
+        fingerSwitch.disabled = true;
         try {
           const res = await actions?.send?.({ type: "DUSK_UI_CHECK_PASSWORD", password });
           if (res?.error) throw new Error(/^Incorrect password$/.test(String(res.error.message ?? "")) ? "Wrong password." : res.error.message);
@@ -80,7 +85,9 @@ function fingerprintRow({ actions }) {
         } catch (e) {
           sayError(e?.message ?? String(e));
         } finally {
+          busy = false;
           turnOn.disabled = false;
+          fingerSwitch.disabled = false;
         }
       },
     });
@@ -89,6 +96,11 @@ function fingerprintRow({ actions }) {
     pwd.focus?.();
   };
   fingerSwitch.addEventListener("change", async () => {
+    // Turning on: it stays as it is till that ends.
+    if (busy) {
+      fingerSwitch.checked = true;
+      return;
+    }
     if (fingerSwitch.checked) return openAsk();
     closeAsk();
     await turnFingerprintOff();

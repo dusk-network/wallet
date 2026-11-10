@@ -864,6 +864,35 @@ describe("security in the app on a phone", () => {
     await vi.waitFor(() => expect(asked.at(-1)).toEqual(["disable", undefined]));
   });
 
+  // Astra's: Turn on pressed, the switch off and on while the password was checked, and Turn on again:
+  // two turnings on, each making the Keystore key anew, could leave neither working.
+  it("starts one turning on at a time, whatever's switched or pressed while one is under way", async () => {
+    const { asked } = onPhone();
+    const view = await settings({}, { app: true });
+    await vi.waitFor(() => expect(isShown(finger())).toBe(true));
+    const checked = Promise.withResolvers();
+    view.actions.send.mockImplementation(async (m) => (m.type === "DUSK_UI_CHECK_PASSWORD" ? checked.promise : {}));
+    const turnOn = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Turn on");
+    const flip = (on) => {
+      finger().checked = on;
+      finger().dispatchEvent(fakeEvent("change"));
+    };
+    flip(true);
+    typeInto(dom.document.body.querySelector("#fingerprint-password"), "right one");
+    turnOn().click();
+    // While the password is checked: off and on again, and Turn on again.
+    flip(false);
+    flip(true);
+    const again = dom.document.body.querySelector("#fingerprint-password");
+    if (again) typeInto(again, "right one");
+    turnOn()?.click();
+    checked.resolve({});
+    await settle();
+    await vi.waitFor(() => expect(asked.filter(([action]) => action === "enable")).toHaveLength(1));
+    await settle();
+    expect(asked.filter(([action]) => action === "enable" || action === "disable")).toEqual([["enable", "right one"]]);
+  });
+
   it("offers no fingerprint unlock on a phone that can't guard the password with one", async () => {
     const { asked } = onPhone({ available: false });
     await settings({}, { app: true });

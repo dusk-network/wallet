@@ -32,13 +32,23 @@ export async function fingerprintStatus() {
   return { available: answer.ok === true && answer.available === true, on: answer.ok === true && answer.on === true };
 }
 
+// One turning on at a time: each makes the Keystore key anew, so two at once
+// could leave neither one working.
+let turningOn = null;
+
 /**
- * Turns fingerprint unlock on with `password`, after a fingerprint.
+ * Turns fingerprint unlock on with `password`, after a fingerprint; "busy"
+ * while another turning on is under way.
  * @param {string} password
  * @returns {Promise<{ ok: boolean, reason?: string }>}
  */
 export function turnFingerprintOn(password) {
-  return ask("enable", { secret: String(password ?? ""), title: "Unlock with fingerprint", cancel: "Cancel" });
+  if (turningOn) return Promise.resolve({ ok: false, reason: "busy" });
+  const going = ask("enable", { secret: String(password ?? ""), title: "Unlock with fingerprint", cancel: "Cancel" }).finally(() => {
+    if (turningOn === going) turningOn = null;
+  });
+  turningOn = going;
+  return going;
 }
 
 /**
@@ -49,7 +59,8 @@ export function fingerprintPassword() {
   return ask("unlock", { title: "Unlock your wallet", cancel: "Use password" });
 }
 
-/** Turns fingerprint unlock off. */
-export function turnFingerprintOff() {
+/** Turns fingerprint unlock off, after a turning on under way, so off is what's left. */
+export async function turnFingerprintOff() {
+  await turningOn?.catch(() => {});
   return ask("disable");
 }
