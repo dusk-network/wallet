@@ -32,10 +32,12 @@ its screens, the share sheet, saving to Downloads, Back on its first screen)
 is in `src-tauri/src/android.rs`, so a new `android init` keeps it; fingerprint
 unlock is Kotlin beside it, `src-tauri/android/KeystorePlugin.kt`: the password
 kept only encrypted under an Android Keystore key that a fresh fingerprint
-opens (Android 11 and later). As the app is built, `src-tauri/build.rs` adds
-the permissions to hear the network come and go and to ask for a fingerprint
-to the project's manifest, puts that Kotlin in its sources, and Dusk's icon in
-its resources from `src-tauri/icons/android`. That icon is made from `icons/app-icon.json`:
+opens (Android 11 and later); arrival notices are `src-tauri/android/NoticesPlugin.kt`,
+asked for only when the person taps Tell me when it arrives. As the app is
+built, `src-tauri/build.rs` adds the permissions to hear the network come and
+go, to ask for a fingerprint and to show notices to the project's manifest,
+puts that Kotlin in its sources, and Dusk's icon in its resources from
+`src-tauri/icons/android`. That icon is made from `icons/app-icon.json`:
 `cargo tauri icon icons/app-icon.json -o <folder>`, then its `android` folder
 in place of `icons/android`.
 

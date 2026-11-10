@@ -83,6 +83,7 @@ vi.mock("../background/dappEvents.js", () => ({
 }));
 
 vi.mock("../background/txNotify.js", () => ({
+  askPhoneNotices: vi.fn(async () => "asked"),
   notifyTxSubmitted: vi.fn(async () => true),
   notifyTxExecuted: mocks.notifyTxExecuted,
   registerTxNotificationHandlers: vi.fn(() => {}),

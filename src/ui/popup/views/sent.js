@@ -2,7 +2,8 @@ import { formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../..
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { isNodeReply, nodeRefusalText } from "../../../shared/nodeRefusal.js";
 import { openUrl } from "../../../platform/index.js";
-import { isExtensionRuntime } from "../../../platform/runtime.js";
+import { isExtensionRuntime, isTauriRuntime } from "../../../platform/runtime.js";
+import { isPhone } from "../../lib/device.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
 import { stDuskLines, txErrorText } from "./txDisplay.js";
@@ -404,6 +405,57 @@ const STATE_WORDS = { done: "Done: ", current: "Now: ", failed: "Failed: ", unkn
  * pool's event is read (`sozu`, what app.js reads from its block), and that
  * they're coming till then.
  */
+/**
+ * On a phone, while a send is on its way: Tell me when it arrives, which alone
+ * has the phone ask for notices (shared/phoneNotices.js), and after that, that
+ * one will come. Once they're off, it says so once, and where to turn them on.
+ * @returns {HTMLElement | null}
+ */
+function noticeOffer({ state, actions }) {
+  if (!isPhone()) return null;
+  // Where notices stand, read again for each send: Android answers after the
+  // tap, and its settings can change it. Notices being off is said on one
+  // send's Sent, kept as its hash comes.
+  if (state.notices?.for !== state.sent) state.notices = { for: state.sent, state: undefined };
+  const notices = state.notices;
+  const el = h("div", { class: "sent-notices" });
+  const draw = () => {
+    if (notices.state === null) {
+      const ask = h("button", {
+        class: "btn-outline sent-notices__ask",
+        type: "button",
+        text: "Tell me when it arrives",
+        onclick: async () => {
+          ask.disabled = true;
+          const res = await actions?.send?.({ type: "DUSK_UI_NOTICES_ASK" })?.catch?.(() => null);
+          notices.state = res?.state ?? "asked";
+          draw();
+        },
+      });
+      el.replaceChildren(ask);
+    } else if (notices.state === "asked" || notices.state === "on") {
+      el.replaceChildren(h("p", { class: "sent-note", text: "You'll get a notice when it arrives." }));
+    } else if (notices.state === "off") {
+      const where = isTauriRuntime() ? "Dusk Wallet" : "Firefox";
+      el.replaceChildren(h("p", { class: "sent-note", text: `Notices are off. To get them, allow notifications for ${where} in your phone's settings.` }));
+      // Said, on this send's Sent: the next one's reads that it was.
+      notices.said ??= Promise.resolve(actions?.send?.({ type: "DUSK_UI_NOTICES_SAID" })).catch(() => {});
+    } else {
+      el.replaceChildren();
+    }
+  };
+  if (notices.state === undefined) {
+    Promise.resolve(actions?.send?.({ type: "DUSK_UI_NOTICES" }))
+      .then((res) => {
+        notices.state = res?.state ?? null;
+        draw();
+      })
+      .catch(() => {});
+  }
+  draw();
+  return el;
+}
+
 export function sentView(ov, { state, actions, sozu } = {}) {
   const sent = state?.sent;
   if (!sent) return [];
@@ -553,6 +605,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
     h("div", { class: "sent", "data-phase": phase, "data-status": status }, [
       head,
       note,
+      final ? null : noticeOffer({ state, actions }),
       stepper,
       details.children.length ? details : null,
       h("div", { class: "sent-actions" }, (notSent ? [back, done] : unconfirmed ? [done, back] : [done, explorer]).filter(Boolean)),

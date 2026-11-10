@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added Tell me when it arrives to Sent on a phone, the only place the wallet asks for notices; a no stays a no.
 - Added Immediately to Auto-lock in the Android app, which locks it as you leave it.
 - Added fingerprint unlock to the Android app, offered with a new password and in Settings, with the password as the fallback.
 - Gave the Android app Dusk's icon, in the launcher and on its splash.
@@ -56,6 +57,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Showed a send's outcome as a notice in Firefox.
 - Looked each send left waiting through a lost signal up again once the signal returns, and said Completed with its fee, or Not sent.
 - Said Not sent for a send that couldn't reach the network.
 - Said Offline on a Review and on a site's approval, holding Confirm and Approve until the connection is back.
@@ -69,7 +71,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Opened a request link or a notice in the wallet's tab already open, rather than another.
 - Closed an approval's tab that said its request ended once you leave it, and said a connection request ended without pointing to Activity.
 - Titled the tab Firefox for Android shows for the wallet's engine "Keep open", saying closing it locks the wallet.
-- Showed no system notices on a phone, so Android never asks for them over a payment.
 - Stopped Firefox offering a strong password of its own for a new wallet password.
 - Typed recovery words on a phone in boxes the keyboard learns nothing from, with Show words.
 - Named a bridge's call in Connected sites with its approval's own words.

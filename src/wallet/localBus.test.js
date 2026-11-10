@@ -101,10 +101,24 @@ vi.mock("../shared/walletEngine.js", () => ({
   getSelectedAccountIndex: () => 0,
   getCachedGasPrice: vi.fn(async () => ({ median: "1" })),
   sendTransaction: engine.sendTransaction,
-  // Execution is never seen here.
-  waitTxExecuted: () => new Promise(() => {}),
+  // Execution is never seen here, unless a test says when (`engine.executed`).
+  waitTxExecuted: () => engine.executed?.promise ?? new Promise(() => {}),
   waitTxRemoved: () => new Promise(() => {}),
   startShieldedSync: vi.fn(async () => {}),
+}));
+
+// The phone's notices, as the app's Kotlin would answer: allowed or not, and what was asked.
+const phoneNotices = vi.hoisted(() => ({ allowed: () => false, asked: [] }));
+vi.mock("../platform/notices.js", () => ({
+  appNoticesAllowed: async () => phoneNotices.allowed(),
+  askAppNotices: async () => {
+    phoneNotices.asked.push("ask");
+    return phoneNotices.allowed() ? "on" : "off";
+  },
+  showAppNotice: async ({ title }) => {
+    phoneNotices.asked.push(`notify: ${title}`);
+    return phoneNotices.allowed();
+  },
 }));
 
 // The node, prover and archiver checks the overview starts: none, but in the
@@ -142,6 +156,7 @@ beforeEach(() => {
   engine.addFails = false;
   engine.switchFails = false;
   engine.checkpoints = [];
+  engine.executed = null;
 });
 
 afterEach(() => {
@@ -799,5 +814,84 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     await ok({ type: "DUSK_UI_RESET_WALLET" });
     for (const key of ["dusk_vault_v1", "dusk_vault_v2", "dusk_wallets_v1", "dusk_permissions_v2"]) expect(localStorage.getItem(key)).toBeNull();
     await expect(send({ type: "DUSK_UI_STATUS" })).resolves.toMatchObject({ hasVault: false });
+  });
+});
+
+// Hein's: arrival notices in the app on a phone, asked for by the person. The
+// phone's side (platform/notices.js, android/NoticesPlugin.kt) answers here as
+// a test says, and records what it was asked.
+describe("arrival notices in the app on a phone", () => {
+  const phone = ({ allowed }) => {
+    Object.assign(phoneNotices, { allowed, asked: [] });
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    vi.stubGlobal("document", { visibilityState: "hidden" });
+    return phoneNotices.asked;
+  };
+  const sendAndSettle = async (localSend, hash) => {
+    engine.executed = Promise.withResolvers();
+    engine.sendTransaction.mockResolvedValueOnce({ hash, nonce: 1n });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1" } });
+    engine.executed.resolve({ data: { err: null } });
+  };
+  // What a send left behind, done: its watcher's steps, as many as it takes.
+  const settled = async (hash) => {
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await vi.waitFor(async () => expect((await getTxMeta(hash))?.status).toBe("executed"));
+  };
+
+  it("shows none and asks nothing by itself, asks once when the person taps, and then shows the arrival", async () => {
+    let allowed = false;
+    const asked = phone({ allowed: () => allowed });
+    const { localSend } = await import("./localBus.js");
+    await sendAndSettle(localSend, "d1".repeat(32));
+    await settled("d1".repeat(32));
+    expect(asked).toEqual([]);
+
+    // Tell me when it arrives: Android's question, and a yes.
+    allowed = true;
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
+    expect(asked).toEqual(["ask"]);
+    await sendAndSettle(localSend, "d2".repeat(32));
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual("notify: Transaction executed"));
+
+    // Learned another way, as the app looks a send up again: a notice all the same, once.
+    const { patchTxMeta, putTxMeta } = await import("../shared/txStore.js");
+    await putTxMeta("d4".repeat(32), { status: "submitted", nodeUrl: "https://testnet.nodes.dusk.network" });
+    await patchTxMeta("d4".repeat(32), { status: "executed" });
+    await patchTxMeta("d4".repeat(32), { status: "executed" });
+    expect(asked.filter((step) => step.startsWith("notify"))).toHaveLength(2);
+  });
+
+  it("never asks again after a no, and shows arrivals once notices are allowed in the phone's settings", async () => {
+    let allowed = false;
+    const asked = phone({ allowed: () => allowed });
+    const { localSend } = await import("./localBus.js");
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "off" });
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "off" });
+    await sendAndSettle(localSend, "d3".repeat(32));
+    await settled("d3".repeat(32));
+    expect(asked).toEqual(["ask"]);
+    await localSend({ type: "DUSK_UI_NOTICES_SAID" });
+    await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "off-said" });
+
+    // Astra's: allowed later in Android's settings, as Sent said, and arrivals still off for good.
+    allowed = true;
+    await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "on" });
+    await sendAndSettle(localSend, "d5".repeat(32));
+    await vi.waitFor(() => expect(asked).toEqual(["ask", "notify: Transaction executed"]));
+  });
+
+  // Astra's: notices kept "on" by an earlier build, Android's leave taken back
+  // later: Sent said they're off on every send, as its saying wasn't kept.
+  it("says notices are off once when Android's leave is taken back, whatever was kept", async () => {
+    const asked = phone({ allowed: () => false });
+    const { setSettings } = await import("../shared/settings.js");
+    await setSettings({ phoneNotices: "on" });
+    const { localSend } = await import("./localBus.js");
+    await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "off" });
+    await localSend({ type: "DUSK_UI_NOTICES_SAID" });
+    await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "off-said" });
+    expect(asked).toEqual([]);
   });
 });

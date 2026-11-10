@@ -50,10 +50,12 @@ import {
 import { siteWalletId } from "./siteWallet.js";
 
 import {
+  askPhoneNotices,
   notifyTxSubmitted,
   notifyTxExecuted,
   registerTxNotificationHandlers,
 } from "./txNotify.js";
+import { noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
@@ -1215,6 +1217,22 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // again: a refusal is final now; an approval waits a moment for it.
         const kept = getPending(message.rid) ? null : await decideKept(message.rid, message.decision);
         sendResponse(kept ?? (await resolvePendingDecision(message)));
+        return;
+      }
+
+      // Arrival notices on a phone: where they stand, the question Firefox asks
+      // Android when the person taps Tell me when it arrives, and Sent having said they're off.
+      if (message?.type === "DUSK_UI_NOTICES") {
+        sendResponse({ ok: true, state: await noticesState() });
+        return;
+      }
+      if (message?.type === "DUSK_UI_NOTICES_ASK") {
+        sendResponse({ ok: true, state: await askPhoneNotices() });
+        return;
+      }
+      if (message?.type === "DUSK_UI_NOTICES_SAID") {
+        await saidNoticesOff();
+        sendResponse({ ok: true });
         return;
       }
 

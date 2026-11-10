@@ -1,8 +1,9 @@
 //! What the wallet asks of Android itself, through the activity the app runs
 //! in, on Android's main thread: kept out of screenshots, light icons on its
 //! dark bars, the share sheet, a file saved to Downloads under the name
-//! Android gave it, the app put in the background as it is, and fingerprint
-//! unlock (android/KeystorePlugin.kt).
+//! Android gave it, the app put in the background as it is, fingerprint
+//! unlock (android/KeystorePlugin.kt), and arrival notices
+//! (android/NoticesPlugin.kt).
 
 use tauri::tao::platform::android::prelude::jni::{
   errors::Error,
@@ -216,4 +217,31 @@ pub async fn fingerprint<R: Runtime>(app: &AppHandle<R>, action: &str, args: Val
     return Ok(json!({ "ok": false, "reason": "unavailable" }));
   };
   keystore.0.run_mobile_plugin_async::<Value>(action, args).await.map_err(|e| e.to_string())
+}
+
+/// The wallet's Kotlin for arrival notices, once Android has it.
+struct Notices<R: Runtime>(PluginHandle<R>);
+
+/// Arrival notices' Kotlin (android/NoticesPlugin.kt), as the plugin
+/// "dusk-notices". Where Android can't find it, there are no notices.
+pub fn notices<R: Runtime>() -> TauriPlugin<R> {
+  Builder::new("dusk-notices")
+    .setup(|app, api| {
+      if let Ok(handle) = api.register_android_plugin("network.dusk.wallet", "NoticesPlugin") {
+        app.manage(Notices(handle));
+      }
+      Ok(())
+    })
+    .build()
+}
+
+/// Asks arrival notices' Kotlin `action`: status, ask or notify. Each answers `{ allowed }`.
+pub async fn notice<R: Runtime>(app: &AppHandle<R>, action: &str, args: Value) -> Result<Value, String> {
+  if !matches!(action, "status" | "ask" | "notify") {
+    return Err("There's no such thing to ask.".into());
+  }
+  let Some(notices) = app.try_state::<Notices<R>>() else {
+    return Ok(json!({ "allowed": false }));
+  };
+  notices.0.run_mobile_plugin_async::<Value>(action, args).await.map_err(|e| e.to_string())
 }

@@ -17,7 +17,7 @@ import { chainIdForChoice, checkAllEndpoints, checkEveryMs, getNetworkStatus, is
 import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
-import { getTxEpoch, getTxMeta, listTxs, patchTxMeta, putTxMeta } from "../shared/txStore.js";
+import { getTxEpoch, getTxMeta, listTxs, onTxSettled, patchTxMeta, putTxMeta } from "../shared/txStore.js";
 import { sendingProfile, submittedTxMeta, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import {
@@ -31,6 +31,11 @@ import { engineContactsVault, handleUiCommand } from "./uiCommands.js";
 import { assertSendPassword, sendPasswordLimit } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
+import { askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
+import { appNoticesAllowed, askAppNotices, showAppNotice } from "../platform/notices.js";
+import { networkTextOf } from "../shared/nodeNetwork.js";
+import { shortAddress } from "../ui/lib/strings.js";
+import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
   configure,
@@ -81,6 +86,24 @@ import {
 // extension's checks do. Once read, the page draws again (popup/app.js).
 let askingChain = null;
 let chainAskedAt = -Infinity;
+
+// A payment's arrival as a notice, in the app on a phone: once the person
+// asked for notices (phoneNotices.js) and while Android lets the app show
+// them, read each time, and only while they're away from it.
+async function noticeArrival({ hash, ok, nodeUrl }) {
+  if (!isPhone() || globalThis.document?.visibilityState !== "hidden") return;
+  if (!(await mayNotify(appNoticesAllowed))) return;
+  const network = nodeUrl ? networkTextOf(nodeUrl) : "";
+  await showAppNotice({
+    title: ok ? "Transaction executed" : "Transaction failed",
+    body: [`Tx: ${shortAddress(hash)}`, network ? `Network: ${network}` : ""].filter(Boolean).join(" · "),
+  }).catch(() => {});
+}
+
+// However a send's outcome is learned, while the app is away.
+onTxSettled((hash, tx) => {
+  noticeArrival({ hash, ok: tx.status === "executed", nodeUrl: tx.nodeUrl }).catch(() => {});
+});
 
 function tellPage(message) {
   try {
@@ -474,6 +497,15 @@ export async function localSend(message) {
         // Every wallet the vault holds, those another password opens too.
         walletsHere: await countVaultWallets().catch(() => null),
       };
+    }
+
+    // Arrival notices on a phone: where they stand, the question Android asks
+    // when the person taps Tell me when it arrives, and Sent having said they're off.
+    if (message?.type === "DUSK_UI_NOTICES") return { ok: true, state: await noticesState(appNoticesAllowed) };
+    if (message?.type === "DUSK_UI_NOTICES_ASK") return { ok: true, state: await askForNotices(askAppNotices, appNoticesAllowed) };
+    if (message?.type === "DUSK_UI_NOTICES_SAID") {
+      await saidNoticesOff(appNoticesAllowed);
+      return { ok: true };
     }
 
     // The network checked now, as when the phone is back online.
