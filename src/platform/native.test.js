@@ -34,10 +34,14 @@ describe("a link the app opens", () => {
 describe("fingerprint unlock turned on", () => {
   it("starts no second turning on while one is under way, and turns off only after it", async () => {
     const steps = [];
+    // The native side: reached when it's asked to turn on, answering when the test says.
+    const reached = Promise.withResolvers();
     const enabled = Promise.withResolvers();
     const invoke = vi.fn(async (cmd, args) => {
       steps.push(args.action);
-      return args.action === "enable" ? enabled.promise : { ok: true };
+      if (args.action !== "enable") return { ok: true };
+      reached.resolve();
+      return enabled.promise;
     });
     vi.stubGlobal("window", { __TAURI_INTERNALS__: { invoke } });
     vi.resetModules();
@@ -45,7 +49,8 @@ describe("fingerprint unlock turned on", () => {
     const first = turnFingerprintOn("one");
     await expect(turnFingerprintOn("two")).resolves.toEqual({ ok: false, reason: "busy" });
     const off = turnFingerprintOff();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The first is with Android: nothing else is asked of it till that ends.
+    await reached.promise;
     expect(steps).toEqual(["enable"]);
     enabled.resolve({ ok: true });
     await expect(first).resolves.toEqual({ ok: true });
