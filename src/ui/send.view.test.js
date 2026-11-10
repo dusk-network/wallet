@@ -610,6 +610,30 @@ describe("what the To field says about what's typed", () => {
       `Your contact Estudio Sol · ${shortAddress(BOB.address)}`,
     ]);
   });
+
+  // Sofia's: picked, the one in a Cyrillic а read as plain "Estudio Marta" on Send and on Review.
+  it("marks a contact whose name looks like another's once it's picked, on Send and on Review, beside its address", () => {
+    const state = newState();
+    state.addressBook.items = [
+      { name: "Estudio Marta", address: ALICE.account },
+      { name: "Estudio M\u0430rta", address: BOB.account },
+      { name: "Estudio Sol", address: BOB.address },
+    ];
+    const note = () => {
+      const el = dom.document.body.querySelector(".send-alike-note");
+      return isShown(el) ? el.textContent : "";
+    };
+    let form = mount(state);
+    typeInto(form.to, BOB.account);
+    expect(note()).toBe("Looks like another contact. Check the address.");
+    typeInto(form.to, BOB.address);
+    expect(note()).toBe("");
+
+    state.route = "confirm";
+    state.draft = { to: BOB.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" };
+    form = mount(state);
+    expect(form.reviewTo()).toBe(`Estudio M\u0430rta · looks like another contact${BOB.account}`);
+  });
 });
 
 describe("a memo too long for the network", () => {
@@ -877,7 +901,7 @@ describe("names on Send and Review", () => {
       ov
     );
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings");
+    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings · looks like your profile's name");
   });
 
   it("offers no Save to Contacts for this wallet's own account or address", () => {

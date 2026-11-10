@@ -3106,7 +3106,8 @@ body.page--popup .brand-mark {
 }
 
 /* "This is your own account": a quiet note in the send form */
-.send-self-note {
+.send-self-note,
+.send-alike-note {
   padding: 10px 12px;
   border-radius: var(--radius-md);
   background: color-mix(in oklab, var(--pending) 10%, var(--surface-1));

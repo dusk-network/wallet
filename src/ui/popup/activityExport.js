@@ -21,7 +21,6 @@ import { saveToDownloads } from "../../platform/native.js";
 import { stamped } from "../lib/fileNames.js";
 import { ActivityChangedError, activityRows, assertActivityOpen, selected, sozuFactsOf, wholeActivity } from "./activity.js";
 import { duskPrices } from "./duskPrice.js";
-import { migrationFactsOf } from "./migrationFacts.js";
 import { defaultCurrency } from "@dusk-network/app-core/amounts";
 
 /**
@@ -158,9 +157,6 @@ export async function makeExport(ov, choices, { state }) {
   const { account, profileIndex } = selected(ov);
   // A stake whose stDUSK can't be read yet says so in its line.
   const facts = await sozuFactsOf(ov, rows);
-  // What each migration paid on its own chain, its approval too, on lines of their own, each in the period
-  // of its own time: a payout after the period can have fees in it, one before it can't.
-  const evm = await migrationFactsOf(ov, period ? rows.filter((row) => row.time >= period.from) : rows);
   const made = await accountingCsv({
     rows,
     profile: { name: await profileNameOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
@@ -169,29 +165,28 @@ export async function makeExport(ov, choices, { state }) {
     price: choices.fiat ? duskPrices({ currency }) : undefined,
     currency,
     facts,
-    evm,
+    // Gas paid on a migration's own chain only from EVM addresses the app knows
+    // as the person's, those it connected or migrated from, as the web wallet
+    // does: the extension has none, and anyone can migrate to an account.
+    evmAddresses: [],
     contactName,
     network: ov?.networkName,
     bom: Boolean(choices.excel),
   });
   // The file is of what was open as it began: with anything else open now, there's none.
   await assertActivityOpen(ov, { state });
-  // A migration whose side there couldn't be read has no fee there in the file.
-  const evmUnread = [...evm.values()].filter((fact) => fact.state === "pending" || fact.state === "error");
-  const evmChains = [...new Set(evmUnread.map((fact) => rows.find((row) => row.route?.id === fact.route)?.route.chain?.name ?? "its chain"))];
-  return { ...made, currency, evmUnread: { count: evmUnread.length, chain: evmChains.length === 1 ? evmChains[0] : "their chains" }, shieldedWaiting: whole.shieldedWaiting };
+  return { ...made, currency, shieldedWaiting: whole.shieldedWaiting };
 }
 
 // What the file holds, and what it doesn't, once it's saved; where, when the
 // phone's Downloads has it, by the name Android gave it there.
-function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting }, { savedAs = "" } = {}) {
+function savedText({ count, currency, left, unpriced, shieldedWaiting }, { savedAs = "" } = {}) {
   const out = [left.pending ? `${left.pending} on its way` : "", left.notRead ? `${left.notRead} not read yet` : ""].filter(Boolean);
   const lines = count === 1 ? "1 line" : `${count} lines`;
   return [
     savedAs ? `CSV saved to Downloads as ${savedAs}: ${lines}.` : `CSV saved: ${lines}.`,
     out.length ? `Left out: ${out.join(", ")}.` : "",
     unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no ${currencyName(currency, 1)} value.` : "",
-    evmUnread?.count ? `${evmUnread.count === 1 ? "1 migration's fee" : `${evmUnread.count} migrations' fees`} on ${evmUnread.chain} couldn't be read: export again to add ${evmUnread.count === 1 ? "it" : "them"}.` : "",
     shieldedWaiting ? "Your shielded activity is still syncing: export again once it's done." : "",
   ]
     .filter(Boolean)

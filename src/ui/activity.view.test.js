@@ -10,6 +10,7 @@ import { openUrl } from "../platform/index.js";
 import { accessibleName, installFakeDom, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
 import { bracketTitle } from "./components/BracketTitle.js";
 import { subnav } from "./components/Subnav.js";
+import { shortAddress } from "./lib/strings.js";
 import { homeView } from "./popup/views/home.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
 import { activityKey } from "./popup/activity.js";
@@ -137,6 +138,17 @@ describe("Activity's rows", () => {
     state.addressBook.items = [{ name: "Old me", address: SENDER }];
     draw();
     expect(rows()[2]).toBe("Old meReceived · Yesterday+1,000 DUSK");
+  });
+
+  // Sofia's: Activity named the one in a Cyrillic а as plain "Estudio Marta", with no address.
+  it("mark a contact whose name looks like another's, with its address", () => {
+    const { state, draw } = setup();
+    state.addressBook.items = [
+      { name: "Estudio M\u0430rta", address: SENDER },
+      { name: "Estudio Marta", address: A.replace(/.$/, "x") },
+    ];
+    draw();
+    expect(rows()[2]).toBe(`Estudio M\u0430rta · ${shortAddress(SENDER)}Received · YesterdayLooks like another contact+1,000 DUSK`);
   });
 
   it("name a contact saved with hidden characters by their codes, never turned around", () => {

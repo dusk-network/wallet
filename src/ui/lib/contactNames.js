@@ -55,3 +55,25 @@ export const lookAlikeText = (clash) => (!clash ? "" : clash.kind === "profile" 
  */
 export const contactAlikeText = (ov, contact, contacts) =>
   lookAlikeText(contactNameClash(ov, contact?.name, { address: String(contact?.address ?? ""), contacts: contacts.filter((each) => each !== contact), except: contact?.id }));
+
+/**
+ * What each contact whose name looks like another's says of itself, by its
+ * address: "" for an address no such contact has. For every place a contact's
+ * name shows: Send, Review and Activity.
+ * @param {object} ov
+ * @param {any[]} contacts - all of them
+ * @returns {(address: unknown) => string}
+ */
+export function contactAlikeOf(ov, contacts) {
+  const list = Array.isArray(contacts) ? contacts : [];
+  const said = new Map();
+  return (address) => {
+    const key = String(address ?? "").trim().toLowerCase();
+    if (!key) return "";
+    if (!said.has(key)) {
+      const contact = list.find((each) => String(each?.address ?? "").trim().toLowerCase() === key);
+      said.set(key, contact ? contactAlikeText(ov, contact, list) : "");
+    }
+    return said.get(key);
+  };
+}

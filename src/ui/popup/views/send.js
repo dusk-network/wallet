@@ -50,7 +50,7 @@ import {
 
 import { openQrScanModal } from "../../components/QrScanModal.js";
 import { forgetPaidLink, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
-import { contactAlikeText, contactNameText } from "../../lib/contactNames.js";
+import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
 import { whenAtText } from "./txRow.js";
@@ -483,8 +483,15 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   ensureContactsLoaded();
 
+  // A picked contact whose name looks like another's says so: only its address tells them apart.
+  const alikeNote = h("div", { class: "send-alike-note", role: "status", hidden: true });
+  const sayAlike = (text) => {
+    alikeNote.textContent = text ? `${text}. Check the address.` : "";
+    alikeNote.hidden = !text;
+  };
   const hideContactBadge = () => {
     hideRecipientBadge(toChip);
+    sayAlike("");
     if (!toWrap.classList.contains("has-chip")) return;
     toWrap.classList.remove("has-chip");
     to.fitLines?.();
@@ -515,6 +522,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         title: hit?.name ? `Saved contact: ${name}` : `Your profile: ${name}`,
         className: "to-chip",
       });
+      sayAlike(hit ? contactAlikeText(ov, hit, Array.isArray(state.addressBook?.items) ? state.addressBook.items : []) : "");
       // The chip on its own line over the address: the field is as tall as both.
       if (!toWrap.classList.contains("has-chip")) {
         toWrap.classList.add("has-chip");
@@ -1108,6 +1116,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     h("div", { class: "row send-form" }, [
       fieldLabel(to, "To"),
       toRow,
+      alikeNote,
       toTypePill,
       chainNote,
       filledNote,
@@ -1235,11 +1244,13 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     const profile = own ? "" : ownProfileName(ov, toAddr);
     return profile ? `Your profile ${profile}` : contactNameText(hit?.name);
   };
+  // A contact whose name looks like another's says so beside it, over the address.
+  const alike = own || ownProfileName(ov, toAddr) ? "" : contactAlikeOf(ov, state.addressBook?.items)(toAddr).toLowerCase();
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
   const toNameNote = nameCheckNoteEl(ov?.nodeUrl, { hidden: true });
   const showToNames = () => {
-    const names = service ? [`The bridge's account for ${service.chain}`] : [contactName(), duskName?.name || verifiedName].filter(Boolean);
+    const names = service ? [`The bridge's account for ${service.chain}`] : [contactName(), alike, duskName?.name || verifiedName].filter(Boolean);
     const unique = names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
     toNames.textContent = unique.join(" · ");
     toNames.hidden = !unique.length;
