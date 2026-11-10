@@ -19,16 +19,17 @@ async fn share_text(window: tauri::WebviewWindow, text: String, title: String) -
   }
 }
 
-/// Saves a file (Activity's export, a QR code) in the phone's Downloads, under
-/// `name`. False where it can't.
+/// Saves a file (Activity's export, a QR code) in the phone's Downloads, as
+/// `name` or the name Android gave it instead (" (1)" for one taken), which it
+/// returns. None where it can't.
 #[tauri::command]
-async fn save_download(window: tauri::WebviewWindow, name: String, mime: String, bytes: Vec<u8>) -> Result<bool, String> {
+async fn save_download(window: tauri::WebviewWindow, name: String, mime: String, bytes: Vec<u8>) -> Result<Option<String>, String> {
   #[cfg(target_os = "android")]
   return android::save_download(&window, name, mime, bytes).await;
   #[cfg(not(target_os = "android"))]
   {
     let _ = (window, name, mime, bytes);
-    Ok(false)
+    Ok(None)
   }
 }
 

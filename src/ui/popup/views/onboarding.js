@@ -3,7 +3,7 @@ import { wordlist } from "@scure/bip39/wordlists/english";
 import { h } from "../../lib/dom.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
-import { checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, stepActions, unlockPasswordField } from "../../components/FormControls.js";
+import { NEW_PASSWORD, checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, stepActions, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -45,16 +45,18 @@ function srpGridEl(mnemonic, { blurred = false } = {}) {
   return h("div", { class: "box srp-box" }, [grid]);
 }
 
-// A new password and its repeat, each with its error under it.
+// A new password and its repeat, each with its error under it. Not marked as
+// a new password: Firefox for Android offers one of its own for that, over
+// the field, and fills in a password nobody wrote down.
 function newPasswordFields({ onDone, label = "Password" }) {
   const pwd = passwordInput({
     placeholder: "At least 8 characters",
-    autocomplete: "new-password",
+    autocomplete: NEW_PASSWORD,
     onEnter: () => pwd2.focus(),
   });
   const pwd2 = passwordInput({
     placeholder: "The same password again",
-    autocomplete: "new-password",
+    autocomplete: NEW_PASSWORD,
     onEnter: () => onDone?.(),
   });
   const pwdError = fieldError(pwd);
@@ -184,9 +186,10 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
       subnav({
         title: "Add wallet",
         onBack: () => {
-          // Out of the flow: its words go.
+          // Out of the flow, back where it was opened from: its words go.
+          const from = state.onboard?.from;
           state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
-          state.route = "home";
+          state.route = from || "home";
           actions?.render?.().catch(() => {});
         },
       }),

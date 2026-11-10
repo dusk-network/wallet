@@ -36,7 +36,7 @@ import {
 import { handleRpc } from "./rpc.js";
 import { assertSendPassword, sendPasswordLimit, sendPasswordTerms } from "../shared/sendPassword.js";
 import { offersRequestLink, openRequestLink } from "./requestLinks.js";
-import { askKeptAgain, bindPendingWallet, cancelPendingApprovals, checkResume, decideKept, getPending, keptApproval, requestKey, resolvePendingDecision } from "./pending.js";
+import { approvalShown, askKeptAgain, bindPendingWallet, cancelPendingApprovals, checkResume, decideKept, getPending, keptApproval, requestKey, resolvePendingDecision } from "./pending.js";
 import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNames.js";
 import {
   broadcastChainChangedAll,
@@ -431,7 +431,7 @@ async function paysFor(params, accountIndex, status) {
 }
 
 // Only the wallet's own pages' to send, whatever a content script is made to.
-const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS"]);
+const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN"]);
 
 // For when a site last used its connection: anything but what any page can ask.
 const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId", "dusk_openPaymentLink"]);
@@ -1200,6 +1200,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
         await setupAutoLockAlarm();
         sendResponse({ ok: true, autoLockTimeoutMinutes: timeout });
+        return;
+      }
+
+      // An approval drawn: its words, and in a tab, the entry the phone's Back takes away.
+      if (message?.type === "DUSK_APPROVAL_SHOWN") {
+        sendResponse({ ok: await approvalShown(message, sender) });
         return;
       }
 

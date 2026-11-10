@@ -113,7 +113,6 @@ export function createHeaderRenderer({
     if (word) {
       word.textContent = problem;
       word.hidden = !problem;
-      word.title = problem ? statusDot?.title ?? "" : "";
     }
 
     if (networkPill) {

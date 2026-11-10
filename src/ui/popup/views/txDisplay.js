@@ -57,6 +57,14 @@ export function txRecoveryReasonLabel(reason) {
   if (key === "watcher_timeout") {
     return "The wallet did not receive a final network event before the watcher timed out.";
   }
+  // Its connection to the network went while it waited, as with no signal.
+  if (key === "watcher_unavailable") {
+    return "The wallet lost its connection to the network while it waited. It looks it up again once it's back.";
+  }
+  // Handed over as the connection went: whether the node got it is looked up by its ID.
+  if (key === "handover_unclear") {
+    return "The connection went as it was sent. The wallet looks it up by its ID.";
+  }
   if (key === "not_found") {
     return "The transaction was not found in the node's chain or mempool response.";
   }

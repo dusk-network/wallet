@@ -15,7 +15,8 @@ import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.j
 import { networkForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
-import { thisDevice } from "../../lib/device.js";
+import { isPhone, thisDevice } from "../../lib/device.js";
+import { isTauriRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress, siteName } from "../../lib/strings.js";
 import { dateText } from "../../lib/time.js";
@@ -299,7 +300,7 @@ export function optionsView(ov, { state, actions } = {}) {
       class: "list-row settings-row",
       type: "button",
       onclick: async () => {
-        state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true };
+        state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true, from: "options" };
         state.route = "wallet_add";
         await actions?.render?.();
       },
@@ -373,6 +374,28 @@ export function optionsView(ov, { state, actions } = {}) {
       actions?.showToast?.(e?.message ?? String(e), 2500);
     }
   });
+
+  // The app on a phone: locked as the person leaves it, when they ask for that.
+  const leaveToggle =
+    isTauriRuntime() && isPhone()
+      ? h("input", {
+          id: "lock-on-leave",
+          type: "checkbox",
+          checked: ov?.lockOnLeave === true,
+          onchange: async (event) => {
+            const on = event.target.checked === true;
+            try {
+              const res = await actions?.send?.({ type: "DUSK_UI_SET_LOCK_ON_LEAVE", lockOnLeave: on });
+              if (res?.error) throw new Error(res.error.message ?? "Couldn't save that");
+              if (state.overview) state.overview.lockOnLeave = on;
+              actions?.showToast?.(on ? "Locks when you leave the app." : "Stays unlocked when you leave the app, until auto-lock.");
+            } catch (e) {
+              event.target.checked = !on;
+              actions?.showToast?.(e?.message ?? String(e), 2500);
+            }
+          },
+        })
+      : null;
 
   // Connected sites, each with its profile and Disconnect; Disconnect all asks first.
   // Connected sites, each with its wallet: with more than one wallet here,
@@ -889,7 +912,8 @@ export function optionsView(ov, { state, actions } = {}) {
     ]);
 
   return [
-    subnav({ actions: lockBtn ? [lockBtn] : [], title: "Settings", onBack: () => ((st.nodeDraft = null), (state.route = "home"), rerender()) }),
+    // Back to where Settings was opened from.
+    subnav({ actions: lockBtn ? [lockBtn] : [], title: "Settings", onBack: () => ((st.nodeDraft = null), (state.route = state.optionsFrom || "home"), (state.optionsFrom = null), rerender()) }),
     walletRows.length
       ? section("Wallets", [h("div", { class: "settings-labels" }, walletRows), h("div", { class: "group" }, [addWalletRow])])
       : null,
@@ -905,6 +929,7 @@ export function optionsView(ov, { state, actions } = {}) {
         class: "settings-note",
         text: lockAll ? "Locks every wallet after this long without use." : "Locks the wallet after this long without use.",
       }),
+      leaveToggle ? h("label", { class: "settings-switch", for: "lock-on-leave" }, [leaveToggle, h("span", { text: "Lock when I leave the app" })]) : null,
       changePasswordBtn,
       changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
       sendPasswordRow ? h("div", { class: "group" }, [sendPasswordRow]) : null,

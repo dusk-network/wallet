@@ -165,6 +165,23 @@ describe("a wallet form being filled in", () => {
 });
 
 describe("the password on big sends, in Settings", () => {
+  // Chen's: "what sites ask", in an app no site reaches.
+  it("says what it asks on in the app without sites, which only the extension has", async () => {
+    const note = (app) => app.querySelector(".settings-note").textContent;
+    const ext = await popupAt("send_password");
+    expect(note(ext.app)).toMatch(/^On sends, stakes, shielding and what sites ask, network fee included\./);
+    vi.stubGlobal("browser", undefined);
+    globalThis.window.__TAURI_INTERNALS__ = { invoke: vi.fn(async () => null), transformCallback: () => 0 };
+    // Opened again in the app: Settings, then the page.
+    ext.state.route = "options";
+    await ext.render({ forceRefresh: true });
+    ext.state.route = "send_password";
+    await ext.render({ forceRefresh: true });
+    await flush();
+    expect(note(ext.app)).toMatch(/^On sends, stakes and shielding, network fee included\./);
+    expect(note(ext.app)).not.toContain("site");
+  });
+
   const typed = (app, name, value) => typeInto(app.querySelectorAll("input").find((i) => accessibleName(i) === name), value);
   const pressed = (app, name) => app.querySelectorAll("button").find((b) => b.textContent === name).click();
   const errorsOf = (app) => app.querySelectorAll(".field-error").filter((el) => !el.hidden).map((el) => el.textContent);

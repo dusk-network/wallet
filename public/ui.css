@@ -647,9 +647,11 @@ textarea.wrap-input {
   field-sizing: content;
 }
 
+/* A contact's chip on a line of its own at the top of the field, the address
+   under it at the field's whole width, as Review shows them. */
 .to-input-wrap.has-chip > textarea,
 .to-input-wrap.has-chip > input {
-  padding-left: calc(12px + var(--chip-w, 0px) + 10px);
+  padding-top: 46px;
 }
 
 .recipient-badge {
@@ -748,9 +750,8 @@ textarea.wrap-input {
 .to-chip {
   position: absolute;
   left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  max-width: 170px;
+  top: 10px;
+  max-width: calc(100% - 20px);
   pointer-events: none;
 }
 
@@ -2485,6 +2486,12 @@ button.network-pill.is-disabled .network-pill__chev {
 
 .net-status--unknown {
   background-color: var(--text-subtle);
+}
+
+/* The tab Firefox for Android shows for the wallet's engine: what it is, so it's left open. */
+.page--engine .engine-note {
+  margin: 24px 16px;
+  color: var(--text-muted);
 }
 
 /* What the red dot means, in a word beside the network's name. */
@@ -5493,6 +5500,20 @@ p.phrase-warning {
   display: flex;
   gap: 8px;
   justify-content: center;
+}
+
+/* Reveal, Hide and Copy under the phrase: a finger's size. */
+.phrase-tools button.mini-btn {
+  height: 44px;
+  padding: 0 18px;
+  font-size: 14px;
+}
+
+/* Show words, under the boxes a phone types the words in unseen. */
+button.text-btn.srp-show {
+  display: block;
+  min-height: 44px;
+  margin-top: 2px;
 }
 
 /* -------------------------------------------------------

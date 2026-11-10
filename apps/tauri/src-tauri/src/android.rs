@@ -1,7 +1,7 @@
 //! What the wallet asks of Android itself, through the activity the app runs
 //! in, on Android's main thread: kept out of screenshots, light icons on its
-//! dark bars, the share sheet, a file saved to Downloads, and the app put in
-//! the background as it is.
+//! dark bars, the share sheet, a file saved to Downloads under the name
+//! Android gave it, and the app put in the background as it is.
 
 use tauri::tao::platform::android::prelude::jni::{
   errors::Error,
@@ -112,10 +112,39 @@ fn put(env: &mut JNIEnv, values: &JObject, key: &str, value: &str) -> Jni<()> {
   Ok(())
 }
 
-// Android 10 and later: MediaStore, which asks for no permission.
-fn save_in_downloads(env: &mut JNIEnv, activity: &JObject, name: &str, mime: &str, bytes: &[u8]) -> Jni<bool> {
+// The name a file was given in the store at `uri`: Android adds " (1)" and so
+// on to one that would take another's.
+fn display_name(env: &mut JNIEnv, resolver: &JObject, uri: &JObject) -> Jni<Option<String>> {
+  let column = env.new_string("_display_name")?;
+  let columns = env.new_object_array(1, "java/lang/String", JObject::null())?;
+  env.set_object_array_element(&columns, 0, &column)?;
+  let cursor = env
+    .call_method(
+      resolver,
+      "query",
+      "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;",
+      &[JValue::Object(uri), JValue::Object(&columns), JValue::Object(&JObject::null()), JValue::Object(&JObject::null()), JValue::Object(&JObject::null())],
+    )?
+    .l()?;
+  if cursor.is_null() {
+    return Ok(None);
+  }
+  let mut name = None;
+  if env.call_method(&cursor, "moveToFirst", "()Z", &[])?.z()? {
+    let value = env.call_method(&cursor, "getString", "(I)Ljava/lang/String;", &[JValue::Int(0)])?.l()?;
+    if !value.is_null() {
+      name = Some(env.get_string(&value.into())?.into());
+    }
+  }
+  env.call_method(&cursor, "close", "()V", &[])?;
+  Ok(name)
+}
+
+// Android 10 and later: MediaStore, which asks for no permission. The name it
+// was saved as, which Android may have changed, or None where it couldn't.
+fn save_in_downloads(env: &mut JNIEnv, activity: &JObject, name: &str, mime: &str, bytes: &[u8]) -> Jni<Option<String>> {
   if sdk(env)? < 29 {
-    return Ok(false);
+    return Ok(None);
   }
   let values = env.new_object("android/content/ContentValues", "()V", &[])?;
   put(env, &values, "_display_name", name)?;
@@ -134,7 +163,7 @@ fn save_in_downloads(env: &mut JNIEnv, activity: &JObject, name: &str, mime: &st
     )?
     .l()?;
   if uri.is_null() {
-    return Ok(false);
+    return Ok(None);
   }
   let out = env
     .call_method(&resolver, "openOutputStream", "(Landroid/net/Uri;)Ljava/io/OutputStream;", &[JValue::Object(&uri)])?
@@ -142,12 +171,13 @@ fn save_in_downloads(env: &mut JNIEnv, activity: &JObject, name: &str, mime: &st
   let data = env.byte_array_from_slice(bytes)?;
   env.call_method(&out, "write", "([B)V", &[JValue::Object(data.as_ref())])?;
   env.call_method(&out, "close", "()V", &[])?;
-  Ok(true)
+  Ok(Some(display_name(env, &resolver, &uri)?.unwrap_or_else(|| name.to_string())))
 }
 
-/// Saves `bytes` as `name` in the phone's Downloads. False where Android is
-/// older than 10, which has no Downloads an app can add to without asking.
-pub async fn save_download<R: Runtime>(window: &WebviewWindow<R>, name: String, mime: String, bytes: Vec<u8>) -> Result<bool, String> {
+/// Saves `bytes` in the phone's Downloads, as `name` or the name Android gave
+/// it instead, which it returns. None where Android is older than 10, which
+/// has no Downloads an app can add to without asking.
+pub async fn save_download<R: Runtime>(window: &WebviewWindow<R>, name: String, mime: String, bytes: Vec<u8>) -> Result<Option<String>, String> {
   on_activity(window, move |env, activity| save_in_downloads(env, activity, &name, &mime, &bytes)).await
 }
 

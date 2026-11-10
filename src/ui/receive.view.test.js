@@ -411,6 +411,43 @@ describe("receive", () => {
     expect(dom.clipboard.writeText).not.toHaveBeenCalled();
   });
 
+  // Sofía's, Chen's and Lena's: every QR named alike, without a label, and the message naming an older file.
+  it("saves a request's QR in the app named by what it asks and when, says what it asks under the code, and the name Android gave it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 10, 4, 12));
+    // A canvas that keeps what's written on it, and a picture that loads.
+    const written = [];
+    dom = installFakeDom({
+      elements: {
+        canvas: (el) => {
+          el.getContext = () => ({ fillRect() {}, drawImage() {}, fillText: (text) => written.push(text), measureText: (text) => ({ width: text.length * 10 }) });
+          el.toBlob = (done) => done(new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }));
+        },
+      },
+    });
+    vi.stubGlobal("Image", class {
+      set src(url) {
+        setTimeout(() => this.onload?.(url));
+      }
+    });
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:qr", revokeObjectURL: () => {} });
+    dom.document.body.dataset.runtime = "tauri";
+    // A picture of that name is there already: Android adds " (1)".
+    const invoke = vi.fn(async (cmd, args) => (cmd === "save_download" ? args.name.replace(/\.png$/, " (1).png") : null));
+    dom.window.__TAURI_INTERNALS__ = { invoke };
+    lookupPrimaryName.mockResolvedValue("sofiadesign.dusk");
+    const state = { receive: { tab: "public", requestOpen: true, amountDusk: "0.03", memo: "Invoice 2026-114" } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
+    dom.document.body.replaceChildren(...receiveView({ ...overview, networkName: "Testnet" }, { state, actions }));
+    await settle();
+    dom.document.body.querySelectorAll("button").find((b) => visibleText(b) === "Download QR PNG").click();
+    await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+    const [, args] = invoke.mock.calls.find(([cmd]) => cmd === "save_download");
+    expect(args.name).toBe("dusk-testnet-request-0.03-DUSK-Invoice-2026-114-2026-11-10-0412.png");
+    expect(actions.showToast).toHaveBeenLastCalledWith("QR saved to Downloads as dusk-testnet-request-0.03-DUSK-Invoice-2026-114-2026-11-10-0412 (1).png");
+    expect(written).toEqual(["Dusk payment request · Testnet", "0.03 DUSK", "Invoice 2026-114", "To sofiadesign.dusk · 26FCH7…Tck927"]);
+  });
+
   it("starts a request over when the profile switches, rather than asking for it on the other one", async () => {
     const { switchContext } = await import("./popup/context.js");
     const state = {};

@@ -468,8 +468,9 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   const hideContactBadge = () => {
     hideRecipientBadge(toChip);
+    if (!toWrap.classList.contains("has-chip")) return;
     toWrap.classList.remove("has-chip");
-    toWrap.style.removeProperty("--chip-w");
+    to.fitLines?.();
   };
 
   const updateContactMatch = (addr, typ) => {
@@ -497,17 +498,11 @@ export function sendFormView(ov, { state, actions } = {}) {
         title: hit?.name ? `Saved contact: ${name}` : `Your profile: ${name}`,
         className: "to-chip",
       });
-      toWrap.classList.add("has-chip");
-
-      // Measure and shift input text so it doesn't overlap the badge.
-      requestAnimationFrame(() => {
-        try {
-          const w = Math.ceil(toChip.getBoundingClientRect().width);
-          if (w > 0) toWrap.style.setProperty("--chip-w", `${w}px`);
-        } catch {
-          // ignore
-        }
-      });
+      // The chip on its own line over the address: the field is as tall as both.
+      if (!toWrap.classList.contains("has-chip")) {
+        toWrap.classList.add("has-chip");
+        to.fitLines?.();
+      }
     } catch {
       hideContactBadge();
     }

@@ -457,6 +457,7 @@ export async function localSend(message) {
         nftMetadataEnabled: settings.nftMetadataEnabled !== false,
         ipfsGateway: settings.ipfsGateway ?? "",
         hideBalances: settings.hideBalances === true,
+        lockOnLeave: settings.lockOnLeave === true,
         sendPasswordLimit: (await sendPasswordLimit())?.toString() ?? null,
         customGas: settings.customGas ?? null,
         chainId: settings.chainId,

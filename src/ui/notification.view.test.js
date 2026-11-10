@@ -141,13 +141,27 @@ function expectNamedAccount(el, name, account) {
 
 describe("a request the wallet stopped for, as Firefox for Android stops it while Firefox is away", () => {
   it("says it isn't waiting any more when Approve finds it gone: never a dead Approve that closes on nothing", async () => {
-    await render("connect", { requestedProfiles: true });
+    await render("send_tx", transfer(BOB));
     mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: "Unknown request" });
     pastClickGuard();
     approve().click();
     await vi.waitFor(() => expect(visibleText(app)).toContain("This request isn't waiting any more, and this window can't tell whether it went through."));
     expect(dom.window.close).not.toHaveBeenCalled();
     expect(bar()?.querySelector(".btn-primary") ?? null).toBeNull();
+  });
+
+  // Amélie's: a dead tab about a connection told her to check Activity, and stayed.
+  it("says a connection that isn't waiting any more plainly, and on a phone its tab goes once it's left", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:144.0) Gecko/144.0 Firefox/159.0" });
+    await render("connect", { requestedProfiles: true });
+    mocks.answers.DUSK_PENDING_DECISION = () => ({ ok: false, error: "Unknown request" });
+    pastClickGuard();
+    approve().click();
+    await vi.waitFor(() => expect(visibleText(app)).toBe("This request isn't waiting any more. Ask the site again if you still want to."));
+    expect(dom.window.close).not.toHaveBeenCalled();
+    dom.document.hidden = true;
+    dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    expect(dom.window.close).toHaveBeenCalled();
   });
 
   it("takes the answer once its site has asked again, the wallet picking the request up meanwhile", async () => {
@@ -162,7 +176,7 @@ describe("a request the wallet stopped for, as Firefox for Android stops it whil
   });
 
   it("ends it for good when its site never asks again, so nothing takes it up later, and says so", async () => {
-    await render("connect", { requestedProfiles: true });
+    await render("send_tx", transfer(BOB));
     mocks.answers.DUSK_PENDING_DECISION = (msg) => (msg.decision === "abandon" ? { ok: true } : { ok: false, error: { code: "waking", message: "The wallet is picking this request up again." } });
     pastClickGuard();
     approve().click();
@@ -193,6 +207,25 @@ describe("a request the wallet stopped for, as Firefox for Android stops it whil
     expect(pushState).not.toHaveBeenCalled();
     dom.document.dispatchEvent(fakeEvent("click"));
     expect(pushState).toHaveBeenCalledTimes(1);
+    dom.window.dispatchEvent(fakeEvent("popstate"));
+    await vi.waitFor(() => expect(decision("reject")).toBeTruthy());
+  });
+
+  // Marek's and Amélie's: the first Back on a fresh approval left it waiting in a hidden tab.
+  it("rejects it with the phone's first Back, no press needed, from the entry the wallet put under it", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:144.0) Gecko/144.0 Firefox/159.0" });
+    const pushState = vi.fn();
+    dom.window.history = { pushState };
+    await render("connect", { requestedProfiles: true });
+    // Drawn, it tells the wallet, which puts up "#back" under it.
+    expect(mocks.sent).toContainEqual({ type: "DUSK_APPROVAL_SHOWN", rid: "r1", asked: "Connect this site?" });
+    globalThis.location.hash = "#back";
+    dom.window.dispatchEvent(fakeEvent("popstate"));
+    // A press now puts up nothing more: one Back answers.
+    dom.document.dispatchEvent(fakeEvent("click"));
+    expect(pushState).not.toHaveBeenCalled();
+    expect(decision("reject")).toBeUndefined();
+    globalThis.location.hash = "";
     dom.window.dispatchEvent(fakeEvent("popstate"));
     await vi.waitFor(() => expect(decision("reject")).toBeTruthy());
   });

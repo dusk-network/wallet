@@ -102,6 +102,15 @@ function show(body, actions = []) {
   const kept = actions.filter(Boolean);
   setChildren(bar, kept);
   bar.hidden = kept.length === 0;
+  tellShown();
+}
+
+// The wallet hears what a request waiting here leads with, for its site's
+// record, and in a tab puts up the entry the phone's first Back takes away.
+function tellShown() {
+  if (!approvalLive || !rid) return;
+  const asked = app.querySelector(".ap-title")?.textContent ?? "";
+  send({ type: "DUSK_APPROVAL_SHOWN", rid, asked }).catch(() => {});
 }
 
 function renderError(text) {
@@ -235,6 +244,8 @@ function stopActivityHeartbeat() {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     stopActivityHeartbeat();
+    // A tab that said its request ended goes once it's left: no dead tabs to pile up.
+    if (endedSaid && isPhone()) window.close();
     return;
   }
   startActivityHeartbeat();
@@ -249,19 +260,24 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// The phone's Back rejects the request, as closing its tab does: one history
-// entry for it, put up once a press counts (a click, a key let go), as
-// browsers skip one put up before. Back before any press: pending.js.
+// The phone's Back rejects the request, as closing its tab does. In a tab,
+// the wallet puts an entry under it as it's drawn (pending.js, "#back"), which
+// Firefox for Android's first Back takes away; one the page put up itself, it
+// skips before a press. Elsewhere, one is put up once a press counts (a click,
+// a key let go).
 if (isPhone()) {
   let backGuard = false;
+  const backEntry = () => globalThis.location?.hash === "#back";
   const guardBack = () => {
-    if (backGuard || !approvalLive) return;
+    if (backGuard || !approvalLive || backEntry()) return;
     backGuard = true;
     window.history?.pushState?.({ duskApproval: true }, "");
   };
   document.addEventListener("click", guardBack, true);
   document.addEventListener("keyup", guardBack, true);
   window.addEventListener("popstate", () => {
+    // Come to the wallet's entry, not gone back from it.
+    if (backEntry()) return;
     if (approvalLive) decide("reject").catch(() => ended());
   });
 }
@@ -280,8 +296,16 @@ document.addEventListener(
 // never a dead Approve.
 export const ENDED_TEXT = "This request isn't waiting any more, and this window can't tell whether it went through. Check Activity before you ask the site again.";
 
-function ended(text = ENDED_TEXT) {
+/** The same, for a request that sends nothing: a connection, a signature. */
+export const ENDED_ASK_TEXT = "This request isn't waiting any more. Ask the site again if you still want to.";
+
+// The kind of request this window shows, and whether it said it ended.
+let shownKind = "";
+let endedSaid = false;
+
+function ended(text = shownKind === "send_tx" ? ENDED_TEXT : ENDED_ASK_TEXT) {
   approvalLive = false;
+  endedSaid = true;
   stopActivityHeartbeat();
   renderError(text);
 }
@@ -476,6 +500,7 @@ export async function renderNotification() {
   const kindNorm = String(kind ?? "")
     .trim()
     .toLowerCase();
+  shownKind = kindNorm;
 
   // The network: a transaction's own, which it was approved for, a
   // signature's chain, or the wallet's.

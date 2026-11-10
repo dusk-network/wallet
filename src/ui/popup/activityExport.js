@@ -17,6 +17,7 @@ import { fieldLabel } from "../components/FormControls.js";
 import { profileLabelOf } from "../components/ProfileName.js";
 import { h } from "../lib/dom.js";
 import { saveToDownloads } from "../../platform/native.js";
+import { stamped } from "../lib/fileNames.js";
 import { ActivityChangedError, activityRows, assertActivityOpen, selected, sozuFactsOf, wholeActivity } from "./activity.js";
 import { duskPrices } from "./duskPrice.js";
 import { migrationFactsOf } from "./migrationFacts.js";
@@ -158,12 +159,12 @@ export async function makeExport(ov, choices, { state }) {
 }
 
 // What the file holds, and what it doesn't, once it's saved; where, when the
-// phone's Downloads has it.
-function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting, fileName }, { inDownloads = false } = {}) {
+// phone's Downloads has it, by the name Android gave it there.
+function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting }, { savedAs = "" } = {}) {
   const out = [left.pending ? `${left.pending} on its way` : "", left.notRead ? `${left.notRead} not read yet` : ""].filter(Boolean);
   const lines = count === 1 ? "1 line" : `${count} lines`;
   return [
-    inDownloads ? `CSV saved to Downloads as ${fileName}: ${lines}.` : `CSV saved: ${lines}.`,
+    savedAs ? `CSV saved to Downloads as ${savedAs}: ${lines}.` : `CSV saved: ${lines}.`,
     out.length ? `Left out: ${out.join(", ")}.` : "",
     unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no ${currency === "USD" ? "dollar" : "euro"} value.` : "",
     evmUnread?.count ? `${evmUnread.count === 1 ? "1 migration's fee" : `${evmUnread.count} migrations' fees`} on ${evmUnread.chain} couldn't be read: export again to add ${evmUnread.count === 1 ? "it" : "them"}.` : "",
@@ -177,10 +178,12 @@ function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting
 async function exportNow(ov, choices, { state, showToast }) {
   const made = await makeExport(ov, choices, { state });
   if (!made.count) return "There's nothing in that period, so nothing was saved.";
-  // The app saves it in the phone's Downloads; a page, as a download.
-  const inDownloads = await saveToDownloads(made.fileName, "text/csv", made.csv);
-  if (!inDownloads) saveTextFile(made.csv, made.fileName);
-  showToast?.(savedText(made, { inDownloads }), 6000);
+  // The app saves it in the phone's Downloads; a page, as a download. Named
+  // with when it was made, so one export never takes another's name.
+  const fileName = stamped(made.fileName);
+  const savedAs = await saveToDownloads(fileName, "text/csv", made.csv);
+  if (!savedAs) saveTextFile(made.csv, fileName);
+  showToast?.(savedText(made, { savedAs }), 6000);
   return "";
 }
 

@@ -1067,7 +1067,10 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       if (!terms) {
         // Staking reads Sozu again on the way back.
         st.loaded = false;
-        draft.checkError = "Couldn't check Sozu's terms just now, so nothing was sent. Try again.";
+        draft.checkError =
+          globalThis.navigator?.onLine === false
+            ? "No connection, so nothing was sent. Try again once you're back online."
+            : "Couldn't check Sozu's terms just now, so nothing was sent. Try again.";
         actions?.render?.().catch(() => {});
         return;
       }

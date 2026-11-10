@@ -159,6 +159,12 @@ export async function handleUiCommand(
     return { ok: true, hideBalances: next.hideBalances === true };
   }
 
+  // The app on a phone: lock as the person leaves it.
+  if (type === "DUSK_UI_SET_LOCK_ON_LEAVE") {
+    const next = await setSettings({ lockOnLeave: message.lockOnLeave === true });
+    return { ok: true, lockOnLeave: next.lockOnLeave === true };
+  }
+
   // Custom gas from Settings, or null for the network's price.
   if (type === "DUSK_UI_SET_CUSTOM_GAS") {
     const next = await setSettings({ customGas: normalizeCustomGas(message.customGas) });

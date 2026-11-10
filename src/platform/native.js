@@ -5,6 +5,24 @@
 
 import { isTauriRuntime } from "./runtime.js";
 
+// The wallet sent the person elsewhere for a moment (the share sheet, the
+// phone's browser, a picture to choose, the camera's question): going to the
+// background then isn't leaving the app. Until it shows again.
+let awayOnPurpose = false;
+
+/** The wallet sends the person elsewhere for a moment. */
+export function stepAway() {
+  awayOnPurpose = true;
+}
+
+/** Whether the wallet sent the person elsewhere, and isn't back yet. */
+export const steppedAway = () => awayOnPurpose;
+
+/** Shown again. */
+export function stepBack() {
+  awayOnPurpose = false;
+}
+
 /**
  * Opens `url` in the phone's browser (the opener plugin), never in the
  * wallet's own window. False outside the app, or where it couldn't.
@@ -12,6 +30,7 @@ import { isTauriRuntime } from "./runtime.js";
  */
 export async function openInBrowser(url) {
   if (!isTauriRuntime()) return false;
+  stepAway();
   try {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
@@ -28,6 +47,7 @@ export async function openInBrowser(url) {
  */
 export async function shareText(text, title = "") {
   if (!isTauriRuntime()) return false;
+  stepAway();
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("share_text", { text: String(text), title: String(title) });
@@ -38,18 +58,21 @@ export async function shareText(text, title = "") {
 }
 
 /**
- * Saves a file in the phone's Downloads, as `name`. False outside the app, or
- * where it couldn't; the caller saves it as a page does.
+ * Saves a file in the phone's Downloads, as `name`: the name it was saved as,
+ * which Android may have changed (" (1)" for one taken). False outside the
+ * app, or where it couldn't; the caller saves it as a page does.
  * @param {string} name
  * @param {string} mime
  * @param {Uint8Array | string} contents - text is saved as UTF-8
+ * @returns {Promise<string | false>}
  */
 export async function saveToDownloads(name, mime, contents) {
   if (!isTauriRuntime()) return false;
   try {
     const bytes = typeof contents === "string" ? new TextEncoder().encode(contents) : contents;
     const { invoke } = await import("@tauri-apps/api/core");
-    return (await invoke("save_download", { name: String(name), mime: String(mime), bytes: Array.from(bytes) })) === true;
+    const saved = await invoke("save_download", { name: String(name), mime: String(mime), bytes: Array.from(bytes) });
+    return typeof saved === "string" && saved ? saved : false;
   } catch {
     return false;
   }

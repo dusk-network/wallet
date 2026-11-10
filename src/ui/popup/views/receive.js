@@ -11,10 +11,13 @@ import { fullAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
 import { segmented } from "../../components/Segmented.js";
 import { formatDuskPlain } from "@dusk-network/app-core/amounts";
+import { displayText } from "@dusk-network/app-core/text";
+import { requestFileName, stamped } from "../../lib/fileNames.js";
+import { shortAddress } from "../../lib/strings.js";
 import { makePaymentLink } from "@dusk-network/app-core/payment-links";
 import { rememberRequest } from "../../../shared/paymentRequests.js";
 import { requestKept, requestNetwork, requestsSection } from "./requests.js";
-import { amountForInput } from "../../../shared/amount.js";
+import { amountForInput, formatDuskExact } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
 
@@ -29,9 +32,25 @@ function isTauriMobileLike() {
   }
 }
 
-function qrFilename({ request, tab } = {}) {
-  const rail = tab === "shielded" ? "shielded" : "public";
-  return request ? `dusk-${rail}-request-qr.png` : `dusk-${rail}-receive-qr.png`;
+// A test network's name, for a request's picture and its file; "" on Mainnet.
+const testNetworkOf = (ov) => {
+  const name = String(ov?.networkName ?? "");
+  return name && name !== "Mainnet" ? name : "";
+};
+
+/**
+ * What a request's picture says under its code, for whoever gets the picture
+ * alone, as the web wallet's does: that it's a request, on which test network,
+ * what it asks and its memo, and whom it pays.
+ * @param {{ lux: bigint | null, memo: string, to: string, name?: string, network?: string }} asked
+ */
+export function requestCaption({ lux, memo, to, name = "", network = "" }) {
+  return [
+    { size: 44, weight: 600, text: `Dusk payment request${network ? ` · ${network}` : ""}` },
+    { size: 64, weight: 600, text: lux === null || lux === undefined ? "Any amount" : `${formatDuskExact(lux)} DUSK` },
+    memo ? { size: 40, text: displayText(memo, { isolate: true }).text } : null,
+    { size: 36, text: `To ${name ? `${name} · ` : ""}${shortAddress(to)}` },
+  ].filter(Boolean);
 }
 
 let nameNotes = 0;
@@ -224,12 +243,18 @@ export function receiveView(ov, { state, actions } = {}) {
   const downloadCurrentQr = async () => {
     if (!curQrValue) return;
     try {
-      const name = qrFilename({ request: wantRequest, tab });
-      // The app saves it in the phone's Downloads; a page, as a download.
-      if (isTauriRuntime() && (await saveToDownloads(name, "image/png", new Uint8Array(await (await qrPngBlob(curQrValue)).arrayBuffer())))) {
-        actions?.showToast?.(`QR saved to Downloads as ${name}`);
+      // Named by what it asks and when it was made; a request's picture says what it asks under its code.
+      const network = testNetworkOf(ov);
+      const name = wantRequest
+        ? requestFileName({ lux: curLux, memo: curMemo }, { network })
+        : stamped(`dusk-${network ? `${network.toLowerCase()}-` : ""}${tab === "shielded" ? "shielded" : "public"}-receive-qr.png`);
+      const opts = wantRequest ? { caption: requestCaption({ lux: curLux, memo: curMemo, to: curRecipient, name: shownName, network }) } : {};
+      // The app saves it in the phone's Downloads, and says the name Android gave it; a page, as a download.
+      const saved = isTauriRuntime() ? await saveToDownloads(name, "image/png", new Uint8Array(await (await qrPngBlob(curQrValue, opts)).arrayBuffer())) : false;
+      if (saved) {
+        actions?.showToast?.(`QR saved to Downloads as ${saved}`);
       } else {
-        await downloadQrPng(curQrValue, name);
+        await downloadQrPng(curQrValue, name, opts);
         actions?.showToast?.("Downloaded QR PNG");
       }
       keepRequest();

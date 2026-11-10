@@ -88,6 +88,30 @@ describe("the QR scan", () => {
     expect(decoder.read).toHaveBeenCalledWith(expect.any(Uint8ClampedArray), 300, 300, { inversionAttempts: "attemptBoth" });
   });
 
+  // Sofía's: a big broken "Unable to play media" player over the message, without a camera.
+  it("shows only its message and Choose image where there's no camera, and the camera once it plays", async () => {
+    const { isShown, visibleText } = await import("../testing/fakeDom.js");
+    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: vi.fn(async () => Promise.reject(new DOMException("denied", "NotAllowedError"))) } });
+    const { openQrScanModal } = await import("./QrScanModal.js");
+    const scan = openQrScanModal();
+    await loaded();
+    expect(isShown(modal().querySelector(".qrscan-video-wrap"))).toBe(false);
+    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("Camera permission denied or unavailable. You can still choose an image.Choose imageCancel");
+    await close();
+    await expect(scan).resolves.toBeNull();
+
+    const { stream } = camera();
+    // A camera that sees no code yet.
+    decoder.read.mockImplementation(() => null);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: vi.fn(async () => stream) } });
+    const live = openQrScanModal({ hint: "Point your camera at a QR code" });
+    await loaded();
+    expect(isShown(modal().querySelector(".qrscan-video-wrap"))).toBe(true);
+    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("Point your camera at a QR codeChoose imageCancel");
+    await close();
+    await live;
+  });
+
   it("says the scanner couldn't load and offers no image when its decoder doesn't come, until the wallet opens again", async () => {
     let { openQrScanModal } = await import("./QrScanModal.js");
     decoder.fail = true;

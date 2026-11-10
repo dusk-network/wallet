@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added Lock when I leave the app to the Android app's Settings, off at first.
+- Gave the Android app Dusk's icon, in the launcher and on its splash.
 - Brought back the app for Android and desktop (Tauri), in `apps/tauri`.
 - Opened `dusk:` payment links in the Android app's Send, filled in.
 - Shared an address or a request from the Android app through the phone's share sheet.
@@ -57,6 +59,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said Offline or Can't reach beside the network's dot, and checked the network again once it answers.
 - Ended "Checking network…" on setup once the network was checked.
 - Asked before Back clears the recovery phrase and password typed on Import.
+- Rejected a site's approval with the phone's first Back in Firefox for Android, no tap first, and went back to the site's tab.
+- Kept a site's approval waiting while you switch tabs in Firefox for Android.
+- Opened a request link or a notice in the wallet's tab already open, rather than another.
+- Closed an approval's tab that said its request ended once you leave it, and said a connection request ended without pointing to Activity.
+- Titled the tab Firefox for Android shows for the wallet's engine "Keep open", saying closing it locks the wallet.
+- Showed no system notices on a phone, so Android never asks for them over a payment.
+- Stopped Firefox offering a strong password of its own for a new wallet password.
+- Typed recovery words on a phone in boxes the keyboard learns nothing from, with Show words.
+- Named a bridge's call in Connected sites with its approval's own words.
+- Made Reveal, Hide and Copy on the recovery phrase a finger's size.
+- Scrolled the field being typed in, and its button, above the keyboard in Firefox for Android's tab.
+- Put a contact's name over the address in Send's To, the address at the field's whole width.
+- Went back from Settings, and from Add wallet, to the screen it was opened from.
+- Showed only the message and Choose image in Scan QR without a camera.
+- Said in the app what the password on big sends covers without sites, and why the wallet stopped waiting for a send in plain words.
+- Said No connection while a send waits offline, rather than how long a block takes.
+- Gave the keyboard's room back as the phone turns, and put the page back where it was.
+- Named a saved QR by what it asks and when it was made, wrote its amount, memo and name under the code, and said the name Android saved it as.
+- Named a saved export by when it was made, and said the name Android saved it as.
 - Read the balance again as the Android app comes back to the front.
 - Kept a setup form's words and passwords through the wallet drawing again.
 - Kept a site's approval through Firefox for Android stopping the wallet in the background, so Approve still works; if it can't, the approval and the site say the request ended.

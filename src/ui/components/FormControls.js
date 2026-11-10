@@ -146,6 +146,8 @@ export function wrappingInput({ value = "", onEnter, ...attrs } = {}) {
     else fit();
   });
   field.addEventListener("focus", fit);
+  // Fitted again on asking, as when what's drawn in it (a contact's chip) changes its room.
+  field.fitLines = fit;
   if (typeof requestAnimationFrame === "function") requestAnimationFrame(fit);
   // Narrower or wider (a contact's chip beside the text, the phone turned),
   // its lines change: fitted again. Only the width: fitting sets the height.
@@ -169,6 +171,13 @@ export function decimalInput(attrs = {}) {
 export function integerInput(attrs = {}) {
   return textInput({ ...attrs, numericMode: "integer" });
 }
+
+/**
+ * The `autocomplete` of a field for a new wallet password: not
+ * "new-password", for which Firefox for Android offers a strong password of
+ * its own over the field, one nobody wrote down.
+ */
+export const NEW_PASSWORD = "off";
 
 export function passwordInput(attrs = {}) {
   return textInput({ ...attrs, type: "password" });

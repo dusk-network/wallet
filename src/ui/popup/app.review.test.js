@@ -428,6 +428,43 @@ function tauriBridge(answers = {}) {
 describe("the app on a phone", () => {
   const LINK = `dusk:public-${B}@dusk:2?amount=0.01&memo=Deep+link+test`;
 
+  // Chen's wish: lock when I leave the app.
+  it("locks as the person leaves it with Lock when I leave the app on, not for the share sheet, and not with it off", async () => {
+    const bridge = tauriBridge();
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge });
+    const hide = async () => {
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+    const show = async () => {
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+    // Off, as it starts: nothing locks.
+    await hide();
+    expect(t.asked("DUSK_UI_LOCK")).toEqual([]);
+    await show();
+
+    // On, in Settings: the switch is there in the app.
+    t.open = { ...t.open, lockOnLeave: true };
+    t.state.route = "options";
+    await t.render({ forceRefresh: true });
+    expect(t.app.querySelector("#lock-on-leave").checked).toBe(true);
+    expect(t.app.textContent).toContain("Lock when I leave the app");
+
+    // The wallet's own share sheet is no leaving.
+    const { shareText } = await import("../../platform/native.js");
+    await shareText("an address");
+    await hide();
+    expect(t.asked("DUSK_UI_LOCK")).toEqual([]);
+    await show();
+    // Leaving is.
+    await hide();
+    expect(t.asked("DUSK_UI_LOCK")).toHaveLength(1);
+  });
+
   it("opens Send filled in from a dusk: link it was opened with, and from one opened while it runs", async () => {
     const bridge = tauriBridge({ "plugin:deep-link|get_current": [LINK] });
     const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge });
@@ -461,6 +498,9 @@ describe("the phone's Back in the app, as Android hands it over", () => {
     ["into Settings before Android answers (Sol's)", "on answer", [["back", "home"], ["settings", "options"], ["answer", "options"], ["back", "home"], ["back", "home"]], 2],
     ["into Settings and Back before Android answers (the delta review's)", "on answer", [["back", "home"], ["settings", "options"], ["back", "home"], ["answer", "home"], ["back", "home"]], 2],
     ["Android answering after the next Back too", "on answer", [["back", "home"], ["back", "home"], ["answer", "home"], ["answer", "home"], ["back", "home"]], 3],
+    // Chen's: Back from Settings and from Add wallet went straight to the dashboard.
+    ["Settings opened from Receive, Back to Receive", "at once", [["receive", "receive"], ["settings", "options"], ["back", "receive"], ["back", "home"], ["back", "home"]], 1],
+    ["Add wallet from Settings, Back to Settings, then to where Settings was opened", "at once", [["receive", "receive"], ["settings", "options"], ["add", "wallet_add"], ["back", "options"], ["back", "receive"], ["back", "home"]], 0],
   ];
 
   it.each(ROWS)("%s", async (_, when, steps, toBackground) => {
@@ -482,6 +522,8 @@ describe("the phone's Back in the app, as Android hands it over", () => {
     for (const [step, route] of steps) {
       if (step === "settings") button("Settings").click();
       if (step === "contacts") button("Contacts").click();
+      if (step === "receive") button("Receive").click();
+      if (step === "add") [...t.app.querySelectorAll(".settings-row")].find((row) => row.textContent.includes("Add wallet")).click();
       if (step === "tap") t.app.click();
       if (step === "back") backButton.onmessage({ canGoBack: false });
       if (step === "answer") waiting.shift()?.(true);

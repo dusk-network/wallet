@@ -197,6 +197,7 @@ describe("settings", () => {
       { at: AT - 2, what: "watch_nft", answer: "cancelled" },
       { at: AT - 3, what: "transfer", answer: "failed" },
       { at: AT - 4, what: "transfer", answer: "unconfirmed" },
+      { at: AT - 5, what: "contract_call", method: "depositETHToWithValue", asked: "Bridge to DuskEVM", answer: "approved" },
     ];
     const siteRecords = { [ACCOUNTS[0]]: { [SITE]: { lastUsedAt: AT + 60_000, asked } } };
     const details = (el) => el.querySelector("details.settings-site__details");
@@ -223,6 +224,7 @@ describe("settings", () => {
         ["Import an NFT", "Ended before an answer", dateText(AT - 2)],
         ["Pay", "Approved, not sent", dateText(AT - 3)],
         ["Pay", "Approved, not confirmed", dateText(AT - 4)],
+        ["Bridge to DuskEVM", "Approved", dateText(AT - 5)],
       ]);
       // Nothing a site chose reads as something else.
       expect(row.textContent).not.toContain("\u202E");

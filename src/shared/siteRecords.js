@@ -73,8 +73,14 @@ function bounded(sites) {
   return Object.fromEntries(entries.slice(0, SITES_KEPT));
 }
 
-// What a request is, for its record, and nothing else of it.
-function requestRecord(kind, params) {
+// What a request is, for its record, and nothing else of it: with the words
+// its approval led with (`asked`), where they say more than its kind.
+function requestRecord(kind, params, asked) {
+  const record = requestKind(kind, params);
+  return typeof asked === "string" && asked ? { ...record, asked: Array.from(asked).slice(0, METHOD_CHARS).join("") } : record;
+}
+
+function requestKind(kind, params) {
   switch (kind) {
     case "connect":
       return { what: params?.shieldedReceiveAddress ? "shielded_address" : "connect" };
@@ -101,20 +107,21 @@ function requestRecord(kind, params) {
  * note takes its place in line as it's made.
  * @param {string | Promise<string>} walletId - the wallet it was for
  * @param {string} origin
- * @param {{ kind: string, params?: object, answer: "approved"|"failed"|"unconfirmed"|"rejected"|"closed"|"expired"|"cancelled"|"not_shown", at?: number }} request
+ * @param {{ kind: string, params?: object, answer: "approved"|"failed"|"unconfirmed"|"rejected"|"closed"|"expired"|"cancelled"|"not_shown", asked?: string, at?: number }} request
+ *   `asked`: the words its approval led with, kept for a bridge's calls
  */
-export function noteSiteRequest(walletId, origin, { kind, params, answer, at = Date.now() }) {
+export function noteSiteRequest(walletId, origin, { kind, params, answer, asked, at = Date.now() }) {
   return mutate(async (all) => {
     const id = String((await walletId) ?? "");
     if (!id || !origin) return all;
     const sites = sitesOf(all, id);
     const site = siteOf(sites, origin);
-    const asked = [{ at, ...requestRecord(kind, params), answer }, ...(Array.isArray(site.asked) ? site.asked : [])];
-    while (asked.length > SITE_ASKED_KEPT) {
-      const least = Math.min(...asked.map(rankOf));
-      asked.splice(asked.findLastIndex((entry) => rankOf(entry) === least), 1);
+    const list = [{ at, ...requestRecord(kind, params, asked), answer }, ...(Array.isArray(site.asked) ? site.asked : [])];
+    while (list.length > SITE_ASKED_KEPT) {
+      const least = Math.min(...list.map(rankOf));
+      list.splice(list.findLastIndex((entry) => rankOf(entry) === least), 1);
     }
-    return { ...all, [id]: bounded({ ...sites, [origin]: { ...site, asked } }) };
+    return { ...all, [id]: bounded({ ...sites, [origin]: { ...site, asked: list } }) };
   });
 }
 

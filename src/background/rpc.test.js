@@ -175,6 +175,9 @@ vi.mock("../platform/extensionApi.js", () => ({
   getExtensionApi,
   runtimeGetURL,
   tabsCreate,
+  // No wallet tab open: a request link opens one.
+  tabsQuery: async () => [],
+  tabsUpdate: async () => ({}),
 }));
 
 describe("background rpc handler", () => {

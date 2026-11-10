@@ -29,7 +29,12 @@ The Android project under `src-tauri/gen/` is generated, not kept in git: make
 it once with `cargo tauri android init --ci` (with `ANDROID_HOME` and
 `NDK_HOME` set). What the wallet needs of Android itself (no screenshots of
 its screens, the share sheet, saving to Downloads, Back on its first screen)
-is in `src-tauri/src/android.rs`, so a new `android init` keeps it.
+is in `src-tauri/src/android.rs`, so a new `android init` keeps it. As the app
+is built, `src-tauri/build.rs` adds the permission to hear the network come
+and go to the project's manifest, and puts Dusk's icon in its resources from
+`src-tauri/icons/android`. That icon is made from `icons/app-icon.json`:
+`cargo tauri icon icons/app-icon.json -o <folder>`, then its `android` folder
+in place of `icons/android`.
 
 ### Running
 

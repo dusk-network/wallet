@@ -62,7 +62,21 @@ function svgModuleSize(svg) {
     : { w: 256, h: 256 };
 }
 
-export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10 } = {}) {
+// `text` cut to fit `width` on the canvas, with "…" where it was cut.
+function fitted(ctx, text, width) {
+  if (ctx.measureText(text).width <= width) return text;
+  const chars = Array.from(text);
+  while (chars.length > 1 && ctx.measureText(`${chars.join("")}…`).width > width) chars.pop();
+  return `${chars.join("")}…`;
+}
+
+/**
+ * The QR as a PNG, with `caption`'s lines written under it in the picture, for
+ * whoever gets the picture alone: what a request asks.
+ * @param {string} value
+ * @param {{ ecc?: string, margin?: number, scale?: number, caption?: Array<{ size: number, text: string, weight?: number }> }} [opts]
+ */
+export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10, caption = [] } = {}) {
   const svg = qrSvgString(value, { ecc, margin });
   if (!svg) throw new Error("No QR value to export");
   if (typeof document === "undefined") throw new Error("PNG export is unavailable");
@@ -70,7 +84,9 @@ export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10 } = {
   const { w, h } = svgModuleSize(svg);
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.ceil(w * scale));
-  canvas.height = Math.max(1, Math.ceil(h * scale));
+  const qrHeight = Math.max(1, Math.ceil(h * scale));
+  const lines = (caption ?? []).filter((line) => line?.text);
+  canvas.height = qrHeight + (lines.length ? lines.reduce((sum, { size }) => sum + size * 1.5, 0) + 24 : 0);
 
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("PNG export is unavailable");
@@ -90,7 +106,21 @@ export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10 } = {
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, qrHeight);
+
+    // What it asks, centred under the code, each line in the width there is.
+    if (lines.length) {
+      const font = globalThis.getComputedStyle?.(document.body)?.fontFamily || "sans-serif";
+      ctx.fillStyle = "#101010";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      let top = qrHeight;
+      for (const { size, text, weight = 400 } of lines) {
+        ctx.font = `${weight} ${size}px ${font}`;
+        ctx.fillText(fitted(ctx, String(text), canvas.width - 32), canvas.width / 2, top);
+        top += size * 1.5;
+      }
+    }
 
     return await new Promise((resolve, reject) => {
       canvas.toBlob((png) => {

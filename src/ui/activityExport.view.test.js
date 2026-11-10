@@ -34,6 +34,8 @@ vi.mock("../shared/activityHistory.js", async (importOriginal) => ({
 
 process.env.TZ = "UTC";
 const NOW = new Date("2026-10-23T09:00:00Z");
+// When a file saved now was made, in its name (UTC here).
+const MADE = "2026-10-23-0900";
 const NODE = "https://testnet.nodes.dusk.network";
 const ACCOUNT = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
 const SAVINGS = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
@@ -216,7 +218,7 @@ describe("Activity's Export", () => {
     await settle();
     expect(history.sync).toHaveBeenCalled();
     expect(saved).toHaveLength(1);
-    expect(saved[0].name).toBe("dusk-estudio-sofia-testnet-all.csv");
+    expect(saved[0].name).toBe(`dusk-estudio-sofia-testnet-all-${MADE}.csv`);
     expect(saved[0].blob.type).toBe("text/csv;charset=utf-8");
     const text = await saved[0].blob.text();
     expect(text.split("\r\n")[0]).toBe(CSV_COLUMNS.join(","));
@@ -241,20 +243,22 @@ describe("Activity's Export", () => {
     expect(body().querySelector("#activity-export")).toBeNull();
   });
 
-  it("saves it in the phone's Downloads in the app, and says where, where a download made no file", async () => {
+  // Chen's, Lena's and Sofía's: the message named an older file, Android having saved the new one as "(1)".
+  it("saves it in the phone's Downloads in the app, and says the name Android saved it as, where a download made no file", async () => {
     page("/index.html");
-    const invoke = vi.fn(async (cmd) => (cmd === "save_download" ? true : null));
+    // A file of that name is there already: Android adds " (1)".
+    const invoke = vi.fn(async (cmd, args) => (cmd === "save_download" ? args.name.replace(/\.csv$/, " (1).csv") : null));
     dom.window.__TAURI_INTERNALS__ = { invoke };
     const { actions } = setup();
     button("Export").click();
     button("Save CSV").click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     const [cmd, args] = invoke.mock.calls.find(([c]) => c === "save_download");
-    expect([cmd, args.name, args.mime]).toEqual(["save_download", "dusk-estudio-sofia-testnet-all.csv", "text/csv"]);
+    expect([cmd, args.name, args.mime]).toEqual(["save_download", `dusk-estudio-sofia-testnet-all-${MADE}.csv`, "text/csv"]);
     expect(new TextDecoder().decode(Uint8Array.from(args.bytes)).split("\r\n")[0]).toBe(CSV_COLUMNS.join(","));
     // No download besides, which the app's WebView never makes a file of.
     expect(saved).toHaveLength(0);
-    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(/^CSV saved to Downloads as dusk-estudio-sofia-testnet-all\.csv: \d+ lines\./);
+    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(new RegExp(`^CSV saved to Downloads as dusk-estudio-sofia-testnet-all-${MADE} \\(1\\)\\.csv: \\d+ lines\\.`));
   });
 
   it("marks a transfer between the person's own profiles, which isn't income", async () => {
@@ -286,7 +290,7 @@ describe("Activity's Export", () => {
     expect(body().querySelector("#activity-export-period").value).toBe("2026-3");
     button("Save CSV").click();
     await settle();
-    expect(saved[0].name).toBe("dusk-estudio-sofia-testnet-2026-q3.csv");
+    expect(saved[0].name).toBe(`dusk-estudio-sofia-testnet-2026-q3-${MADE}.csv`);
     expect((await linesOf()).map((l) => l.TxHash)).toEqual(["c2".repeat(32), "c3".repeat(32)]);
 
     button("Export").click();
@@ -322,7 +326,7 @@ describe("Activity's Export", () => {
     day("activity-export-from", "2026-10-23");
     button("Save CSV").click();
     await settle();
-    expect(saved[0].name).toBe("dusk-estudio-sofia-testnet-2026-10-23-to-2026-10-23.csv");
+    expect(saved[0].name).toBe(`dusk-estudio-sofia-testnet-2026-10-23-to-2026-10-23-${MADE}.csv`);
     expect((await linesOf()).map((l) => l.TxHash)).toContain("c1".repeat(32));
     expect((await linesOf()).map((l) => l.TxHash)).not.toContain("c2".repeat(32));
   });
@@ -693,7 +697,7 @@ describe("Activity's Export", () => {
     storageSessionGet.mockImplementationOnce(async (asked) => (asked === key ? { [key]: handed } : {}));
     const tab = setup();
     await expect(saveHandedExport({ state: tab.state, render: tab.actions.render, showToast: tab.actions.showToast })).resolves.toBe(true);
-    expect(saved.map((s) => s.name)).toEqual(["dusk-estudio-sofia-testnet-2026-q3.csv"]);
+    expect(saved.map((s) => s.name)).toEqual([`dusk-estudio-sofia-testnet-2026-q3-${MADE}.csv`]);
     expect(storageSessionRemove).toHaveBeenCalledWith(key);
     expect(history.replaceState).toHaveBeenCalledWith(null, "", "/full.html?route=activity");
     expect(tab.state.activityExport.open).toBe(false);
@@ -748,11 +752,11 @@ describe("Activity's Export", () => {
     page("/full.html");
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${first.id}` });
     await saveHandedExport({ state: setup().state });
-    expect(saved.at(-1).name).toBe("dusk-estudio-sofia-testnet-2026-q3.csv");
+    expect(saved.at(-1).name).toBe(`dusk-estudio-sofia-testnet-2026-q3-${MADE}.csv`);
     expect(Object.keys(kept)).toEqual([handedExportKey(second.id)]);
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${second.id}` });
     await saveHandedExport({ state: setup().state });
-    expect(saved.at(-1).name).toBe("dusk-estudio-sofia-testnet-2026-q4.csv");
+    expect(saved.at(-1).name).toBe(`dusk-estudio-sofia-testnet-2026-q4-${MADE}.csv`);
     expect(kept).toEqual({});
     // An address that isn't an export's ID asks nothing.
     storageSessionGet.mockClear();

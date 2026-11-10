@@ -7,7 +7,7 @@ import { STORAGE_KEYS } from "../shared/storage.js";
 import { createVault } from "../shared/vault.js";
 import { noteActiveWallet } from "../shared/wallets.js";
 import { handleRpc } from "./rpc.js";
-import { cancelPendingApprovals, pendingApprovals, resolvePendingDecision } from "./pending.js";
+import { approvalShown, cancelPendingApprovals, pendingApprovals, resolvePendingDecision } from "./pending.js";
 
 // The real RPC, queue, connections and records: only storage, windows and the
 // engine are stand-ins, as a site's request meets them.
@@ -167,6 +167,16 @@ describe("what's kept of what a site asked", () => {
       ["contract_call", "swap_tokens", "unconfirmed"],
       ["transfer", "failed"],
     ]);
+  });
+
+  it("keeps a bridge call by the words its approval led with, and its function's name besides", async () => {
+    await approveOrigin(SITE, { accountIndex: 0, profileId: `account:0:${ACCOUNT}` }, ACCOUNT);
+    const bridging = await ask("dusk_sendTransaction", call("depositETHToWithValue"));
+    await approvalShown({ rid: bridging.rid, asked: "Bridge to DuskEVM" }, {});
+    bridging.reject();
+    await bridging.outcome;
+    await vi.waitFor(() => expect(recordOf()?.asked).toHaveLength(1));
+    expect(recordOf().asked[0]).toMatchObject({ what: "contract_call", method: "depositETHToWithValue", asked: "Bridge to DuskEVM", answer: "rejected" });
   });
 
   it("notes one not answered in time, and one the wallet ended", async () => {

@@ -37,6 +37,36 @@ const paste = (field, text) => field.dispatchEvent(fakeEvent("paste", { clipboar
 // The focus leaving `field` for `to` (null: for nothing on the page).
 const leave = (field, to = null) => field.dispatchEvent(fakeEvent("focusout", { relatedTarget: to }));
 
+describe("on a phone", () => {
+  // Marek's: Firefox for Android told the keyboard nothing of "don't learn" for these boxes.
+  it("types each word in a password box no browser offers or keeps a password for, shown read-only on asking", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+    const { input, box, words } = mount();
+    const types = () => input.el.querySelectorAll("input").map((i) => [i.getAttribute("type"), Boolean(i.readOnly)]);
+    expect(new Set(types().map(String))).toEqual(new Set(["password,false"]));
+    expect(box(1).getAttribute("autocomplete")).toBe("one-time-code");
+    paste(box(1), TWELVE);
+    expect(words()).toEqual(TWELVE.split(" "));
+    expect(input.getMnemonic()).toBe(TWELVE);
+
+    const show = input.el.querySelectorAll("button").find((b) => b.textContent === "Show words");
+    show.click();
+    expect(new Set(types().map(String))).toEqual(new Set(["text,true"]));
+    expect(show.textContent).toBe("Hide words");
+    // Pressed to type in, a box hides them again, and takes what's typed.
+    box(3).dispatchEvent(fakeEvent("pointerdown"));
+    expect(new Set(types().map(String))).toEqual(new Set(["password,false"]));
+    typeInto(box(3), "zoo");
+    expect(words()[2]).toBe("zoo");
+  });
+
+  it("keeps words in plain boxes elsewhere", () => {
+    const { input } = mount();
+    expect(new Set(input.el.querySelectorAll("input").map((i) => i.getAttribute("type")))).toEqual(new Set(["text"]));
+    expect(input.el.querySelectorAll("button").find((b) => b.textContent === "Show words")).toBeUndefined();
+  });
+});
+
 describe("the recovery phrase's word boxes", () => {
   it("fills every box in order from a whole phrase pasted into any box, and takes its length from it", () => {
     const { box, words } = mount();

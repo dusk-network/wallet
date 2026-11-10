@@ -28,7 +28,7 @@ import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
 import { requestDraftOf } from "../lib/requestLink.js";
-import { listenForBack, listenForLinks, moveAppToBack } from "../../platform/native.js";
+import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
@@ -97,6 +97,18 @@ function isWalletLockedResponse(value) {
 
 // The screens of a wallet being added, removed, or a new password: unlocked only.
 const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password", "send_password"]);
+
+// The screen Settings or Add wallet opens from, for its Back to return to:
+// home from Settings' own pages and a setup.
+function cameFrom() {
+  const route = String(state.route || "home");
+  return route === "options" || WALLET_ROUTES.has(route) || ONBOARD_ROUTES.has(route) ? "home" : route;
+}
+
+function openSettings() {
+  if (state.route !== "options") state.optionsFrom = cameFrom();
+  state.route = "options";
+}
 
 function applyLockedOverviewPatch() {
   try {
@@ -888,9 +900,22 @@ function comeBack() {
   resumeWatching();
 }
 
+// The app on a phone, with Lock when I leave the app on: locked as the person
+// leaves it, unless the wallet itself sent them elsewhere for a moment.
+function leave() {
+  const ov = state.overview;
+  if (!appBack || !ov?.isUnlocked || ov?.lockOnLeave !== true || steppedAway()) return;
+  send({ type: "DUSK_UI_LOCK" }).catch(() => {});
+}
+
 try {
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") comeBack();
+    if (document.visibilityState === "hidden") {
+      leave();
+      return;
+    }
+    stepBack();
+    comeBack();
   });
   window.addEventListener("pageshow", (event) => {
     if (event?.persisted) resumeWatching();
@@ -926,7 +951,7 @@ const netMenu = createNetworkMenuController({
 
       if (preset.id === "custom") {
         // Keep navigation consistent: open the in-app Settings screen.
-        state.route = "options";
+        openSettings();
         await render();
         return;
       }
@@ -1006,14 +1031,14 @@ const acctMenu = createAccountMenuController({
   onAddWallet: async () => {
     acctMenu.close();
     netMenu.close();
-    state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true };
+    state.onboard = { mode: null, mnemonic: null, password: "", reveal: false, adding: true, from: cameFrom() };
     state.route = "wallet_add";
     await render();
   },
   onOpenOptions: async () => {
     acctMenu.close();
     netMenu.close();
-    state.route = "options";
+    openSettings();
     await render();
   },
   onCopy: showToast,
@@ -1058,7 +1083,7 @@ async function onRefresh() {
 async function onOpenOptions() {
   netMenu.close();
   acctMenu.close();
-  state.route = "options";
+  openSettings();
   await render();
 }
 

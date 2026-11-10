@@ -39,10 +39,21 @@ export function keyboardTop(win) {
   return Math.round(layout * ((win.innerWidth || 0) > layout ? 0.35 : 0.5));
 }
 
-// The box that scrolls `el`: the panel's content in the popup, else the page.
-function scrollerOf(el, doc) {
+// Whether `n` is a box that scrolls what's in it: one that may and has more
+// than it shows. Where styles can't be read, the panel's content, which does
+// in the popup.
+function scrolls(n, win) {
+  const style = win?.getComputedStyle?.(n);
+  if (!style) return Boolean(n.classList?.contains("panel-content"));
+  return /(auto|scroll)/.test(String(style.overflowY ?? "")) && n.scrollHeight > n.clientHeight;
+}
+
+// The box that scrolls `el`: the panel's content in the popup, else the page,
+// as in a tab of Firefox for Android, where the panel grows with the screen
+// and the page scrolls instead.
+function scrollerOf(el, doc, win) {
   for (let n = el?.parentNode; n && n.nodeType === 1; n = n.parentNode) {
-    if (n.classList?.contains("panel-content")) return n;
+    if (scrolls(n, win)) return n;
   }
   return doc.scrollingElement ?? doc.documentElement;
 }
@@ -65,6 +76,8 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
   const touch = () => isPhone(win?.navigator);
   const root = doc?.documentElement;
   let room = 0;
+  // Where the box the keyboard moved was before it did, to go back to.
+  let before = null;
 
   const setRoom = (px) => {
     const next = Math.max(room, Math.ceil(px));
@@ -73,12 +86,18 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
     root?.style?.setProperty?.("--keyboard-room", `${room}px`);
   };
 
+  const dropRoom = () => {
+    room = 0;
+    root?.style?.removeProperty?.("--keyboard-room");
+  };
+
   const reveal = (field) => {
     if (!field?.isConnected) return;
     const top = keyboardTop(win);
     const layout = doc.documentElement?.clientHeight || win.innerHeight || 0;
+    const scroller = scrollerOf(field, doc, win);
+    if (!before) before = { scroller, top: scroller.scrollTop };
     setRoom(layout - top + MARGIN);
-    const scroller = scrollerOf(field, doc);
     const page = scroller === doc.scrollingElement || scroller === doc.documentElement;
     const from = Math.max(MARGIN, page ? 0 : scroller.getBoundingClientRect().top + MARGIN);
     const to = top - MARGIN;
@@ -106,13 +125,28 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
     if (isTyped(e.target)) soon();
   });
   win.visualViewport?.addEventListener?.("resize", soon);
-  win.addEventListener?.("resize", soon);
+  // Turned sideways or back: the room made for the keyboard the other way
+  // round goes, and the page goes back where it was before the keyboard came,
+  // or makes room afresh for a field still typed in.
+  let width = win.innerWidth;
+  win.addEventListener?.("resize", () => {
+    if (win.innerWidth !== width) {
+      width = win.innerWidth;
+      if (room) {
+        dropRoom();
+        const typing = touch() && isTyped(doc.activeElement);
+        if (!typing && before?.scroller?.isConnected) before.scroller.scrollTop = before.top;
+        if (!typing) before = null;
+      }
+    }
+    soon();
+  });
 
   return {
     reset() {
+      before = null;
       if (!room) return;
-      room = 0;
-      root?.style?.removeProperty?.("--keyboard-room");
+      dropRoom();
     },
     reveal,
   };

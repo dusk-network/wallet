@@ -222,23 +222,68 @@ describe("pending approvals", () => {
       }
     });
 
-    it("cancels a request as the person goes back to its site's tab without an answer, as Back before any press does there", async () => {
+    // Marek's: switching to the site's tab ended it, as "User rejected".
+    it("keeps a request waiting as the person switches tabs, its site's too, and puts the entry the phone's Back takes away under it", async () => {
       browserHas.windows = false;
       vi.resetModules();
       const pending = await import("./pending.js");
       tabs.remove.mockClear();
+      tabs.update.mockClear();
+      const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("rid-back");
       try {
         const answer = pending.requestUserApproval("send_tx", "https://site.example", {}, { walletId: "acct0" });
         await new Promise((r) => setTimeout(r, 0));
-        // Another tab moves nothing; the site's tab (5) ends it.
-        onTabActivatedCb({ tabId: 9 });
-        expect(pending.pendingApprovals.size).toBe(1);
-        onTabActivatedCb({ tabId: 5 });
-        await expect(answer).rejects.toMatchObject({ code: 4001 });
+        onTabActivatedCb?.({ tabId: 9 });
+        onTabActivatedCb?.({ tabId: 5 });
+        expect(pending.getPending("rid-back")).toBeTruthy();
+        expect(tabs.remove).not.toHaveBeenCalled();
+
+        // Drawn in its tab: the wallet's entry under it, once; not from another tab.
+        const url = "chrome-extension://test/notification.html?rid=rid-back";
+        await expect(pending.approvalShown({ rid: "rid-back" }, { tab: { id: 12 }, url })).resolves.toBe(true);
+        expect(tabs.update).not.toHaveBeenCalled();
+        await pending.approvalShown({ rid: "rid-back" }, { tab: { id: 77 }, url });
+        await pending.approvalShown({ rid: "rid-back" }, { tab: { id: 77 }, url: `${url}#back` });
+        expect(tabs.update.mock.calls).toEqual([[77, { url: `${url}#back` }]]);
+        await expect(pending.approvalShown({ rid: "gone" }, { tab: { id: 77 }, url })).resolves.toBe(false);
+
+        // Back takes it away: the window rejects, and the site's tab comes back.
+        pending.resolvePendingDecision({ rid: "rid-back", decision: "reject" });
+        await expect(answer).rejects.toMatchObject({ code: 4001, message: "User rejected the request" });
         await new Promise((r) => setTimeout(r, 0));
         expect(tabs.remove).toHaveBeenCalledWith(77);
+        expect(tabs.update).toHaveBeenLastCalledWith(5, { active: true });
       } finally {
+        ridSpy.mockRestore();
         browserHas.windows = true;
+      }
+    });
+
+    // Marek's: the record said "Contract call: depositETHToWithValue" where the approval said "Bridge to DuskEVM".
+    it("keeps the words a bridge's call led with for its site's record, and nothing else a window says", async () => {
+      vi.resetModules();
+      const pending = await import("./pending.js");
+      const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("rid-words");
+      notes.length = 0;
+      try {
+        const bridged = pending.requestUserApproval("send_tx", "https://bridge.example", { kind: "contract_call", fnName: "depositETHToWithValue" }, { walletId: "acct0" });
+        await new Promise((r) => setTimeout(r, 0));
+        await pending.approvalShown({ rid: "rid-words", asked: "Bridge to DuskEVM" }, {});
+        pending.resolvePendingDecision({ rid: "rid-words", decision: "reject" });
+        await bridged.catch(() => {});
+        ridSpy.mockReturnValue("rid-other");
+        const paid = pending.requestUserApproval("send_tx", "https://shop.example", { kind: "transfer", amount: "7" }, { walletId: "acct0" });
+        await new Promise((r) => setTimeout(r, 0));
+        await pending.approvalShown({ rid: "rid-other", asked: "Pay 7 DUSK to alice" }, {});
+        pending.resolvePendingDecision({ rid: "rid-other", decision: "reject" });
+        await paid.catch(() => {});
+        await vi.waitFor(() => expect(notes).toHaveLength(2));
+        expect(notes.map(({ origin, asked }) => [origin, asked])).toEqual([
+          ["https://bridge.example", "Bridge to DuskEVM"],
+          ["https://shop.example", undefined],
+        ]);
+      } finally {
+        ridSpy.mockRestore();
       }
     });
 
@@ -347,12 +392,12 @@ describe("pending approvals", () => {
       }
     });
 
-    it("tells its site it was cancelled when the person went back to the site's tab while the background was stopped", async () => {
+    it("keeps one kept through a stop waiting as the person goes back to the site's tab meanwhile", async () => {
       try {
         const pending = await stoppedWhileWaiting();
-        onTabActivatedCb({ tabId: 5 });
-        await expect(pending.checkResume(KEY)).rejects.toMatchObject({ code: 4001 });
-        expect(tabs.remove).toHaveBeenCalledWith(77);
+        onTabActivatedCb?.({ tabId: 5 });
+        await expect(pending.checkResume(KEY)).resolves.toBeUndefined();
+        expect(tabs.remove).not.toHaveBeenCalled();
       } finally {
         browserHas.windows = true;
       }
