@@ -9,6 +9,7 @@ import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
 import { askConfirm } from "../../components/ConfirmDialog.js";
+import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
 
 function generateMnemonic12() {
   const entropy = new Uint8Array(16);
@@ -218,8 +219,35 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
   ];
 }
 
+// Unlock with fingerprint, offered beside the password where the phone can
+// guard it with one (the app on Android): on, the fingerprint is asked once
+// the wallet is made (fingerOnWith).
+function fingerprintOffer(state) {
+  const onboard = (state.onboard ??= {});
+  const box = checkboxInput({ id: "onboard-fingerprint" });
+  box.checked = onboard.fingerprint === true;
+  box.addEventListener("change", () => {
+    onboard.fingerprint = box.checked;
+  });
+  const el = h("label", { class: "checkline", hidden: true }, [box, h("span", { text: "Unlock with fingerprint" })]);
+  fingerprintStatus().then(({ available }) => {
+    if (available) el.hidden = false;
+  });
+  return { el, wanted: () => !el.hidden && box.checked };
+}
+
+// Turns fingerprint unlock on with the new wallet's password, where it was asked for.
+function fingerOnWith(password, actions) {
+  turnFingerprintOn(password)
+    .then((on) => {
+      if (on.ok) actions?.showToast?.("Fingerprint unlock is on.");
+    })
+    .catch(() => {});
+}
+
 export function onboardingCreatePasswordView({ state, actions } = {}) {
   const fields = newPasswordFields({ onDone: () => (agree.checked ? next.click() : agree.focus()) });
+  const finger = fingerprintOffer(state);
   const agree = checkboxInput({ onEnter: () => next.click() });
   const agreeError = fieldError(agree);
   agree.addEventListener("change", () => agreeError.show(""));
@@ -268,6 +296,7 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
         h("span", { text: "I understand that my recovery phrase is the only way to restore this wallet." }),
       ]),
       agreeError.el,
+      finger.el,
       err.el,
       next,
     ]),
@@ -424,10 +453,12 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
           await addedWallet(state, actions);
           return;
         }
+        const finger = state.onboard?.fingerprint === true;
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
         state.route = "home";
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
+        if (finger) fingerOnWith(password, actions);
       } catch (e) {
         const message = e?.message ?? String(e);
         if (adding) {
@@ -487,6 +518,8 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
   const fields = adding
     ? currentPasswordField({ onDone: () => btn.click() })
     : newPasswordFields({ onDone: () => btn.click(), label: passwordLabel });
+  // A new password, a new wallet's or a restored one's: fingerprint unlock offered with it.
+  const finger = adding ? null : fingerprintOffer(state);
   const err = formError();
 
   const busyBody = h("p", { class: "auth-note", style: "display:none", text: "Encrypting your wallet. Keep this window open." });
@@ -556,6 +589,9 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
         state.route = "home";
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
+        // A new password: fingerprint unlock with it where asked, and the old one's gone.
+        if (finger?.wanted()) fingerOnWith(password, actions);
+        else if (type === "DUSK_UI_RESTORE_WALLET") turnFingerprintOff().catch(() => {});
       } catch (e) {
         const message = e?.message ?? String(e);
         if (adding) {
@@ -584,6 +620,7 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
       mnemonicInput.el,
       phraseError.el,
       ...fields.els,
+      finger?.el,
       err.el,
       btn,
       busyBody,

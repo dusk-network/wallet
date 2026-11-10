@@ -428,8 +428,8 @@ function tauriBridge(answers = {}) {
 describe("the app on a phone", () => {
   const LINK = `dusk:public-${B}@dusk:2?amount=0.01&memo=Deep+link+test`;
 
-  // Chen's wish: lock when I leave the app.
-  it("locks as the person leaves it with Lock when I leave the app on, not for the share sheet, and not with it off", async () => {
+  // Chen's wish: lock when I leave the app, as phone wallets' Auto-lock: Immediately.
+  it("locks as the person leaves it with Auto-lock: Immediately, not for the share sheet, and not otherwise", async () => {
     const bridge = tauriBridge();
     // The wallet locks when asked, and says so.
     const locks = async (message, t) => {
@@ -454,12 +454,19 @@ describe("the app on a phone", () => {
     expect(t.asked("DUSK_UI_LOCK")).toEqual([]);
     await show();
 
-    // On, in Settings: the switch is there in the app.
-    t.open = { ...t.open, lockOnLeave: true };
+    // Immediately, in Settings: Auto-lock's first choice in the app.
     t.state.route = "options";
     await t.render({ forceRefresh: true });
-    expect(t.app.querySelector("#lock-on-leave").checked).toBe(true);
-    expect(t.app.textContent).toContain("Lock when I leave the app");
+    const autoLock = () => t.app.querySelector("#auto-lock");
+    expect(autoLock().querySelectorAll("option").map((o) => o.textContent)).toEqual(["Immediately", "5 minutes", "15 minutes", "Off"]);
+    autoLock().value = "leave";
+    autoLock().dispatchEvent(fakeEvent("change"));
+    await flush();
+    expect(t.asked("DUSK_UI_SET_LOCK_ON_LEAVE").at(-1)).toMatchObject({ lockOnLeave: true });
+    t.open = { ...t.open, lockOnLeave: true };
+    await t.render({ forceRefresh: true });
+    expect(autoLock().value).toBe("leave");
+    expect(t.app.textContent).toContain("Locks the wallet as you leave the app.");
 
     // The wallet's own share sheet is no leaving.
     const { shareText } = await import("../../platform/native.js");
@@ -472,7 +479,7 @@ describe("the app on a phone", () => {
     expect(t.asked("DUSK_UI_LOCK")).toHaveLength(1);
     await show();
     expect(t.app.querySelector("input[type=password]")?.getAttribute("placeholder")).toBe("Password");
-    expect(t.app.textContent).not.toContain("Lock when I leave the app");
+    expect(t.app.textContent).not.toContain("Locks the wallet as you leave the app.");
   });
 
   it("opens Send filled in from a dusk: link it was opened with, and from one opened while it runs", async () => {

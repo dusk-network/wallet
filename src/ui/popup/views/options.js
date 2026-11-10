@@ -25,9 +25,10 @@ import { bracketTitle } from "../../components/BracketTitle.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { setNetworkSwitching } from "../../components/NetworkMenu.js";
 import { askConfirm } from "../../components/ConfirmDialog.js";
-import { fieldLabel, integerInput, textInput, urlInput } from "../../components/FormControls.js";
+import { fieldLabel, integerInput, passwordInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
 import { contactNameText } from "../../lib/contactNames.js";
+import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
 import { switchContext } from "../context.js";
 import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
 
@@ -379,50 +380,114 @@ export function optionsView(ov, { state, actions } = {}) {
     : null;
 
   // Auto-lock. The choice shows at once: a redraw before the overview has it
-  // doesn't put the old one back.
-  const lockChoices = AUTO_LOCK_OPTIONS.some((o) => o.value === currentAutoLock)
-    ? AUTO_LOCK_OPTIONS
-    : [...AUTO_LOCK_OPTIONS, { value: currentAutoLock, label: autoLockLabel(currentAutoLock) }];
+  // doesn't put the old one back. The app on a phone locks Immediately too,
+  // as the person leaves it, as phone wallets do.
+  const inApp = isTauriRuntime() && isPhone();
+  const leaving = inApp && ov?.lockOnLeave === true;
+  const lockChoices = [
+    ...(inApp ? [{ value: "leave", label: "Immediately" }] : []),
+    ...(AUTO_LOCK_OPTIONS.some((o) => o.value === currentAutoLock) ? AUTO_LOCK_OPTIONS : [...AUTO_LOCK_OPTIONS, { value: currentAutoLock, label: autoLockLabel(currentAutoLock) }]),
+  ];
   const autoLockSelect = h(
     "select",
     { id: "auto-lock" },
     lockChoices.map((opt) => h("option", { value: String(opt.value), text: opt.label }))
   );
-  autoLockSelect.value = String(currentAutoLock);
+  autoLockSelect.value = leaving ? "leave" : String(currentAutoLock);
+  const lockNote = h("p", { class: "settings-note" });
+  const sayLock = (onLeave) => {
+    lockNote.textContent = onLeave
+      ? "Locks the wallet as you leave the app."
+      : lockAll
+        ? "Locks every wallet after this long without use."
+        : "Locks the wallet after this long without use.";
+  };
   autoLockSelect.addEventListener("change", async () => {
-    const timeout = Number(autoLockSelect.value);
-    if (state.overview) state.overview.autoLockTimeoutMinutes = timeout;
-    if (ov && ov !== state.overview) ov.autoLockTimeoutMinutes = timeout;
+    const onLeave = autoLockSelect.value === "leave";
+    const timeout = onLeave ? currentAutoLock || 5 : Number(autoLockSelect.value);
+    for (const o of new Set([state.overview, ov].filter(Boolean))) Object.assign(o, { autoLockTimeoutMinutes: timeout }, inApp ? { lockOnLeave: onLeave } : {});
+    sayLock(onLeave);
     try {
+      if (inApp) {
+        const left = await actions?.send?.({ type: "DUSK_UI_SET_LOCK_ON_LEAVE", lockOnLeave: onLeave });
+        if (left?.error) throw new Error(left.error.message ?? "Couldn't save auto-lock");
+      }
       const res = await actions?.send?.({ type: "DUSK_UI_SET_AUTO_LOCK", autoLockTimeoutMinutes: timeout });
       if (res?.error) throw new Error(res.error.message ?? "Couldn't save auto-lock");
-      actions?.showToast?.(timeout > 0 ? `Locks after ${autoLockLabel(timeout)} without use.` : "Auto-lock is off.");
+      actions?.showToast?.(onLeave ? "Locks as you leave the app." : timeout > 0 ? `Locks after ${autoLockLabel(timeout)} without use.` : "Auto-lock is off.");
     } catch (e) {
       actions?.showToast?.(e?.message ?? String(e), 2500);
     }
   });
 
-  // The app on a phone: locked as the person leaves it, when they ask for that.
-  const leaveToggle =
-    isTauriRuntime() && isPhone()
-      ? h("input", {
-          id: "lock-on-leave",
-          type: "checkbox",
-          checked: ov?.lockOnLeave === true,
-          onchange: async (event) => {
-            const on = event.target.checked === true;
-            try {
-              const res = await actions?.send?.({ type: "DUSK_UI_SET_LOCK_ON_LEAVE", lockOnLeave: on });
-              if (res?.error) throw new Error(res.error.message ?? "Couldn't save that");
-              if (state.overview) state.overview.lockOnLeave = on;
-              actions?.showToast?.(on ? "Locks when you leave the app." : "Stays unlocked when you leave the app, until auto-lock.");
-            } catch (e) {
-              event.target.checked = !on;
-              actions?.showToast?.(e?.message ?? String(e), 2500);
-            }
-          },
-        })
-      : null;
+  // Fingerprint unlock, in the app on a phone that can guard the password with
+  // one (platform/fingerprint.js): turned on with the password, then a
+  // fingerprint; off at once. Shown once the phone says it can.
+  const fingerSwitch = h("input", { id: "fingerprint-unlock", type: "checkbox" });
+  const fingerPwd = passwordInput({ id: "fingerprint-password", autocomplete: "current-password", placeholder: "Password", onEnter: () => fingerOn.click() });
+  const fingerError = h("div", { class: "field-error", id: "fingerprint-error", role: "alert", hidden: true });
+  const sayFingerError = (text) => {
+    fingerError.textContent = text || "";
+    fingerError.hidden = !text;
+  };
+  fingerPwd.addEventListener("input", () => sayFingerError(""));
+  const fingerOn = h("button", {
+    class: "btn-outline",
+    type: "button",
+    text: "Turn on",
+    onclick: async () => {
+      sayFingerError("");
+      const password = fingerPwd.value;
+      if (!password) return sayFingerError("Enter your password.");
+      fingerOn.disabled = true;
+      try {
+        const res = await actions?.send?.({ type: "DUSK_UI_CHECK_PASSWORD", password });
+        if (res?.error) throw new Error(/^Incorrect password$/.test(String(res.error.message ?? "")) ? "Wrong password." : res.error.message);
+        const on = await turnFingerprintOn(password);
+        fingerPwd.value = "";
+        if (!on.ok) {
+          fingerSwitch.checked = false;
+          fingerAsk.hidden = true;
+          if (on.reason !== "password") actions?.showToast?.("Fingerprint unlock couldn't be turned on.", 2500);
+          return;
+        }
+        fingerAsk.hidden = true;
+        actions?.showToast?.("Fingerprint unlock is on.");
+      } catch (e) {
+        sayFingerError(e?.message ?? String(e));
+      } finally {
+        fingerOn.disabled = false;
+      }
+    },
+  });
+  const fingerAsk = h("div", { class: "settings-fingerprint-ask", hidden: true }, [
+    fieldLabel(fingerPwd, "Your password, to turn it on"),
+    fingerPwd,
+    fingerError,
+    fingerOn,
+  ]);
+  fingerSwitch.addEventListener("change", async () => {
+    if (fingerSwitch.checked) {
+      fingerAsk.hidden = false;
+      fingerPwd.focus?.();
+      return;
+    }
+    fingerAsk.hidden = true;
+    fingerPwd.value = "";
+    await turnFingerprintOff();
+    actions?.showToast?.("Fingerprint unlock is off.");
+  });
+  const fingerRow = h("div", { class: "settings-fingerprint", hidden: true }, [
+    h("label", { class: "settings-switch", for: "fingerprint-unlock" }, [fingerSwitch, h("span", { text: "Unlock with fingerprint" })]),
+    fingerAsk,
+  ]);
+  if (inApp && ov?.isUnlocked) {
+    fingerprintStatus().then(({ available, on }) => {
+      if (!available && !on) return;
+      fingerSwitch.checked = on;
+      fingerRow.hidden = false;
+    });
+  }
 
   // Connected sites, each with its profile and Disconnect; Disconnect all asks first.
   // Connected sites, each with its wallet: with more than one wallet here,
@@ -908,6 +973,8 @@ export function optionsView(ov, { state, actions } = {}) {
         switchContext(state);
         const res = await actions?.send?.({ type: "DUSK_UI_RESET_WALLET" });
         if (res?.error) throw new Error(res.error.message ?? "Wallet reset failed");
+        // No wallet, no password to keep for a fingerprint.
+        await turnFingerprintOff();
         actions?.showToast?.("Wallet reset. Import again to continue.", 2500);
         state.route = "home";
         state.needsRefresh = true;
@@ -952,11 +1019,8 @@ export function optionsView(ov, { state, actions } = {}) {
       : null,
     section("Security", [
       h("div", { class: "settings-field" }, [fieldLabel(autoLockSelect, "Auto-lock"), h("div", { class: "select-wrap" }, [autoLockSelect])]),
-      h("p", {
-        class: "settings-note",
-        text: lockAll ? "Locks every wallet after this long without use." : "Locks the wallet after this long without use.",
-      }),
-      leaveToggle ? h("label", { class: "settings-switch", for: "lock-on-leave" }, [leaveToggle, h("span", { text: "Lock when I leave the app" })]) : null,
+      (sayLock(leaving), lockNote),
+      fingerRow,
       changePasswordBtn,
       changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
       sendPasswordRow ? h("div", { class: "group" }, [sendPasswordRow]) : null,

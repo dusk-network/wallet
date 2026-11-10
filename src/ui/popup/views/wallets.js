@@ -10,6 +10,7 @@ import { NEW_PASSWORD, decimalInput, fieldError, fieldLabel, passwordInput, unlo
 import { subnav } from "../../components/Subnav.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { switchContext } from "../context.js";
+import { fingerprintStatus, turnFingerprintOn } from "../../../platform/fingerprint.js";
 
 // A wrong password, or one that has to wait, is said under the password.
 const passwordRefusal = (message) => /^Incorrect password$|^Too many attempts/.test(String(message ?? ""));
@@ -155,11 +156,17 @@ export function changePasswordView(ov, { state, actions } = {}) {
       for (const f of fields) f.input.disabled = true;
       btn.textContent = "Changing…";
       try {
-        const res = await actions?.send?.({ type: "DUSK_UI_CHANGE_PASSWORD", password: current.input.value, newPassword: next.input.value });
+        const newPassword = next.input.value;
+        const res = await actions?.send?.({ type: "DUSK_UI_CHANGE_PASSWORD", password: current.input.value, newPassword });
         if (res?.error) throw new Error(res.error.message ?? "Couldn't change the password");
         for (const f of fields) f.input.value = "";
         actions?.showToast?.("Password changed.");
         backToSettings(state, actions);
+        // Fingerprint unlock kept the old password: it keeps the new one, after a fingerprint, or it's off.
+        if ((await fingerprintStatus()).on) {
+          const on = await turnFingerprintOn(newPassword);
+          if (!on.ok) actions?.showToast?.("Fingerprint unlock is off. Turn it on again in Settings.", 3000);
+        }
       } catch (e) {
         const message = e?.message ?? String(e);
         if (passwordRefusal(message)) current.error.show(message);

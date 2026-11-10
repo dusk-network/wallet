@@ -4,34 +4,41 @@ use std::{
 };
 
 // What the wallet asks of Android beyond Tauri's own manifest: to hear the
-// network come and go. Without it the WebView never tells the page it went
-// offline, so the wallet can't say so. A normal permission: Android asks nothing.
-const NETWORK_STATE: &str = r#"<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />"#;
+// network come and go (without it the WebView never tells the page it went
+// offline, so the wallet can't say so), and to ask for a fingerprint, for
+// fingerprint unlock (android/KeystorePlugin.kt). Normal permissions: Android
+// asks nothing.
+const PERMISSIONS: [&str; 2] = ["android.permission.ACCESS_NETWORK_STATE", "android.permission.USE_BIOMETRIC"];
 
 // The Android project `cargo tauri android init` makes, which isn't kept in
-// git: its manifest gets the permission as the app is built.
-fn ask_for_network_state() {
+// git: its manifest gets the permissions as the app is built.
+fn ask_for_permissions() {
   println!("cargo:rerun-if-env-changed=TAURI_ANDROID_PROJECT_PATH");
   let Some(project) = env::var_os("TAURI_ANDROID_PROJECT_PATH").map(PathBuf::from) else {
     return;
   };
   let path = project.join("app/src/main/AndroidManifest.xml");
   println!("cargo:rerun-if-changed={}", path.display());
-  let Ok(manifest) = fs::read_to_string(&path) else {
+  let Ok(mut manifest) = fs::read_to_string(&path) else {
     return;
   };
-  if manifest.contains("android.permission.ACCESS_NETWORK_STATE") {
-    return;
+  let before = manifest.clone();
+  for permission in PERMISSIONS {
+    if manifest.contains(permission) {
+      continue;
+    }
+    // Right after the manifest's opening tag, beside its other permissions.
+    let Some(open) = manifest.find("<manifest") else {
+      return;
+    };
+    let Some(end) = manifest[open..].find('>').map(|at| open + at + 1) else {
+      return;
+    };
+    manifest = format!("{}\n    <uses-permission android:name=\"{permission}\" />{}", &manifest[..end], &manifest[end..]);
   }
-  // Right after the manifest's opening tag, beside its other permissions.
-  let Some(open) = manifest.find("<manifest") else {
-    return;
-  };
-  let Some(end) = manifest[open..].find('>').map(|at| open + at + 1) else {
-    return;
-  };
-  let rewritten = format!("{}\n    {NETWORK_STATE}{}", &manifest[..end], &manifest[end..]);
-  fs::write(&path, rewritten).expect("failed to add ACCESS_NETWORK_STATE to AndroidManifest.xml");
+  if manifest != before {
+    fs::write(&path, manifest).expect("failed to add the wallet's permissions to AndroidManifest.xml");
+  }
 }
 
 // Every file under `from`, by its path under it.
@@ -76,8 +83,38 @@ fn dusk_icon() {
   }
 }
 
+// The wallet's own Android code, Kotlin beside src/android.rs, into the Android
+// project's sources, where Gradle builds it with the app.
+fn dusk_kotlin() {
+  println!("cargo:rerun-if-changed=android");
+  let Some(project) = env::var_os("TAURI_ANDROID_PROJECT_PATH").map(PathBuf::from) else {
+    return;
+  };
+  let from = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default()).join("android");
+  let to = project.join("app/src/main/java/network/dusk/wallet");
+  let Ok(entries) = fs::read_dir(&from) else {
+    return;
+  };
+  for entry in entries.flatten() {
+    let path = entry.path();
+    if path.extension().and_then(|ext| ext.to_str()) != Some("kt") {
+      continue;
+    }
+    let Ok(bytes) = fs::read(&path) else {
+      continue;
+    };
+    let target = to.join(entry.file_name());
+    if fs::read(&target).ok().as_deref() == Some(bytes.as_slice()) {
+      continue;
+    }
+    fs::create_dir_all(&to).expect("failed to make the Android sources' folder");
+    fs::write(&target, bytes).expect("failed to put the wallet's Kotlin in the Android project");
+  }
+}
+
 fn main() {
-  ask_for_network_state();
+  ask_for_permissions();
   dusk_icon();
+  dusk_kotlin();
   tauri_build::build()
 }

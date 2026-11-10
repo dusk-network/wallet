@@ -9,7 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- Added Lock when I leave the app to the Android app's Settings, off at first.
+- Added Immediately to Auto-lock in the Android app, which locks it as you leave it.
+- Added fingerprint unlock to the Android app, offered with a new password and in Settings, with the password as the fallback.
 - Gave the Android app Dusk's icon, in the launcher and on its splash.
 - Brought back the app for Android and desktop (Tauri), in `apps/tauri`.
 - Opened `dusk:` payment links in the Android app's Send, filled in.

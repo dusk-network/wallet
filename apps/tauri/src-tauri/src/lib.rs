@@ -33,6 +33,20 @@ async fn save_download(window: tauri::WebviewWindow, name: String, mime: String,
   }
 }
 
+/// Fingerprint unlock, on Android: `action` status, enable (with the password
+/// as `secret`), unlock (the password back) or disable, each after a
+/// fingerprint where it takes one. `{ ok: false, reason: "unavailable" }` elsewhere.
+#[tauri::command]
+async fn fingerprint(app: tauri::AppHandle, action: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+  #[cfg(target_os = "android")]
+  return android::fingerprint(&app, &action, args).await;
+  #[cfg(not(target_os = "android"))]
+  {
+    let _ = (app, action, args);
+    Ok(serde_json::json!({ "ok": false, "reason": "unavailable" }))
+  }
+}
+
 /// Puts the app in the background as it is (Back on its first screen). False
 /// where there's no such thing.
 #[tauri::command]
@@ -48,14 +62,18 @@ async fn move_to_back(window: tauri::WebviewWindow) -> Result<bool, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+  let builder = tauri::Builder::default();
+  // Fingerprint unlock's Kotlin (android/KeystorePlugin.kt).
+  #[cfg(target_os = "android")]
+  let builder = builder.plugin(android::keystore());
+  builder
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_fs::init())
     // Links open in the phone's browser, never in the wallet's window.
     .plugin(tauri_plugin_opener::init())
     // dusk: payment links open the app's Send (popup/app.js).
     .plugin(tauri_plugin_deep_link::init())
-    .invoke_handler(tauri::generate_handler![share_text, save_download, move_to_back])
+    .invoke_handler(tauri::generate_handler![share_text, save_download, move_to_back, fingerprint])
     .setup(|app| {
       // Stronghold needs a salt file used for Argon2 hashing.
       // We store it in the app's local data directory.

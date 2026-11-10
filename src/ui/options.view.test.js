@@ -818,3 +818,57 @@ describe("wallets", () => {
   });
 });
 
+
+// The app on a phone: Auto-lock's Immediately, and fingerprint unlock, as phone wallets have them.
+describe("security in the app on a phone", () => {
+  const onPhone = ({ available = true, on = false } = {}) => {
+    const asked = [];
+    dom.window.__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (cmd, args) => {
+        if (cmd !== "fingerprint") return null;
+        asked.push([args.action, args.args?.secret]);
+        return args.action === "status" ? { ok: true, available, on } : { ok: true };
+      }),
+    };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) AppleWebKit/537.36 Chrome/156.0 Mobile Safari/537.36" });
+    return { asked };
+  };
+  const finger = () => dom.document.body.querySelector("#fingerprint-unlock");
+
+  it("turns fingerprint unlock on with the password, checked first, then a fingerprint; and off at once", async () => {
+    const { asked } = onPhone();
+    const view = await settings({}, { app: true });
+    await vi.waitFor(() => expect(isShown(finger())).toBe(true));
+    expect(visibleText(finger().parentNode)).toBe("Unlock with fingerprint");
+    expect(finger().checked).toBe(false);
+    finger().checked = true;
+    finger().dispatchEvent(fakeEvent("change"));
+    const pwd = dom.document.body.querySelector("#fingerprint-password");
+    expect(isShown(pwd)).toBe(true);
+
+    // A wrong password: said, and no fingerprint asked.
+    view.actions.send.mockImplementation(async (m) => (m.type === "DUSK_UI_CHECK_PASSWORD" && m.password !== "right one" ? { error: { message: "Incorrect password" } } : {}));
+    typeInto(pwd, "wrong one");
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Turn on").click();
+    await settle();
+    expect(dom.document.body.querySelector("#fingerprint-error").textContent).toBe("Wrong password.");
+    expect(asked.map(([action]) => action)).toEqual(["status"]);
+
+    typeInto(pwd, "right one");
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Turn on").click();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "right one"]));
+    expect(view.actions.showToast).toHaveBeenCalledWith("Fingerprint unlock is on.");
+
+    finger().checked = false;
+    finger().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["disable", undefined]));
+  });
+
+  it("offers no fingerprint unlock on a phone that can't guard the password with one", async () => {
+    const { asked } = onPhone({ available: false });
+    await settings({}, { app: true });
+    await vi.waitFor(() => expect(asked).toEqual([["status", undefined]]));
+    await settle();
+    expect(isShown(finger())).toBe(false);
+  });
+});

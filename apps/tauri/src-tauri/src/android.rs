@@ -1,14 +1,17 @@
 //! What the wallet asks of Android itself, through the activity the app runs
 //! in, on Android's main thread: kept out of screenshots, light icons on its
 //! dark bars, the share sheet, a file saved to Downloads under the name
-//! Android gave it, and the app put in the background as it is.
+//! Android gave it, the app put in the background as it is, and fingerprint
+//! unlock (android/KeystorePlugin.kt).
 
 use tauri::tao::platform::android::prelude::jni::{
   errors::Error,
   objects::{JObject, JValue},
   JNIEnv,
 };
-use tauri::{Runtime, WebviewWindow};
+use serde_json::{json, Value};
+use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 // WindowManager.LayoutParams.FLAG_SECURE: no screenshots, screen recordings or
 // app-switcher thumbnail of any screen, recovery words and passwords among them.
@@ -185,4 +188,32 @@ pub async fn save_download<R: Runtime>(window: &WebviewWindow<R>, name: String, 
 /// screen would close it, an unlocked wallet with it.
 pub async fn move_to_back<R: Runtime>(window: &WebviewWindow<R>) -> Result<bool, String> {
   on_activity(window, |env, activity| env.call_method(activity, "moveTaskToBack", "(Z)Z", &[JValue::Bool(1)])?.z()).await
+}
+
+/// The wallet's Kotlin for fingerprint unlock, once Android has it.
+struct Keystore<R: Runtime>(PluginHandle<R>);
+
+/// Fingerprint unlock's Kotlin (android/KeystorePlugin.kt), as the plugin
+/// "dusk-keystore". Where Android can't find it, there's no fingerprint unlock.
+pub fn keystore<R: Runtime>() -> TauriPlugin<R> {
+  Builder::new("dusk-keystore")
+    .setup(|app, api| {
+      if let Ok(handle) = api.register_android_plugin("network.dusk.wallet", "KeystorePlugin") {
+        app.manage(Keystore(handle));
+      }
+      Ok(())
+    })
+    .build()
+}
+
+/// Asks fingerprint unlock's Kotlin `action`: status, enable, unlock or disable.
+/// Each answers `{ ok, reason?, ... }`.
+pub async fn fingerprint<R: Runtime>(app: &AppHandle<R>, action: &str, args: Value) -> Result<Value, String> {
+  if !matches!(action, "status" | "enable" | "unlock" | "disable") {
+    return Err("There's no such thing to ask.".into());
+  }
+  let Some(keystore) = app.try_state::<Keystore<R>>() else {
+    return Ok(json!({ "ok": false, "reason": "unavailable" }));
+  };
+  keystore.0.run_mobile_plugin_async::<Value>(action, args).await.map_err(|e| e.to_string())
 }
