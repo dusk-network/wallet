@@ -504,7 +504,7 @@ export async function localSend(message) {
     if (message?.type === "DUSK_UI_NOTICES") return { ok: true, state: await noticesState(appNoticesAllowed) };
     if (message?.type === "DUSK_UI_NOTICES_ASK") return { ok: true, state: await askForNotices(askAppNotices, appNoticesAllowed) };
     if (message?.type === "DUSK_UI_NOTICES_SAID") {
-      await saidNoticesOff();
+      await saidNoticesOff(appNoticesAllowed);
       return { ok: true };
     }
 

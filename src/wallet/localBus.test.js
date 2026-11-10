@@ -881,4 +881,17 @@ describe("arrival notices in the app on a phone", () => {
     await sendAndSettle(localSend, "d5".repeat(32));
     await vi.waitFor(() => expect(asked).toEqual(["ask", "notify: Transaction executed"]));
   });
+
+  // Astra's: notices kept "on" by an earlier build, Android's leave taken back
+  // later: Sent said they're off on every send, as its saying wasn't kept.
+  it("says notices are off once when Android's leave is taken back, whatever was kept", async () => {
+    const asked = phone({ allowed: () => false });
+    const { setSettings } = await import("../shared/settings.js");
+    await setSettings({ phoneNotices: "on" });
+    const { localSend } = await import("./localBus.js");
+    await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "off" });
+    await localSend({ type: "DUSK_UI_NOTICES_SAID" });
+    await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "off-said" });
+    expect(asked).toEqual([]);
+  });
 });

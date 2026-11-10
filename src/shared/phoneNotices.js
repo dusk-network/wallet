@@ -4,15 +4,19 @@
 //
 // Where they stand is kept (settings.phoneNotices):
 // - null: not asked;
-// - "asked": asked; Firefox hasn't said yet what Android answered;
-// - "on" / "off": Firefox's notice that asked showed, or was taken away
-//   without showing, as after a no (noticeAnswered);
+// - "asked": asked; in Firefox, its question is on screen till Firefox says
+//   what its notice that asked did;
+// - "on" / "off": that notice showed, or was taken away without showing, as
+//   after a no (noticeAnswered);
 // - "off-said": Sent said they're off, once.
 // Whether an arrival shows is read as it comes: the app reads Android's leave
 // as it is then (`allowedNow`, which never asks), so allowing notices in the
 // phone's settings later is enough. Firefox can't be asked whether it may
-// without asking Android, so it goes by what its notice that asked did; till
-// it says, an arrival shows, as a wrong "off" would lose every one.
+// without asking Android, so it goes by what its notice that asked did, and
+// makes no other notice while its question is on screen: Firefox keeps one
+// notice's answer, the last made, and the notice that asked would never hear
+// a no. Firefox wakes the wallet for that word, so it's lost only with
+// Firefox itself, and the question with it (questionGone).
 
 import { getSettings, setSettings } from "./settings.js";
 
@@ -34,16 +38,40 @@ async function kept() {
 
 const keep = (state) => setSettings({ phoneNotices: state });
 
+// What Sent says of what's kept: in the app, by Android's leave now.
+async function forSent(state, allowedNow) {
+  if (!state || !allowedNow) return state;
+  if (await allowedNow().catch(() => false)) return "on";
+  return state === "off-said" ? state : "off";
+}
+
+// Who waits for Firefox's word on the question on screen (questionAnswered).
+const waiting = new Set();
+function wake() {
+  for (const resolve of waiting) resolve();
+  waiting.clear();
+}
+
+// While Firefox's question is on screen, its answer first.
+async function questionAnswered() {
+  for (;;) {
+    let heard;
+    const word = new Promise((resolve) => waiting.add((heard = resolve)));
+    if ((await kept()) !== "asked") {
+      waiting.delete(heard);
+      return;
+    }
+    await word;
+  }
+}
+
 /**
  * Where notices stand, for Sent.
  * @param {() => Promise<boolean>} [allowedNow] - the app's: whether Android lets it show one now
  * @returns {Promise<"asked" | "on" | "off" | "off-said" | null>}
  */
 export async function noticesState(allowedNow) {
-  const state = await kept();
-  if (!state || !allowedNow) return state;
-  if (await allowedNow().catch(() => false)) return "on";
-  return state === "off-said" ? state : "off";
+  return forSent(await kept(), allowedNow);
 }
 
 /**
@@ -69,26 +97,39 @@ export async function askForNotices(ask, allowedNow) {
 export function noticeAnswered(answer) {
   return inTurn(async () => {
     if ((await kept()) === "asked") await keep(answer);
-  });
+  }).finally(wake);
+}
+
+/**
+ * Firefox started: a question still asked went with the Firefox before,
+ * unanswered, so it's not asked, and Sent offers the tap again.
+ */
+export function questionGone() {
+  return inTurn(async () => {
+    if ((await kept()) === "asked") await keep(null);
+  }).finally(wake);
 }
 
 /**
  * Whether a payment's arrival may show as a notice now.
  * @param {() => Promise<boolean>} [allowedNow] - the app's
  */
-export function mayNotify(allowedNow) {
+export async function mayNotify(allowedNow) {
+  if (!allowedNow) await questionAnswered();
   return inTurn(async () => {
     const state = await kept();
     if (!state) return false;
     if (allowedNow) return allowedNow().catch(() => false);
-    return state === "asked" || state === "on";
+    return state === "on";
   });
 }
 
-/** Sent said notices are off: it doesn't again. */
-export function saidNoticesOff() {
+/**
+ * Sent said notices are off: it doesn't again.
+ * @param {() => Promise<boolean>} [allowedNow] - the app's
+ */
+export function saidNoticesOff(allowedNow) {
   return inTurn(async () => {
-    const state = await kept();
-    if (state === "asked" || state === "off") await keep("off-said");
+    if ((await forSent(await kept(), allowedNow)) === "off") await keep("off-said");
   });
 }

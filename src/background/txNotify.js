@@ -8,7 +8,7 @@ import { getTxMeta } from "../shared/txStore.js";
 import { shortAddress } from "../ui/lib/strings.js";
 import { isPhone } from "../ui/lib/device.js";
 import { IS_FIREFOX } from "../platform/targets.js";
-import { askForNotices, mayNotify, noticeAnswered, noticesState } from "../shared/phoneNotices.js";
+import { askForNotices, mayNotify, noticeAnswered, noticesState, questionGone } from "../shared/phoneNotices.js";
 import { openWalletTab } from "./walletTab.js";
 import {
   getExtensionApi,
@@ -76,6 +76,10 @@ export function registerTxNotificationHandlers() {
     });
     ext.notifications.onClosed?.addListener((id) => {
       if (id === ASK_NOTICE) noticeAnswered("off").catch(() => {});
+    });
+    // Firefox started anew: a question asked in the one before went with it.
+    ext.runtime?.onStartup?.addListener(() => {
+      questionGone().catch(() => {});
     });
 
     // Clicking the notification opens the explorer (when possible), otherwise
