@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAccountName } from "../shared/accountNames.js";
-import { clearAddressBook } from "../shared/addressBook.js";
+import { clearAddressBook, listAddressBook } from "../shared/addressBook.js";
 import { dateText } from "./lib/time.js";
 import { accessibleName, fakeEvent, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 vi.mock("../shared/accountNames.js", () => ({ setAccountName: vi.fn(async () => {}) }));
-vi.mock("../shared/addressBook.js", () => ({ clearAddressBook: vi.fn(async () => {}) }));
+vi.mock("../shared/addressBook.js", () => ({ clearAddressBook: vi.fn(async () => {}), listAddressBook: vi.fn(async () => []) }));
 // The first profile has a verified .dusk name, as the header shows it.
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -124,6 +124,43 @@ describe("profile names", () => {
     label(2).dispatchEvent(fakeEvent("blur"));
     await settle();
     expect(setAccountName).toHaveBeenCalledWith(ACCOUNTS[0], 1, "Alice");
+  });
+
+  // Lena's: Profile 2 named after a contact read as that contact in History.
+  it("refuse a name that is, or looks like, another profile's or a contact's, saying whose, and let a profile keep its own", async () => {
+    const MARTA = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+    listAddressBook.mockResolvedValue([
+      { id: "c1", name: "Marta", address: MARTA },
+      // A contact saved with the second profile's own account.
+      { id: "c2", name: "Spending", address: ACCOUNTS[1] },
+    ]);
+    setAccountName.mockClear();
+    await settings();
+    const shownError = (n) => {
+      const id = label(n).getAttribute("aria-describedby");
+      return id ? dom.document.getElementById(id).textContent : "";
+    };
+    for (const [n, typed, said] of [
+      // The first profile goes by its verified .dusk name, the second by its default one.
+      [2, "alice.dusk", "Your other profile is called alice.dusk. Choose another name."],
+      [1, "Profile 2", "Your other profile is called Profile 2. Choose another name."],
+      [2, "Marta", "You have a contact called Marta. Choose another name."],
+      // A Cyrillic М.
+      [2, "\u041carta", "That looks like your contact Marta. Choose another name."],
+    ]) {
+      typeInto(label(n), typed);
+      label(n).dispatchEvent(fakeEvent("blur"));
+      await settle();
+      expect(shownError(n)).toBe(said);
+    }
+    expect(setAccountName).not.toHaveBeenCalled();
+
+    // Its own name, and the name of a contact saved with its own account, are the profile's to take.
+    typeInto(label(2), "Spending");
+    label(2).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect([shownError(2), setAccountName.mock.calls.at(-1)]).toEqual(["", [ACCOUNTS[0], 1, "Spending"]]);
+    listAddressBook.mockResolvedValue([]);
   });
 
   it("save once when the field is left with both a change and a blur, and not when nothing changed", async () => {

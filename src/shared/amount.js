@@ -7,6 +7,7 @@ import {
   groupDigits,
   normalizeAmount,
   parseDusk,
+  readAmount,
   unclearAmount,
 } from "@dusk-network/app-core/amounts";
 
@@ -156,19 +157,19 @@ export function maxAmountLux(availableLux, keepLux = 0n) {
 export const normalizeDuskInput = (text) => normalizeAmount(text);
 
 /**
- * What to write instead of an amount that could be read two ways, or "".
+ * The question for an amount that could be read two ways, in the language's
+ * reading and the web wallet's words (app-core's readAmount), or "".
  * @param {string} text - as typed
  * @returns {string}
  */
 export function unclearAmountText(text) {
-  const either = unclearAmount(text);
-  return either ? `That could be two amounts: write ${either.grouped} or ${either.decimal}.` : "";
+  return unclearAmount(text) ? (readAmount(text).problem ?? "") : "";
 }
 
 /**
  * What's wrong with an amount of DUSK that can't be read, for the line under
- * its field: that it could be two amounts, that it has too many decimals, else
- * what an amount looks like.
+ * its field: that it could be two amounts, that it has spaces to leave out, that
+ * it has too many decimals, else what an amount looks like.
  * @param {string} text - as typed
  * @param {{ whole?: string, decimal?: string }} [example] - the example's plain amounts
  * @returns {string}
@@ -176,6 +177,10 @@ export function unclearAmountText(text) {
 export function amountProblem(text, { whole = "1", decimal = "0.5" } = {}) {
   const unclear = unclearAmountText(text);
   if (unclear) return unclear;
+  // Spaces the language doesn't group with, as "1 234,5" in Spanish: which to leave out.
+  const typed = String(text ?? "").trim();
+  const spaced = /\s/.test(typed) ? readAmount(typed).problem : null;
+  if (spaced && readAmount(typed.replace(/\s/g, "")).lux !== null) return spaced;
   if (/^\d*\.\d+$/.test(normalizeDuskInput(text))) return `DUSK has ${LUX_DECIMALS} decimals at most.`;
   return `Enter an amount such as ${whole} or ${amountExample(decimal)}.`;
 }

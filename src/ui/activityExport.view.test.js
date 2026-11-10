@@ -25,6 +25,13 @@ vi.mock("../platform/extensionApi.js", async (importOriginal) => ({
   tabsCreate: vi.fn(async () => ({})),
 }));
 
+// The profile's verified .dusk name, as the header reads it: none unless a test gives one.
+const primary = vi.hoisted(() => ({ name: null }));
+vi.mock("../shared/duskNames.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  lookupPrimaryName: vi.fn(async () => primary.name),
+}));
+
 // What the archive answers about each stake with Sozu.
 const archive = vi.hoisted(() => ({ query: vi.fn(async () => ({})) }));
 vi.mock("../shared/activityHistory.js", async (importOriginal) => ({
@@ -94,6 +101,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   vi.clearAllMocks();
   archive.query.mockImplementation(async () => ({}));
+  primary.name = null;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -201,8 +209,8 @@ describe("Activity's Export", () => {
     expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual([
       "Period",
       "Add my contact names",
-      // An American browser's: in US dollars.
-      "Add each payment's value in US dollars, from CoinGecko's prices",
+      // A British browser's: in pounds.
+      "Add each payment's value in British pounds, from CoinGecko's prices",
       "For Excel: keep accents as it opens",
     ]);
     expect(visibleText(panel())).toContain("One profile's file for tax tools such as Koinly: exact amounts, times in UTC, transfers between your profiles marked.");
@@ -369,6 +377,20 @@ describe("Activity's Export", () => {
     expect(actions.showToast.mock.calls.filter(([text]) => /^CSV saved/.test(text))).toHaveLength(3);
   });
 
+  // Sofía's: the file called her "Profile 1", and a contact by its .dusk name rather than the name she saved.
+  it("names the file and its account as the header names the profile, its .dusk name, and a contact by the name saved", async () => {
+    page("/full.html");
+    primary.name = "sofia.dusk";
+    setup({ contacts: [{ name: "Marta", address: FAUCET }] });
+    button("Export").click();
+    choose("activity-export-contacts");
+    button("Save CSV").click();
+    await settle();
+    expect(saved[0].name).toBe(`dusk-sofia-dusk-testnet-all-${MADE}.csv`);
+    const sent = (await linesOf()).find((l) => l.TxHash === "a1".repeat(32));
+    expect([sent["Account Name"], sent["Counterparty Name"]]).toEqual(["sofia.dusk", "Marta"]);
+  });
+
   it("reads what isn't kept yet, with the details of what it has none of", async () => {
     page("/full.html");
     let runs = 0;
@@ -514,7 +536,7 @@ describe("Activity's Export", () => {
     button("Save CSV").click();
     await settle();
     const lines = await linesOf(1);
-    expect(lines.find((l) => l.TxHash === "c1".repeat(32))).toMatchObject({ "Net Worth Amount": "0.63", "Net Worth Currency": "EUR" });
+    expect(lines.find((l) => l.TxHash === "c1".repeat(32))).toMatchObject({ "Net Worth Amount": "0.62500000", "Net Worth Currency": "EUR" });
     // No price near that time: its columns stay empty, and it says so.
     expect(lines.find((l) => l.TxHash === "c2".repeat(32))).toMatchObject({ "Net Worth Amount": "", "Net Worth Currency": "" });
     expect(actions.showToast.mock.calls.at(-1)[0]).toContain("2 lines have no euro value.");
@@ -539,10 +561,13 @@ describe("Activity's Export", () => {
     expect(actions.showToast.mock.calls.at(-1)[0]).toContain("no euro value");
   });
 
-  it("adds values in US dollars where the browser's region doesn't pay in euros, as Singapore's", async () => {
-    // Lena's German browser got dollars on the web wallet; the export follows the region too.
+  // Lena's German browser got dollars on the web wallet, and Wei's Singapore phone US dollars: the region's own, where CoinGecko has it.
+  it.each([
+    ["en-SG", "Singapore dollars", "sgd", "Singapore dollar"],
+    ["ro-RO", "US dollars", "usd", "US dollar"],
+  ])("adds values in the currency of the browser's region where CoinGecko prices DUSK in it, else in US dollars: %s", async (language, name, vs, one) => {
     page("/full.html");
-    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language });
     const asked = [];
     vi.stubGlobal(
       "fetch",
@@ -553,13 +578,13 @@ describe("Activity's Export", () => {
     );
     const { actions } = setup({ entries: WHOLE.slice(0, 1) });
     button("Export").click();
-    expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain("Add each payment's value in US dollars, from CoinGecko's prices");
+    expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain(`Add each payment's value in ${name}, from CoinGecko's prices`);
     choose("activity-export-value");
     button("Save CSV").click();
     await settle();
     expect(asked.length).toBeGreaterThan(0);
-    for (const url of asked) expect(url).toContain("vs_currency=usd&from=");
-    expect(actions.showToast.mock.calls.at(-1)[0]).toContain("no dollar value");
+    for (const url of asked) expect(url).toContain(`vs_currency=${vs}&from=`);
+    expect(actions.showToast.mock.calls.at(-1)[0]).toContain(`no ${one} value`);
   });
 
   it("starts the file with a BOM only for Excel", async () => {

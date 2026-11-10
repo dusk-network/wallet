@@ -1,4 +1,4 @@
-import { NAME_HIDES, nameHides } from "@dusk-network/app-core/names";
+import { NAME_HIDES, nameHides, profileNameClash } from "@dusk-network/app-core/names";
 import { networks } from "@dusk-network/networks";
 
 import { formatDuskExact, formatFee } from "../../../shared/amount.js";
@@ -10,7 +10,7 @@ import { MAX_ACCOUNT_COUNT } from "../../../shared/constants.js";
 import { setAccountName } from "../../../shared/accountNames.js";
 import { siteLastSeen } from "../../../shared/siteRecords.js";
 import { normalizeWalletName, walletLabel } from "../../../shared/wallets.js";
-import { clearAddressBook } from "../../../shared/addressBook.js";
+import { clearAddressBook, listAddressBook } from "../../../shared/addressBook.js";
 import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
 import { networkForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 import { openUrl, platform } from "../../../platform/index.js";
@@ -27,6 +27,7 @@ import { setNetworkSwitching } from "../../components/NetworkMenu.js";
 import { askConfirm } from "../../components/ConfirmDialog.js";
 import { fieldLabel, integerInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
+import { contactNameText } from "../../lib/contactNames.js";
 import { switchContext } from "../context.js";
 import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
 
@@ -124,6 +125,21 @@ export function optionsView(ov, { state, actions } = {}) {
   // Each wallet's own: another wallet's fields start from its saved labels.
   const drafts = ((state.labelDrafts ??= {})[walletId] ??= {});
   const labelOf = (s) => String(s ?? "").trim().replace(/\s+/g, " ").slice(0, 32);
+  // A profile's name can't be, or look like, another profile's or a contact's:
+  // History would show the one as the other. Each profile by the name the header
+  // shows; the contacts read once, when a name is first saved.
+  let contactsRead = null;
+  const contactsNow = () => {
+    const ab = state?.addressBook;
+    const own = ab?.loaded && Array.isArray(ab.items) && (!state?.contactsWallet || state.contactsWallet === walletId);
+    contactsRead ??= own ? Promise.resolve(ab.items) : listAddressBook({ walletId }).catch(() => []);
+    return contactsRead;
+  };
+  const clashText = (clash) => {
+    const name = clash.kind === "contact" ? contactNameText(clash.entry.name) : String(clash.entry.name);
+    if (clash.kind === "profile") return clash.same ? `Your other profile is called ${name}. Choose another name.` : `That looks like the name of your other profile ${name}. Choose another name.`;
+    return clash.same ? `You have a contact called ${name}. Choose another name.` : `That looks like your contact ${name}. Choose another name.`;
+  };
   const labelsEditor =
     ov?.isUnlocked && walletId
       ? h("div", { class: "settings-labels" }, [
@@ -152,7 +168,10 @@ export function optionsView(ov, { state, actions } = {}) {
               drafts[i] = input.value;
               showError("");
             });
-            const save = async () => {
+            // A change and a blur as the field is left: one save.
+            let saving = null;
+            const save = () => (saving ??= saveName().finally(() => (saving = null)));
+            const saveName = async () => {
               const value = input.value;
               const label = labelOf(value);
               if (label === saved) {
@@ -162,6 +181,14 @@ export function optionsView(ov, { state, actions } = {}) {
               if (nameHides(label)) {
                 showError(NAME_HIDES);
                 return;
+              }
+              if (label) {
+                const profiles = displayAccounts.map((account, j) => ({ account: String(account ?? ""), address: String(ov?.addresses?.[j] ?? ""), name: verified.get(j) || profileLabelOf(ov, j) }));
+                const clash = profileNameClash(label, { profiles, contacts: await contactsNow(), self: String(acct ?? "") });
+                if (clash) {
+                  showError(clashText(clash));
+                  return;
+                }
               }
               const before = saved;
               saved = label;

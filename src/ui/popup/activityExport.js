@@ -15,6 +15,7 @@ import { walletLabel } from "../../shared/wallets.js";
 import { runtimeGetURL, storageSessionGet, storageSessionRemove, storageSessionSet, tabsCreate } from "../../platform/extensionApi.js";
 import { fieldLabel } from "../components/FormControls.js";
 import { profileLabelOf } from "../components/ProfileName.js";
+import { duskNamesNetwork, lookupPrimaryName } from "../../shared/duskNames.js";
 import { h } from "../lib/dom.js";
 import { saveToDownloads } from "../../platform/native.js";
 import { stamped } from "../lib/fileNames.js";
@@ -22,6 +23,29 @@ import { ActivityChangedError, activityRows, assertActivityOpen, selected, sozuF
 import { duskPrices } from "./duskPrice.js";
 import { migrationFactsOf } from "./migrationFacts.js";
 import { defaultCurrency } from "@dusk-network/app-core/amounts";
+
+/**
+ * A currency by its name, as a value is said in it: "euros", "US dollars",
+ * "Singapore dollars"; "euro" and the like with `count` 1.
+ * @param {string} code
+ * @param {number} [count]
+ */
+export function currencyName(code, count = 2) {
+  try {
+    const parts = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "name", minimumFractionDigits: 0, maximumFractionDigits: 0 }).formatToParts(count);
+    return parts.find((part) => part.type === "currency")?.value ?? code;
+  } catch {
+    return code;
+  }
+}
+
+// The profile's name as the header shows it: its verified .dusk name, else its
+// label on this device, else "Profile N".
+async function profileNameOf(ov, profileIndex) {
+  const account = String(ov?.accounts?.[profileIndex] ?? "");
+  const name = account && duskNamesNetwork(ov?.nodeUrl) ? await lookupPrimaryName(account, { nodeUrl: ov?.nodeUrl, stale: true }).catch(() => null) : null;
+  return name || profileLabelOf(ov, profileIndex);
+}
 
 /** Where the popup leaves what one export asks for the full view to do: `{ id, choices, at }`. */
 export const handedExportKey = (id) => `dusk_activity_export_v1:${id}`;
@@ -114,7 +138,7 @@ function periodOf({ period, from, to } = {}) {
  */
 export async function makeExport(ov, choices, { state }) {
   const period = periodOf(choices);
-  // Euros where the browser's region pays in them, US dollars elsewhere.
+  // The region's own currency where CoinGecko has DUSK's price in it, US dollars elsewhere.
   const currency = defaultCurrency();
   if (!ov?.isUnlocked) throw new Error("Unlock the wallet, then export again.");
   let contactName;
@@ -139,7 +163,7 @@ export async function makeExport(ov, choices, { state }) {
   const evm = await migrationFactsOf(ov, period ? rows.filter((row) => row.time >= period.from) : rows);
   const made = await accountingCsv({
     rows,
-    profile: { name: profileLabelOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
+    profile: { name: await profileNameOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
     profiles: otherProfiles(ov, profileIndex),
     period,
     price: choices.fiat ? duskPrices({ currency }) : undefined,
@@ -166,7 +190,7 @@ function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting
   return [
     savedAs ? `CSV saved to Downloads as ${savedAs}: ${lines}.` : `CSV saved: ${lines}.`,
     out.length ? `Left out: ${out.join(", ")}.` : "",
-    unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no ${currency === "USD" ? "dollar" : "euro"} value.` : "",
+    unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no ${currencyName(currency, 1)} value.` : "",
     evmUnread?.count ? `${evmUnread.count === 1 ? "1 migration's fee" : `${evmUnread.count} migrations' fees`} on ${evmUnread.chain} couldn't be read: export again to add ${evmUnread.count === 1 ? "it" : "them"}.` : "",
     shieldedWaiting ? "Your shielded activity is still syncing: export again once it's done." : "",
   ]
@@ -324,7 +348,7 @@ export function activityExportPanel(ov, { state, actions }) {
     checkbox("activity-export-contacts", "Add my contact names", ex.withContacts, (on) => {
       ex.withContacts = on;
     }),
-    checkbox("activity-export-value", `Add each payment's value in ${defaultCurrency() === "USD" ? "US dollars" : "euros"}, from CoinGecko's prices`, ex.fiat, (on) => {
+    checkbox("activity-export-value", `Add each payment's value in ${currencyName(defaultCurrency())}, from CoinGecko's prices`, ex.fiat, (on) => {
       ex.fiat = on;
     }),
     checkbox("activity-export-excel", "For Excel: keep accents as it opens", ex.excel, (on) => {

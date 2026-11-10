@@ -567,7 +567,7 @@ describe("text that reads as something it isn't", () => {
     const bytes = new TextEncoder().encode("Pay \u07c0\u07c0\u07c0\u07c1 DUSK");
     await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
     expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Text needs review");
-    expect(app.querySelector(".callout.warn .muted").textContent).toBe("A number here is in digits that read right to left. Check it digit by digit. Only sign it if you trust this site.");
+    expect(app.querySelector(".callout.warn .muted").textContent).toBe("A number here uses digits that read right to left. Check it digit by digit. Only sign it if you trust this site.");
 
     await render("send_tx", transfer(BOB, { memo: "Invoice \u07c0\u07c0\u07c0\u07c1 paid 1\u06605" }));
     const flags = [...row("Memo").querySelectorAll(".safe-text__flag")].map((el) => el.textContent);
@@ -577,9 +577,9 @@ describe("text that reads as something it isn't", () => {
     expect(app.querySelector(".callout.warn .muted").textContent).toBe("A number here mixes digits of different scripts. Check it digit by digit. Only sign in if you trust this site.");
   });
 
-  it("says when a number's digits look like other digits than they are, in a message to sign and a memo", async () => {
+  it("says when a number's digits look like other digits, in a message to sign and a memo, in the web wallet's words", async () => {
     // Marek's: Bengali's 4 looks like 8, Gurmukhi's 44 like 88, Oriya's 2 and Malayalam's 7 like 9.
-    const lookalike = "A number here is in digits that look like other digits than they are. Check it digit by digit.";
+    const lookalike = "A number here uses digits that look like other digits. Check it digit by digit.";
     for (const message of ["Pay \u09ea DUSK to unlock", "Pay \u0a6a\u0a6a DUSK", "Pay \u0b68 DUSK", "Pay \u0d6d DUSK"]) {
       const bytes = new TextEncoder().encode(message);
       await render("sign_message", { chainId: "dusk:2", messageHash: `0x${"ab".repeat(32)}`, messageLen: bytes.length, messagePreview: describeSignMessagePreview(bytes) });
@@ -589,7 +589,7 @@ describe("text that reads as something it isn't", () => {
 
     await render("send_tx", transfer(BOB, { memo: "Factura \u09ea, or 1\u06605" }));
     expect([...row("Memo").querySelectorAll(".safe-text__flag")].map((el) => el.textContent)).toEqual([
-      "A number here mixes digits of different scripts, and some look like other digits than they are. Check it digit by digit.",
+      "A number here mixes digits of different scripts, and some look like other digits. Check it digit by digit.",
     ]);
     await render("sign_auth", { chainId: "dusk:2", nonce: "n1", statement: "Pay \u09ea DUSK" });
     expect(app.querySelector(".callout.warn .muted").textContent).toBe(`${lookalike} Only sign in if you trust this site.`);

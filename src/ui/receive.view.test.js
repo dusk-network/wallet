@@ -411,6 +411,25 @@ describe("receive", () => {
     expect(dom.clipboard.writeText).not.toHaveBeenCalled();
   });
 
+  // Lena's: the app offered no dusk: link, which opens the app's own Send.
+  it("copies the app's dusk: link beside Share in the app, of the account or of the request", async () => {
+    dom.document.body.dataset.runtime = "tauri";
+    dom.window.matchMedia = () => ({ matches: true });
+    dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn(async () => null) };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    let view = await receive("public");
+    const buttons = dom.document.body.querySelectorAll(".btnrow button").map(visibleText);
+    expect(buttons.slice(buttons.indexOf("Share"), buttons.indexOf("Share") + 2)).toEqual(["Share", "Copy app link"]);
+    expect((await view.copy("Copy app link"))[0]).toBe(`dusk:public-${ACCOUNT}@dusk:2`);
+    view = await receive("public", { state: { receive: { tab: "public", requestOpen: true, amountDusk: "0.03", memo: "Invoice 114" } } });
+    expect((await view.copy("Copy app link"))[0]).toBe(`dusk:public-${ACCOUNT}@dusk:2?amount=0.03&memo=Invoice+114`);
+  });
+
+  it("offers no app link outside the app", async () => {
+    await receive("public");
+    expect(dom.document.body.querySelector('button[aria-label="Copy app link"]')).toBeNull();
+  });
+
   // Sofía's, Chen's and Lena's: every QR named alike, without a label, and the message naming an older file.
   it("saves a request's QR in the app named by what it asks and when, says what it asks under the code, and the name Android gave it", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -568,14 +587,25 @@ describe("the requests made here", () => {
         kept({ id: "a", memo: "r18 open" }),
         // Sofia's: kept paid by an earlier visit, its payment off the page now.
         kept({ id: "b", memo: "Anticipo Proyecto Sol", paid: { at: T0 + 2 * HOUR, hash: "b1".repeat(32), lux: "20000000" } }),
+        // Kept paid by an earlier version, which kept no amount.
+        kept({ id: "c", memo: "Older", paid: { at: T0 + 3 * HOUR, hash: "c1".repeat(32) } }),
+        kept({ id: "d", lux: "10000000", memo: "Fixed", at: T0 + 4 * HOUR }),
       ],
     };
-    const entries = [paidIn("a1".repeat(32), "1", "r18 open", T0 + HOUR)];
+    const entries = [paidIn("a1".repeat(32), "1", "r18 open", T0 + HOUR), paidIn("d1".repeat(32), "10000000", "Fixed", T0 + 5 * HOUR)];
     const state = { receive: { tab: "public" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
     await draw(state);
-    expect(shown().map(({ state: word, match }) => [word, match])).toEqual([
-      ["Paid", `Its memo matches a payment of 0.000000001 DUSK ${whenAtText(T0 + HOUR)}.`],
-      ["Paid", `Its memo matches a payment of 0.02 DUSK ${whenAtText(T0 + 2 * HOUR)}.`],
+    const badges = () => dom.document.body.querySelectorAll(".request-row .request-state").map((badge) => [visibleText(badge), badge.className.replace("request-state request-state--", "")]);
+    // A request of any amount says what came in, plainly: one lux reads as no green Paid. One of an amount asked says Paid.
+    expect(badges()).toEqual([
+      ["0.000000001 DUSK", "plain"],
+      ["0.02 DUSK", "plain"],
+      ["Paid", "plain"],
+      ["Paid", "ok"],
+    ]);
+    expect(shown().slice(0, 2).map(({ match }) => match)).toEqual([
+      `Its memo matches a payment of 0.000000001 DUSK ${whenAtText(T0 + HOUR)}.`,
+      `Its memo matches a payment of 0.02 DUSK ${whenAtText(T0 + 2 * HOUR)}.`,
     ]);
     await vi.waitFor(() => expect(items[KEY][ACCOUNT].find((r) => r.id === "a").paid).toEqual({ at: T0 + HOUR, hash: "a1".repeat(32), lux: "1" }));
 
@@ -585,7 +615,11 @@ describe("the requests made here", () => {
     await actions.render();
     await vi.waitFor(() => expect(hiddenState.requests?.loaded).toBe(true));
     await actions.render();
-    expect(shown().map(({ match }) => match)).toEqual([`Its memo matches a payment of •••• DUSK ${whenAtText(T0 + HOUR)}.`, `Its memo matches a payment of •••• DUSK ${whenAtText(T0 + 2 * HOUR)}.`]);
+    expect(shown().slice(0, 2).map(({ match }) => match)).toEqual([`Its memo matches a payment of •••• DUSK ${whenAtText(T0 + HOUR)}.`, `Its memo matches a payment of •••• DUSK ${whenAtText(T0 + 2 * HOUR)}.`]);
+    expect(badges().slice(0, 2)).toEqual([
+      ["•••• DUSK", "plain"],
+      ["•••• DUSK", "plain"],
+    ]);
   });
 
   // Sofía's: after Send back, the request still offered it, and said nothing of it.

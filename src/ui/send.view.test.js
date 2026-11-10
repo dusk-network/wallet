@@ -696,7 +696,22 @@ describe("send's amount", () => {
     typeInto(last.amount, "0.0000000001");
     expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
     typeInto(last.amount, "1,234");
-    expect(last.amountError()).toBe("That could be two amounts: write 1234 or 1.234.");
+    expect(last.amountError()).toBe("Is that 1234 or 1.234? Write the one you mean.");
+  });
+
+  // Lena's: "1,000" asked and "1.000" didn't. In English the point is the
+  // decimal; where the comma is, "1.000" asks, in the web wallet's words.
+  it.each([
+    ["de-DE", "1.000", "Is that 1000 or 1,000? Write the one you mean."],
+    ["nl-NL", "1.000", "Is that 1000 or 1,000? Write the one you mean."],
+    ["en-GB", "1,000", "Is that 1000 or 1.000? Write the one you mean."],
+    ["es-ES", "1 234,5", "Leave out the space: 1234,5."],
+  ])("asks which amount is meant where it could be two, in the language's reading: %s %s", (language, typed, asked) => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language });
+    const form = mount(newState());
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, typed);
+    expect([form.amountError(), form.review.disabled]).toEqual([asked, true]);
   });
 
   it("keeps Review off while an amount typed won't do, and on for an empty one to say what's missing", () => {
@@ -1935,6 +1950,12 @@ describe("a request link", () => {
     const unread = mount(refused);
     expect([unread.to.value, unread.amount.value]).toEqual(["", ""]);
     expect(refusal()).toEqual(["This link names two networks, Testnet and Mainnet. Ask for a new one."]);
+
+    // A network written as no network is: never "two networks, Testnet and Testnet".
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(`dusk:public-${ALICE.account}@dusk:2?amount=0.001&network=dusk:02`)}` });
+    vi.resetModules();
+    mount((await import("./popup/state.js")).state);
+    expect(refusal()).toEqual(["This link's network can't be read. Ask for a new one."]);
 
     // No link, or a page opened with something that isn't one: an empty form.
     vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send" });

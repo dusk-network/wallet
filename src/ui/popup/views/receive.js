@@ -231,6 +231,8 @@ export function receiveView(ov, { state, actions } = {}) {
   // holds for a wallet to read: the same request.
   let curLink = "";
   let curUri = "";
+  // The dusk: link of what the QR holds, which opens Send in the app.
+  let curAppLink = "";
   let curQrValue = recipient || "";
   let wantRequest = false;
   // What the request asks, as its link says it.
@@ -343,6 +345,19 @@ export function receiveView(ov, { state, actions } = {}) {
       })
     : null;
 
+  // In the app, beside Share: the dusk: link, which a phone with the app opens in its Send.
+  const appLinkBtn = isTauriMobileLike()
+    ? copyButton({
+        value: () => curAppLink,
+        label: "Copy app link",
+        text: "Copy app link",
+        className: "btn-outline",
+        failText: "Copy failed",
+        onFail: actions?.showToast,
+        onCopied: keepRequest,
+      })
+    : null;
+
   const downloadBtn = h("button", {
     class: "btn-outline",
     text: "Download QR PNG",
@@ -352,7 +367,7 @@ export function receiveView(ov, { state, actions } = {}) {
   const btnRow = h(
     "div",
     { class: "btnrow btnrow--grid" },
-    [copyAddress, shareBtn, downloadBtn].filter(Boolean)
+    [copyAddress, shareBtn, appLinkBtn, downloadBtn].filter(Boolean)
   );
 
   // --- Live update -----------------------------------------------------
@@ -403,6 +418,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
     // QR encodes the request only when the request panel is open and has content.
     const qrValue = wantRequest ? curUri : curRecipient;
+    curAppLink = wantRequest ? curUri : (curRecipient && makePaymentLink({ to: curRecipient, network: chainId }).dusk) || "";
     curQrValue = qrValue || "";
     qrCard.replaceChildren(qrCodeEl(qrValue || ""));
 
@@ -417,6 +433,7 @@ export function receiveView(ov, { state, actions } = {}) {
     downloadBtn.disabled = !curQrValue;
     if (!curQrValue) hideQrMenu();
     if (shareBtn) shareBtn.disabled = !curRecipient;
+    if (appLinkBtn) appLinkBtn.disabled = !curAppLink;
   }
 
   // Initial

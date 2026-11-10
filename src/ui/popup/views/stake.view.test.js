@@ -29,6 +29,13 @@ vi.mock("../../../shared/activityHistory.js", async (importOriginal) => ({
   archiveAt: () => ({ query: (text) => archive.query(text) }),
 }));
 
+// What native staking paid lately, as app-core measures it from the chain: nothing read unless a test gives it.
+const nativeMeasure = vi.hoisted(() => ({ value: null }));
+vi.mock("@dusk-network/app-core/sozu", async (importOriginal) => ({
+  ...(await importOriginal()),
+  nativeRewards: vi.fn(async () => nativeMeasure.value),
+}));
+
 const ACCOUNT =
   "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
 const OTHER =
@@ -122,6 +129,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   archive.query = async () => ({});
+  nativeMeasure.value = null;
 });
 
 // Draws Staking, its Review and Sent as app.js routes them, and redraws on
@@ -203,7 +211,7 @@ describe("staking overview", () => {
       fifteen.status = { ...fifteen.status, fees: { ...fifteen.status.fees, reward: { numerator: "15", denominator: "100" } } };
       popup({ route: "stake", staking: staking(), sozu: fifteen }, ov(), { rewardRate: 0.23498725582204427 });
       const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map((el) => visibleText(el).replace(/\s/g, " ")).slice(2));
-      await vi.waitFor(() => expect(subs()).toEqual([["About 23 % a year lately, across the network. Not promised."], ["About 20 % a year after Sozu's 15 %. Not promised."]]), { timeout: 4_000 });
+      await vi.waitFor(() => expect(subs()).toEqual([["About 23 % a year across the network at today's stake. Not promised."], ["About 20 % a year after Sozu's 15 %. Not promised."]]), { timeout: 4_000 });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -218,7 +226,7 @@ describe("staking overview", () => {
     const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
     expect(subs()).toEqual([[], []]);
     await vi.waitFor(() =>
-      expect(subs()).toEqual([["About 23% a year lately, across the network. Not promised."], ["About 20% a year after Sozu's 15%. Not promised."]])
+      expect(subs()).toEqual([["About 23% a year across the network at today's stake. Not promised."], ["About 20% a year after Sozu's 15%. Not promised."]])
     );
     // Asked once for this network, whatever is drawn again.
     actions.render();
@@ -238,12 +246,23 @@ describe("staking overview", () => {
     const state = { route: "stake", staking: staking(), sozu: loading };
     const { draw } = popup(state, ov(), { rewardRate: 0.8615 });
     const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
-    await vi.waitFor(() => expect(subs()[0]).toEqual(["About 86% a year lately, across the network. Not promised."]));
+    await vi.waitFor(() => expect(subs()[0]).toEqual(["About 86% a year across the network at today's stake. Not promised."]));
     // Liquid staking's read is done: its status names the pool.
     const done = sozu();
     Object.assign(state.sozu, { ...done, status: { ...done.status, contracts: { ...done.status.contracts, pool: grown } } });
     draw();
-    await vi.waitFor(() => expect(subs()[1]).toEqual(["About 21% a year after Sozu's 10%. Not promised."]));
+    await vi.waitFor(() => expect(subs()[1]).toEqual(["About 21% a year over the last 30 days, after Sozu's 10%. Not promised."]));
+  });
+
+  // Lena's: native staking said about 87% "lately" from a fixed figure, and neither rate said over what time.
+  it("says what native staking paid over the last 30 days, as the chain says, and Sozu's over the same days, in place of the estimate", async () => {
+    nativeMeasure.value = { rate: 0.8761, days: 30, perBlock: 15_600_000_000n, staked: 2_000_000_000_000_000n, blocks: 6 };
+    const state = { route: "stake", staking: staking(), sozu: sozu() };
+    popup(state, ov(), { rewardRate: 0.8615, stakingFigures: { provisioners: [{ amount: { value: "1" }, eligibility: 0 }], tipHeight: 4_800_000 } });
+    const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
+    await vi.waitFor(() =>
+      expect(subs()).toEqual([["About 88% a year across the network over the last 30 days. Not promised."], ["About 79% a year over the last 30 days, after Sozu's 10%. Not promised."]])
+    );
   });
 
   it("works Sozu's rate out from native staking's as shown, so both wallets give the same figure", async () => {
@@ -252,7 +271,7 @@ describe("staking overview", () => {
     popup(state, ov(), { rewardRate: 0.8615 });
     const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
     await vi.waitFor(() =>
-      expect(subs()).toEqual([["About 86% a year lately, across the network. Not promised."], ["About 77% a year after Sozu's 10%. Not promised."]])
+      expect(subs()).toEqual([["About 86% a year across the network at today's stake. Not promised."], ["About 77% a year after Sozu's 10%. Not promised."]])
     );
   });
 
@@ -975,6 +994,22 @@ describe("a stake with Sozu in figures", () => {
   const held = { position: { poolBalanceLux: dusk(120), stDuskBalanceLux: dusk(39) } };
   const rows = () => body.querySelectorAll(".sozu-position .kv").map(visibleText);
 
+  // Lena's wish: staking rewards per tax year.
+  it("says the rewards of each calendar year on Staking, newest first: native rewards claimed, from the whole history", async () => {
+    const overview = ov();
+    const claim = (n, lux, at) => entryOf({ hash: String(n).repeat(64).slice(0, 64), kind: "withdraw_reward", counterparty: networks.testnet.contracts.stake, direction: "in", payer: true, value: lux, fee: "5000000", blockHeight: HEIGHT + n, timestamp: at });
+    const history = [claim(1, dusk(12), Date.UTC(2025, 5, 1, 12)), claim(2, "500000000", Date.UTC(2025, 11, 31, 12)), claim(3, dusk(3), Date.UTC(2026, 2, 1, 12))];
+    const state = { route: "stake", staking: staking(owner()), sozu: sozu(held), activity: activityOf(overview, history) };
+    popup(state, overview);
+    const years = () => body.querySelectorAll(".stake-years .kv").map(visibleText);
+    await vi.waitFor(() => expect(years()).toEqual(["20263 DUSK claimed", "202512.5 DUSK claimed"]));
+    expect(body.querySelectorAll(".section-head").map((head) => screenReaderText(head))).toContain("Rewards by year");
+
+    // Hidden with the other balances.
+    popup(state, ov({ hideBalances: true }));
+    expect(years()).toEqual(["2026•••• DUSK claimed", "2025•••• DUSK claimed"]);
+  });
+
   it("says what went in, what came out, what it's worth now and what it brought, and they add up", async () => {
     const overview = ov();
     const state = {
@@ -1088,6 +1123,18 @@ describe("a stake with Sozu in figures", () => {
     // 99.75 DUSK staked at 21.6%, less the 0.25 DUSK fee.
     expect(visibleText(body.querySelector(".sozu-year"))).toBe("At today's rate that's about 21.296 DUSK in rewards a year, after Sozu's share and the deposit fee.");
     expect(state.sozu.rate.native).toBe(0.24);
+  });
+
+  // Lena's: the working said a rate from a fixed figure, over no time.
+  it("works the rate out from what the chain paid stakers over the last 30 days, where it can be read", async () => {
+    nativeMeasure.value = { rate: 0.8761, days: 30, perBlock: 15_600_000_000n, staked: 207_300_000_000_000_000n, blocks: 6, from: { at: 0, height: 1 }, to: { at: 1, height: 2 } };
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+    const stakingFigures = { provisioners: [{ amount: 200_000_000_000_000_000, eligibility: 0 }], tipHeight: 5_000_000 };
+    popup(state, ov(), { rewardRate: 0.24, stakingFigures });
+    await vi.waitFor(() => expect(state.sozu.rate.native).toBe(0.8761));
+    popup(state, ov(), { rewardRate: 0.24, stakingFigures });
+    const working = visibleText(body.querySelectorAll(".group.info .list-row")[1]).replace("207.3m DUSK", "207.3M DUSK");
+    expect(working).toMatch(/^About 79% a year\. Not promised\.15\.6 DUSK a block to stakers over the last 30 days, 207\.3M DUSK staked now: about 88% a year\./);
   });
 
   it("says the network's rate alone when the node's figures can't be read, and nothing without any", async () => {

@@ -27,8 +27,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
 - Listed the requests made in Receive, each Waiting, Paid, Check or Paid twice, with its payments to open.
 - Added Copy link to each request in Receive.
+- Added Copy app link beside Share in the Android app's Receive, for the dusk: link that opens the app's Send.
+- Showed staking rewards by calendar year on Staking: native rewards claimed, and what Sozu's unstakes earned.
 - Added a search to Activity: by name, address, memo, transaction ID or amount.
-- Gave the export's values in euros where the browser's region pays in them, and in US dollars elsewhere.
+- Gave the export's values in the currency of the browser's region where CoinGecko prices DUSK in it, as Singapore dollars, and in US dollars elsewhere.
 - Made a release's zips rebuild byte for byte from its tag, with their SHA-256 in the release notes.
 
 ### Changed
@@ -46,7 +48,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Told a site nothing of the wallet's network or version before it connects; the network comes with the connection.
 - Counted what's staked, natively and with Sozu, in Home's total balance, read with the public balance, and showed it beside the rest.
 - Gave Sozu's rate as stDUSK grew over the last 30 days, on Liquid staking and Staking, where the chain says it.
-- Made Activity's Export a file for accountants and tax tools, in Koinly's universal CSV: a quarter or any dates, your profile's name on it, transfers between your profiles marked, stDUSK and fees for staking, and euro values and Excel's accents when asked.
+- Gave native staking's rate as the chain paid stakers over the last 30 days, and said over what days each staking rate was measured.
+- Made Activity's Export a file for accountants and tax tools, in Koinly's universal CSV: a quarter or any dates, your profile's name on it, transfers between your profiles marked, stDUSK and fees for staking, and values in your currency and Excel's accents when asked.
 - Showed an amount and its fee to the last lux in a transaction's details, on Sent and on every Review; rows and balance lines stay short.
 - Made a request link the https form, which opens the web wallet's Send filled in; Send also reads it pasted or scanned.
 
@@ -126,6 +129,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Gave a request's payments to the second, so two in one minute differ.
 - Drew addresses and amounts without the font's contextual alternates, so an x between digits stays an x.
 - Put Review stake right under the amount, so a phone's keyboard doesn't cover it.
+- Asked which amount is meant, and which spaces to leave out of one like 1 234,5, in the web wallet's words.
+- Read a plain dusk:<address>?amount=&memo= link, and said a link's network can't be read rather than naming one twice.
+- Refused a profile's name that is, or looks like, another profile's or a contact's.
+- Showed what came in on a request of any amount in its badge, in plain colour, rather than a green Paid.
+- Said a number's look-alike digits in the web wallet's words.
 - Kept another wallet's shielded history out of Activity and Export when the wallet changes during a read; an Export it changes under saves nothing and says so.
 - Said under a .dusk name when a node the wallet doesn't know checked it, and kept that node's answers from the network's own node's.
 - Said plainly on Home when the balance can't be read, instead of showing what the node said.

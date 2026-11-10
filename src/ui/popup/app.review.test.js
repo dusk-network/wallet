@@ -505,6 +505,12 @@ describe("the app on a phone", () => {
     node.resolve();
     await flush();
     expect([t.app.querySelector(".subnav-title")?.textContent, fields().includes("0.03"), fields().includes("Third")]).toEqual(["Send", true, true]);
+
+    // Lena's plain shape, dusk:<account>?amount=&memo=, read as the web wallet reads it.
+    t.send.mockImplementation(answer);
+    bridge.emit([`dusk:${B}?amount=0.04&memo=Plain`]);
+    await flush();
+    expect([t.app.querySelector(".to-input-wrap textarea").value, fields().includes("0.04"), fields().includes("Plain")]).toEqual([B, true, true]);
   });
 });
 

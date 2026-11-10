@@ -165,12 +165,16 @@ function refundsOf(requests, matches, rows) {
 function requestRow(request, match, { hidden, address, state, actions, walletId, rows, rowOf, rowBack, context, refunds, linkOf, earlier = false }) {
   // The payments with all a request asks, after the one that paid it: paid twice, or more.
   const again = match?.state === "paid" ? (match.more ?? []).filter((payment) => payment.matched === "amount-memo") : [];
+  // A request of any amount says what came in, plainly: a lux is no green Paid.
+  const cameIn = typeof match?.lux === "bigint" ? [balance(hidden, formatDuskExact(String(match.lux))), " DUSK"] : ["Paid"];
   const [word, tone] = earlier
     ? ["Not checked", "muted"]
     : again.length
       ? ["Paid twice", "warn"]
       : match?.state === "paid"
-        ? ["Paid", "ok"]
+        ? match.anyAmount
+          ? [cameIn, "plain"]
+          : ["Paid", "ok"]
         : match?.state === "check"
           ? ["Check", "warn"]
           : ["Waiting", "muted"];
@@ -238,7 +242,7 @@ function requestRow(request, match, { hidden, address, state, actions, walletId,
   return h("li", { class: "request-row" }, [
     h("div", { class: "request-row__head" }, [
       h("span", { class: "request-row__amount" }, request.lux === null ? ["Any amount"] : [balance(hidden, formatDuskExact(request.lux)), " DUSK"]),
-      h("span", { class: `request-state request-state--${tone}`, text: word }),
+      h("span", { class: `request-state request-state--${tone}` }, [word].flat()),
     ]),
     h("div", { class: "request-row__sub" }, [
       request.memo ? h("span", { class: "request-row__memo" }, ["“", safeTextEl(request.memo), "” · "]) : null,

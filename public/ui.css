@@ -5018,6 +5018,10 @@ details.receive-request > summary {
   color: var(--text-muted);
 }
 
+.request-state--plain {
+  color: var(--text);
+}
+
 /* -------------------------------------------------------
    Contacts: the list, a contact's page, and the form
    ------------------------------------------------------- */

@@ -41,7 +41,7 @@ import { reviewActions, submitOnGasEnter } from "../../components/FormControls.j
 import { gasFeeLux, payGuard, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { activityKey, activityRows, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
+import { activityKey, activityRows, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 
 // What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
@@ -408,9 +408,20 @@ function sozuHistory(ov, st, { state, actions }) {
 }
 
 /**
+ * The profile's whole public history with Sozu's facts, as Liquid staking reads
+ * it for its position: for what Staking says of rewards by year.
+ * @returns {{ reading: boolean, rows: object[], facts?: Map<string, object>, whole?: boolean }}
+ */
+export function stakingHistory(ov, { state, actions }) {
+  return sozuHistory(ov, sozuState(state), { state, actions });
+}
+
+/**
  * Native staking's rate, and what the working under Sozu's says is made of:
- * asked once a popup and node, and drawn again when they come.
- * @returns {{ native: number | null, provisioners?: object[], tipHeight?: number }}
+ * asked once a popup and node, and drawn again when they come. The rate as the
+ * chain paid it over the last 30 days (`measured`), where that can be read,
+ * else the estimate.
+ * @returns {{ native: number | null, measured?: object, provisioners?: object[], tipHeight?: number }}
  */
 function sozuRateFigures(ov, st, { actions }) {
   const key = String(ov?.nodeUrl ?? "");
@@ -433,6 +444,11 @@ function sozuRateFigures(ov, st, { actions }) {
     if (st.rate !== rate) return;
     Object.assign(rate, { native: typeof native === "number" ? native : null }, Array.isArray(figures?.provisioners) ? { provisioners: figures.provisioners, tipHeight: figures.tipHeight } : {});
     actions?.render?.()?.catch?.(() => {});
+    nativeRewardsOf(ov, figures).then((measured) => {
+      if (st.rate !== rate || !measured) return;
+      Object.assign(rate, { native: measured.rate, measured });
+      actions?.render?.()?.catch?.(() => {});
+    });
   });
   return measure(rate);
 }
@@ -868,7 +884,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     ].filter(Boolean));
   // What it pays a year, once that's read, and the one line of what that's made of.
   const yearly = sozuRate(figures.native, rateStatus, figures.growth);
-  const working = sozuRateLine({ growth: figures.growth, nativeRate: figures.native, provisioners: figures.provisioners, tipHeight: figures.tipHeight, status: rateStatus, locale: amountLocale() });
+  const working = sozuRateLine({ growth: figures.growth, native: figures.measured ?? null, nativeRate: figures.native, provisioners: figures.provisioners, tipHeight: figures.tipHeight, status: rateStatus, locale: amountLocale() });
   const facts = h("div", { class: "group info" }, [
     fact("drop", "Any amount, no node needed", "You get stDUSK, a token for your share of Sozu's pool.", positionGroup ? null : stDuskAction),
     yearly !== null && working
