@@ -105,3 +105,12 @@ test("keeps a contact's address at the field's whole width, its chip on a line a
   expect(box.lines).toBeLessThanOrEqual(5);
   expect(box.hidden).toBeLessThanOrEqual(1);
 });
+
+// Chen's: an x between two digits drawn as a ×, by the font's contextual alternates.
+test("draws addresses and amounts without the font's contextual alternates, so an x is never a ×", async ({ page }) => {
+  await popupOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "1", memo: "" } });
+  for (const selector of [".to-input-wrap textarea", "input.amount-field__input"]) {
+    const ligatures = await page.locator(selector).first().evaluate((el) => getComputedStyle(el).fontVariantLigatures);
+    expect(ligatures).toMatch(/no-contextual|none/);
+  }
+});

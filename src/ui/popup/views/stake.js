@@ -922,9 +922,10 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     subnav({ title: isNew ? "Native staking" : "Stake more", onBack: back }),
     statusLine(st),
     h("div", { class: "amount-entry" }, [field.el, field.error, note, available]),
-    facts,
     advanced,
+    // Review right under the amount, so both fit above a phone's keyboard.
     h("div", { class: "stake-bottom" }, [reviewBtn, liquidLink].filter(Boolean)),
+    facts,
   ].filter(Boolean);
 }
 

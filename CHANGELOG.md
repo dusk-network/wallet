@@ -26,6 +26,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added `dusk_openPaymentLink`, for the web wallet's own button to open a request link in the extension's Send.
 - Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
 - Listed the requests made in Receive, each Waiting, Paid, Check or Paid twice, with its payments to open.
+- Added Copy link to each request in Receive.
 - Added a search to Activity: by name, address, memo, transaction ID or amount.
 - Gave the export's values in euros where the browser's region pays in them, and in US dollars elsewhere.
 - Made a release's zips rebuild byte for byte from its tag, with their SHA-256 in the release notes.
@@ -118,6 +119,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Caught contact names that look alike in any script, by Unicode's table, and marked them in Contacts and Send's suggestions beside their addresses.
 - Refused a contact named like one of your profiles, and called your other profiles "Your profile" on Review.
 - Repeated on Review that a send goes to your own account, and said what to try after a wrong password.
+- Took a paid request link off the page's address, so a reload doesn't bring the payment back ready to send.
+- Said on Send when you already paid the same payment, and named Review's button Send … again.
+- Showed Sent back, with when, rather than Send back once a request's extra payment went back.
+- Dropped "so far" from what a Sozu stake got once it's final.
+- Gave a request's payments to the second, so two in one minute differ.
+- Drew addresses and amounts without the font's contextual alternates, so an x between digits stays an x.
+- Put Review stake right under the amount, so a phone's keyboard doesn't cover it.
 - Kept another wallet's shielded history out of Activity and Export when the wallet changes during a read; an Export it changes under saves nothing and says so.
 - Said under a .dusk name when a node the wallet doesn't know checked it, and kept that node's answers from the network's own node's.
 - Said plainly on Home when the balance can't be read, instead of showing what the node said.

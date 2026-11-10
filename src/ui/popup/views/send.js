@@ -20,7 +20,7 @@ import { guarded } from "../../lib/clickGuard.js";
 import { joinedAddress } from "../../lib/recipient.js";
 import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
-import { balance, balancesHidden } from "../../components/Balance.js";
+import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
@@ -49,7 +49,7 @@ import {
 } from "../../../shared/duskNames.js";
 
 import { openQrScanModal } from "../../components/QrScanModal.js";
-import { readRequestLink, walletChainOf } from "../../lib/requestLink.js";
+import { forgetPaidLink, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
 import { contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
@@ -87,6 +87,22 @@ const FILLED_TEXT = Object.freeze({
   link: "Filled in from the link. Check it before you send.",
   qr: "Filled in from the QR code. Check it before you send.",
 });
+
+/**
+ * "You sent 0.02 DUSK to Alice with this memo at 08:53.": a payment made
+ * already, for the form and Review, the amount hidden as balances are where
+ * Max filled it in.
+ * @param {object} ov
+ * @param {{ lux: bigint, masked: boolean, to: string, memo: string, name?: string, time: number }} payment
+ */
+function sentAgainWords(ov, { lux, masked, to, memo, name = "", time }) {
+  const own = to === String(ov?.accounts?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "") || to === String(ov?.addresses?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "");
+  return [
+    "You sent ",
+    balance(balancesHidden(ov) && masked, formatDuskExact(lux)),
+    ` DUSK to ${own ? "yourself" : name || shortAddress(to)}${memo.trim() ? " with this memo" : ""} ${whenAtText(time)}.`,
+  ];
+}
 
 export function sendFormView(ov, { state, actions } = {}) {
   // A request for another network leaves nothing of itself here, whether it
@@ -293,6 +309,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   // until the recipient changes: its network is kept with the draft, so
   // Review and any redraw say it too.
   const errBox = h("div", { class: "err", style: "display:none" });
+  const againNote = h("div", { class: "callout warn send-again", role: "alert", hidden: true });
   const setErr = (txt) => {
     if (!txt) {
       errBox.style.display = "none";
@@ -854,7 +871,24 @@ export function sendFormView(ov, { state, actions } = {}) {
     updateAmountHelpers();
   };
 
+  // The same payment, made already: said on the form as soon as it's filled
+  // in, from a link opened again too, as Review says it.
+  const sayAgain = () => {
+    const recipient = String(to.value ?? "").trim();
+    const kind = recipient ? ProfileGenerator.typeOf(recipient) : "";
+    let lux = null;
+    try {
+      lux = kind === "account" || kind === "address" ? parseDuskToLux(String(amount.value ?? "")) : null;
+    } catch {
+      // Not an amount yet: nothing to say.
+    }
+    const made = lux ? sentAlready(activityRows(ov, state), { lux: BigInt(lux), memo: String(memo.value ?? ""), to: recipient }) : null;
+    setChildren(againNote, made && made.time !== null ? [h("div", { class: "callout-title" }, sentAgainWords(ov, { lux: BigInt(lux), masked: field.isMasked(), to: recipient, memo: String(memo.value ?? ""), name: ownProfileName(ov, recipient) || contactNameText(contactsIndex?.get(recipient.toLowerCase())?.name), time: made.time }))] : []);
+    againNote.hidden = !againNote.children.length;
+  };
+
   syncDraft = () => {
+    sayAgain();
     // Keep draft in sync so any toast-triggered re-render doesn't wipe inputs.
     state.draft = {
       ...(state.draft || {}),
@@ -1059,6 +1093,8 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   // Runs once the Review button exists, since a .dusk name toggles it.
   updateToType();
+  // A link already paid says so as it opens.
+  sayAgain();
 
   return [
     subnav({
@@ -1083,6 +1119,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       fieldLabel(memo, "Memo"),
       memo,
       memoError,
+      againNote,
       errBox,
       h("div", { class: "btnrow" }, [nextBtn]),
     ]),
@@ -1212,16 +1249,16 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // The same payment, made already: moments ago, or with this memo whenever,
   // as a request paid once. Said, not stopped: it can be meant.
   const madeAgain = sentAlready(activityRows(ov, state), { lux: safeBigInt(d.amountLux, 0n), memo: String(d.memo ?? ""), to: toAddr });
-  const againNote =
-    madeAgain && madeAgain.time !== null
-      ? h("div", { class: "callout warn review-again", role: "alert" }, [
-          h("div", { class: "callout-title" }, [
-            "You sent ",
-            balance(balancesHidden(ov) && Boolean(d.amountMasked), formatDuskExact(d.amountLux)),
-            ` DUSK to ${own ? "yourself" : contactName() || duskName?.name || shortAddress(toAddr)}${String(d.memo ?? "").trim() ? " with this memo" : ""} ${whenAtText(madeAgain.time)}.`,
-          ]),
-        ])
-      : null;
+  const repeat = Boolean(madeAgain && madeAgain.time !== null);
+  const againNote = repeat
+    ? h("div", { class: "callout warn review-again", role: "alert" }, [
+        h(
+          "div",
+          { class: "callout-title" },
+          sentAgainWords(ov, { lux: safeBigInt(d.amountLux, 0n), masked: Boolean(d.amountMasked), to: toAddr, memo: String(d.memo ?? ""), name: own ? "" : contactName() || duskName?.name || "", time: madeAgain.time })
+        ),
+      ])
+    : null;
 
   // Save to Contacts, unless it's saved already or it's this wallet's own.
   const saveContactBtn = h("button", {
@@ -1285,8 +1322,10 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     }
   }
 
-  // Back returns to Send with the draft, so Review has no Cancel.
-  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm", disabled: nothingArrives });
+  // Back returns to Send with the draft, so Review has no Cancel. A payment
+  // made already says on its button that it sends it again, as the web wallet's does.
+  const amountShown = balancesHidden(ov) && Boolean(d.amountMasked) ? HIDDEN_BALANCE : formatDuskExact(d.amountLux);
+  const confirmBtn = h("button", { class: "btn-primary", text: repeat ? `Send ${amountShown} DUSK again` : "Confirm", disabled: nothingArrives });
 
   // What Max filled in stays hidden with the balances; an amount typed shows.
   const amountMasked = balancesHidden(ov) && Boolean(d.amountMasked);
@@ -1353,6 +1392,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       onSent: () => {
         // Done with, unless a newer draft took its place meanwhile.
         if (state.draft === d) state.draft = null;
+        // Paid: the link the page opened with goes from its address.
+        forgetPaidLink();
       },
     });
     pay.draw();

@@ -465,6 +465,17 @@ code,
   letter-spacing: 0;
 }
 
+/* An address or an amount typed or shown in the page's own font shows each
+   character as it is, as the mono font does: Söhne's contextual alternates
+   draw an x between two digits as a ×. */
+input,
+textarea,
+[class*="address"],
+[class*="amount"],
+[class*="balance"] {
+  font-variant-ligatures: no-contextual;
+}
+
 code {
   word-break: break-all;
 }

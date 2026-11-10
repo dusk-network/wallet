@@ -901,10 +901,13 @@ function comeBack() {
 }
 
 // The app on a phone, with Lock when I leave the app on: locked as the person
-// leaves it, unless the wallet itself sent them elsewhere for a moment.
+// leaves it, unless the wallet itself sent them elsewhere for a moment. Back,
+// they're asked the password, as after Lock wallet.
 function leave() {
   const ov = state.overview;
   if (!appBack || !ov?.isUnlocked || ov?.lockOnLeave !== true || steppedAway()) return;
+  switchContext(state, "lock");
+  state.route = "home";
   send({ type: "DUSK_UI_LOCK" }).catch(() => {});
 }
 
@@ -1377,14 +1380,21 @@ export async function render({ forceRefresh = false } = {}) {
 // --- Payment links opened in the app ---------------------------------------------
 // A dusk: link from another app, a chat or a QR reader: Send, filled in from it
 // as a link pasted into Send fills it, and refused there for another network;
-// after the unlock, when the wallet is locked.
+// after the unlock, when the wallet is locked. Send shows at once, from what
+// the wallet last read: a phone just woken can take a minute to answer, and
+// the balance follows when it does.
 listenForLinks((url) => {
   const draft = requestDraftOf(`?link=${encodeURIComponent(url)}`);
   if (!draft) return;
   netMenu.close();
   acctMenu.close();
-  Object.assign(state, { draft, route: "send", needsRefresh: true });
-  render({ forceRefresh: true }).catch(() => {});
+  Object.assign(state, { draft, route: "send" });
+  render()
+    .then(() => {
+      state.needsRefresh = true;
+      return render({ forceRefresh: true });
+    })
+    .catch(() => {});
 });
 
 export function mountPopup() {

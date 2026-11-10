@@ -902,8 +902,9 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
         ])
       : null,
     h("div", { class: "amount-entry" }, [field.el, field.error, available, maxNote, termsNote, estimate]),
-    facts,
+    // Review right under the amount, so both fit above a phone's keyboard.
     h("div", { class: "stake-bottom" }, [reviewBtn]),
+    facts,
   ].filter(Boolean);
 }
 

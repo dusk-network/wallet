@@ -431,7 +431,14 @@ describe("the app on a phone", () => {
   // Chen's wish: lock when I leave the app.
   it("locks as the person leaves it with Lock when I leave the app on, not for the share sheet, and not with it off", async () => {
     const bridge = tauriBridge();
-    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge });
+    // The wallet locks when asked, and says so.
+    const locks = async (message, t) => {
+      if (message.type !== "DUSK_UI_LOCK") return undefined;
+      t.open = { ...t.open, isUnlocked: false };
+      t.deliver({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
+      return { ok: true };
+    };
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, locks, { tauri: bridge });
     const hide = async () => {
       t.dom.document.visibilityState = "hidden";
       t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
@@ -460,9 +467,12 @@ describe("the app on a phone", () => {
     await hide();
     expect(t.asked("DUSK_UI_LOCK")).toEqual([]);
     await show();
-    // Leaving is.
+    // Leaving is: back, the password is asked, not the locked Settings.
     await hide();
     expect(t.asked("DUSK_UI_LOCK")).toHaveLength(1);
+    await show();
+    expect(t.app.querySelector("input[type=password]")?.getAttribute("placeholder")).toBe("Password");
+    expect(t.app.textContent).not.toContain("Lock when I leave the app");
   });
 
   it("opens Send filled in from a dusk: link it was opened with, and from one opened while it runs", async () => {
@@ -481,6 +491,20 @@ describe("the app on a phone", () => {
     bridge.emit([LINK.replace("0.01", "0.02").replace("Deep+link+test", "Second")]);
     await flush();
     expect([t.state.route, fields().includes("0.02"), fields().includes("Second")]).toEqual(["send", true, true]);
+
+    // Lena's: one as the app comes back on Activity, while the wallet still
+    // reads the node, which a phone just woken can take a minute to answer.
+    t.state.route = "activity";
+    await t.render();
+    const answer = t.send.getMockImplementation();
+    const node = Promise.withResolvers();
+    t.send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? (await node.promise, t.open) : answer(message)));
+    bridge.emit([LINK.replace("0.01", "0.03").replace("Deep+link+test", "Third")]);
+    await flush();
+    expect([t.app.querySelector(".subnav-title")?.textContent, fields().includes("0.03"), fields().includes("Third")]).toEqual(["Send", true, true]);
+    node.resolve();
+    await flush();
+    expect([t.app.querySelector(".subnav-title")?.textContent, fields().includes("0.03"), fields().includes("Third")]).toEqual(["Send", true, true]);
   });
 });
 

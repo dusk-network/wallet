@@ -62,9 +62,9 @@ export function dayLabel(ms, now = Date.now()) {
 }
 
 /** When, in a sentence: "at 14:32", "yesterday at 14:32", "on Thu 5 Nov at 14:32". */
-export function whenAtText(ms, now = Date.now()) {
+export function whenAtText(ms, now = Date.now(), { seconds = false } = {}) {
   const day = dayLabel(ms, now);
-  const at = `at ${clockText(ms)}`;
+  const at = `at ${clockText(ms, { seconds })}`;
   return day === "Today" ? at : day === "Yesterday" ? `yesterday ${at}` : `on ${day} ${at}`;
 }
 

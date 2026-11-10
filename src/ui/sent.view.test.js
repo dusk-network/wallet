@@ -125,9 +125,10 @@ describe("a stake or an unstake with Sozu, completed", () => {
     expect(rows().slice(0, 2)).toEqual(["You got•••• stDUSK", "Rate1 stDUSK = 2 DUSK"]);
   });
 
-  it("says what its block said is so far, till the final history says it", () => {
+  // Lena's: "… stDUSK so far" on a figure that never changed, the chain's own.
+  it("says what its block said as it is, with no \"so far\", before the final history has it too", () => {
     completed("stake", { ...fact("stake", 49_875_000_000n), final: false });
-    expect(rows().slice(0, 2)).toEqual(["You got49.875 stDUSK so far", "Rate1 stDUSK = 2 DUSK"]);
+    expect(rows().slice(0, 2)).toEqual(["You got49.875 stDUSK", "Rate1 stDUSK = 2 DUSK"]);
   });
 
   it("says the stDUSK and rate are coming while its pool's event isn't read yet, never nothing", () => {
@@ -336,6 +337,24 @@ describe("after Confirm", () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
     app.draw();
     expect(steps()[1]).toEqual(["current", "Sent to the network", "No connection. It's looked up again once you're back online."]);
+  });
+
+  // Amélie's: after paying a link, pulling the page down brought the same payment back, ready to send.
+  it("takes the link the page was opened with off its address once it's paid, and leaves it on one not sent", async () => {
+    const replaceState = vi.fn();
+    vi.stubGlobal("history", { state: null, replaceState });
+    vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send&link=https%3A%2F%2Fapps.testnet.dusk.network%2Fwallet%2Fdashboard%2Fsend%3Fto%3Dabc&origin=x" });
+    const refused = popup(reviewState());
+    await settle();
+    (await refused.confirm()).resolve({ error: { message: "Insufficient balance" } });
+    await settle();
+    expect(replaceState).not.toHaveBeenCalled();
+
+    const app = popup(reviewState());
+    await settle();
+    (await app.confirm()).resolve({ ok: true, result: { hash: HASH } });
+    await settle();
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/full.html?origin=x");
   });
 
   it("keeps a send the network didn't take on the Sent screen, with Back to the review as it was", async () => {

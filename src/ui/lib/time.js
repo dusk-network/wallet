@@ -19,23 +19,29 @@ function clockOf(language) {
   };
 }
 
-const clockIn = (language, ms) => {
+const clockIn = (language, ms, seconds = false) => {
   const { english, hourCycle, numberingSystem } = clockOf(language);
   return new Intl.DateTimeFormat(english ? language : "en-US", {
     hour: hourCycle === "h23" || hourCycle === "h24" ? "2-digit" : "numeric",
     hourCycle,
     minute: "2-digit",
+    ...(seconds ? { second: "2-digit" } : {}),
     numberingSystem,
   }).format(new Date(ms));
 };
 
-/** "14:32" or "2:32 PM", in the page's time zone and on the browser's language's clock. */
-export function clockText(ms) {
+/**
+ * "14:32" or "2:32 PM", in the page's time zone and on the browser's
+ * language's clock; with `seconds`, "14:32:07", for times a minute can't tell apart.
+ * @param {number} ms
+ * @param {{ seconds?: boolean }} [opts]
+ */
+export function clockText(ms, { seconds = false } = {}) {
   try {
-    return clockIn(globalThis.navigator?.language || undefined, ms);
+    return clockIn(globalThis.navigator?.language || undefined, ms, seconds);
   } catch {
     // A language Intl doesn't know: its default's clock.
-    return clockIn(undefined, ms);
+    return clockIn(undefined, ms, seconds);
   }
 }
 

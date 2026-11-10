@@ -727,6 +727,20 @@ describe("native staking", () => {
     expect(button("Confirm").disabled).toBe(false);
   });
 
+  // Lena's: on a phone the keyboard covered Review stake, with the facts between it and the amount.
+  it("puts Review stake right under the amount, the facts after it, so both fit above a phone's keyboard", () => {
+    const order = () => {
+      const parts = body.children.map((el) => (el.matches(".amount-entry") ? "amount" : el.matches(".group.info") ? "facts" : el.matches(".stake-bottom") ? "button" : null));
+      return parts.filter(Boolean);
+    };
+    popup({ route: "stake", staking: staking(owner(), { screen: "native" }) });
+    expect(order()).toEqual(["amount", "button", "facts"]);
+    expect(body.querySelector(".stake-bottom button").textContent).toBe("Review stake");
+    popup({ route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() });
+    expect(order()).toEqual(["amount", "button", "facts"]);
+    expect(body.querySelector(".stake-bottom button").textContent).toBe("Review stake");
+  });
+
   it("states the node, timing, penalty and fee facts from Dusk's staking docs", () => {
     popup({ route: "stake", staking: staking(owner(), { screen: "native" }) });
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([

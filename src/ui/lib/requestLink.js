@@ -42,3 +42,22 @@ export function requestDraftOf(search) {
   const { link } = read;
   return { to: link.to, amountDusk: amountForInput(link.amountDusk), memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link" };
 }
+
+/**
+ * Takes the request link the page was opened with off its address, once it's
+ * paid: a reload, or Firefox for Android bringing the tab back, opens the
+ * wallet, not the same payment ready to send again.
+ * @param {{ location?: Location, history?: History }} [page]
+ */
+export function forgetPaidLink({ location: where = globalThis.location, history = globalThis.history ?? globalThis.window?.history } = {}) {
+  try {
+    const params = new URLSearchParams(where?.search ?? "");
+    if (!params.has("link")) return;
+    params.delete("link");
+    params.delete("route");
+    const query = params.toString();
+    history?.replaceState?.(history.state ?? null, "", `${where.pathname}${query ? `?${query}` : ""}`);
+  } catch {
+    // An address that can't change stays as it is.
+  }
+}

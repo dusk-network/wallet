@@ -1955,12 +1955,33 @@ describe("a payment made already", () => {
     return el ? visibleText(el) : "";
   };
 
-  it("is said on Review, with when it went, and Confirm still goes", () => {
-    // Sofia's: the same request link paid, then pasted again.
+  it("is said on Review, with when it went, and its button says it sends it again, as the web wallet's does", () => {
+    // Sofia's: the same request link paid, then pasted again; Amélie's: the button still said Confirm.
     const at = Date.now() - 60_000;
     confirm(draft(), [sentRecord({ submittedAt: at })]);
     expect(again()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(false);
+    const button = dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again");
+    expect(button.disabled).toBe(false);
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm")).toBeUndefined();
+    // Not made before: Confirm.
+    confirm(draft({ memo: "Order 1045" }), [sentRecord({ submittedAt: at })]);
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm")).toBeTruthy();
+  });
+
+  // Amélie's and Sofía's: a link paid already, opened again, said nothing until Review.
+  it("is said on the form as soon as it's filled in, a link opened again too, and goes as the fields change", () => {
+    const at = Date.now() - 60_000;
+    const state = { route: "send", addressBook: { loaded: true, items: [{ name: "Alice", address: ALICE.account }] }, draft: { ...draft(), filledFrom: "link" } };
+    const form = mount(state, { ...overview(), txs: [sentRecord({ submittedAt: at })] });
+    const note = () => {
+      const el = dom.document.body.querySelector(".send-again");
+      return el && isShown(el) ? visibleText(el) : "";
+    };
+    expect(note()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
+    typeInto(form.amount, "0.014");
+    expect(note()).toBe("");
+    typeInto(form.amount, "0.013");
+    expect(note()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
   });
 
   it("is said of the same memo whenever it went, and of the same payment without one only moments after", () => {

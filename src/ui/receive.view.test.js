@@ -503,7 +503,7 @@ describe("the requests made here", () => {
 
     dom.document.body.querySelectorAll("button").find((b) => visibleText(b) === "Copy request link").click();
     await vi.waitFor(() => expect(shown()).toHaveLength(1));
-    expect(shown()).toEqual([{ amount: "1.25 DUSK", state: "Waiting", match: "Nothing matching has come in.", buttons: ["Remove"] }]);
+    expect(shown()).toEqual([{ amount: "1.25 DUSK", state: "Waiting", match: "Nothing matching has come in.", buttons: ["Copy link", "Remove"] }]);
     expect(items[KEY][ACCOUNT]).toEqual([expect.objectContaining({ lux: "1250000000", memo: "Factura 33", network: "testnet", to: ACCOUNT })]);
 
     // The same one copied again is the same request.
@@ -534,18 +534,20 @@ describe("the requests made here", () => {
     const actions = await draw(state);
 
     expect(shown()).toEqual([
-      { amount: "1.25 DUSK", state: "Paid", match: `Amount and memo match a payment of 1.25 DUSK ${whenAtText(T0 + HOUR)}.`, buttons: ["See payment", "Remove"] },
-      { amount: "2 DUSK", state: "Check", match: `Same amount ${whenAtText(T0 + 2 * HOUR)}, with another memo: "Other". Check it's this one.`, buttons: ["See payment", "Remove"] },
-      { amount: "Any amount", state: "Paid twice", match: "Its memo matches 2 payments.", buttons: ["Remove"] },
+      { amount: "1.25 DUSK", state: "Paid", match: `Amount and memo match a payment of 1.25 DUSK ${whenAtText(T0 + HOUR)}.`, buttons: ["See payment", "Copy link", "Remove"] },
+      { amount: "2 DUSK", state: "Check", match: `Same amount ${whenAtText(T0 + 2 * HOUR)}, with another memo: "Other". Check it's this one.`, buttons: ["See payment", "Copy link", "Remove"] },
+      { amount: "Any amount", state: "Paid twice", match: "Its memo matches 2 payments.", buttons: ["Copy link", "Remove"] },
     ]);
     // What paid stays paid, kept with its request and what it paid.
     await vi.waitFor(() => expect(items[KEY][ACCOUNT].find((r) => r.id === "a").paid).toEqual({ at: T0 + HOUR, hash: "a1".repeat(32), lux: "1250000000" }));
 
     // Paid twice: each payment, what it brought and when, to see; the second to send back.
     const payments = () => dom.document.body.querySelectorAll(".request-row")[2].querySelectorAll(".request-row__payments li");
+    // To the second: two in the same minute read apart (Sofía's).
+    const seconds = { seconds: true };
     expect(payments().map((li) => [visibleText(li.querySelector(".request-payment__what")), li.querySelectorAll("button").map(visibleText)])).toEqual([
-      [`0.7 DUSK ${whenAtText(T0 + 3 * HOUR)}`, ["See payment"]],
-      [`0.3 DUSK ${whenAtText(T0 + 4 * HOUR)}`, ["See payment", "Send back"]],
+      [`0.7 DUSK ${whenAtText(T0 + 3 * HOUR, Date.now(), seconds)}`, ["See payment"]],
+      [`0.3 DUSK ${whenAtText(T0 + 4 * HOUR, Date.now(), seconds)}`, ["See payment", "Send back"]],
     ]);
     // A payment opens in its details, and comes back here.
     payments()[1].querySelectorAll("button").find((b) => visibleText(b) === "See payment").click();
@@ -586,6 +588,28 @@ describe("the requests made here", () => {
     expect(shown().map(({ match }) => match)).toEqual([`Its memo matches a payment of •••• DUSK ${whenAtText(T0 + HOUR)}.`, `Its memo matches a payment of •••• DUSK ${whenAtText(T0 + 2 * HOUR)}.`]);
   });
 
+  // Sofía's: after Send back, the request still offered it, and said nothing of it.
+  it("says when a payment was sent back, and offers no Send back for it again; and copies a request's link", async () => {
+    items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "16000000", memo: "Factura 117" })] };
+    const SENDER = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+    const entries = [
+      // The refund, after the second payment, in a later block.
+      entryOf({ blockHeight: 4_687_200, counterparty: SENDER, direction: "out", hash: "b1".repeat(32), memo: "Refund: Factura 117", timestamp: T0 + 3 * HOUR, value: "16000000" }),
+      paidIn("a2".repeat(32), "16000000", "Factura 117", T0 + 2 * HOUR, 4_687_100),
+      paidIn("a1".repeat(32), "16000000", "Factura 117", T0 + HOUR, 4_687_000),
+    ];
+    const state = { route: "receive", receive: { tab: "public" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
+    await draw(state);
+    const second = dom.document.body.querySelectorAll(".request-row__payments li")[1];
+    expect(second.querySelectorAll("button").map(visibleText)).toEqual(["See payment"]);
+    expect(visibleText(second.querySelector(".request-payment__sent"))).toBe(`Sent back ${whenAtText(T0 + 3 * HOUR, Date.now(), { seconds: true })}`);
+
+    // Its link, to copy again (the web wallet's list has it).
+    dom.document.body.querySelectorAll(".request-row__actions button").find((b) => visibleText(b) === "Copy link").click();
+    await settle();
+    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.016&memo=Factura+117&network=testnet`);
+  });
+
   it("sends back a payment that paid a request again: to whoever sent it, what it brought, with the request's memo", async () => {
     // Sofia's: paid twice, and no way to refund but filling Send in by hand.
     items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "16000000", memo: "Factura 2026-074 Ilustración" })] };
@@ -595,7 +619,7 @@ describe("the requests made here", () => {
     await draw(state);
     expect(shown()[0]).toMatchObject({ state: "Paid twice", match: "Amount and memo match 2 payments." });
     const back = dom.document.body.querySelectorAll(".request-row__payments button").find((b) => visibleText(b) === "Send back");
-    expect(accessibleName(back)).toBe(`Send back the payment of 0.016 DUSK ${whenAtText(T0 + 2 * HOUR)}`);
+    expect(accessibleName(back)).toBe(`Send back the payment of 0.016 DUSK ${whenAtText(T0 + 2 * HOUR, Date.now(), { seconds: true })}`);
     back.click();
     expect(state.route).toBe("send");
     expect(state.draft).toMatchObject({ to: SENDER, amountDusk: "0.016", amountMasked: false, memo: "Refund: Factura 2026-074 Ilustración" });
@@ -681,7 +705,7 @@ describe("the requests made here", () => {
       return state;
     };
 
-    const unchecked = (amount) => ({ amount, state: "Not checked", match: "Made by an earlier version for a node it didn't name, so payments aren't checked against it.", buttons: ["Remove"] });
+    const unchecked = (amount) => ({ amount, state: "Not checked", match: "Made by an earlier version for a node it didn't name, so payments aren't checked against it.", buttons: ["Copy link", "Remove"] });
     // On a custom node: the earlier custom one, never matched to the payment that looks like its own.
     await drawOn(on("https://node-42.example", 42));
     expect(shown()).toEqual([unchecked("5 DUSK")]);
