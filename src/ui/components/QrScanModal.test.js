@@ -112,6 +112,26 @@ describe("the QR scan", () => {
     await live;
   });
 
+  // Astra's: with Auto-lock's Immediately, a camera allowed or refused already asks nothing, so the
+  // wallet never went to the background, and the step away for its question stayed: the next leaving didn't lock.
+  it("leaves no step away once the camera's answer comes without a question, nor once the scan closes", async () => {
+    const { steppedAway } = await import("../../platform/native.js");
+    const { openQrScanModal } = await import("./QrScanModal.js");
+    for (const getUserMedia of [async () => camera().stream, async () => Promise.reject(new DOMException("denied", "NotAllowedError"))]) {
+      decoder.read.mockImplementation(() => null);
+      vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: vi.fn(getUserMedia) } });
+      const scan = openQrScanModal();
+      await loaded();
+      expect(steppedAway()).toBe(false);
+      // The phone's picker, then the scan closed without the wallet going anywhere.
+      button("Choose image").click();
+      expect(steppedAway()).toBe(true);
+      await close();
+      await scan;
+      expect(steppedAway()).toBe(false);
+    }
+  });
+
   it("says the scanner couldn't load and offers no image when its decoder doesn't come, until the wallet opens again", async () => {
     let { openQrScanModal } = await import("./QrScanModal.js");
     decoder.fail = true;

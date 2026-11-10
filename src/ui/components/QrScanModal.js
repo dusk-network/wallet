@@ -128,12 +128,15 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
       style: "display:none",
     });
 
+    // The step away the phone's picker or camera question is: over once the
+    // scan closes, whatever came of it.
+    let backFromAway = () => {};
     const chooseBtn = h("button", {
       class: "btn-outline",
       text: "Choose image",
       onclick: () => {
         // The phone's picker, a moment away from the wallet.
-        stepAway();
+        backFromAway = stepAway();
         fileInput.click();
       },
     });
@@ -155,6 +158,7 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
     function finish(value) {
       if (done) return;
       done = true;
+      backFromAway();
       if (raf) cancelAnimationFrame(raf);
       stopStream(stream);
       try {
@@ -221,8 +225,9 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
         return;
       }
 
-      // The phone may ask about the camera, over the wallet.
-      stepAway();
+      // The phone may ask about the camera, over the wallet: a camera allowed
+      // or refused already asks nothing, and the step away ends with the answer.
+      const asked = (backFromAway = stepAway());
       try {
         const baseVideo = {
           width: { ideal: 1280 },
@@ -240,6 +245,8 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
             video: { ...baseVideo, facingMode: { ideal: "environment" } },
             audio: false,
           });
+        } finally {
+          asked();
         }
 
         video.srcObject = stream;

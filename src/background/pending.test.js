@@ -315,7 +315,7 @@ describe("pending approvals", () => {
         const answer = pending.requestUserApproval("connect", "https://site.example", {}, { walletId: "acct0" });
         await expect(answer).rejects.toMatchObject({ code: -32603, message: pending.NOT_SHOWN_TEXT });
         await new Promise((r) => setTimeout(r, 0));
-        expect(notes).toEqual([{ origin: "https://site.example", kind: "connect", params: {}, answer: "not_shown" }]);
+        expect(notes).toEqual([{ origin: "https://site.example", kind: "connect", params: {}, answer: "not_shown", id: expect.any(String) }]);
         expect(pending.pendingApprovals.size).toBe(0);
       } finally {
         browserHas.windows = true;

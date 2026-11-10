@@ -170,6 +170,19 @@ describe("a send that fails, and whether it went out", () => {
     expect(node.signed).toHaveLength(1);
   });
 
+  // Astra's: a node that checked it, then turned its hand-over down, didn't take it.
+  it("says nothing went out when the node turns the hand-over down in so many words, after checking it", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.refuses = "Transaction not accepted: gas price too low";
+    node.refusesAt = /\/propagate$/;
+    const error = await engine.sendTransaction(KINDS["a public transfer"]()).catch((e) => e);
+    expect(error.data).toMatchObject({ sent: false });
+    expect(error.data.sent).toBe(false);
+    // Checked, then handed over and refused.
+    expect(node.signed).toHaveLength(2);
+  });
+
   it("says nothing of it for a send that went", async () => {
     await addNode(TESTNET);
     await engine.unlockWithMnemonic(MNEMONIC);

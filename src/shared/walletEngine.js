@@ -25,7 +25,7 @@ import { runtimeSendMessage } from "../platform/extensionApi.js";
 import { parseSozuPoolState } from "./sozuAdapter.js";
 import { blockedRecipient } from "./recipientBlocklist.js";
 import { askNodeChainId, chainIdForNode, chainRefusal, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
-import { nodeRefusalText, propagationError } from "./nodeRefusal.js";
+import { ALREADY_THERE, NO_CLEAR_ANSWER, nodeRefusalText, propagationError } from "./nodeRefusal.js";
 import { connectionLost } from "./sendOutcome.js";
 
 import {
@@ -1469,8 +1469,11 @@ function sayRefusalsPlainly(network) {
       if (step === "propagate" && args[0] && typeof args[0] === "object") handedOver.add(args[0]);
       return call.apply(txs, args).catch((error) => {
         if (error?.name === "TypeError" || error?.name === "AbortError") throw error;
-        // Before propagation nothing has gone out. After it, only the node's own word is a refusal.
-        throw new Error(step === "propagate" ? propagationError(error?.message ?? error) : nodeRefusalText(error?.message ?? error));
+        // Before propagation nothing has gone out. After it, only the node's own word is a refusal:
+        // then nothing went out either (sayWhetherItWent), where no clear answer may have.
+        if (step !== "propagate") throw new Error(nodeRefusalText(error?.message ?? error));
+        const said = propagationError(error?.message ?? error);
+        throw said === NO_CLEAR_ANSWER || said === ALREADY_THERE ? new Error(said) : markSent(new Error(said), { sent: false });
       });
     };
   }
@@ -1501,7 +1504,8 @@ function sayWhetherItWent(network) {
     try {
       return await execute.call(this, tx);
     } catch (error) {
-      const went = built?.buffer && handedOver.has(built.buffer);
+      // Handed over, and not turned down in so many words: it may have gone.
+      const went = built?.buffer && handedOver.has(built.buffer) && error?.data?.sent !== false;
       throw markSent(error, went ? { sent: "unknown", hash: String(built.hash ?? "") || undefined } : { sent: false });
     } finally {
       if (ownBuild) tx.build = build;

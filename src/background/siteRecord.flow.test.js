@@ -142,6 +142,31 @@ describe("what's kept of what a site asked", () => {
     for (const secret of ["7654321", OTHER, "for the rent", message, Buffer.from(message).toString("hex"), "abab", "cdcd", "0x1234"]) expect(kept).not.toContain(secret);
   });
 
+  // Astra's: a send that failed while the site's next request was approved marked that one, and left itself approved.
+  it("notes a send that failed on its own approval, not on the site's next one approved while it ran", async () => {
+    await approveOrigin(SITE, { accountIndex: 0, profileId: `account:0:${ACCOUNT}` }, ACCOUNT);
+    const sending = Promise.withResolvers();
+    mocks.engineCall.mockImplementation(async (method) => {
+      if (method === "dusk_sendTransaction") return sending.promise;
+      if (method === "dusk_signMessage") return "0xsigned";
+      return method === "dusk_getCachedGasPrice" ? { median: "1" } : true;
+    });
+    const paying = await ask("dusk_sendTransaction", pay());
+    paying.approve();
+    // While it runs, the site asks to sign, and that's approved.
+    const signing = await ask("dusk_signMessage", { message: "0x6869" });
+    signing.approve();
+    await vi.waitFor(() => expect(recordOf().asked[0]).toMatchObject({ what: "sign_message", answer: "approved" }));
+    sending.reject(Object.assign(new Error("Failed to fetch"), { data: { sent: false } }));
+    await paying.outcome;
+    await signing.outcome;
+    await vi.waitFor(() => expect(recordOf().asked.find((entry) => entry.what === "transfer")?.answer).toBe("failed"));
+    expect(await askedOf()).toEqual([
+      ["sign_message", "approved"],
+      ["transfer", "failed"],
+    ]);
+  });
+
   it("notes an approved send that didn't go out as not sent, and one that may not have as not confirmed", async () => {
     await approveOrigin(SITE, { accountIndex: 0, profileId: `account:0:${ACCOUNT}` }, ACCOUNT);
     // Marek's, approved offline: the engine couldn't reach the node.

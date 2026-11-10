@@ -2,7 +2,7 @@
 // tab open already, shown at the page asked for and brought to the front,
 // rather than one more beside it; a new one where there's none.
 
-import { runtimeGetURL, tabsCreate, tabsQuery, tabsUpdate } from "../platform/extensionApi.js";
+import { runtimeGetURL, tabsCreate, tabsQuery, tabsUpdate, windowsGet, windowsUpdate } from "../platform/extensionApi.js";
 
 // The wallet's pages a tab can hold: the full view, and the popup as Firefox for Android shows it.
 const WALLET_PAGES = ["full.html", "popup.html"];
@@ -19,10 +19,20 @@ export async function openWalletTab(path) {
   if (open?.id !== undefined) {
     try {
       await tabsUpdate(open.id, { url, active: true });
+      // Its window too; a window that can't come forward leaves the tab as it is.
+      await frontWindow(open.windowId).catch(() => {});
       return open;
     } catch {
       // Gone meanwhile: a new one.
     }
   }
   return tabsCreate({ url });
+}
+
+// The tab's window to the front too, as it may be another, minimised: a
+// minimised one shown again, any other as it was. A phone's browser has no windows.
+async function frontWindow(windowId) {
+  if (windowId === undefined) return;
+  const shown = await windowsGet(windowId).catch(() => null);
+  await windowsUpdate(windowId, shown?.state === "minimized" ? { focused: true, state: "normal" } : { focused: true }).catch(() => {});
 }

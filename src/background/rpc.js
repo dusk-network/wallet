@@ -829,7 +829,6 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
       // Above the amount chosen in Settings, the password, checked here against
       // the vault as the window answers: a wrong one leaves the request waiting.
       let passwordFor = null;
-      const askedAt = Date.now();
       const overrides = await requestUserApproval("send_tx", origin, approvalParams, shown, {
         beforeApprove: async ({ approvedParams, sendPassword }) => {
           const { walletKey } = await getEngineStatusStrict();
@@ -839,7 +838,7 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
       // Approved, and then not sent, or maybe not: its site's record says so.
       const sayFailed = (error) => {
         const walletId = shown.walletId || approvalContext.walletId;
-        noteSiteSendFailed(walletId, origin, { since: askedAt, answer: sentOf(error) === false ? "failed" : "unconfirmed" }).catch(() => {});
+        noteSiteSendFailed(walletId, origin, { id: shown.rid, answer: sentOf(error) === false ? "failed" : "unconfirmed" }).catch(() => {});
         throw error;
       };
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {

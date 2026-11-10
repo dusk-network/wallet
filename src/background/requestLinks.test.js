@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runtimeGetURL, tabsCreate, tabsQuery, tabsUpdate } from "../platform/extensionApi.js";
+import { runtimeGetURL, tabsCreate, tabsQuery, tabsUpdate, windowsGet, windowsUpdate } from "../platform/extensionApi.js";
 import { loadVault } from "../shared/vault.js";
 import { handOverRequestLink, offersRequestLink, openRequestLink } from "./requestLinks.js";
 
@@ -10,6 +10,8 @@ vi.mock("../platform/extensionApi.js", () => ({
   // No wallet tab open, unless a test opens one.
   tabsQuery: vi.fn(async () => []),
   tabsUpdate: vi.fn(async () => ({})),
+  windowsGet: vi.fn(async () => ({ state: "normal" })),
+  windowsUpdate: vi.fn(async () => ({})),
 }));
 vi.mock("../shared/vault.js", () => ({ loadVault: vi.fn(async () => ({ version: 2 })) }));
 // The wallet's node, as Settings has it: a test on this machine says so.
@@ -43,6 +45,21 @@ describe("a request link from the web wallet's Send", () => {
     await expect(openRequestLink({ link: LINK }, onWalletPage)).resolves.toBe(true);
     expect(tabsUpdate).toHaveBeenCalledWith(7, { url: `chrome-extension://wallet/full.html?route=send&link=${encodeURIComponent(LINK)}`, active: true });
     expect(tabsCreate).not.toHaveBeenCalled();
+  });
+
+  // Astra's: the wallet's tab in another window, maybe minimised, came forward there alone.
+  it("brings the window of the wallet's tab to the front too, where it's another, minimised or not", async () => {
+    tabsQuery.mockResolvedValueOnce([{ id: 7, windowId: 2, url: "chrome-extension://wallet/full.html" }]);
+    windowsGet.mockResolvedValueOnce({ id: 2, state: "minimized" });
+    await expect(openRequestLink({ link: LINK }, onWalletPage)).resolves.toBe(true);
+    expect(tabsUpdate).toHaveBeenCalledWith(7, { url: `chrome-extension://wallet/full.html?route=send&link=${encodeURIComponent(LINK)}`, active: true });
+    expect(windowsUpdate).toHaveBeenCalledWith(2, { focused: true, state: "normal" });
+
+    // A maximised one stays so.
+    tabsQuery.mockResolvedValueOnce([{ id: 7, windowId: 4, url: "chrome-extension://wallet/full.html" }]);
+    windowsGet.mockResolvedValueOnce({ id: 4, state: "maximized" });
+    await openRequestLink({ link: LINK }, onWalletPage);
+    expect(windowsUpdate).toHaveBeenLastCalledWith(4, { focused: true });
   });
 
   it("is taken from the web wallet's own pages alone, also once it moved on", async () => {

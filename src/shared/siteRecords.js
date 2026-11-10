@@ -107,16 +107,17 @@ function requestKind(kind, params) {
  * note takes its place in line as it's made.
  * @param {string | Promise<string>} walletId - the wallet it was for
  * @param {string} origin
- * @param {{ kind: string, params?: object, answer: "approved"|"failed"|"unconfirmed"|"rejected"|"closed"|"expired"|"cancelled"|"not_shown", asked?: string, at?: number }} request
- *   `asked`: the words its approval led with, kept for a bridge's calls
+ * @param {{ kind: string, params?: object, answer: "approved"|"failed"|"unconfirmed"|"rejected"|"closed"|"expired"|"cancelled"|"not_shown", asked?: string, at?: number, id?: string }} request
+ *   `asked`: the words its approval led with, kept for a bridge's calls; `id`,
+ *   the request's, for what comes of it after (noteSiteSendFailed)
  */
-export function noteSiteRequest(walletId, origin, { kind, params, answer, asked, at = Date.now() }) {
+export function noteSiteRequest(walletId, origin, { kind, params, answer, asked, at = Date.now(), id: rid }) {
   return mutate(async (all) => {
     const id = String((await walletId) ?? "");
     if (!id || !origin) return all;
     const sites = sitesOf(all, id);
     const site = siteOf(sites, origin);
-    const list = [{ at, ...requestRecord(kind, params, asked), answer }, ...(Array.isArray(site.asked) ? site.asked : [])];
+    const list = [{ at, ...requestRecord(kind, params, asked), answer, ...(rid ? { id: String(rid) } : {}) }, ...(Array.isArray(site.asked) ? site.asked : [])];
     while (list.length > SITE_ASKED_KEPT) {
       const least = Math.min(...list.map(rankOf));
       list.splice(list.findLastIndex((entry) => rankOf(entry) === least), 1);
@@ -127,18 +128,18 @@ export function noteSiteRequest(walletId, origin, { kind, params, answer, asked,
 
 /**
  * Says how a site's approved send went, on its record: "failed" when nothing
- * went out, "unconfirmed" when it may not have. The approval is the site's
- * newest one since `since`: a site has one waiting at a time.
+ * went out, "unconfirmed" when it may not have. The approval is the one with
+ * the request's `id`: the site may have had another approved since.
  * @param {string} walletId
  * @param {string} origin
- * @param {{ since: number, answer: "failed"|"unconfirmed" }} outcome
+ * @param {{ id: string, answer: "failed"|"unconfirmed" }} outcome
  */
-export function noteSiteSendFailed(walletId, origin, { since, answer }) {
+export function noteSiteSendFailed(walletId, origin, { id: rid, answer }) {
   const id = String(walletId ?? "");
   return mutate((all) => {
     const site = siteOf(sitesOf(all, id), origin);
     const asked = Array.isArray(site.asked) ? site.asked : [];
-    const at = asked.findIndex((entry) => entry?.answer === "approved" && Number(entry.at) >= since);
+    const at = rid ? asked.findIndex((entry) => entry?.answer === "approved" && entry.id === String(rid)) : -1;
     if (!id || at < 0) return all;
     const next = asked.map((entry, i) => (i === at ? { ...entry, answer } : entry));
     return { ...all, [id]: { ...sitesOf(all, id), [origin]: { ...site, asked: next } } };

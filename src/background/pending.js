@@ -42,7 +42,7 @@ const APPROVAL_TTL_MS = 5 * 60_000;
 // of the answer.
 function keepAnswer(entry, answer) {
   const walletId = entry.shown?.walletId || activeWalletId().catch(() => "");
-  noteSiteRequest(walletId, entry.origin, { kind: entry.kind, params: entry.params, answer, asked: entry.asked }).catch(() => {});
+  noteSiteRequest(walletId, entry.origin, { kind: entry.kind, params: entry.params, answer, asked: entry.asked, id: entry.shown?.rid }).catch(() => {});
 }
 
 // Its window or its tab goes; a tab's site comes back to the front, only
@@ -284,9 +284,12 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
   }
 
   // Waiting, with its time left.
+  // The request's ID goes with what it shows (`shown.rid`): what comes of an
+  // approved send is said on that request's record, whatever the site asks after.
   const wait = (rid, entry) =>
     new Promise((resolve, reject) => {
       Object.assign(entry, { resolve, reject });
+      if (entry.shown && typeof entry.shown === "object") entry.shown.rid = rid;
       entry.timer = setTimeout(
         () => rejectPending(rid, entry, "Approval request expired", "expired"),
         Math.max(0, entry.createdAt + APPROVAL_TTL_MS - Date.now())

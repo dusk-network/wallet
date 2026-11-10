@@ -5,22 +5,32 @@
 
 import { isTauriRuntime } from "./runtime.js";
 
-// The wallet sent the person elsewhere for a moment (the share sheet, the
+// The wallet sends the person elsewhere for a moment (the share sheet, the
 // phone's browser, a picture to choose, the camera's question): going to the
-// background then isn't leaving the app. Until it shows again.
-let awayOnPurpose = false;
+// background as it does isn't leaving the app. For a moment only, as what
+// comes over the wallet may not take it to the background at all (a camera
+// already allowed asks nothing): the step ends as the app shows again, with
+// the `done` it gives once nothing came over the wallet, or by itself.
+const STEP_AWAY_MS = 3000;
+let awayUntil = 0;
 
-/** The wallet sends the person elsewhere for a moment. */
+/**
+ * The wallet sends the person elsewhere for a moment.
+ * @returns {() => void} done: nothing more comes over the wallet for it
+ */
 export function stepAway() {
-  awayOnPurpose = true;
+  const until = (awayUntil = Date.now() + STEP_AWAY_MS);
+  return () => {
+    if (awayUntil === until) awayUntil = 0;
+  };
 }
 
-/** Whether the wallet sent the person elsewhere, and isn't back yet. */
-export const steppedAway = () => awayOnPurpose;
+/** Whether going to the background now is the wallet's own step away. */
+export const steppedAway = () => Date.now() < awayUntil;
 
 /** Shown again. */
 export function stepBack() {
-  awayOnPurpose = false;
+  awayUntil = 0;
 }
 
 /**
