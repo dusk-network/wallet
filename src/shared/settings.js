@@ -86,6 +86,12 @@ export const DEFAULT_SETTINGS = {
   hideBalances: false,
   /** The app on a phone: lock as it goes to the background, when the person leaves it. */
   lockOnLeave: false,
+  /**
+   * Arrival notices on a phone (phoneNotices.js): null until the person taps
+   * Tell me when it arrives; then "asked", "on", "off", or "off-said" once
+   * Sent has said they're off.
+   */
+  phoneNotices: null,
   /** How long a site's new connection lasts, in milliseconds: 0 until it's disconnected. */
   newSiteLastsMs: 0,
 };

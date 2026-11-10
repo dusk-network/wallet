@@ -58,3 +58,32 @@ describe("fingerprint unlock turned on", () => {
     expect(steps).toEqual(["enable", "disable"]);
   });
 });
+
+describe("arrival notices in the app", () => {
+  it("asks Android through the app's Kotlin, and shows a notice there, saying no where there's no app", async () => {
+    const asked = [];
+    let allowed = true;
+    const invoke = vi.fn(async (cmd, args) => {
+      asked.push([cmd, args]);
+      return { allowed };
+    });
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: { invoke } });
+    vi.resetModules();
+    const { askAppNotices, showAppNotice } = await import("./notices.js");
+    await expect(askAppNotices()).resolves.toBe("on");
+    await expect(showAppNotice({ title: "Transaction executed", body: "Tx: ab…cd" })).resolves.toBe(true);
+    allowed = false;
+    await expect(askAppNotices()).resolves.toBe("off");
+    expect(asked.map(([cmd, args]) => [cmd, args.action, args.args?.title])).toEqual([
+      ["notices", "ask", undefined],
+      ["notices", "notify", "Transaction executed"],
+      ["notices", "ask", undefined],
+    ]);
+
+    // No app: no notices, and nothing asked.
+    vi.stubGlobal("window", {});
+    vi.resetModules();
+    const outside = await import("./notices.js");
+    await expect(outside.askAppNotices()).resolves.toBe("off");
+  });
+});

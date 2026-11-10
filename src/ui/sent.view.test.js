@@ -596,3 +596,79 @@ describe("the steps", () => {
     expect(app).toContain('if (state.route === "sent") {');
   });
 });
+
+// Hein's: arrival notices on a phone, asked for by the person, never by the wallet.
+describe("Tell me when it arrives, on a phone", () => {
+  const ANDROID = "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0";
+  const draw = async (states, { phone = true } = {}) => {
+    if (phone) vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: ANDROID });
+    const state = { sent: { phase: "sent", hash: HASH, status: "submitted", feeCapLux: "2500000", title: "Send", amountLux: "1000000", sentAt: Date.now() } };
+    const asked = [];
+    const actions = {
+      send: vi.fn(async (m) => {
+        asked.push(m.type);
+        if (m.type === "DUSK_UI_NOTICES") return { ok: true, state: states.shift() ?? null };
+        if (m.type === "DUSK_UI_NOTICES_ASK") return { ok: true, state: states.shift() ?? "asked" };
+        return { ok: true };
+      }),
+      render: vi.fn(async () => {}),
+      showToast: vi.fn(),
+    };
+    const show = async () => {
+      dom.document.body.replaceChildren(...sentView(overview(), { state, actions }));
+      await settle();
+    };
+    await show();
+    const offer = () => visibleText(dom.document.body.querySelector(".sent-notices") ?? dom.document.createElement("div"));
+    const ask = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Tell me when it arrives");
+    return { state, asked, show, offer, ask };
+  };
+
+  it("offers it, and asks the phone nothing until it's tapped", async () => {
+    const shown = await draw([null]);
+    expect(shown.offer()).toBe("Tell me when it arrives");
+    expect(shown.asked).toEqual(["DUSK_UI_NOTICES"]);
+    shown.ask().click();
+    await settle();
+    expect(shown.asked).toEqual(["DUSK_UI_NOTICES", "DUSK_UI_NOTICES_ASK"]);
+    expect(shown.offer()).toBe("You'll get a notice when it arrives.");
+  });
+
+  it("says once that notices are off after a no, and where to turn them on", async () => {
+    const shown = await draw([null, "off", "off-said"]);
+    shown.ask().click();
+    await settle();
+    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
+    expect(shown.asked).toContain("DUSK_UI_NOTICES_SAID");
+    // Drawn again, the same send's Sent still says it.
+    await shown.show();
+    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
+    // The next send's Sent, in the same wallet window: read again, said, so nothing, and nothing asked.
+    shown.state.sent = { ...shown.state.sent, hash: "77".repeat(32), sentAt: Date.now() };
+    await shown.show();
+    expect([shown.offer(), shown.ask()]).toEqual(["", undefined]);
+    expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES_SAID")).toHaveLength(1);
+    expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES")).toHaveLength(2);
+    // Or a new window's, where the wallet says it was said.
+    const later = await draw(["off-said"]);
+    expect(later.offer()).toBe("");
+    expect(later.ask()).toBeUndefined();
+  });
+
+  // Firefox's no is learned as the payment arrives: the next send's Sent says it, not "you'll get one".
+  it("reads where notices stand again for the next send, after an arrival settled what the tap asked", async () => {
+    const shown = await draw([null, "asked", "off"]);
+    shown.ask().click();
+    await settle();
+    expect(shown.offer()).toBe("You'll get a notice when it arrives.");
+    shown.state.sent = { ...shown.state.sent, hash: "78".repeat(32), sentAt: Date.now() };
+    await shown.show();
+    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
+  });
+
+  it("offers nothing on a computer, which shows notices as it always did", async () => {
+    const shown = await draw([null], { phone: false });
+    expect(shown.ask()).toBeUndefined();
+    expect(shown.asked).not.toContain("DUSK_UI_NOTICES");
+  });
+});

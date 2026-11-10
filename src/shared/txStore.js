@@ -119,6 +119,20 @@ export async function putTxMeta(hash, meta, { epoch } = {}) {
   });
 }
 
+// What hears a send settle, executed or failed, from on its way: however the
+// wallet learned it (its watcher, a look-up as the app comes back, a sync).
+const settledListeners = new Set();
+
+/**
+ * Hears each send that settles: `fn(hash, record)`.
+ * @param {(hash: string, tx: TxMeta) => void} fn
+ * @returns {() => void} to stop
+ */
+export function onTxSettled(fn) {
+  settledListeners.add(fn);
+  return () => settledListeners.delete(fn);
+}
+
 /**
  * Patch tx metadata.
  * @param {string} hash
@@ -127,7 +141,8 @@ export async function putTxMeta(hash, meta, { epoch } = {}) {
  */
 export async function patchTxMeta(hash, patch, { epoch } = {}) {
   if (!hash) return;
-  return mutate(async () => {
+  let settled = null;
+  await mutate(async () => {
     if (await stale(epoch)) return;
     const current = await getAll();
     if (isForgotten(current[hash])) return;
@@ -142,7 +157,16 @@ export async function patchTxMeta(hash, patch, { epoch } = {}) {
       ? { ...prev, lastCheckedAt: patch.lastCheckedAt ?? prev.lastCheckedAt }
       : { ...prev, ...nextPatch };
     await setAll(prune(current, hash));
+    if (!terminal && (current[hash].status === "executed" || current[hash].status === "failed")) settled = current[hash];
   });
+  if (!settled) return;
+  for (const fn of settledListeners) {
+    try {
+      fn(hash, settled);
+    } catch {
+      // One listener's trouble is its own.
+    }
+  }
 }
 
 /**

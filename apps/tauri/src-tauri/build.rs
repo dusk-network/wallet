@@ -5,10 +5,16 @@ use std::{
 
 // What the wallet asks of Android beyond Tauri's own manifest: to hear the
 // network come and go (without it the WebView never tells the page it went
-// offline, so the wallet can't say so), and to ask for a fingerprint, for
-// fingerprint unlock (android/KeystorePlugin.kt). Normal permissions: Android
-// asks nothing.
-const PERMISSIONS: [&str; 2] = ["android.permission.ACCESS_NETWORK_STATE", "android.permission.USE_BIOMETRIC"];
+// offline, so the wallet can't say so), to ask for a fingerprint, for
+// fingerprint unlock (android/KeystorePlugin.kt), and to show arrival notices
+// (android/NoticesPlugin.kt), which Android 13 and later ask about, only when
+// the person taps Tell me when it arrives. The others are normal permissions:
+// Android asks nothing.
+const PERMISSIONS: [&str; 3] = [
+  "android.permission.ACCESS_NETWORK_STATE",
+  "android.permission.USE_BIOMETRIC",
+  "android.permission.POST_NOTIFICATIONS",
+];
 
 // The Android project `cargo tauri android init` makes, which isn't kept in
 // git: its manifest gets the permissions as the app is built.

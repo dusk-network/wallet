@@ -47,6 +47,20 @@ async fn fingerprint(app: tauri::AppHandle, action: String, args: serde_json::Va
   }
 }
 
+/// Arrival notices, on Android: `action` status, ask (Android's question for
+/// leave to show them, asked only when the person taps Tell me when it arrives)
+/// or notify (`args` title and body). `{ allowed: false }` elsewhere.
+#[tauri::command]
+async fn notices(app: tauri::AppHandle, action: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+  #[cfg(target_os = "android")]
+  return android::notice(&app, &action, args).await;
+  #[cfg(not(target_os = "android"))]
+  {
+    let _ = (app, action, args);
+    Ok(serde_json::json!({ "allowed": false }))
+  }
+}
+
 /// Puts the app in the background as it is (Back on its first screen). False
 /// where there's no such thing.
 #[tauri::command]
@@ -65,7 +79,7 @@ pub fn run() {
   let builder = tauri::Builder::default();
   // Fingerprint unlock's Kotlin (android/KeystorePlugin.kt).
   #[cfg(target_os = "android")]
-  let builder = builder.plugin(android::keystore());
+  let builder = builder.plugin(android::keystore()).plugin(android::notices());
   builder
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_fs::init())
@@ -73,7 +87,7 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     // dusk: payment links open the app's Send (popup/app.js).
     .plugin(tauri_plugin_deep_link::init())
-    .invoke_handler(tauri::generate_handler![share_text, save_download, move_to_back, fingerprint])
+    .invoke_handler(tauri::generate_handler![share_text, save_download, move_to_back, fingerprint, notices])
     .setup(|app| {
       // Stronghold needs a salt file used for Argon2 hashing.
       // We store it in the app's local data directory.

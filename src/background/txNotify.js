@@ -7,10 +7,13 @@ import { chainIdForNode, networkTextOf } from "../shared/nodeNetwork.js";
 import { getTxMeta } from "../shared/txStore.js";
 import { shortAddress } from "../ui/lib/strings.js";
 import { isPhone } from "../ui/lib/device.js";
+import { askForNotices, mayNotify } from "../shared/phoneNotices.js";
 import { openWalletTab } from "./walletTab.js";
 import {
   getExtensionApi,
+  notificationsClear,
   notificationsCreate,
+  notificationsGetAll,
   runtimeGetURL,
   tabsCreate,
 } from "../platform/extensionApi.js";
@@ -20,10 +23,46 @@ const ICON_PATH = "icons/dusk-128.png";
 let handlersInstalled = false;
 const ext = getExtensionApi();
 
-// No system notices on a phone: Firefox for Android asks Android for leave to
-// show them, over the payment or approval, again after a no. The wallet's own
-// screens say how a send went; a notice is asked for there, if ever.
-const notifies = () => Boolean(ext?.notifications) && !isPhone();
+const notifies = () => Boolean(ext?.notifications);
+
+// On a phone, Firefox for Android asks Android for leave to show a notice as
+// its first one is made, again after a no. So there the wallet makes none by
+// itself: the person taps Tell me when it arrives on Sent, its first notice is
+// that question (askPhoneNotices), and a payment's arrival shows only once that
+// notice showed (phoneNotices.js). Nothing on a phone says a send went out:
+// Sent does.
+const ASK_NOTICE = "dusk_notices_asked";
+
+/** Tell me when it arrives, tapped on a phone: Firefox asks Android, once. */
+export function askPhoneNotices() {
+  return askForNotices(async () => {
+    await notificationsCreate(ASK_NOTICE, {
+      type: "basic",
+      iconUrl: runtimeGetURL(ICON_PATH),
+      title: "Dusk Wallet",
+      message: "You'll get a notice when your payment arrives.",
+    });
+    return "asked";
+  });
+}
+
+// Whether the notice that asked still shows: then Android let Firefox show it.
+// Turned down, Firefox takes it away at once. It goes, for the arrival's.
+async function askedNoticeShows() {
+  const shown = Boolean((await notificationsGetAll().catch(() => ({})))?.[ASK_NOTICE]);
+  if (shown) await notificationsClear(ASK_NOTICE).catch(() => {});
+  return shown;
+}
+
+const mayShow = () => (isPhone() ? mayNotify(askedNoticeShows) : Promise.resolve(true));
+
+/** A send settled: on a phone, whether notices show is settled with it, once asked. */
+export async function settlePhoneNotices() {
+  if (notifies() && isPhone()) await mayNotify(askedNoticeShows);
+}
+
+// Each send's outcome is said once, however many ways the wallet learns it.
+const told = new Set();
 
 // The node and network a transaction was sent on, as its record keeps them
 // (txRecord.js), for its notice and explorer link after a switch and a
@@ -111,7 +150,7 @@ export function registerTxNotificationHandlers() {
  */
 export async function notifyTxSubmitted({ hash, origin, title, nodeUrl } = {}) {
   try {
-    if (!notifies()) return;
+    if (!notifies() || isPhone()) return;
 
     const sent = await sentOn(hash, nodeUrl);
     const networkName = sent.nodeUrl ? networkTextOf(sent.nodeUrl) : "";
@@ -156,8 +195,11 @@ export async function notifyTxExecuted({
   nodeUrl,
 } = {}) {
   try {
-    if (!notifies()) return;
-    if (!hash) return;
+    if (!notifies() || !hash) return;
+    const outcome = `${hash}:${ok ? "executed" : "failed"}`;
+    if (told.has(outcome)) return;
+    told.add(outcome);
+    if (!(await mayShow())) return;
 
     const sent = await sentOn(hash, nodeUrl);
     const networkName = sent.nodeUrl ? networkTextOf(sent.nodeUrl) : "";

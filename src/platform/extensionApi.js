@@ -135,6 +135,14 @@ export function notificationsCreate(id, options) {
   return callApi(raw?.notifications?.create, [id, options], raw?.notifications);
 }
 
+export function notificationsGetAll() {
+  return callApi(raw?.notifications?.getAll, [], raw?.notifications);
+}
+
+export function notificationsClear(id) {
+  return callApi(raw?.notifications?.clear, [id], raw?.notifications);
+}
+
 export function storageLocalGet(keys) {
   return callApi(raw?.storage?.local?.get, [keys ?? null], raw?.storage?.local);
 }

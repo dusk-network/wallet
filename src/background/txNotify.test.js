@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The extension's notifications, recorded; nothing is shown. `meta` is the
 // transaction's record (txStore.js).
-const ext = vi.hoisted(() => ({ clicked: null, created: [], tabs: [], meta: null }));
+const ext = vi.hoisted(() => ({ clicked: null, created: [], tabs: [], meta: null, shown: {} }));
 vi.mock("../platform/extensionApi.js", () => ({
   getExtensionApi: () => ({
     notifications: {
@@ -11,6 +11,9 @@ vi.mock("../platform/extensionApi.js", () => ({
     },
   }),
   notificationsCreate: vi.fn(async (id, opts) => ext.created.push({ id, opts })),
+  // What shows in the phone's notices: a test says, as Firefox's getAll would.
+  notificationsGetAll: vi.fn(async () => ext.shown),
+  notificationsClear: vi.fn(async (id) => delete ext.shown[id]),
   runtimeGetURL: (path) => `chrome-extension://wallet/${path}`,
   tabsCreate: vi.fn(async ({ url }) => ext.tabs.push(url)),
   // The wallet's tab open already, if a test opens one.
@@ -39,7 +42,7 @@ const EXPLORER = `https://explorer.testnet.dusk.network/transactions/transaction
 beforeEach(() => {
   vi.resetModules();
   // The transaction was sent on the custom node, before the network was kept with it.
-  Object.assign(ext, { clicked: null, created: [], tabs: [], open: [], meta: { nodeUrl: "https://my-node.example" } });
+  Object.assign(ext, { clicked: null, created: [], tabs: [], open: [], meta: { nodeUrl: "https://my-node.example" }, shown: {} });
   // A custom node of Testnet's, as Settings saved it with the chain ID it gave.
   vi.stubGlobal("localStorage", memoryStorage());
   localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://my-node.example", chainId: 2 }));
@@ -50,13 +53,72 @@ afterEach(() => {
 });
 
 describe("on a phone", () => {
+  const onPhone = () => vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+  const ids = () => ext.created.map(({ id }) => id.replace(/_\d+$/, ""));
+
   // Amélie's and Marek's: Android's "Allow Firefox to send you notifications?" over the payment, again after a no.
-  it("shows no notice, so Firefox for Android never asks Android for leave over a payment", async () => {
-    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+  it("shows no notice by itself, so Firefox for Android never asks Android for leave over a payment", async () => {
+    onPhone();
     const { notifyTxExecuted, notifyTxSubmitted } = await import("./txNotify.js");
     await notifyTxSubmitted({ hash: HASH, origin: "Wallet", nodeUrl: "https://my-node.example" });
     await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
     expect(ext.created).toEqual([]);
+  });
+
+  // Hein's: arrival notices back on phones, asked for by the person.
+  it("asks when the person taps Tell me when it arrives, once, and with a yes shows the arrival", async () => {
+    onPhone();
+    const { askPhoneNotices, notifyTxExecuted, notifyTxSubmitted } = await import("./txNotify.js");
+    await expect(askPhoneNotices()).resolves.toBe("asked");
+    // The question is Firefox's, as the first notice is made.
+    expect(ids()).toEqual(["dusk_notices_asked"]);
+    // Asked again, or a send on its way: nothing more comes over the wallet.
+    await expect(askPhoneNotices()).resolves.toBe("asked");
+    await notifyTxSubmitted({ hash: HASH, origin: "Wallet" });
+    expect(ids()).toEqual(["dusk_notices_asked"]);
+
+    // Allowed: that notice shows, and the payment's arrival shows in its place.
+    ext.shown = { dusk_notices_asked: {} };
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
+    expect(ids()).toEqual(["dusk_notices_asked", `dusk_tx_${HASH}_executed`]);
+    expect(ext.shown).toEqual({});
+    await notifyTxExecuted({ hash: HASH, ok: false, error: "out of gas", nodeUrl: "https://my-node.example" });
+    expect(ids().at(-1)).toBe(`dusk_tx_${HASH}_failed`);
+  });
+
+  // A send learned settled by a look-up rather than the watcher: what the tap asked is settled all the same.
+  it("settles what the tap asked as any send settles, showing nothing for it", async () => {
+    onPhone();
+    const { askPhoneNotices, settlePhoneNotices } = await import("./txNotify.js");
+    const { noticesState } = await import("../shared/phoneNotices.js");
+    await askPhoneNotices();
+    ext.shown = {};
+    await settlePhoneNotices();
+    await expect(noticesState()).resolves.toBe("off");
+    expect(ids()).toEqual(["dusk_notices_asked"]);
+  });
+
+  it("never asks again after a no, and shows nothing more", async () => {
+    onPhone();
+    const { askPhoneNotices, notifyTxExecuted } = await import("./txNotify.js");
+    await askPhoneNotices();
+    // Turned down: Firefox takes the notice away at once.
+    ext.shown = {};
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
+    await expect(askPhoneNotices()).resolves.toBe("off");
+    expect(ids()).toEqual(["dusk_notices_asked"]);
+    const { noticesState } = await import("../shared/phoneNotices.js");
+    await expect(noticesState()).resolves.toBe("off");
+  });
+});
+
+describe("a send's outcome learned twice", () => {
+  it("is said once", async () => {
+    const { notifyTxExecuted } = await import("./txNotify.js");
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: "https://my-node.example" });
+    expect(ext.created).toHaveLength(1);
   });
 });
 

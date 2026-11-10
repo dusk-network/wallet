@@ -83,6 +83,8 @@ vi.mock("../background/dappEvents.js", () => ({
 }));
 
 vi.mock("../background/txNotify.js", () => ({
+  askPhoneNotices: vi.fn(async () => "asked"),
+  settlePhoneNotices: vi.fn(async () => {}),
   notifyTxSubmitted: vi.fn(async () => true),
   notifyTxExecuted: mocks.notifyTxExecuted,
   registerTxNotificationHandlers: vi.fn(() => {}),
@@ -534,10 +536,12 @@ describe("background Phoenix tx lifecycle flow", () => {
     const { getTxMeta } = await import("../shared/txStore.js");
     await expect(getTxMeta(hash)).resolves.toMatchObject({ ...stored, pendingNullifiers: ["aa"] });
 
-    // One status, the one found; a recheck notifies nothing.
+    // One status, the one found; a recheck notifies nothing, but settles what a phone's tap asked.
     const statuses = mocks.sentMessages.filter((m) => m.type === "DUSK_UI_TX_STATUS" && m.hash === hash);
     expect(statuses).toEqual([expect.objectContaining(result)]);
     expect(mocks.notifyTxExecuted).not.toHaveBeenCalled();
+    const { settlePhoneNotices } = await import("../background/txNotify.js");
+    expect(settlePhoneNotices.mock.calls.length > 0).toBe(result.status === "executed" || result.status === "failed");
   });
 
   it("serializes under-floor Phoenix gas from dApp RPC as INVALID_PARAMS", async () => {
