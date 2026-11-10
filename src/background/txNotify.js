@@ -15,6 +15,9 @@ import {
   notificationsClear,
   notificationsCreate,
   runtimeGetURL,
+  storageSessionGet,
+  storageSessionRemove,
+  storageSessionSet,
   tabsCreate,
 } from "../platform/extensionApi.js";
 
@@ -45,7 +48,34 @@ export function askPhoneNotices() {
   );
 }
 
-const mayShow = () => (isPhone() ? mayNotify() : Promise.resolve(true));
+// Arrivals that came while Firefox's question was on screen, kept for its
+// answer in the browser's session: the background that heard them may be
+// gone by then, and a new one hear the answer.
+const LATER = "dusk_notices_later";
+
+async function keptForLater() {
+  const later = (await storageSessionGet(LATER).catch(() => ({})))?.[LATER];
+  return Array.isArray(later) ? later : [];
+}
+
+async function takeLater() {
+  const later = await keptForLater();
+  await storageSessionRemove(LATER).catch(() => {});
+  return later;
+}
+
+const keepForLater = async (arrival) => storageSessionSet({ [LATER]: [...(await keptForLater()), arrival] });
+
+const mayShow = (arrival) => (isPhone() ? mayNotify(undefined, () => keepForLater(arrival)) : Promise.resolve(true));
+
+// Firefox's answer kept: what waited for it shows with a yes, and goes with a no.
+function answered(answer) {
+  noticeAnswered(answer, takeLater)
+    .then((later) => {
+      if (answer === "on") for (const arrival of later) notifyTxExecuted(arrival).catch(() => {});
+    })
+    .catch(() => {});
+}
 
 // Each send's outcome is said once, however many ways the wallet learns it.
 const told = new Set();
@@ -72,10 +102,10 @@ export function registerTxNotificationHandlers() {
     // it showed, so Android let it; or it went without showing, as Firefox
     // takes it away after a no. Gone once shown, it was swiped away.
     ext.notifications.onShown?.addListener((id) => {
-      if (id === ASK_NOTICE) noticeAnswered("on").catch(() => {});
+      if (id === ASK_NOTICE) answered("on");
     });
     ext.notifications.onClosed?.addListener((id) => {
-      if (id === ASK_NOTICE) noticeAnswered("off").catch(() => {});
+      if (id === ASK_NOTICE) answered("off");
     });
     // Firefox started anew: a question asked in the one before went with it.
     ext.runtime?.onStartup?.addListener(() => {
@@ -198,7 +228,7 @@ export async function notifyTxExecuted({
     if (!notifies() || !hash) return;
     // Told as it shows: learned another way meanwhile, it waits its turn and finds it told.
     const outcome = `${hash}:${ok ? "executed" : "failed"}`;
-    if (told.has(outcome) || !(await mayShow()) || told.has(outcome)) return;
+    if (told.has(outcome) || !(await mayShow({ hash, origin, ok, error, nodeUrl })) || told.has(outcome)) return;
     told.add(outcome);
 
     const sent = await sentOn(hash, nodeUrl);

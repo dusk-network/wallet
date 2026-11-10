@@ -15,8 +15,9 @@
 // without asking Android, so it goes by what its notice that asked did, and
 // makes no other notice while its question is on screen: Firefox keeps one
 // notice's answer, the last made, and the notice that asked would never hear
-// a no. Firefox wakes the wallet for that word, so it's lost only with
-// Firefox itself, and the question with it (questionGone).
+// a no. An arrival then is kept for the answer (`later`), shown with a yes.
+// Firefox wakes the wallet for that word, so it's lost only with Firefox
+// itself, and the question with it (questionGone).
 
 import { getSettings, setSettings } from "./settings.js";
 
@@ -43,26 +44,6 @@ async function forSent(state, allowedNow) {
   if (!state || !allowedNow) return state;
   if (await allowedNow().catch(() => false)) return "on";
   return state === "off-said" ? state : "off";
-}
-
-// Who waits for Firefox's word on the question on screen (questionAnswered).
-const waiting = new Set();
-function wake() {
-  for (const resolve of waiting) resolve();
-  waiting.clear();
-}
-
-// While Firefox's question is on screen, its answer first.
-async function questionAnswered() {
-  for (;;) {
-    let heard;
-    const word = new Promise((resolve) => waiting.add((heard = resolve)));
-    if ((await kept()) !== "asked") {
-      waiting.delete(heard);
-      return;
-    }
-    await word;
-  }
 }
 
 /**
@@ -93,11 +74,15 @@ export async function askForNotices(ask, allowedNow) {
  * Firefox's word on its notice that asked, the first it gives: shown ("on"),
  * or taken away without showing ("off"). Taken away once shown is a swipe.
  * @param {"on" | "off"} answer
+ * @param {() => Promise<object[]>} [takeLater] - the arrivals kept for the answer, taken as it's kept
+ * @returns {Promise<object[]>} those arrivals, to show with a yes
  */
-export function noticeAnswered(answer) {
+export function noticeAnswered(answer, takeLater) {
   return inTurn(async () => {
-    if ((await kept()) === "asked") await keep(answer);
-  }).finally(wake);
+    if ((await kept()) !== "asked") return [];
+    await keep(answer);
+    return (await takeLater?.()) ?? [];
+  });
 }
 
 /**
@@ -107,19 +92,20 @@ export function noticeAnswered(answer) {
 export function questionGone() {
   return inTurn(async () => {
     if ((await kept()) === "asked") await keep(null);
-  }).finally(wake);
+  });
 }
 
 /**
  * Whether a payment's arrival may show as a notice now.
  * @param {() => Promise<boolean>} [allowedNow] - the app's
+ * @param {() => Promise<void>} [later] - Firefox's: keeps the arrival for the answer to the question on screen
  */
-export async function mayNotify(allowedNow) {
-  if (!allowedNow) await questionAnswered();
+export function mayNotify(allowedNow, later) {
   return inTurn(async () => {
     const state = await kept();
     if (!state) return false;
     if (allowedNow) return allowedNow().catch(() => false);
+    if (state === "asked") await later?.();
     return state === "on";
   });
 }

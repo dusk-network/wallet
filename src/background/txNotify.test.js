@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // transaction's record (txStore.js). On a phone, Firefox for Android as it
 // does: a notice made without Android's leave (`android`, "ask" till the
 // person answers, "no" after a no) has Android ask (`questions`), and the last
-// one made holds the answer (`question`); `tray` is what shows, and `heard`
-// what Firefox tells the wallet (onShown, onClosed, and its own start).
-const ext = vi.hoisted(() => ({ clicked: null, created: [], tabs: [], meta: null, android: null, question: null, questions: [], tray: new Set(), heard: {}, onClear: null }));
+// one made holds the answer (`question`); `tray` is what shows, `heard` what
+// Firefox tells the wallet (onShown, onClosed, and its own start), and
+// `session` the browser's session storage, which outlives the background.
+const ext = vi.hoisted(() => ({ clicked: null, created: [], tabs: [], meta: null, android: null, question: null, questions: [], tray: new Set(), heard: {}, session: {}, onClear: null }));
 vi.mock("../platform/extensionApi.js", () => ({
   getExtensionApi: () => ({
     notifications: {
@@ -38,6 +39,9 @@ vi.mock("../platform/extensionApi.js", () => ({
     ext.onClear?.(id);
   }),
   runtimeGetURL: (path) => `chrome-extension://wallet/${path}`,
+  storageSessionGet: vi.fn(async (key) => (key in ext.session ? { [key]: structuredClone(ext.session[key]) } : {})),
+  storageSessionSet: vi.fn(async (items) => Object.assign(ext.session, structuredClone(items))),
+  storageSessionRemove: vi.fn(async (key) => delete ext.session[key]),
   tabsCreate: vi.fn(async ({ url }) => ext.tabs.push(url)),
   // The wallet's tab open already, if a test opens one.
   tabsQuery: vi.fn(async () => ext.open),
@@ -65,7 +69,7 @@ const EXPLORER = `https://explorer.testnet.dusk.network/transactions/transaction
 beforeEach(() => {
   vi.resetModules();
   // The transaction was sent on the custom node, before the network was kept with it.
-  Object.assign(ext, { clicked: null, created: [], tabs: [], open: [], meta: { nodeUrl: "https://my-node.example" }, android: null, question: null, questions: [], tray: new Set(), heard: {}, onClear: null });
+  Object.assign(ext, { clicked: null, created: [], tabs: [], open: [], meta: { nodeUrl: "https://my-node.example" }, android: null, question: null, questions: [], tray: new Set(), heard: {}, session: {}, onClear: null });
   // A custom node of Testnet's, as Settings saved it with the chain ID it gave.
   vi.stubGlobal("localStorage", memoryStorage());
   localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://my-node.example", chainId: 2 }));
@@ -108,11 +112,15 @@ describe("on a phone", () => {
       ext.tray.delete(id);
       ext.heard.closed?.(id, true);
     },
-    // Firefox goes, its question with it, and starts again: a new background hears its start.
-    restarts: async () => {
-      ext.question = null;
+    // Firefox's background goes, idle, and a new one starts as Firefox has news for it.
+    newBackground: async () => {
       vi.resetModules();
-      const notices = await phone();
+      return phone();
+    },
+    // Firefox goes, its question and session with it, and starts again: a new background hears its start.
+    restarts: async () => {
+      Object.assign(ext, { question: null, session: {} });
+      const notices = await firefox.newBackground();
       ext.heard.startup?.();
       return notices;
     },
@@ -138,10 +146,10 @@ describe("on a phone", () => {
     expect(ids()).toEqual([ASKED]);
 
     // The payment arrives with the question on screen, and waits for the answer: a yes.
-    const arrival = notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: NODE });
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: NODE });
+    expect(ids()).toEqual([ASKED]);
     firefox.answer(true);
-    await arrival;
-    expect(ids()).toEqual([ASKED, `dusk_tx_${HASH}_executed`]);
+    await vi.waitFor(() => expect(ids()).toEqual([ASKED, `dusk_tx_${HASH}_executed`]));
     expect(tray()).toEqual([`dusk_tx_${HASH}_executed`]);
     await notifyTxExecuted({ hash: HASH, ok: false, error: "out of gas", nodeUrl: NODE });
     expect(ids().at(-1)).toBe(`dusk_tx_${HASH}_failed`);
@@ -160,6 +168,30 @@ describe("on a phone", () => {
     expect(ext.questions).toEqual([ASKED]);
     expect(ids()).toEqual([ASKED]);
     await expect(askPhoneNotices()).resolves.toBe("off");
+    expect(ext.session).toEqual({});
+  });
+
+  // Astra's: the tap and a payment's arrival at once, the arrival finding
+  // nothing asked, then the question on screen, and lost even after a yes.
+  it("shows an arrival that came as the person tapped, once they allow", async () => {
+    const { askPhoneNotices, notifyTxExecuted } = await phone();
+    await Promise.all([askPhoneNotices(), notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: NODE })]);
+    firefox.answer(true);
+    await vi.waitFor(() => expect(ids()).toEqual([ASKED, `dusk_tx_${HASH}_executed`]));
+    expect(ext.questions).toEqual([ASKED]);
+  });
+
+  // Astra's: Firefox's background, idle, went while an arrival waited for the
+  // answer; the yes woke a new one, which knew nothing of the arrival.
+  it("shows an arrival that waited for the answer when a new background hears the yes", async () => {
+    const first = await phone();
+    await first.askPhoneNotices();
+    first.notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: NODE });
+    await vi.waitFor(() => expect(ext.session.dusk_notices_later).toHaveLength(1));
+    await firefox.newBackground();
+    firefox.answer(true);
+    await vi.waitFor(() => expect(ids()).toEqual([ASKED, `dusk_tx_${HASH}_executed`]));
+    expect(ext.session).toEqual({});
   });
 
   // A question doesn't outlive Firefox: unanswered, it's not asked, and nothing asks by itself.
