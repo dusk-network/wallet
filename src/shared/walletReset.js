@@ -64,7 +64,7 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     // The sends the app on Android looks for while it's away, and their notices.
     forgetAppArrivals(),
     // Names checked and rates read, kept by account or by node, and the password on big sends.
-    storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES, STORAGE_KEYS.SEND_PASSWORD]),
+    storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES, STORAGE_KEYS.MEASURED_RATES, STORAGE_KEYS.SEND_PASSWORD]),
   ]);
   if (results.some((r) => r.status === "rejected")) {
     throw new Error("The old wallet's data couldn't be cleared. Try again.");

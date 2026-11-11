@@ -170,6 +170,20 @@ function popup(state, overview = ov(), { sozuStatus, rewardRate = null, stakingF
   return { actions, draw };
 }
 
+// What the wallet keeps on this device between popups.
+function memoryStorage() {
+  const store = new Map();
+  return {
+    get length() {
+      return store.size;
+    },
+    key: (i) => [...store.keys()][i] ?? null,
+    getItem: (k) => store.get(String(k)) ?? null,
+    setItem: (k, v) => store.set(String(k), String(v)),
+    removeItem: (k) => store.delete(String(k)),
+  };
+}
+
 const button = (text) => body.querySelectorAll("button").find((b) => isShown(b) && visibleText(b) === text);
 const buttonStarting = (text) => body.querySelectorAll("button").find((b) => isShown(b) && visibleText(b).startsWith(text));
 const field = (name) => body.querySelectorAll("input").find((i) => accessibleName(i) === name);
@@ -263,6 +277,43 @@ describe("staking overview", () => {
     await vi.waitFor(() =>
       expect(subs()).toEqual([["About 88% a year across the network over the last 30 days. Not promised."], ["About 79% a year over the last 30 days, after Sozu's 10%. Not promised."]])
     );
+  });
+
+  // Lena's: with the node silent, Staking swapped 89% and 99% over the last 30 days for "88% at today's stake" and a
+  // Sozu figure 20 points lower, with no days.
+  it("keeps the rates measured last, with their days, in the next popup while they can't be read again, for a day", async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-11T04:00:00Z"));
+    const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
+    const measured = [["About 89% a year across the network over the last 30 days. Not promised."], ["About 21% a year over the last 30 days, after Sozu's 10%. Not promised."]];
+    // A pool of its own: what the popup keeps of its growth for an hour stays with this test.
+    const kept = "7b".repeat(32);
+    const withPool = () => {
+      const done = sozu();
+      return { ...done, status: { ...done.status, contracts: { ...done.status.contracts, pool: kept } } };
+    };
+
+    // Read from the chain as the node answers.
+    nativeMeasure.value = { rate: 0.8911, days: 30, perBlock: 15_600_000_000n, staked: 2_000_000_000_000_000n, blocks: 6 };
+    archive.query = sozuArchiveQuery({ pool: kept, now: Date.now(), from: 3_020_000_000_000n, to: 3_071_932_000_000n });
+    const figures = { provisioners: [{ amount: { value: "1" }, eligibility: 0 }], tipHeight: 4_800_000 };
+    popup({ route: "stake", staking: staking(), sozu: withPool() }, ov(), { rewardRate: 0.8811, stakingFigures: figures });
+    await vi.waitFor(() => expect(subs()).toEqual(measured));
+
+    // The next popup, the node silent: nothing measured again, Sozu's status not read, only the day's estimate kept.
+    nativeMeasure.value = null;
+    archive.query = () => new Promise(() => {});
+    const silent = () => popup({ route: "stake", staking: staking(), sozu: sozu({ loaded: false, loading: true, status: null }) }, ov(), { rewardRate: 0.8811 });
+    silent();
+    await vi.waitFor(() => expect(subs()).toEqual(measured));
+    await settle();
+    expect(subs()).toEqual(measured);
+
+    // A day on, they're too old to stand for the last 30 days: the estimate, saying what it is.
+    vi.setSystemTime(new Date("2026-11-12T04:00:01Z"));
+    silent();
+    await vi.waitFor(() => expect(subs()[0]).toEqual(["About 88% a year across the network at today's stake. Not promised."]));
   });
 
   it("works Sozu's rate out from native staking's as shown, so both wallets give the same figure", async () => {
@@ -1210,6 +1261,27 @@ describe("a stake with Sozu in figures", () => {
     popup(state, ov(), { rewardRate: 0.24, stakingFigures });
     const working = visibleText(body.querySelectorAll(".group.info .list-row")[1]).replace("207.3m DUSK", "207.3M DUSK");
     expect(working).toMatch(/^About 79% a year\. Not promised\.15\.6 DUSK a block to stakers over the last 30 days, 207\.3M DUSK staked now: about 88% a year\./);
+  });
+
+  // Lena's: the rate measured went as the node went silent.
+  it("keeps the rate measured last and what it's made of in the next popup, while it can't be read again", async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    const factRows = () => body.querySelectorAll(".group.info .list-row").map(visibleText);
+    const grew = "About 21% a year. Not promised.stDUSK went from 3.0200 to 3.0719 DUSK over the last 30 days, after Sozu's share.";
+    // A pool of its own: what the popup keeps of its growth for an hour stays with this test.
+    const kept = "7c".repeat(32);
+    const done = sozu();
+    const withPool = { ...done, status: { ...done.status, contracts: { ...done.status.contracts, pool: kept } } };
+    const testnet = ov({ chainId: 2 });
+    archive.query = sozuArchiveQuery({ pool: kept, now: Date.now(), from: 3_020_000_000_000n, to: 3_071_932_000_000n });
+    popup({ route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: withPool }, testnet, { rewardRate: 0.24 });
+    await vi.waitFor(() => expect(factRows()[1]).toBe(grew));
+
+    // The next popup, the node silent: Sozu's status isn't read again, nor the growth.
+    archive.query = () => new Promise(() => {});
+    const unread = sozu({ loaded: false, loading: true, status: null });
+    popup({ route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: unread }, testnet, { rewardRate: 0.24 });
+    await vi.waitFor(() => expect(factRows()[1]).toBe(grew));
   });
 
   it("says the network's rate alone when the node's figures can't be read, and nothing without any", async () => {

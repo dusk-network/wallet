@@ -98,6 +98,7 @@ describe("walletReset", () => {
         [STORAGE_KEYS.VERIFIED_NAMES]: { mainnet: { [ACCOUNT]: { name: "alice.dusk", at: 1 } } },
         [STORAGE_KEYS.NETWORK_STATUS]: { nodeUrl: NODE, nodeError: `Failed to reach ${NODE}` },
         [STORAGE_KEYS.REWARD_RATES]: { [NODE]: { at: 1, rate: 0.2 } },
+        [STORAGE_KEYS.MEASURED_RATES]: { [`native:${NODE}`]: { at: 1, text: "{}" } },
       });
       return { settings, names, assets };
     }

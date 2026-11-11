@@ -41,7 +41,7 @@ import { reviewActions, submitOnGasEnter } from "../../components/FormControls.j
 import { gasFeeLux, payGuard, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { activityKey, activityRows, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
+import { activityKey, activityRows, keptRatesOf, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 
 // What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
@@ -420,15 +420,16 @@ export function stakingHistory(ov, { state, actions }) {
  * Native staking's rate, and what the working under Sozu's says is made of:
  * asked once a popup and node, and drawn again when they come. The rate as the
  * chain paid it over the last 30 days (`measured`), where that can be read,
- * else the estimate.
- * @returns {{ native: number | null, measured?: object, provisioners?: object[], tipHeight?: number }}
+ * else the estimate. The rates measured last, kept a day (keptRatesOf), show
+ * till new ones come, and stay where they can't be read.
+ * @returns {{ native: number | null, measured?: object, provisioners?: object[], tipHeight?: number, growth?: object | null }}
  */
 function sozuRateFigures(ov, st, { actions }) {
   const key = String(ov?.nodeUrl ?? "");
   // How stDUSK grew lately, once the status names its pool: the rate as measured, its line too.
   const measure = (rate) => {
-    if (rate.growth !== undefined || !st.status?.contracts?.pool) return rate;
-    rate.growth = null;
+    if (rate.growthAsked || !st.status?.contracts?.pool) return rate;
+    rate.growthAsked = true;
     sozuGrowthOf(ov, st.status, rate.tipHeight ?? null).then((growth) => {
       if (st.rate !== rate || !growth) return;
       rate.growth = growth;
@@ -437,12 +438,21 @@ function sozuRateFigures(ov, st, { actions }) {
     return rate;
   };
   if (st.rate?.key === key) return measure(st.rate);
-  const rate = (st.rate = { key, native: null });
+  const rate = (st.rate = { key, native: null, growth: null });
   const result = (res) => (res?.error ? null : res?.result ?? null);
   const ask = (type) => Promise.resolve(actions?.send?.({ type })).then(result, () => null);
-  Promise.all([ask("DUSK_UI_GET_REWARD_RATE"), ask("DUSK_UI_GET_STAKING_FIGURES")]).then(([native, figures]) => {
+  // The last measured, unless a new measure came first.
+  const kept = keptRatesOf(ov)
+    .then(({ native, sozu }) => {
+      if (st.rate !== rate || !(native || sozu)) return;
+      if (native && !rate.measured) Object.assign(rate, { native: native.rate, measured: native });
+      if (sozu && !rate.growth) rate.growth = sozu.growth;
+      actions?.render?.()?.catch?.(() => {});
+    })
+    .catch(() => {});
+  Promise.all([ask("DUSK_UI_GET_REWARD_RATE"), ask("DUSK_UI_GET_STAKING_FIGURES"), kept]).then(([native, figures]) => {
     if (st.rate !== rate) return;
-    Object.assign(rate, { native: typeof native === "number" ? native : null }, Array.isArray(figures?.provisioners) ? { provisioners: figures.provisioners, tipHeight: figures.tipHeight } : {});
+    Object.assign(rate, rate.measured ? {} : { native: typeof native === "number" ? native : null }, Array.isArray(figures?.provisioners) ? { provisioners: figures.provisioners, tipHeight: figures.tipHeight } : {});
     actions?.render?.()?.catch?.(() => {});
     nativeRewardsOf(ov, figures).then((measured) => {
       if (st.rate !== rate || !measured) return;

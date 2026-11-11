@@ -32,6 +32,7 @@ import { lookupRecipientNames } from "../../shared/duskNames.js";
 import { forgetTxs, getTxEpoch, listTxs, patchTxMeta } from "../../shared/txStore.js";
 import { VERIFIED_NAME_TTL_MS, duskNamesScope } from "../../shared/verifiedNames.js";
 import { noteTxStatus, sentStatus } from "./views/sent.js";
+import { keepMeasure, keptMeasure } from "./keptMeasures.js";
 
 /** Rows read for the History view at first, and how many more Show more adds. */
 export const ACTIVITY_PAGE = 50;
@@ -595,6 +596,9 @@ function lookForFinal(ov, sent, refresh) {
   }, SOZU_FINAL_AGAIN_MS);
 }
 
+// The network a measured rate is of: its chain, else its node.
+const networkOfRates = (ov) => String(ov?.chainId ?? ov?.nodeUrl ?? "");
+
 // How Sozu's stDUSK grew lately, by pool, as app-core reads it from the chain:
 // read once an hour in this popup, for every screen that shows Sozu's rate.
 const sozuGrowthKept = new Map();
@@ -609,7 +613,27 @@ const sozuGrowthKept = new Map();
 export function sozuGrowthOf(ov, status, tipHeight = null) {
   if (!status?.contracts?.pool) return Promise.resolve(null);
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
-  return sozuGrowth({ archive, cache: sozuGrowthKept, pool: status.contracts.pool, status, tipHeight }).catch(() => null);
+  return sozuGrowth({ archive, cache: sozuGrowthKept, pool: status.contracts.pool, status, tipHeight })
+    .then((growth) => {
+      // The last measured, for the next screen to show while it reads again: with Sozu's fee on rewards then.
+      if (growth) keepMeasure(`sozu:${networkOfRates(ov)}`, { fee: status.fees?.reward ?? null, growth });
+      return growth;
+    })
+    .catch(() => null);
+}
+
+/**
+ * The staking rates last measured on the overview's network, as they were
+ * read, while they're less than a day old: native staking's (`native`, as
+ * nativeRewardsOf gives it) and Sozu's growth with its fee on rewards then
+ * (`sozu`), each null where there's none.
+ * @param {object} ov - the overview
+ * @returns {Promise<{ native: object | null, sozu: { fee: object | null, growth: object } | null }>}
+ */
+export async function keptRatesOf(ov) {
+  const network = networkOfRates(ov);
+  const [native, sozu] = await Promise.all([keptMeasure(`native:${network}`), keptMeasure(`sozu:${network}`)]);
+  return { native: typeof native?.rate === "number" ? native : null, sozu: sozu?.growth && typeof sozu.growth.rate === "number" ? sozu : null };
 }
 
 // stDUSK's worth at each new year, as Rewards by year reads it from the chain:
@@ -644,8 +668,14 @@ const nativeRewardsKept = new Map();
 export function nativeRewardsOf(ov, figures) {
   if (!Array.isArray(figures?.provisioners)) return Promise.resolve(null);
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
-  const network = String(ov?.chainId ?? ov?.nodeUrl ?? "");
-  return nativeRewards({ archive, cache: nativeRewardsKept, network, provisioners: figures.provisioners, tipHeight: figures.tipHeight ?? null }).catch(() => null);
+  const network = networkOfRates(ov);
+  return nativeRewards({ archive, cache: nativeRewardsKept, network, provisioners: figures.provisioners, tipHeight: figures.tipHeight ?? null })
+    .then((measured) => {
+      // The last measured, for the next screen to show while it reads again.
+      if (measured) keepMeasure(`native:${network}`, measured);
+      return measured;
+    })
+    .catch(() => null);
 }
 
 /** How long a detail lookup that brought nothing waits before it is asked again. */

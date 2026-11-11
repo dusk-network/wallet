@@ -33,7 +33,7 @@ import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/Ne
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { sozuHolding, sozuLiquidStakingView, stakingHistory } from "./sozu.js";
-import { nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
+import { keptRatesOf, nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -493,8 +493,10 @@ export function stakeFormView(ov, { state, actions } = {}) {
 // days (app-core's nativeRewards), else the estimate at today's stake (one read
 // of the node a day, rewardRate.js); Sozu's as stDUSK grew, else after its fee
 // on rewards from native staking's figure as shown, so both wallets give the
-// same one. Asked once a popup, node and network (a custom node's once its
-// chain ID is read too), and drawn again when the answers come.
+// same one. The rates measured last, kept a day (keptRatesOf), show with their
+// days till new ones come, and stay where they can't be read. Asked once a
+// popup, node and network (a custom node's once its chain ID is read too), and
+// drawn again when the answers come.
 function rewardRates(ov, { state, actions }) {
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
@@ -504,9 +506,18 @@ function rewardRates(ov, { state, actions }) {
   const held = heldStatus?.fees?.reward ?? null;
   const key = `${networkKey} ${nodeUrl}`;
   if (state.rewardRates?.key !== key) {
-    const rates = (state.rewardRates = { key, native: null, nativeDays: null, sozuFee: null, growth: null });
+    const rates = (state.rewardRates = { key, native: null, nativeDays: null, sozuFee: null, growth: null, keptFee: null });
     const result = (res) => (res?.error ? null : res?.result ?? null);
     const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
+    // The last measured, unless a new measure came first.
+    const kept = keptRatesOf(ov)
+      .then(({ native, sozu }) => {
+        if (state.rewardRates !== rates || !(native || sozu)) return;
+        if (native && !rates.measured) Object.assign(rates, { native: native.rate, nativeDays: native.days, measured: true });
+        if (sozu && !rates.growth) Object.assign(rates, { growth: sozu.growth, keptFee: sozu.fee });
+        actions?.render?.().catch(() => {});
+      })
+      .catch(() => {});
     // As the chain paid it, where that can be read: in place of the estimate.
     Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_STAKING_FIGURES" }))
       .then(result, () => null)
@@ -526,9 +537,10 @@ function rewardRates(ov, { state, actions }) {
               (res) => ofNetwork(result(res)),
               () => null
             )),
+      kept,
     ]).then(([native, status]) => {
       if (state.rewardRates !== rates) return;
-      // The estimate, unless what the chain paid came first.
+      // The estimate, unless what the chain paid came first, or was kept.
       if (!rates.measured) rates.native = typeof native === "number" ? native : null;
       rates.sozuFee = status?.fees?.reward ?? null;
       if (rates.native !== null) actions?.render?.().catch(() => {});
@@ -537,8 +549,8 @@ function rewardRates(ov, { state, actions }) {
   }
   // Or Liquid staking's status, where it came in while this read none.
   measureGrowth(ov, heldStatus, { state, actions });
-  // Sozu's fee as Liquid staking read it last, else as asked here.
-  const sozuFee = held ?? state.rewardRates.sozuFee;
+  // Sozu's fee as Liquid staking read it last, else as asked here, else as it was with the growth kept.
+  const sozuFee = held ?? state.rewardRates.sozuFee ?? state.rewardRates.keptFee;
   const { native, nativeDays, growth } = state.rewardRates;
   const sozu = native !== null && sozuFee ? sozuRate(native, { fees: { reward: sozuFee } }, growth) : null;
   // Sozu's over the days stDUSK grew, else over native staking's.
