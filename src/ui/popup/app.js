@@ -1125,6 +1125,8 @@ const systemBack = appBack
       screenKey: () =>
         [state.route, app?.querySelector(".subnav-title")?.textContent ?? "", overlays().length, netMenu?.isOpen, acctMenu?.isOpen].join("|"),
       backStep,
+      // Import with words typed: its Back asks first.
+      asks: () => !overlays().length && !netMenu.isOpen && !acctMenu.isOpen && Boolean(app?.querySelector(".subnav-back[data-back-asks]")),
     });
 
 // --- Header actions -------------------------------------------------------

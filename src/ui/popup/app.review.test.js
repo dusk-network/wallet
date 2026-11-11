@@ -417,6 +417,43 @@ describe("the phone's Back button", () => {
     expect([t.state.route, history.at]).toEqual(["send", 1]);
   });
 
+  // Amélie's: on Import opened from Firefox's menu, Back closed the wallet with 12 typed words.
+  it("asks before Import's typed words go, and the question's own Back keeps them", async () => {
+    let history;
+    const t = await popupOn(
+      "onboard_welcome",
+      { onboard: { mode: null, mnemonic: null, password: "", reveal: false } },
+      async (message) => (message.type === "DUSK_UI_OVERVIEW" ? { hasVault: false, isUnlocked: false, networkName: "Testnet" } : undefined),
+      { history: (win) => (history = pageHistory(win)) }
+    );
+    const word = (n) => t.app.querySelectorAll("input").find((i) => accessibleName(i) === `Word ${n}`);
+    const question = () => t.dom.document.querySelector("[role=alertdialog]");
+    t.app.querySelectorAll("button").find((b) => b.textContent.startsWith("Import wallet")).click();
+    await flush();
+    expect([t.state.route, history.at]).toEqual(["onboard_import", 1]);
+    word(1).value = "abandon";
+    word(1).dispatchEvent(fakeEvent("input"));
+    await flush();
+
+    history.back();
+    await flush();
+    expect(question()?.textContent).toContain("Go back?");
+    expect([t.state.route, history.closed]).toEqual(["onboard_import", false]);
+    // The question's own Back: its Cancel, the words kept.
+    history.back();
+    await flush();
+    expect([question(), word(1).value, history.closed]).toEqual([null, "abandon", false]);
+
+    // Nothing typed: one entry, and Back goes at once.
+    word(1).value = "";
+    word(1).dispatchEvent(fakeEvent("input"));
+    await flush();
+    expect(history.at).toBe(1);
+    history.back();
+    await flush();
+    expect([t.state.route, question()]).toEqual(["onboard_welcome", null]);
+  });
+
   it("goes one screen back inside the wallet, Review to the Send form with what was typed, and leaves only from Home", async () => {
     let history;
     const t = await popupOn(

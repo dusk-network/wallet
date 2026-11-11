@@ -74,11 +74,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
-- Asked for the unlock on a site's approval once the wallet locks, as its tab in Firefox for Android closes, rather than an Approve that does nothing.
+- Asked for the unlock on a site's approval once the wallet locks, as when Firefox for Android's Keep open tab closes, rather than an Approve that does nothing.
 - Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
 - Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.
 - Said on Send the fee its Review asks, at the network's gas price.
 - Took one step back with each press of a phone's Back, also after a payment, rather than none two or three times.
+- Kept the words typed on Import through a phone's Back, which asks first, rather than closing the wallet with them.
 - Saved Auto-lock's time in the Android app, which said it couldn't, and locked the app after it.
 - Turned fingerprint unlock off once the phone's fingerprints or screen lock went, said so, and offered it again.
 - Brought up the keyboard for the password after the fingerprint prompt's Use password.

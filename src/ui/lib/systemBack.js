@@ -19,6 +19,11 @@
 // entry, or a step of the wallet's own the browser didn't take, never leaves
 // it counting entries that aren't there, and the person's next Back taken for
 // the wallet's own. The wallet takes one step of its own at a time.
+//
+// A screen whose way back asks first, as Import does with words typed
+// (`asks`), stands on one entry more, put up as they're typed: the question's
+// own Back, its Cancel, keeps them, rather than closing the wallet with them
+// (Firefox for Android honours an entry put up as the person types).
 
 const BACK_CONTROL = "[data-back], .subnav-back";
 // A step of the wallet's own that the browser said nothing of: where it
@@ -36,11 +41,13 @@ const depthOf = (state) => (state && Number.isInteger(state.duskDepth) && state.
  * @param {() => Promise<boolean>} [opts.onFirst] - what Back does on a first
  *   screen instead of leaving (the app goes to the background, kept as it
  *   is); false from it, and Back there is the browser's from then on
+ * @param {() => boolean} [opts.asks] - whether the screen's way back asks
+ *   first, with what's typed on it
  * @param {Window} [opts.win]
  * @returns {{ sync: () => void }} `sync` after a screen, a dialog or a menu
  *   changes, and after a press
  */
-export function installSystemBack({ backStep, screenKey, onFirst, win = globalThis.window }) {
+export function installSystemBack({ backStep, screenKey, onFirst, asks = () => false, win = globalThis.window }) {
   const history = win?.history;
   if (typeof history?.pushState !== "function") return { sync() {} };
   const doc = win.document ?? globalThis.document;
@@ -61,9 +68,9 @@ export function installSystemBack({ backStep, screenKey, onFirst, win = globalTh
   let shown = screenKey();
 
   const first = () => Boolean(onFirst) && !firstFailed;
-  // The entries the screen shown now stands on: one with a way back, or on
-  // a first screen with `onFirst`; none on a first screen without.
-  const needed = () => (backStep() || first() ? 1 : 0);
+  // The entries the screen shown now stands on: one with a way back, two
+  // where it asks first; on a first screen with `onFirst` one, without none.
+  const needed = () => (backStep() ? (asks() ? 2 : 1) : first() ? 1 : 0);
   // Whether a press allows an entry now.
   const pressing = () => !afterBack && (win.navigator?.userActivation ? win.navigator.userActivation.isActive : true);
   const push = () => {
@@ -173,6 +180,11 @@ export function installSystemBack({ backStep, screenKey, onFirst, win = globalTh
     },
     true
   );
+  // Typing, and a paste, as a press: a screen whose way back asks gets its
+  // second entry as it's typed in.
+  const typedIn = () => pressed(false);
+  doc?.addEventListener?.("input", typedIn, true);
+  doc?.addEventListener?.("paste", () => setTimeout(typedIn, 0), true);
 
   return { sync };
 }

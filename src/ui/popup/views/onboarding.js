@@ -533,6 +533,9 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
   };
   const nav = subnav({ title, onBack: leave });
   const backBtn = nav.querySelector("button");
+  // Its Back asks while something's typed: a phone's Back keeps an entry for
+  // the question's own Back, which keeps what's typed (systemBack.js).
+  const markAsks = () => (typed() ? backBtn?.setAttribute("data-back-asks", "") : backBtn?.removeAttribute("data-back-asks"));
 
   let busy = false;
   let btn;
@@ -612,21 +615,22 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
   });
   // `busy`: the wallet being made, which the popup keeps the form through;
   // `landing`, to say again which wallet it becomes, as the form is kept.
-  return Object.assign([
-    nav,
-    h("div", { class: "row onboard-form" }, [
-      landing?.el,
-      lead ? h("p", { class: "auth-lead", text: lead }) : null,
-      groupLabel(mnemonicInput.el, "Recovery phrase"),
-      mnemonicInput.el,
-      phraseError.el,
-      ...fields.els,
-      finger?.el,
-      err.el,
-      btn,
-      busyBody,
-    ].filter(Boolean)),
-  ], { busy: () => busy, landing: (ov) => landing?.update(ov) });
+  const form = h("div", { class: "row onboard-form" }, [
+    landing?.el,
+    lead ? h("p", { class: "auth-lead", text: lead }) : null,
+    groupLabel(mnemonicInput.el, "Recovery phrase"),
+    mnemonicInput.el,
+    phraseError.el,
+    ...fields.els,
+    finger?.el,
+    err.el,
+    btn,
+    busyBody,
+  ].filter(Boolean));
+  for (const type of ["input", "change"]) form.addEventListener(type, markAsks, true);
+  // A phrase pasted whole goes into its boxes a moment on.
+  form.addEventListener("paste", () => setTimeout(markAsks, 0), true);
+  return Object.assign([nav, form], { busy: () => busy, landing: (ov) => landing?.update(ov) });
 }
 
 export function onboardingImportView({ state, actions, adding = false, ov } = {}) {
