@@ -4,7 +4,7 @@
 // a network's own web wallet, and only as a form to fill in: nothing goes until
 // its Review and Confirm.
 
-import { makePaymentLink, parsePaymentLink, readPaymentLink } from "@dusk-network/app-core/payment-links";
+import { makePaymentLink, readPaymentLink } from "@dusk-network/app-core/payment-links";
 
 import { openWalletTab } from "./walletTab.js";
 import { isPhone } from "../ui/lib/device.js";
@@ -30,10 +30,12 @@ const onThisMachine = (url) => {
   }
 };
 
-// The link in a message, or null: one to a network's web wallet's Send, sent from that very site.
+// The link in a message, or null: one to a network's web wallet's Send, sent
+// from that very site, that Send reads (app-core's readPaymentLink, as the web
+// wallet reads it): one Send would refuse isn't offered.
 function linkOf(message, sender) {
   const link = String(message?.link ?? "");
-  if (parsePaymentLink(link)?.form !== "https") return null;
+  if (readPaymentLink(link)?.link?.form !== "https") return null;
   const from = originOf(sender?.url ?? sender?.tab?.url);
   return from && from === originOf(link) ? link : null;
 }
@@ -76,7 +78,10 @@ export async function openRequestLink(message, sender) {
 async function siteLinkOf(origin, raw) {
   const link = String(raw ?? "");
   if (!origin || originOf(link) !== origin) return {};
-  if (parsePaymentLink(link)?.form === "https") return { link };
+  // A network's web wallet's, read as Send reads it: one Send would refuse is
+  // refused before anything opens, saying why.
+  const sent = readPaymentLink(link);
+  if (sent) return sent.link?.form === "https" ? { link } : { problem: sent.problem };
   const at = link.indexOf("/dashboard/send");
   if (!onThisMachine(origin) || at <= 0) return {};
   if (!onThisMachine((await getSettings())?.nodeUrl)) return { problem: "params.link from this machine needs the wallet on a node on this machine" };

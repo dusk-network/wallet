@@ -82,6 +82,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Searched Activity's whole history as a search is typed, without Show more, and found a contact named in look-alike letters by the name as typed.
 - Marked a contact whose name looks like another's on a transaction's details, as its row does, with its address once.
 - Showed a request's memo as codes under its field, saying what to check, while it has hidden characters or look-alike digits.
+- Refused a request link whose recipient Send can't pay, as a second address, a line break or a hidden character in to=, pasted, scanned or handed over by a site, as the web wallet does.
+- Refused a link that says a field twice in two letter cases, as To= beside to=, a dusk:shielded- link to a public account or a dusk:public- link to a shielded address, saying which, and a dusk: link with a #.
 - Asked for the unlock on a site's approval once the wallet locks, as when Firefox for Android's Keep open tab closes, rather than an Approve that does nothing.
 - Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
 - Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.

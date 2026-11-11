@@ -96,8 +96,15 @@ const vary = (value, n) =>
 // The current profile's own account and address, and another profile's account.
 const OWN = { account: ACCOUNT, address: ADDRESS };
 const OTHER_PROFILE = vary(ACCOUNT, 1);
-const ALICE = { account: vary(ACCOUNT, 2), address: vary(ADDRESS, 2) };
-const BOB = { account: vary(ACCOUNT, 3), address: vary(ADDRESS, 3) };
+// Others' accounts as keys: a link to one that isn't is refused, as Send can't pay it.
+const ALICE = {
+  account: "26JfWKvhYdVY71bdSPVLNJ51Buy4GjimCT7zcsoxNQtydDbdoH2AwZaH8W7rjcAc9riAu39Vw9Lx1w7yrkBgotSjWmUdkSyQuaTKDZWVCKp9g1GxiEnnksv3W3onToB5NsNi",
+  address: vary(ADDRESS, 2),
+};
+const BOB = {
+  account: "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz",
+  address: vary(ADDRESS, 3),
+};
 
 const NAMES = {
   "alice.dusk": { ok: true, name: "alice.dusk", ...ALICE },
@@ -1874,6 +1881,36 @@ describe("a request link", () => {
     const el = dom.document.body.querySelector(".err");
     return el && el.style.display !== "none" ? el.textContent : "";
   };
+
+  // Marek's: a second recipient, a line break or a hidden character inside an https link's to= filled To, under
+  // "Filled in from the link", where the web wallet refuses the link.
+  it("refuses a link whose recipient it can't pay, as the web wallet does, filling in nothing", async () => {
+    for (const to of [`${ALICE.account},${BOB.account}`, `${ALICE.account}%2C${BOB.account}`, `${ALICE.account.slice(0, 40)}%0A${ALICE.account.slice(40)}`, `${ALICE.account}%E2%80%AE`, `${ALICE.account}%EF%B8%8F`]) {
+      const state = newState();
+      const form = mount(state);
+      typeInto(form.amount, "0.5");
+      paste(form, httpsLink(`to=${to}&amount=0.001`));
+      await settle();
+      expect(refusal(), to).toEqual(["This link's address isn't valid. Ask for a new one."]);
+      expect([form.to.value, form.amount.value, state.draft.to, visibleText(dom.document.body.querySelector(".send-filled-note"))]).toEqual(["", "", "", ""]);
+    }
+  });
+
+  // Marek's: a dusk:shielded- link to a public account filled a public send, and what followed a # landed in Amount.
+  it("refuses a link for one kind of payment to the other kind's recipient, and a dusk: link with a #, saying why", async () => {
+    for (const [link, why] of [
+      [`dusk:shielded-${ALICE.account}?amount=0.001`, "This link asks for a shielded payment to a public account. Ask for a new one."],
+      [`dusk:public-${ALICE.address}?amount=0.001`, "This link asks for a public payment to a shielded address. Ask for a new one."],
+      [`dusk:${ALICE.account}?amount=0.001#to=${BOB.account}`, "That link can't be read. Ask for a new one."],
+    ]) {
+      const state = newState();
+      const form = mount(state);
+      paste(form, link);
+      await settle();
+      expect(refusal(), link).toEqual([why]);
+      expect([form.to.value, form.amount.value, state.draft.to]).toEqual(["", "", ""]);
+    }
+  });
 
   it("refuses a link that says a field twice, or has a user part before its host, saying which", async () => {
     // Marek's: each would fill in its first value without a word. Sofia's: say what's wrong, for its sender to fix.
