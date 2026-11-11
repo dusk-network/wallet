@@ -8,6 +8,7 @@ import { entryOf } from "../shared/fixtures/rows.js";
 import { accessibleName, installFakeDom, isShown, settle, visibleText } from "./testing/fakeDom.js";
 import { recordedEvm, recordedMigration } from "./testing/recordedEvm.js";
 import { activityView } from "./popup/views/activityView.js";
+import { txDetailsView } from "./popup/views/txDetails.js";
 import { activityKey } from "./popup/activity.js";
 import { handedExportKey, saveHandedExport } from "./popup/activityExport.js";
 import { runtimeGetURL, storageSessionGet, storageSessionRemove, storageSessionSet, tabsCreate } from "../platform/extensionApi.js";
@@ -602,26 +603,87 @@ describe("Activity's Export", () => {
     expect(await firstBytes(1)).toEqual([0xef, 0xbb, 0xbf]);
   });
 
-  // Nandini's, Sofía's and Lena's: the file booked gas paid by EVM addresses that aren't theirs, as anyone can
-  // migrate to an account. The extension connects no EVM wallet and migrates from none: it books none, as the web
-  // wallet books only the addresses it connected or migrated from.
-  it("books no gas of a migration's own chain, which the extension can't tell is yours, and reads none", async () => {
+  // Nandini's: the payout's details said what its migration paid on BNB Smart Chain, to the wei, and the
+  // file left it out without a word.
+  it("books what a migration whose payout it has paid on its own chain, to the wei of the payout's details, and says when that chain can't be read", async () => {
     page("/full.html");
     const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
-    const { payout, migration } = recordedMigration;
+    const { approval, migration, owner, payout } = recordedMigration;
     const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: payout.at, blockHeight: 5_684_134 }];
     const MAINNET = "https://nodes.dusk.network";
+    const { actions, ov } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+    const exportAll = async () => {
+      button("Export").click();
+      button("Save CSV").click();
+      await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+      const toast = actions.showToast.mock.calls.at(-1)[0];
+      actions.showToast.mockClear();
+      return { lines: await linesOf(saved.length - 1), toast };
+    };
+    const paidThere = (lines) => lines.filter((l) => l["Sent Currency"] === "BNB").map((l) => [l.TxHash, l["Sent Amount"], l.Tag, l["Account Name"], l.Account]);
+
+    // BNB Smart Chain's RPC can't be read: the payout alone, and the toast says what's missing.
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+    const down = await exportAll();
+    expect(paidThere(down.lines)).toEqual([]);
+    expect(down.lines.find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
+    expect(down.toast).toContain("1 migration's fee on BNB Smart Chain couldn't be read: export again to add it.");
+
+    // Read: the approval and the migration, each a cost of its own, in BNB, from the address that paid it.
+    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
+    const up = await exportAll();
+    expect(paidThere(up.lines)).toEqual([
+      [approval, "0.0000023109", "cost", "BNB Smart Chain", owner],
+      [migration, "0.00000243765", "cost", "BNB Smart Chain", owner],
+    ]);
+    expect(up.toast).not.toContain("couldn't be read");
+
+    // Together, to the wei, what the payout's details say it paid there.
+    const wei = (text) => {
+      const [whole, fraction = ""] = text.split(".");
+      return BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, "0"));
+    };
+    const booked = up.lines.filter((l) => l["Sent Currency"] === "BNB").reduce((sum, l) => sum + wei(l["Sent Amount"]), 0n);
+    const detailState = { route: "tx", txDetailHash: payout.hash, txDetailFrom: "activity", addressBook: { loaded: true, items: [] } };
+    const tx = { hash: payout.hash, nodeUrl: MAINNET, status: "executed", kind: TX_KIND.TRANSFER, direction: "in", from: route.payoutAccount, amount: payout.value, memo: migration };
+    const detailFee = () => {
+      dom.document.body.replaceChildren(...txDetailsView({ ...ov, txs: [tx] }, { state: detailState, actions: { render: async () => {}, showToast: vi.fn() } }));
+      return body()
+        .querySelectorAll(".tx-detail > .group > .kv")
+        .map(visibleText)
+        .find((row) => row.startsWith("Fee on BNB Smart Chain"));
+    };
+    detailFee();
+    await vi.waitFor(() => expect(detailFee()).toBeDefined());
+    expect(detailFee()).toBe("Fee on BNB Smart Chain0.00000474855 BNB · approval and migration");
+    expect(booked).toBe(wei("0.00000474855"));
+  });
+
+  it("puts a migration's fees in the period of their own day, though its payout came the day after", async () => {
+    // Codex's: a 30 September fee was left out of Q3, and put in Q4 with its payout.
+    vi.setSystemTime(new Date("2026-11-10T09:00:00Z"));
+    page("/full.html");
+    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
+    const { approval, migration, owner, payout } = recordedMigration;
+    const nextDay = Date.UTC(2026, 10, 6, 0, 30);
+    const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: nextDay, blockHeight: 5_684_134 }];
+    const MAINNET = "https://nodes.dusk.network";
     const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
-    const evm = recordedEvm(route.chain.rpcUrl);
-    const fetch = vi.fn(evm.fetch);
-    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
     button("Export").click();
+    pickPeriod("dates");
+    for (const id of ["activity-export-from", "activity-export-to"]) {
+      const input = body().querySelector(`#${id}`);
+      input.value = "2026-11-05";
+      input.dispatchEvent(new Event("input"));
+    }
     button("Save CSV").click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
-    const lines = await linesOf();
-    expect(lines.map((l) => [l.TxHash, l["Received Amount"], l["Sent Currency"]])).toEqual([[payout.hash, "1041.53106263", ""]]);
-    expect(fetch.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith(route.chain.rpcUrl))).toEqual([]);
-    expect(actions.showToast.mock.calls.at(-1)[0]).not.toContain("couldn't be read");
+    // The approval and the migration of 5 November, and not the payout of the 6th.
+    expect((await linesOf()).map((l) => [l.TxHash, l["Sent Currency"] || l["Received Currency"], l.Account])).toEqual([
+      [approval, "BNB", owner],
+      [migration, "BNB", owner],
+    ]);
   });
 
   it("makes a stake with Sozu a trade of DUSK for stDUSK, with its deposit fee, as the pool's event says it", async () => {

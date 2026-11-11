@@ -26,7 +26,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed a Sozu stake's position on Liquid staking: put in, taken out, worth now, deposit fees and rewards so far.
 - Said what an amount brings in a year with Sozu as it's typed, and one line of what the rate is made of under it.
 - Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
-- Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei.
+- Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei, and put those fees in the export.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
 - Added `dusk_openPaymentLink`, for the web wallet's own button to open a request link in the extension's Send.
 - Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
@@ -169,7 +169,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Refused a profile's name that is, or looks like, another profile's or a contact's.
 - Showed what came in on a request of any amount in its badge, in plain colour, rather than a green Paid.
 - Said a number's look-alike digits in the web wallet's words.
-- Booked no gas of a migration's own chain in the export, as the extension connects no EVM wallet and anyone can migrate to an account.
 - Marked a contact whose name looks like another's on Send, Review and Activity, beside its address.
 - Kept another wallet's shielded history out of Activity and Export when the wallet changes during a read; an Export it changes under saves nothing and says so.
 - Said under a .dusk name when a node the wallet doesn't know checked it, and kept that node's answers from the network's own node's.
