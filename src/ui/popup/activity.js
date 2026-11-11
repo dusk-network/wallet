@@ -91,6 +91,8 @@ async function reload(a) {
   a.coveredTo = coveredTo;
   a.complete = complete;
   a.loaded = true;
+  // What's kept changed: a search reads it whole again.
+  a.reads = (a.reads ?? 0) + 1;
 }
 
 // What the wallet's own record of a send adds to the chain's row of it: the
@@ -401,6 +403,43 @@ export async function showMoreActivity({ state, render }) {
 // A whole read: runs of this many history requests, at most this many runs.
 const WHOLE_RUN_REQUESTS = 64;
 const WHOLE_RUNS = 64;
+
+/**
+ * Activity's search: the account's whole history, its older blocks synced
+ * first as far back as they go, as Show more would, then every row kept read
+ * at once. Read again once what's kept changed; the last read stands
+ * meanwhile. `whole` is what `activityRows` takes, null until it's read, or
+ * where there's no history to read; `reading` while it's read.
+ * @param {object} ov - the overview
+ * @param {{ state: object, render?: () => Promise<void> }} ctx
+ * @returns {{ whole: { entries: object[], meta: object | null, shielded: object[] } | null, reading: boolean }}
+ */
+export function searchedActivity(ov, { state, render }) {
+  const a = state?.activity;
+  if (!a?.history || !a.loaded || a.key !== activityKey(ov)) return { whole: null, reading: false };
+  // Once for each change to what's kept: one that can't be read whole leaves the last read, or the page.
+  const at = a.reads ?? 0;
+  if (a.searchAsked !== at && !a.searching) {
+    a.searchAsked = at;
+    a.searching = (async () => {
+      if ((await a.epoch) === undefined) throw new Error("The activity store is out of reach");
+      let complete = a.complete;
+      for (let run = 0; run < WHOLE_RUNS && !complete && !a.stale; run += 1) {
+        await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
+        ({ complete } = await a.history.read({ limit: 1 }));
+      }
+      const read = await a.history.read({ limit: Number.MAX_SAFE_INTEGER - 1 });
+      if (state.activity === a) a.searched = { entries: read.entries, meta: read.state };
+    })()
+      .catch(() => {})
+      .finally(() => {
+        a.searching = null;
+        redraw(state, render);
+      });
+  }
+  const whole = a.searched ? { entries: a.searched.entries, meta: a.searched.meta, shielded: a.shielded } : null;
+  return { whole, reading: Boolean(a.searching) };
+}
 
 /**
  * All of the account's history, for what needs every row (an export, a Sozu

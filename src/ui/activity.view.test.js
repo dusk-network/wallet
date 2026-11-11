@@ -402,6 +402,44 @@ describe("the Activity view", () => {
     for (const typed of ["0", "0.0", "0,0"]) expect(search(typed).some((amount) => amount.includes("0,05")), typed).toBe(true);
   });
 
+  // Sofía's: "Marta" found nothing until Show more, and never the payment from her contact named with a Cyrillic а.
+  it("finds a contact's payments by a name that looks like the one typed, from the whole history, without Show more", async () => {
+    const { state, draw } = setup({ complete: false, route: "activity" });
+    // Two contacts, one named in a Cyrillic а; their payments older than the page.
+    state.addressBook.items = [
+      { id: "c1", name: "Estudio Marta", address: FAUCET },
+      { id: "c2", name: "Estudio M\u0430rta", address: SENDER },
+    ];
+    const kept = state.activity.entries;
+    let synced = false;
+    state.activity.limit = 2;
+    state.activity.entries = kept.slice(0, 2);
+    state.activity.epoch = Promise.resolve(1);
+    state.activity.history = {
+      // Older blocks come in as it's synced back; until then the history isn't whole.
+      sync: vi.fn(async () => {
+        synced = true;
+      }),
+      read: vi.fn(async ({ limit }) => ({ entries: kept.slice(0, synced ? limit : 2), state: null, complete: synced, coveredTo: 0 })),
+    };
+    draw();
+    const field = body().querySelector('input[aria-label="Search activity"]');
+    field.value = "marta";
+    field.dispatchEvent(new Event("input"));
+    // While it's read: saying so, and no Show more.
+    expect(visibleText(body().querySelector(".tx-empty"))).toBe("Looking through all your activity…");
+    expect(button("Show more")).toBeUndefined();
+    await vi.waitFor(() => expect(rows()).toHaveLength(2));
+    expect(rows().map((row) => row.split(" · ")[0])).toEqual(["Estudio M\u0430rta", "Estudio Marta"]);
+    expect(rows().every((row) => row.includes("Looks like another contact"))).toBe(true);
+    expect(state.activity.history.sync).toHaveBeenCalled();
+    expect(button("Show more")).toBeUndefined();
+    // Cleared, the page is as it was.
+    field.value = "";
+    field.dispatchEvent(new Event("input"));
+    expect(rows()).toHaveLength(2);
+  });
+
   it("finds no row by its amount while balances are hidden, and says what's still to read", () => {
     const { state, draw } = setup({ complete: false, hidden: true, route: "activity" });
     state.activitySearch = "1,100";
