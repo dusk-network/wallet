@@ -4,9 +4,10 @@ import { formatDuskExact, formatFee, groupThousands } from "../../../shared/amou
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { arrivalUrl, awaitingArrival, depositLux } from "../../../shared/bridgeArrival.js";
-import { chainIdForNode, networkKeyOf, networkTextOf, nameCheckNote } from "../../../shared/nodeNetwork.js";
+import { chainIdForNode, networkTextOf, nameCheckNote } from "../../../shared/nodeNetwork.js";
 import { getTxMeta } from "../../../shared/txStore.js";
 import { activityOwnersOf } from "../../../shared/activityStore.js";
+import { activityNetworkKey } from "../../../shared/activityHistory.js";
 import { walletLabel } from "../../../shared/wallets.js";
 import { networks } from "@dusk-network/networks";
 import { contractLabel } from "../../../shared/knownCalls.js";
@@ -163,10 +164,15 @@ function ledgerRows(tx, desc, nodeUrl, hidden, evm) {
   };
 }
 
+// A network's node, by the key its history is kept under (activityNetworkKey):
+// Mainnet's and Testnet's own node, any other node's origin.
+const nodeOfNetwork = (network) => (network === "mainnet" || network === "testnet" ? String(networks[network]?.urls?.node ?? "") : network);
+
 // Where a transaction is, for one that isn't in this profile's activity (a
 // notice tapped after a switch of network, wallet or profile): the record the
 // wallet kept as it sent it, or once that's gone, the history it's kept in.
-// Read once for the transaction shown, and drawn again when it's read.
+// Its network by the key its history is kept under, as the history's writer
+// keys it. Read once for the transaction shown, and drawn again when it's read.
 function whereOf(hash, { state, actions }) {
   if (state.txDetailWhere?.hash === hash) return state.txDetailWhere.where;
   const read = (state.txDetailWhere = { hash, where: null });
@@ -174,11 +180,16 @@ function whereOf(hash, { state, actions }) {
     .then(([meta, owners]) => {
       if (state.txDetailWhere !== read) return;
       if (meta?.nodeUrl) {
-        read.where = { nodeUrl: String(meta.nodeUrl), chainId: Number.isInteger(meta.chainId) ? meta.chainId : undefined, walletId: String(meta.walletId ?? ""), profileIndex: meta.profileIndex };
+        const nodeUrl = String(meta.nodeUrl);
+        const chainId = Number.isInteger(meta.chainId) ? meta.chainId : chainIdForNode(nodeUrl) ?? undefined;
+        read.where = { network: activityNetworkKey(nodeUrl), nodeUrl, chainId, walletId: String(meta.walletId ?? ""), profileIndex: meta.profileIndex };
       } else if (owners.length) {
-        const [network, account] = owners[0].split("::");
-        const net = networks[network];
-        read.where = { nodeUrl: String(net?.urls?.node ?? ""), chainId: net?.chainId, account: String(account ?? ""), network };
+        // `network::account`: the account has no "::", a node's origin may.
+        const owner = owners[0];
+        const at = owner.lastIndexOf("::");
+        const network = owner.slice(0, at);
+        const nodeUrl = nodeOfNetwork(network);
+        read.where = { network, nodeUrl, chainId: chainIdForNode(nodeUrl) ?? undefined, account: owner.slice(at + 2) };
       } else return;
       actions?.render?.()?.catch?.(() => {});
     })
@@ -186,14 +197,8 @@ function whereOf(hash, { state, actions }) {
   return null;
 }
 
-// Whether it's on the network the wallet is on: by the history's key for it,
-// else by its name.
-function onThisNetwork(where, ov) {
-  const nodeUrl = String(ov?.nodeUrl ?? "");
-  if (where.network) return where.network === networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
-  const there = where.nodeUrl ? networkTextOf(where.nodeUrl) : "";
-  return !there || there === networkTextOf(nodeUrl);
-}
+// Whether it's on the network the wallet is on, by the same key.
+const onThisNetwork = (where, ov) => where.network === activityNetworkKey(String(ov?.nodeUrl ?? ""));
 
 // What's said of where it is: another network, wallet or profile.
 function elsewhereText(where, ov) {
@@ -252,8 +257,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
     // Where it is, and its explorer is its network's.
     const at = whereOf(hash.toLowerCase(), { state, actions });
     const where = elsewhereText(at, ov);
-    // None for another network the wallet knows no explorer of.
-    const url = at?.nodeUrl ? explorerTxUrl(at.nodeUrl, hash, at.chainId) : at && !onThisNetwork(at, ov) ? null : explorerUrl;
+    // Another network's explorer, where it has one.
+    const url = at && !onThisNetwork(at, ov) ? explorerTxUrl(at.nodeUrl, hash, at.chainId) : explorerUrl;
     return [
       nav,
       h("div", { class: "tx-detail" }, [
