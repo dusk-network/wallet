@@ -1,7 +1,8 @@
 // What a wallet reset clears besides the vault and the site permissions: every
 // wallet's transactions, shielded notes, history, deposits' arrivals on
 // DuskEVM, contacts, profile labels and tokens, the wallets' names, what sites
-// asked, and the settings, so the network is Mainnet's own node again and no address stays.
+// asked, the sends the app on Android looks for while it's away, and the
+// settings, so the network is Mainnet's own node again and no address stays.
 // And what removing one wallet clears of it alone (forgetWalletData).
 //
 // A reset is noted before the vault goes. If any of these can't be cleared,
@@ -29,6 +30,7 @@ import { storage, STORAGE_KEYS } from "./storage.js";
 import { clearTxs, forgetWalletTxs } from "./txStore.js";
 import { clearWallets } from "./wallets.js";
 import { forgetWalletRequests, keepOnlyRequestsOf } from "./paymentRequests.js";
+import { forgetAppArrivals } from "../platform/notices.js";
 
 /**
  * Note that a reset began, before anything is cleared: for a restore, with
@@ -59,6 +61,8 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     clearWallets(),
     clearSettings(),
     clearSiteRecords(),
+    // The sends the app on Android looks for while it's away, and their notices.
+    forgetAppArrivals(),
     // Names checked and rates read, kept by account or by node, and the password on big sends.
     storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES, STORAGE_KEYS.SEND_PASSWORD]),
   ]);
@@ -119,6 +123,7 @@ export async function forgetWalletData({ walletId, accounts }) {
     forgetWalletNotes(id),
     forgetWalletRequests(id),
     forgetWalletActivity({ walletId: id, accounts }),
+    forgetAppArrivals(id),
   ]);
   return results.every((r) => r.status === "fulfilled");
 }

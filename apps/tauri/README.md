@@ -36,7 +36,7 @@ kept only encrypted under an Android Keystore key that a fresh fingerprint
 opens (Android 11 and later); arrival notices are `src-tauri/android/NoticesPlugin.kt`,
 asked for only when the person taps Tell me when it arrives, and a send they
 asked about is looked up with the app in the background by a JobScheduler job,
-`src-tauri/android/ArrivalJob.kt`. As the app is built, `src-tauri/build.rs`
+`src-tauri/android/ArrivalJob.kt`, until its wallet is removed, reset or restored. As the app is built, `src-tauri/build.rs`
 adds the permissions to hear the network come and go, to ask for a fingerprint,
 to show notices and to use the camera for Scan QR to the project's manifest,
 with the job's service, puts that Kotlin in its sources, and Dusk's icon in its

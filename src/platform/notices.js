@@ -33,11 +33,31 @@ export const showAppNotice = async ({ title, body, hash = "" }) =>
 
 /**
  * A send for Android to look for once the app leaves the screen, and the
- * notice it shows when it's in a block, for either outcome.
- * @param {{ hash: string, nodeUrl: string, title: string, failTitle: string, body: string }} send
+ * notice it shows when it's in a block, for either outcome; `wallet`, the
+ * wallet it's from, whose removal forgets it.
+ * @param {{ hash: string, nodeUrl: string, title: string, failTitle: string, body: string, wallet?: string }} send
  */
-export const watchAppArrival = async ({ hash, nodeUrl, title, failTitle, body }) =>
-  (await ask("watch", { hash: String(hash ?? ""), nodeUrl: String(nodeUrl ?? ""), title: String(title ?? ""), failTitle: String(failTitle ?? ""), body: String(body ?? "") })).allowed === true;
+export const watchAppArrival = async ({ hash, nodeUrl, title, failTitle, body, wallet = "" }) =>
+  (
+    await ask("watch", {
+      hash: String(hash ?? ""),
+      nodeUrl: String(nodeUrl ?? ""),
+      title: String(title ?? ""),
+      failTitle: String(failTitle ?? ""),
+      body: String(body ?? ""),
+      wallet: String(wallet ?? ""),
+    })
+  ).allowed === true;
+
+/**
+ * A wallet removed: Android looks for none of its sends any more, and tells
+ * none it was looking for. "" for every wallet's, on a reset or a restore.
+ * Never fails.
+ * @param {string} [wallet]
+ */
+export const forgetAppArrivals = async (wallet = "") => {
+  await ask("forget", { wallet: String(wallet ?? "") });
+};
 
 /**
  * A send whose outcome the wallet heard: Android doesn't look for it any more.

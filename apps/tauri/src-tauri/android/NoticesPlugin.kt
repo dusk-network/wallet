@@ -1,8 +1,8 @@
 // Arrival notices on the phone (src/shared/phoneNotices.js): Android's
 // question for leave to show them, asked only when the person taps Tell me
 // when it arrives, a payment's notice once they may show, the sends to look
-// for once the app leaves the screen (ArrivalJob.kt), and the transaction a
-// notice's tap opened the app on.
+// for once the app leaves the screen (ArrivalJob.kt), forgotten with their
+// wallet, and the transaction a notice's tap opened the app on.
 //
 // Copied into the generated Android project by build.rs, as the icon is, and
 // registered by src/android.rs as the plugin "dusk-notices". Each command
@@ -38,6 +38,13 @@ class WatchArgs {
   var title: String = ""
   var failTitle: String = ""
   var body: String = ""
+  var wallet: String = ""
+}
+
+@InvokeArg
+class ForgetArgs {
+  // The wallet whose sends are forgotten: "" for every wallet's.
+  var wallet: String = ""
 }
 
 @TauriPlugin(permissions = [Permission(strings = ["android.permission.POST_NOTIFICATIONS"], alias = "notices")])
@@ -104,7 +111,15 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun watch(invoke: Invoke) {
     val args = invoke.parseArgs(WatchArgs::class.java)
-    Arrivals.watch(activity.applicationContext, args.hash, args.nodeUrl, args.title, args.failTitle, args.body)
+    Arrivals.watch(activity.applicationContext, args.hash, args.nodeUrl, args.title, args.failTitle, args.body, args.wallet)
+    answer(invoke, Arrivals.allowed(activity))
+  }
+
+  /** A wallet removed, or every one reset or restored (""): none of its sends looked for or told. */
+  @Command
+  fun forget(invoke: Invoke) {
+    val args = invoke.parseArgs(ForgetArgs::class.java)
+    Arrivals.forget(activity.applicationContext, args.wallet)
     answer(invoke, Arrivals.allowed(activity))
   }
 

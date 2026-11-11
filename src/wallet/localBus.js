@@ -107,11 +107,11 @@ onTxSettled((hash, tx) => {
 // A send the person asked to hear of, for Android to look for once the app
 // leaves the screen, when it cuts the page's network (android/ArrivalJob.kt):
 // its notice, for either outcome, comes from there.
-async function watchArrival(hash, { kind, nodeUrl }) {
+async function watchArrival(hash, { kind, nodeUrl, walletId }) {
   if (!hash || !isPhone() || !(await mayNotify(appNoticesAllowed))) return;
   const went = arrivalNotice({ kind, ok: true, nodeUrl });
   const failed = arrivalNotice({ kind, ok: false, nodeUrl });
-  await watchAppArrival({ hash, nodeUrl, title: went.title, failTitle: failed.title, body: went.network });
+  await watchAppArrival({ hash, nodeUrl, title: went.title, failTitle: failed.title, body: went.network, wallet: String(walletId ?? "") });
 }
 
 // Auto-lock in the app, as the extension's background does it: the wallet
@@ -644,7 +644,7 @@ export async function localSend(message) {
           const { pendingNullifiers } = record;
           await putTxMeta(hash, record, { epoch: txEpoch });
           // Asked for notices: Android looks for it too, once the app leaves the screen.
-          watchArrival(hash, { kind: baseParams.kind, nodeUrl }).catch(() => {});
+          watchArrival(hash, { kind: baseParams.kind, nodeUrl, walletId: record.walletId }).catch(() => {});
 
           // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
           (async () => {

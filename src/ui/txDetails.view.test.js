@@ -1,3 +1,4 @@
+import "fake-indexeddb/auto";
 import { networks, routes } from "@dusk-network/networks";
 import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { PINNED_RELEASES as releases } from "@duskdomains/sdk/releases";
@@ -522,6 +523,58 @@ describe("transaction details", () => {
     expect(visibleText(dom.document.body)).toBe(
       "← BackTransactionThis transaction isn't in your activity.Transaction IDefefef…efefefView in Dusk explorer"
     );
+  });
+
+  // Astra's: a notice tapped after a switch opened its transaction where it isn't, the explorer on the wrong network.
+  it("says where a transaction of another network, wallet or profile is, and opens it in its own network's explorer", async () => {
+    // Where the transaction store lives outside the extension.
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(String(k)) ?? null, setItem: (k, v) => kept.set(String(k), String(v)), removeItem: (k) => kept.delete(String(k)) });
+    const { putTxMeta } = await import("../shared/txStore.js");
+    const A = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
+    const B = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+    const hash = "cd".repeat(32);
+    await putTxMeta(hash, { walletId: A, nodeUrl: NODE, chainId: networks.testnet.chainId, profileIndex: 0, kind: TX_KIND.TRANSFER, status: "executed" });
+    const wallets = [
+      { key: "wa", n: 1, name: "", walletId: A, accounts: [A] },
+      { key: "wb", n: 2, name: "Savings", walletId: B, accounts: [B] },
+    ];
+    dom.window.open = vi.fn(() => ({}));
+    const shown = async (ov) => {
+      const state = { route: "tx", txDetailHash: hash, txDetailFrom: "home" };
+      const actions = { render: vi.fn(async () => {}) };
+      dom.document.body.replaceChildren(...txDetailsView({ txs: [], wallets, ...ov }, { state, actions }));
+      await vi.waitFor(() => expect(actions.render).toHaveBeenCalled());
+      dom.document.body.replaceChildren(...txDetailsView({ txs: [], wallets, ...ov }, { state, actions }));
+      const body = dom.document.body;
+      body.querySelector(".tx-explorer-btn").click();
+      await settle();
+      return [visibleText(body.querySelector(".tx-missing")), dom.window.open.mock.lastCall?.[0]];
+    };
+    const { explorerTxUrl } = await import("../shared/explorer.js");
+    const onTestnet = explorerTxUrl(NODE, hash);
+    expect(onTestnet).toContain("testnet");
+    expect(await shown({ nodeUrl: "https://nodes.dusk.network", accounts: [A] })).toEqual(["This transaction is on Testnet. You are on Mainnet.", onTestnet]);
+    expect(await shown({ nodeUrl: NODE, accounts: [B], selectedAccountIndex: 0 })).toEqual(["This transaction is in Wallet 1.", onTestnet]);
+    expect(await shown({ nodeUrl: NODE, accounts: [A, B], selectedAccountIndex: 1 })).toEqual(["This transaction is in another profile.", onTestnet]);
+
+    // Its record gone once the history had it: the history it's kept in says.
+    kept.clear();
+    const { activityOwnerKey, commitActivityStep } = await import("../shared/activityStore.js");
+    await commitActivityStep(activityOwnerKey("testnet", B), [{ hash, blockHeight: 7 }], () => ({ covered: [[0, 9]] }));
+    expect(await shown({ nodeUrl: "https://nodes.dusk.network", accounts: [A] })).toEqual(["This transaction is on Testnet. You are on Mainnet.", onTestnet]);
+    expect(await shown({ nodeUrl: NODE, accounts: [A] })).toEqual(["This transaction is in Savings.", onTestnet]);
+
+    // On a node of its own: said, and no explorer of another network's.
+    const other = "ef".repeat(32);
+    await commitActivityStep(activityOwnerKey("custom", A), [{ hash: other, blockHeight: 8 }], () => ({ covered: [[0, 9]] }));
+    const state = { route: "tx", txDetailHash: other, txDetailFrom: "home" };
+    const actions = { render: vi.fn(async () => {}) };
+    const draw = () => dom.document.body.replaceChildren(...txDetailsView({ txs: [], wallets, nodeUrl: "https://nodes.dusk.network", accounts: [A] }, { state, actions }));
+    draw();
+    await vi.waitFor(() => expect(actions.render).toHaveBeenCalled());
+    draw();
+    expect([visibleText(dom.document.body.querySelector(".tx-missing")), dom.document.body.querySelector(".tx-explorer-btn")]).toEqual(["This transaction is on another network.", null]);
   });
 
   it("hides the gas used with Hide balances, as the fee can be worked out from it", () => {

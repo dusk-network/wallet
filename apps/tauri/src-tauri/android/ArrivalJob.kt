@@ -6,7 +6,9 @@
 // soon after the app leaves the screen, then less often, for two hours at
 // most. In a block, its notice shows, as the page's would, and it's dropped;
 // one the page heard of first is dropped by the page (`settled`). Each send's
-// notice shows once, whichever told it first.
+// notice shows once, whichever told it first. A wallet removed, reset or
+// restored takes its sends with it (`forget`): none is looked for or told
+// after, even by a look already under way.
 //
 // Copied into the generated Android project by build.rs, as the plugins are;
 // build.rs also declares the job's service in the manifest.
@@ -115,9 +117,9 @@ object Arrivals {
     return true
   }
 
-  /** A send to look for while the app is away: its node, and the notice for each outcome. */
+  /** A send to look for while the app is away: its node, the notice for each outcome, and the wallet it's from. */
   @Synchronized
-  fun watch(context: Context, hash: String, nodeUrl: String, title: String, failTitle: String, body: String) {
+  fun watch(context: Context, hash: String, nodeUrl: String, title: String, failTitle: String, body: String, wallet: String) {
     if (!HASH.matches(hash) || !(nodeUrl.startsWith("https://") || nodeUrl.startsWith("http://"))) return
     val pending = list(context, "pending")
     val next = JSONArray()
@@ -132,6 +134,7 @@ object Arrivals {
         .put("title", title)
         .put("failTitle", failTitle)
         .put("body", body)
+        .put("wallet", wallet)
         .put("at", System.currentTimeMillis())
     )
     keep(context, "pending", next)
@@ -152,9 +155,36 @@ object Arrivals {
     return next.length()
   }
 
+  // Still looked for: not told yet, nor forgotten.
+  private fun watched(context: Context, hash: String): Boolean {
+    val pending = list(context, "pending")
+    for (i in 0 until pending.length()) if (pending.optJSONObject(i)?.optString("hash") == hash) return true
+    return false
+  }
+
   /** Heard of by the page: no need to look for it, nor for the job while nothing's left. */
   fun settled(context: Context, hash: String) {
     if (drop(context, hash) == 0) context.getSystemService(JobScheduler::class.java)?.cancel(JOB_ID)
+  }
+
+  /**
+   * A wallet removed (`wallet`), or every one, reset or restored (""): its
+   * sends aren't looked for any more, and the job goes once none is left.
+   * Every one: the notices shown go too.
+   */
+  @Synchronized
+  fun forget(context: Context, wallet: String) {
+    val pending = list(context, "pending")
+    val next = JSONArray()
+    if (wallet.isNotEmpty()) {
+      for (i in 0 until pending.length()) {
+        val entry = pending.optJSONObject(i) ?: continue
+        if (entry.optString("wallet") != wallet) next.put(entry)
+      }
+    }
+    keep(context, "pending", next)
+    if (next.length() == 0) context.getSystemService(JobScheduler::class.java)?.cancel(JOB_ID)
+    if (wallet.isEmpty()) context.getSystemService(NotificationManager::class.java)?.cancelAll()
   }
 
   /** The app left the screen: a send still kept is looked for soon. */
@@ -214,15 +244,21 @@ object Arrivals {
         continue
       }
       val went = outcome(entry.optString("nodeUrl"), hash) ?: continue
-      post(context, if (went) entry.optString("title") else entry.optString("failTitle"), entry.optString("body"), hash)
-      drop(context, hash)
+      // Forgotten while the node answered (its wallet reset or removed): nothing told.
+      synchronized(this) {
+        if (watched(context, hash)) {
+          post(context, if (went) entry.optString("title") else entry.optString("failTitle"), entry.optString("body"), hash)
+          drop(context, hash)
+        }
+      }
     }
     return synchronized(this) { list(context, "pending").length() > 0 }
   }
 
-  /** Once more, a little later than the last time. */
+  /** Once more, a little later than the last time, while some send is left to look for. */
   @Synchronized
   fun again(context: Context) {
+    if (list(context, "pending").length() == 0) return
     val tries = prefs(context).getInt("tries", 0) + 1
     prefs(context).edit().putInt("tries", tries).commit()
     schedule(context, DELAYS[minOf(tries, DELAYS.size - 1)])

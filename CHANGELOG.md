@@ -77,6 +77,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Asked for the unlock on a site's approval once the wallet locks, as when Firefox for Android's Keep open tab closes, rather than an Approve that does nothing.
 - Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
 - Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.
+- Said which network, wallet or profile a transaction is in when it isn't this one's, and opened it in its own network's explorer.
 - Said on Send the fee its Review asks, at the network's gas price.
 - Took one step back with each press of a phone's Back, also after a payment, rather than none two or three times.
 - Kept the words typed on Import through a phone's Back, which asks first, rather than closing the wallet with them.

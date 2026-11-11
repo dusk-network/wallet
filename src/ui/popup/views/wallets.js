@@ -223,7 +223,11 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
   const wallets = Array.isArray(ov?.wallets) ? ov.wallets : [];
   const open = wallets.length > 1 ? wallets.find((w) => w.key === ov?.walletKey) : null;
   const page = h("div", { class: "row onboard-form" });
+  // Read under way, in the popup's context then (`asked`): the form stays
+  // through redraws meanwhile, not through another wallet opening, and what
+  // comes after one did isn't shown. Shown, the words go with the next.
   let busy = false;
+  let asked = null;
 
   const words = (mnemonic) => [
     open ? h("p", { class: "settings-profile-line", text: walletLabel(open) }) : null,
@@ -236,6 +240,7 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
   const show = async (password) => {
     if (busy) return;
     busy = true;
+    asked = state.context;
     btn.disabled = true;
     fingerBtn.disabled = true;
     pwd.input.disabled = true;
@@ -244,7 +249,8 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
       const res = await actions?.send?.({ type: "DUSK_UI_RECOVERY_PHRASE", password });
       pwd.input.value = "";
       if (res?.error) throw new Error(res.error.message ?? "Couldn't read the recovery phrase");
-      if (!page.isConnected) return;
+      busy = false;
+      if (!page.isConnected || state.context !== asked) return;
       page.replaceChildren(...words(String(res?.result ?? "")).filter(Boolean));
     } catch (e) {
       const message = e?.message ?? String(e);
@@ -305,7 +311,7 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
       fingerBtn,
     ].filter(Boolean)
   );
-  return Object.assign([subnav({ title: "Recovery phrase", onBack: () => backToSettings(state, actions) }), page], { busy: () => busy });
+  return Object.assign([subnav({ title: "Recovery phrase", onBack: () => backToSettings(state, actions) }), page], { busy: () => busy && state.context === asked });
 }
 
 /** A new password for every wallet here: the current one, then the new one twice. */

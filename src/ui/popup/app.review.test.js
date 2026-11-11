@@ -546,6 +546,38 @@ describe("a half-typed Send, left with Back", () => {
   });
 });
 
+// Astra's: a Testnet request kept with Back, Send opened again, then Mainnet: it could be paid there.
+describe("a request's Send, left with Back", () => {
+  it("keeps the request's network with it, and is refused on another network as the link is", async () => {
+    let history;
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { history: (win) => (history = pageHistory(win)) });
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const values = () => ["To", "Amount", "Memo"].map((name) => field(name).value);
+    const openSend = async () => {
+      t.app.querySelectorAll("button").find((b) => b.textContent === "Send" && b.closest(".action-bar, .dashboard-top-actions")).click();
+      await flush();
+      expect(t.state.route).toBe("send");
+    };
+    await openSend();
+    const { makePaymentLink } = await import("@dusk-network/app-core/payment-links");
+    field("To").value = makePaymentLink({ amount: "0.02", memo: "satay", network: "testnet", to: B }).dusk;
+    field("To").dispatchEvent(fakeEvent("input", { inputType: "insertFromPaste" }));
+    await flush();
+    expect(values()).toEqual([B, "0.02", "satay"]);
+    history.back();
+    await flush();
+    await openSend();
+    expect(values()).toEqual([B, "0.02", "satay"]);
+
+    // Mainnet, the form still open: nothing of the request stays to pay there.
+    t.open = { ...t.open, nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" };
+    await t.render({ forceRefresh: true });
+    await flush();
+    expect([t.state.route, ...values()]).toEqual(["send", "", "", ""]);
+    expect(t.app.textContent).toContain("This request is for Testnet. You are on Mainnet.");
+  });
+});
+
 describe("coming back to the wallet during a payment", () => {
   // Chen's: back a minute later, the first thing shown was "waiting for a block", the block long come.
   it("says it's looked up again from the moment it's left, never the wait for a block, till the lookup answers", async () => {

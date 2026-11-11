@@ -9,8 +9,10 @@ import { validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 
 const KEY = "dusk_send_draft";
-// What's kept of the form: what the person typed and chose.
-const FIELDS = ["to", "duskName", "nameChoices", "amountDusk", "amountMasked", "memo", "gas"];
+// What's kept of the form: what the person typed and chose, and a request's
+// network, which Send refuses it on any other (`requestChainId`), with where
+// it was filled in from.
+const FIELDS = ["to", "duskName", "nameChoices", "amountDusk", "amountMasked", "memo", "gas", "requestChainId", "filledFrom"];
 
 let held = null;
 

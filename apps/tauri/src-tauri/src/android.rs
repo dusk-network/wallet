@@ -242,10 +242,11 @@ pub fn notices<R: Runtime>() -> TauriPlugin<R> {
 
 /// Asks arrival notices' Kotlin `action`: status, ask, notify, watch (a send
 /// to look for once the app leaves the screen, android/ArrivalJob.kt),
-/// settled (one the page heard of) or opened (the transaction a notice's tap
-/// opened the app on). Each answers `{ allowed }`, opened its `hash` too.
+/// settled (one the page heard of), forget (a wallet's sends, or every
+/// wallet's) or opened (the transaction a notice's tap opened the app on).
+/// Each answers `{ allowed }`, opened its `hash` too.
 pub async fn notice<R: Runtime>(app: &AppHandle<R>, action: &str, args: Value) -> Result<Value, String> {
-  if !matches!(action, "status" | "ask" | "notify" | "watch" | "settled" | "opened") {
+  if !matches!(action, "status" | "ask" | "notify" | "watch" | "settled" | "forget" | "opened") {
     return Err("There's no such thing to ask.".into());
   }
   let Some(notices) = app.try_state::<Notices<R>>() else {

@@ -108,7 +108,7 @@ vi.mock("../shared/walletEngine.js", () => ({
 }));
 
 // The phone's notices, as the app's Kotlin would answer: allowed or not, and what was asked.
-const phoneNotices = vi.hoisted(() => ({ allowed: () => false, asked: [], watched: [], settled: [] }));
+const phoneNotices = vi.hoisted(() => ({ allowed: () => false, asked: [], watched: [], settled: [], forgotten: [] }));
 vi.mock("../platform/notices.js", () => ({
   appNoticesAllowed: async () => phoneNotices.allowed(),
   askAppNotices: async () => {
@@ -127,6 +127,10 @@ vi.mock("../platform/notices.js", () => ({
   },
   settleAppArrival: async (hash) => {
     phoneNotices.settled.push(hash);
+  },
+  // A wallet's sends no longer looked for: "" for every wallet's.
+  forgetAppArrivals: async (wallet = "") => {
+    phoneNotices.forgotten.push(wallet);
   },
 }));
 
@@ -679,6 +683,9 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     await expect(names.getAccountNames(second.walletId)).resolves.toEqual({});
     await expect(names.getAccountNames(first.walletId)).resolves.toEqual({ 0: "label 1" });
     expect((await overview()).wallets.map((w) => w.key)).toEqual([first.key]);
+    // Its sends no longer looked for by Android, and no other wallet's forgotten.
+    expect(phoneNotices.forgotten.filter((w) => w === second.walletId)).toEqual([second.walletId]);
+    expect(phoneNotices.forgotten).not.toContain(first.walletId);
 
     // The only wallet stays: Reset removes it.
     await expect(send({ type: "DUSK_UI_REMOVE_WALLET", walletKey: first.key, password: twelve.password })).resolves.toMatchObject({
@@ -846,7 +853,7 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
 // a test says, and records what it was asked.
 describe("arrival notices in the app on a phone", () => {
   const phone = ({ allowed }) => {
-    Object.assign(phoneNotices, { allowed, asked: [], watched: [], settled: [], shown: null });
+    Object.assign(phoneNotices, { allowed, asked: [], watched: [], settled: [], forgotten: [], shown: null });
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
     vi.stubGlobal("document", { visibilityState: "hidden" });
     return phoneNotices.asked;
@@ -915,16 +922,33 @@ describe("arrival notices in the app on a phone", () => {
     const { localSend } = await import("./localBus.js");
     const { putTxMeta } = await import("../shared/txStore.js");
     // Asked for on Sent, the send on its way: Android looks for it, with its notice for either outcome.
-    await putTxMeta("e1".repeat(32), { status: "submitted", kind: "transfer", nodeUrl: "https://testnet.nodes.dusk.network" });
+    await putTxMeta("e1".repeat(32), { status: "submitted", kind: "transfer", nodeUrl: "https://testnet.nodes.dusk.network", walletId: ACCOUNT });
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK", hash: "e1".repeat(32) })).resolves.toMatchObject({ state: "on" });
     expect(phoneNotices.watched).toEqual([
-      { hash: "e1".repeat(32), nodeUrl: "https://testnet.nodes.dusk.network", title: "Your payment arrived", failTitle: "Your payment didn't go through", body: "Testnet" },
+      { hash: "e1".repeat(32), nodeUrl: "https://testnet.nodes.dusk.network", title: "Your payment arrived", failTitle: "Your payment didn't go through", body: "Testnet", wallet: ACCOUNT },
     ]);
     // Notices on, each send after: looked for from the start, and no more once its outcome is heard.
     await sendAndSettle(localSend, "e2".repeat(32));
     await settled("e2".repeat(32));
     expect(phoneNotices.watched.map((w) => w.hash)).toEqual(["e1".repeat(32), "e2".repeat(32)]);
     await vi.waitFor(() => expect(phoneNotices.settled).toContain("e2".repeat(32)));
+  });
+
+  // Astra's: after a reset, Android kept looking for the old wallet's sends on its node, and told them.
+  it("has Android forget every wallet's sends on a reset and a restore, each send kept with its wallet", async () => {
+    phone({ allowed: () => true });
+    const { localSend } = await import("./localBus.js");
+    await localSend({ type: "DUSK_UI_NOTICES_ASK" });
+    await sendAndSettle(localSend, "e4".repeat(32));
+    await vi.waitFor(() => expect(phoneNotices.watched.map((w) => [w.hash, w.wallet])).toEqual([["e4".repeat(32), `account of ${engine.wallet}`]]));
+    expect(phoneNotices.forgotten).toEqual([]);
+
+    await expect(localSend({ type: "DUSK_UI_RESET_WALLET" })).resolves.toEqual({ ok: true });
+    expect(phoneNotices.forgotten).toEqual([""]);
+    await localSend({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet A", password: "password123" });
+    await localSend({ type: "DUSK_UI_LOCK" });
+    await expect(localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" })).resolves.toMatchObject({ ok: true });
+    expect(phoneNotices.forgotten).toEqual(["", ""]);
   });
 
   it("asks Android to look for nothing while the person hasn't asked for notices", async () => {

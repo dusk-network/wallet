@@ -142,6 +142,35 @@ describe("a wallet form being filled in", () => {
     expect(fieldsOf(t.app, FORMS[2][3]).map((f) => f.value)).toEqual(typed);
   });
 
+  // Astra's: wallet A's words shown, then wallet B opened, and A's words stayed under B's name.
+  it("drops a recovery phrase shown, or being read, as another wallet opens", async () => {
+    const answer = { next: null };
+    const t = await popupAt("recovery_phrase", {}, async (message) =>
+      message.type === "DUSK_UI_RECOVERY_PHRASE" ? (answer.next ? answer.next.promise : { ok: true, result: WORDS.join(" ") }) : {}
+    );
+    const words = () => t.app.querySelectorAll(".srp-word-text").map((w) => w.textContent);
+    const ask = async () => {
+      typeInto(fieldsOf(t.app, [SHARED_PASSWORD])[0], "the password");
+      button(t.app, "Show recovery phrase").click();
+      await flush();
+    };
+    await ask();
+    expect(words()).toEqual(WORDS);
+    await t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
+    expect(words()).toEqual([]);
+    expect(fieldsOf(t.app, [SHARED_PASSWORD]).map((f) => f.value)).toEqual([""]);
+
+    // Read as the wallet changes: what comes is the wallet's before, and isn't shown.
+    answer.next = Promise.withResolvers();
+    await ask();
+    expect(button(t.app, "Checking…")?.disabled).toBe(true);
+    await t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
+    answer.next.resolve({ ok: true, result: WORDS.join(" ") });
+    await flush();
+    expect(words()).toEqual([]);
+    expect(button(t.app, "Show recovery phrase")?.disabled).toBe(false);
+  });
+
   it("keeps a submit under way through a wallet change, with what it says after", async () => {
     const answer = Promise.withResolvers();
     const t = await popupAt("change_password", {}, async (message) => (message.type === "DUSK_UI_CHANGE_PASSWORD" ? answer.promise : {}));

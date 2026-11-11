@@ -4,7 +4,11 @@ import { formatDuskExact, formatFee, groupThousands } from "../../../shared/amou
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { arrivalUrl, awaitingArrival, depositLux } from "../../../shared/bridgeArrival.js";
-import { networkTextOf, nameCheckNote } from "../../../shared/nodeNetwork.js";
+import { chainIdForNode, networkKeyOf, networkTextOf, nameCheckNote } from "../../../shared/nodeNetwork.js";
+import { getTxMeta } from "../../../shared/txStore.js";
+import { activityOwnersOf } from "../../../shared/activityStore.js";
+import { walletLabel } from "../../../shared/wallets.js";
+import { networks } from "@dusk-network/networks";
 import { contractLabel } from "../../../shared/knownCalls.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
@@ -159,6 +163,58 @@ function ledgerRows(tx, desc, nodeUrl, hidden, evm) {
   };
 }
 
+// Where a transaction is, for one that isn't in this profile's activity (a
+// notice tapped after a switch of network, wallet or profile): the record the
+// wallet kept as it sent it, or once that's gone, the history it's kept in.
+// Read once for the transaction shown, and drawn again when it's read.
+function whereOf(hash, { state, actions }) {
+  if (state.txDetailWhere?.hash === hash) return state.txDetailWhere.where;
+  const read = (state.txDetailWhere = { hash, where: null });
+  Promise.all([getTxMeta(hash).catch(() => null), activityOwnersOf(hash).catch(() => [])])
+    .then(([meta, owners]) => {
+      if (state.txDetailWhere !== read) return;
+      if (meta?.nodeUrl) {
+        read.where = { nodeUrl: String(meta.nodeUrl), chainId: Number.isInteger(meta.chainId) ? meta.chainId : undefined, walletId: String(meta.walletId ?? ""), profileIndex: meta.profileIndex };
+      } else if (owners.length) {
+        const [network, account] = owners[0].split("::");
+        const net = networks[network];
+        read.where = { nodeUrl: String(net?.urls?.node ?? ""), chainId: net?.chainId, account: String(account ?? ""), network };
+      } else return;
+      actions?.render?.()?.catch?.(() => {});
+    })
+    .catch(() => {});
+  return null;
+}
+
+// Whether it's on the network the wallet is on: by the history's key for it,
+// else by its name.
+function onThisNetwork(where, ov) {
+  const nodeUrl = String(ov?.nodeUrl ?? "");
+  if (where.network) return where.network === networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
+  const there = where.nodeUrl ? networkTextOf(where.nodeUrl) : "";
+  return !there || there === networkTextOf(nodeUrl);
+}
+
+// What's said of where it is: another network, wallet or profile.
+function elsewhereText(where, ov) {
+  if (!where) return "";
+  if (!onThisNetwork(where, ov)) {
+    const [there, here] = [where.nodeUrl ? networkTextOf(where.nodeUrl) : "", networkTextOf(String(ov?.nodeUrl ?? ""))];
+    return there && here ? `This transaction is on ${there}. You are on ${here}.` : "This transaction is on another network.";
+  }
+  const own = (Array.isArray(ov?.accounts) ? ov.accounts : []).map(String);
+  const wallets = Array.isArray(ov?.wallets) ? ov.wallets : [];
+  // Its wallet, by its ID or by the account whose history has it.
+  const otherWallet = where.account ? !own.includes(where.account) : Boolean(where.walletId) && where.walletId !== own[0];
+  if (otherWallet) {
+    const wallet = wallets.find((w) => (where.account ? (w?.accounts ?? []).map(String).includes(where.account) : w?.walletId === where.walletId));
+    return wallet ? `This transaction is in ${walletLabel(wallet)}.` : "This transaction is in another wallet.";
+  }
+  const profile = where.account ? own.indexOf(where.account) : where.profileIndex;
+  if (Number.isInteger(profile) && profile !== (Number(ov?.selectedAccountIndex ?? 0) || 0)) return "This transaction is in another profile.";
+  return "";
+}
+
 export function txDetailsView(ov, { state, actions } = {}) {
   const hash = String(state?.txDetailHash ?? "");
   const txs = activityRows(ov, state);
@@ -193,12 +249,17 @@ export function txDetailsView(ov, { state, actions } = {}) {
   if (!tx && given?.reading) return [nav, waiting("Looking for this transaction…", { tag: "p", className: "tx-missing" })];
 
   if (!tx) {
+    // Where it is, and its explorer is its network's.
+    const at = whereOf(hash.toLowerCase(), { state, actions });
+    const where = elsewhereText(at, ov);
+    // None for another network the wallet knows no explorer of.
+    const url = at?.nodeUrl ? explorerTxUrl(at.nodeUrl, hash, at.chainId) : at && !onThisNetwork(at, ov) ? null : explorerUrl;
     return [
       nav,
       h("div", { class: "tx-detail" }, [
-        h("p", { class: "tx-missing", text: "This transaction isn't in your activity." }),
+        h("p", { class: "tx-missing", text: where || "This transaction isn't in your activity." }),
         h("div", { class: "group" }, [kv("Transaction ID", mono(hash, shortAddress(hash)))]),
-        explorerButton(explorerUrl, actions),
+        explorerButton(url, actions),
       ].filter(Boolean)),
     ];
   }

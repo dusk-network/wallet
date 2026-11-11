@@ -269,6 +269,33 @@ export async function listActivityEntries(ownerKey, { limit = 200, before } = {}
 }
 
 /**
+ * The histories that hold a transaction, `network::account` each: for one
+ * opened where it isn't, as a notice tapped after a switch of network,
+ * wallet or profile. Every kept entry is looked at.
+ * @param {string} hash
+ * @returns {Promise<string[]>}
+ */
+export async function activityOwnersOf(hash) {
+  const suffix = `::${String(hash ?? "").toLowerCase()}`;
+  if (suffix === "::") return [];
+  const db = await openDb();
+  const tx = db.transaction([STORE_ENTRIES], "readonly");
+  const owners = [];
+  await new Promise((resolve, reject) => {
+    const req = tx.objectStore(STORE_ENTRIES).openKeyCursor();
+    req.onerror = () => reject(req.error || new Error("Activity store read failed"));
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) return resolve();
+      const id = String(cursor.primaryKey);
+      if (id.endsWith(suffix)) owners.push(id.slice(0, -suffix.length));
+      cursor.continue();
+    };
+  });
+  return owners;
+}
+
+/**
  * Forget an account's kept history on one network: entries and sync state.
  * `check` sees the sync state first, in the same transaction, and nothing
  * is forgotten when it throws: another run started the history over on the
