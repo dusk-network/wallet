@@ -764,14 +764,21 @@ const detailLoads = new Map();
 /**
  * The time, outcome and fee of one synced entry, for its details view, when
  * no sync looked them up yet, and a deposit to DuskEVM's address there: one
- * request at a time, again a minute after one that brought nothing.
- * @param {{ state: object, render: () => Promise<void> }} ctx
+ * request at a time, again a minute after one that brought nothing. An entry
+ * past the page, found by Activity's search or handed to the details with its
+ * row (`txDetailRow`), is read again once they're kept, into the search's
+ * rows and the row handed over.
+ * @param {{ ov?: object, state: object, render: () => Promise<void> }} ctx - `ov`: the overview the row handed over is of
  * @param {string} hash
  */
-export function loadActivityDetail({ state, render }, hash) {
+export function loadActivityDetail({ ov, state, render }, hash) {
   const a = state?.activity;
-  const entry = a?.entries.find((e) => e.hash === hash);
-  const key = `${a?.key}\n${hash}`;
+  if (!a?.history) return;
+  const handed = state.txDetailRow?.hash === hash && state.txDetailRow.context === a.key ? state.txDetailRow : null;
+  const searched = () => a.searched?.entries.some((e) => e.hash === hash);
+  let now = a.entries.find((e) => e.hash === hash);
+  const entry = now ?? a.searched?.entries.find((e) => e.hash === hash) ?? handed?.row?.entry ?? undefined;
+  const key = `${a.key}\n${hash}`;
   const last = detailLoads.get(key);
   if (!entry || !a.history.needsDetails(entry) || last === "loading" || (typeof last === "number" && Date.now() - last < DETAIL_RETRY_MS)) return;
   detailLoads.set(key, "loading");
@@ -781,10 +788,22 @@ export function loadActivityDetail({ state, render }, hash) {
       return a.history.fillDetails([entry]);
     })
     .then(() => reload(a))
+    .then(async () => {
+      now = a.entries.find((e) => e.hash === hash);
+      if (now || state.activity !== a) return;
+      // Past the page: its block read again, whole.
+      const { entries: block } = await a.history.read({ before: entry.blockHeight + 1, limit: 1 });
+      now = block.find((e) => e.hash === hash);
+      if (!now) return;
+      if (searched()) a.searched = { ...a.searched, entries: a.searched.entries.map((e) => (e.hash === hash ? now : e)) };
+      if (!handed || state.txDetailRow !== handed || !ov) return;
+      // Its row again, among the rows it was found with: the search's, else the page's.
+      const whole = searched() ? { entries: a.searched.entries, meta: a.searched.meta } : { entries: [...block, ...a.entries], meta: a.meta };
+      handed.row = activityRows(ov, state, { ...whole, shielded: a.shielded }).find((row) => row.hash === hash) ?? handed.row;
+    })
     .then(() => redraw(state, render))
     .catch(() => {})
     .finally(() => {
-      const now = a.entries.find((e) => e.hash === hash);
       if (now && !a.history.needsDetails(now)) detailLoads.delete(key);
       else detailLoads.set(key, Date.now());
     });

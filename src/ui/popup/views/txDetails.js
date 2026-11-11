@@ -241,14 +241,15 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const hash = String(state?.txDetailHash ?? "");
   const txs = activityRows(ov, state);
   // Or the row a screen gave it, found past Activity's page (Receive's
-  // requests): only in the context it was found in, dropped in another.
+  // requests, Activity's search): only in the context it was found in,
+  // dropped in another.
   if (state?.txDetailRow && state.txDetailRow.context !== activityKey(ov)) state.txDetailRow = null;
   const given = state?.txDetailRow && String(state.txDetailRow.hash ?? "") === hash.toLowerCase() ? state.txDetailRow : null;
   const tx = txs.find((t) => String(t?.hash ?? "") === hash.toLowerCase()) || given?.row || null;
   // A synced entry not looked up yet gets its time, outcome and fee now, and
-  // a deposit to DuskEVM its address there.
+  // a deposit to DuskEVM its address there; one handed over, its row again.
   if (tx?.source === "public") {
-    loadActivityDetail({ state, render: actions?.render }, tx.hash);
+    loadActivityDetail({ ov, state, render: actions?.render }, tx.hash);
   }
 
   const backRoute = state?.txDetailFrom || "home";
