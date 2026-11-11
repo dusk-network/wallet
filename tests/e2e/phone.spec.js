@@ -132,6 +132,16 @@ test("gives the recovery phrase's Reveal and Copy a finger's height, as Amélie'
   // A public BIP39 test phrase, never a real wallet's.
   const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
   await popupOn(page, "onboard_create_phrase", { onboard: { mode: "create", mnemonic, password: "", reveal: false } }, { hasVault: false, isUnlocked: false });
+  // Measured once the screen has come in: while it slides in (viewIn), a box
+  // reads a fraction of a pixel off, as 43.99994.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+        .map((a) => a.finished.catch(() => {}))
+    )
+  );
   for (const name of ["Reveal", "Copy"]) {
     const box = await page.locator(".phrase-tools button", { hasText: name }).boundingBox();
     expect(box.height).toBeGreaterThanOrEqual(44);
