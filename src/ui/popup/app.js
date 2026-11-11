@@ -886,7 +886,12 @@ async function askNode() {
   const now = state.overview;
   // About the node shown still, and saying otherwise than it shows.
   if (!answer?.nodeStatus || !now || answer.nodeUrl !== now.nodeUrl || answer.nodeStatus === now.networkStatus?.nodeStatus) return;
+  const was = now.networkStatus?.nodeStatus;
   now.networkStatus = { ...now.networkStatus, ...answer };
+  // The balance shown was read before the node stopped answering: maybe out
+  // of date, also once it answers again, till a balance read since takes its
+  // place (refreshOverview's overview has its own say).
+  if ((was === "offline" || answer.nodeStatus === "offline") && now.balance?.value) now.balanceStale = true;
   // Drawn again from what's read already, as a read under way may never end (a Refresh pressed while the node holds it).
   if (REVIEW_ROUTES.has(state.route)) renderHeader(now);
   else await render({ cached: true });

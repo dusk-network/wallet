@@ -265,3 +265,78 @@ describe("a node that stops answering while a Refresh waits on it", () => {
     }
   });
 });
+
+describe("a node that answers again before the balance does", () => {
+  it("says it's back at once, and that the balance may be out of date till one is read", async () => {
+    // Astra's: back online, the balance read before the node went silent showed as current while its read still hung.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const dom = installFakeDom({ pathname: "/popup.html" });
+    dom.document.body.innerHTML = "";
+    const pill = dom.document.createElement("button");
+    pill.id = "network-pill";
+    pill.className = "network-pill";
+    const label = dom.document.createElement("span");
+    label.className = "network-pill__label";
+    pill.appendChild(label);
+    const actions = dom.document.createElement("div");
+    actions.id = "header-actions";
+    const app = dom.document.createElement("div");
+    app.id = "app";
+    dom.document.body.append(pill, actions, app);
+
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-US", onLine: true });
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    const NODE = "https://testnet.nodes.dusk.network";
+    // `silent`: the node doesn't answer its check; `held`: the balance reads waiting on it.
+    let silent = false;
+    let holding = false;
+    const held = [];
+    const overview = { hasVault: true, isUnlocked: true, networkName: "Testnet", nodeUrl: NODE, accounts: [ACCOUNT], selectedAccountIndex: 0, txs: [], shieldedSync: { state: "done", notes: 1 } };
+    const read = (lux) => ({ ...overview, balance: { value: lux }, shieldedBalance: { value: "0", spendable: "0" }, networkStatus: { nodeStatus: "online", nodeUrl: NODE } });
+    send.mockReset();
+    send.mockImplementation(async (message) => {
+      if (message.type === "DUSK_UI_OVERVIEW") return holding ? new Promise((resolve) => held.push(resolve)) : read("1047700000");
+      if (message.type === "DUSK_UI_CHECK_NODE") return { ok: true, networkStatus: { nodeStatus: silent ? "offline" : "online", nodeUrl: NODE } };
+      return {};
+    });
+    const reads = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_OVERVIEW").length;
+    const words = () => {
+      const el = dom.document.querySelector(".network-word");
+      return el && !el.hidden ? el.textContent : "";
+    };
+    const dot = () => pill.querySelector(".net-status-dot")?.className ?? "";
+    try {
+      const { render } = await import("./app.js");
+      await render();
+      await settle();
+      expect(app.textContent).not.toContain("may be out of date");
+
+      // The node goes silent, and holds the balance's reads.
+      silent = true;
+      holding = true;
+      vi.advanceTimersByTime(15_000);
+      await vi.waitFor(() => expect(words()).toBe("Can't reach the network"));
+      expect(app.textContent).toContain("Your balance may be out of date.");
+
+      // It answers its check again, the balance's read still held: back at once, the balance still maybe out of date.
+      silent = false;
+      const before = reads();
+      vi.advanceTimersByTime(15_000);
+      await vi.waitFor(() => expect(reads()).toBeGreaterThan(before));
+      await settle();
+      expect(words()).toBe("");
+      expect(dot()).not.toContain("net-status--offline");
+      expect(app.textContent).toContain("Your balance may be out of date.");
+      expect(app.querySelector(".balance-amount").textContent).toBe("1.0477 DUSK");
+
+      // A balance read since: shown, and no longer said to be out of date.
+      holding = false;
+      for (const resolve of held.splice(0)) resolve(read("2000000000"));
+      await vi.waitFor(() => expect(app.querySelector(".balance-amount").textContent).toBe("2 DUSK"));
+      expect(app.textContent).not.toContain("may be out of date");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
