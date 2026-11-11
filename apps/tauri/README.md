@@ -28,8 +28,9 @@ npm run tauri:build
 The Android project under `src-tauri/gen/` is generated, not kept in git: make
 it once with `cargo tauri android init --ci` (with `ANDROID_HOME` and
 `NDK_HOME` set). What the wallet needs of Android itself (no screenshots of
-its screens, the share sheet, saving to Downloads, Back on its first screen)
-is in `src-tauri/src/android.rs`, so a new `android init` keeps it; fingerprint
+its screens, saving to Downloads, Back on its first screen) is in
+`src-tauri/src/android.rs`, so a new `android init` keeps it; the share sheet,
+with a request's QR code beside its words, is `src-tauri/android/SharePlugin.kt`; fingerprint
 unlock is Kotlin beside it, `src-tauri/android/KeystorePlugin.kt`: the password
 kept only encrypted under an Android Keystore key that a fresh fingerprint
 opens (Android 11 and later); arrival notices are `src-tauri/android/NoticesPlugin.kt`,

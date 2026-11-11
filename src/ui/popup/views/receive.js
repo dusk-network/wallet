@@ -44,6 +44,16 @@ const testNetworkOf = (ov) => {
  * what it asks and its memo, and whom it pays.
  * @param {{ lux: bigint | null, memo: string, to: string, name?: string, network?: string }} asked
  */
+/**
+ * What Share sends with a request's picture and link, for whoever gets it: that
+ * it's a request, on which test network, and what it asks, its memo too.
+ * @param {{ lux: bigint | null, memo: string, network?: string, link: string }} asked
+ */
+export function requestShareText({ lux, memo, network = "", link }) {
+  const asks = [lux === null || lux === undefined ? "" : `${formatDuskExact(lux)} DUSK`, memo ? displayText(memo, { isolate: true }).text : ""].filter(Boolean).join(" · ");
+  return [`Dusk payment request${network ? ` · ${network}` : ""}`, asks, link].filter(Boolean).join("\n");
+}
+
 export function requestCaption({ lux, memo, to, name = "", network = "" }) {
   return [
     { size: 44, weight: 600, text: `Dusk payment request${network ? ` · ${network}` : ""}` },
@@ -68,15 +78,20 @@ export function receiveView(ov, { state, actions } = {}) {
   const chainId = Number.isInteger(ov?.chainId) ? ov.chainId : chainIdFromNodeUrl(ov?.nodeUrl ?? "");
 
   // Persist request fields while the user navigates around, for the profile,
-  // wallet and network they were typed for: a switch of any starts them over.
-  if (state.receive && state.receive.context !== state.context) state.receive = null;
+  // wallet and network they were typed for: a switch of any starts them over;
+  // a lock and its unlock, the same wallet's, don't.
+  const owner = [accounts[0] ?? "", idx].join(" ");
+  const switched = state.receive && state.receive.context !== state.context && state.context?.reason !== "lock";
+  if (state.receive && (switched || (state.receive.owner ?? owner) !== owner)) state.receive = null;
   const r = (state.receive ??= {
     tab: "public",
     requestOpen: false,
     amountDusk: "",
     memo: "",
     context: state.context,
+    owner,
   });
+  Object.assign(r, { context: state.context, owner });
   const tab = r.tab === "shielded" ? "shielded" : "public";
 
   // Current recipient string
@@ -322,8 +337,24 @@ export function receiveView(ov, { state, actions } = {}) {
           const shareValue = wantRequest && curLink ? curLink : curRecipient;
           if (!shareValue) return;
 
-          // The phone's share sheet: the app's own, else the browser's.
-          if (await shareText(shareValue, wantRequest && curLink ? "Dusk payment request" : "Dusk address")) {
+          // The phone's share sheet: the app's own, else the browser's. A
+          // request goes as a few words of what it asks, its link, and its
+          // QR code's picture, the one Download saves.
+          const network = testNetworkOf(ov);
+          let shared;
+          if (wantRequest && curLink) {
+            let picture = {};
+            try {
+              const caption = requestCaption({ lux: curLux, memo: curMemo, to: curRecipient, name: shownName, network });
+              picture = { image: new Uint8Array(await (await qrPngBlob(curQrValue, { caption })).arrayBuffer()), name: requestFileName({ lux: curLux, memo: curMemo }, { network }) };
+            } catch {
+              // Its words and link alone.
+            }
+            shared = await shareText(requestShareText({ lux: curLux, memo: curMemo, network, link: curLink }), "Dusk payment request", picture);
+          } else {
+            shared = await shareText(shareValue, "Dusk address");
+          }
+          if (shared) {
             keepRequest();
             return;
           }

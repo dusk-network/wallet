@@ -24,13 +24,13 @@ import { subnav } from "../../components/Subnav.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { setNetworkSwitching } from "../../components/NetworkMenu.js";
-import { askConfirm } from "../../components/ConfirmDialog.js";
 import { fieldLabel, integerInput, passwordInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
 import { contactNameText } from "../../lib/contactNames.js";
 import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
 import { switchContext } from "../context.js";
 import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
+import { resetKeptText } from "./wallets.js";
 
 // Settings: the wallets, the profile, security, connected sites, contacts and
 // the network, then Advanced (custom gas, Delete all contacts), Reset wallet
@@ -43,8 +43,11 @@ const autoLockLabel = (minutes) =>
 // on, the password, checked against the vault, then the fingerprint.
 function fingerprintRow({ actions }) {
   const fingerSwitch = h("input", { id: "fingerprint-unlock", type: "checkbox" });
+  // A phone without a fingerprint yet: what to do first.
+  const enrollNote = h("p", { class: "settings-note", id: "fingerprint-enroll", text: "Add a fingerprint in your phone's settings first.", hidden: true });
   const row = h("div", { class: "settings-fingerprint", hidden: true }, [
     h("label", { class: "settings-switch", for: "fingerprint-unlock" }, [fingerSwitch, h("span", { text: "Unlock with fingerprint" })]),
+    enrollNote,
   ]);
   let ask = null;
   // A turning on under way, for the row: no switching nor another Turn on till it ends.
@@ -410,10 +413,9 @@ export function optionsView(ov, { state, actions } = {}) {
     ]
   );
 
-  // A new password for every wallet: not in the desktop app, whose
-  // Stronghold can't be sealed again in place.
+  // A new password for every wallet.
   const changePasswordBtn =
-    ov?.isUnlocked && !platform.isTauri
+    ov?.isUnlocked
       ? h("button", {
           class: "btn-outline settings-change-password",
           type: "button",
@@ -423,6 +425,27 @@ export function optionsView(ov, { state, actions } = {}) {
             await actions?.render?.();
           },
         })
+      : null;
+
+  // The open wallet's recovery phrase again, behind the password, in the app.
+  const phraseRow =
+    ov?.isUnlocked && platform.isTauri
+      ? h(
+          "button",
+          {
+            class: "list-row settings-row",
+            type: "button",
+            onclick: async () => {
+              state.route = "recovery_phrase";
+              await actions?.render?.();
+            },
+          },
+          [
+            h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg("eye") }),
+            h("span", { class: "row-main" }, [h("span", { class: "row-title", text: "Recovery phrase" })]),
+            h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
+          ]
+        )
       : null;
 
   // The password again on big sends, on a screen of its own.
@@ -492,13 +515,18 @@ export function optionsView(ov, { state, actions } = {}) {
 
   // Fingerprint unlock, in the app on a phone that can guard the password with
   // one (platform/fingerprint.js): turned on with the password, then a
-  // fingerprint; off at once. Shown once the phone says it can; the password's
+  // fingerprint; off at once. Shown once the phone says it can, and on one
+  // that could with a fingerprint, off, with what to do first; the password's
   // field is there only while it's being turned on.
   const fingerRow = inApp && ov?.isUnlocked ? fingerprintRow({ actions }) : null;
   if (fingerRow) {
-    fingerprintStatus().then(({ available, on }) => {
-      if (!available && !on) return;
-      fingerRow.querySelector("#fingerprint-unlock").checked = on;
+    fingerprintStatus().then(({ available, enroll, on }) => {
+      if (!available && !on && !enroll) return;
+      const fingerSwitch = fingerRow.querySelector("#fingerprint-unlock");
+      fingerSwitch.checked = on;
+      const first = !available && !on;
+      fingerSwitch.disabled = first;
+      fingerRow.querySelector("#fingerprint-enroll").hidden = !first;
       fingerRow.hidden = false;
     });
   }
@@ -969,33 +997,15 @@ export function optionsView(ov, { state, actions } = {}) {
     ]
   );
 
-  // What a reset takes with the wallets: the app has no connected sites.
-  const resetKept = platform.capabilities.dapp ? "contacts, names, activity and connected sites" : "contacts, names and activity";
+  // Reset, on a screen of its own: the password first, as for removing a wallet.
+  const resetKept = resetKeptText();
   const resetBtn = h("button", {
     class: "btn-destructive",
     type: "button",
     text: "Reset wallet",
     onclick: async () => {
-      const sure = await askConfirm({
-        title: "Reset wallet?",
-        text: `This removes every wallet here, with its ${resetKept}. Your funds stay on Dusk. You need each recovery phrase to use them again.`,
-        action: "Reset wallet",
-        destructive: true,
-      });
-      if (!sure) return;
-      try {
-        switchContext(state);
-        const res = await actions?.send?.({ type: "DUSK_UI_RESET_WALLET" });
-        if (res?.error) throw new Error(res.error.message ?? "Wallet reset failed");
-        // No wallet, no password to keep for a fingerprint.
-        await turnFingerprintOff();
-        actions?.showToast?.("Wallet reset. Import again to continue.", 2500);
-        state.route = "home";
-        state.needsRefresh = true;
-        await actions?.render?.({ forceRefresh: true });
-      } catch (e) {
-        actions?.showToast?.(e?.message ?? String(e), 2500);
-      }
+      state.route = "wallet_reset";
+      await actions?.render?.();
     },
   });
 
@@ -1037,7 +1047,7 @@ export function optionsView(ov, { state, actions } = {}) {
       fingerRow,
       changePasswordBtn,
       changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
-      sendPasswordRow ? h("div", { class: "group" }, [sendPasswordRow]) : null,
+      sendPasswordRow || phraseRow ? h("div", { class: "group" }, [phraseRow, sendPasswordRow].filter(Boolean)) : null,
     ]),
     sitesSection ? section("Connected sites", sitesSection) : null,
     section("Contacts", [h("div", { class: "group" }, [contactsRow])]),

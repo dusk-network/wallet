@@ -546,12 +546,12 @@ describe("removing a wallet, and a new password", () => {
 describe("fingerprint unlock", () => {
   const actions = (reply = {}) => ({ send: vi.fn(async () => reply), render: vi.fn(async () => {}), showToast: vi.fn() });
   // The phone: `on` with a fingerprint kept, and what each prompt answers.
-  const phone = ({ available = true, on = false, unlock = { ok: true, secret: "kept password" }, enable = { ok: true } } = {}) => {
+  const phone = ({ available = true, on = false, lost = false, unlock = { ok: true, secret: "kept password" }, enable = { ok: true } } = {}) => {
     const asked = [];
     const invoke = vi.fn(async (cmd, args) => {
       if (cmd !== "fingerprint") return null;
       asked.push([args.action, args.args?.secret]);
-      if (args.action === "status") return { ok: true, available, on };
+      if (args.action === "status") return { ok: true, available, on, lost };
       if (args.action === "unlock") return typeof unlock === "function" ? unlock() : unlock;
       if (args.action === "enable") return enable;
       return { ok: true };
@@ -579,14 +579,16 @@ describe("fingerprint unlock", () => {
     await vi.waitFor(() => expect(asked.filter(([action]) => action === "unlock")).toHaveLength(2));
   });
 
-  it("leaves the password to type when the person picks Use password, and asks again with Use fingerprint", async () => {
+  // Chen's: the field focused, and the keyboard down until it was tapped.
+  it("leaves the password to type when the person picks Use password, keyboard up, and asks again with Use fingerprint", async () => {
     const { asked } = phone({ on: true, unlock: { ok: false, reason: "password" } });
     const acts = actions();
     const body = show(lockedView({ state: {}, actions: acts }));
-    await vi.waitFor(() => expect(asked.map(([action]) => action)).toEqual(["status", "unlock"]));
+    await vi.waitFor(() => expect(asked.map(([action]) => action)).toEqual(["status", "unlock", "keyboard"]));
     await settle();
     expect(acts.send).not.toHaveBeenCalled();
     expect(isShown(field(body, "Password"))).toBe(true);
+    expect(dom.document.activeElement).toBe(field(body, "Password"));
     button(body, "Use fingerprint").click();
     await vi.waitFor(() => expect(asked.filter(([action]) => action === "unlock")).toHaveLength(2));
   });
@@ -612,6 +614,32 @@ describe("fingerprint unlock", () => {
     expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toContain("Turn fingerprint unlock on again?");
     button(dom.document.body, "Turn on").click();
     await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "typed password"]));
+  });
+
+  // Chen's: the phone's screen lock removed, its fingerprint with it; still "on", and a button that did nothing.
+  it("says so once the phone's fingerprint is gone, asks for nothing, and turns it on again after the password once there's one", async () => {
+    const { asked } = phone({ available: true, on: false, lost: true });
+    const acts = actions();
+    const body = show(lockedView({ state: {}, actions: acts }));
+    await vi.waitFor(() => expect(visibleText(body)).toContain("Your fingerprints changed, so fingerprint unlock is off. Unlock with your password."));
+    expect(isShown(button(body, "Use fingerprint"))).toBe(false);
+    expect(asked.map(([action]) => action)).toEqual(["status"]);
+    typeInto(field(body, "Password"), "typed password");
+    button(body, "Unlock").click();
+    await vi.waitFor(() => expect(dom.document.body.querySelector("[role=alertdialog]")).toBeTruthy());
+    button(dom.document.body, "Turn on").click();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "typed password"]));
+  });
+
+  it("leaves it off without asking once the phone has no fingerprint left, after the password", async () => {
+    const { asked } = phone({ available: false, on: false, lost: true });
+    const acts = actions();
+    const body = show(lockedView({ state: {}, actions: acts }));
+    await vi.waitFor(() => expect(visibleText(body)).toContain("Your fingerprints changed, so fingerprint unlock is off. Unlock with your password."));
+    typeInto(field(body, "Password"), "typed password");
+    button(body, "Unlock").click();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["disable", undefined]));
+    expect(dom.document.body.querySelector("[role=alertdialog]")).toBeFalsy();
   });
 
   it("turns it off when the password kept is an old one, and says so", async () => {

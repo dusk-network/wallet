@@ -1718,6 +1718,39 @@ describe("the password on big sends", () => {
     expect(view.confirm().disabled).toBe(false);
   });
 
+  // Chen's: fingerprint unlock on, and still a password box for the big send.
+  it("takes a fingerprint for it in the app where fingerprint unlock is on, the password left to type", async () => {
+    const asked = [];
+    let kept = "the password";
+    dom.window.__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (cmd, args) => {
+        if (cmd !== "fingerprint") return null;
+        asked.push(args.action);
+        if (args.action === "status") return { ok: true, available: true, on: true };
+        if (args.action === "unlock") return { ok: true, secret: kept };
+        return { ok: true };
+      }),
+    };
+    const view = reviewAt("6000000000");
+    await pressConfirm(view);
+    await vi.waitFor(() => expect(view.sends()).toHaveLength(1));
+    expect(view.sends()[0].sendTicket).toBe("ticket-1");
+    expect(asked).toEqual(["status", "unlock"]);
+    expect(view.dialog()).toBeNull();
+
+    // The password kept is an old one: off, said, and the box to type in.
+    kept = "an old password";
+    const again = reviewAt("6000000000");
+    await pressConfirm(again);
+    await vi.waitFor(() => expect(asked.at(-1)).toBe("disable"));
+    await settle();
+    expect(visibleText(again.dialog())).toContain("Your password changed, so fingerprint unlock is off. Enter your password.");
+    expect(again.sends()).toEqual([]);
+    typeInto(again.password(), "the password");
+    again.press("Confirm");
+    await vi.waitFor(() => expect(again.sends()).toHaveLength(1));
+  });
+
   it("asks nothing up to the amount, or with it off", async () => {
     const view = reviewAt("1000000000");
     view.answers.DUSK_UI_SEND_PASSWORD_ASKS = () => ({ ok: true, result: null });
@@ -1788,7 +1821,7 @@ describe("a request link", () => {
     expect(form.amount.value).toBe("0,15");
     // Said under the recipient, in words, and covering nothing.
     const filled = () => visibleText(dom.document.body.querySelector(".send-filled-note"));
-    expect(filled()).toBe("Filled in from the link. Check it before you send.");
+    expect(filled()).toBe("Filled in from the link, to pay on Testnet. Check it before you send.");
     expect(form.actions.showToast).not.toHaveBeenCalled();
     typeInto(form.to, BOB.account);
     expect(filled()).toBe("");
@@ -1880,7 +1913,7 @@ describe("a request link", () => {
     await settle();
     expect(form.to.value).toBe(BOB.account);
     expect(refusal()).toEqual([]);
-    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the QR code. Check it before you send.");
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the QR code, to pay on Testnet. Check it before you send.");
   });
 
   it("is no request when it goes anywhere else, or names no recipient", async () => {
@@ -1956,6 +1989,16 @@ describe("a request link", () => {
     expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
   });
 
+  // Chen's: a plain dusk: link on Mainnet filled Send in without a word of the network.
+  it("says the network it pays on, for a plain link that names none", async () => {
+    const state = newState();
+    const form = mount(state, overview({ nodeUrl: "https://nodes.dusk.network", chainId: 1, networkName: "Mainnet" }));
+    paste(form, `dusk:${ALICE.account}?amount=0.01&memo=Lunch`);
+    await settle();
+    expect(form.to.value).toBe(ALICE.account);
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link, to pay on Mainnet. Check it before you send.");
+  });
+
   it("fills in the page it opened, a tab of its own, as the form any request fills in", async () => {
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=2.5&memo=Rent&network=testnet`))}` });
     vi.resetModules();
@@ -1965,7 +2008,7 @@ describe("a request link", () => {
     expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "2.5"]);
     expect(state.draft.memo).toBe("Rent");
     expect(state.draft.requestChainId).toBe("dusk:2");
-    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link. Check it before you send.");
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link, to pay on Testnet. Check it before you send.");
 
     // Marek's: a testnet link that says mainnet opened an empty Send without a word.
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=0.001&network=mainnet`))}` });

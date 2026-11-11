@@ -813,6 +813,16 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     expect(engine.held.map((w) => w.mnemonic)).toEqual([twelve.mnemonic, "wallet B"]);
   });
 
+  // Chen's: the recovery words, to check them, in the app's Settings.
+  it("gives the open wallet's recovery phrase for the password that opens it, and nothing for another", async () => {
+    await twoWallets();
+    await expect(send({ type: "DUSK_UI_RECOVERY_PHRASE", password: "not it" })).resolves.toMatchObject({ error: { message: "Incorrect password" } });
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    await expect(send({ type: "DUSK_UI_RECOVERY_PHRASE", password: "password123" })).resolves.toEqual({ ok: true, result: engine.wallet });
+    await ok({ type: "DUSK_UI_LOCK" });
+    await expect(send({ type: "DUSK_UI_RECOVERY_PHRASE", password: "password123" })).resolves.toMatchObject({ error: { message: "Wallet locked" } });
+  });
+
   it("removes every wallet on Reset, and on a restore after a forgotten password", async () => {
     await twoWallets();
     await ok({ type: "DUSK_UI_LOCK" });
@@ -820,7 +830,12 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     expect(vault().wallets).toHaveLength(1);
     expect((await overview()).wallets).toMatchObject([{ n: 1, walletId: accountOf("wallet C") }]);
 
-    await ok({ type: "DUSK_UI_RESET_WALLET" });
+    // Not without the password the wallets here open with.
+    await expect(send({ type: "DUSK_UI_RESET_WALLET" })).resolves.toMatchObject({ error: { message: "Incorrect password" } });
+    await expect(send({ type: "DUSK_UI_RESET_WALLET", password: "password123" })).resolves.toMatchObject({ error: { message: expect.stringMatching(/Incorrect password|Too many attempts/) } });
+    expect(vault().wallets).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    await ok({ type: "DUSK_UI_RESET_WALLET", password: "password456" });
     for (const key of ["dusk_vault_v1", "dusk_vault_v2", "dusk_wallets_v1", "dusk_permissions_v2"]) expect(localStorage.getItem(key)).toBeNull();
     await expect(send({ type: "DUSK_UI_STATUS" })).resolves.toMatchObject({ hasVault: false });
   });
@@ -931,5 +946,38 @@ describe("arrival notices in the app on a phone", () => {
     await localSend({ type: "DUSK_UI_NOTICES_SAID" });
     await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "off-said" });
     expect(asked).toEqual([]);
+  });
+});
+
+// Sofía's: every change of Auto-lock said "Couldn't save auto-lock", and a
+// time chosen never locked the app: only Immediately had a home in it.
+describe("Auto-lock in the app", () => {
+  it("saves the time chosen, says it in the overview, and locks after that long without use", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { localSend } = await import("./localBus.js");
+      const told = vi.fn();
+      vi.stubGlobal("window", { dispatchEvent: told });
+      await expect(localSend({ type: "DUSK_UI_SET_AUTO_LOCK", autoLockTimeoutMinutes: 5 })).resolves.toMatchObject({ ok: true, autoLockTimeoutMinutes: 5 });
+      await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ isUnlocked: true, autoLockTimeoutMinutes: 5 });
+      // Used four minutes on: still open five minutes after that use.
+      vi.advanceTimersByTime(4 * 60_000);
+      await expect(localSend({ type: "DUSK_UI_ACTIVITY" })).resolves.toMatchObject({ ok: true });
+      vi.advanceTimersByTime(4 * 60_000);
+      await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ isUnlocked: true });
+      // Five minutes without a press: locked as the page asks, and the page is told.
+      vi.advanceTimersByTime(60_000);
+      await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ isUnlocked: false });
+      expect(told.mock.calls.map(([event]) => event.detail)).toContainEqual({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason: "auto_lock" });
+
+      // Unlocked and used again, then Off: never.
+      engine.unlocked = true;
+      await localSend({ type: "DUSK_UI_ACTIVITY" });
+      await localSend({ type: "DUSK_UI_SET_AUTO_LOCK", autoLockTimeoutMinutes: 0 });
+      vi.advanceTimersByTime(60 * 60_000);
+      await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ isUnlocked: true, autoLockTimeoutMinutes: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

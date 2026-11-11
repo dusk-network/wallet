@@ -7,14 +7,16 @@ use tauri::Manager;
 #[cfg(target_os = "android")]
 mod android;
 
-/// Opens the phone's share sheet with `text` (Receive's address or request link).
+/// Opens the phone's share sheet with `text` (Receive's address, or a
+/// request's words and link), and a request's QR code (`image`, a PNG in
+/// base64, shared as `name`) beside it.
 #[tauri::command]
-async fn share_text(window: tauri::WebviewWindow, text: String, title: String) -> Result<(), String> {
+async fn share_text(app: tauri::AppHandle, text: String, title: String, image: Option<String>, name: Option<String>) -> Result<(), String> {
   #[cfg(target_os = "android")]
-  return android::share(&window, text, title).await;
+  return android::share(&app, text, title, image.unwrap_or_default(), name.unwrap_or_default()).await;
   #[cfg(not(target_os = "android"))]
   {
-    let _ = (window, text, title);
+    let _ = (app, text, title, image, name);
     Err("There's no share sheet here.".into())
   }
 }
@@ -35,7 +37,8 @@ async fn save_download(window: tauri::WebviewWindow, name: String, mime: String,
 
 /// Fingerprint unlock, on Android: `action` status, enable (with the password
 /// as `secret`), unlock (the password back) or disable, each after a
-/// fingerprint where it takes one. `{ ok: false, reason: "unavailable" }` elsewhere.
+/// fingerprint where it takes one, or keyboard (for the password instead).
+/// `{ ok: false, reason: "unavailable" }` elsewhere.
 #[tauri::command]
 async fn fingerprint(app: tauri::AppHandle, action: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
   #[cfg(target_os = "android")]
@@ -81,7 +84,7 @@ pub fn run() {
   let builder = tauri::Builder::default();
   // Fingerprint unlock's Kotlin (android/KeystorePlugin.kt).
   #[cfg(target_os = "android")]
-  let builder = builder.plugin(android::keystore()).plugin(android::notices());
+  let builder = builder.plugin(android::keystore()).plugin(android::notices()).plugin(android::share_sheet());
   builder
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_fs::init())

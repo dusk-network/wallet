@@ -120,10 +120,10 @@ describe("a wallet form being filled in", () => {
     await t.render();
     expect(fieldsOf(t.app, names).map((f) => f.value).every((v) => v === "")).toBe(true);
 
-    // Locked: the form goes.
+    // Locked: the form goes, and the unlock goes back to where it was opened from.
     typeAll(fieldsOf(t.app, names));
     await t.deliver({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
-    expect(t.state.route).toBe("home");
+    expect(t.state.route).toBe(route.startsWith("wallet_add") ? "home" : "options");
     expect(fieldsOf(t.app, names)).toEqual([]);
   });
 

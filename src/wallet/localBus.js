@@ -4,8 +4,8 @@
 // This lets the same UI (popup/full) run without chrome.runtime messaging,
 // which is how we reuse it in Tauri desktop/mobile.
 
-import { clearVault, countVaultWallets, createVault, loadVault, unlockVault } from "../shared/vault.js";
-import { getSettings, rememberNodeChain, setSettings } from "../shared/settings.js";
+import { checkResetPassword, clearVault, countVaultWallets, createVault, loadVault, unlockVault, vaultPhrase } from "../shared/vault.js";
+import { getSettings, normalizeAutoLock, rememberNodeChain, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearAllPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -114,6 +114,32 @@ async function watchArrival(hash, { kind, nodeUrl }) {
   await watchAppArrival({ hash, nodeUrl, title: went.title, failTitle: failed.title, body: went.network });
 }
 
+// Auto-lock in the app, as the extension's background does it: the wallet
+// locks once it's gone this long without a press or a key in it (the page's
+// DUSK_UI_ACTIVITY), looked at every half minute while the page runs, and as
+// the page asks for anything, as when the app comes back to the front after
+// Android stopped its timers. Immediately is the page's (popup/app.js).
+const AUTO_LOCK_CHECK_MS = 30_000;
+let lastActivity = Date.now();
+
+async function lockIfIdle() {
+  if (!isUnlocked()) return false;
+  const minutes = Number((await getSettings())?.autoLockTimeoutMinutes ?? 0);
+  if (!(minutes > 0) || Date.now() - lastActivity < minutes * 60_000) return false;
+  return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+    if (!isUnlocked()) return false;
+    lock();
+    tellPage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason: "auto_lock" });
+    return true;
+  });
+}
+
+try {
+  setInterval(() => lockIfIdle().catch(() => {}), AUTO_LOCK_CHECK_MS);
+} catch {
+  // No timers here.
+}
+
 function tellPage(message) {
   try {
     globalThis.window?.dispatchEvent(new CustomEvent(WALLET_MESSAGE_EVENT, { detail: message }));
@@ -213,6 +239,18 @@ const localEngineCall = (method, params) => localEngineMethods[method](params ??
  */
 export async function localSend(message) {
   try {
+    // A use of the wallet: a press or a key, or an unlock.
+    if (message?.type === "DUSK_UI_ACTIVITY") {
+      lastActivity = Date.now();
+      return { ok: true };
+    }
+    // Gone long enough without one: locked before anything is answered.
+    await lockIfIdle().catch(() => {});
+    if (message?.type === "DUSK_UI_SET_AUTO_LOCK") {
+      const next = await setSettings({ autoLockTimeoutMinutes: normalizeAutoLock(message.autoLockTimeoutMinutes ?? 0) });
+      lastActivity = Date.now();
+      return { ok: true, autoLockTimeoutMinutes: next.autoLockTimeoutMinutes };
+    }
     const common = await handleUiCommand(message, {
       engineCall: localEngineCall,
       ensureEngineConfigured,
@@ -240,6 +278,7 @@ export async function localSend(message) {
         if (isUnlocked()) return { ok: true, accounts: getAccounts() };
         // Every wallet the password opens, the one unlocked last unlocked again.
         const { wallets } = await unlockVault(message.password);
+        lastActivity = Date.now();
         await ensureEngineConfigured();
         await unlockWallets({ wallets, walletKey: (await getWalletDirectory().catch(() => ({}))).active });
         await keepWalletShown(unlockedNow());
@@ -247,6 +286,15 @@ export async function localSend(message) {
         // this wallet's record (background/index.js does the same).
         await moveLegacyContacts(engineContactsVault(localEngineCall)).catch(() => {});
         return { ok: true, accounts: getAccounts() };
+      });
+    }
+
+    // The open wallet's recovery phrase, shown again in Settings: only for
+    // the password that opens it, checked against the vault.
+    if (message?.type === "DUSK_UI_RECOVERY_PHRASE") {
+      return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        if (!isUnlocked()) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        return { ok: true, result: await vaultPhrase(message.password, getWalletKey()) };
       });
     }
 
@@ -260,6 +308,8 @@ export async function localSend(message) {
 
     if (message?.type === "DUSK_UI_RESET_WALLET") {
       return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        // The password first, as for removing a wallet: a reset wipes them all.
+        if (await loadVault()) await checkResetPassword(message.password);
         lock();
         if (isUnlocked()) throw new Error("Wallet lock did not complete");
         await beginReset();
@@ -490,6 +540,7 @@ export async function localSend(message) {
         ipfsGateway: settings.ipfsGateway ?? "",
         hideBalances: settings.hideBalances === true,
         lockOnLeave: settings.lockOnLeave === true,
+        autoLockTimeoutMinutes: settings.autoLockTimeoutMinutes ?? 15,
         sendPasswordLimit: (await sendPasswordLimit())?.toString() ?? null,
         customGas: settings.customGas ?? null,
         chainId: settings.chainId,

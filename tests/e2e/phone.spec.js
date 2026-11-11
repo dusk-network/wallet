@@ -146,3 +146,18 @@ test("keeps Copy request link above the keyboard with the request's Memo", async
   await expect.poll(() => copy.evaluate((node) => node.getBoundingClientRect().bottom)).toBeLessThanOrEqual(top);
   expect(await memo.evaluate((node) => node.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
 });
+
+// Sofía's and Lena's: in landscape, Review's Confirm bar covered the address, fee and total until a scroll.
+test("puts Review's Confirm after its details on a phone turned sideways, over none of them", async ({ page }) => {
+  await page.setViewportSize({ width: 915, height: 412 });
+  await popupOn(page, "confirm", { draft: { to: TO, privacy: "public", amountDusk: "0.01", amountLux: "10000000", memo: "Invoice 2026-115" } });
+  const confirm = page.getByRole("button", { name: "Confirm" });
+  await expect(confirm).toBeVisible();
+  const [confirmTop, detailsBottom] = await page.evaluate(() => {
+    const top = (el) => el.getBoundingClientRect().top + document.querySelector(".panel-content").scrollTop;
+    const button = [...document.querySelectorAll("button")].find((b) => b.textContent === "Confirm");
+    const details = [...document.querySelectorAll("#app .kv")];
+    return [top(button), Math.max(...details.map((el) => top(el) + el.getBoundingClientRect().height))];
+  });
+  expect(confirmTop).toBeGreaterThanOrEqual(detailsBottom);
+});

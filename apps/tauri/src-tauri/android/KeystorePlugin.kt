@@ -23,6 +23,10 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.view.ViewTreeObserver
+import android.view.WindowInsets
+import android.view.inputmethod.InputMethodManager
+import android.webkit.WebView
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -52,6 +56,11 @@ class EnableArgs {
 class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
   private val alias = "dusk-wallet-fingerprint"
   private val prefs = activity.getSharedPreferences("dusk-wallet-fingerprint", Context.MODE_PRIVATE)
+  private var webView: WebView? = null
+
+  override fun load(webView: WebView) {
+    this.webView = webView
+  }
 
   private fun answer(invoke: Invoke, ok: Boolean, reason: String? = null, secret: String? = null) {
     val out = JSObject()
@@ -61,11 +70,34 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve(out)
   }
 
-  // A strong biometric enrolled on Android 11 or later: what can guard the key.
-  private fun available(): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
-    val manager = activity.getSystemService(BiometricManager::class.java) ?: return false
-    return manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
+  // What Android 11 or later says of a strong biometric, which can guard the
+  // key: one enrolled ("yes"), none enrolled yet ("none"), or none to have ("no").
+  private fun biometric(): String {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "no"
+    val manager = activity.getSystemService(BiometricManager::class.java) ?: return "no"
+    return when (manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)) {
+      BiometricManager.BIOMETRIC_SUCCESS -> "yes"
+      BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "none"
+      else -> "no"
+    }
+  }
+
+  private fun available(): Boolean = biometric() == "yes"
+
+  // Whether the key the password is kept under can't open it any more: gone
+  // with the phone's screen lock, or made void as its fingerprints changed.
+  private fun keyLost(): Boolean {
+    if (!prefs.contains("secret")) return false
+    val iv = prefs.getString("iv", null) ?: return true
+    return try {
+      val key = keyStore().getKey(alias, null) as? SecretKey ?: return true
+      cipher().init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP)))
+      false
+    } catch (_: KeyPermanentlyInvalidatedException) {
+      true
+    } catch (_: Exception) {
+      false
+    }
   }
 
   private fun keyStore(): KeyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -133,20 +165,66 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** Whether fingerprint unlock can be had here, and whether it's on. */
+  /**
+   * Whether fingerprint unlock can be had here (`available`), or once the
+   * phone has a fingerprint (`enroll`), whether it's on, and whether it went
+   * off by itself (`lost`): its key gone or void, what it guarded goes too,
+   * and it says so till it's turned on or off again.
+   */
   @Command
   fun status(invoke: Invoke) {
+    if (keyLost()) {
+      forget()
+      prefs.edit().putBoolean("lost", true).commit()
+    }
+    val biometric = biometric()
     val out = JSObject()
     out.put("ok", true)
-    out.put("available", available())
+    out.put("available", biometric == "yes")
+    out.put("enroll", biometric == "none")
     out.put("on", prefs.contains("secret"))
+    out.put("lost", prefs.getBoolean("lost", false))
     invoke.resolve(out)
+  }
+
+  /**
+   * The keyboard, for the password field the page just focused: a WebView's
+   * own focus doesn't bring it. Asked once the app's window has the focus
+   * back from the fingerprint's prompt, as Android ignores it till then.
+   */
+  @Command
+  fun keyboard(invoke: Invoke) {
+    val view = webView
+    if (view == null) return answer(invoke, false, "unavailable")
+    activity.runOnUiThread {
+      val show = {
+        view.requestFocus()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          view.windowInsetsController?.show(WindowInsets.Type.ime())
+        } else {
+          activity.getSystemService(InputMethodManager::class.java)?.showSoftInput(view, 0)
+        }
+      }
+      if (view.hasWindowFocus()) {
+        show()
+      } else {
+        view.viewTreeObserver.addOnWindowFocusChangeListener(object : ViewTreeObserver.OnWindowFocusChangeListener {
+          override fun onWindowFocusChanged(hasFocus: Boolean) {
+            if (!hasFocus) return
+            view.viewTreeObserver.removeOnWindowFocusChangeListener(this)
+            view.post { show() }
+          }
+        })
+      }
+      answer(invoke, true)
+    }
   }
 
   /** Turns it on: `secret`, the password, encrypted under a new key, after a fingerprint. */
   @Command
   fun enable(invoke: Invoke) {
     val args = invoke.parseArgs(EnableArgs::class.java)
+    prefs.edit().remove("lost").commit()
     if (!available()) return answer(invoke, false, "unavailable")
     if (args.secret.isEmpty()) return answer(invoke, false, "error")
     val encrypt = try {
@@ -213,6 +291,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun disable(invoke: Invoke) {
     forget()
+    prefs.edit().remove("lost").commit()
     answer(invoke, true)
   }
 }

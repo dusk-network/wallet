@@ -57,7 +57,7 @@ import {
   restoreWalletView,
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
-import { changePasswordView, removeWalletView, sendPasswordView } from "./views/wallets.js";
+import { changePasswordView, recoveryPhraseView, removeWalletView, resetWalletView, sendPasswordView } from "./views/wallets.js";
 import { cancelSendPassword } from "../components/SendPasswordDialog.js";
 import { getRuntimeKind, isExtensionRuntime, isTauriRuntime } from "../../platform/runtime.js";
 import {
@@ -97,7 +97,7 @@ function isWalletLockedResponse(value) {
 }
 
 // The screens of a wallet being added, removed, or a new password: unlocked only.
-const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password", "send_password"]);
+const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password", "send_password", "recovery_phrase"]);
 
 // The screen Settings or Add wallet opens from, for its Back to return to:
 // home from Settings' own pages and a setup.
@@ -111,16 +111,27 @@ function openSettings() {
   state.route = "options";
 }
 
+// Where the unlock after a lock returns to: the screen locked on, but for a
+// wallet form, whose words and passwords a lock drops: the screen it was
+// opened from, Settings or Add wallet's.
+function afterLock(route) {
+  if (!WALLET_ROUTES.has(route)) return route;
+  return route.startsWith("wallet_add") ? state.onboard?.from || "home" : "options";
+}
+
 function applyLockedOverviewPatch() {
   try {
-    // Locked here or elsewhere: whatever began unlocked is for nothing now.
+    // Locked here or elsewhere: whatever began unlocked is for nothing now;
+    // but where the lock's own unlock returns to (leave), which is this lock's.
+    const returning = state.returnTo?.context === state.context;
     switchContext(state, "lock");
+    if (returning) state.returnTo.context = state.context;
     acctMenu.close();
     cancelSendPassword();
     stopArrivalChecks();
     // A wallet being added keeps nothing of its new phrase through a lock.
+    state.route = afterLock(state.route);
     if (state.onboard?.adding) state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
-    if (WALLET_ROUTES.has(state.route)) state.route = "home";
     state.overview = {
       ...(state.overview ?? {}),
       isUnlocked: false,
@@ -903,13 +914,25 @@ function comeBack() {
 
 // The app on a phone, with Lock when I leave the app on: locked as the person
 // leaves it, unless the wallet itself sent them elsewhere for a moment. Back,
-// they're asked the password, as after Lock wallet.
+// they're asked the password, as after Lock wallet, and return to the screen
+// they left, with what they typed on it.
 function leave() {
   const ov = state.overview;
   if (!appBack || !ov?.isUnlocked || ov?.lockOnLeave !== true || steppedAway()) return;
   switchContext(state, "lock");
+  // The unlock first, wherever they were: Settings would show locked.
+  state.returnTo = { route: afterLock(state.route), context: state.context };
   state.route = "home";
   send({ type: "DUSK_UI_LOCK" }).catch(() => {});
+}
+
+// Unlocked again after leaving: back where they were, unless something
+// switched since (another wallet, a restore).
+function returnAfterUnlock(ov) {
+  const back = state.returnTo;
+  if (!back || !ov?.isUnlocked) return;
+  state.returnTo = null;
+  if (back.context === state.context && state.route === "home") state.route = back.route;
 }
 
 try {
@@ -1171,6 +1194,7 @@ export async function render({ forceRefresh = false } = {}) {
     await maybeAutoWatchDashboardStDusk(ov);
   }
   keepContactsToTheirWallet(ov);
+  returnAfterUnlock(ov);
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";
   } catch {
@@ -1212,6 +1236,12 @@ export async function render({ forceRefresh = false } = {}) {
   // TODO: Reconsider?
   if (state.route === "options") {
     setApp(optionsView(ov, { state, actions }));
+    return;
+  }
+  // Reset, from Settings, locked or not: with no wallet here, Settings.
+  if (state.route === "wallet_reset") {
+    if (!ov?.hasVault) state.route = "options";
+    setApp(ov?.hasVault ? keepForm(() => resetWalletView(ov, { state, actions })) : optionsView(ov, { state, actions }));
     return;
   }
 
@@ -1300,6 +1330,10 @@ export async function render({ forceRefresh = false } = {}) {
   }
   if (state.route === "send_password") {
     setApp(keepForm(() => sendPasswordView(ov, { state, actions })));
+    return;
+  }
+  if (state.route === "recovery_phrase") {
+    setApp(keepForm(() => recoveryPhraseView(ov, { state, actions })));
     return;
   }
   // After Confirm: the transaction's steps. Without one (a new popup), home.

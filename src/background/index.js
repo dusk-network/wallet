@@ -1,7 +1,7 @@
 // Background service worker entry.
 
 import { version as WORKER_VERSION } from "../../package.json";
-import { clearVault, countVaultWallets, createVault, loadVault, unlockVault } from "../shared/vault.js";
+import { checkResetPassword, clearVault, countVaultWallets, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import {
   approveOrigin,
   clearAllPermissions,
@@ -881,6 +881,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       if (message?.type === "DUSK_UI_RESET_WALLET") {
         await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          // The password first, as for removing a wallet: a reset wipes them all.
+          if (await loadVault()) await checkResetPassword(message.password);
           await lockWallet("reset");
           await beginReset();
           await clearAllPermissions();

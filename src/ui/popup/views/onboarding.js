@@ -27,7 +27,8 @@ async function showPersistedVault(state, actions) {
   return true;
 }
 
-function srpGridEl(mnemonic, { blurred = false } = {}) {
+/** A recovery phrase's words in their numbered places, blurred till Reveal where it's asked. */
+export function srpGridEl(mnemonic, { blurred = false } = {}) {
   const words = normalizeMnemonic(mnemonic)
     .split(" ")
     .filter(Boolean);

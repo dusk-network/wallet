@@ -56,6 +56,7 @@ import { activityRows } from "../activity.js";
 import { whenAtText } from "./txRow.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
+import { forgetSendDraft, keepSendDraft } from "../../lib/sendDraft.js";
 import { networkTextOf } from "../../../shared/nodeNetwork.js";
 
 // A pasted EVM address, which a Dusk transfer can't pay.
@@ -82,11 +83,11 @@ export function draftDuskName(draft) {
   return name && typeof draft.to === "string" && name.to === draft.to ? name : undefined;
 }
 
-// What a request link or a QR code filled in says under the recipient, until it changes.
-const FILLED_TEXT = Object.freeze({
-  link: "Filled in from the link. Check it before you send.",
-  qr: "Filled in from the QR code. Check it before you send.",
-});
+// What a request link or a QR code filled in says under the recipient, until
+// it changes, with the network it pays on: a plain link says none.
+const FILLED_FROM = Object.freeze({ link: "the link", qr: "the QR code" });
+const filledText = (from, nodeUrl) =>
+  FILLED_FROM[from] ? `Filled in from ${FILLED_FROM[from]}, to pay on ${networkTextOf(String(nodeUrl ?? "")) || "this network"}. Check it before you send.` : "";
 
 /**
  * "You sent 0.02 DUSK to Alice with this memo at 08:53.": a payment made
@@ -331,8 +332,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
   const filledNote = h("p", { class: "field-hint send-filled-note", role: "status", hidden: true });
   const sayFilled = (from) => {
-    filledNote.textContent = FILLED_TEXT[from] ?? "";
-    filledNote.hidden = !FILLED_TEXT[from];
+    filledNote.textContent = filledText(from, ov?.nodeUrl);
+    filledNote.hidden = !filledNote.textContent;
   };
   sayRefused({ chainId: state.draft?.refusedChainId, problem: state.draft?.refusedProblem });
   sayFilled(state.draft?.filledFrom);
@@ -1108,6 +1109,8 @@ export function sendFormView(ov, { state, actions } = {}) {
     subnav({
       title: "Send",
       onBack: () => {
+        // Kept for Send's next opening: Back on a phone is pressed by the way.
+        keepSendDraft(state.draft, ov);
         state.route = "home";
         state.draft = null;
         actions?.render?.().catch(() => {});
@@ -1401,8 +1404,10 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       backRoute: "confirm",
       doneRoute: "home",
       onSent: () => {
-        // Done with, unless a newer draft took its place meanwhile.
+        // Done with, unless a newer draft took its place meanwhile, and nothing
+        // of it kept for the next Send.
         if (state.draft === d) state.draft = null;
+        forgetSendDraft();
         // Paid: the link the page opened with goes from its address.
         forgetPaidLink();
       },

@@ -382,6 +382,61 @@ describe("the phone's Back button", () => {
   });
 });
 
+// Chen's: Amelie and 0.02 typed, Back, Back, and Send again was empty, nothing asked.
+describe("a half-typed Send, left with Back", () => {
+  it("is there again as Send opens from Home, for the same wallet, profile and network, and goes once it's sent", async () => {
+    let history;
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { history: (win) => (history = pageHistory(win)) });
+    const button = (text) => t.app.querySelectorAll("button").find((b) => b.textContent === text);
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const type = (name, value) => {
+      field(name).value = value;
+      field(name).dispatchEvent(fakeEvent("input"));
+    };
+    const openSend = async () => {
+      t.app.querySelectorAll("button").find((b) => b.textContent === "Send" && b.closest(".action-bar, .dashboard-top-actions")).click();
+      await flush();
+      expect(t.state.route).toBe("send");
+    };
+    await openSend();
+    type("To", B);
+    type("Amount", "0.02");
+    type("Memo", "satay");
+    history.back();
+    await flush();
+    expect(t.state.route).toBe("home");
+    await openSend();
+    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.02", "satay"]);
+
+    // Another profile: not its own, so nothing.
+    button("← Back").click();
+    await flush();
+    t.open = { ...t.open, selectedAccountIndex: 1 };
+    await t.render({ forceRefresh: true });
+    await openSend();
+    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual(["", "", ""]);
+
+    // Sent: gone for good.
+    button("← Back").click();
+    await flush();
+    t.open = { ...t.open, selectedAccountIndex: 0 };
+    await t.render({ forceRefresh: true });
+    await openSend();
+    type("To", B);
+    type("Amount", "0.02");
+    button("Review").click();
+    await flush();
+    pastClickGuard();
+    button("Confirm").click();
+    await flush();
+    expect(t.asked("DUSK_UI_SEND_TX")).toHaveLength(1);
+    button("Done").click();
+    await flush();
+    await openSend();
+    expect(["To", "Amount"].map((name) => field(name).value)).toEqual(["", ""]);
+  });
+});
+
 describe("coming back to the wallet during a payment", () => {
   it("looks the payment up by its ID, and says Completed with its real fee, though nothing was heard while away", async () => {
     const HASH = "9f".repeat(32);
@@ -480,6 +535,68 @@ describe("the app on a phone", () => {
     await show();
     expect(t.app.querySelector("input[type=password]")?.getAttribute("placeholder")).toBe("Password");
     expect(t.app.textContent).not.toContain("Locks the wallet as you leave the app.");
+  });
+
+  // Chen's and Sofía's: Immediately locked the app on a trip to Files or a call, and the unlock
+  // landed on the dashboard, Send's half-typed payment and Receive's request gone.
+  it("returns after Immediately's lock to the screen left, with what was typed on it", async () => {
+    const bridge = tauriBridge();
+    const locks = async (message, t) => {
+      if (message.type === "DUSK_UI_LOCK") {
+        t.open = { ...t.open, isUnlocked: false };
+        t.deliver({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
+        return { ok: true };
+      }
+      if (message.type === "DUSK_UI_UNLOCK") {
+        t.open = { ...t.open, isUnlocked: true };
+        return { ok: true };
+      }
+      return undefined;
+    };
+    const t = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: null }, locks, { tauri: bridge });
+    t.open = { ...t.open, lockOnLeave: true };
+    await t.render({ forceRefresh: true });
+    const away = async () => {
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+    const unlock = async () => {
+      const pwd = t.app.querySelector("#unlock-password");
+      expect(pwd).toBeTruthy();
+      pwd.value = "the password";
+      t.app.querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
+      await flush();
+    };
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const type = (name, value) => {
+      field(name).value = value;
+      field(name).dispatchEvent(fakeEvent("input"));
+    };
+
+    // Send, half typed: To, an amount and a memo.
+    type("To", B);
+    type("Amount", "0.02");
+    type("Memo", "Invoice 2026-120");
+    await away();
+    expect(t.asked("DUSK_UI_LOCK")).toHaveLength(1);
+    await unlock();
+    expect(t.state.route).toBe("send");
+    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.02", "Invoice 2026-120"]);
+
+    // Receive, a request filled in, then Files to find its picture.
+    t.state.route = "receive";
+    t.state.receive = { tab: "public", requestOpen: true, amountDusk: "0.05", memo: "Chicken rice Tue" };
+    await t.render();
+    await away();
+    expect(t.asked("DUSK_UI_LOCK")).toHaveLength(2);
+    await unlock();
+    expect(t.state.route).toBe("receive");
+    const request = t.app.querySelector(".receive-request");
+    expect(["Amount", "Memo"].map((name) => request.querySelectorAll("input").find((f) => accessibleName(f) === name).value)).toEqual(["0.05", "Chicken rice Tue"]);
   });
 
   it("opens Send filled in from a dusk: link it was opened with, and from one opened while it runs", async () => {

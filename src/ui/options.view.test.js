@@ -375,31 +375,74 @@ describe("settings", () => {
     );
   });
 
-  it("asks before a reset in the wallet's own dialog, not the browser's, and Cancel resets nothing", async () => {
+  // Chen's and Lena's: two taps, and every wallet was gone, with no password or fingerprint.
+  it("asks for the password before a reset, as for removing a wallet, on a screen of its own: Back resets nothing", async () => {
     const view = await settings();
     const browserConfirm = vi.fn(() => true);
     vi.stubGlobal("confirm", browserConfirm);
-    const reset = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Reset wallet" && !b.closest(".wallet-dialog"));
-    const dialog = () => dom.document.body.querySelector(".wallet-dialog");
     const resets = () => view.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_RESET_WALLET");
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Reset wallet").click();
+    await settle();
+    expect([view.state.route, browserConfirm.mock.calls, resets()]).toEqual(["wallet_reset", [], []]);
 
-    reset().click();
+    const { resetWalletView } = await import("./popup/views/wallets.js");
+    const draw = () => dom.document.body.replaceChildren(...resetWalletView(view.ov, { state: view.state, actions: view.actions }));
+    draw();
     await settle();
-    expect(browserConfirm).not.toHaveBeenCalled();
-    expect([dialog().getAttribute("role"), visibleText(dialog())]).toEqual([
-      "alertdialog",
-      "Reset wallet?This removes every wallet here, with its contacts, names, activity and connected sites. Your funds stay on Dusk. You need each recovery phrase to use them again.CancelReset wallet",
-    ]);
-    expect(dom.document.activeElement.textContent).toBe("Cancel");
-    dialog().querySelector("button").click();
+    const body = dom.document.body;
+    const press = (name) => body.querySelectorAll("button").find((b) => b.textContent === name).click();
+    expect(visibleText(body.querySelector(".auth-lead"))).toBe(
+      "This removes every wallet here, with its contacts, names, activity and connected sites. Your funds stay on Dusk. You need each recovery phrase to use them again."
+    );
+    // Nothing typed: said, and nothing asked of the wallet.
+    press("Reset wallet");
     await settle();
-    expect([dialog(), resets()]).toEqual([null, []]);
+    expect(visibleText(body)).toContain("Enter your password.");
+    expect(resets()).toEqual([]);
+    // A wrong one: the wallet says so, under the field.
+    view.actions.send.mockImplementation(async (m) => (m.type === "DUSK_UI_RESET_WALLET" && m.password !== "the password" ? { error: { message: "Incorrect password" } } : {}));
+    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with"), "not it");
+    press("Reset wallet");
+    await settle();
+    expect(visibleText(body)).toContain("Incorrect password");
+    expect(view.state.route).toBe("wallet_reset");
+    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with"), "the password");
+    press("Reset wallet");
+    await settle();
+    expect(resets().at(-1)[0]).toEqual({ type: "DUSK_UI_RESET_WALLET", password: "the password" });
+    expect(view.state.route).toBe("home");
+    expect(view.actions.showToast).toHaveBeenCalledWith("Wallet reset. Import again to continue.", 2500);
 
-    reset().click();
-    await settle();
-    dialog().querySelector(".btn-destructive").click();
-    await settle();
-    expect(resets()).toHaveLength(1);
+    // Back from it: Settings, nothing reset.
+    view.state.route = "wallet_reset";
+    const before = resets().length;
+    draw();
+    press("← Back");
+    expect([view.state.route, resets().length]).toEqual(["options", before]);
+  });
+
+  it("takes a fingerprint for a reset in the app where fingerprint unlock is on", async () => {
+    const asked = [];
+    dom.window.__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (cmd, args) => {
+        if (cmd !== "fingerprint") return null;
+        asked.push(args.action);
+        if (args.action === "status") return { ok: true, available: true, on: true };
+        if (args.action === "unlock") return { ok: true, secret: "the password" };
+        return { ok: true };
+      }),
+    };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const view = await settings({}, { app: true });
+    const { resetWalletView } = await import("./popup/views/wallets.js");
+    view.state.route = "wallet_reset";
+    dom.document.body.replaceChildren(...resetWalletView(view.ov, { state: view.state, actions: view.actions }));
+    const finger = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Use fingerprint");
+    await vi.waitFor(() => expect(isShown(finger())).toBe(true));
+    expect(view.actions.send).not.toHaveBeenCalled();
+    finger().click();
+    await vi.waitFor(() => expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_RESET_WALLET", password: "the password" }));
+    expect(asked.filter((action) => action !== "status")).toEqual(["unlock", "disable"]);
   });
 
   it("starts each switch of profile, network or wallet before asking the wallet, so a check begun before it can tell", async () => {
@@ -423,9 +466,10 @@ describe("settings", () => {
     await settle();
     buttonOf("Lock wallet").click();
     await settle();
+    const { resetWalletView } = await import("./popup/views/wallets.js");
+    dom.document.body.replaceChildren(...resetWalletView(view.ov, { state: view.state, actions: view.actions }));
+    typeInto(dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with"), "the password");
     buttonOf("Reset wallet").click();
-    await settle();
-    dom.document.body.querySelector(".wallet-dialog .btn-destructive").click();
     await settle();
     expect(asked.map(([type, context]) => [type, context?.reason])).toEqual([
       ["DUSK_UI_SET_ACCOUNT_INDEX", "switch"],
@@ -672,9 +716,9 @@ describe("about", () => {
     expect(visibleText(app.section("Reset").querySelector(".settings-note"))).toBe(
       "Removes every wallet, with its contacts, names and activity, from this phone, and goes back to Mainnet. Your funds stay on Dusk. You need each recovery phrase to use them again."
     );
-    app.section("Reset").querySelector("button").click();
-    await settle();
-    expect(visibleText(dom.document.body.querySelector(".wallet-dialog .settings-note"))).not.toMatch(/browser|connected sites/);
+    const { resetWalletView } = await import("./popup/views/wallets.js");
+    dom.document.body.replaceChildren(...resetWalletView(app.ov, { state: app.state, actions: app.actions }));
+    expect(visibleText(dom.document.body.querySelector(".auth-lead"))).not.toMatch(/browser|connected sites/);
   });
 
   it("keeps them on a custom node, and in the desktop app, which has no version to show", async () => {
@@ -821,13 +865,13 @@ describe("wallets", () => {
 
 // The app on a phone: Auto-lock's Immediately, and fingerprint unlock, as phone wallets have them.
 describe("security in the app on a phone", () => {
-  const onPhone = ({ available = true, on = false } = {}) => {
+  const onPhone = ({ available = true, on = false, enroll = false } = {}) => {
     const asked = [];
     dom.window.__TAURI_INTERNALS__ = {
       invoke: vi.fn(async (cmd, args) => {
         if (cmd !== "fingerprint") return null;
         asked.push([args.action, args.args?.secret]);
-        return args.action === "status" ? { ok: true, available, on } : { ok: true };
+        return args.action === "status" ? { ok: true, available, on, enroll } : { ok: true };
       }),
     };
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) AppleWebKit/537.36 Chrome/156.0 Mobile Safari/537.36" });
@@ -891,6 +935,55 @@ describe("security in the app on a phone", () => {
     await vi.waitFor(() => expect(asked.filter(([action]) => action === "enable")).toHaveLength(1));
     await settle();
     expect(asked.filter(([action]) => action === "enable" || action === "disable")).toEqual([["enable", "right one"]]);
+  });
+
+  // Chen's, Sofía's and Lena's: nothing said fingerprint unlock was there until a fingerprint was added.
+  it("lists fingerprint unlock on a phone without a fingerprint yet, off, with what to do first", async () => {
+    const { asked } = onPhone({ available: false, enroll: true });
+    await settings({}, { app: true });
+    await vi.waitFor(() => expect(isShown(finger())).toBe(true));
+    expect([finger().checked, finger().disabled]).toEqual([false, true]);
+    expect(visibleText(finger().closest(".settings-fingerprint"))).toBe("Unlock with fingerprintAdd a fingerprint in your phone's settings first.");
+    expect(asked).toEqual([["status", undefined]]);
+  });
+
+  // Chen's: no way in the app to see the recovery words again, or to change the password.
+  it("offers the recovery phrase and a new password in the app, each behind the password", async () => {
+    onPhone({ on: false });
+    const view = await settings({}, { app: true });
+    const security = view.section("Security");
+    expect(view.shownButtons(security)).toEqual(expect.arrayContaining(["Change password", expect.stringContaining("Recovery phrase")]));
+    security.querySelectorAll("button").find((b) => b.textContent.includes("Recovery phrase")).click();
+    await settle();
+    expect(view.state.route).toBe("recovery_phrase");
+
+    const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    view.actions.send.mockImplementation(async (m) =>
+      m.type === "DUSK_UI_RECOVERY_PHRASE" ? (m.password === "the password" ? { ok: true, result: MNEMONIC } : { error: { message: "Incorrect password" } }) : {}
+    );
+    const { recoveryPhraseView } = await import("./popup/views/wallets.js");
+    dom.document.body.replaceChildren(...recoveryPhraseView(view.ov, { state: view.state, actions: view.actions }));
+    const body = dom.document.body;
+    const password = () => body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with");
+    const press = (name) => body.querySelectorAll("button").find((b) => b.textContent === name).click();
+    expect(body.querySelector(".srp-grid")).toBeNull();
+    typeInto(password(), "not it");
+    press("Show recovery phrase");
+    await settle();
+    expect(visibleText(body)).toContain("Incorrect password");
+    expect(body.querySelector(".srp-grid")).toBeNull();
+    typeInto(password(), "the password");
+    press("Show recovery phrase");
+    await settle();
+    expect(body.querySelectorAll(".srp-word-text").map((w) => w.textContent)).toEqual(MNEMONIC.split(" "));
+    expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_RECOVERY_PHRASE", password: "the password" });
+    press("Done");
+    expect(view.state.route).toBe("options");
+  });
+
+  it("shows no recovery phrase in Settings outside the app", async () => {
+    const view = await settings();
+    expect(view.shownButtons(view.section("Security")).some((b) => b.includes("Recovery phrase"))).toBe(false);
   });
 
   it("offers no fingerprint unlock on a phone that can't guard the password with one", async () => {

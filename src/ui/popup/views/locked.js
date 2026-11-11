@@ -2,7 +2,7 @@ import { h } from "../../lib/dom.js";
 import { passwordInput } from "../../components/FormControls.js";
 import { askConfirm } from "../../components/ConfirmDialog.js";
 import { isPhone } from "../../lib/device.js";
-import { fingerprintPassword, fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
+import { fingerprintPassword, fingerprintStatus, showKeyboard, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
 
 /** What the unlock screen says once the phone's fingerprints changed. */
 export const FINGERPRINTS_CHANGED_TEXT = "Your fingerprints changed, so fingerprint unlock is off. Unlock with your password.";
@@ -47,8 +47,10 @@ export function lockedView({ state, actions } = {}) {
     fingerNote.textContent = text || "";
     fingerNote.hidden = !text;
   };
-  // The phone's fingerprints changed: once unlocked with the password, offer it again.
-  let offerAgain = false;
+  // The phone's fingerprints or its screen lock changed since it was turned
+  // on, so it's off: said here, and once unlocked with the password, offered
+  // again where the phone has a fingerprint (`again`), else simply off.
+  let lost = null;
   const fingerBtn = h("button", {
     class: "btn-outline btn-full",
     type: "button",
@@ -68,16 +70,23 @@ export function lockedView({ state, actions } = {}) {
     if (answer.reason === "invalidated" || answer.reason === "off") {
       fingerBtn.hidden = true;
       if (answer.reason === "invalidated") {
-        offerAgain = true;
+        lost = { again: true };
         sayFinger(FINGERPRINTS_CHANGED_TEXT);
       }
     } else if (answer.reason === "error" || answer.reason === "unavailable") {
       sayFinger("Your fingerprint can't be read now. Use your password.");
     }
+    // The password, with the keyboard up: the app's focus alone doesn't bring it.
     pwd.focus?.();
+    showKeyboard().catch(() => {});
   };
-  fingerprintStatus().then(({ on }) => {
-    if (!on || !pwd.isConnected) return;
+  fingerprintStatus().then(({ on, lost: gone, available }) => {
+    if (!pwd.isConnected) return;
+    if (gone) {
+      lost = { again: available };
+      sayFinger(FINGERPRINTS_CHANGED_TEXT);
+    }
+    if (!on) return;
     fingerBtn.hidden = false;
     byFingerprint();
     // Back in front with the wallet still locked: asked again, as the app opens.
@@ -123,12 +132,17 @@ export function lockedView({ state, actions } = {}) {
         throw new Error(res.error.message ?? "Unlock failed");
       }
       state.needsRefresh = true;
-      // The phone's fingerprints changed: fingerprint unlock again, with the password just typed.
-      if (offerAgain && !fingerprint) {
-        offerAgain = false;
-        askConfirm({ title: "Turn fingerprint unlock on again?", text: "Your fingerprints changed since you turned it on.", action: "Turn on" })
-          .then((yes) => (yes ? turnFingerprintOn(password) : null))
-          .catch(() => {});
+      // Fingerprint unlock went off by itself: on again with the password just
+      // typed, where the phone has a fingerprint and the person says so; else off.
+      if (lost && !fingerprint) {
+        const { again } = lost;
+        lost = null;
+        (again
+          ? askConfirm({ title: "Turn fingerprint unlock on again?", text: "Your fingerprints changed since you turned it on.", action: "Turn on" }).then((yes) =>
+              yes ? turnFingerprintOn(password) : turnFingerprintOff()
+            )
+          : turnFingerprintOff()
+        ).catch(() => {});
       }
       // Refresh even a replacement unlock form, but leave other views alone.
       if (!document.getElementById("unlock-password")) return;

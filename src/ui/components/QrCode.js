@@ -62,12 +62,31 @@ function svgModuleSize(svg) {
     : { w: 256, h: 256 };
 }
 
-// `text` cut to fit `width` on the canvas, with "…" where it was cut.
-function fitted(ctx, text, width) {
-  if (ctx.measureText(text).width <= width) return text;
-  const chars = Array.from(text);
-  while (chars.length > 1 && ctx.measureText(`${chars.join("")}…`).width > width) chars.pop();
-  return `${chars.join("")}…`;
+// `text` on as many lines as it takes to fit `width` on the canvas, broken
+// between words, and inside a word only where it's wider than a line.
+function wrapped(ctx, text, width) {
+  const fits = (line) => ctx.measureText(line).width <= width;
+  const lines = [];
+  let line = "";
+  for (const word of String(text).split(" ")) {
+    const next = line ? `${line} ${word}` : word;
+    if (fits(next)) {
+      line = next;
+      continue;
+    }
+    if (line) lines.push(line);
+    line = "";
+    // A word wider than a line goes on in pieces.
+    for (const char of Array.from(word)) {
+      if (line && !fits(line + char)) {
+        lines.push(line);
+        line = "";
+      }
+      line += char;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
 }
 
 /**
@@ -85,11 +104,21 @@ export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10, capt
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.ceil(w * scale));
   const qrHeight = Math.max(1, Math.ceil(h * scale));
-  const lines = (caption ?? []).filter((line) => line?.text);
-  canvas.height = qrHeight + (lines.length ? lines.reduce((sum, { size }) => sum + size * 1.5, 0) + 24 : 0);
 
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("PNG export is unavailable");
+
+  // What it asks, each line wrapped to the width there is under the code,
+  // never cut: the picture is all whoever gets it has.
+  const font = globalThis.getComputedStyle?.(document.body)?.fontFamily || "sans-serif";
+  const fontOf = ({ size, weight = 400 }) => `${weight} ${size}px ${font}`;
+  const lines = (caption ?? [])
+    .filter((line) => line?.text)
+    .flatMap((line) => {
+      ctx.font = fontOf(line);
+      return wrapped(ctx, String(line.text), canvas.width - 32).map((text) => ({ ...line, text }));
+    });
+  canvas.height = qrHeight + (lines.length ? lines.reduce((sum, { size }) => sum + size * 1.5, 0) + 24 : 0);
 
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -108,17 +137,16 @@ export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10, capt
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, qrHeight);
 
-    // What it asks, centred under the code, each line in the width there is.
+    // Centred under the code.
     if (lines.length) {
-      const font = globalThis.getComputedStyle?.(document.body)?.fontFamily || "sans-serif";
       ctx.fillStyle = "#101010";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       let top = qrHeight;
-      for (const { size, text, weight = 400 } of lines) {
-        ctx.font = `${weight} ${size}px ${font}`;
-        ctx.fillText(fitted(ctx, String(text), canvas.width - 32), canvas.width / 2, top);
-        top += size * 1.5;
+      for (const line of lines) {
+        ctx.font = fontOf(line);
+        ctx.fillText(line.text, canvas.width / 2, top);
+        top += line.size * 1.5;
       }
     }
 
