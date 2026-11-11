@@ -638,6 +638,16 @@ function lookForFinal(ov, sent, refresh) {
 // The network a measured rate is of: its chain, else its node.
 const networkOfRates = (ov) => String(ov?.chainId ?? ov?.nodeUrl ?? "");
 
+// Native staking's period, as app-core 0.12.0 measures it: the 30 days to the
+// last whole day of blocks (8,640) an hour (360 blocks) or more below the tip.
+// A rate measured over one stands for that day of blocks alone: once the tip
+// passes the next day's line, at the same block for every app, it's another's.
+const DAY_BLOCKS = 8_640;
+const PERIOD_MARGIN = 360;
+// About a block's time, for where the tip is while the node can't say.
+const BLOCK_MS = 10_000;
+const periodEnd = (tip) => Math.floor((tip - PERIOD_MARGIN) / DAY_BLOCKS) * DAY_BLOCKS;
+
 // How Sozu's stDUSK grew lately, by pool, as app-core reads it from the chain:
 // read once an hour in this popup, for every screen that shows Sozu's rate.
 const sozuGrowthKept = new Map();
@@ -663,16 +673,22 @@ export function sozuGrowthOf(ov, status, tipHeight = null) {
 
 /**
  * The staking rates last measured on the overview's network, as they were
- * read, while they're less than a day old: native staking's (`native`, as
- * nativeRewardsOf gives it) and Sozu's growth with its fee on rewards then
- * (`sozu`), each null where there's none.
+ * read: native staking's (`native`, as nativeRewardsOf gives it) while the
+ * tip is still in the day of blocks it was measured to (its `to.height`), and
+ * Sozu's growth with its fee on rewards then (`sozu`), less than a day old;
+ * each null where there's none. The tip is where it would be by now, a block
+ * every 10 seconds from the period's last block, where the node doesn't say.
  * @param {object} ov - the overview
+ * @param {{ tipHeight?: number | null, now?: number }} [at]
  * @returns {Promise<{ native: object | null, sozu: { fee: object | null, growth: object } | null }>}
  */
-export async function keptRatesOf(ov) {
+export async function keptRatesOf(ov, { tipHeight = null, now = Date.now() } = {}) {
   const network = networkOfRates(ov);
-  const [native, sozu] = await Promise.all([keptMeasure(`native:${network}`), keptMeasure(`sozu:${network}`)]);
-  return { native: typeof native?.rate === "number" ? native : null, sozu: sozu?.growth && typeof sozu.growth.rate === "number" ? sozu : null };
+  const [kept, sozu] = await Promise.all([keptMeasure(`native-period:${network}`, { now }), keptMeasure(`sozu:${network}`, { now })]);
+  const to = kept?.to;
+  const tip = Number.isSafeInteger(tipHeight) ? tipHeight : Number.isSafeInteger(to?.height) && Number.isFinite(to?.at) ? to.height + Math.floor((now - to.at) / BLOCK_MS) : null;
+  const native = typeof kept?.rate === "number" && tip !== null && periodEnd(tip) === to.height ? kept : null;
+  return { native, sozu: sozu?.growth && typeof sozu.growth.rate === "number" ? sozu : null };
 }
 
 // stDUSK's worth at each new year, as Rewards by year reads it from the chain:
@@ -710,8 +726,8 @@ export function nativeRewardsOf(ov, figures) {
   const network = networkOfRates(ov);
   return nativeRewards({ archive, cache: nativeRewardsKept, network, provisioners: figures.provisioners, tipHeight: figures.tipHeight ?? null })
     .then((measured) => {
-      // The last measured, for the next screen to show while it reads again.
-      if (measured) keepMeasure(`native:${network}`, measured);
+      // The last measured, for the next screen to show while it reads again, for the day of blocks it's of.
+      if (measured) keepMeasure(`native-period:${network}`, measured);
       return measured;
     })
     .catch(() => null);

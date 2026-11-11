@@ -294,8 +294,10 @@ describe("staking overview", () => {
       return { ...done, status: { ...done.status, contracts: { ...done.status.contracts, pool: kept } } };
     };
 
-    // Read from the chain as the node answers.
-    nativeMeasure.value = { rate: 0.8911, days: 30, perBlock: 15_600_000_000n, staked: 2_000_000_000_000_000n, blocks: 6 };
+    // Read from the chain as the node answers: the 30 days to the last whole day of blocks, two hours ago.
+    const to = { height: 4_795_200, at: Date.parse("2026-11-11T02:00:00Z") };
+    const period = { from: { height: to.height - 30 * 8_640, at: to.at - 30 * 86_400_000 }, to };
+    nativeMeasure.value = { rate: 0.8911, days: 30, perBlock: 15_600_000_000n, staked: 2_000_000_000_000_000n, blocks: 6, ...period };
     archive.query = sozuArchiveQuery({ pool: kept, now: Date.now(), from: 3_020_000_000_000n, to: 3_071_932_000_000n });
     const figures = { provisioners: [{ amount: { value: "1" }, eligibility: 0 }], tipHeight: 4_800_000 };
     popup({ route: "stake", staking: staking(), sozu: withPool() }, ov(), { rewardRate: 0.8811, stakingFigures: figures });
@@ -312,6 +314,31 @@ describe("staking overview", () => {
 
     // A day on, they're too old to stand for the last 30 days: the estimate, saying what it is.
     vi.setSystemTime(new Date("2026-11-12T04:00:01Z"));
+    silent();
+    await vi.waitFor(() => expect(subs()[0]).toEqual(["About 88% a year across the network at today's stake. Not promised."]));
+  });
+
+  // Lena's 94%, kept from one read, stood for a day where every app had read 88% since: a native rate is kept for
+  // the day of blocks it was measured to, and no longer once the tip is past the next day's line.
+  it("keeps native staking's rate measured last only while the tip is in the day of blocks it was measured to", async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-11T04:00:00Z"));
+    const subs = () => body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText).slice(2));
+    // Its period ended 24 hours 30 minutes ago: the next day's line is 30 minutes off.
+    const to = { height: 4_795_200, at: Date.parse("2026-11-10T03:30:00Z") };
+    nativeMeasure.value = { rate: 0.9405, days: 30, perBlock: 15_689_599_089n, staked: 2_000_000_000_000_000n, blocks: 6, from: { height: to.height - 30 * 8_640, at: to.at - 30 * 86_400_000 }, to };
+    popup({ route: "stake", staking: staking(), sozu: sozu() }, ov(), { rewardRate: 0.8811, stakingFigures: { provisioners: [{ amount: { value: "1" }, eligibility: 0 }], tipHeight: to.height + 8_820 } });
+    await vi.waitFor(() => expect(subs()[0]).toEqual(["About 94% a year across the network over the last 30 days. Not promised."]));
+
+    // The node silent: still that day of blocks, the rate kept stands.
+    nativeMeasure.value = null;
+    const silent = () => popup({ route: "stake", staking: staking(), sozu: sozu({ loaded: false, loading: true, status: null }) }, ov(), { rewardRate: 0.8811 });
+    silent();
+    await vi.waitFor(() => expect(subs()[0]).toEqual(["About 94% a year across the network over the last 30 days. Not promised."]));
+
+    // 31 minutes on, the tip is past the next day's line: another day's figure, so the estimate, saying what it is.
+    vi.setSystemTime(new Date("2026-11-11T04:31:00Z"));
     silent();
     await vi.waitFor(() => expect(subs()[0]).toEqual(["About 88% a year across the network at today's stake. Not promised."]));
   });

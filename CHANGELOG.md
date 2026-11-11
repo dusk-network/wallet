@@ -79,7 +79,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Measured native staking's rate over the 30 days to the last whole day of blocks, counting every stake, so it no longer moves from one block to the next and both wallets give the same figure.
 - Said Can't reach the network, and that the balance may be out of date, soon after the node stops answering while the wallet is open.
 - Kept the profile's name whole beside the network while it says Offline or Can't reach the network.
-- Kept the staking rates measured last, with their days, while they can't be read again, rather than estimates at today's stake.
+- Kept the staking rates measured last, with their days, while they can't be read again, rather than estimates at today's stake: native staking's until the next day of blocks, Sozu's for a day.
 - Searched Activity's whole history as a search is typed, without Show more, and found a contact named in look-alike letters by the name as typed.
 - Marked a contact whose name looks like another's on a transaction's details, as its row does, with its address once.
 - Showed a request's memo as codes under its field, saying what to check, while it has hidden characters or look-alike digits.
