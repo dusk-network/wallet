@@ -163,9 +163,11 @@ export function sentSteps(sent, ov) {
       state: "current",
       sub: offline()
         ? "No connection. It's looked up again once you're back online."
-        : status === "unknown"
-          ? "Taking longer than usual. It can still go through; the explorer shows where it is."
-          : "Waiting for a block, usually about 10 seconds",
+        : sent?.lookingUp
+          ? "Looking it up again…"
+          : status === "unknown"
+            ? "Taking longer than usual. It can still go through; the explorer shows where it is."
+            : "Waiting for a block, usually about 10 seconds",
     },
     { label: "Completed", state: "upcoming", sub: "" },
   ];

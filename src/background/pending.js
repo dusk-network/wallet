@@ -4,6 +4,7 @@ import { activeWalletId } from "../shared/wallets.js";
 import {
   getExtensionApi,
   runtimeGetURL,
+  runtimeSendMessage,
   storageSessionGet,
   storageSessionSet,
   tabsCreate,
@@ -83,6 +84,8 @@ const LOST_TEXT = "The wallet stopped before it answered, as Firefox stops it in
 export const NOT_NOTED_TEXT = "The wallet couldn't note your approval, so nothing was signed or sent. Ask the site again.";
 
 const REJECTED = { code: ERROR_CODES.USER_REJECTED, message: "User rejected the request" };
+// A site asking while its request waits: not refused, the one before still waits.
+const PENDING = { code: ERROR_CODES.REQUEST_PENDING, message: "Request already pending. Answer the one open in the wallet." };
 const CLOSED = { code: ERROR_CODES.USER_REJECTED, message: "User closed the approval window" };
 
 async function readKept() {
@@ -280,7 +283,7 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
     pendingApprovals.size >= MAX_PENDING ||
     [...pendingApprovals.values()].some((entry) => entry.origin === origin)
   ) {
-    throw rpcError(ERROR_CODES.USER_REJECTED, "Another approval is already pending");
+    throw rpcError(PENDING.code, PENDING.message);
   }
 
   // Waiting, with its time left.
@@ -310,7 +313,7 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
         const kept = Object.values(all).find((r) => r.key === key && fresh(r));
         if (!kept) ended = { code: 4900, message: LOST_TEXT };
         else if (kept.ended) ended = kept.ended;
-        else if (pendingApprovals.has(kept.rid)) ended = { code: ERROR_CODES.USER_REJECTED, message: "Another approval is already pending" };
+        else if (pendingApprovals.has(kept.rid)) ended = PENDING;
         else if (kept.origin !== origin || kept.kind !== kind || !sameAsked(kept.context, context)) {
           ended = kept.ended = { code: ERROR_CODES.UNAUTHORIZED, message: "Wallet changed while awaiting approval" };
           closeShown(kept);
@@ -332,7 +335,7 @@ export async function requestUserApproval(kind, origin, params, shown = { wallet
       const { rid, createdAt, windowId, tabId, backTo, asked } = taken;
       return wait(rid, { kind, origin, params, shown, beforeApprove, key, context, createdAt, windowId, tabId, backTo, asked });
     }
-    if (taken) throw rpcError(ERROR_CODES.USER_REJECTED, "Another approval is already pending");
+    if (taken) throw rpcError(PENDING.code, PENDING.message);
     if (stale) closeShown(stale);
   }
 
@@ -373,6 +376,10 @@ ext?.windows?.onRemoved?.addListener((windowId) => {
 });
 
 ext?.tabs?.onRemoved?.addListener?.((tabId) => {
+  // Closed by the person while its send went, or after it said why not.
+  for (const kept of [handing, saying]) {
+    for (const [rid, entry] of kept) if (entry.tabId === tabId) kept.delete(rid);
+  }
   for (const [rid, entry] of pendingApprovals.entries()) {
     if (entry.tabId === tabId) {
       // Gone already: only the site's tab comes back.
@@ -466,6 +473,48 @@ export function resolvePendingDecision(message) {
   return decided(rid, entry, message);
 }
 
+// Approved sends shown in a tab (Firefox for Android), till their hand-over
+// ends: the tab stays meanwhile, and goes once the network took the send;
+// else it says why nothing went, till the person closes it (`saying`).
+const handing = new Map();
+const saying = new Map();
+
+/**
+ * What came of an approved send's hand-over to the network, for its approval
+ * kept open in a tab: gone once the network took it; else it says why, in the
+ * wallet, rather than only the site's own words.
+ * @param {string} rid
+ * @param {{ error?: { message?: string, data?: object } }} [outcome] - no error: it went
+ */
+export function sendOutcome(rid, { error } = {}) {
+  const id = String(rid ?? "");
+  const entry = handing.get(id);
+  if (!entry) return;
+  handing.delete(id);
+  if (!error) {
+    closeShown(entry);
+    return;
+  }
+  saying.set(id, entry);
+  const said = { message: String(error?.message ?? error ?? ""), ...(error?.data?.sent !== undefined ? { data: { sent: error.data.sent } } : {}) };
+  runtimeSendMessage({ type: "DUSK_APPROVAL_SEND_FAILED", rid: id, error: said }).catch(() => {});
+}
+
+/**
+ * The approval that said why its send didn't go, closed by the person: its
+ * tab goes, and the site's comes back.
+ * @param {string} rid
+ */
+export function closeSaidApproval(rid) {
+  const id = String(rid ?? "");
+  const entry = saying.get(id) ?? handing.get(id);
+  if (!entry) return false;
+  saying.delete(id);
+  handing.delete(id);
+  closeShown(entry);
+  return true;
+}
+
 async function decided(rid, entry, message) {
   const { decision } = message;
   const approve = decision === "approve";
@@ -484,8 +533,12 @@ async function decided(rid, entry, message) {
       return { ok: false, error: { code: "ended", message: NOT_NOTED_TEXT } };
     }
   } else noted.catch(() => {});
-  // A tab doesn't close itself as a window does.
-  if (entry.tabId !== undefined) closeShown(entry);
+  // A tab doesn't close itself as a window does. An approved send's stays
+  // through its hand-over, to say so if nothing went (sendOutcome).
+  if (entry.tabId !== undefined) {
+    if (approve && entry.kind === "send_tx") handing.set(rid, entry);
+    else closeShown(entry);
+  }
   keepAnswer(entry, approve ? "approved" : "rejected");
 
   if (approve) {
@@ -510,17 +563,18 @@ async function decided(rid, entry, message) {
  * wallet open now, which its window would show. Another wallet's stay.
  * @param {string|null} origin
  * @param {string} [reason]
- * @param {{ wallets?: string[], open?: string }} [opts]
+ * @param {{ wallets?: string[], open?: string, code?: number }} [opts] - `code`:
+ *   what its site hears, as a lock's 4100, rather than a refusal
  */
-export function cancelPendingApprovals(origin, reason = "Wallet state changed", { wallets, open = "" } = {}) {
+export function cancelPendingApprovals(origin, reason = "Wallet state changed", { wallets, open = "", code = ERROR_CODES.USER_REJECTED } = {}) {
   for (const [rid, entry] of pendingApprovals) {
     if (origin && entry.origin !== origin) continue;
     if (Array.isArray(wallets) && !wallets.includes(String(entry.shown?.walletId || open || ""))) continue;
-    rejectPending(rid, entry, reason);
+    rejectPending(rid, entry, reason, "cancelled", code);
   }
   // And those kept through a stop, not asked again yet: never taken up after it.
   endKeptWhere(
     (record) => (!origin || record.origin === origin) && (!Array.isArray(wallets) || wallets.includes(String(record.walletId || open || ""))),
-    { code: ERROR_CODES.USER_REJECTED, message: reason }
+    { code, message: reason }
   );
 }

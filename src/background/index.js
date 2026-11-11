@@ -36,7 +36,7 @@ import {
 import { handleRpc } from "./rpc.js";
 import { assertSendPassword, sendPasswordLimit, sendPasswordTerms } from "../shared/sendPassword.js";
 import { offersRequestLink, openRequestLink } from "./requestLinks.js";
-import { approvalShown, askKeptAgain, bindPendingWallet, cancelPendingApprovals, checkResume, decideKept, getPending, keptApproval, requestKey, resolvePendingDecision } from "./pending.js";
+import { approvalShown, askKeptAgain, bindPendingWallet, cancelPendingApprovals, checkResume, closeSaidApproval, decideKept, getPending, keptApproval, requestKey, resolvePendingDecision } from "./pending.js";
 import { approvalRecipientName, keepEngineNameCheck, siteNames } from "./siteNames.js";
 import {
   broadcastChainChangedAll,
@@ -189,7 +189,8 @@ async function ensureActivityTimestamp() {
 async function lockWallet(reason) {
   await engineCall("engine_lock");
   if ((await getEngineStatusStrict())?.isUnlocked) throw new Error("Wallet lock did not complete");
-  cancelPendingApprovals();
+  // Its site hears the wallet locked, as it did: not a refusal, nor another account.
+  cancelPendingApprovals(null, "Wallet locked", { code: ERROR_CODES.UNAUTHORIZED });
   await clearActivity();
   broadcastProfilesChangedAll().catch(() => {});
   emitUiLockState(false, reason).catch(() => {});
@@ -433,7 +434,7 @@ async function paysFor(params, accountIndex, status) {
 }
 
 // Only the wallet's own pages' to send, whatever a content script is made to.
-const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN"]);
+const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN", "DUSK_APPROVAL_CLOSE"]);
 
 // For when a site last used its connection: anything but what any page can ask.
 const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId", "dusk_openPaymentLink"]);
@@ -596,7 +597,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const activityContext = await prepareDappActivityContext(message.request);
         // Whether the page had a person's press as it asked: the content script's word, never the page's.
         const pressed = typeof message.pressed === "boolean" ? message.pressed : undefined;
-        const result = await handleRpc(origin, message.request, { pressed, approvalKey, resume }).finally(() => noteConnectionUse(origin, message.request));
+        const result = await handleRpc(origin, message.request, { pressed, approvalKey, resume, tabId: sender?.tab?.id }).finally(() => noteConnectionUse(origin, message.request));
         await updateDappActivity(message.request, activityContext);
         // A connection's answer brings the site the wallet's network, read once it's connected.
         sendResponse(CONNECTS.has(String(message.request?.method ?? "")) ? { id, result, state: await providerStateFor(origin) } : { id, result });
@@ -1207,6 +1208,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // An approval that said why its send didn't go, closed: its tab goes.
+      if (message?.type === "DUSK_APPROVAL_CLOSE") {
+        sendResponse({ ok: closeSaidApproval(message.rid) });
+        return;
+      }
+
       // An approval drawn: its words, and in a tab, the entry the phone's Back takes away.
       if (message?.type === "DUSK_APPROVAL_SHOWN") {
         sendResponse({ ok: await approvalShown(message, sender) });
@@ -1215,6 +1222,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
 
       // UI approves or rejects a pending request
       if (message?.type === "DUSK_PENDING_DECISION") {
+        // Approved with the wallet locked meanwhile (its engine's tab closed,
+        // in Firefox): nothing's answered, and the approval asks for the unlock.
+        if (message.decision === "approve" && getPending(message.rid) && !(await getEngineStatus().catch(() => null))?.isUnlocked) {
+          sendResponse({ ok: false, error: { code: "locked", message: "Unlock to answer." } });
+          return;
+        }
         // Answered while the background was stopped, before its site asked
         // again: a refusal is final now; an approval waits a moment for it.
         const kept = getPending(message.rid) ? null : await decideKept(message.rid, message.decision);

@@ -106,6 +106,9 @@ if (ext?.tabs?.onRemoved) {
         engineReady = false;
         engineReadyError = null;
         engineReadyPromise = null;
+        // The wallet went with its tab: pages say it's locked, and an
+        // approval open asks for the unlock before its answer.
+        runtimeSendMessage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason: "engine_closed" }).catch(() => {});
       }
     });
   } catch {

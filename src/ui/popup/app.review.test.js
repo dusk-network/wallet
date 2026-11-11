@@ -316,7 +316,79 @@ function pageHistory(win) {
   };
 }
 
+// A browser that takes one step of the page's history at a time, as Firefox
+// for Android may: a step asked while one is under way goes nowhere. Its
+// entries keep their state, which `state` gives for the one it's on.
+function oneStepHistory(win) {
+  const entries = [null];
+  let at = 0;
+  let moving = false;
+  return {
+    closed: false,
+    get state() {
+      return entries[at];
+    },
+    get at() {
+      return at;
+    },
+    pushState(state) {
+      entries.splice(at + 1, Infinity, state);
+      at++;
+    },
+    back() {
+      this.go(-1);
+    },
+    go(delta) {
+      if (moving) return;
+      if (at + delta < 0) {
+        this.closed = true;
+        return;
+      }
+      at += delta;
+      moving = true;
+      setTimeout(() => {
+        moving = false;
+        win.dispatchEvent(fakeEvent("popstate", { state: entries[at] }));
+      }, 0);
+    },
+  };
+}
+
 describe("the phone's Back button", () => {
+  // Amélie's: after a payment, Back on Home did nothing two or three times before it left.
+  it("leaves from Home with one Back after a payment's Done, the browser taking one step at a time", async () => {
+    let history;
+    const t = await popupOn(
+      "home",
+      { addressBook: { loaded: true, items: [] }, draft: null },
+      undefined,
+      { history: (win) => (history = oneStepHistory(win)) }
+    );
+    const button = (text) => t.app.querySelectorAll("button").find((b) => b.textContent === text);
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Send" && b.closest(".action-bar, .dashboard-top-actions")).click();
+    await flush();
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    field("To").value = B;
+    field("To").dispatchEvent(fakeEvent("input"));
+    field("Amount").value = "1";
+    field("Amount").dispatchEvent(fakeEvent("input"));
+    button("Review").click();
+    await flush();
+    pastClickGuard();
+    button("Confirm").click();
+    await flush();
+    expect(t.state.route).toBe("sent");
+    button("Done").click();
+    await flush();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flush();
+    expect(t.state.route).toBe("home");
+    // Nothing of the wallet's left above the page's own entry: one Back leaves.
+    expect(history.at).toBe(0);
+    history.back();
+    expect(history.closed).toBe(true);
+  });
+
   it("keeps one entry for each step in: the page's own Back takes one, and none goes up while no one presses anything", async () => {
     let history;
     const t = await popupOn(
@@ -438,6 +510,42 @@ describe("a half-typed Send, left with Back", () => {
 });
 
 describe("coming back to the wallet during a payment", () => {
+  // Chen's: back a minute later, the first thing shown was "waiting for a block", the block long come.
+  it("says it's looked up again from the moment it's left, never the wait for a block, till the lookup answers", async () => {
+    const HASH = "9e".repeat(32);
+    const looked = Promise.withResolvers();
+    const t = await popupOn(
+      "sent",
+      { addressBook: { loaded: true, items: [] }, sent: { phase: "sent", status: "submitted", hash: HASH, title: "Send", amountLux: "30000000", feeCapLux: "2500000", sentAt: Date.now(), startedAt: Date.now() } },
+      async (message, t) => {
+        if (message.type === "DUSK_UI_RECHECK_TX" && message.hash === HASH) {
+          await looked.promise;
+          t.open = { ...t.open, txs: [{ hash: HASH, status: "executed", submittedAt: Date.now() - 60_000, feePaid: "1855943", blockHeight: "4823435" }] };
+          t.deliver({ type: "DUSK_UI_TX_STATUS", hash: HASH, status: "executed", ok: true });
+          return { ok: true };
+        }
+        return undefined;
+      }
+    );
+    t.open = { ...t.open, txs: [{ hash: HASH, status: "submitted", submittedAt: Date.now() - 60_000 }] };
+    await t.render({ forceRefresh: true });
+    expect(t.app.textContent).toContain("Waiting for a block");
+
+    // Home pressed: what shows as the wallet comes back is the lookup, not the wait.
+    t.dom.document.visibilityState = "hidden";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    expect(t.app.textContent).toContain("Looking it up again…");
+    expect(t.app.textContent).not.toContain("Waiting for a block");
+    t.dom.document.visibilityState = "visible";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await flush();
+    expect(t.app.textContent).toContain("Looking it up again…");
+    looked.resolve();
+    await flush();
+    expect(t.app.textContent).toContain("In block 4,823,435");
+    expect(t.app.textContent).not.toContain("Looking it up again…");
+  });
+
   it("looks the payment up by its ID, and says Completed with its real fee, though nothing was heard while away", async () => {
     const HASH = "9f".repeat(32);
     const t = await popupOn(

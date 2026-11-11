@@ -27,6 +27,7 @@ import { activityRows, ensureActivity, refreshActivitySoon, selected, sozuFactOf
 import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
+import { siteLastSeen } from "../../shared/siteRecords.js";
 import { requestDraftOf } from "../lib/requestLink.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 import { openedFromNotice } from "../../platform/notices.js";
@@ -458,6 +459,9 @@ function activeSiteInfo(ov) {
   const origin = typeof ov?.activeOrigin === "string" ? ov.activeOrigin : "";
   if (!origin) return null;
   if (!origin.startsWith("https://") && !origin.startsWith("http://")) return null;
+  // A site that never asked the wallet for anything gets no Connect of its own.
+  const record = ov?.siteRecords?.[String(ov?.accounts?.[0] ?? "")]?.[origin];
+  if (!ov?.activeConnected && !siteLastSeen(record)) return null;
 
   // As its approval named it: "http://127.0.0.1:5354", "app.dusk.network".
   return {
@@ -892,6 +896,8 @@ async function lookUpSends() {
   const hashes = sendsOnTheirWay();
   if (!hashes.length) return;
   await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
+  // Looked up: what the node said shows from here on.
+  if (state.sent) state.sent.lookingUp = false;
   state.needsRefresh = true;
   await renderForConnection({ forceRefresh: true }).catch(() => {});
   if (Date.now() < resumeUntil && document.visibilityState !== "hidden" && sendsOnTheirWay().length) {
@@ -912,6 +918,22 @@ function comeBack() {
   resumeWatching();
 }
 
+// A send on its way when the wallet is left: the Sent screen says it's looked
+// up again, drawn at once from what it has, so that coming back never first
+// shows the wait for a block that may have come meanwhile. The lookup's answer
+// takes its place (lookUpSends).
+let drawn = null;
+function lookingUpOnLeave() {
+  const sent = state.sent;
+  if (state.route !== "sent" || !sent?.hash || !drawn || sentIsFinal(sent, state.overview)) return;
+  sent.lookingUp = true;
+  try {
+    setApp(sentView(state.overview, { state, actions: drawn }));
+  } catch {
+    // The next draw says it.
+  }
+}
+
 // The app on a phone, with Lock when I leave the app on: locked as the person
 // leaves it, unless the wallet itself sent them elsewhere for a moment. Back,
 // they're asked the password, as after Lock wallet, and return to the screen
@@ -927,17 +949,25 @@ function leave() {
 }
 
 // Unlocked again after leaving: back where they were, unless something
-// switched since (another wallet, a restore).
+// switched since (another wallet, a restore). Sends left on their way are
+// looked up again, as they couldn't be while it was locked.
+let wasUnlocked = null;
 function returnAfterUnlock(ov) {
+  const unlocked = Boolean(ov?.isUnlocked);
+  const unlockedNow = unlocked && wasUnlocked === false;
+  wasUnlocked = unlocked;
   const back = state.returnTo;
-  if (!back || !ov?.isUnlocked) return;
-  state.returnTo = null;
-  if (back.context === state.context && state.route === "home") state.route = back.route;
+  if (back && unlocked) {
+    state.returnTo = null;
+    if (back.context === state.context && state.route === "home") state.route = back.route;
+  }
+  if (unlockedNow) setTimeout(resumeWatching, 0);
 }
 
 try {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
+      lookingUpOnLeave();
       leave();
       return;
     }
@@ -1231,6 +1261,7 @@ export async function render({ forceRefresh = false } = {}) {
     // The header alone, for a change only it shows, such as a profile's label.
     renderHeader: () => renderHeader(state.overview),
   };
+  drawn = actions;
 
   // Settings should be accessible even when the wallet is locked or not yet imported.
   // TODO: Reconsider?

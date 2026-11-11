@@ -176,6 +176,7 @@ vi.mock("./pending.js", () => ({
     throw Object.assign(new Error("The wallet stopped before it answered, as Firefox stops it in the background. Check its Activity before you try again."), { code: 4900 });
   }),
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
+  closeSaidApproval: vi.fn(() => false),
 }));
 
 vi.mock("./dappEvents.js", () => ({
@@ -358,6 +359,26 @@ describe("background auto-lock activity", () => {
     expect(activityRecord()).toBeUndefined();
   });
 
+  // Marek's: Approve with the wallet locked meanwhile (its engine's tab closed) was taken as
+  // approved, and the site's record said "Approved, not sent".
+  it("answers nothing when Approve comes with the wallet locked, so the approval asks for the unlock", async () => {
+    const pending = await import("./pending.js");
+    pending.getPending.mockReturnValue({ kind: "send_tx", origin: "https://bridge.example" });
+    try {
+      mocks.engineUnlocked = false;
+      await expect(sendBackgroundMessage({ type: "DUSK_PENDING_DECISION", rid: "r1", decision: "approve" })).resolves.toEqual({
+        ok: false,
+        error: { code: "locked", message: "Unlock to answer." },
+      });
+      expect(pending.resolvePendingDecision).not.toHaveBeenCalled();
+      // A refusal needs no unlock.
+      await expect(sendBackgroundMessage({ type: "DUSK_PENDING_DECISION", rid: "r1", decision: "reject" })).resolves.toEqual({ ok: true });
+      expect(pending.resolvePendingDecision).toHaveBeenCalledTimes(1);
+    } finally {
+      pending.getPending.mockReturnValue(null);
+    }
+  });
+
   it("manual lock clears persisted activity and broadcasts profilesChanged", async () => {
     mocks.sessionStore.set(AUTO_LOCK_ACTIVITY_KEY, { lastActivityAt: 1_000_000 });
 
@@ -366,6 +387,8 @@ describe("background auto-lock activity", () => {
     expect(mocks.engineCall).toHaveBeenCalledWith("engine_lock");
     expect(mocks.broadcastProfilesChangedAll).toHaveBeenCalledTimes(1);
     expect(mocks.cancelPendingApprovals).toHaveBeenCalledTimes(1);
+    // Marek's: a site with a request waiting heard another account; it hears the lock.
+    expect(mocks.cancelPendingApprovals).toHaveBeenCalledWith(null, "Wallet locked", { code: 4100 });
     expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({
         type: "DUSK_UI_LOCK_STATE",

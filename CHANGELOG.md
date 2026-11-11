@@ -40,6 +40,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Answered a site's request made while its last one waits with -32002, request already pending, rather than a refusal.
+- Told a site its request ended as the wallet locked with 4100, wallet locked, rather than a refusal.
+- Showed the bar with Connect only for a site that asked the wallet for something or is connected.
+- Opened a request link handed to the extension in place of the web page's tab on a phone.
 - Asked for the password before Reset, as for removing a wallet.
 - Listed fingerprint unlock in the Android app before the phone has a fingerprint, saying to add one first.
 - Returned to the screen left after the Android app's Immediately lock, with what was typed on it.
@@ -70,6 +74,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Asked for the unlock on a site's approval once the wallet locks, as its tab in Firefox for Android closes, rather than an Approve that does nothing.
+- Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
+- Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.
+- Said on Send the fee its Review asks, at the network's gas price.
+- Took one step back with each press of a phone's Back, also after a payment, rather than none two or three times.
 - Saved Auto-lock's time in the Android app, which said it couldn't, and locked the app after it.
 - Turned fingerprint unlock off once the phone's fingerprints or screen lock went, said so, and offered it again.
 - Brought up the keyboard for the password after the fingerprint prompt's Use password.

@@ -50,7 +50,9 @@ import {
   warning,
 } from "./parts.js";
 import { bridgeCallOf, callArgs, requestSummary, withdrawalAmount, withdrawalCost } from "./summary.js";
-import { runtimeGetURL, runtimeSendMessage, tabsCreate } from "../../platform/extensionApi.js";
+import { sentOf } from "../../shared/sendOutcome.js";
+import { reasonText } from "../popup/views/sent.js";
+import { getExtensionApi, runtimeGetURL, runtimeSendMessage, tabsCreate } from "../../platform/extensionApi.js";
 
 const app = document.getElementById("app");
 const MAX_U64 = 18446744073709551615n;
@@ -290,6 +292,19 @@ document.addEventListener(
   { passive: true }
 );
 
+// The wallet locked while this waits, as its engine's tab closed in Firefox:
+// the request stays, and the window asks for the unlock before an answer,
+// rather than an Approve that can't do anything.
+getExtensionApi()?.runtime?.onMessage?.addListener?.((message) => {
+  // An approved send of this window's that didn't go: why, in the wallet.
+  if (message?.type === "DUSK_APPROVAL_SEND_FAILED" && message.rid === rid && handingOver) {
+    notSent(message.error);
+    return;
+  }
+  if (message?.type !== "DUSK_UI_LOCK_STATE" || message.isUnlocked !== false || !approvalLive) return;
+  renderNotification().catch(() => {});
+});
+
 // A request this window no longer answers: the wallet stopped meanwhile (Firefox
 // for Android stops it in the background) and nothing took it up, or it was
 // handled elsewhere, maybe approved and sent. Said, with nothing to press:
@@ -329,10 +344,40 @@ async function untilTakenUp(ask, waking) {
   return answer;
 }
 
+// An approved send on a phone, whose tab the wallet keeps while it hands the
+// send to the network, and closes once the network took it (pending.js): it
+// says so meanwhile, and why if nothing went, in the wallet's own words
+// rather than only the site's. No word at all (the wallet stopped): what an
+// approval that isn't waiting any more says.
+const HANDING_OVER_MS = 60_000;
+let handingOver = false;
+function handOver() {
+  approvalLive = false;
+  handingOver = true;
+  stopActivityHeartbeat();
+  setChildren(actionsHost(), [h("p", { class: "ap-sub", role: "status", text: "Sending…" })]);
+  setTimeout(() => {
+    if (handingOver) ended(ENDED_TEXT);
+  }, HANDING_OVER_MS);
+}
+
+function notSent(error) {
+  handingOver = false;
+  endedSaid = true;
+  const text =
+    sentOf(error) === false
+      ? ["Not sent.", reasonText(error?.message), "No fee was charged."].filter(Boolean).join(" ")
+      : "It may not have gone through. Check Activity before you ask the site again.";
+  show(
+    [h("div", { class: "err", role: "alert", text })],
+    [h("button", { class: "btn-primary", type: "button", text: "Back to the site", onclick: () => send({ type: "DUSK_APPROVAL_CLOSE", rid }).catch(() => window.close()) })]
+  );
+}
+
 // The answer, and the window goes, unless the wallet refused what came with it:
 // then it says why, and the request goes on waiting. One that isn't waiting
-// any more says so.
-async function decide(decision, approvedParams, withAnswer = {}) {
+// any more says so. An approved send on a phone stays while it's handed over.
+async function decide(decision, approvedParams, withAnswer = {}, { sends = false } = {}) {
   const res = await untilTakenUp(
     () => send({ type: "DUSK_PENDING_DECISION", rid, decision, ...(decision === "approve" ? { approvedParams, ...withAnswer } : {}) }),
     (answer) => answer?.error?.code === "waking"
@@ -346,7 +391,16 @@ async function decide(decision, approvedParams, withAnswer = {}) {
     ended(res.error?.message);
     return;
   }
+  // The wallet locked meanwhile: nothing's answered, and the unlock comes first.
+  if (res?.error?.code === "locked") {
+    await renderNotification();
+    return;
+  }
   if (res?.error?.message) throw Object.assign(new Error(res.error.message), { refused: true, data: res.error.data });
+  if (decision === "approve" && sends && isPhone()) {
+    handOver();
+    return;
+  }
   window.close();
 }
 
@@ -391,7 +445,7 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
   const error = h("div", { class: "field-error ap-actions__error", role: "alert", hidden: true });
   const answer = async (decision, approvedParams, withAnswer) => {
     try {
-      await decide(decision, approvedParams, withAnswer);
+      await decide(decision, approvedParams, withAnswer, { sends });
     } catch (e) {
       // What the password's refusal says, under its field.
       if (e?.refused && e.data?.sendPassword) {
@@ -786,7 +840,7 @@ export async function renderNotification() {
         site,
         requestHead({ title: summary.title, amount: summary.amount, node: summary.node, to: headTo(summary.to), sub: summary.sub }),
         h("div", { class: "ap-unlock" }, [
-          h("label", { for: "approval-password", text: "Unlock to review and approve it" }),
+          h("label", { for: "approval-password", text: "Unlock to answer" }),
           pwd,
           errLine,
           busyNote,

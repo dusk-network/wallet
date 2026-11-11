@@ -16,10 +16,12 @@ import { shortAddress } from "./lib/strings.js";
 import { dateText } from "./lib/time.js";
 import { fakeEvent, installFakeDom, isShown, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
-const mocks = vi.hoisted(() => ({ pending: null, sent: [], answers: {} }));
+const mocks = vi.hoisted(() => ({ pending: null, sent: [], answers: {}, heard: [] }));
 
 vi.mock("./components/GasEditor.js", () => ({}));
 vi.mock("../platform/extensionApi.js", () => ({
+  // What the wallet tells its pages, as the approval's window hears it.
+  getExtensionApi: () => ({ runtime: { onMessage: { addListener: (fn) => mocks.heard.push(fn) } } }),
   runtimeGetURL: (path) => `chrome-extension://wallet/${path}`,
   runtimeSendMessage: vi.fn(async (message) => {
     mocks.sent.push(message);
@@ -60,6 +62,7 @@ beforeEach(() => {
   dom.document.body.appendChild(app);
   mocks.sent = [];
   mocks.answers = {};
+  mocks.heard = [];
   vi.resetModules();
 });
 
@@ -1975,5 +1978,66 @@ describe("an approval's button, the moment the window shows", () => {
     pastClickGuard();
     approve().click();
     await vi.waitFor(() => expect(decision("approve")).toBeTruthy());
+  });
+});
+
+// Marek's: the "Keep open" tab closed with an approval open; the wallet locked, and Approve did nothing.
+describe("the wallet locking while an approval is open", () => {
+  const lockedNow = () => {
+    mocks.pending = { ...mocks.pending, isUnlocked: false, accounts: [], duskNames: {} };
+  };
+
+  it("asks for the unlock to answer it, rather than leaving an Approve that does nothing", async () => {
+    await render("send_tx", transfer(BOB));
+    expect(approve().textContent).toBe("Approve");
+    lockedNow();
+    for (const hear of mocks.heard) hear({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason: "engine_closed" });
+    await vi.waitFor(() => expect(app.querySelector("label[for=approval-password]")?.textContent).toBe("Unlock to answer"));
+    expect(buttons()).toEqual(["Reject", "Unlock"]);
+    expect(decision("approve")).toBeUndefined();
+  });
+
+  it("asks for the unlock when Approve finds the wallet locked first, and answers nothing", async () => {
+    await render("send_tx", transfer(BOB));
+    mocks.answers.DUSK_PENDING_DECISION = async () => {
+      lockedNow();
+      return { ok: false, error: { code: "locked", message: "Unlock to answer." } };
+    };
+    pastClickGuard();
+    approve().click();
+    await vi.waitFor(() => expect(app.querySelector("label[for=approval-password]")?.textContent).toBe("Unlock to answer"));
+    expect(dom.window.close).not.toHaveBeenCalled();
+    expect(buttons()).toEqual(["Reject", "Unlock"]);
+  });
+});
+
+// Marek's: Approve as the signal dropped; the approval closed at once, and only the site said "NetworkError".
+describe("an approved send on a phone", () => {
+  const onPhone = () => vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+
+  it("stays while the wallet hands it to the network, and says in the wallet why nothing went", async () => {
+    onPhone();
+    await render("send_tx", transfer(BOB));
+    pastClickGuard();
+    approve().click();
+    await vi.waitFor(() => expect(decision("approve")).toBeTruthy());
+    await settle();
+    expect(dom.window.close).not.toHaveBeenCalled();
+    expect(visibleText(bar())).toBe("Sending…");
+
+    for (const hear of mocks.heard) hear({ type: "DUSK_APPROVAL_SEND_FAILED", rid: "r1", error: { message: "NetworkError when attempting to fetch resource." } });
+    await settle();
+    expect(visibleText(app)).toBe("Not sent. Couldn't reach the network. No fee was charged.");
+    expect(buttons()).toEqual(["Back to the site"]);
+    bar().querySelector("button").click();
+    await settle();
+    expect(mocks.sent.at(-1)).toEqual({ type: "DUSK_APPROVAL_CLOSE", rid: "r1" });
+  });
+
+  it("closes as before on a computer, whose window goes with the answer", async () => {
+    await render("send_tx", transfer(BOB));
+    pastClickGuard();
+    approve().click();
+    await vi.waitFor(() => expect(dom.window.close).toHaveBeenCalled());
   });
 });

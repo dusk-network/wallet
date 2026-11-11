@@ -46,7 +46,7 @@ import {
   getEngineStatusStrict,
   invalidateEngineConfig,
 } from "./engineHost.js";
-import { cancelPendingApprovals, requestUserApproval as askForApproval } from "./pending.js";
+import { cancelPendingApprovals, requestUserApproval as askForApproval, sendOutcome } from "./pending.js";
 import { siteWalletId } from "./siteWallet.js";
 import { notifyTxSubmitted } from "./txNotify.js";
 import { readCurrent, siteNames } from "./siteNames.js";
@@ -60,7 +60,7 @@ import {
 import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
-export async function handleRpc(origin, request, { pressed, approvalKey = "", resume = false } = {}) {
+export async function handleRpc(origin, request, { pressed, approvalKey = "", resume = false, tabId } = {}) {
   // Each approval this request asks for, by the site's request (`approvalKey`):
   // asked again after the background stopped (`resume`), it takes up the one
   // still open (pending.js).
@@ -598,7 +598,7 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
 
     case "dusk_openPaymentLink": {
       // Not a connection's: a web wallet hands over its own request, to be reviewed in Send.
-      return handOverRequestLink(origin, firstParamObject(params)?.link, { pressed });
+      return handOverRequestLink(origin, firstParamObject(params)?.link, { pressed, tabId });
     }
 
     case "dusk_chainId": {
@@ -835,10 +835,12 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
           passwordFor = await proveSiteSend(paramsAnswered(approvedParams), { password: sendPassword, walletKey, nodeUrl: approvalNodeUrl });
         },
       });
-      // Approved, and then not sent, or maybe not: its site's record says so.
+      // Approved, and then not sent, or maybe not: its site's record says so,
+      // and its approval, kept open in a tab, says it in the wallet.
       const sayFailed = (error) => {
         const walletId = shown.walletId || approvalContext.walletId;
         noteSiteSendFailed(walletId, origin, { id: shown.rid, answer: sentOf(error) === false ? "failed" : "unconfirmed" }).catch(() => {});
+        sendOutcome(shown.rid, { error });
         throw error;
       };
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
@@ -893,6 +895,8 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
       if (result?.nonce !== undefined && result?.nonce !== null) {
         response.nonce = result.nonce?.toString?.() ?? String(result.nonce);
       }
+      // Handed over: its approval's tab goes.
+      sendOutcome(shown.rid);
       return response;
       }).catch(sayFailed);
     }

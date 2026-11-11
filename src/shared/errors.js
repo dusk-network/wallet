@@ -11,6 +11,8 @@ export const SEND_PASSWORD_WAITS = "It waits for your password, so nothing was s
 
 export const ERROR_CODES = {
   USER_REJECTED: 4001,
+  // A request of the site's waits for an answer already (EIP-1474's resource unavailable).
+  REQUEST_PENDING: -32002,
   UNAUTHORIZED: 4100,
   UNSUPPORTED: 4200,
   INTERNAL: -32603,

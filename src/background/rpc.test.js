@@ -154,9 +154,12 @@ vi.mock("./engineHost.js", () => ({
   getEngineStatusStrict,
   invalidateEngineConfig,
 }));
+// What came of each approved send's hand-over, for its approval kept open in a tab.
+const sendOutcome = vi.hoisted(() => vi.fn());
 vi.mock("./pending.js", () => ({
   cancelPendingApprovals: vi.fn(),
   requestUserApproval,
+  sendOutcome,
 }));
 vi.mock("./txNotify.js", () => ({ notifyTxSubmitted }));
 // The transaction store's reset count when a send begins.

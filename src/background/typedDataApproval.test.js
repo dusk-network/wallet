@@ -165,7 +165,8 @@ describe("typed-data RPC with the real approval queue", () => {
     const second = request(origins[0], params("duplicate"));
     await vi.waitFor(() => expect(hashTypedDataHex).toHaveBeenCalledTimes(2));
     expect(pendingApprovals.size).toBe(1);
-    await expect(second).rejects.toMatchObject({ code: 4001, message: "Another approval is already pending" });
+    // Marek's: told 4001, the site said he cancelled what he never saw.
+    await expect(second).rejects.toMatchObject({ code: -32002, message: "Request already pending. Answer the one open in the wallet." });
     expect(mocks.windowsCreate).toHaveBeenCalledTimes(1);
     expect(mocks.engineCall).not.toHaveBeenCalled();
     expect(approval(origins[0])[1].params.digestHex).toBe(expected);

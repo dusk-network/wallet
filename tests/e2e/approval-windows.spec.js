@@ -260,7 +260,7 @@ test("a locked wallet shows what the site asks, with Reject beside Unlock", asyn
   await open(page, pendingFor("send_tx", pay, { isUnlocked: false, accounts: [], duskNames: {} }));
   await expect(page.getByRole("heading", { name: "Pay" })).toBeVisible();
   await expect(page.locator(".ap-amount")).toHaveText("1 DUSK");
-  await expect(page.getByLabel("Unlock to review and approve it")).toBeVisible();
+  await expect(page.getByLabel("Unlock to answer")).toBeVisible();
   const reject = page.getByRole("button", { name: "Reject", exact: true });
   const unlock = page.getByRole("button", { name: "Unlock", exact: true });
   const [r, u] = [await reject.boundingBox(), await unlock.boundingBox()];

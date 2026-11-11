@@ -27,7 +27,7 @@ import { amountField } from "../../components/AmountField.js";
 import { ownProfileName, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { fieldLabel, reviewActions, submitOnGasEnter, textInput, wrappingInput } from "../../components/FormControls.js";
-import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, networkGasPrice, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
@@ -150,12 +150,16 @@ export function sendFormView(ov, { state, actions } = {}) {
   // Amount helpers (MAX + slider)
   // ------------------------------------------------------------
   // Max and the balance check reserve the fee Review starts from: the
-  // draft's own gas, custom gas from Settings, or the transfer's default.
+  // draft's own gas, custom gas from Settings, or the transfer's default
+  // limit at the node's gas price, as Review asks it (till it answers, the
+  // wallet's own), so the two say the same fee.
+  let networkPrice = null;
   function feeLuxForRecipientType(type) {
     const privacy = type === "address" ? "shielded" : "public";
+    const defaultGas = getDefaultGas(TX_KIND.TRANSFER, { privacy });
     return gasFeeLux(
       startingGas({
-        defaultGas: getDefaultGas(TX_KIND.TRANSFER, { privacy }),
+        defaultGas: networkPrice && defaultGas ? { ...defaultGas, price: networkPrice } : defaultGas,
         minLimit: getMinimumGas(TX_KIND.TRANSFER, { privacy })?.limit,
         customGas: ov?.customGas,
         gas: draft?.gas,
@@ -1104,6 +1108,14 @@ export function sendFormView(ov, { state, actions } = {}) {
   updateToType();
   // A link already paid says so as it opens.
   sayAgain();
+  // The node's gas price, as Review asks it: the fee and Max from it.
+  networkGasPrice(actions)
+    .then((price) => {
+      if (!price || price === networkPrice) return;
+      networkPrice = price;
+      updateAmountHelpers();
+    })
+    .catch(() => {});
 
   return [
     subnav({

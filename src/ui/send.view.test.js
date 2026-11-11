@@ -667,6 +667,24 @@ describe("a memo too long for the network", () => {
 });
 
 describe("send's amount", () => {
+  // Amélie's and Lena's: Send said up to 0.0025, its Review up to 0.005, the node asking 2 LUX.
+  it("says the fee its Review will, at the node's gas price, and keeps it from Max", async () => {
+    const state = newState();
+    const form = mount(state, overview(), async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {}));
+    typeInto(form.to, ALICE.account);
+    await settle();
+    expect(form.feeNote()).toBe("Network fee up to 0.005 DUSK");
+    expect(form.balanceLine()).toBe("Available after fees 177.9815 DUSK");
+
+    // Its Review: the same fee.
+    typeInto(form.amount, "1");
+    state.route = "confirm";
+    Object.assign(state.draft, { privacy: "public", amountLux: "1000000000" });
+    mount(state, overview(), async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {}));
+    await settle();
+    expect(visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-fee"))).toBe("Network feeup to 0.005 DUSKTotalup to 1.005 DUSK");
+  });
+
   it("says what's available after fees, fills Max, and says under the field what's wrong", () => {
     const state = newState();
     const form = mount(state);

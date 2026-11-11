@@ -7,6 +7,7 @@
 import { makePaymentLink, parsePaymentLink, readPaymentLink } from "@dusk-network/app-core/payment-links";
 
 import { openWalletTab } from "./walletTab.js";
+import { isPhone } from "../ui/lib/device.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { isLocalHttpHostname } from "../shared/securityPolicy.js";
 import { getSettings } from "../shared/settings.js";
@@ -47,8 +48,11 @@ export async function offersRequestLink(message, sender) {
   return Boolean(linkOf(message, sender)) && Boolean(await loadVault());
 }
 
-// The extension's Send, with the link filled in, in the wallet's tab.
-const openSend = (link) => openWalletTab(`full.html?route=send&link=${encodeURIComponent(link)}`);
+// The extension's Send, with the link filled in, in the wallet's tab. On a
+// phone, in place of the web page's tab that handed it over (`fromTab`):
+// both are called Dusk Wallet, and one more piled up with each link.
+const openSend = (link, fromTab) =>
+  openWalletTab(`full.html?route=send&link=${encodeURIComponent(link)}`, { replacing: isPhone() ? fromTab : undefined });
 
 /**
  * Opens the extension's Send on a tab of its own, with the link filled in.
@@ -59,7 +63,7 @@ const openSend = (link) => openWalletTab(`full.html?route=send&link=${encodeURIC
 export async function openRequestLink(message, sender) {
   const link = linkOf(message, sender);
   if (!link) return false;
-  await openSend(link);
+  await openSend(link, sender?.tab?.id);
   return true;
 }
 
@@ -91,14 +95,14 @@ async function siteLinkOf(origin, raw) {
  * its Review and Confirm. False where there's no wallet here to pay it with.
  * @param {string} origin - the asking page's
  * @param {unknown} link
- * @param {{ pressed?: boolean }} [context] - whether the page had a press when it asked, where the browser says
+ * @param {{ pressed?: boolean, tabId?: number }} [context] - whether the page had a press when it asked, where the browser says, and its tab
  * @returns {Promise<boolean>} whether Send opened
  */
-export async function handOverRequestLink(origin, link, { pressed } = {}) {
+export async function handOverRequestLink(origin, link, { pressed, tabId } = {}) {
   const { link: own, problem } = await siteLinkOf(origin, link);
   if (!own) throw rpcError(ERROR_CODES.INVALID_PARAMS, problem || "params.link must be a request link to this web wallet's own Send");
   if (pressed === false) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Hand a request over from a press of the person's");
   if (!(await loadVault())) return false;
-  await openSend(own);
+  await openSend(own, tabId);
   return true;
 }
