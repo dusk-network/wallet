@@ -507,9 +507,11 @@ function pulseClass(state, hash) {
  *   state: object, actions: object, hidden: boolean, nodeUrl?: string,
  *   contactName: (address: string) => string,
  *   when: (tx: object) => string,
- * }} ctx
+ *   context?: string,
+ * }} ctx - `context`: the activity a row found past its page is of, for its
+ *   details to show it from (`txDetailRow`), as Receive's requests hand theirs
  */
-export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when }) {
+export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when, context }) {
   const desc = describeTx(tx, { contactName, nodeUrl });
   const hash = String(tx?.hash ?? "");
   const sub = subText(desc, when(tx), { hidden, spoken: true });
@@ -520,6 +522,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
 
   const open = () => {
     if (!state || !hash) return;
+    if (context) state.txDetailRow = { context, hash, reading: false, row: tx };
     state.txDetailHash = hash;
     // Back from the details returns here: Activity, a contact's page, or Home.
     state.txDetailFrom = ["activity", "contacts"].includes(state.route) ? state.route : "home";

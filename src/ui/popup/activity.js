@@ -29,6 +29,7 @@ import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { nameFactsFor } from "../../shared/knownCalls.js";
 import { chainIdForNode, networkForNode } from "../../shared/nodeNetwork.js";
 import { lookupRecipientNames } from "../../shared/duskNames.js";
+import { NODE_ANSWER_MS } from "../../shared/networkStatus.js";
 import { forgetTxs, getTxEpoch, listTxs, patchTxMeta } from "../../shared/txStore.js";
 import { VERIFIED_NAME_TTL_MS, duskNamesScope } from "../../shared/verifiedNames.js";
 import { noteTxStatus, sentStatus } from "./views/sent.js";
@@ -121,10 +122,11 @@ async function settle(a, state) {
   for (const { hash } of keep) await patchTxMeta(hash, { settled: true }, { epoch });
 }
 
-// Names kept from a check in the last ten minutes, as sites get them.
-async function keptNames(a) {
+// Names kept from a check in the last ten minutes, as sites get them: of the
+// page's counterparties, or those of `entries` (a search's whole history).
+async function keptNames(a, entries = a.entries) {
   const scope = duskNamesScope(a.nodeUrl);
-  const accounts = counterparties(a);
+  const accounts = counterparties(a, entries);
   if (!scope || !accounts.length) return;
   const now = Date.now();
   for (const [account, { name, at }] of await getCounterpartyNames(scope, accounts)) {
@@ -132,14 +134,15 @@ async function keptNames(a) {
   }
 }
 
-const counterparties = (a) => [
-  ...new Set(a.entries.map((e) => e.counterparty).filter((c) => c && c !== a.account && classifyDuskIdentifier(c) === "account")),
+const counterparties = (a, entries = a.entries) => [
+  ...new Set(entries.map((e) => e.counterparty).filter((c) => c && c !== a.account && classifyDuskIdentifier(c) === "account")),
 ];
 
-// The shown counterparties' names, checked again: one Multicall query for up to 32.
-async function checkNames(a) {
+// The shown counterparties' names, checked again: one Multicall query for up
+// to 32. Of the page's, or those of `entries`.
+async function checkNames(a, entries = a.entries) {
   const scope = duskNamesScope(a.nodeUrl);
-  const due = counterparties(a).filter((c) => !a.checked.has(c));
+  const due = counterparties(a, entries).filter((c) => !a.checked.has(c));
   if (!scope || !due.length) return false;
   for (const c of due) a.checked.add(c);
   const names = await lookupRecipientNames(due, { nodeUrl: a.nodeUrl });
@@ -404,6 +407,16 @@ export async function showMoreActivity({ state, render }) {
 const WHOLE_RUN_REQUESTS = 64;
 const WHOLE_RUNS = 64;
 
+// What `promise` gives within `ms`, or LATE.
+const LATE = Symbol("late");
+function within(promise, ms) {
+  let timer;
+  const late = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(LATE), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
 /**
  * Activity's search: the account's whole history, its older blocks synced
  * first as far back as they go, as Show more would, then every row kept read
@@ -429,6 +442,15 @@ export function searchedActivity(ov, { state, render }) {
         ({ complete } = await a.history.read({ limit: 1 }));
       }
       const read = await a.history.read({ limit: Number.MAX_SAFE_INTEGER - 1 });
+      // The .dusk names of whom the rows past the page are with too, as the
+      // page's, as a name is searched for as well: those kept, then those
+      // checked again for as long as a node that answers takes. A silent node
+      // doesn't hold the search: the names it gives later show when they come.
+      await keptNames(a, read.entries).catch(() => {});
+      const checking = checkNames(a, read.entries).catch(() => false);
+      if ((await within(checking, NODE_ANSWER_MS)) === LATE) {
+        checking.then((named) => named && state.activity === a && redraw(state, render));
+      }
       if (state.activity === a) a.searched = { entries: read.entries, meta: read.state };
     })()
       .catch(() => {})

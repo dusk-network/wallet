@@ -14,6 +14,7 @@ import { shortAddress } from "./lib/strings.js";
 import { homeView } from "./popup/views/home.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
 import { activityKey } from "./popup/activity.js";
+import { lookupRecipientNames } from "../shared/duskNames.js";
 
 // The token and NFT cards load on their own.
 vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
@@ -28,6 +29,8 @@ vi.mock("../platform/index.js", async (importOriginal) => ({ ...(await importOri
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupPrimaryName: vi.fn(async () => "alice.dusk"),
+  // The .dusk names of an Activity's counterparties, as the node checks them: none unless a test gives some.
+  lookupRecipientNames: vi.fn(async () => new Map()),
 }));
 
 // Times as a popup in UTC shows them, the day after the fixture's transactions.
@@ -438,6 +441,86 @@ describe("the Activity view", () => {
     field.value = "";
     field.dispatchEvent(new Event("input"));
     expect(rows()).toHaveLength(2);
+
+    // Astra's: a payment found past the page opened as "This transaction isn't in your activity".
+    field.value = "marta";
+    field.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(rows()).toHaveLength(2));
+    body()
+      .querySelectorAll(".tx-row")
+      .find((row) => visibleText(row).startsWith("Estudio Marta ·"))
+      .querySelector("button.tx-open")
+      .click();
+    await settle();
+    expect(body().querySelector(".tx-missing")).toBeNull();
+    expect([visibleText(body().querySelector(".tx-hero-name")), visibleText(body().querySelector(".tx-hero-amount"))]).toEqual(["Estudio Marta", "+1,100 DUSK"]);
+  });
+
+  // Astra's: a .dusk name searched for found nothing where its payments were all past the page, their names never read.
+  it("finds a payment past the page by its counterparty's .dusk name, read as the page's are", async () => {
+    const { state, draw } = setup({ complete: false, route: "activity" });
+    const kept = state.activity.entries;
+    let synced = false;
+    Object.assign(state.activity, {
+      limit: 2,
+      entries: kept.slice(0, 2),
+      checked: new Set(),
+      epoch: Promise.resolve(1),
+      history: {
+        sync: vi.fn(async () => {
+          synced = true;
+        }),
+        read: vi.fn(async ({ limit }) => ({ entries: kept.slice(0, synced ? limit : 2), state: null, complete: synced, coveredTo: 0 })),
+      },
+    });
+    lookupRecipientNames.mockImplementationOnce(async (accounts) => new Map(accounts.filter((a) => a === SENDER).map((a) => [a, "sender.dusk"])));
+    draw();
+    const field = body().querySelector('input[aria-label="Search activity"]');
+    field.value = "sender.dusk";
+    field.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(rows().map((row) => [row.split(" · ")[0], row.endsWith("+1,000 DUSK")])).toEqual([["sender.duskReceived", true]]));
+    expect(lookupRecipientNames).toHaveBeenCalledWith(expect.arrayContaining([SENDER]), expect.anything());
+  });
+
+  it("isn't held by a node that doesn't answer for the names past the page, and names those rows when it does", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(NOW);
+    const { state, draw } = setup({ complete: false, route: "activity" });
+    const kept = state.activity.entries;
+    let synced = false;
+    Object.assign(state.activity, {
+      limit: 2,
+      entries: kept.slice(0, 2),
+      checked: new Set(),
+      epoch: Promise.resolve(1),
+      history: {
+        sync: vi.fn(async () => {
+          synced = true;
+        }),
+        read: vi.fn(async ({ limit }) => ({ entries: kept.slice(0, synced ? limit : 2), state: null, complete: synced, coveredTo: 0 })),
+      },
+    });
+    // The node takes the names' check and answers it only later.
+    let answer;
+    lookupRecipientNames.mockClear();
+    lookupRecipientNames.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    draw();
+    const field = body().querySelector('input[aria-label="Search activity"]');
+    field.value = "1,000";
+    field.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(lookupRecipientNames).toHaveBeenCalledWith(expect.arrayContaining([SENDER]), expect.anything()));
+    expect(visibleText(body().querySelector(".tx-empty"))).toContain("Looking");
+
+    // Past the time a node that answers takes, what's found shows, by its address.
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(rows().map((row) => row.split(" · ")[0])).toEqual([`${short(SENDER)}Received`]));
+
+    // The name it gives later shows, and is searched for.
+    answer(new Map([[SENDER, "sender.dusk"]]));
+    await vi.waitFor(() => expect(rows().map((row) => row.split(" · ")[0])).toEqual(["sender.duskReceived"]));
+    field.value = "sender.dusk";
+    field.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(rows().map((row) => row.split(" · ")[0])).toEqual(["sender.duskReceived"]));
   });
 
   it("finds no row by its amount while balances are hidden, and says what's still to read", () => {

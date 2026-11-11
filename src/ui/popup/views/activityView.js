@@ -16,7 +16,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { subnav } from "../../components/Subnav.js";
-import { activityRows, hasMoreActivity, searchedActivity, showMoreActivity } from "../activity.js";
+import { activityKey, activityRows, hasMoreActivity, searchedActivity, showMoreActivity } from "../activity.js";
 import { activityExportPanel } from "../activityExport.js";
 import { ACTIVITY_FILTERS, clockText, contactNames, dayLabel, describeTx, inFilter, recentText, txRowEl, whenText } from "./txRow.js";
 
@@ -182,10 +182,12 @@ export function activityView(ov, { state, actions } = {}) {
     else days.push({ label, rows: [tx] });
   }
 
+  // A search's rows past the page go to their details with themselves: the page doesn't have them.
+  const context = searched.whole ? activityKey(ov) : undefined;
   const groups = days.map(({ label, rows: dayRows }) =>
     h("section", { class: "tx-day" }, [
       h("h2", { class: "tx-day-label", text: label }),
-      h("ul", { class: "group tx-list" }, dayRows.map((tx) => txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when }))),
+      h("ul", { class: "group tx-list" }, dayRows.map((tx) => txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when, context }))),
     ])
   );
 
