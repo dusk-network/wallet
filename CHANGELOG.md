@@ -76,6 +76,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Measured native staking's rate over the 30 days to the last whole day of blocks, counting every stake, so it no longer moves from one block to the next and both wallets give the same figure.
 - Said Can't reach the network, and that the balance may be out of date, soon after the node stops answering while the wallet is open.
 - Kept the profile's name whole beside the network while it says Offline or Can't reach the network.
 - Kept the staking rates measured last, with their days, while they can't be read again, rather than estimates at today's stake.
