@@ -101,7 +101,18 @@ jobs:
       - name: Verify registry signatures
         run: npm audit signatures
 
-      - name: Run approval and unlock renderer tests
+      # Chromium comes from Playwright's own download, its system packages from
+      # apt. An Ubuntu mirror that stopped resolving once held apt for the
+      # job's 10 minutes; the image already has every library Chromium needs
+      # (apt adds fonts), so apt gets 3 minutes and the tests go on past that.
+      - name: Install Chromium for the renderer tests
+        timeout-minutes: 4
         run: |
-          npx --no-install playwright install --with-deps chromium
-          npm run e2e -- typed-data-preview.spec.js unlock-form.spec.js approval-windows.spec.js phone.spec.js --workers=1
+          npx --no-install playwright install chromium
+          timeout -k 10 180 npx --no-install playwright install-deps chromium \
+            || echo "::warning title=Chromium's system packages::apt didn't install them within 3 minutes; the tests run with the runner image's own."
+
+      # A run that hangs ends itself well inside the job (playwright.config.js).
+      - name: Run approval and unlock renderer tests
+        timeout-minutes: 4
+        run: npm run e2e -- typed-data-preview.spec.js unlock-form.spec.js approval-windows.spec.js phone.spec.js --workers=1
