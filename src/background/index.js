@@ -73,6 +73,7 @@ import { getWalletDirectory } from "../shared/wallets.js";
 import {
   getNetworkStatus,
   checkAllEndpoints,
+  checkNode,
   chainIdForChoice,
   statusChainRefusal,
   resetNetworkStatus,
@@ -1473,6 +1474,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           archiverUrl: settings.archiverUrl,
         });
         sendResponse({ ok: true, networkStatus: status });
+        return;
+      }
+
+      // A page that shows asks whether the node answers, now and then.
+      if (message?.type === "DUSK_UI_CHECK_NODE") {
+        const settings = await getSettings();
+        sendResponse({ ok: true, networkStatus: await checkNode(settings.nodeUrl) });
         return;
       }
 

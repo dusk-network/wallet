@@ -14,7 +14,8 @@ const TO =
 async function popupOn(page, route, extra = {}, over = {}) {
   await page.route("**/phone/popup.html", (r) => r.fulfill({
     contentType: "text/html",
-    body: '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><link rel="stylesheet" href="/ui.css"><body class="page--popup"><div class="panel"><header class="panel-header"><button id="network-pill"><span class="network-pill__label"></span></button><div id="header-actions"></div></header><main class="panel-content"><div id="app"></div></main></div></body>',
+    // The popup's shell, its top bar as popup.html has it.
+    body: '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><link rel="stylesheet" href="/ui.css"><body class="page--popup"><div class="panel"><header class="panel-header"><div class="brand"><div class="brand-mark" aria-hidden="true"><img class="brand-mark__glyph" src="/icons/dusk-glyph.svg" alt=""></div><button class="panel-subtitle network-pill" id="network-pill" type="button"><span class="network-pill__label"></span><span class="network-pill__chev" aria-hidden="true">▾</span></button></div><div class="header-actions" id="header-actions"></div></header><main class="panel-content"><div id="app"></div></main></div></body>',
   }));
   await page.route("**/src/wallet/localBus.js*", (r) => r.fulfill({
     contentType: "text/javascript",
@@ -52,6 +53,21 @@ test("fills the phone's width, as Chen and Marek's popup didn't", async ({ page 
   await expect(page.locator(".balance-split")).toBeVisible();
   const [panel, width] = await page.evaluate(() => [document.querySelector(".panel").getBoundingClientRect().width, window.innerWidth]);
   expect(panel).toBe(width);
+});
+
+// Amélie's: the word beside the network squeezed her profile's name to "P".
+test("keeps the profile's name whole while the network can't be reached, the words on a line of their own", async ({ page }) => {
+  await page.setViewportSize({ width: 380, height: 600 });
+  await popupOn(page, "home", {}, { networkStatus: { nodeStatus: "offline", nodeUrl: "https://testnet.nodes.dusk.network" } });
+  const words = page.locator(".network-word");
+  await expect(words).toHaveText("Can't reach the network");
+  const name = page.locator(".account-chip .chip-text");
+  await expect(name).toHaveText("Profile 1");
+  // All of the name in view, none of it cut.
+  expect(await name.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+  // The words under the network's name, not beside it.
+  const [pill, said] = [await page.locator("#network-pill").boundingBox(), await words.boundingBox()];
+  expect(said.y).toBeGreaterThanOrEqual(pill.y + pill.height - 1);
 });
 
 test("shows Send's recipient whole, start to end, rather than its end alone", async ({ page }) => {

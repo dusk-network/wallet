@@ -863,6 +863,42 @@ try {
   // ignore
 }
 
+// A node can stop answering without an error, and between reads, minutes
+// apart, nothing else would find it silent: while an unlocked wallet shows and
+// the browser is online, the node is asked whether it answers, at once and
+// every 15 seconds. What came of it shows at once, without a read that may
+// hang; once it answers again, the balance is read again.
+const ASK_NODE_EVERY_MS = 15_000;
+let askNodeTimer = null;
+let askingNode = false;
+
+async function askNode() {
+  const ov = state.overview;
+  if (askingNode || !ov?.isUnlocked || !ov?.nodeUrl || document.visibilityState === "hidden" || globalThis.navigator?.onLine === false) return;
+  askingNode = true;
+  try {
+    const answer = (await send({ type: "DUSK_UI_CHECK_NODE" }).catch(() => null))?.networkStatus;
+    const now = state.overview;
+    // About the node shown still, and saying otherwise than it shows.
+    if (!answer?.nodeStatus || !now || answer.nodeUrl !== now.nodeUrl || answer.nodeStatus === now.networkStatus?.nodeStatus) return;
+    now.networkStatus = { ...now.networkStatus, ...answer };
+    await renderForConnection({ forceRefresh: answer.nodeStatus === "online" });
+  } finally {
+    askingNode = false;
+  }
+}
+
+function scheduleNodeAsk(ov) {
+  if (!ov?.isUnlocked) {
+    clearInterval(askNodeTimer);
+    askNodeTimer = null;
+    return;
+  }
+  if (askNodeTimer) return;
+  askNodeTimer = setInterval(() => askNode().catch(() => {}), ASK_NODE_EVERY_MS);
+  setTimeout(() => askNode().catch(() => {}), 0);
+}
+
 // --- Coming back to the wallet ----------------------------------------------
 // A phone stops the page, and with it what was following a send, once the
 // wallet is left (Home, another app, no signal): the send may have gone into a
@@ -1241,6 +1277,7 @@ export async function render({ forceRefresh = false } = {}) {
   scheduleShieldedPoll(ov);
   schedulePendingTxPoll(ov);
   scheduleBalanceRetry(ov);
+  scheduleNodeAsk(ov);
   scheduleArrivalCheck(ov);
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });

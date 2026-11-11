@@ -76,6 +76,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said Can't reach the network, and that the balance may be out of date, soon after the node stops answering while the wallet is open.
+- Kept the profile's name whole beside the network while it says Offline or Can't reach the network.
 - Asked for the unlock on a site's approval once the wallet locks, as when Firefox for Android's Keep open tab closes, rather than an Approve that does nothing.
 - Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
 - Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.
@@ -96,7 +98,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said Offline on a Review and on a site's approval, holding Confirm and Approve until the connection is back.
 - Said Offline in the Android app as soon as the phone loses its signal.
 - Noted a site's approved send that didn't go out as Approved, not sent, in Connected sites.
-- Said Offline or Can't reach beside the network's dot, and checked the network again once it answers.
+- Said Offline or Can't reach the network under the network's name, and checked the network again once it answers.
 - Ended "Checking network…" on setup once the network was checked.
 - Asked before Back clears the recovery phrase and password typed on Import.
 - Rejected a site's approval with the phone's first Back in Firefox for Android, no tap first, and went back to the site's tab.

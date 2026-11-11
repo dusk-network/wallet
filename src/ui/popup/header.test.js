@@ -113,25 +113,38 @@ describe("the network at the top", () => {
     expect([label(), strip()]).toEqual(["Custom", "Mainnet · Proofs from prover.example"]);
   });
 
-  // Amélie's: a red dot with no words, for as long as it stayed red.
-  it("says in a word beside the dot that it's offline or can't reach the node, and nothing once it's back", async () => {
-    const { dom, renderHeader } = await setup("popup");
+  // Amélie's: a red dot with no words, for as long as it stayed red; then the word beside the dot squeezed her
+  // profile's name to "P".
+  it("says on a line of its own under the network's name that it's offline or can't reach the network, and nothing once it's back", async () => {
+    const { dom, host, renderHeader } = await setup("popup");
+    // The top bar as popup.html has it: the brand with the network's pill, then the buttons.
+    const header = dom.document.createElement("header");
+    header.className = "panel-header";
+    const brand = dom.document.createElement("div");
+    brand.className = "brand";
     pill(dom);
-    const word = () => {
-      const el = dom.document.querySelector("#network-pill .network-pill__word");
-      return el && !el.hidden ? visibleText(el) : "";
-    };
+    brand.appendChild(dom.document.getElementById("network-pill"));
+    header.append(brand, host);
+    dom.document.body.appendChild(header);
+    const words = () => header.querySelector(".network-word");
+    const said = () => (words() && !words().hidden ? visibleText(words()) : "");
+
     renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
-    expect(word()).toBe("");
+    expect(said()).toBe("");
     renderHeader({ ...overview, networkStatus: { nodeStatus: "offline", nodeError: "Failed to fetch" } });
-    expect(word()).toBe("Can't reach");
-    expect(screenReaderText(dom.document.getElementById("network-pill"))).toBe("TestnetCan't reach");
+    expect(said()).toBe("Can't reach the network");
+    // Out of the pill, which says the network alone, between the brand and the buttons: read after the network's name.
+    expect(screenReaderText(dom.document.getElementById("network-pill"))).toBe("Testnet");
+    expect(header.children.map((el) => el.className)).toEqual(["brand", "network-word", host.className]);
+    expect(words().getAttribute("role")).toBe("status");
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
     renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
-    expect(word()).toBe("Offline");
+    expect(said()).toBe("Offline");
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
     renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
-    expect(word()).toBe("");
+    expect(said()).toBe("");
+    // One line, however often it's drawn.
+    expect(header.querySelectorAll(".network-word")).toHaveLength(1);
   });
 });
 

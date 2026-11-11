@@ -1613,6 +1613,21 @@ body.page--popup .site-bar-action {
     margin-top: 10px;
   }
 
+  /* In the sidebar, the words sit right under the network's pill. */
+  body.page--full .panel-header:has(> .network-word) {
+    flex-wrap: nowrap;
+  }
+
+  body.page--full .panel-header:has(> .network-word) > .header-actions {
+    flex: 0 1 auto;
+  }
+
+  body.page--full .network-word {
+    order: 0;
+    flex: none;
+    margin-top: -20px;
+  }
+
   body.page--full .full-nav {
     display: flex;
     flex-direction: column;
@@ -2519,14 +2534,31 @@ button.network-pill.is-disabled .network-pill__chev {
   color: var(--text-muted);
 }
 
-/* What the red dot means, in a word beside the network's name. */
-.network-pill__word {
+/* What the red dot means, in words, on a line of its own under the top bar,
+   so the profile's name beside the network's keeps its room. */
+.network-word {
+  order: 1;
+  flex: 0 0 100%;
+  margin: 0;
   color: var(--danger);
-  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
 }
 
-.network-pill__word[hidden] {
+.network-word[hidden] {
   display: none;
+}
+
+/* While it shows, the brand and the buttons keep the top bar's line, and the
+   words take the next. */
+.panel-header:has(> .network-word:not([hidden])) {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.panel-header:has(> .network-word:not([hidden])) > .header-actions {
+  flex: 1 1 0%;
 }
 
 @keyframes statusPulse {

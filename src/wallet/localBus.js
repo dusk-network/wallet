@@ -13,7 +13,7 @@ import { applyTxDefaults } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem } from "../shared/securityPolicy.js";
-import { chainIdForChoice, checkAllEndpoints, checkEveryMs, getNetworkStatus, isStatusStale, readChainId, resetNetworkStatus, statusChainRefusal, statusWords } from "../shared/networkStatus.js";
+import { chainIdForChoice, checkAllEndpoints, checkEveryMs, checkNode, getNetworkStatus, isStatusStale, readChainId, resetNetworkStatus, statusChainRefusal, statusWords } from "../shared/networkStatus.js";
 import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
@@ -579,6 +579,9 @@ export async function localSend(message) {
       const settings = await getSettings();
       return { ok: true, networkStatus: await checkAllEndpoints({ nodeUrl: settings.nodeUrl, proverUrl: settings.proverUrl, archiverUrl: settings.archiverUrl }) };
     }
+
+    // A page that shows asks whether the node answers, now and then.
+    if (message?.type === "DUSK_UI_CHECK_NODE") return { ok: true, networkStatus: await checkNode((await getSettings()).nodeUrl) };
 
     // A send looked up again by its ID, as the extension's background does:
     // the page hears what came of it.

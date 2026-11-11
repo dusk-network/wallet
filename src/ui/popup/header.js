@@ -101,17 +101,19 @@ export function createHeaderRenderer({
       statusDot.title = statusTitles[nodeStatus] ?? statusTitles.unknown;
     }
 
-    // Said beside the dot in a word, not by its colour alone: offline, as the
-    // browser says, or a node that doesn't answer.
-    const problem = browserOffline ? "Offline" : nodeStatus === "offline" ? "Can't reach" : "";
-    let word = networkPill?.querySelector(".network-pill__word");
+    // Said in words, not by the dot's colour alone, on a line of its own under
+    // the network's name, so the profile's name beside it keeps its room:
+    // offline, as the browser says, or a node that doesn't answer.
+    const problem = browserOffline ? "Offline" : nodeStatus === "offline" ? "Can't reach the network" : "";
+    let word = document.querySelector(".network-word");
     if (networkPill && !word) {
-      word = document.createElement("span");
-      word.className = "network-pill__word";
-      networkLabel?.after?.(word) ?? networkPill.appendChild(word);
+      word = h("p", { class: "network-word", role: "status" });
+      // Right after the pill's group: read after the network's name, shown under the top bar.
+      const after = networkPill.closest?.(".brand") ?? networkPill;
+      after.parentNode?.insertBefore(word, after.nextSibling ?? null);
     }
     if (word) {
-      word.textContent = problem;
+      if (word.textContent !== problem) word.textContent = problem;
       word.hidden = !problem;
     }
 

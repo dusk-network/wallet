@@ -241,6 +241,11 @@ class FakeElement {
     return this.childNodes[0] ?? null;
   }
 
+  get nextSibling() {
+    const siblings = this.parentNode?.childNodes ?? [];
+    return siblings[siblings.indexOf(this) + 1] ?? null;
+  }
+
   get isConnected() {
     let node = this;
     while (node.parentNode) node = node.parentNode;

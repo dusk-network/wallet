@@ -246,10 +246,10 @@ export function homeView(ov, { state, actions } = {}) {
       [balance(hidden, heroText), heroAmt === "—" ? null : h("span", { class: "balance-unit", text: " DUSK" })].filter(Boolean)
     ),
     balanceSplit,
-    // Offline, as the browser says at once; or read before, kept while the node can't give it; or not read at all.
+    // Offline, as the browser says at once; or read before, kept while the node can't give it or doesn't answer; or not read at all.
     globalThis.navigator?.onLine === false
       ? h("div", { class: "muted balance-stale", role: "status", text: BALANCE_OFFLINE })
-      : ov?.balanceStale || ov?.shieldedStale
+      : ov?.balanceStale || ov?.shieldedStale || (hasBalance && ov?.networkStatus?.nodeStatus === "offline")
         ? h("div", { class: "muted balance-stale", role: "status", text: BALANCE_STALE })
         : ov?.balanceError
           ? h("div", { class: "muted", text: BALANCE_UNREAD })
