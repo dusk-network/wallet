@@ -21,6 +21,7 @@ import { saveToDownloads } from "../../platform/native.js";
 import { stamped } from "../lib/fileNames.js";
 import { ActivityChangedError, activityRows, assertActivityOpen, selected, sozuFactsOf, wholeActivity } from "./activity.js";
 import { duskPrices } from "./duskPrice.js";
+import { migrationFactsOf } from "./migrationFacts.js";
 import { defaultCurrency } from "@dusk-network/app-core/amounts";
 
 /**
@@ -99,6 +100,32 @@ async function exportContactNames(state, walletId) {
   return (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? "";
 }
 
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * The EVM addresses this profile bridged DUSK to, as its own rows say them:
+ * the address a transfer to BNB Smart Chain or Ethereum pays (its memo, as
+ * text), and the one a deposit to DuskEVM pays, of any that didn't fail. The
+ * extension connects no EVM wallet: these are the ones it knows as the
+ * person's, as the web wallet knows those it connected or migrated from.
+ * @param {object[]} rows - the profile's activity rows
+ * @returns {string[]}
+ */
+function bridgedToOf(rows) {
+  const out = new Set();
+  for (const row of rows ?? []) {
+    if (row?.dropped || row?.status === "failed") continue;
+    const to =
+      row?.route?.kind === "service" && row.direction === "out" && row.entry?.memoBinary !== true
+        ? String(row.memo ?? "").trim()
+        : row?.bridge?.step === "deposit"
+          ? String(row.bridge.to ?? "")
+          : "";
+    if (EVM_ADDRESS.test(to)) out.add(to.toLowerCase());
+  }
+  return [...out];
+}
+
 // The person's other profiles, this wallet's and any other wallet's here: what
 // moves between them is a transfer, not income.
 function otherProfiles(ov, profileIndex) {
@@ -157,6 +184,14 @@ export async function makeExport(ov, choices, { state }) {
   const { account, profileIndex } = selected(ov);
   // A stake whose stDUSK can't be read yet says so in its line.
   const facts = await sozuFactsOf(ov, rows);
+  // What each migration whose payout is here paid on its own chain, its
+  // approval too, to the wei, as the payout's details say: each on a line of
+  // its own, in the period of its own time. A payout after the period can have
+  // fees in it, one before it can't. Booked only where it came from an EVM
+  // address this profile bridged to: anyone can migrate to an account, and
+  // another's gas is no cost of the person's.
+  const bridgedTo = bridgedToOf(rows);
+  const evm = bridgedTo.length ? await migrationFactsOf(ov, period ? rows.filter((row) => row.time >= period.from) : rows) : new Map();
   const made = await accountingCsv({
     rows,
     profile: { name: await profileNameOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
@@ -165,28 +200,31 @@ export async function makeExport(ov, choices, { state }) {
     price: choices.fiat ? duskPrices({ currency }) : undefined,
     currency,
     facts,
-    // Gas paid on a migration's own chain only from EVM addresses the app knows
-    // as the person's, those it connected or migrated from, as the web wallet
-    // does: the extension has none, and anyone can migrate to an account.
-    evmAddresses: [],
+    evm,
+    evmAddresses: bridgedTo,
     contactName,
     network: ov?.networkName,
     bom: Boolean(choices.excel),
   });
   // The file is of what was open as it began: with anything else open now, there's none.
   await assertActivityOpen(ov, { state });
-  return { ...made, currency, shieldedWaiting: whole.shieldedWaiting };
+  // A migration whose side there couldn't be read has no fee there in the file, and the toast says so:
+  // read, it may be from one of those addresses.
+  const evmUnread = [...evm.values()].filter((fact) => fact.state === "pending" || fact.state === "error");
+  const evmChains = [...new Set(evmUnread.map((fact) => rows.find((row) => row.route?.id === fact.route)?.route.chain?.name ?? "its chain"))];
+  return { ...made, currency, evmUnread: { count: evmUnread.length, chain: evmChains.length === 1 ? evmChains[0] : "their chains" }, shieldedWaiting: whole.shieldedWaiting };
 }
 
 // What the file holds, and what it doesn't, once it's saved; where, when the
 // phone's Downloads has it, by the name Android gave it there.
-function savedText({ count, currency, left, unpriced, shieldedWaiting }, { savedAs = "" } = {}) {
+function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting }, { savedAs = "" } = {}) {
   const out = [left.pending ? `${left.pending} on its way` : "", left.notRead ? `${left.notRead} not read yet` : ""].filter(Boolean);
   const lines = count === 1 ? "1 line" : `${count} lines`;
   return [
     savedAs ? `CSV saved to Downloads as ${savedAs}: ${lines}.` : `CSV saved: ${lines}.`,
     out.length ? `Left out: ${out.join(", ")}.` : "",
     unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no ${currencyName(currency, 1)} value.` : "",
+    evmUnread?.count ? `${evmUnread.count === 1 ? "1 migration's fee" : `${evmUnread.count} migrations' fees`} on ${evmUnread.chain} couldn't be read: export again to add ${evmUnread.count === 1 ? "it" : "them"}.` : "",
     shieldedWaiting ? "Your shielded activity is still syncing: export again once it's done." : "",
   ]
     .filter(Boolean)

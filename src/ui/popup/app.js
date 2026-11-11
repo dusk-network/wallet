@@ -863,6 +863,53 @@ try {
   // ignore
 }
 
+// A node can stop answering without an error, and between reads, minutes
+// apart, nothing else would find it silent: while an unlocked wallet shows and
+// the browser is online, the node is asked whether it answers, at once and
+// every 15 seconds. What came of it shows at once, without a read that may
+// hang; once it answers again, the balance is read again.
+const ASK_NODE_EVERY_MS = 15_000;
+let askNodeTimer = null;
+let askingNode = false;
+
+async function askNode() {
+  const ov = state.overview;
+  if (askingNode || !ov?.isUnlocked || !ov?.nodeUrl || document.visibilityState === "hidden" || globalThis.navigator?.onLine === false) return;
+  // One ask at a time, over once the node answers or the ask gives up: never held by a read.
+  askingNode = true;
+  let answer = null;
+  try {
+    answer = (await send({ type: "DUSK_UI_CHECK_NODE" }).catch(() => null))?.networkStatus;
+  } finally {
+    askingNode = false;
+  }
+  const now = state.overview;
+  // About the node shown still, and saying otherwise than it shows.
+  if (!answer?.nodeStatus || !now || answer.nodeUrl !== now.nodeUrl || answer.nodeStatus === now.networkStatus?.nodeStatus) return;
+  const was = now.networkStatus?.nodeStatus;
+  now.networkStatus = { ...now.networkStatus, ...answer };
+  // The balance shown was read before the node stopped answering: maybe out
+  // of date, also once it answers again, till a balance read since takes its
+  // place (refreshOverview's overview has its own say).
+  if ((was === "offline" || answer.nodeStatus === "offline") && now.balance?.value) now.balanceStale = true;
+  // Drawn again from what's read already, as a read under way may never end (a Refresh pressed while the node holds it).
+  if (REVIEW_ROUTES.has(state.route)) renderHeader(now);
+  else await render({ cached: true });
+  // Back: the balance read again, without waiting for it here.
+  if (answer.nodeStatus === "online") renderForConnection({ forceRefresh: true }).catch(() => {});
+}
+
+function scheduleNodeAsk(ov) {
+  if (!ov?.isUnlocked) {
+    clearInterval(askNodeTimer);
+    askNodeTimer = null;
+    return;
+  }
+  if (askNodeTimer) return;
+  askNodeTimer = setInterval(() => askNode().catch(() => {}), ASK_NODE_EVERY_MS);
+  setTimeout(() => askNode().catch(() => {}), 0);
+}
+
 // --- Coming back to the wallet ----------------------------------------------
 // A phone stops the page, and with it what was following a send, once the
 // wallet is left (Home, another app, no signal): the send may have gone into a
@@ -1209,8 +1256,9 @@ function keepContactsToTheirWallet(ov) {
 }
 
 // --- Main render ----------------------------------------------------------
-export async function render({ forceRefresh = false } = {}) {
-  const overviewRefreshed = await refreshOverview(send, { force: forceRefresh });
+export async function render({ forceRefresh = false, cached = false } = {}) {
+  // `cached`: drawn from the overview read already, asking for none.
+  const overviewRefreshed = cached ? false : await refreshOverview(send, { force: forceRefresh });
   // Deposits to DuskEVM seen there before, for Activity's rows: the wallet's own.
   await loadArrivals(state.overview?.isUnlocked ? state.overview?.accounts?.[0] : "");
   if (overviewRefreshed && state.staking) {
@@ -1241,6 +1289,7 @@ export async function render({ forceRefresh = false } = {}) {
   scheduleShieldedPoll(ov);
   schedulePendingTxPoll(ov);
   scheduleBalanceRetry(ov);
+  scheduleNodeAsk(ov);
   scheduleArrivalCheck(ov);
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });

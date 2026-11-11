@@ -25,6 +25,7 @@ export const STORAGE_KEYS = {
   ASSETS: "dusk_assets_v1", // { [walletId]: { [networkKey]: { [profileIndex]: { tokens: [], nfts: [] } } } }
   NETWORK_STATUS: "dusk_network_status_v1", // { nodeStatus, proverStatus, archiverStatus, lastChecked, errors }
   REWARD_RATES: "dusk_reward_rates_v1", // { [network]: { at, rate } }: native staking's estimate, read once a day (rewardRate.js)
+  MEASURED_RATES: "dusk_measured_rates_v1", // { [key]: { at, text } }: the staking rates last measured from the chain, kept a day (keptMeasures.js)
   AUTO_LOCK_ACTIVITY: "dusk_auto_lock_activity_v1", // { lastActivityAt }
   VERIFIED_NAMES: "dusk_verified_names_v1", // { [network]: { [account]: { name: string|null, at } } }
   BRIDGE_ARRIVALS: "dusk_bridge_arrivals_v1", // { epoch, items: { [depositHash]: { hash, at } } }: one wallet's arrivals, from before BRIDGE_ARRIVALS_V2; moved there on unlock

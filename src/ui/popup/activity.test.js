@@ -724,6 +724,34 @@ describe("loadActivityDetail", () => {
     activity.loadActivityDetail({ state, render }, entry.hash);
     await until(() => lookups() > before);
   });
+
+  it("looks up a row Activity's search found past the page, and gives its details the row again", async () => {
+    // Astra's: a search's row older than the page opened, but its outcome, date and fee were never looked up.
+    const node = fakeArchive();
+    const ov = overview(B);
+    const { state, render } = await popup(ov, "activity");
+    const a = state.activity;
+    // The whole history, as a search reads it: what's past the page without details.
+    activity.searchedActivity(ov, { state, render });
+    await until(() => a.searched && !a.searching);
+    const past = a.searched.entries.find((e) => !a.entries.some((p) => p.hash === e.hash) && a.history.needsDetails(e));
+    expect(past).toBeTruthy();
+    const row = activity.activityRows(ov, state, { entries: a.searched.entries, meta: a.searched.meta, shielded: a.shielded }).find((r) => r.hash === past.hash);
+    expect(row).toMatchObject({ success: null, incomplete: true });
+
+    // Opened from the search: its row goes to its details with it (txRow.js).
+    Object.assign(state, { route: "tx", txDetailHash: past.hash, txDetailRow: { context: a.key, hash: past.hash, reading: false, row } });
+    const asked = node.detailQueries().length;
+    render.mockClear();
+    activity.loadActivityDetail({ ov, state, render }, past.hash);
+    await until(() => state.txDetailRow.row.success !== null);
+    expect(node.detailQueries().length).toBeGreaterThan(asked);
+    expect(state.txDetailRow.row).toMatchObject({ success: true, incomplete: false });
+    expect(state.txDetailRow.row.time).toEqual(expect.any(Number));
+    // The search's rows have it too, and the details are drawn again.
+    expect(a.history.needsDetails(a.searched.entries.find((e) => e.hash === past.hash))).toBe(false);
+    await until(() => render.mock.calls.length > 0);
+  });
 });
 
 describe("refreshActivitySoon", () => {

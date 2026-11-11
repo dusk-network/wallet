@@ -4,6 +4,7 @@
 // (activityExport.js).
 
 import { amountsMeant } from "@dusk-network/app-core/amounts";
+import { nameSkeleton } from "@dusk-network/app-core/names";
 import { searchKey } from "@dusk-network/app-core/text";
 
 import { explorerAccountUrl } from "../../../shared/explorer.js";
@@ -15,7 +16,7 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { subnav } from "../../components/Subnav.js";
-import { activityRows, hasMoreActivity, showMoreActivity } from "../activity.js";
+import { activityKey, activityRows, hasMoreActivity, searchedActivity, showMoreActivity } from "../activity.js";
 import { activityExportPanel } from "../activityExport.js";
 import { ACTIVITY_FILTERS, clockText, contactNames, dayLabel, describeTx, inFilter, recentText, txRowEl, whenText } from "./txRow.js";
 
@@ -43,15 +44,18 @@ function emptyText(state, filter) {
   return "No activity yet.";
 }
 
-// Nothing found: what's searched covers what's read so far.
-function searchedText(state, filter, query) {
+const LOOKING_BACK = "Looking through all your activity…";
+// Nothing found: what's searched covers the whole history once it's read,
+// what's read so far where it can't be.
+function searchedText(state, filter, query, searched) {
   const text = emptyText(state, filter);
   if (!query || text === LOOKING) return text;
-  return hasMoreActivity(state) ? "Nothing read so far matches that. Show more to look further back." : "Nothing in your activity matches that.";
+  if (searched.reading && !searched.whole) return LOOKING_BACK;
+  return !searched.whole && hasMoreActivity(state) ? "Nothing read so far matches that. Show more to look further back." : "Nothing in your activity matches that.";
 }
 
 const empty = (text) =>
-  h("div", { class: "group" }, [text === LOOKING ? waiting(text, { tag: "p", className: "tx-empty" }) : h("p", { class: "tx-empty", text })]);
+  h("div", { class: "group" }, [text === LOOKING || text === LOOKING_BACK ? waiting(text, { tag: "p", className: "tx-empty" }) : h("p", { class: "tx-empty", text })]);
 
 /**
  * Home's Activity: the newest rows, and See all.
@@ -90,6 +94,9 @@ export function recentActivitySection(ov, { state, actions } = {}) {
   ]);
 }
 
+// A text by what it looks like (app-core's nameSkeleton), whatever its case and accents.
+const lookKey = (text) => searchKey(nameSkeleton(String(text ?? "").toLowerCase()));
+
 /**
  * Whether a row has what's searched for, in any case and with or without its
  * accents (app-core's searchKey): its name, contact or .dusk name, address,
@@ -102,6 +109,11 @@ export function inSearch(tx, desc, query, { hidden = false } = {}) {
   if (!q) return true;
   const memo = tx?.entry?.memoBinary === true ? "" : tx?.memo;
   const has = (field) => searchKey(field).includes(q);
+  // A name holds what's typed, or looks as if it did in letters of another
+  // script, as "Estudio Mаrta" with a Cyrillic а for "marta": a name marked
+  // as looking like another is found with it, as the web wallet finds it.
+  const looks = (field) => q.length >= 3 && lookKey(field).includes(lookKey(query));
+  if ([desc.isAddress ? "" : desc.name, desc.alias].some(looks)) return true;
   if ([desc.name, desc.alias, desc.address, desc.recipient, desc.lead, tx?.counterparty, memo, tx?.hash].some(has)) return true;
   if (hidden || !desc.amount) return false;
   if (desc.amount.unit !== "DUSK" || desc.amount.text) return [desc.amount.value, desc.amount.exact, desc.amount.plain].some(has);
@@ -119,7 +131,9 @@ export function activityView(ov, { state, actions } = {}) {
   const filter = ACTIVITY_FILTERS.some((f) => f.id === state?.activityFilter) ? state.activityFilter : "all";
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const query = String(state?.activitySearch ?? "").trim();
-  const rows = activityRows(ov, state).filter((tx) => {
+  // A search covers the whole history, read whole as it's typed; what's read so far meanwhile.
+  const searched = query ? searchedActivity(ov, { state, render: actions?.render }) : { whole: null, reading: false };
+  const rows = activityRows(ov, state, searched.whole).filter((tx) => {
     const desc = describeTx(tx, { contactName, nodeUrl });
     return inFilter(desc, filter) && inSearch(tx, desc, query, { hidden });
   });
@@ -168,15 +182,18 @@ export function activityView(ov, { state, actions } = {}) {
     else days.push({ label, rows: [tx] });
   }
 
+  // A search's rows past the page go to their details with themselves: the page doesn't have them.
+  const context = searched.whole ? activityKey(ov) : undefined;
   const groups = days.map(({ label, rows: dayRows }) =>
     h("section", { class: "tx-day" }, [
       h("h2", { class: "tx-day-label", text: label }),
-      h("ul", { class: "group tx-list" }, dayRows.map((tx) => txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when }))),
+      h("ul", { class: "group tx-list" }, dayRows.map((tx) => txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when, context }))),
     ])
   );
 
-  // Older history: kept rows past this page, or the next sync of older blocks.
-  const more = hasMoreActivity(state)
+  // Older history: kept rows past this page, or the next sync of older blocks;
+  // none for a search, which reads it all.
+  const more = hasMoreActivity(state) && !(query && (searched.whole || searched.reading))
     ? h("button", {
         class: "btn-outline tx-more",
         type: "button",
@@ -240,7 +257,8 @@ export function activityView(ov, { state, actions } = {}) {
       ex.open ? activityExportPanel(ov, { state, actions }) : null,
       search,
       chips,
-      ...(groups.length ? groups : [empty(searchedText(state, filter, query))]),
+      ...(groups.length ? groups : [empty(searchedText(state, filter, query, searched))]),
+      groups.length && searched.reading && !searched.whole ? empty(LOOKING_BACK) : null,
       more,
       explorer,
     ].filter(Boolean)),

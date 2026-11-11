@@ -395,6 +395,43 @@ async function runEndpointChecks({ nodeUrl, proverUrl, archiverUrl }) {
   });
 }
 
+/** How long a page's ask of the node gets before it's said not to answer: less than a page asks again. */
+export const NODE_ANSWER_MS = 10_000;
+
+// The node's ask under way, by its address: one at a time, as a node that holds
+// them open would otherwise use up the browser's connections to it.
+const runningNodeAsks = new Map();
+
+/**
+ * Asks the node alone whether it answers, as a page that shows asks it: a node
+ * can stop answering without an error, and between reads, minutes apart,
+ * nothing else would find it silent. Its status, error and chain ID go in the
+ * status kept, the prover's and the archiver's stay, and it's never "checking"
+ * meanwhile. Nothing is kept once the wallet is on another node.
+ * @param {string} nodeUrl
+ * @param {{ timeoutMs?: number }} [opts]
+ * @returns {Promise<NetworkStatusState>}
+ */
+export function checkNode(nodeUrl, { timeoutMs = NODE_ANSWER_MS } = {}) {
+  const key = String(nodeUrl ?? "");
+  let ask = runningNodeAsks.get(key);
+  if (!ask) {
+    ask = (async () => {
+      const result = key ? await probeNode(key, timeoutMs) : { ok: false, error: "No URL configured" };
+      if ((await getSettings()).nodeUrl !== key) return getNetworkStatus();
+      if (Number.isInteger(result.chainId)) await rememberNodeChain(key, result.chainId).catch(() => {});
+      return setNetworkStatus({
+        nodeStatus: result.ok ? "online" : "offline",
+        nodeError: result.error ?? null,
+        nodeUrl: key,
+        nodeChainId: Number.isInteger(result.chainId) ? result.chainId : null,
+      });
+    })().finally(() => runningNodeAsks.delete(key));
+    runningNodeAsks.set(key, ask);
+  }
+  return ask;
+}
+
 /**
  * What the last check heard from a node, when it contradicts the chain it's
  * fixed to: why nothing is signed on it, in plain words, else "".

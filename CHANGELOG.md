@@ -26,7 +26,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed a Sozu stake's position on Liquid staking: put in, taken out, worth now, deposit fees and rewards so far.
 - Said what an amount brings in a year with Sozu as it's typed, and one line of what the rate is made of under it.
 - Showed one ledger in a bridge transfer's details, to the last lux: sent, bridge fee, network fee and what arrives.
-- Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei.
+- Showed what a migration to Dusk paid on BNB Smart Chain or Ethereum in its payout's details, its approval too, to the wei, and put those fees in the export where the migration came from an EVM address this profile bridged DUSK to.
 - Offered the extension's Send, filled in, on the web wallet's Send page opened from a request link.
 - Added `dusk_openPaymentLink`, for the web wallet's own button to open a request link in the extension's Send.
 - Warned on Review when a payment repeats one you made moments ago, or one with the same memo.
@@ -76,6 +76,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Measured native staking's rate over the 30 days to the last whole day of blocks, counting every stake, so it no longer moves from one block to the next and both wallets give the same figure.
+- Said Can't reach the network, and that the balance may be out of date, soon after the node stops answering while the wallet is open.
+- Kept the profile's name whole beside the network while it says Offline or Can't reach the network.
+- Kept the staking rates measured last, with their days, while they can't be read again, rather than estimates at today's stake: native staking's until the next day of blocks, Sozu's for a day.
+- Searched Activity's whole history as a search is typed, without Show more, and found a contact named in look-alike letters by the name as typed.
+- Marked a contact whose name looks like another's on a transaction's details, as its row does, with its address once.
+- Showed a request's memo as codes under its field, saying what to check, while it has hidden characters or look-alike digits.
+- Refused a request link whose recipient Send can't pay, as a second address, a line break or a hidden character in to=, pasted, scanned or handed over by a site, as the web wallet does.
+- Refused a link that says a field twice in two letter cases, as To= beside to=, a dusk:shielded- link to a public account or a dusk:public- link to a shielded address, saying which, and a dusk: link with a #.
+- Refused a profile's name that is, or looks like, another profile's own name as well as its .dusk name.
+- Asked whether a contact is someone else when its name and a profile's start the same, as "Lucas (petit-fils)" beside a profile called Lucas, and the same of a profile's name beside a contact's.
+- Said Rewards by year in the web wallet's words, Sozu's by stDUSK's own rates with no rounding remainder, and added each reward's value in your currency when asked, from CoinGecko's prices.
 - Asked for the unlock on a site's approval once the wallet locks, as when Firefox for Android's Keep open tab closes, rather than an Approve that does nothing.
 - Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
 - Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.
@@ -96,7 +108,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said Offline on a Review and on a site's approval, holding Confirm and Approve until the connection is back.
 - Said Offline in the Android app as soon as the phone loses its signal.
 - Noted a site's approved send that didn't go out as Approved, not sent, in Connected sites.
-- Said Offline or Can't reach beside the network's dot, and checked the network again once it answers.
+- Said Offline or Can't reach the network under the network's name, and checked the network again once it answers.
 - Ended "Checking network…" on setup once the network was checked.
 - Asked before Back clears the recovery phrase and password typed on Import.
 - Rejected a site's approval with the phone's first Back in Firefox for Android, no tap first, and went back to the site's tab.
@@ -169,7 +181,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Refused a profile's name that is, or looks like, another profile's or a contact's.
 - Showed what came in on a request of any amount in its badge, in plain colour, rather than a green Paid.
 - Said a number's look-alike digits in the web wallet's words.
-- Booked no gas of a migration's own chain in the export, as the extension connects no EVM wallet and anyone can migrate to an account.
 - Marked a contact whose name looks like another's on Send, Review and Activity, beside its address.
 - Kept another wallet's shielded history out of Activity and Export when the wallet changes during a read; an Export it changes under saves nothing and says so.
 - Said under a .dusk name when a node the wallet doesn't know checked it, and kept that node's answers from the network's own node's.

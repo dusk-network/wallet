@@ -20,6 +20,8 @@ import { requestKept, requestNetwork, requestsSection } from "./requests.js";
 import { amountForInput, formatDuskExact } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
+import { safeText } from "../../../shared/safeText.js";
+import { numbersText, safeTextEl } from "../../components/SafeText.js";
 
 function isTauriMobileLike() {
   try {
@@ -180,6 +182,9 @@ export function receiveView(ov, { state, actions } = {}) {
   });
   const amountErr = h("div", { class: "field-error receive-amount-error", role: "alert", hidden: true });
   const memoErr = h("div", { class: "field-error memo-error", role: "alert", hidden: true });
+  // A memo with what changes how it reads, or digits that may not read as they
+  // look: as the payer will see it, its codes and what to check, under the field.
+  const memoShown = h("div", { class: "receive-memo-shown", role: "status", hidden: true });
   const linkErr = h("div", { class: "field-error", role: "alert", hidden: true });
   const linkNote = h("div", { class: "muted" });
 
@@ -226,6 +231,7 @@ export function receiveView(ov, { state, actions } = {}) {
         fieldLabel(memoInput, "Memo"),
         memoInput,
         memoErr,
+        memoShown,
         linkErr,
         linkNote,
         copyRequestBtn,
@@ -435,6 +441,10 @@ export function receiveView(ov, { state, actions } = {}) {
     sayUnder(linkErr, requestDetails.open && curRecipient ? made.problems.to ?? "" : "");
 
     const memoVal = String(memoInput.value ?? "").trim();
+    const { checks } = safeText(memoVal);
+    const flagged = Boolean(memoVal && (checks.hidden || numbersText(checks)));
+    memoShown.replaceChildren(...(flagged ? [safeTextEl(memoVal)] : []));
+    memoShown.hidden = !flagged;
     const hasReq = !!memoVal || made.lux !== null;
     curLux = made.lux;
     curMemo = memoVal;

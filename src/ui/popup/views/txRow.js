@@ -155,7 +155,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
       // One whose name looks like another's: its address beside it, and the mark.
       const alike = (addr && contactName?.alike?.(addr)) || "";
       return alike
-        ? { name: contact, alias: [alias, shortAddress(addr)].filter(Boolean).join(" · "), address: addr, isAddress: false, alike }
+        ? { name: contact, alias: [alias, shortAddress(addr)].filter(Boolean).join(" · "), duskAlias: alias, address: addr, isAddress: false, alike }
         : { name: contact, alias, address: addr || null, isAddress: false };
     }
     if (dusk) return { name: dusk, address: addr || null, isAddress: false };
@@ -507,9 +507,11 @@ function pulseClass(state, hash) {
  *   state: object, actions: object, hidden: boolean, nodeUrl?: string,
  *   contactName: (address: string) => string,
  *   when: (tx: object) => string,
- * }} ctx
+ *   context?: string,
+ * }} ctx - `context`: the activity a row found past its page is of, for its
+ *   details to show it from (`txDetailRow`), as Receive's requests hand theirs
  */
-export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when }) {
+export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when, context }) {
   const desc = describeTx(tx, { contactName, nodeUrl });
   const hash = String(tx?.hash ?? "");
   const sub = subText(desc, when(tx), { hidden, spoken: true });
@@ -520,6 +522,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
 
   const open = () => {
     if (!state || !hash) return;
+    if (context) state.txDetailRow = { context, hash, reading: false, row: tx };
     state.txDetailHash = hash;
     // Back from the details returns here: Activity, a contact's page, or Home.
     state.txDetailFrom = ["activity", "contacts"].includes(state.route) ? state.route : "home";

@@ -33,7 +33,10 @@ import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/Ne
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { sozuHolding, sozuLiquidStakingView, stakingHistory } from "./sozu.js";
-import { nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
+import { keptRatesOf, nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
+import { currencyName } from "../activityExport.js";
+import { duskPrices } from "../duskPrice.js";
+import { defaultCurrency } from "@dusk-network/app-core/amounts";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -410,21 +413,39 @@ function nodeRow(actions) {
   ]);
 }
 
+// What a year's rewards of one kind were worth, as the web wallet says it: in
+// the currency, at least its smallest coin, else "under" it, and how many of
+// them have no price.
+function worthText({ worth, unpriced }, currency) {
+  if (worth === null || worth === undefined) return "";
+  const one = currencyName(currency, 1);
+  if (unpriced && !Number(worth)) return `no ${one} value`;
+  const money = new Intl.NumberFormat(amountLocale(), { currency, style: "currency" });
+  const least = 10 ** -(money.resolvedOptions().maximumFractionDigits ?? 2);
+  const amount = Number(worth);
+  return `${amount > 0 && amount < least ? `under ${money.format(least)}` : money.format(amount)}${unpriced ? `, ${unpriced} with no ${one} value` : ""}`;
+}
+
 // Rewards by calendar year, in this device's time zone, as a tax return asks
 // for them: native rewards claimed, and with Sozu what grew while held and
 // what unstaking took out that year (rewardYearsOf), from the profile's whole
-// public history and Sozu's `status`. Their value in money is in Activity's export.
+// public history and Sozu's `status`, in the web wallet's words. What each
+// was worth in the region's currency, at its time, only when asked, as
+// Activity's export asks: CoinGecko's prices.
 function rewardYears(ov, { state, actions, hidden, status }) {
   const history = stakingHistory(ov, { state, actions });
   if (history.reading || !history.rows.length) return null;
+  const currency = defaultCurrency();
+  const valued = Boolean(state.rewardYearsValued);
   // Read again for a new status, what was said kept meanwhile: what's held
-  // and what it's worth now, which grows as Sozu's rewards come.
+  // and what it's worth now, which grows as Sozu's rewards come; and with
+  // their value once it's asked for.
   const base = `${history.key}|${history.rows.length}|${history.facts?.size ?? 0}`;
   const held = status?.position ?? {};
-  const key = `${base}|${status ? `${held.stDusk ?? held.stDuskBalanceLux ?? ""}/${held.balance ?? held.poolBalanceLux ?? ""}` : "-"}`;
+  const key = `${base}|${status ? `${held.stDusk ?? held.stDuskBalanceLux ?? ""}/${held.balance ?? held.poolBalanceLux ?? ""}` : "-"}|${valued ? currency : ""}`;
   if (state.rewardYears?.key !== key) {
     const kept = (state.rewardYears = { base, key, years: state.rewardYears?.base === base ? state.rewardYears.years : [] });
-    rewardYearsOf(ov, { rows: history.rows, facts: history.facts, complete: Boolean(history.whole), status })
+    rewardYearsOf(ov, { rows: history.rows, facts: history.facts, complete: Boolean(history.whole), status, price: valued ? duskPrices({ currency }) : undefined })
       .then((years) => {
         if (state.rewardYears !== kept) return;
         kept.years = years;
@@ -435,20 +456,35 @@ function rewardYears(ov, { state, actions, hidden, status }) {
   // Sozu's part as it is, or null where it couldn't be read, which is said.
   const years = state.rewardYears.years.filter((year) => year.claimed.lux > 0n || year.sozu?.lux > 0n || year.sozuGrown?.lux > 0n || year.sozu === null || year.sozuGrown === null);
   if (!years.length) return null;
+  const line = (label, sum) => {
+    if (sum === null) return [`${label}: couldn't be read`];
+    if (!(sum?.lux > 0n)) return null;
+    const worth = valued ? worthText(sum, currency) : "";
+    return [`${label}: `, ...amountParts(hidden, sum.lux), worth ? h("span", { class: "kv-muted" }, [" · ", balance(hidden, worth)]) : null].filter(Boolean);
+  };
+  const value = h("label", { class: "checkline stake-years-value", for: "stake-years-value" }, [
+    h("input", {
+      type: "checkbox",
+      id: "stake-years-value",
+      checked: valued,
+      onchange: (e) => {
+        state.rewardYearsValued = Boolean(e?.target?.checked);
+        actions?.render?.()?.catch?.(() => {});
+      },
+    }),
+    h("span", { text: `Add each reward's value in ${currencyName(currency)}, from CoinGecko's prices` }),
+  ]);
   return [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
     h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown }) =>
       kvRow(
         String(year),
-        [
-          claimed.lux > 0n ? [...amountParts(hidden, claimed.lux), " claimed"] : null,
-          sozuGrown === null ? ["Grown with Sozu while held: couldn't be read"] : sozuGrown?.lux > 0n ? [...amountParts(hidden, sozuGrown.lux), " grown with Sozu while held"] : null,
-          sozu === null ? ["Taken out of Sozu by unstaking: couldn't be read"] : sozu?.lux > 0n ? [...amountParts(hidden, sozu.lux), " taken out of Sozu by unstaking"] : null,
-        ]
+        [line("Native staking, claimed", claimed), line("Sozu, grown while held", sozuGrown), line("Sozu, taken out by unstaking", sozu)]
           .filter(Boolean)
           .map((parts) => h("span", { class: "stake-year-part" }, parts))
       )
     )),
+    value,
   ];
 }
 
@@ -493,8 +529,10 @@ export function stakeFormView(ov, { state, actions } = {}) {
 // days (app-core's nativeRewards), else the estimate at today's stake (one read
 // of the node a day, rewardRate.js); Sozu's as stDUSK grew, else after its fee
 // on rewards from native staking's figure as shown, so both wallets give the
-// same one. Asked once a popup, node and network (a custom node's once its
-// chain ID is read too), and drawn again when the answers come.
+// same one. The rates measured last, kept a day (keptRatesOf), show with their
+// days till new ones come, and stay where they can't be read. Asked once a
+// popup, node and network (a custom node's once its chain ID is read too), and
+// drawn again when the answers come.
 function rewardRates(ov, { state, actions }) {
   const nodeUrl = String(ov?.nodeUrl ?? "");
   const networkKey = networkKeyOf(Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl), nodeUrl);
@@ -504,9 +542,18 @@ function rewardRates(ov, { state, actions }) {
   const held = heldStatus?.fees?.reward ?? null;
   const key = `${networkKey} ${nodeUrl}`;
   if (state.rewardRates?.key !== key) {
-    const rates = (state.rewardRates = { key, native: null, nativeDays: null, sozuFee: null, growth: null });
+    const rates = (state.rewardRates = { key, native: null, nativeDays: null, sozuFee: null, growth: null, keptFee: null });
     const result = (res) => (res?.error ? null : res?.result ?? null);
     const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
+    // The last measured, unless a new measure came first.
+    const kept = keptRatesOf(ov)
+      .then(({ native, sozu }) => {
+        if (state.rewardRates !== rates || !(native || sozu)) return;
+        if (native && !rates.measured) Object.assign(rates, { native: native.rate, nativeDays: native.days, measured: true });
+        if (sozu && !rates.growth) Object.assign(rates, { growth: sozu.growth, keptFee: sozu.fee });
+        actions?.render?.().catch(() => {});
+      })
+      .catch(() => {});
     // As the chain paid it, where that can be read: in place of the estimate.
     Promise.resolve(actions?.send?.({ type: "DUSK_UI_GET_STAKING_FIGURES" }))
       .then(result, () => null)
@@ -526,9 +573,10 @@ function rewardRates(ov, { state, actions }) {
               (res) => ofNetwork(result(res)),
               () => null
             )),
+      kept,
     ]).then(([native, status]) => {
       if (state.rewardRates !== rates) return;
-      // The estimate, unless what the chain paid came first.
+      // The estimate, unless what the chain paid came first, or was kept.
       if (!rates.measured) rates.native = typeof native === "number" ? native : null;
       rates.sozuFee = status?.fees?.reward ?? null;
       if (rates.native !== null) actions?.render?.().catch(() => {});
@@ -537,8 +585,8 @@ function rewardRates(ov, { state, actions }) {
   }
   // Or Liquid staking's status, where it came in while this read none.
   measureGrowth(ov, heldStatus, { state, actions });
-  // Sozu's fee as Liquid staking read it last, else as asked here.
-  const sozuFee = held ?? state.rewardRates.sozuFee;
+  // Sozu's fee as Liquid staking read it last, else as asked here, else as it was with the growth kept.
+  const sozuFee = held ?? state.rewardRates.sozuFee ?? state.rewardRates.keptFee;
   const { native, nativeDays, growth } = state.rewardRates;
   const sozu = native !== null && sozuFee ? sozuRate(native, { fees: { reward: sozuFee } }, growth) : null;
   // Sozu's over the days stDUSK grew, else over native staking's.

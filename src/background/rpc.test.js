@@ -223,7 +223,7 @@ describe("background rpc handler", () => {
     vi.resetModules();
     const { handleRpc } = await import("./rpc.js");
     vaultValue = { v: 1 };
-    const link = "https://apps.testnet.dusk.network/wallet/dashboard/send?to=abc&amount=1&network=testnet";
+    const link = "https://apps.testnet.dusk.network/wallet/dashboard/send?to=26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927&amount=1&network=testnet";
     const handOver = (context) => handleRpc("https://apps.testnet.dusk.network", { method: "dusk_openPaymentLink", params: { link } }, context);
 
     await expect(handOver({ pressed: true })).resolves.toBe(true);

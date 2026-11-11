@@ -144,6 +144,9 @@ describe("profile names", () => {
       // The first profile goes by its verified .dusk name, the second by its default one.
       [2, "alice.dusk", "Your other profile is called alice.dusk. Choose another name."],
       [1, "Profile 2", "Your other profile is called Profile 2. Choose another name."],
+      // Sofía's: the first profile by its own name too, and its .dusk name in look-alike letters (a Cyrillic а).
+      [2, "Profile 1", "Your other profile is called Profile 1. Choose another name."],
+      [2, "\u0430lice.dusk", "That looks like the name of your other profile alice.dusk. Choose another name."],
       [2, "Marta", "You have a contact called Marta. Choose another name."],
       // A Cyrillic М.
       [2, "\u041carta", "That looks like your contact Marta. Choose another name."],
@@ -160,6 +163,25 @@ describe("profile names", () => {
     label(2).dispatchEvent(fakeEvent("blur"));
     await settle();
     expect([shownError(2), setAccountName.mock.calls.at(-1)]).toEqual(["", [ACCOUNTS[0], 1, "Spending"]]);
+    listAddressBook.mockResolvedValue([]);
+  });
+
+  // Amélie's: her profile named Lucas beside her grandson's contact "Lucas (petit-fils)".
+  it("ask about a name a contact's starts, or that starts it, word for word, and save it", async () => {
+    listAddressBook.mockResolvedValue([{ id: "c1", name: "Lucas (petit-fils)", address: "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T" }]);
+    setAccountName.mockClear();
+    await settings();
+    const question = () => label(1).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.textContent);
+    typeInto(label(1), "Lucas");
+    label(1).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect([question(), setAccountName.mock.calls.at(-1)]).toEqual([["You have a contact called Lucas (petit-fils). Is this someone else?"], [ACCOUNTS[0], 0, "Lucas"]]);
+    // Typed again, the question goes with what it asked of.
+    typeInto(label(1), "Luc");
+    expect(question()).toEqual([]);
+    label(1).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(question()).toEqual([]);
     listAddressBook.mockResolvedValue([]);
   });
 

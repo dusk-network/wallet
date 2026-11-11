@@ -29,9 +29,11 @@ import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { nameFactsFor } from "../../shared/knownCalls.js";
 import { chainIdForNode, networkForNode } from "../../shared/nodeNetwork.js";
 import { lookupRecipientNames } from "../../shared/duskNames.js";
+import { NODE_ANSWER_MS } from "../../shared/networkStatus.js";
 import { forgetTxs, getTxEpoch, listTxs, patchTxMeta } from "../../shared/txStore.js";
 import { VERIFIED_NAME_TTL_MS, duskNamesScope } from "../../shared/verifiedNames.js";
 import { noteTxStatus, sentStatus } from "./views/sent.js";
+import { keepMeasure, keptMeasure } from "./keptMeasures.js";
 
 /** Rows read for the History view at first, and how many more Show more adds. */
 export const ACTIVITY_PAGE = 50;
@@ -90,6 +92,8 @@ async function reload(a) {
   a.coveredTo = coveredTo;
   a.complete = complete;
   a.loaded = true;
+  // What's kept changed: a search reads it whole again.
+  a.reads = (a.reads ?? 0) + 1;
 }
 
 // What the wallet's own record of a send adds to the chain's row of it: the
@@ -118,10 +122,11 @@ async function settle(a, state) {
   for (const { hash } of keep) await patchTxMeta(hash, { settled: true }, { epoch });
 }
 
-// Names kept from a check in the last ten minutes, as sites get them.
-async function keptNames(a) {
+// Names kept from a check in the last ten minutes, as sites get them: of the
+// page's counterparties, or those of `entries` (a search's whole history).
+async function keptNames(a, entries = a.entries) {
   const scope = duskNamesScope(a.nodeUrl);
-  const accounts = counterparties(a);
+  const accounts = counterparties(a, entries);
   if (!scope || !accounts.length) return;
   const now = Date.now();
   for (const [account, { name, at }] of await getCounterpartyNames(scope, accounts)) {
@@ -129,14 +134,15 @@ async function keptNames(a) {
   }
 }
 
-const counterparties = (a) => [
-  ...new Set(a.entries.map((e) => e.counterparty).filter((c) => c && c !== a.account && classifyDuskIdentifier(c) === "account")),
+const counterparties = (a, entries = a.entries) => [
+  ...new Set(entries.map((e) => e.counterparty).filter((c) => c && c !== a.account && classifyDuskIdentifier(c) === "account")),
 ];
 
-// The shown counterparties' names, checked again: one Multicall query for up to 32.
-async function checkNames(a) {
+// The shown counterparties' names, checked again: one Multicall query for up
+// to 32. Of the page's, or those of `entries`.
+async function checkNames(a, entries = a.entries) {
   const scope = duskNamesScope(a.nodeUrl);
-  const due = counterparties(a).filter((c) => !a.checked.has(c));
+  const due = counterparties(a, entries).filter((c) => !a.checked.has(c));
   if (!scope || !due.length) return false;
   for (const c of due) a.checked.add(c);
   const names = await lookupRecipientNames(due, { nodeUrl: a.nodeUrl });
@@ -401,6 +407,62 @@ export async function showMoreActivity({ state, render }) {
 const WHOLE_RUN_REQUESTS = 64;
 const WHOLE_RUNS = 64;
 
+// What `promise` gives within `ms`, or LATE.
+const LATE = Symbol("late");
+function within(promise, ms) {
+  let timer;
+  const late = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(LATE), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Activity's search: the account's whole history, its older blocks synced
+ * first as far back as they go, as Show more would, then every row kept read
+ * at once. Read again once what's kept changed; the last read stands
+ * meanwhile. `whole` is what `activityRows` takes, null until it's read, or
+ * where there's no history to read; `reading` while it's read.
+ * @param {object} ov - the overview
+ * @param {{ state: object, render?: () => Promise<void> }} ctx
+ * @returns {{ whole: { entries: object[], meta: object | null, shielded: object[] } | null, reading: boolean }}
+ */
+export function searchedActivity(ov, { state, render }) {
+  const a = state?.activity;
+  if (!a?.history || !a.loaded || a.key !== activityKey(ov)) return { whole: null, reading: false };
+  // Once for each change to what's kept: one that can't be read whole leaves the last read, or the page.
+  const at = a.reads ?? 0;
+  if (a.searchAsked !== at && !a.searching) {
+    a.searchAsked = at;
+    a.searching = (async () => {
+      if ((await a.epoch) === undefined) throw new Error("The activity store is out of reach");
+      let complete = a.complete;
+      for (let run = 0; run < WHOLE_RUNS && !complete && !a.stale; run += 1) {
+        await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
+        ({ complete } = await a.history.read({ limit: 1 }));
+      }
+      const read = await a.history.read({ limit: Number.MAX_SAFE_INTEGER - 1 });
+      // The .dusk names of whom the rows past the page are with too, as the
+      // page's, as a name is searched for as well: those kept, then those
+      // checked again for as long as a node that answers takes. A silent node
+      // doesn't hold the search: the names it gives later show when they come.
+      await keptNames(a, read.entries).catch(() => {});
+      const checking = checkNames(a, read.entries).catch(() => false);
+      if ((await within(checking, NODE_ANSWER_MS)) === LATE) {
+        checking.then((named) => named && state.activity === a && redraw(state, render));
+      }
+      if (state.activity === a) a.searched = { entries: read.entries, meta: read.state };
+    })()
+      .catch(() => {})
+      .finally(() => {
+        a.searching = null;
+        redraw(state, render);
+      });
+  }
+  const whole = a.searched ? { entries: a.searched.entries, meta: a.searched.meta, shielded: a.shielded } : null;
+  return { whole, reading: Boolean(a.searching) };
+}
+
 /**
  * All of the account's history, for what needs every row (an export, a Sozu
  * position), read from the archive as far as it isn't kept yet, with each
@@ -595,6 +657,19 @@ function lookForFinal(ov, sent, refresh) {
   }, SOZU_FINAL_AGAIN_MS);
 }
 
+// The network a measured rate is of: its chain, else its node.
+const networkOfRates = (ov) => String(ov?.chainId ?? ov?.nodeUrl ?? "");
+
+// Native staking's period, as app-core 0.12.0 measures it: the 30 days to the
+// last whole day of blocks (8,640) an hour (360 blocks) or more below the tip.
+// A rate measured over one stands for that day of blocks alone: once the tip
+// passes the next day's line, at the same block for every app, it's another's.
+const DAY_BLOCKS = 8_640;
+const PERIOD_MARGIN = 360;
+// About a block's time, for where the tip is while the node can't say.
+const BLOCK_MS = 10_000;
+const periodEnd = (tip) => Math.floor((tip - PERIOD_MARGIN) / DAY_BLOCKS) * DAY_BLOCKS;
+
 // How Sozu's stDUSK grew lately, by pool, as app-core reads it from the chain:
 // read once an hour in this popup, for every screen that shows Sozu's rate.
 const sozuGrowthKept = new Map();
@@ -609,7 +684,33 @@ const sozuGrowthKept = new Map();
 export function sozuGrowthOf(ov, status, tipHeight = null) {
   if (!status?.contracts?.pool) return Promise.resolve(null);
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
-  return sozuGrowth({ archive, cache: sozuGrowthKept, pool: status.contracts.pool, status, tipHeight }).catch(() => null);
+  return sozuGrowth({ archive, cache: sozuGrowthKept, pool: status.contracts.pool, status, tipHeight })
+    .then((growth) => {
+      // The last measured, for the next screen to show while it reads again: with Sozu's fee on rewards then.
+      if (growth) keepMeasure(`sozu:${networkOfRates(ov)}`, { fee: status.fees?.reward ?? null, growth });
+      return growth;
+    })
+    .catch(() => null);
+}
+
+/**
+ * The staking rates last measured on the overview's network, as they were
+ * read: native staking's (`native`, as nativeRewardsOf gives it) while the
+ * tip is still in the day of blocks it was measured to (its `to.height`), and
+ * Sozu's growth with its fee on rewards then (`sozu`), less than a day old;
+ * each null where there's none. The tip is where it would be by now, a block
+ * every 10 seconds from the period's last block, where the node doesn't say.
+ * @param {object} ov - the overview
+ * @param {{ tipHeight?: number | null, now?: number }} [at]
+ * @returns {Promise<{ native: object | null, sozu: { fee: object | null, growth: object } | null }>}
+ */
+export async function keptRatesOf(ov, { tipHeight = null, now = Date.now() } = {}) {
+  const network = networkOfRates(ov);
+  const [kept, sozu] = await Promise.all([keptMeasure(`native-period:${network}`, { now }), keptMeasure(`sozu:${network}`, { now })]);
+  const to = kept?.to;
+  const tip = Number.isSafeInteger(tipHeight) ? tipHeight : Number.isSafeInteger(to?.height) && Number.isFinite(to?.at) ? to.height + Math.floor((now - to.at) / BLOCK_MS) : null;
+  const native = typeof kept?.rate === "number" && tip !== null && periodEnd(tip) === to.height ? kept : null;
+  return { native, sozu: sozu?.growth && typeof sozu.growth.rate === "number" ? sozu : null };
 }
 
 // stDUSK's worth at each new year, as Rewards by year reads it from the chain:
@@ -620,14 +721,14 @@ const sozuYearsKept = new Map();
  * Rewards by calendar year, in this device's time zone (app-core's
  * rewardsByYear): native rewards claimed, and with Sozu what grew while held
  * and what unstaking took out, from the profile's whole public history and
- * Sozu's status as read now.
+ * Sozu's status as read now; with `price`, what each was worth at its time.
  * @param {object} ov - the overview
- * @param {{ rows: object[], facts?: Map<string, object>, complete: boolean, status?: object | null }} history
+ * @param {{ rows: object[], facts?: Map<string, object>, complete: boolean, status?: object | null, price?: Function }} history
  */
-export function rewardYearsOf(ov, { rows, facts, complete, status }) {
+export function rewardYearsOf(ov, { rows, facts, complete, status, price }) {
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return rewardsByYear({ archive, cache: sozuYearsKept, complete, facts, rows, status: status ?? undefined, timeZone });
+  return rewardsByYear({ archive, cache: sozuYearsKept, complete, facts, price, rows, status: status ?? undefined, timeZone });
 }
 
 // What native staking paid lately, as app-core measures it from the chain: read
@@ -644,8 +745,14 @@ const nativeRewardsKept = new Map();
 export function nativeRewardsOf(ov, figures) {
   if (!Array.isArray(figures?.provisioners)) return Promise.resolve(null);
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
-  const network = String(ov?.chainId ?? ov?.nodeUrl ?? "");
-  return nativeRewards({ archive, cache: nativeRewardsKept, network, provisioners: figures.provisioners, tipHeight: figures.tipHeight ?? null }).catch(() => null);
+  const network = networkOfRates(ov);
+  return nativeRewards({ archive, cache: nativeRewardsKept, network, provisioners: figures.provisioners, tipHeight: figures.tipHeight ?? null })
+    .then((measured) => {
+      // The last measured, for the next screen to show while it reads again, for the day of blocks it's of.
+      if (measured) keepMeasure(`native-period:${network}`, measured);
+      return measured;
+    })
+    .catch(() => null);
 }
 
 /** How long a detail lookup that brought nothing waits before it is asked again. */
@@ -657,14 +764,21 @@ const detailLoads = new Map();
 /**
  * The time, outcome and fee of one synced entry, for its details view, when
  * no sync looked them up yet, and a deposit to DuskEVM's address there: one
- * request at a time, again a minute after one that brought nothing.
- * @param {{ state: object, render: () => Promise<void> }} ctx
+ * request at a time, again a minute after one that brought nothing. An entry
+ * past the page, found by Activity's search or handed to the details with its
+ * row (`txDetailRow`), is read again once they're kept, into the search's
+ * rows and the row handed over.
+ * @param {{ ov?: object, state: object, render: () => Promise<void> }} ctx - `ov`: the overview the row handed over is of
  * @param {string} hash
  */
-export function loadActivityDetail({ state, render }, hash) {
+export function loadActivityDetail({ ov, state, render }, hash) {
   const a = state?.activity;
-  const entry = a?.entries.find((e) => e.hash === hash);
-  const key = `${a?.key}\n${hash}`;
+  if (!a?.history) return;
+  const handed = state.txDetailRow?.hash === hash && state.txDetailRow.context === a.key ? state.txDetailRow : null;
+  const searched = () => a.searched?.entries.some((e) => e.hash === hash);
+  let now = a.entries.find((e) => e.hash === hash);
+  const entry = now ?? a.searched?.entries.find((e) => e.hash === hash) ?? handed?.row?.entry ?? undefined;
+  const key = `${a.key}\n${hash}`;
   const last = detailLoads.get(key);
   if (!entry || !a.history.needsDetails(entry) || last === "loading" || (typeof last === "number" && Date.now() - last < DETAIL_RETRY_MS)) return;
   detailLoads.set(key, "loading");
@@ -674,10 +788,22 @@ export function loadActivityDetail({ state, render }, hash) {
       return a.history.fillDetails([entry]);
     })
     .then(() => reload(a))
+    .then(async () => {
+      now = a.entries.find((e) => e.hash === hash);
+      if (now || state.activity !== a) return;
+      // Past the page: its block read again, whole.
+      const { entries: block } = await a.history.read({ before: entry.blockHeight + 1, limit: 1 });
+      now = block.find((e) => e.hash === hash);
+      if (!now) return;
+      if (searched()) a.searched = { ...a.searched, entries: a.searched.entries.map((e) => (e.hash === hash ? now : e)) };
+      if (!handed || state.txDetailRow !== handed || !ov) return;
+      // Its row again, among the rows it was found with: the search's, else the page's.
+      const whole = searched() ? { entries: a.searched.entries, meta: a.searched.meta } : { entries: [...block, ...a.entries], meta: a.meta };
+      handed.row = activityRows(ov, state, { ...whole, shielded: a.shielded }).find((row) => row.hash === hash) ?? handed.row;
+    })
     .then(() => redraw(state, render))
     .catch(() => {})
     .finally(() => {
-      const now = a.entries.find((e) => e.hash === hash);
       if (now && !a.history.needsDetails(now)) detailLoads.delete(key);
       else detailLoads.set(key, Date.now());
     });

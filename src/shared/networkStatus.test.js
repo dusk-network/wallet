@@ -120,6 +120,60 @@ describe("checkAllEndpoints", () => {
   });
 });
 
+describe("checkNode", () => {
+  let checkNode;
+  let getNetworkStatus;
+  let node;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    for (const key of Object.keys(items)) delete items[key];
+    node = vi.fn(async () => new Response('{"chain_id":2}', { status: 200 }));
+    vi.stubGlobal("fetch", node);
+    ({ checkNode, getNetworkStatus } = await import("./networkStatus.js"));
+    const { setSettings } = await import("./settings.js");
+    await setSettings({ nodeUrl: ENDPOINTS.nodeUrl, chainId: 2 });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Lena's and Amélie's: a node that held every request open went unnoticed, the dot green.
+  it("says a node that doesn't answer in time can't be reached, asking it alone, once at a time, and the prover and archiver as they were", async () => {
+    const { setNetworkStatus } = await import("./networkStatus.js");
+    await setNetworkStatus({ nodeStatus: "online", proverStatus: "online", archiverStatus: "offline", lastChecked: 1 });
+    // It holds what it's asked until the ask gives up.
+    node.mockImplementation((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(new Error("signal is aborted without reason")))));
+    const asked = checkNode(ENDPOINTS.nodeUrl, { timeoutMs: 50 });
+    const again = checkNode(ENDPOINTS.nodeUrl, { timeoutMs: 50 });
+    // While it's asked: as it was, never "checking".
+    await vi.waitFor(() => expect(node).toHaveBeenCalledTimes(1));
+    expect((await getNetworkStatus()).nodeStatus).toBe("online");
+    const [a, b] = await Promise.all([asked, again]);
+    expect(node).toHaveBeenCalledTimes(1);
+    expect(new URL(node.mock.calls[0][0]).pathname).toBe("/on/node/info");
+    expect(a).toMatchObject({ nodeStatus: "offline", nodeUrl: ENDPOINTS.nodeUrl, proverStatus: "online", archiverStatus: "offline", lastChecked: 1 });
+    expect(b).toEqual(a);
+
+    // It answers again.
+    node.mockImplementation(async () => new Response('{"chain_id":2}'));
+    await expect(checkNode(ENDPOINTS.nodeUrl)).resolves.toMatchObject({ nodeStatus: "online", nodeError: null, nodeChainId: 2 });
+  });
+
+  it("keeps nothing of a node the wallet left while it was asked", async () => {
+    const { setSettings } = await import("./settings.js");
+    const { setNetworkStatus } = await import("./networkStatus.js");
+    await setNetworkStatus({ nodeStatus: "online", nodeUrl: "https://nodes.dusk.network" });
+    node.mockImplementation(async () => {
+      await setSettings({ nodeUrl: "https://nodes.dusk.network", chainId: 1 });
+      return new Response("", { status: 503 });
+    });
+    await checkNode(ENDPOINTS.nodeUrl);
+    expect(await getNetworkStatus()).toMatchObject({ nodeStatus: "online", nodeUrl: "https://nodes.dusk.network" });
+  });
+});
+
 describe("chainIdForChoice", () => {
   let node;
 

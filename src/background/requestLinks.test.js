@@ -19,7 +19,8 @@ vi.mock("../shared/vault.js", () => ({ loadVault: vi.fn(async () => ({ version: 
 const node = vi.hoisted(() => ({ url: "https://testnet.nodes.dusk.network" }));
 vi.mock("../shared/settings.js", () => ({ getSettings: vi.fn(async () => ({ nodeUrl: node.url })) }));
 
-const LINK = "https://apps.testnet.dusk.network/wallet/dashboard/send?to=abc&amount=1&network=testnet";
+const ACCOUNT = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
+const LINK = `https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1&network=testnet`;
 const onWalletPage = { url: LINK };
 
 beforeEach(() => {
@@ -122,7 +123,6 @@ describe("a request link from the web wallet's Send", () => {
 
 describe("a request the web wallet hands over (dusk_openPaymentLink)", () => {
   const WALLET = "https://apps.testnet.dusk.network";
-  const ACCOUNT = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
   const opened = () => tabsCreate.mock.calls.map(([{ url }]) => decodeURIComponent(url.split("&link=")[1]));
 
   it("opens Send with the link of the web wallet's own page, on a press, with a wallet here", async () => {
@@ -133,6 +133,19 @@ describe("a request the web wallet hands over (dusk_openPaymentLink)", () => {
     loadVault.mockImplementation(async () => null);
     await expect(handOverRequestLink(WALLET, LINK, { pressed: true })).resolves.toBe(false);
     expect(opened()).toHaveLength(2);
+  });
+
+  // Marek's: a second recipient, a line break or a hidden character inside to= was handed over, OK true, where the web wallet refuses the link.
+  it("refuses a link whose recipient Send can't pay, saying why, as the web wallet does, offered or handed over", async () => {
+    const OTHER = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+    const page = "https://apps.testnet.dusk.network/wallet/dashboard/send";
+    for (const to of [`${ACCOUNT},${OTHER}`, `${ACCOUNT}%2C${OTHER}`, `${ACCOUNT.slice(0, 40)}%0A${ACCOUNT.slice(40)}`, `${ACCOUNT}%E2%80%AE`, `${ACCOUNT.slice(0, 40)}%E2%80%8B${ACCOUNT.slice(40)}`, `${ACCOUNT}%EF%B8%8F`]) {
+      const link = `${page}?to=${to}&amount=0.001&network=testnet`;
+      await expect(handOverRequestLink(WALLET, link, { pressed: true })).rejects.toMatchObject({ code: -32602, message: "This link's address isn't valid. Ask for a new one." });
+      await expect(offersRequestLink({ link }, { url: link })).resolves.toBe(false);
+      await expect(openRequestLink({ link }, { url: link })).resolves.toBe(false);
+    }
+    expect(tabsCreate).not.toHaveBeenCalled();
   });
 
   it("refuses another site's, another page's or another network's link, and one asked without a press", async () => {

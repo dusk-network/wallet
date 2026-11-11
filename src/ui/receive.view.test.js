@@ -327,6 +327,21 @@ describe("receive", () => {
       expect(view.button("Copy request link").disabled).toBe(false);
     });
 
+    // Marek's: a memo with a direction override read "r22 x req" in the field, and nothing said it until it was in the list.
+    it("shows a memo's hidden characters as codes under the field, and what to check, before the link is copied", async () => {
+      inLanguage("en-US");
+      const memoShown = () => shown(".receive-memo-shown");
+      const view = await receive("public", { state: open({ memo: "r22 x \u202eqer" }) });
+      expect(memoShown()).toBe("r22 x \\u202eqerHidden characters that can change how this reads show here as � or \\u codes.");
+      expect(dom.document.body.querySelector(".receive-memo-shown").getAttribute("role")).toBe("status");
+      expect(view.button("Copy request link").disabled).toBe(false);
+      // A look-alike digit says what to check; a plain memo says nothing.
+      await receive("public", { state: open({ memo: "Invoice \u09ea" }) });
+      expect(memoShown()).toContain("A number here uses digits that look like other digits.");
+      await receive("public", { state: open({ memo: "Lunch" }) });
+      expect(memoShown()).toBe("");
+    });
+
     it("says nothing with the panel closed, and claims nothing for what wouldn't do", async () => {
       inLanguage("en-US");
       await receive("public", { state: { receive: { tab: "public", requestOpen: false, amountDusk: "abc", memo: "Lunch" } } });

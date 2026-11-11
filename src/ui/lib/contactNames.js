@@ -1,4 +1,4 @@
-import { nameClash } from "@dusk-network/app-core/names";
+import { nameClash, nameStarts } from "@dusk-network/app-core/names";
 
 import { safeText } from "../../shared/safeText.js";
 import { profileLabelOf } from "../components/ProfileName.js";
@@ -38,6 +38,21 @@ export function contactNameClash(ov, name, { address = "", contacts = [], except
   const clash = nameClash(name, { contacts, except, profiles: profilesOf(ov) });
   if (clash?.kind === "profile" && address && (clash.entry.account === address || clash.entry.address === address)) return null;
   return clash;
+}
+
+/**
+ * The question for a contact's name that a profile's name starts, or that
+ * starts it, word for word, by the look-alike rules (app-core's nameStarts):
+ * "Lucas (petit-fils)" beside a profile "Lucas" reads as it on Send. It can be
+ * saved. "" for none, and for the profile whose own address it is.
+ * @param {object} ov
+ * @param {unknown} name
+ * @param {{ address?: string }} [contact]
+ */
+export function contactNameStartsText(ov, name, { address = "" } = {}) {
+  const starts = nameStarts(name, { profiles: profilesOf(ov) });
+  if (!starts || (address && (starts.entry.account === address || starts.entry.address === address))) return "";
+  return `One of your profiles is called ${starts.name}. Is this someone else?`;
 }
 
 /**

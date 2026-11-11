@@ -311,6 +311,14 @@ body[data-runtime="tauri"].page--full .panel {
   line-height: 1.35;
 }
 
+/* A request's memo as the payer will see it, under its field, while it has
+   what changes how it reads */
+.receive-memo-shown {
+  margin-top: 4px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 /* A node that isn't a network's own says which it is, in neutral words, its
    whole host showing: the end of a host is what names it. */
 .testnet-strip.testnet-strip--wrap {
@@ -1613,6 +1621,23 @@ body.page--popup .site-bar-action {
     margin-top: 10px;
   }
 
+  /* In the sidebar, the words sit right under the network's pill, with the
+     sidebar's own gap between its parts (not the top bar's line gap). */
+  body.page--full .panel-header:has(> .network-word) {
+    flex-wrap: nowrap;
+    row-gap: 28px;
+  }
+
+  body.page--full .panel-header:has(> .network-word) > .header-actions {
+    flex: 0 1 auto;
+  }
+
+  body.page--full .network-word {
+    order: 0;
+    flex: none;
+    margin-top: -20px;
+  }
+
   body.page--full .full-nav {
     display: flex;
     flex-direction: column;
@@ -2519,14 +2544,31 @@ button.network-pill.is-disabled .network-pill__chev {
   color: var(--text-muted);
 }
 
-/* What the red dot means, in a word beside the network's name. */
-.network-pill__word {
+/* What the red dot means, in words, on a line of its own under the top bar,
+   so the profile's name beside the network's keeps its room. */
+.network-word {
+  order: 1;
+  flex: 0 0 100%;
+  margin: 0;
   color: var(--danger);
-  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
 }
 
-.network-pill__word[hidden] {
+.network-word[hidden] {
   display: none;
+}
+
+/* While it shows, the brand and the buttons keep the top bar's line, and the
+   words take the next. */
+.panel-header:has(> .network-word:not([hidden])) {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.panel-header:has(> .network-word:not([hidden])) > .header-actions {
+  flex: 1 1 0%;
 }
 
 @keyframes statusPulse {
@@ -4598,15 +4640,22 @@ input.activity-search {
   padding: 14px;
 }
 
-.activity-export-check {
+.activity-export-check,
+.stake-years-value {
   color: var(--text);
   font-size: 13.5px;
   line-height: 1.4;
 }
 
-.activity-export-check input[type="checkbox"] {
+.activity-export-check input[type="checkbox"],
+.stake-years-value input[type="checkbox"] {
   flex: 0 0 auto;
   accent-color: var(--pill);
+}
+
+/* Rewards by year's values, asked for under the years */
+.stake-years-value {
+  margin: 8px 4px 0;
 }
 
 .activity-export-dates {
@@ -4783,6 +4832,11 @@ p.tx-hero-note {
   line-height: 1.4;
 }
 
+/* A contact whose name looks like another's, as its row says it */
+p.tx-hero-note.tx-hero-alike {
+  color: var(--pending);
+}
+
 .kv-muted {
   color: var(--text-muted);
 }
@@ -4799,6 +4853,7 @@ p.tx-hero-note {
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
+  text-align: right;
 }
 
 /* The transaction ID opens the explorer */
