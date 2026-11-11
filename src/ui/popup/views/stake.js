@@ -417,9 +417,11 @@ function nodeRow(actions) {
 function rewardYears(ov, { state, actions, hidden, status }) {
   const history = stakingHistory(ov, { state, actions });
   if (history.reading || !history.rows.length) return null;
-  // Read again for a new status, what was said kept meanwhile.
+  // Read again for a new status, what was said kept meanwhile: what's held
+  // and what it's worth now, which grows as Sozu's rewards come.
   const base = `${history.key}|${history.rows.length}|${history.facts?.size ?? 0}`;
-  const key = `${base}|${status ? String(status.position?.stDuskBalanceLux ?? "") : "-"}`;
+  const held = status?.position ?? {};
+  const key = `${base}|${status ? `${held.stDusk ?? held.stDuskBalanceLux ?? ""}/${held.balance ?? held.poolBalanceLux ?? ""}` : "-"}`;
   if (state.rewardYears?.key !== key) {
     const kept = (state.rewardYears = { base, key, years: state.rewardYears?.base === base ? state.rewardYears.years : [] });
     rewardYearsOf(ov, { rows: history.rows, facts: history.facts, complete: Boolean(history.whole), status })
