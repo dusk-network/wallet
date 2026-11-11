@@ -580,20 +580,26 @@ describe("transaction details", () => {
     const { putTxMeta } = await import("../shared/txStore.js");
     const { explorerTxUrl } = await import("../shared/explorer.js");
     const txHash = "7a".repeat(32);
-    // Sent from another wallet while the node signed for Testnet; it signs for Mainnet now.
+    // Sent from another wallet while the node signed for Testnet.
     await putTxMeta(txHash, { walletId: "another wallet", nodeUrl: CUSTOM, chainId: networks.testnet.chainId, profileIndex: 0, kind: TX_KIND.TRANSFER, status: "executed" });
-    noteChainId(CUSTOM, networks.mainnet.chainId);
-    try {
+    const open = async (ov) => {
       dom.window.open = vi.fn(() => ({}));
       const state = { route: "tx", txDetailHash: txHash, txDetailFrom: "home" };
       const actions = { render: vi.fn(async () => {}) };
-      const ov = { txs: [], nodeUrl: CUSTOM, chainId: networks.mainnet.chainId, accounts: [A], selectedAccountIndex: 0 };
-      dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
+      dom.document.body.replaceChildren(...txDetailsView({ txs: [], accounts: [A], selectedAccountIndex: 0, ...ov }, { state, actions }));
       await vi.waitFor(() => expect(actions.render).toHaveBeenCalled());
-      dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
+      dom.document.body.replaceChildren(...txDetailsView({ txs: [], accounts: [A], selectedAccountIndex: 0, ...ov }, { state, actions }));
       dom.document.body.querySelector(".tx-explorer-btn").click();
       await settle();
-      expect([visibleText(dom.document.body.querySelector(".tx-missing")), dom.window.open.mock.lastCall?.[0]]).toEqual([
+      return [visibleText(dom.document.body.querySelector(".tx-missing")), dom.window.open.mock.lastCall?.[0]];
+    };
+    try {
+      // On Testnet's own node, what the node signs for not known here: called by its own name.
+      noteChainId(CUSTOM, null);
+      expect(await open({ nodeUrl: NODE })).toEqual(["This transaction is on Custom · my-node.example:8443. You are on Testnet.", explorerTxUrl(NODE, txHash)]);
+      // It signs for Mainnet now: the chain its record says.
+      noteChainId(CUSTOM, networks.mainnet.chainId);
+      expect(await open({ nodeUrl: CUSTOM, chainId: networks.mainnet.chainId })).toEqual([
         "This transaction is on Testnet. You are on Custom · my-node.example:8443.",
         explorerTxUrl(NODE, txHash),
       ]);

@@ -209,11 +209,11 @@ function onThisNetwork(where, ov) {
   return where.recordedChain == null || now == null || where.recordedChain === now;
 }
 
-// What its network is called: the recorded chain's name, where its node signs
-// for another now, else the node's.
+// What its network is called: the recorded chain's name, where its node is
+// known to sign for another now, else the node's.
 function networkNameOf(where) {
-  const chain = where.recordedChain;
-  if (chain != null && chain !== chainIdForNode(where.nodeUrl)) return networkOf(chain)?.label ?? `chain ${chain}`;
+  const [chain, now] = [where.recordedChain, where.nodeUrl ? chainIdForNode(where.nodeUrl) : null];
+  if (chain != null && now != null && chain !== now) return networkOf(chain)?.label ?? `chain ${chain}`;
   return where.nodeUrl ? networkTextOf(where.nodeUrl) : "";
 }
 
