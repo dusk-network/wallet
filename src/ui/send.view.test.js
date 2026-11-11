@@ -738,15 +738,16 @@ describe("send's amount", () => {
     typeInto(last.amount, "0.0000000001");
     expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
     typeInto(last.amount, "1,234");
-    expect(last.amountError()).toBe("Is that 1234 or 1.234? Write the one you mean.");
+    expect(last.amountError()).toBe("Is that about 1.23 or 1234? Write the one you mean.");
   });
 
   // Lena's: "1,000" asked and "1.000" didn't. In English the point is the
-  // decimal; where the comma is, "1.000" asks, in the web wallet's words.
+  // decimal; where the comma is, "1.000" asks, in the web wallet's words. And
+  // the question's "1.000" read as a thousand to her: it names 1 and 1000.
   it.each([
-    ["de-DE", "1.000", "Is that 1000 or 1,000? Write the one you mean."],
-    ["nl-NL", "1.000", "Is that 1000 or 1,000? Write the one you mean."],
-    ["en-GB", "1,000", "Is that 1000 or 1.000? Write the one you mean."],
+    ["de-DE", "1.000", "Is that 1 or 1000? Write the one you mean."],
+    ["nl-NL", "1.000", "Is that 1 or 1000? Write the one you mean."],
+    ["en-GB", "1,000", "Is that 1 or 1000? Write the one you mean."],
     ["es-ES", "1 234,5", "Leave out the space: 1234,5."],
   ])("asks which amount is meant where it could be two, in the language's reading: %s %s", (language, typed, asked) => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language });

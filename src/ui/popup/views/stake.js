@@ -430,7 +430,8 @@ function rewardYears(ov, { state, actions, hidden, status }) {
       })
       .catch(() => {});
   }
-  const years = state.rewardYears.years.filter((year) => year.claimed.lux > 0n || year.sozu?.lux > 0n || year.sozuGrown?.lux > 0n);
+  // Sozu's part as it is, or null where it couldn't be read, which is said.
+  const years = state.rewardYears.years.filter((year) => year.claimed.lux > 0n || year.sozu?.lux > 0n || year.sozuGrown?.lux > 0n || year.sozu === null || year.sozuGrown === null);
   if (!years.length) return null;
   return [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
@@ -439,8 +440,8 @@ function rewardYears(ov, { state, actions, hidden, status }) {
         String(year),
         [
           claimed.lux > 0n ? [...amountParts(hidden, claimed.lux), " claimed"] : null,
-          sozuGrown?.lux > 0n ? [...amountParts(hidden, sozuGrown.lux), " grown with Sozu while held"] : null,
-          sozu?.lux > 0n ? [...amountParts(hidden, sozu.lux), " taken out of Sozu by unstaking"] : null,
+          sozuGrown === null ? ["Grown with Sozu while held: couldn't be read"] : sozuGrown?.lux > 0n ? [...amountParts(hidden, sozuGrown.lux), " grown with Sozu while held"] : null,
+          sozu === null ? ["Taken out of Sozu by unstaking: couldn't be read"] : sozu?.lux > 0n ? [...amountParts(hidden, sozu.lux), " taken out of Sozu by unstaking"] : null,
         ]
           .filter(Boolean)
           .map((parts) => h("span", { class: "stake-year-part" }, parts))

@@ -40,6 +40,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Split Sozu's part of Rewards by year into what grew while held and what unstaking took out, saying where either couldn't be read.
+- Worded the question for an amount that could be two as "Is that 1 or 1000?".
 - Answered a site's request made while its last one waits with -32002, request already pending, rather than a refusal.
 - Told a site its request ended as the wallet locked with 4100, wallet locked, rather than a refusal.
 - Showed the bar with Connect only for a site that asked the wallet for something or is connected.

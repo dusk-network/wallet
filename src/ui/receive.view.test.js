@@ -293,11 +293,11 @@ describe("receive", () => {
     it("says an amount that could be two amounts is that, in the language's own way", async () => {
       inLanguage("nl-NL");
       let view = await receive("public", { state: open({ amountDusk: "1.234" }) });
-      expect(amountError()).toBe("Is that 1234 or 1,234? Write the one you mean.");
+      expect(amountError()).toBe("Is that about 1,23 or 1234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
       inLanguage("en-US");
       view = await receive("public", { state: open({ amountDusk: "1,234" }) });
-      expect(amountError()).toBe("Is that 1234 or 1.234? Write the one you mean.");
+      expect(amountError()).toBe("Is that about 1.23 or 1234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
     });
 
