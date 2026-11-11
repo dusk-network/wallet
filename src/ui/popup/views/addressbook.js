@@ -19,7 +19,7 @@ import { fieldLabel, searchInput, textInput } from "../../components/FormControl
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
 import { ownProfileName } from "../../components/ProfileName.js";
-import { HIDDEN_NAME_NOTE, HIDDEN_NAME_ROW, contactAlikeText, contactNameClash, contactNameText } from "../../lib/contactNames.js";
+import { HIDDEN_NAME_NOTE, HIDDEN_NAME_ROW, contactAlikeText, contactNameClash, contactNameStartsText, contactNameText } from "../../lib/contactNames.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
 import { contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
@@ -486,9 +486,11 @@ export function addressBookView(ov, { state, actions } = {}) {
       const clash = typed ? clashNow() : null;
       const at = (e) => `${contactNameText(e.name)}, at ${shortAddress(String(e.address ?? ""))}`;
       setFieldError(nameInput, nameError, clash?.kind === "profile" ? profileClashText(clash) : "");
+      // A profile's name it starts with, or that starts it, is asked about: it can be saved.
+      const starts = typed && !clash ? contactNameStartsText(ov, typed, { address: normalizeRecipient(addrInput.value) }) : "";
       nameNote.textContent =
-        clash?.kind !== "contact" ? "" : clash.same ? `You already have a contact called ${at(clash.entry)}.` : `This looks like your contact ${at(clash.entry)}, but uses different letters.`;
-      nameNote.hidden = clash?.kind !== "contact";
+        clash?.kind !== "contact" ? starts : clash.same ? `You already have a contact called ${at(clash.entry)}.` : `This looks like your contact ${at(clash.entry)}, but uses different letters.`;
+      nameNote.hidden = !nameNote.textContent;
     };
 
     const addrInput = textInput({

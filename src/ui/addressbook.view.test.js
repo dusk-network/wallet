@@ -389,6 +389,25 @@ describe("contacts", () => {
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Profile 2", address: BOB }), expect.anything());
     });
 
+    // Amélie's: her own profile named Lucas, by a slip, beside her grandson saved as "Lucas (petit-fils)": Send read
+    // "From Lucas … To Lucas (petit-fils)".
+    it("asks about a name a profile's starts, or that starts it, word for word, and lets it be saved", async () => {
+      const ov = { nodeUrl: NODE, accounts: [OWN, BOB], addresses: [ADDRESS_OWN, ADDRESS_SECOND], accountNames: { 0: "Lucas" }, selectedAccountIndex: 0, txs: [] };
+      const view = edit({}, ov);
+      typeInto(view.field("Address"), CAROL);
+      for (const typed of ["Lucas (petit-fils)", "lucas petit-fils", "Luc\u0430s (petit-fils)"]) {
+        typeInto(view.field("Name"), typed);
+        expect([view.error("Name"), shownNote()], typed).toEqual(["", ["One of your profiles is called Lucas. Is this someone else?"]]);
+      }
+      // Not a whole word of it: nothing to ask.
+      typeInto(view.field("Name"), "Lucastor");
+      expect(shownNote()).toEqual([]);
+      typeInto(view.field("Name"), "Lucas (petit-fils)");
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Lucas (petit-fils)", address: CAROL }), expect.anything());
+    });
+
     it("says this profile's own address as it's typed, under the field, and won't save it", async () => {
       const ov = { nodeUrl: NODE, accounts: [OWN], addresses: [ADDRESS_OWN], selectedAccountIndex: 0, txs: [] };
       const view = edit({}, ov);

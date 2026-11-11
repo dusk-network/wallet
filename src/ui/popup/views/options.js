@@ -1,4 +1,4 @@
-import { NAME_HIDES, nameHides, profileNameClash } from "@dusk-network/app-core/names";
+import { NAME_HIDES, nameHides, nameStarts, profileNameClash } from "@dusk-network/app-core/names";
 import { networks } from "@dusk-network/networks";
 
 import { formatDuskExact, formatFee } from "../../../shared/amount.js";
@@ -210,7 +210,8 @@ export function optionsView(ov, { state, actions } = {}) {
     return contactsRead;
   };
   const clashText = (clash) => {
-    const name = clash.kind === "contact" ? contactNameText(clash.entry.name) : String(clash.entry.name);
+    // The name it takes, as that profile or contact goes by it: a profile by its label or its .dusk name.
+    const name = clash.kind === "contact" ? contactNameText(clash.name) : String(clash.name);
     if (clash.kind === "profile") return clash.same ? `Your other profile is called ${name}. Choose another name.` : `That looks like the name of your other profile ${name}. Choose another name.`;
     return clash.same ? `You have a contact called ${name}. Choose another name.` : `That looks like your contact ${name}. Choose another name.`;
   };
@@ -238,9 +239,16 @@ export function optionsView(ov, { state, actions } = {}) {
                 input.removeAttribute("aria-describedby");
               }
             };
+            // A contact's name it starts, or that starts it, word for word, is asked about: the name is saved.
+            const question = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
+            const ask = (text) => {
+              question.textContent = text;
+              question.hidden = !text;
+            };
             input.addEventListener("input", () => {
               drafts[i] = input.value;
               showError("");
+              ask("");
             });
             // A change and a blur as the field is left: one save.
             let saving = null;
@@ -256,14 +264,19 @@ export function optionsView(ov, { state, actions } = {}) {
                 showError(NAME_HIDES);
                 return;
               }
+              let starts = null;
               if (label) {
-                const profiles = displayAccounts.map((account, j) => ({ account: String(account ?? ""), address: String(ov?.addresses?.[j] ?? ""), name: verified.get(j) || profileLabelOf(ov, j) }));
-                const clash = profileNameClash(label, { profiles, contacts: await contactsNow(), self: String(acct ?? "") });
+                // Each profile by its label and by its verified .dusk name, look-alikes of either too.
+                const profiles = displayAccounts.map((account, j) => ({ account: String(account ?? ""), address: String(ov?.addresses?.[j] ?? ""), name: profileLabelOf(ov, j), duskName: verified.get(j) || undefined }));
+                const contacts = await contactsNow();
+                const clash = profileNameClash(label, { profiles, contacts, self: String(acct ?? "") });
                 if (clash) {
                   showError(clashText(clash));
                   return;
                 }
+                starts = nameStarts(label, { contacts, self: String(acct ?? "") });
               }
+              ask(starts ? `You have a contact called ${contactNameText(starts.name)}. Is this someone else?` : "");
               const before = saved;
               saved = label;
               try {
@@ -288,7 +301,7 @@ export function optionsView(ov, { state, actions } = {}) {
             const line = named(i, h("span", { class: "settings-profile-line" }), () =>
               [verified.get(i) || `Profile ${i + 1}`, acct ? shortAddress(String(acct)) : ""].filter(Boolean).join(" · ")
             );
-            return h("div", { class: "settings-label" }, [line, input, error]);
+            return h("div", { class: "settings-label" }, [line, input, error, question]);
           }),
         ])
       : null;

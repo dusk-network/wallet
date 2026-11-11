@@ -84,6 +84,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed a request's memo as codes under its field, saying what to check, while it has hidden characters or look-alike digits.
 - Refused a request link whose recipient Send can't pay, as a second address, a line break or a hidden character in to=, pasted, scanned or handed over by a site, as the web wallet does.
 - Refused a link that says a field twice in two letter cases, as To= beside to=, a dusk:shielded- link to a public account or a dusk:public- link to a shielded address, saying which, and a dusk: link with a #.
+- Refused a profile's name that is, or looks like, another profile's own name as well as its .dusk name.
+- Asked whether a contact is someone else when its name and a profile's start the same, as "Lucas (petit-fils)" beside a profile called Lucas, and the same of a profile's name beside a contact's.
 - Asked for the unlock on a site's approval once the wallet locks, as when Firefox for Android's Keep open tab closes, rather than an Approve that does nothing.
 - Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
 - Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.
