@@ -114,3 +114,50 @@ test("draws addresses and amounts without the font's contextual alternates, so a
     expect(ligatures).toMatch(/no-contextual|none/);
   }
 });
+
+// Where the keyboard starts when the browser says nothing of it, as Firefox's
+// add-on page doesn't: the page's top half stays clear of it (keyboard.js).
+const clearOfKeyboard = (page) => page.evaluate(() => document.documentElement.clientHeight / 2);
+
+// Amélie's: Review, Back to Send, then Memo tapped first, under the keyboard with Review.
+test("keeps Memo and Review above the keyboard on Send opened again from its Review", async ({ page }) => {
+  await popupOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "0.02", memo: "" } });
+  await page.getByRole("button", { name: "Review" }).click();
+  await expect(page.getByRole("button", { name: "Confirm" })).toBeVisible();
+  await page.getByRole("button", { name: "← Back" }).click();
+  const memo = page.getByLabel("Memo");
+  await expect(memo).toBeVisible();
+  await memo.focus();
+  const top = await clearOfKeyboard(page);
+  const bottom = (el) => el.evaluate((node) => node.getBoundingClientRect().bottom);
+  await expect.poll(() => bottom(memo)).toBeLessThanOrEqual(top);
+  expect(await bottom(page.getByRole("button", { name: "Review" }))).toBeLessThanOrEqual(top);
+  expect(await memo.evaluate((node) => node.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
+});
+
+// Chen's, Sofía's and Amélie's: the request's Amount and Memo above the keyboard, Copy request link under it.
+test("keeps Copy request link above the keyboard with the request's Memo", async ({ page }) => {
+  await popupOn(page, "receive", { receive: { tab: "public", requestOpen: true, amountDusk: "0.05", memo: "", context: null } });
+  const memo = page.locator(".receive-request").getByLabel("Memo");
+  await expect(memo).toBeVisible();
+  await memo.focus();
+  const top = await clearOfKeyboard(page);
+  const copy = page.getByRole("button", { name: "Copy request link" });
+  await expect.poll(() => copy.evaluate((node) => node.getBoundingClientRect().bottom)).toBeLessThanOrEqual(top);
+  expect(await memo.evaluate((node) => node.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
+});
+
+// Sofía's and Lena's: in landscape, Review's Confirm bar covered the address, fee and total until a scroll.
+test("puts Review's Confirm after its details on a phone turned sideways, over none of them", async ({ page }) => {
+  await page.setViewportSize({ width: 915, height: 412 });
+  await popupOn(page, "confirm", { draft: { to: TO, privacy: "public", amountDusk: "0.01", amountLux: "10000000", memo: "Invoice 2026-115" } });
+  const confirm = page.getByRole("button", { name: "Confirm" });
+  await expect(confirm).toBeVisible();
+  const [confirmTop, detailsBottom] = await page.evaluate(() => {
+    const top = (el) => el.getBoundingClientRect().top + document.querySelector(".panel-content").scrollTop;
+    const button = [...document.querySelectorAll("button")].find((b) => b.textContent === "Confirm");
+    const details = [...document.querySelectorAll("#app .kv")];
+    return [top(button), Math.max(...details.map((el) => top(el) + el.getBoundingClientRect().height))];
+  });
+  expect(confirmTop).toBeGreaterThanOrEqual(detailsBottom);
+});

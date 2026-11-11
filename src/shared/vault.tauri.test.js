@@ -177,10 +177,41 @@ describe("desktop vault (Stronghold)", () => {
     expect(kv.items).toEqual({});
   });
 
-  it("doesn't change the password in place", async () => {
+  // Chen's: no way in the app to change the password.
+  it("changes the password by a new snapshot in the vault's place, holding every wallet, and nothing beside it", async () => {
+    startFromMain();
+    let vault = await restart();
+    const before = await vault.unlockVault(recorded.password);
+    await expect(vault.changeVaultPassword("not it", "a new password")).rejects.toThrow("Incorrect password");
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    await vault.changeVaultPassword(recorded.password, "a new password");
+    expect([...tauri.files.keys()]).toEqual([SNAPSHOT]);
+    vault = await restart();
+    await expect(vault.unlockVault(recorded.password)).rejects.toThrow("Incorrect password");
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    expect(await vault.unlockVault("a new password")).toEqual(before);
+  });
+
+  it("keeps the old password's snapshot when the new one can't take its place", async () => {
     startFromMain();
     const vault = await restart();
-    await expect(vault.changeVaultPassword(recorded.password, "new")).rejects.toThrow(/isn't available/);
-    expect(tauri.files.get(SNAPSHOT)).toEqual(recorded.files[SNAPSHOT]);
+    const before = await vault.unlockVault(recorded.password);
+    const snapshot = structuredClone(tauri.files.get(SNAPSHOT));
+    tauri.hooks.rename = async () => {
+      throw new Error("forbidden path");
+    };
+    await expect(vault.changeVaultPassword(recorded.password, "a new password")).rejects.toThrow("forbidden path");
+    tauri.hooks.rename = null;
+    expect(tauri.files.get(SNAPSHOT)).toEqual(snapshot);
+    expect([...tauri.files.keys()]).toEqual([SNAPSHOT]);
+    expect(await vault.unlockVault(recorded.password)).toEqual(before);
+  });
+
+  it("shows a wallet's recovery phrase again only for the password that opens it", async () => {
+    startFromMain();
+    const vault = await restart();
+    const [first] = (await vault.unlockVault(recorded.password)).wallets;
+    expect(await vault.vaultPhrase(recorded.password, first.id)).toBe(first.mnemonic);
+    await expect(vault.vaultPhrase("not it", first.id)).rejects.toThrow("Incorrect password");
   });
 });

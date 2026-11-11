@@ -91,12 +91,12 @@ describe("the QR scan", () => {
   // Sofía's: a big broken "Unable to play media" player over the message, without a camera.
   it("shows only its message and Choose image where there's no camera, and the camera once it plays", async () => {
     const { isShown, visibleText } = await import("../testing/fakeDom.js");
-    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: vi.fn(async () => Promise.reject(new DOMException("denied", "NotAllowedError"))) } });
+    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: vi.fn(async () => Promise.reject(new DOMException("none", "NotFoundError"))) } });
     const { openQrScanModal } = await import("./QrScanModal.js");
     const scan = openQrScanModal();
     await loaded();
     expect(isShown(modal().querySelector(".qrscan-video-wrap"))).toBe(false);
-    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("Camera permission denied or unavailable. You can still choose an image.Choose imageCancel");
+    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("Camera not available. You can still choose an image.Choose imageCancel");
     await close();
     await expect(scan).resolves.toBeNull();
 
@@ -107,6 +107,32 @@ describe("the QR scan", () => {
     const live = openQrScanModal({ hint: "Point your camera at a QR code" });
     await loaded();
     expect(isShown(modal().querySelector(".qrscan-video-wrap"))).toBe(true);
+    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("Point your camera at a QR codeChoose imageCancel");
+    await close();
+    await live;
+  });
+
+  // Sofía's: the app asks for the camera now, once; a no is said as a no, and isn't asked again at once.
+  it("asks for the camera once, says when it isn't allowed, and takes another camera where the back one is missing", async () => {
+    const { visibleText } = await import("../testing/fakeDom.js");
+    const refused = vi.fn(async () => Promise.reject(new DOMException("denied", "NotAllowedError")));
+    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: refused } });
+    const { openQrScanModal } = await import("./QrScanModal.js");
+    const scan = openQrScanModal();
+    await loaded();
+    expect(refused).toHaveBeenCalledTimes(1);
+    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("The camera isn't allowed. You can still choose an image.Choose imageCancel");
+    await close();
+    await scan;
+
+    // A laptop's: no camera on the back, the front one plays.
+    decoder.read.mockImplementation(() => null);
+    const { stream } = camera();
+    const front = vi.fn(async ({ video }) => (video.facingMode.exact ? Promise.reject(new DOMException("none", "OverconstrainedError")) : stream));
+    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: front } });
+    const live = openQrScanModal({ hint: "Point your camera at a QR code" });
+    await loaded();
+    expect(front).toHaveBeenCalledTimes(2);
     expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("Point your camera at a QR codeChoose imageCancel");
     await close();
     await live;

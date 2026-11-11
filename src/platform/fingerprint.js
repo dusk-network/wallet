@@ -23,13 +23,16 @@ async function ask(action, args = {}) {
 }
 
 /**
- * Whether this phone can guard the password with a fingerprint, and whether
- * it does.
- * @returns {Promise<{ available: boolean, on: boolean }>}
+ * Whether this phone can guard the password with a fingerprint (`available`),
+ * or could once it has one (`enroll`), whether it does, and whether it
+ * stopped by itself (`lost`): the phone's fingerprints or screen lock changed,
+ * so it's off until it's turned on or off again.
+ * @returns {Promise<{ available: boolean, enroll: boolean, on: boolean, lost: boolean }>}
  */
 export async function fingerprintStatus() {
   const answer = await ask("status");
-  return { available: answer.ok === true && answer.available === true, on: answer.ok === true && answer.on === true };
+  const said = (name) => answer.ok === true && answer[name] === true;
+  return { available: said("available"), enroll: said("enroll"), on: said("on"), lost: said("lost") };
 }
 
 // One turning on at a time: each makes the Keystore key anew, so two at once
@@ -52,11 +55,21 @@ export function turnFingerprintOn(password) {
 }
 
 /**
- * The password, after a fingerprint.
+ * The password, after a fingerprint, for what the prompt's `title` says.
+ * @param {{ title?: string }} [opts]
  * @returns {Promise<{ ok: boolean, secret?: string, reason?: string }>}
  */
-export function fingerprintPassword() {
-  return ask("unlock", { title: "Unlock your wallet", cancel: "Use password" });
+export function fingerprintPassword({ title = "Unlock your wallet" } = {}) {
+  return ask("unlock", { title, cancel: "Use password" });
+}
+
+/**
+ * The phone's keyboard, for the password field just focused, as the person
+ * chose their password over the fingerprint: a page's focus alone doesn't
+ * bring it in the app.
+ */
+export async function showKeyboard() {
+  await ask("keyboard");
 }
 
 /** Turns fingerprint unlock off, after a turning on under way, so off is what's left. */

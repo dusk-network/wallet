@@ -1,9 +1,10 @@
 //! What the wallet asks of Android itself, through the activity the app runs
 //! in, on Android's main thread: kept out of screenshots, light icons on its
-//! dark bars, the share sheet, a file saved to Downloads under the name
+//! dark bars, the share sheet (android/SharePlugin.kt), a file saved to Downloads under the name
 //! Android gave it, the app put in the background as it is, fingerprint
 //! unlock (android/KeystorePlugin.kt), and arrival notices
-//! (android/NoticesPlugin.kt).
+//! (android/NoticesPlugin.kt), looked for in the background too
+//! (android/ArrivalJob.kt).
 
 use tauri::tao::platform::android::prelude::jni::{
   errors::Error,
@@ -76,37 +77,6 @@ pub fn secure<R: Runtime>(window: &WebviewWindow<R>) {
       }
     })
   });
-}
-
-fn share_sheet(env: &mut JNIEnv, activity: &JObject, text: &str, title: &str) -> Jni<()> {
-  let action = env.new_string("android.intent.action.SEND")?;
-  let intent = env.new_object("android/content/Intent", "(Ljava/lang/String;)V", &[JValue::Object(action.as_ref())])?;
-  let mime = env.new_string("text/plain")?;
-  env.call_method(&intent, "setType", "(Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(mime.as_ref())])?;
-  let key = env.new_string("android.intent.extra.TEXT")?;
-  let value = env.new_string(text)?;
-  env.call_method(
-    &intent,
-    "putExtra",
-    "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;",
-    &[JValue::Object(key.as_ref()), JValue::Object(value.as_ref())],
-  )?;
-  let title = env.new_string(title)?;
-  let chooser = env
-    .call_static_method(
-      "android/content/Intent",
-      "createChooser",
-      "(Landroid/content/Intent;Ljava/lang/CharSequence;)Landroid/content/Intent;",
-      &[JValue::Object(&intent), JValue::Object(title.as_ref())],
-    )?
-    .l()?;
-  env.call_method(activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&chooser)])?;
-  Ok(())
-}
-
-/// Opens Android's share sheet with `text`.
-pub async fn share<R: Runtime>(window: &WebviewWindow<R>, text: String, title: String) -> Result<(), String> {
-  on_activity(window, move |env, activity| share_sheet(env, activity, &text, &title)).await
 }
 
 fn put(env: &mut JNIEnv, values: &JObject, key: &str, value: &str) -> Jni<()> {
@@ -207,16 +177,51 @@ pub fn keystore<R: Runtime>() -> TauriPlugin<R> {
     .build()
 }
 
-/// Asks fingerprint unlock's Kotlin `action`: status, enable, unlock or disable.
-/// Each answers `{ ok, reason?, ... }`.
+/// Asks fingerprint unlock's Kotlin `action`: status, enable, unlock, disable,
+/// or keyboard (for the password field the page focused instead). Each
+/// answers `{ ok, reason?, ... }`.
 pub async fn fingerprint<R: Runtime>(app: &AppHandle<R>, action: &str, args: Value) -> Result<Value, String> {
-  if !matches!(action, "status" | "enable" | "unlock" | "disable") {
+  if !matches!(action, "status" | "enable" | "unlock" | "disable" | "keyboard") {
     return Err("There's no such thing to ask.".into());
   }
   let Some(keystore) = app.try_state::<Keystore<R>>() else {
     return Ok(json!({ "ok": false, "reason": "unavailable" }));
   };
   keystore.0.run_mobile_plugin_async::<Value>(action, args).await.map_err(|e| e.to_string())
+}
+
+/// The wallet's Kotlin for the share sheet, once Android has it.
+struct Share<R: Runtime>(PluginHandle<R>);
+
+/// The share sheet's Kotlin (android/SharePlugin.kt), as the plugin
+/// "dusk-share". Where Android can't find it, there's no share sheet.
+pub fn share_sheet<R: Runtime>() -> TauriPlugin<R> {
+  Builder::new("dusk-share")
+    .setup(|app, api| {
+      if let Ok(handle) = api.register_android_plugin("network.dusk.wallet", "SharePlugin") {
+        app.manage(Share(handle));
+      }
+      Ok(())
+    })
+    .build()
+}
+
+/// Opens Android's share sheet with `text`, and with `image` (a PNG, base64,
+/// shared as `name`) beside it where there's one.
+pub async fn share<R: Runtime>(app: &AppHandle<R>, text: String, title: String, image: String, name: String) -> Result<(), String> {
+  let Some(share) = app.try_state::<Share<R>>() else {
+    return Err("There's no share sheet here.".into());
+  };
+  let answer = share
+    .0
+    .run_mobile_plugin_async::<Value>("share", json!({ "text": text, "title": title, "image": image, "name": name }))
+    .await
+    .map_err(|e| e.to_string())?;
+  if answer.get("ok").and_then(Value::as_bool) == Some(true) {
+    Ok(())
+  } else {
+    Err("The share sheet didn't open.".into())
+  }
 }
 
 /// The wallet's Kotlin for arrival notices, once Android has it.
@@ -235,9 +240,13 @@ pub fn notices<R: Runtime>() -> TauriPlugin<R> {
     .build()
 }
 
-/// Asks arrival notices' Kotlin `action`: status, ask or notify. Each answers `{ allowed }`.
+/// Asks arrival notices' Kotlin `action`: status, ask, notify, watch (a send
+/// to look for once the app leaves the screen, android/ArrivalJob.kt),
+/// settled (one the page heard of), forget (a wallet's sends, or every
+/// wallet's) or opened (the transaction a notice's tap opened the app on).
+/// Each answers `{ allowed }`, opened its `hash` too.
 pub async fn notice<R: Runtime>(app: &AppHandle<R>, action: &str, args: Value) -> Result<Value, String> {
-  if !matches!(action, "status" | "ask" | "notify") {
+  if !matches!(action, "status" | "ask" | "notify" | "watch" | "settled" | "forget" | "opened") {
     return Err("There's no such thing to ask.".into());
   }
   let Some(notices) = app.try_state::<Notices<R>>() else {

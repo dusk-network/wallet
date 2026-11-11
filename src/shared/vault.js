@@ -40,6 +40,10 @@ import {
 
 const VAULT_VERSION = 2;
 const STRONGHOLD_SNAPSHOT_FILE = "dusk-wallet.hold";
+// A new password's snapshot while it's made, and the one before it while the
+// new one is put in its place (changeVaultPassword).
+const STRONGHOLD_NEXT_FILE = `${STRONGHOLD_SNAPSHOT_FILE}.next`;
+const STRONGHOLD_OLD_FILE = `${STRONGHOLD_SNAPSHOT_FILE}.old`;
 const STRONGHOLD_CLIENT_PATH = "dusk-wallet";
 // v1's one phrase in the snapshot, and v2's list and a key per wallet.
 const STRONGHOLD_STORE_KEY_MNEMONIC = "mnemonic";
@@ -324,6 +328,8 @@ async function tauriVaultExists() {
 
 async function tauriDeleteVaultSnapshot() {
   const { remove, BaseDirectory } = await import("@tauri-apps/plugin-fs");
+  // A change of password cut short may have left the one before or the new one beside it.
+  for (const file of [STRONGHOLD_NEXT_FILE, STRONGHOLD_OLD_FILE]) await remove(file, { baseDir: BaseDirectory.AppData }).catch(() => {});
   try {
     await remove(STRONGHOLD_SNAPSHOT_FILE, { baseDir: BaseDirectory.AppData });
   } catch (err) {
@@ -336,14 +342,14 @@ async function tauriDeleteVaultSnapshot() {
   }
 }
 
-async function tauriGetStrongholdPath() {
+async function tauriGetStrongholdPath(file = STRONGHOLD_SNAPSHOT_FILE) {
   const { appDataDir, join } = await import("@tauri-apps/api/path");
-  return await join(await appDataDir(), STRONGHOLD_SNAPSHOT_FILE);
+  return await join(await appDataDir(), file);
 }
 
-async function tauriLoadStronghold(password) {
+async function tauriLoadStronghold(password, file = STRONGHOLD_SNAPSHOT_FILE) {
   const { Stronghold } = await import("@tauri-apps/plugin-stronghold");
-  const path = await tauriGetStrongholdPath();
+  const path = await tauriGetStrongholdPath(file);
   return await Stronghold.load(path, password);
 }
 
@@ -372,11 +378,12 @@ async function strongholdList(store) {
 // unloading ends it, so sessions run one after another. A snapshot that
 // doesn't load with the password is almost always a wrong password.
 // `check` is for a load again with the password that just loaded it: a
-// failure then isn't a wrong password.
-async function strongholdSession(password, fn, { create = false, check = false } = {}) {
+// failure then isn't a wrong password. `file`, another snapshot than the
+// vault's: a new password's, as it's made.
+async function strongholdSession(password, fn, { create = false, check = false, file = STRONGHOLD_SNAPSHOT_FILE } = {}) {
   let stronghold;
   try {
-    stronghold = await tauriLoadStronghold(password);
+    stronghold = await tauriLoadStronghold(password, file);
   } catch (err) {
     if (create && isBadFileKeyError(err)) {
       throw new Error(
@@ -425,15 +432,56 @@ async function strongholdWallets(store) {
 const listBytes = (wallets) => bytesOf(JSON.stringify(wallets.map(publicOf)));
 
 // Whether the snapshot, loaded again with the password, holds just `wallets`.
-async function strongholdHolds(password, wallets) {
+async function strongholdHolds(password, wallets, file = STRONGHOLD_SNAPSHOT_FILE) {
   return strongholdSession(
     password,
     async (store) => {
       const back = await strongholdWallets(store);
       return back.length === wallets.length && wallets.every((h) => back.some((w) => w.id === h.id && w.mnemonic === h.mnemonic));
     },
-    { check: true }
+    { check: true, file }
   ).catch(() => false);
+}
+
+// A new password for the snapshot, which Stronghold can't seal again in
+// place: a new snapshot made with it, holding `wallets`, loaded again to
+// check it, then put in the vault's place, the one before kept beside it till
+// the vault, loaded with the new password, holds them all. Cut short anywhere,
+// the vault's file holds the old password's snapshot or the new one's, whole.
+async function strongholdReseal(newPassword, wallets) {
+  const fs = await import("@tauri-apps/plugin-fs");
+  const here = { baseDir: fs.BaseDirectory.AppData };
+  const both = { oldPathBaseDir: fs.BaseDirectory.AppData, newPathBaseDir: fs.BaseDirectory.AppData };
+  // What a change cut short left.
+  await fs.remove(STRONGHOLD_NEXT_FILE, here).catch(() => {});
+  await strongholdSession(
+    newPassword,
+    async (store, stronghold) => {
+      for (const w of wallets) await store.insert(strongholdWalletKey(w.id), bytesOf(w.mnemonic));
+      await store.insert(STRONGHOLD_STORE_KEY_WALLETS, listBytes(wallets));
+      await stronghold.save();
+    },
+    { create: true, file: STRONGHOLD_NEXT_FILE }
+  );
+  if (!(await strongholdHolds(newPassword, wallets, STRONGHOLD_NEXT_FILE))) {
+    await fs.remove(STRONGHOLD_NEXT_FILE, here).catch(() => {});
+    throw new Error(NOT_SAVED);
+  }
+  try {
+    await fs.copyFile(STRONGHOLD_SNAPSHOT_FILE, STRONGHOLD_OLD_FILE, { fromPathBaseDir: fs.BaseDirectory.AppData, toPathBaseDir: fs.BaseDirectory.AppData });
+    await fs.rename(STRONGHOLD_NEXT_FILE, STRONGHOLD_SNAPSHOT_FILE, both);
+  } catch (error) {
+    // Not put in its place: the vault is as it was, and no copy of it stays.
+    for (const file of [STRONGHOLD_NEXT_FILE, STRONGHOLD_OLD_FILE]) await fs.remove(file, here).catch(() => {});
+    throw error;
+  }
+  if (await strongholdHolds(newPassword, wallets)) {
+    await fs.remove(STRONGHOLD_OLD_FILE, here).catch(() => {});
+    return;
+  }
+  // Not sure of it: the snapshot before goes back, with its password.
+  await fs.rename(STRONGHOLD_OLD_FILE, STRONGHOLD_SNAPSHOT_FILE, both).catch(() => {});
+  throw new Error(NOT_SAVED);
 }
 
 // The snapshot as saved, loaded again with the password: it holds `wallets`,
@@ -635,6 +683,28 @@ export function checkVaultPassword(password, id) {
   });
 }
 
+/**
+ * Checks the password before Reset wipes the vault: it must open a wallet
+ * here. A wrong one throws as an unlock's does, and counts as one. A vault
+ * this version can't read asks for none, as it says to reset it, and none
+ * here has none to ask for.
+ * @param {string} password
+ */
+export function checkResetPassword(password) {
+  return vaultLock(async () => {
+    const p = String(password ?? "");
+    let opened;
+    try {
+      opened = isTauriRuntime() ? (await tauriOpen(p)).wallets : (await openVault(p)).opened;
+    } catch (error) {
+      if (error?.message === UNSUPPORTED || error?.message === NO_VAULT) return;
+      throw error;
+    }
+    if (!opened.length) throw await incorrectPassword();
+    await resetUnlockFailures();
+  });
+}
+
 // The vault opened with the password for a change: refused for a wrong one,
 // one that doesn't open every wallet in `held` (the IDs of those unlocked
 // with one password) included, and while v1 is still to move (a write just
@@ -742,10 +812,13 @@ export function changeVaultPassword(password, newPassword, { held = [] } = {}) {
     const p = String(password ?? "");
     const np = String(newPassword ?? "");
     if (!np) throw new Error("Enter a new password.");
-    // Stronghold can't seal its snapshot under another password in place.
-    if (isTauriRuntime()) throw new Error("Changing the password isn't available in this app yet.");
 
     const { record, opened } = await openForChange(p, held);
+    // The app: a new snapshot, sealed with the new password.
+    if (isTauriRuntime()) {
+      await strongholdReseal(np, opened);
+      return true;
+    }
     const phrases = new Map(opened.map((w) => [w.id, w.mnemonic]));
     // One new salt for all of them: the new password's key, derived once.
     const keys = keyring(np);
@@ -761,6 +834,25 @@ export function changeVaultPassword(password, newPassword, { held = [] } = {}) {
       }
     );
     return true;
+  });
+}
+
+/**
+ * The recovery phrase of the wallet `id`, for Settings to show again: only for
+ * the password that opens it. A wrong one throws as an unlock's does, and
+ * counts as one.
+ * @param {string} password
+ * @param {string} id
+ * @returns {Promise<string>}
+ */
+export function vaultPhrase(password, id) {
+  return vaultLock(async () => {
+    const p = String(password ?? "");
+    const opened = isTauriRuntime() ? (await tauriOpen(p)).wallets : (await openVault(p)).opened;
+    const wallet = opened.find((w) => w.id === String(id ?? ""));
+    if (!wallet) throw await incorrectPassword();
+    await resetUnlockFailures();
+    return wallet.mnemonic;
   });
 }
 

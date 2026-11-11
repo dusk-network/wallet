@@ -109,8 +109,9 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
   expect((await stored(page, "dusk_vault_v2")).wallets).toEqual([second]);
   await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0);
 
-  // Reset: every phrase gone.
-  page.once("dialog", (dialog) => dialog.accept());
+  // Reset, with the password: every phrase gone.
+  await page.getByRole("button", { name: "Reset wallet" }).click();
+  await page.getByLabel(SHARED).fill(twelve.password);
   await page.getByRole("button", { name: "Reset wallet" }).click();
   await expect(page.getByText("Set up your Dusk Wallet")).toBeVisible({ timeout: 60_000 });
   expect([await stored(page, "dusk_vault_v1"), await stored(page, "dusk_vault_v2"), await stored(page, "dusk_wallets_v1")]).toEqual([null, null, null]);

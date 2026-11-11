@@ -293,11 +293,11 @@ describe("receive", () => {
     it("says an amount that could be two amounts is that, in the language's own way", async () => {
       inLanguage("nl-NL");
       let view = await receive("public", { state: open({ amountDusk: "1.234" }) });
-      expect(amountError()).toBe("Is that 1234 or 1,234? Write the one you mean.");
+      expect(amountError()).toBe("Is that about 1,23 or 1234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
       inLanguage("en-US");
       view = await receive("public", { state: open({ amountDusk: "1,234" }) });
-      expect(amountError()).toBe("Is that 1234 or 1.234? Write the one you mean.");
+      expect(amountError()).toBe("Is that about 1.23 or 1234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
     });
 
@@ -465,6 +465,46 @@ describe("receive", () => {
     expect(args.name).toBe("dusk-testnet-request-0.03-DUSK-Invoice-2026-114-2026-11-10-0412.png");
     expect(actions.showToast).toHaveBeenLastCalledWith("QR saved to Downloads as dusk-testnet-request-0.03-DUSK-Invoice-2026-114-2026-11-10-0412 (1).png");
     expect(written).toEqual(["Dusk payment request · Testnet", "0.03 DUSK", "Invoice 2026-114", "To sofiadesign.dusk · 26FCH7…Tck927"]);
+  });
+
+  // Sofía's: Share sent one bare long web link.
+  it("shares a request in the app as a few words of what it asks, with its QR code's picture and its link", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 10, 4, 12));
+    dom = installFakeDom({
+      elements: {
+        canvas: (el) => {
+          el.getContext = () => ({ fillRect() {}, drawImage() {}, fillText() {}, measureText: (text) => ({ width: text.length * 10 }) });
+          el.toBlob = (done) => done(new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }));
+        },
+      },
+    });
+    vi.stubGlobal("Image", class {
+      set src(url) {
+        setTimeout(() => this.onload?.(url));
+      }
+    });
+    // URLs as ever, and a picture's blob that needs none.
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, { createObjectURL: () => "blob:qr", revokeObjectURL: () => {} }));
+    dom.document.body.dataset.runtime = "tauri";
+    dom.window.matchMedia = () => ({ matches: true });
+    const invoke = vi.fn(async () => null);
+    dom.window.__TAURI_INTERNALS__ = { invoke };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const state = { receive: { tab: "public", requestOpen: true, amountDusk: "0.03", memo: "Invoice 2026-115" } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
+    dom.document.body.replaceChildren(...receiveView({ ...overview, networkName: "Testnet" }, { state, actions }));
+    await settle();
+    dom.document.body.querySelectorAll("button").find((b) => visibleText(b) === "Share").click();
+    await vi.waitFor(() => expect(invoke.mock.calls.some(([cmd]) => cmd === "share_text")).toBe(true));
+    const [, args] = invoke.mock.calls.find(([cmd]) => cmd === "share_text");
+    expect(args).toEqual({
+      text: `Dusk payment request · Testnet\n0.03 DUSK · Invoice 2026-115\nhttps://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.03&memo=Invoice+2026-115&network=testnet`,
+      title: "Dusk payment request",
+      image: "iVBORw==",
+      name: "dusk-testnet-request-0.03-DUSK-Invoice-2026-115-2026-11-10-0412.png",
+    });
+    expect(dom.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it("starts a request over when the profile switches, rather than asking for it on the other one", async () => {

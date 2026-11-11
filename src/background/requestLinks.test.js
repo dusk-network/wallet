@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runtimeGetURL, tabsCreate, tabsQuery, tabsUpdate, windowsGet, windowsUpdate } from "../platform/extensionApi.js";
+import { runtimeGetURL, tabsCreate, tabsQuery, tabsRemove, tabsUpdate, windowsGet, windowsUpdate } from "../platform/extensionApi.js";
 import { loadVault } from "../shared/vault.js";
 import { handOverRequestLink, offersRequestLink, openRequestLink } from "./requestLinks.js";
 
@@ -10,6 +10,7 @@ vi.mock("../platform/extensionApi.js", () => ({
   // No wallet tab open, unless a test opens one.
   tabsQuery: vi.fn(async () => []),
   tabsUpdate: vi.fn(async () => ({})),
+  tabsRemove: vi.fn(async () => {}),
   windowsGet: vi.fn(async () => ({ state: "normal" })),
   windowsUpdate: vi.fn(async () => ({})),
 }));
@@ -25,7 +26,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   node.url = "https://testnet.nodes.dusk.network";
 });
-afterEach(() => loadVault.mockImplementation(async () => ({ version: 2 })));
+afterEach(() => {
+  loadVault.mockImplementation(async () => ({ version: 2 }));
+  vi.unstubAllGlobals();
+});
 
 describe("a request link from the web wallet's Send", () => {
   it("gets its offer from a wallet here to pay it with", async () => {
@@ -60,6 +64,30 @@ describe("a request link from the web wallet's Send", () => {
     windowsGet.mockResolvedValueOnce({ id: 4, state: "maximized" });
     await openRequestLink({ link: LINK }, onWalletPage);
     expect(windowsUpdate).toHaveBeenLastCalledWith(4, { focused: true });
+  });
+
+  // Chen's, Amélie's and Marek's: each link left a web page's tab also called "Dusk Wallet"; five piled up.
+  it("takes the web page's tab's place on a phone, and leaves a computer's tabs as they were", async () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+    const send = `chrome-extension://wallet/full.html?route=send&link=${encodeURIComponent(LINK)}`;
+    const page = { ...onWalletPage, tab: { id: 3, url: LINK } };
+    // The wallet's tab open already: it shows the link, and the page's goes.
+    tabsQuery.mockResolvedValueOnce([{ id: 3, url: LINK }, { id: 7, url: "chrome-extension://wallet/full.html" }]);
+    await expect(openRequestLink({ link: LINK }, page)).resolves.toBe(true);
+    expect(tabsUpdate).toHaveBeenCalledWith(7, { url: send, active: true });
+    expect(tabsRemove).toHaveBeenCalledWith(3);
+    // None open: the page's own tab becomes the wallet's.
+    vi.clearAllMocks();
+    await expect(handOverRequestLink("https://apps.testnet.dusk.network", LINK, { pressed: true, tabId: 3 })).resolves.toBe(true);
+    expect(tabsUpdate).toHaveBeenCalledWith(3, { url: send, active: true });
+    expect([tabsCreate.mock.calls, tabsRemove.mock.calls]).toEqual([[], []]);
+
+    // A computer's: a tab of its own, the page's left.
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0" });
+    vi.clearAllMocks();
+    await expect(openRequestLink({ link: LINK }, page)).resolves.toBe(true);
+    expect(tabsCreate).toHaveBeenCalledWith({ url: send });
+    expect(tabsRemove).not.toHaveBeenCalled();
   });
 
   it("is taken from the web wallet's own pages alone, also once it moved on", async () => {

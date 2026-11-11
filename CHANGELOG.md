@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added the recovery phrase and Change password to the Android app's Settings, each behind the password.
+- Let a fingerprint answer the password on big sends and before Reset in the Android app.
+- Looked a send up with the Android app in the background, for its notice once the app is left.
 - Added Tell me when it arrives to Sent on a phone, the only place the wallet asks for notices; a no stays a no.
 - Added Immediately to Auto-lock in the Android app, which locks it as you leave it.
 - Added fingerprint unlock to the Android app, offered with a new password and in Settings, with the password as the fallback.
@@ -37,6 +40,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Split Sozu's part of Rewards by year into what grew while held and what unstaking took out, saying where either couldn't be read.
+- Worded the question for an amount that could be two as "Is that 1 or 1000?".
+- Answered a site's request made while its last one waits with -32002, request already pending, rather than a refusal.
+- Told a site its request ended as the wallet locked with 4100, wallet locked, rather than a refusal.
+- Showed the bar with Connect only for a site that asked the wallet for something or is connected.
+- Opened a request link handed to the extension in place of the web page's tab on a phone.
+- Asked for the password before Reset, as for removing a wallet.
+- Listed fingerprint unlock in the Android app before the phone has a fingerprint, saying to add one first.
+- Returned to the screen left after the Android app's Immediately lock, with what was typed on it.
+- Kept a half-typed Send for its next opening after Back.
+- Said the network a link or a QR code fills Send in to pay on.
+- Shared a request from the Android app as a few words of what it asks, its QR code's picture and its link.
+- Put Review's Confirm after its details on a phone turned sideways.
+- Said on a phone's Sent that its notice comes while the wallet stays open.
+- Said "Your payment arrived" in a phone's notices, without the amount, and opened the payment in the wallet from it.
+- Offered Ask again in Firefox for Android once notices are off, in place of the phone's settings.
 - Saved Activity's export and a QR code to the phone's Downloads in the Android app, saying so.
 - Opened the explorer and other sites in the phone's browser from the app, never in the wallet's window.
 - Kept the Android app's screens out of screenshots and the app switcher.
@@ -57,6 +76,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Asked for the unlock on a site's approval once the wallet locks, as when Firefox for Android's Keep open tab closes, rather than an Approve that does nothing.
+- Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
+- Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.
+- Said which network, wallet or profile a transaction is in when it isn't this one's, and opened it in its own network's explorer.
+- Said on Send the fee its Review asks, at the network's gas price.
+- Took one step back with each press of a phone's Back, also after a payment, rather than none two or three times.
+- Kept the words typed on Import through a phone's Back, which asks first, rather than closing the wallet with them.
+- Saved Auto-lock's time in the Android app, which said it couldn't, and locked the app after it.
+- Turned fingerprint unlock off once the phone's fingerprints or screen lock went, said so, and offered it again.
+- Brought up the keyboard for the password after the fingerprint prompt's Use password.
+- Wrapped a saved QR's caption rather than cutting it.
+- Asked for the camera as Scan QR opens in the Android app, rather than saying it was refused.
+- Kept Memo and Review above the keyboard on Send opened again from its Review.
+- Kept Copy request link above the keyboard with the request's fields.
 - Showed a send's outcome as a notice in Firefox.
 - Looked each send left waiting through a lost signal up again once the signal returns, and said Completed with its fee, or Not sent.
 - Said Not sent for a send that couldn't reach the network.

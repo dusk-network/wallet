@@ -69,7 +69,13 @@ describe("connected site status", () => {
     expect(visibleText(bar().querySelector(".site-bar-copy"))).toBe("Connectedhttp://127.0.0.1:5354");
     expect(bar().title).toBe("http://127.0.0.1:5354");
 
-    site = { activeOrigin: "https://app.example:8443", activeConnected: false };
+    // Amélie's: Wikipedia never asked for anything, and a big Connect sat on Home, Activity and Receive.
+    site = { activeOrigin: "https://www.wikipedia.org", activeConnected: false };
+    await render({ forceRefresh: true });
+    expect(bar()).toBeNull();
+
+    // A site that asked before, and isn't connected now: its Connect.
+    site = { activeOrigin: "https://app.example:8443", activeConnected: false, siteRecords: { [ACCOUNT]: { "https://app.example:8443": { asked: [{ at: Date.now(), kind: "connect", answer: "rejected" }] } } } };
     await render({ forceRefresh: true });
     expect(visibleText(bar().querySelector(".site-bar-copy"))).toBe("Not connectedapp.example:8443");
 

@@ -120,6 +120,10 @@ vi.mock("../shared/vault.js", () => ({
   countVaultWallets: vi.fn(async () => null),
   createVault: mocks.createVault,
   loadVault: vi.fn(async () => mocks.vault),
+  // The password a reset takes: the one the wallets here open with.
+  checkResetPassword: vi.fn(async (password) => {
+    if (password !== "password123") throw new Error("Incorrect password");
+  }),
   removeVaultWallet: vi.fn(async () => true),
   unlockVault: vi.fn(async () => ({ wallets: [{ id: "w1", n: 1, mnemonic: "mnemonic" }] })),
 }));
@@ -172,6 +176,7 @@ vi.mock("./pending.js", () => ({
     throw Object.assign(new Error("The wallet stopped before it answered, as Firefox stops it in the background. Check its Activity before you try again."), { code: 4900 });
   }),
   resolvePendingDecision: vi.fn(() => ({ ok: true })),
+  closeSaidApproval: vi.fn(() => false),
 }));
 
 vi.mock("./dappEvents.js", () => ({
@@ -354,6 +359,26 @@ describe("background auto-lock activity", () => {
     expect(activityRecord()).toBeUndefined();
   });
 
+  // Marek's: Approve with the wallet locked meanwhile (its engine's tab closed) was taken as
+  // approved, and the site's record said "Approved, not sent".
+  it("answers nothing when Approve comes with the wallet locked, so the approval asks for the unlock", async () => {
+    const pending = await import("./pending.js");
+    pending.getPending.mockReturnValue({ kind: "send_tx", origin: "https://bridge.example" });
+    try {
+      mocks.engineUnlocked = false;
+      await expect(sendBackgroundMessage({ type: "DUSK_PENDING_DECISION", rid: "r1", decision: "approve" })).resolves.toEqual({
+        ok: false,
+        error: { code: "locked", message: "Unlock to answer." },
+      });
+      expect(pending.resolvePendingDecision).not.toHaveBeenCalled();
+      // A refusal needs no unlock.
+      await expect(sendBackgroundMessage({ type: "DUSK_PENDING_DECISION", rid: "r1", decision: "reject" })).resolves.toEqual({ ok: true });
+      expect(pending.resolvePendingDecision).toHaveBeenCalledTimes(1);
+    } finally {
+      pending.getPending.mockReturnValue(null);
+    }
+  });
+
   it("manual lock clears persisted activity and broadcasts profilesChanged", async () => {
     mocks.sessionStore.set(AUTO_LOCK_ACTIVITY_KEY, { lastActivityAt: 1_000_000 });
 
@@ -362,6 +387,8 @@ describe("background auto-lock activity", () => {
     expect(mocks.engineCall).toHaveBeenCalledWith("engine_lock");
     expect(mocks.broadcastProfilesChangedAll).toHaveBeenCalledTimes(1);
     expect(mocks.cancelPendingApprovals).toHaveBeenCalledTimes(1);
+    // Marek's: a site with a request waiting heard another account; it hears the lock.
+    expect(mocks.cancelPendingApprovals).toHaveBeenCalledWith(null, "Wallet locked", { code: 4100 });
     expect(mocks.sentMessages).toContainEqual(
       expect.objectContaining({
         type: "DUSK_UI_LOCK_STATE",
@@ -373,7 +400,12 @@ describe("background auto-lock activity", () => {
   });
 
   it("resets the wallet with its transactions, shielded notes and history", async () => {
-    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET" });
+    // Not without the password: nothing locks or goes.
+    await expect(sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET" })).resolves.toMatchObject({ error: { message: "Incorrect password" } });
+    expect([mocks.beginReset, mocks.clearVault, mocks.clearAllPermissions].map((fn) => fn.mock.calls.length)).toEqual([0, 0, 0]);
+    expect(mocks.engineCall).not.toHaveBeenCalledWith("engine_lock");
+
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET", password: "password123" });
 
     expect(response).toEqual({ ok: true });
     // Noted before the vault goes, ended once all is cleared.
@@ -393,7 +425,7 @@ describe("background auto-lock activity", () => {
   it("reports a reset that couldn't clear the old wallet's data, and makes no wallet until it can", async () => {
     const failure = new Error("The old wallet's data couldn't be cleared. Try again.");
     mocks.finishReset.mockRejectedValueOnce(failure);
-    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET" });
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET", password: "password123" });
     expect(response.error.message).toBe(failure.message);
 
     mocks.vault = null;
@@ -472,7 +504,7 @@ describe("background auto-lock activity", () => {
   it("does not clear the vault when reset cannot lock the engine", async () => {
     mocks.engineCall.mockRejectedValueOnce(new Error("lock transport failed"));
 
-    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET" });
+    const response = await sendBackgroundMessage({ type: "DUSK_UI_RESET_WALLET", password: "password123" });
 
     expect(response.error.message).toBe("lock transport failed");
     expect(mocks.clearVault).not.toHaveBeenCalled();

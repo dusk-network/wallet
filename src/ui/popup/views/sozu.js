@@ -537,6 +537,8 @@ export function sozuHolding(ov, { state, actions } = {}) {
     reading: Boolean(st.loading),
     poolLux: safeBigInt(position.poolBalanceLux, 0n),
     stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n),
+    // The status read for this profile and network, for Rewards by year.
+    status: answered ? st.status : null,
   };
 }
 

@@ -600,13 +600,18 @@ describe("the steps", () => {
 // Hein's: arrival notices on a phone, asked for by the person, never by the wallet.
 describe("Tell me when it arrives, on a phone", () => {
   const ANDROID = "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0";
-  const draw = async (states, { phone = true, sent = {} } = {}) => {
+  const COMES = "You'll get a notice when it arrives, while the wallet stays open.";
+  const draw = async (states, { phone = true, app = false, sent = {} } = {}) => {
     if (phone) vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: ANDROID });
+    // The app on Android: Tauri's bridge to its wrapper.
+    if (app) dom.window.__TAURI_INTERNALS__ = {};
     const state = { sent: { phase: "sent", hash: HASH, status: "submitted", feeCapLux: "2500000", title: "Send", amountLux: "1000000", sentAt: Date.now(), ...sent } };
     const asked = [];
+    const messages = [];
     const actions = {
       send: vi.fn(async (m) => {
         asked.push(m.type);
+        messages.push(m);
         if (m.type === "DUSK_UI_NOTICES") return { ok: true, state: states.shift() ?? null };
         if (m.type === "DUSK_UI_NOTICES_ASK") return { ok: true, state: states.shift() ?? "asked" };
         return { ok: true };
@@ -620,49 +625,69 @@ describe("Tell me when it arrives, on a phone", () => {
     };
     await show();
     const offer = () => visibleText(dom.document.body.querySelector(".sent-notices") ?? dom.document.createElement("div"));
-    const ask = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Tell me when it arrives");
-    return { state, asked, show, offer, ask };
+    const tap = (text) => dom.document.body.querySelectorAll("button").find((b) => b.textContent === text);
+    const ask = () => tap("Tell me when it arrives");
+    return { state, asked, messages, show, offer, ask, tap };
   };
 
-  it("offers it, and asks the phone nothing until it's tapped", async () => {
+  // Chen's, Sofía's and Marek's: promised, and nothing came once they left Firefox or the app.
+  it("offers it, asks the phone nothing until it's tapped, and says the notice comes while the wallet stays open", async () => {
     const shown = await draw([null]);
     expect(shown.offer()).toBe("Tell me when it arrives");
     expect(shown.asked).toEqual(["DUSK_UI_NOTICES"]);
     shown.ask().click();
     await settle();
     expect(shown.asked).toEqual(["DUSK_UI_NOTICES", "DUSK_UI_NOTICES_ASK"]);
-    expect(shown.offer()).toBe("You'll get a notice when it arrives.");
+    // For the send on screen, which the app's Android looks for once the wallet's left.
+    expect(shown.messages.at(-1)).toMatchObject({ type: "DUSK_UI_NOTICES_ASK", hash: HASH });
+    expect(shown.offer()).toBe(COMES);
   });
 
-  it("says once that notices are off after a no, and where to turn them on", async () => {
-    const shown = await draw([null, "off", "off-said"]);
+  // After a no in Firefox, the phone's settings didn't bring them back: Firefox's own question does, when tapped.
+  it("says once in Firefox that notices are off after a no, with Ask again, and asks only when it's tapped", async () => {
+    const shown = await draw([null, "off", "asked"]);
     shown.ask().click();
     await settle();
-    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
+    expect(shown.offer()).toBe("Notices are off.Ask again");
     expect(shown.asked).toContain("DUSK_UI_NOTICES_SAID");
-    // Drawn again, the same send's Sent still says it.
+    // Drawn again, the same send's Sent still says it, and has asked nothing more.
     await shown.show();
-    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
-    // The next send's Sent, in the same wallet window: read again, said, so nothing, and nothing asked.
+    expect(shown.offer()).toBe("Notices are off.Ask again");
+    expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES_ASK")).toHaveLength(1);
+    shown.tap("Ask again").click();
+    await settle();
+    expect(shown.messages.at(-1)).toMatchObject({ type: "DUSK_UI_NOTICES_ASK", again: true, hash: HASH });
+    expect(shown.offer()).toBe(COMES);
+    // A new window's, where the wallet says it was said: the tap, and nothing asked by itself.
+    const later = await draw(["off-said"]);
+    expect(later.offer()).toBe("Tell me when it arrives");
+    expect(later.asked).toEqual(["DUSK_UI_NOTICES"]);
+    later.ask().click();
+    await settle();
+    expect(later.messages.at(-1)).toMatchObject({ type: "DUSK_UI_NOTICES_ASK", again: true });
+  });
+
+  it("says once in the app that notices are off after a no, and where to turn them on", async () => {
+    const shown = await draw([null, "off", "off-said"], { app: true });
+    shown.ask().click();
+    await settle();
+    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Dusk Wallet in your phone's settings.");
+    expect(shown.asked).toContain("DUSK_UI_NOTICES_SAID");
+    // The next send's Sent: read again, said, so nothing, and nothing asked.
     shown.state.sent = { ...shown.state.sent, hash: "77".repeat(32), sentAt: Date.now() };
     await shown.show();
     expect([shown.offer(), shown.ask()]).toEqual(["", undefined]);
     expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES_SAID")).toHaveLength(1);
-    expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES")).toHaveLength(2);
-    // Or a new window's, where the wallet says it was said.
-    const later = await draw(["off-said"]);
-    expect(later.offer()).toBe("");
-    expect(later.ask()).toBeUndefined();
   });
 
   // Seen on Firefox for Android: said as the send went out, and gone as its hash came, so never seen.
   it("says notices are off for the whole of a send's Sent, its hash coming", async () => {
     const shown = await draw(["off", "off-said"], { sent: { phase: "sending", hash: "", status: "", sentAt: 0 } });
-    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
+    expect(shown.offer()).toBe("Notices are off.Ask again");
     // The network took it: the same send, now with its hash.
     Object.assign(shown.state.sent, { phase: "sent", hash: HASH, status: "submitted", sentAt: Date.now() });
     await shown.show();
-    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
+    expect(shown.offer()).toBe("Notices are off.Ask again");
     expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES")).toHaveLength(1);
   });
 
@@ -671,10 +696,10 @@ describe("Tell me when it arrives, on a phone", () => {
     const shown = await draw([null, "asked", "off"]);
     shown.ask().click();
     await settle();
-    expect(shown.offer()).toBe("You'll get a notice when it arrives.");
+    expect(shown.offer()).toBe(COMES);
     shown.state.sent = { ...shown.state.sent, hash: "78".repeat(32), sentAt: Date.now() };
     await shown.show();
-    expect(shown.offer()).toBe("Notices are off. To get them, allow notifications for Firefox in your phone's settings.");
+    expect(shown.offer()).toBe("Notices are off.Ask again");
   });
 
   it("offers nothing on a computer, which shows notices as it always did", async () => {

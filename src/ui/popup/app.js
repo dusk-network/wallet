@@ -27,8 +27,10 @@ import { activityRows, ensureActivity, refreshActivitySoon, selected, sozuFactOf
 import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
+import { siteLastSeen } from "../../shared/siteRecords.js";
 import { requestDraftOf } from "../lib/requestLink.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
+import { openedFromNotice } from "../../platform/notices.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
@@ -56,7 +58,7 @@ import {
   restoreWalletView,
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
-import { changePasswordView, removeWalletView, sendPasswordView } from "./views/wallets.js";
+import { changePasswordView, recoveryPhraseView, removeWalletView, resetWalletView, sendPasswordView } from "./views/wallets.js";
 import { cancelSendPassword } from "../components/SendPasswordDialog.js";
 import { getRuntimeKind, isExtensionRuntime, isTauriRuntime } from "../../platform/runtime.js";
 import {
@@ -96,7 +98,7 @@ function isWalletLockedResponse(value) {
 }
 
 // The screens of a wallet being added, removed, or a new password: unlocked only.
-const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password", "send_password"]);
+const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password", "send_password", "recovery_phrase"]);
 
 // The screen Settings or Add wallet opens from, for its Back to return to:
 // home from Settings' own pages and a setup.
@@ -110,16 +112,27 @@ function openSettings() {
   state.route = "options";
 }
 
+// Where the unlock after a lock returns to: the screen locked on, but for a
+// wallet form, whose words and passwords a lock drops: the screen it was
+// opened from, Settings or Add wallet's.
+function afterLock(route) {
+  if (!WALLET_ROUTES.has(route)) return route;
+  return route.startsWith("wallet_add") ? state.onboard?.from || "home" : "options";
+}
+
 function applyLockedOverviewPatch() {
   try {
-    // Locked here or elsewhere: whatever began unlocked is for nothing now.
+    // Locked here or elsewhere: whatever began unlocked is for nothing now;
+    // but where the lock's own unlock returns to (leave), which is this lock's.
+    const returning = state.returnTo?.context === state.context;
     switchContext(state, "lock");
+    if (returning) state.returnTo.context = state.context;
     acctMenu.close();
     cancelSendPassword();
     stopArrivalChecks();
     // A wallet being added keeps nothing of its new phrase through a lock.
+    state.route = afterLock(state.route);
     if (state.onboard?.adding) state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
-    if (WALLET_ROUTES.has(state.route)) state.route = "home";
     state.overview = {
       ...(state.overview ?? {}),
       isUnlocked: false,
@@ -446,6 +459,9 @@ function activeSiteInfo(ov) {
   const origin = typeof ov?.activeOrigin === "string" ? ov.activeOrigin : "";
   if (!origin) return null;
   if (!origin.startsWith("https://") && !origin.startsWith("http://")) return null;
+  // A site that never asked the wallet for anything gets no Connect of its own.
+  const record = ov?.siteRecords?.[String(ov?.accounts?.[0] ?? "")]?.[origin];
+  if (!ov?.activeConnected && !siteLastSeen(record)) return null;
 
   // As its approval named it: "http://127.0.0.1:5354", "app.dusk.network".
   return {
@@ -880,6 +896,8 @@ async function lookUpSends() {
   const hashes = sendsOnTheirWay();
   if (!hashes.length) return;
   await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
+  // Looked up: what the node said shows from here on.
+  if (state.sent) state.sent.lookingUp = false;
   state.needsRefresh = true;
   await renderForConnection({ forceRefresh: true }).catch(() => {});
   if (Date.now() < resumeUntil && document.visibilityState !== "hidden" && sendsOnTheirWay().length) {
@@ -900,20 +918,56 @@ function comeBack() {
   resumeWatching();
 }
 
+// A send on its way when the wallet is left: the Sent screen says it's looked
+// up again, drawn at once from what it has, so that coming back never first
+// shows the wait for a block that may have come meanwhile. The lookup's answer
+// takes its place (lookUpSends).
+let drawn = null;
+function lookingUpOnLeave() {
+  const sent = state.sent;
+  if (state.route !== "sent" || !sent?.hash || !drawn || sentIsFinal(sent, state.overview)) return;
+  sent.lookingUp = true;
+  try {
+    setApp(sentView(state.overview, { state, actions: drawn }));
+  } catch {
+    // The next draw says it.
+  }
+}
+
 // The app on a phone, with Lock when I leave the app on: locked as the person
 // leaves it, unless the wallet itself sent them elsewhere for a moment. Back,
-// they're asked the password, as after Lock wallet.
+// they're asked the password, as after Lock wallet, and return to the screen
+// they left, with what they typed on it.
 function leave() {
   const ov = state.overview;
   if (!appBack || !ov?.isUnlocked || ov?.lockOnLeave !== true || steppedAway()) return;
   switchContext(state, "lock");
+  // The unlock first, wherever they were: Settings would show locked.
+  state.returnTo = { route: afterLock(state.route), context: state.context };
   state.route = "home";
   send({ type: "DUSK_UI_LOCK" }).catch(() => {});
+}
+
+// Unlocked again after leaving: back where they were, unless something
+// switched since (another wallet, a restore). Sends left on their way are
+// looked up again, as they couldn't be while it was locked.
+let wasUnlocked = null;
+function returnAfterUnlock(ov) {
+  const unlocked = Boolean(ov?.isUnlocked);
+  const unlockedNow = unlocked && wasUnlocked === false;
+  wasUnlocked = unlocked;
+  const back = state.returnTo;
+  if (back && unlocked) {
+    state.returnTo = null;
+    if (back.context === state.context && state.route === "home") state.route = back.route;
+  }
+  if (unlockedNow) setTimeout(resumeWatching, 0);
 }
 
 try {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
+      lookingUpOnLeave();
       leave();
       return;
     }
@@ -1071,6 +1125,8 @@ const systemBack = appBack
       screenKey: () =>
         [state.route, app?.querySelector(".subnav-title")?.textContent ?? "", overlays().length, netMenu?.isOpen, acctMenu?.isOpen].join("|"),
       backStep,
+      // Import with words typed: its Back asks first.
+      asks: () => !overlays().length && !netMenu.isOpen && !acctMenu.isOpen && Boolean(app?.querySelector(".subnav-back[data-back-asks]")),
     });
 
 // --- Header actions -------------------------------------------------------
@@ -1170,6 +1226,7 @@ export async function render({ forceRefresh = false } = {}) {
     await maybeAutoWatchDashboardStDusk(ov);
   }
   keepContactsToTheirWallet(ov);
+  returnAfterUnlock(ov);
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";
   } catch {
@@ -1206,11 +1263,18 @@ export async function render({ forceRefresh = false } = {}) {
     // The header alone, for a change only it shows, such as a profile's label.
     renderHeader: () => renderHeader(state.overview),
   };
+  drawn = actions;
 
   // Settings should be accessible even when the wallet is locked or not yet imported.
   // TODO: Reconsider?
   if (state.route === "options") {
     setApp(optionsView(ov, { state, actions }));
+    return;
+  }
+  // Reset, from Settings, locked or not: with no wallet here, Settings.
+  if (state.route === "wallet_reset") {
+    if (!ov?.hasVault) state.route = "options";
+    setApp(ov?.hasVault ? keepForm(() => resetWalletView(ov, { state, actions })) : optionsView(ov, { state, actions }));
     return;
   }
 
@@ -1299,6 +1363,10 @@ export async function render({ forceRefresh = false } = {}) {
   }
   if (state.route === "send_password") {
     setApp(keepForm(() => sendPasswordView(ov, { state, actions })));
+    return;
+  }
+  if (state.route === "recovery_phrase") {
+    setApp(keepForm(() => recoveryPhraseView(ov, { state, actions })));
     return;
   }
   // After Confirm: the transaction's steps. Without one (a new popup), home.
@@ -1397,7 +1465,27 @@ listenForLinks((url) => {
     .catch(() => {});
 });
 
+// --- A notice tapped in the app ----------------------------------------------
+// Its send's details, as Activity opens them: after the unlock, when the
+// wallet is locked. Asked as the app starts, and each time it's back in front.
+async function openNoticed() {
+  const hash = isTauriRuntime() && isPhone() ? await openedFromNotice().catch(() => "") : "";
+  if (!hash) return;
+  netMenu.close();
+  acctMenu.close();
+  Object.assign(state, { txDetailHash: hash, txDetailFrom: "home", route: "tx" });
+  await render();
+}
+try {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") openNoticed().catch(() => {});
+  });
+} catch {
+  // ignore
+}
+
 export function mountPopup() {
+  openNoticed().catch(() => {});
   render()
     // Sends left on their way while the wallet was closed are looked up now.
     .then(() => resumeWatching())

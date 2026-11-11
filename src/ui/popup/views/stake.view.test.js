@@ -1010,6 +1010,81 @@ describe("a stake with Sozu in figures", () => {
     expect(years()).toEqual(["2026•••• DUSK claimed", "2025•••• DUSK claimed"]);
   });
 
+  // Lena's: 2026 said 0.0062 DUSK with Sozu, and Sozu "Rewards so far 0.0295".
+  describe("Sozu's part of each year, as app-core works it out", () => {
+    // What the pool's events and the token's burn hold, as the archive lists a
+    // block's transactions: u64s little-endian, the account a key's tag and 193 bytes.
+    const u64 = (n) => Array.from({ length: 8 }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn).toString(16).padStart(2, "0")).join("");
+    const key = `01${"ab".repeat(193)}`;
+    const poolEvent = (topic, figures) => ({ target: PILOT, topic, data: `${figures.map(u64).join("")}${key}${"00".repeat(6)}` });
+    const burn = (lux) => ({ target: ST_DUSK, topic: "transfer", data: `${u64(lux)}${key}${"00".repeat(33)}${"00".repeat(161)}${"00".repeat(4)}` });
+    const move = (hash, fnName, lux, blockHeight, timestamp) =>
+      entryOf({ hash, kind: "contract_call", contractId: PILOT, counterparty: PILOT, fnName, direction: fnName === "sozu_stake" ? "out" : "in", payer: true, value: lux, fee: "5000000", blockHeight, timestamp });
+    // The archive: each stake's and unstake's events by its block; nothing of
+    // the pool's restakes, so a new year's rate can't be read.
+    const archiveWith = (events) => async (text) =>
+      Object.fromEntries([...String(text).matchAll(/(h\d+): moonlightHistory\([^)]*?fromBlock: (\d+)/g)].map(([, alias, height]) => [alias, { json: events[height] ?? [] }]));
+    const years = () => body.querySelectorAll(".stake-years .kv").map((row) => [row.querySelector(".kv-label").textContent, ...row.querySelectorAll(".stake-year-part").map(visibleText)]);
+    // Sozu's status as the engine reads it, with what's held and its worth now.
+    const holding = (stDusk, worth) => {
+      const st = sozu({ position: { poolBalanceLux: String(worth), stDuskBalanceLux: String(stDusk) } });
+      st.status = { ...st.status, position: st.position };
+      return st;
+    };
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.UTC(2026, 10, 11, 12));
+    });
+
+    it("says what grew while held and what unstaking took out, from the pool's events and Sozu's status", async () => {
+      const [staked, unstaked] = ["5a".repeat(32), "5b".repeat(32)];
+      // 100 DUSK staked at 2 DUSK an stDUSK, 0.25 deposit fee: 49.875 stDUSK. 15 of
+      // them unstaked at 2.02: 30.3 DUSK back, 0.3 over what they cost. 34.875 left, worth 2.04 each now.
+      archive.query = archiveWith({
+        4800001: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }],
+        4800002: [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }],
+      });
+      const overview = ov();
+      const history = [move(staked, "sozu_stake", "100000000000", 4_800_001, Date.UTC(2026, 2, 1, 12)), move(unstaked, "sozu_unstake", "30300000000", 4_800_002, Date.UTC(2026, 5, 1, 12))];
+      popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
+      // Held from March at 2 to June at 2.02 (49.875 stDUSK), then on to now at 2.04 (34.875): 0.9975 and 0.6975.
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "1.695 DUSK grown with Sozu while held", "0.3 DUSK taken out of Sozu by unstaking"]]));
+    });
+
+    // Astra's: rewards accrued, the holding worth more for the same stDUSK, and the year's growth stayed as it was.
+    it("says what grew again as what's held is worth more, its stDUSK the same", async () => {
+      const staked = "5d".repeat(32);
+      archive.query = archiveWith({ 4800004: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }] });
+      const overview = ov();
+      // 49.875 stDUSK that cost 99.75 DUSK, worth 101.745 now.
+      const state = { route: "stake", staking: staking(owner()), sozu: holding(49_875_000_000n, 101_745_000_000n), activity: activityOf(overview, [move(staked, "sozu_stake", "100000000000", 4_800_004, Date.UTC(2026, 2, 1, 12))]) };
+      const app = popup(state, overview);
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "1.995 DUSK grown with Sozu while held"]]));
+      // Read again, worth 103.74: what grew is 3.99.
+      const position = { poolBalanceLux: "103740000000", stDuskBalanceLux: "49875000000" };
+      Object.assign(state.sozu, { position, status: { ...state.sozu.status, position } });
+      app.draw();
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "3.99 DUSK grown with Sozu while held"]]));
+    });
+
+    it("says what grew couldn't be read where a new year's rate isn't on the archive yet", async () => {
+      const staked = "5c".repeat(32);
+      archive.query = archiveWith({ 4800003: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }] });
+      const overview = ov();
+      popup(
+        { route: "stake", staking: staking(owner()), sozu: holding(49_875_000_000n, 101_745_000_000n), activity: activityOf(overview, [move(staked, "sozu_stake", "100000000000", 4_800_003, Date.UTC(2025, 5, 1, 12))]) },
+        overview
+      );
+      // Held across the new year, whose rate the archive doesn't have: neither year's growth is known.
+      await vi.waitFor(() =>
+        expect(years()).toEqual([
+          ["2026", "Grown with Sozu while held: couldn't be read"],
+          ["2025", "Grown with Sozu while held: couldn't be read"],
+        ])
+      );
+    });
+  });
+
   it("says what went in, what came out, what it's worth now and what it brought, and they add up", async () => {
     const overview = ov();
     const state = {

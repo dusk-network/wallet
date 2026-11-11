@@ -14,6 +14,8 @@ const tabs = vi.hoisted(() => ({
   send: null,
 }));
 const notes = vi.hoisted(() => []);
+// What the background tells the wallet's pages.
+const runtime = vi.hoisted(() => ({ sendMessage: null }));
 // The browser's session storage: it outlives the background's stops.
 // `gate`, when set, runs before each write: to hold it, or to fail it.
 const session = vi.hoisted(() => ({ items: {}, gate: null }));
@@ -58,6 +60,7 @@ vi.mock("../platform/extensionApi.js", () => {
       },
     }),
     runtimeGetURL: (path) => `chrome-extension://test/${String(path ?? "")}`,
+    runtimeSendMessage: (...args) => (runtime.sendMessage ??= vi.fn(async () => {}))(...args),
     windowsCreate: vi.fn(async () => ({ id: 999 })),
     windowsRemove,
     storageSessionGet: async (key) => ({ [key]: structuredClone(session.items[key]) }),
@@ -184,9 +187,10 @@ describe("pending approvals", () => {
     const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("rid-3");
     const first = pending.requestUserApproval("send_tx", "https://example.com", {});
 
+    // Request already pending: not the person's refusal.
     await expect(
       pending.requestUserApproval("sign_message", "https://example.com", {})
-    ).rejects.toMatchObject({ code: 4001 });
+    ).rejects.toMatchObject({ code: -32002 });
 
     pending.cancelPendingApprovals("https://example.com", "Wallet locked");
     await expect(first).rejects.toMatchObject({ code: 4001, message: "Wallet locked" });
@@ -194,6 +198,40 @@ describe("pending approvals", () => {
   });
 
   describe("where windows can't be made, as in Firefox for Android", () => {
+
+    // Marek's: approved as the signal dropped, the tab went at once, and the wallet said nothing.
+    it("keeps an approved send's tab till the network took it, and has it say why when nothing went", async () => {
+      browserHas.windows = false;
+      vi.resetModules();
+      const pending = await import("./pending.js");
+      const ridSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("rid-send");
+      try {
+        const sent = pending.requestUserApproval("send_tx", "https://bridge.example", {});
+        await new Promise((r) => setTimeout(r, 0));
+        await pending.resolvePendingDecision({ rid: "rid-send", decision: "approve" });
+        await sent;
+        await new Promise((r) => setTimeout(r, 0));
+        expect(tabs.remove).not.toHaveBeenCalled();
+        // The network took it: the tab goes.
+        pending.sendOutcome("rid-send");
+        await vi.waitFor(() => expect(tabs.remove).toHaveBeenCalledWith(77));
+
+        tabs.remove.mockClear();
+        const again = pending.requestUserApproval("send_tx", "https://bridge.example", {});
+        await new Promise((r) => setTimeout(r, 0));
+        await pending.resolvePendingDecision({ rid: "rid-send", decision: "approve" });
+        await again;
+        // Nothing went: the tab stays to say why, till it's closed.
+        pending.sendOutcome("rid-send", { error: { message: "NetworkError when attempting to fetch resource." } });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(tabs.remove).not.toHaveBeenCalled();
+        expect(runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_APPROVAL_SEND_FAILED", rid: "rid-send", error: { message: "NetworkError when attempting to fetch resource." } }));
+        expect(pending.closeSaidApproval("rid-send")).toBe(true);
+        await vi.waitFor(() => expect(tabs.remove).toHaveBeenCalledWith(77));
+      } finally {
+        ridSpy.mockRestore();
+      }
+    });
     it("shows the request in a tab, and once it's answered closes it and brings the site's tab back", async () => {
       browserHas.windows = false;
       vi.resetModules();

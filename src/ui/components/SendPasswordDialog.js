@@ -1,4 +1,5 @@
 import { formatDuskExact } from "../../shared/amount.js";
+import { fingerprintPassword, fingerprintStatus, showKeyboard, turnFingerprintOff } from "../../platform/fingerprint.js";
 import { h } from "../lib/dom.js";
 import { fieldError, fieldLabel, passwordInput } from "./FormControls.js";
 
@@ -21,7 +22,10 @@ export const cancelSendPassword = () => closeOpen?.(null);
 
 /**
  * Asks for the password over whatever shows, in front of the screen's redraws:
- * Enter gives it, Escape cancels, and what's typed goes with the dialog.
+ * Enter gives it, Escape cancels, and what's typed goes with the dialog. With
+ * fingerprint unlock on (the app on a phone), a fingerprint answers it: its
+ * prompt comes up as the dialog opens, Use fingerprint asks again, and the
+ * password stays, the prompt's Use password bringing up the keyboard.
  *
  * @param {object} opts
  * @param {string} opts.limit - the amount chosen, in lux
@@ -38,7 +42,9 @@ export function askSendPassword({ limit, always = false, check }) {
     const error = fieldError(input);
     input.addEventListener("input", () => error.show(""));
     let busy = false;
+    let closed = false;
     const finish = (answer) => {
+      closed = true;
       closeOpen = null;
       input.value = "";
       document.removeEventListener("keydown", onKey, true);
@@ -48,9 +54,10 @@ export function askSendPassword({ limit, always = false, check }) {
     };
     const cancel = h("button", { class: "btn-outline", type: "button", text: "Cancel", "data-back": "", onclick: () => finish(null) });
     const confirmBtn = h("button", { class: "btn-primary", type: "button", text: "Confirm", onclick: () => submit() });
-    const submit = async () => {
+    // The password typed, or the one a fingerprint gave (`kept`).
+    const submit = async (kept = "") => {
       if (busy) return;
-      if (!input.value) {
+      if (!kept && !input.value) {
         error.show("Enter your password.");
         input.focus();
         return;
@@ -59,16 +66,33 @@ export function askSendPassword({ limit, always = false, check }) {
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Checking…";
       try {
-        finish(await check(input.value));
+        finish(await check(kept || input.value));
       } catch (e) {
         input.value = "";
-        error.show(sendPasswordRefusal(e?.message));
+        // The password the fingerprint kept is an old one: it's off now.
+        if (kept && /^Incorrect password$/.test(String(e?.message ?? ""))) {
+          await turnFingerprintOff().catch(() => {});
+          fingerBtn.hidden = true;
+          error.show("Your password changed, so fingerprint unlock is off. Enter your password.");
+        } else {
+          error.show(sendPasswordRefusal(e?.message));
+        }
         input.focus();
       } finally {
         busy = false;
         confirmBtn.disabled = false;
         confirmBtn.textContent = "Confirm";
       }
+    };
+    const fingerBtn = h("button", { class: "btn-outline btn-full", type: "button", text: "Use fingerprint", hidden: true, onclick: () => byFingerprint() });
+    const byFingerprint = async () => {
+      if (busy || closed) return;
+      const answer = await fingerprintPassword({ title: "Confirm this send" });
+      if (closed) return;
+      if (answer.ok && answer.secret) return submit(answer.secret);
+      if (answer.reason === "invalidated" || answer.reason === "off") fingerBtn.hidden = true;
+      input.focus();
+      showKeyboard().catch(() => {});
     };
     const title = h("h2", { class: "send-password__title", id: "send-password-title", text: "Enter your password" });
     const modal = h("div", { class: "send-password", role: "dialog", "aria-modal": "true", "aria-labelledby": "send-password-title" }, [
@@ -77,6 +101,7 @@ export function askSendPassword({ limit, always = false, check }) {
       fieldLabel(input, "Password you unlock with"),
       input,
       error.el,
+      fingerBtn,
       h("div", { class: "send-password__actions" }, [cancel, confirmBtn]),
     ]);
     const overlay = h("div", { class: "qrscan-overlay" }, [modal]);
@@ -87,7 +112,7 @@ export function askSendPassword({ limit, always = false, check }) {
         event.stopPropagation();
         if (!busy) finish(null);
       } else if (event.key === "Tab") {
-        const stops = [input, cancel, confirmBtn].filter((el) => !el.disabled);
+        const stops = [input, fingerBtn, cancel, confirmBtn].filter((el) => !el.disabled && !el.hidden);
         const at = stops.indexOf(document.activeElement);
         const next = event.shiftKey ? (at <= 0 ? stops.length - 1 : at - 1) : (at + 1) % stops.length;
         event.preventDefault();
@@ -98,5 +123,12 @@ export function askSendPassword({ limit, always = false, check }) {
     document.addEventListener("keydown", onKey, true);
     document.body.appendChild(overlay);
     input.focus();
+    fingerprintStatus()
+      .then(({ on }) => {
+        if (!on || closed) return;
+        fingerBtn.hidden = false;
+        byFingerprint();
+      })
+      .catch(() => {});
   });
 }

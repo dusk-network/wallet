@@ -58,11 +58,13 @@ function scrollerOf(el, doc, win) {
   return doc.scrollingElement ?? doc.documentElement;
 }
 
-// The first main button after `field` on its screen or in its dialog.
+// The first main button after `field` on its screen or in its dialog: a
+// primary one, or the one its fields lead to (`data-next`), as Receive's
+// Copy request link.
 function nextButton(field, doc) {
   const scope = field.closest?.(".qrscan-overlay") ?? doc.getElementById?.("app") ?? doc.body;
   const all = Array.from(scope?.querySelectorAll?.("*") ?? []);
-  return all.slice(all.indexOf(field) + 1).find((el) => el.matches?.("button.btn-primary")) ?? null;
+  return all.slice(all.indexOf(field) + 1).find((el) => el.matches?.("button.btn-primary, button[data-next]")) ?? null;
 }
 
 /**
@@ -95,9 +97,11 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
     if (!field?.isConnected) return;
     const top = keyboardTop(win);
     const layout = doc.documentElement?.clientHeight || win.innerHeight || 0;
+    // The room first: a screen that fits whole scrolls only once it's there,
+    // as one opened again from its Review does, its first field tapped low.
+    setRoom(layout - top + MARGIN);
     const scroller = scrollerOf(field, doc, win);
     if (!before) before = { scroller, top: scroller.scrollTop };
-    setRoom(layout - top + MARGIN);
     const page = scroller === doc.scrollingElement || scroller === doc.documentElement;
     const from = Math.max(MARGIN, page ? 0 : scroller.getBoundingClientRect().top + MARGIN);
     const to = top - MARGIN;

@@ -629,6 +629,7 @@ dusk.on("duskNodeChanged", ({ chainId, nodeUrl, networkName }) => { });
 | `4100` | UNAUTHORIZED | Not connected, locked, or no wallet |
 | `4200` | UNSUPPORTED | Feature not available |
 | `4900` | DISCONNECTED | Extension unavailable |
+| `-32002` | REQUEST_PENDING | The site's request before this one still waits for the user's answer: nothing was refused |
 | `-32601` | METHOD_NOT_FOUND | Unknown method |
 | `-32602` | INVALID_PARAMS | Bad parameters |
 | `-32603` | INTERNAL | Something broke, such as a prompt the wallet couldn't show: nothing was approved, and the user didn't refuse |

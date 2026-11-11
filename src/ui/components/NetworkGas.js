@@ -33,6 +33,21 @@ export function startingGas({ defaultGas, minLimit, customGas, gas } = {}) {
   return whole(defaultGas?.price) ? { limit: own, price: String(defaultGas.price) } : null;
 }
 
+/**
+ * The gas price the node asks now, as Review and Send's own fee both start
+ * from it: its median, or null where it doesn't say. The wallet keeps it
+ * 30 seconds, so the two agree.
+ * @param {object} actions
+ * @returns {Promise<string | null>}
+ */
+export async function networkGasPrice(actions) {
+  const response = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
+  if (response?.error) throw new Error(response.error.message ?? "Gas price unavailable");
+  const stats = response?.result ?? response;
+  const price = String(stats?.median ?? stats?.average ?? "").trim();
+  return /^\d+$/.test(price) && price !== "0" ? price : null;
+}
+
 /** A gas's fee at most: limit times price, in Lux; 0 without gas. */
 export function gasFeeLux(gas) {
   return gas ? BigInt(gas.limit) * BigInt(gas.price) : 0n;
@@ -80,11 +95,8 @@ export function useNetworkGas({ actions, gasEditor, defaultLimit, fallbackPrice,
   else if (fallback) gasEditor.setGas(fallback);
 
   (async () => {
-    const response = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
-    if (response?.error) throw new Error(response.error.message ?? "Gas price unavailable");
-    const stats = response?.result ?? response;
-    const price = String(stats?.median ?? stats?.average ?? "").trim();
-    if (!defaultLimit || !/^\d+$/.test(price) || price === "0") return;
+    const price = await networkGasPrice(actions);
+    if (!defaultLimit || !price) return;
     const network = { limit: String(defaultLimit), price };
     // Gas the user set, here, in Settings or before going back, stays theirs.
     const untouched = !gas && !custom && sameGas(gasEditor.getGasInputs(), gasEditor.networkGas);

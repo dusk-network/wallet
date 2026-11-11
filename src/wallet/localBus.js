@@ -4,8 +4,8 @@
 // This lets the same UI (popup/full) run without chrome.runtime messaging,
 // which is how we reuse it in Tauri desktop/mobile.
 
-import { clearVault, countVaultWallets, createVault, loadVault, unlockVault } from "../shared/vault.js";
-import { getSettings, rememberNodeChain, setSettings } from "../shared/settings.js";
+import { checkResetPassword, clearVault, countVaultWallets, createVault, loadVault, unlockVault, vaultPhrase } from "../shared/vault.js";
+import { getSettings, normalizeAutoLock, rememberNodeChain, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearAllPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -31,10 +31,8 @@ import { engineContactsVault, handleUiCommand } from "./uiCommands.js";
 import { assertSendPassword, sendPasswordLimit } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
-import { askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
-import { appNoticesAllowed, askAppNotices, showAppNotice } from "../platform/notices.js";
-import { networkTextOf } from "../shared/nodeNetwork.js";
-import { shortAddress } from "../ui/lib/strings.js";
+import { arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
+import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, watchAppArrival } from "../platform/notices.js";
 import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
@@ -89,21 +87,58 @@ let chainAskedAt = -Infinity;
 
 // A payment's arrival as a notice, in the app on a phone: once the person
 // asked for notices (phoneNotices.js) and while Android lets the app show
-// them, read each time, and only while they're away from it.
-async function noticeArrival({ hash, ok, nodeUrl }) {
-  if (!isPhone() || globalThis.document?.visibilityState !== "hidden") return;
+// them, read each time, and only while they're away from it. Its lock screen
+// says what came of it, never the amount or whom it was for. Heard here,
+// Android stops looking for it (watchArrival); each send's notice shows once.
+async function noticeArrival({ hash, ok, kind, nodeUrl }) {
+  if (!isPhone()) return;
+  settleAppArrival(hash).catch(() => {});
+  if (globalThis.document?.visibilityState !== "hidden") return;
   if (!(await mayNotify(appNoticesAllowed))) return;
-  const network = nodeUrl ? networkTextOf(nodeUrl) : "";
-  await showAppNotice({
-    title: ok ? "Transaction executed" : "Transaction failed",
-    body: [`Tx: ${shortAddress(hash)}`, network ? `Network: ${network}` : ""].filter(Boolean).join(" · "),
-  }).catch(() => {});
+  const { title, network } = arrivalNotice({ kind, ok, nodeUrl });
+  await showAppNotice({ title, body: network, hash }).catch(() => {});
 }
 
 // However a send's outcome is learned, while the app is away.
 onTxSettled((hash, tx) => {
-  noticeArrival({ hash, ok: tx.status === "executed", nodeUrl: tx.nodeUrl }).catch(() => {});
+  noticeArrival({ hash, ok: tx.status === "executed", kind: tx.kind, nodeUrl: tx.nodeUrl }).catch(() => {});
 });
+
+// A send the person asked to hear of, for Android to look for once the app
+// leaves the screen, when it cuts the page's network (android/ArrivalJob.kt):
+// its notice, for either outcome, comes from there.
+async function watchArrival(hash, { kind, nodeUrl, walletId }) {
+  if (!hash || !isPhone() || !(await mayNotify(appNoticesAllowed))) return;
+  const went = arrivalNotice({ kind, ok: true, nodeUrl });
+  const failed = arrivalNotice({ kind, ok: false, nodeUrl });
+  await watchAppArrival({ hash, nodeUrl, title: went.title, failTitle: failed.title, body: went.network, wallet: String(walletId ?? "") });
+}
+
+// Auto-lock in the app, as the extension's background does it: the wallet
+// locks once it's gone this long without a press or a key in it (the page's
+// DUSK_UI_ACTIVITY), looked at every half minute while the page runs, and as
+// the page asks for anything, as when the app comes back to the front after
+// Android stopped its timers. Immediately is the page's (popup/app.js).
+const AUTO_LOCK_CHECK_MS = 30_000;
+let lastActivity = Date.now();
+
+async function lockIfIdle() {
+  if (!isUnlocked()) return false;
+  const minutes = Number((await getSettings())?.autoLockTimeoutMinutes ?? 0);
+  if (!(minutes > 0) || Date.now() - lastActivity < minutes * 60_000) return false;
+  return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+    if (!isUnlocked()) return false;
+    lock();
+    tellPage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason: "auto_lock" });
+    return true;
+  });
+}
+
+try {
+  setInterval(() => lockIfIdle().catch(() => {}), AUTO_LOCK_CHECK_MS);
+} catch {
+  // No timers here.
+}
 
 function tellPage(message) {
   try {
@@ -204,6 +239,18 @@ const localEngineCall = (method, params) => localEngineMethods[method](params ??
  */
 export async function localSend(message) {
   try {
+    // A use of the wallet: a press or a key, or an unlock.
+    if (message?.type === "DUSK_UI_ACTIVITY") {
+      lastActivity = Date.now();
+      return { ok: true };
+    }
+    // Gone long enough without one: locked before anything is answered.
+    await lockIfIdle().catch(() => {});
+    if (message?.type === "DUSK_UI_SET_AUTO_LOCK") {
+      const next = await setSettings({ autoLockTimeoutMinutes: normalizeAutoLock(message.autoLockTimeoutMinutes ?? 0) });
+      lastActivity = Date.now();
+      return { ok: true, autoLockTimeoutMinutes: next.autoLockTimeoutMinutes };
+    }
     const common = await handleUiCommand(message, {
       engineCall: localEngineCall,
       ensureEngineConfigured,
@@ -231,6 +278,7 @@ export async function localSend(message) {
         if (isUnlocked()) return { ok: true, accounts: getAccounts() };
         // Every wallet the password opens, the one unlocked last unlocked again.
         const { wallets } = await unlockVault(message.password);
+        lastActivity = Date.now();
         await ensureEngineConfigured();
         await unlockWallets({ wallets, walletKey: (await getWalletDirectory().catch(() => ({}))).active });
         await keepWalletShown(unlockedNow());
@@ -238,6 +286,15 @@ export async function localSend(message) {
         // this wallet's record (background/index.js does the same).
         await moveLegacyContacts(engineContactsVault(localEngineCall)).catch(() => {});
         return { ok: true, accounts: getAccounts() };
+      });
+    }
+
+    // The open wallet's recovery phrase, shown again in Settings: only for
+    // the password that opens it, checked against the vault.
+    if (message?.type === "DUSK_UI_RECOVERY_PHRASE") {
+      return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        if (!isUnlocked()) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        return { ok: true, result: await vaultPhrase(message.password, getWalletKey()) };
       });
     }
 
@@ -251,6 +308,8 @@ export async function localSend(message) {
 
     if (message?.type === "DUSK_UI_RESET_WALLET") {
       return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        // The password first, as for removing a wallet: a reset wipes them all.
+        if (await loadVault()) await checkResetPassword(message.password);
         lock();
         if (isUnlocked()) throw new Error("Wallet lock did not complete");
         await beginReset();
@@ -481,6 +540,7 @@ export async function localSend(message) {
         ipfsGateway: settings.ipfsGateway ?? "",
         hideBalances: settings.hideBalances === true,
         lockOnLeave: settings.lockOnLeave === true,
+        autoLockTimeoutMinutes: settings.autoLockTimeoutMinutes ?? 15,
         sendPasswordLimit: (await sendPasswordLimit())?.toString() ?? null,
         customGas: settings.customGas ?? null,
         chainId: settings.chainId,
@@ -502,7 +562,13 @@ export async function localSend(message) {
     // Arrival notices on a phone: where they stand, the question Android asks
     // when the person taps Tell me when it arrives, and Sent having said they're off.
     if (message?.type === "DUSK_UI_NOTICES") return { ok: true, state: await noticesState(appNoticesAllowed) };
-    if (message?.type === "DUSK_UI_NOTICES_ASK") return { ok: true, state: await askForNotices(askAppNotices, appNoticesAllowed) };
+    if (message?.type === "DUSK_UI_NOTICES_ASK") {
+      const state = await askForNotices(askAppNotices, appNoticesAllowed);
+      // The send on Sent, on its way as the person asked: looked for once they leave.
+      const meta = message.hash ? await getTxMeta(String(message.hash)).catch(() => null) : null;
+      if (meta && !["executed", "failed", "removed"].includes(meta.status)) await watchArrival(String(message.hash), meta).catch(() => {});
+      return { ok: true, state };
+    }
     if (message?.type === "DUSK_UI_NOTICES_SAID") {
       await saidNoticesOff(appNoticesAllowed);
       return { ok: true };
@@ -577,6 +643,8 @@ export async function localSend(message) {
           const record = submittedTxMeta(baseParams, { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message));
           const { pendingNullifiers } = record;
           await putTxMeta(hash, record, { epoch: txEpoch });
+          // Asked for notices: Android looks for it too, once the app leaves the screen.
+          watchArrival(hash, { kind: baseParams.kind, nodeUrl, walletId: record.walletId }).catch(() => {});
 
           // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
           (async () => {

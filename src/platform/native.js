@@ -51,20 +51,29 @@ export async function openInBrowser(url) {
 }
 
 /**
- * Android's share sheet with `text`. False outside the app, or where there's none.
+ * Android's share sheet with `text`, and a picture beside it where there's one
+ * (`image`, a PNG, shared as `name`). False outside the app, or where there's none.
  * @param {string} text
  * @param {string} [title]
+ * @param {{ image?: Uint8Array, name?: string }} [picture]
  */
-export async function shareText(text, title = "") {
+export async function shareText(text, title = "", { image, name = "" } = {}) {
   if (!isTauriRuntime()) return false;
   stepAway();
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("share_text", { text: String(text), title: String(title) });
+    const png = image ? base64Of(image) : undefined;
+    await invoke("share_text", { text: String(text), title: String(title), ...(png ? { image: png, name: String(name) } : {}) });
     return true;
   } catch {
     return false;
   }
+}
+
+function base64Of(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
 }
 
 /**

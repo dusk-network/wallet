@@ -667,6 +667,24 @@ describe("a memo too long for the network", () => {
 });
 
 describe("send's amount", () => {
+  // Amélie's and Lena's: Send said up to 0.0025, its Review up to 0.005, the node asking 2 LUX.
+  it("says the fee its Review will, at the node's gas price, and keeps it from Max", async () => {
+    const state = newState();
+    const form = mount(state, overview(), async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {}));
+    typeInto(form.to, ALICE.account);
+    await settle();
+    expect(form.feeNote()).toBe("Network fee up to 0.005 DUSK");
+    expect(form.balanceLine()).toBe("Available after fees 177.9815 DUSK");
+
+    // Its Review: the same fee.
+    typeInto(form.amount, "1");
+    state.route = "confirm";
+    Object.assign(state.draft, { privacy: "public", amountLux: "1000000000" });
+    mount(state, overview(), async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {}));
+    await settle();
+    expect(visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-fee"))).toBe("Network feeup to 0.005 DUSKTotalup to 1.005 DUSK");
+  });
+
   it("says what's available after fees, fills Max, and says under the field what's wrong", () => {
     const state = newState();
     const form = mount(state);
@@ -720,15 +738,16 @@ describe("send's amount", () => {
     typeInto(last.amount, "0.0000000001");
     expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
     typeInto(last.amount, "1,234");
-    expect(last.amountError()).toBe("Is that 1234 or 1.234? Write the one you mean.");
+    expect(last.amountError()).toBe("Is that about 1.23 or 1234? Write the one you mean.");
   });
 
   // Lena's: "1,000" asked and "1.000" didn't. In English the point is the
-  // decimal; where the comma is, "1.000" asks, in the web wallet's words.
+  // decimal; where the comma is, "1.000" asks, in the web wallet's words. And
+  // the question's "1.000" read as a thousand to her: it names 1 and 1000.
   it.each([
-    ["de-DE", "1.000", "Is that 1000 or 1,000? Write the one you mean."],
-    ["nl-NL", "1.000", "Is that 1000 or 1,000? Write the one you mean."],
-    ["en-GB", "1,000", "Is that 1000 or 1.000? Write the one you mean."],
+    ["de-DE", "1.000", "Is that 1 or 1000? Write the one you mean."],
+    ["nl-NL", "1.000", "Is that 1 or 1000? Write the one you mean."],
+    ["en-GB", "1,000", "Is that 1 or 1000? Write the one you mean."],
     ["es-ES", "1 234,5", "Leave out the space: 1234,5."],
   ])("asks which amount is meant where it could be two, in the language's reading: %s %s", (language, typed, asked) => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language });
@@ -1718,6 +1737,39 @@ describe("the password on big sends", () => {
     expect(view.confirm().disabled).toBe(false);
   });
 
+  // Chen's: fingerprint unlock on, and still a password box for the big send.
+  it("takes a fingerprint for it in the app where fingerprint unlock is on, the password left to type", async () => {
+    const asked = [];
+    let kept = "the password";
+    dom.window.__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (cmd, args) => {
+        if (cmd !== "fingerprint") return null;
+        asked.push(args.action);
+        if (args.action === "status") return { ok: true, available: true, on: true };
+        if (args.action === "unlock") return { ok: true, secret: kept };
+        return { ok: true };
+      }),
+    };
+    const view = reviewAt("6000000000");
+    await pressConfirm(view);
+    await vi.waitFor(() => expect(view.sends()).toHaveLength(1));
+    expect(view.sends()[0].sendTicket).toBe("ticket-1");
+    expect(asked).toEqual(["status", "unlock"]);
+    expect(view.dialog()).toBeNull();
+
+    // The password kept is an old one: off, said, and the box to type in.
+    kept = "an old password";
+    const again = reviewAt("6000000000");
+    await pressConfirm(again);
+    await vi.waitFor(() => expect(asked.at(-1)).toBe("disable"));
+    await settle();
+    expect(visibleText(again.dialog())).toContain("Your password changed, so fingerprint unlock is off. Enter your password.");
+    expect(again.sends()).toEqual([]);
+    typeInto(again.password(), "the password");
+    again.press("Confirm");
+    await vi.waitFor(() => expect(again.sends()).toHaveLength(1));
+  });
+
   it("asks nothing up to the amount, or with it off", async () => {
     const view = reviewAt("1000000000");
     view.answers.DUSK_UI_SEND_PASSWORD_ASKS = () => ({ ok: true, result: null });
@@ -1788,7 +1840,7 @@ describe("a request link", () => {
     expect(form.amount.value).toBe("0,15");
     // Said under the recipient, in words, and covering nothing.
     const filled = () => visibleText(dom.document.body.querySelector(".send-filled-note"));
-    expect(filled()).toBe("Filled in from the link. Check it before you send.");
+    expect(filled()).toBe("Filled in from the link, to pay on Testnet. Check it before you send.");
     expect(form.actions.showToast).not.toHaveBeenCalled();
     typeInto(form.to, BOB.account);
     expect(filled()).toBe("");
@@ -1880,7 +1932,7 @@ describe("a request link", () => {
     await settle();
     expect(form.to.value).toBe(BOB.account);
     expect(refusal()).toEqual([]);
-    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the QR code. Check it before you send.");
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the QR code, to pay on Testnet. Check it before you send.");
   });
 
   it("is no request when it goes anywhere else, or names no recipient", async () => {
@@ -1956,6 +2008,16 @@ describe("a request link", () => {
     expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
   });
 
+  // Chen's: a plain dusk: link on Mainnet filled Send in without a word of the network.
+  it("says the network it pays on, for a plain link that names none", async () => {
+    const state = newState();
+    const form = mount(state, overview({ nodeUrl: "https://nodes.dusk.network", chainId: 1, networkName: "Mainnet" }));
+    paste(form, `dusk:${ALICE.account}?amount=0.01&memo=Lunch`);
+    await settle();
+    expect(form.to.value).toBe(ALICE.account);
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link, to pay on Mainnet. Check it before you send.");
+  });
+
   it("fills in the page it opened, a tab of its own, as the form any request fills in", async () => {
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=2.5&memo=Rent&network=testnet`))}` });
     vi.resetModules();
@@ -1965,7 +2027,7 @@ describe("a request link", () => {
     expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "2.5"]);
     expect(state.draft.memo).toBe("Rent");
     expect(state.draft.requestChainId).toBe("dusk:2");
-    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link. Check it before you send.");
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link, to pay on Testnet. Check it before you send.");
 
     // Marek's: a testnet link that says mainnet opened an empty Send without a word.
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=0.001&network=mainnet`))}` });

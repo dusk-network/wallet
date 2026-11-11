@@ -27,7 +27,7 @@ import { amountField } from "../../components/AmountField.js";
 import { ownProfileName, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { fieldLabel, reviewActions, submitOnGasEnter, textInput, wrappingInput } from "../../components/FormControls.js";
-import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
+import { gasFeeLux, networkGasPrice, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
@@ -56,6 +56,7 @@ import { activityRows } from "../activity.js";
 import { whenAtText } from "./txRow.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
+import { forgetSendDraft, keepSendDraft } from "../../lib/sendDraft.js";
 import { networkTextOf } from "../../../shared/nodeNetwork.js";
 
 // A pasted EVM address, which a Dusk transfer can't pay.
@@ -82,11 +83,11 @@ export function draftDuskName(draft) {
   return name && typeof draft.to === "string" && name.to === draft.to ? name : undefined;
 }
 
-// What a request link or a QR code filled in says under the recipient, until it changes.
-const FILLED_TEXT = Object.freeze({
-  link: "Filled in from the link. Check it before you send.",
-  qr: "Filled in from the QR code. Check it before you send.",
-});
+// What a request link or a QR code filled in says under the recipient, until
+// it changes, with the network it pays on: a plain link says none.
+const FILLED_FROM = Object.freeze({ link: "the link", qr: "the QR code" });
+const filledText = (from, nodeUrl) =>
+  FILLED_FROM[from] ? `Filled in from ${FILLED_FROM[from]}, to pay on ${networkTextOf(String(nodeUrl ?? "")) || "this network"}. Check it before you send.` : "";
 
 /**
  * "You sent 0.02 DUSK to Alice with this memo at 08:53.": a payment made
@@ -149,12 +150,16 @@ export function sendFormView(ov, { state, actions } = {}) {
   // Amount helpers (MAX + slider)
   // ------------------------------------------------------------
   // Max and the balance check reserve the fee Review starts from: the
-  // draft's own gas, custom gas from Settings, or the transfer's default.
+  // draft's own gas, custom gas from Settings, or the transfer's default
+  // limit at the node's gas price, as Review asks it (till it answers, the
+  // wallet's own), so the two say the same fee.
+  let networkPrice = null;
   function feeLuxForRecipientType(type) {
     const privacy = type === "address" ? "shielded" : "public";
+    const defaultGas = getDefaultGas(TX_KIND.TRANSFER, { privacy });
     return gasFeeLux(
       startingGas({
-        defaultGas: getDefaultGas(TX_KIND.TRANSFER, { privacy }),
+        defaultGas: networkPrice && defaultGas ? { ...defaultGas, price: networkPrice } : defaultGas,
         minLimit: getMinimumGas(TX_KIND.TRANSFER, { privacy })?.limit,
         customGas: ov?.customGas,
         gas: draft?.gas,
@@ -331,8 +336,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
   const filledNote = h("p", { class: "field-hint send-filled-note", role: "status", hidden: true });
   const sayFilled = (from) => {
-    filledNote.textContent = FILLED_TEXT[from] ?? "";
-    filledNote.hidden = !FILLED_TEXT[from];
+    filledNote.textContent = filledText(from, ov?.nodeUrl);
+    filledNote.hidden = !filledNote.textContent;
   };
   sayRefused({ chainId: state.draft?.refusedChainId, problem: state.draft?.refusedProblem });
   sayFilled(state.draft?.filledFrom);
@@ -1103,11 +1108,21 @@ export function sendFormView(ov, { state, actions } = {}) {
   updateToType();
   // A link already paid says so as it opens.
   sayAgain();
+  // The node's gas price, as Review asks it: the fee and Max from it.
+  networkGasPrice(actions)
+    .then((price) => {
+      if (!price || price === networkPrice) return;
+      networkPrice = price;
+      updateAmountHelpers();
+    })
+    .catch(() => {});
 
   return [
     subnav({
       title: "Send",
       onBack: () => {
+        // Kept for Send's next opening: Back on a phone is pressed by the way.
+        keepSendDraft(state.draft, ov);
         state.route = "home";
         state.draft = null;
         actions?.render?.().catch(() => {});
@@ -1401,8 +1416,10 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       backRoute: "confirm",
       doneRoute: "home",
       onSent: () => {
-        // Done with, unless a newer draft took its place meanwhile.
+        // Done with, unless a newer draft took its place meanwhile, and nothing
+        // of it kept for the next Send.
         if (state.draft === d) state.draft = null;
+        forgetSendDraft();
         // Paid: the link the page opened with goes from its address.
         forgetPaidLink();
       },

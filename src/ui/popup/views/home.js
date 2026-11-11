@@ -8,6 +8,7 @@ import { networkForNode } from "../../../shared/nodeNetwork.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
+import { keptSendDraft } from "../../lib/sendDraft.js";
 
 // In the wallet's words: what a node says of it is that node's to choose.
 const BALANCE_UNREAD = "Couldn't read your balance from this node. Try again in a moment.";
@@ -187,7 +188,8 @@ export function homeView(ov, { state, actions } = {}) {
   const actionBar = h("div", { class: "action-bar" }, [
     actionBtn("Send", "send", () => {
       state.route = "send";
-      state.draft = null;
+      // What was typed before, left with Back: there again.
+      state.draft = keptSendDraft(ov);
       actions?.render?.().catch(() => {});
     }),
     actionBtn("Receive", "receive", () => {
@@ -223,7 +225,7 @@ export function homeView(ov, { state, actions } = {}) {
         text: "Send",
         onclick: () => {
           state.route = "send";
-          state.draft = null;
+          state.draft = keptSendDraft(ov);
           actions?.render?.().catch(() => {});
         },
       }),

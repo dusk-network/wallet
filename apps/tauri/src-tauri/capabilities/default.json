@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
-  "description": "Default permissions for the Dusk Wallet main window. Stronghold: exactly the commands src/shared/vault.js calls, unload (destroy) and a wallet's removal (remove-store-record) among them; the store and fs as src/platform/storage.js and the vault use them.",
+  "description": "Default permissions for the Dusk Wallet main window. Stronghold: exactly the commands src/shared/vault.js calls, unload (destroy) and a wallet's removal (remove-store-record) among them; the store and fs as src/platform/storage.js and the vault use them, a new password's snapshot (.next) and the one before it (.old) beside the vault's.",
   "windows": [
     "main"
   ],
@@ -24,6 +24,12 @@
       "allow": [
         {
           "path": "$APPDATA/dusk-wallet.hold"
+        },
+        {
+          "path": "$APPDATA/dusk-wallet.hold.next"
+        },
+        {
+          "path": "$APPDATA/dusk-wallet.hold.old"
         }
       ]
     },
@@ -32,6 +38,40 @@
       "allow": [
         {
           "path": "$APPDATA/dusk-wallet.hold"
+        },
+        {
+          "path": "$APPDATA/dusk-wallet.hold.next"
+        },
+        {
+          "path": "$APPDATA/dusk-wallet.hold.old"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-rename",
+      "allow": [
+        {
+          "path": "$APPDATA/dusk-wallet.hold"
+        },
+        {
+          "path": "$APPDATA/dusk-wallet.hold.next"
+        },
+        {
+          "path": "$APPDATA/dusk-wallet.hold.old"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-copy-file",
+      "allow": [
+        {
+          "path": "$APPDATA/dusk-wallet.hold"
+        },
+        {
+          "path": "$APPDATA/dusk-wallet.hold.next"
+        },
+        {
+          "path": "$APPDATA/dusk-wallet.hold.old"
         }
       ]
     }

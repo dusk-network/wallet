@@ -10,8 +10,9 @@ export function fakeTauri() {
   const files = new Map();
   const loaded = new Map();
   // Tests set these to fail a step: hooks.save(path), hooks.load(path),
-  // hooks.unload(path) (refused as the app's capabilities refuse a command).
-  const hooks = { save: null, load: null, unload: null };
+  // hooks.unload(path), hooks.rename(from, to) (refused as the app's
+  // capabilities refuse a command).
+  const hooks = { save: null, load: null, unload: null, rename: null };
 
   const live = (path) => {
     const state = loaded.get(path);
@@ -89,6 +90,19 @@ export function fakeTauri() {
       exists: async (file) => files.has(`${APP_DATA}/${file}`),
       remove: async (file) => {
         if (!files.delete(`${APP_DATA}/${file}`)) throw new Error("No such file or directory (os error 2)");
+      },
+      // In place of what's there, as a file system's rename is.
+      rename: async (from, to) => {
+        await hooks.rename?.(from, to);
+        const file = files.get(`${APP_DATA}/${from}`);
+        if (!file) throw new Error("No such file or directory (os error 2)");
+        files.set(`${APP_DATA}/${to}`, file);
+        files.delete(`${APP_DATA}/${from}`);
+      },
+      copyFile: async (from, to) => {
+        const file = files.get(`${APP_DATA}/${from}`);
+        if (!file) throw new Error("No such file or directory (os error 2)");
+        files.set(`${APP_DATA}/${to}`, structuredClone(file));
       },
     },
     path: {

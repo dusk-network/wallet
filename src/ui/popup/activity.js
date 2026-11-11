@@ -13,6 +13,7 @@
 
 import { activityRows as rowsOf, settleSends } from "@dusk-network/app-core/activity";
 import { StaleHistoryError } from "@dusk-network/app-core/history";
+import { rewardsByYear } from "@dusk-network/app-core/export";
 import { nativeRewards, sozuFacts, sozuGrowth } from "@dusk-network/app-core/sozu";
 
 import { activityHistory, archiveAt, historyArchiverUrl, noteActivityUnavailable } from "../../shared/activityHistory.js";
@@ -609,6 +610,24 @@ export function sozuGrowthOf(ov, status, tipHeight = null) {
   if (!status?.contracts?.pool) return Promise.resolve(null);
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
   return sozuGrowth({ archive, cache: sozuGrowthKept, pool: status.contracts.pool, status, tipHeight }).catch(() => null);
+}
+
+// stDUSK's worth at each new year, as Rewards by year reads it from the chain:
+// read once in this popup, and kept.
+const sozuYearsKept = new Map();
+
+/**
+ * Rewards by calendar year, in this device's time zone (app-core's
+ * rewardsByYear): native rewards claimed, and with Sozu what grew while held
+ * and what unstaking took out, from the profile's whole public history and
+ * Sozu's status as read now.
+ * @param {object} ov - the overview
+ * @param {{ rows: object[], facts?: Map<string, object>, complete: boolean, status?: object | null }} history
+ */
+export function rewardYearsOf(ov, { rows, facts, complete, status }) {
+  const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return rewardsByYear({ archive, cache: sozuYearsKept, complete, facts, rows, status: status ?? undefined, timeZone });
 }
 
 // What native staking paid lately, as app-core measures it from the chain: read
