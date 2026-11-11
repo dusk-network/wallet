@@ -80,6 +80,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Kept the profile's name whole beside the network while it says Offline or Can't reach the network.
 - Kept the staking rates measured last, with their days, while they can't be read again, rather than estimates at today's stake.
 - Searched Activity's whole history as a search is typed, without Show more, and found a contact named in look-alike letters by the name as typed.
+- Marked a contact whose name looks like another's on a transaction's details, as its row does, with its address once.
+- Showed a request's memo as codes under its field, saying what to check, while it has hidden characters or look-alike digits.
 - Asked for the unlock on a site's approval once the wallet locks, as when Firefox for Android's Keep open tab closes, rather than an Approve that does nothing.
 - Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
 - Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.

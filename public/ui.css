@@ -311,6 +311,14 @@ body[data-runtime="tauri"].page--full .panel {
   line-height: 1.35;
 }
 
+/* A request's memo as the payer will see it, under its field, while it has
+   what changes how it reads */
+.receive-memo-shown {
+  margin-top: 4px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 /* A node that isn't a network's own says which it is, in neutral words, its
    whole host showing: the end of a host is what names it. */
 .testnet-strip.testnet-strip--wrap {
@@ -4813,6 +4821,11 @@ p.tx-hero-note {
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.4;
+}
+
+/* A contact whose name looks like another's, as its row says it */
+p.tx-hero-note.tx-hero-alike {
+  color: var(--pending);
 }
 
 .kv-muted {

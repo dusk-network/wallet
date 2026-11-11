@@ -155,7 +155,7 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
       // One whose name looks like another's: its address beside it, and the mark.
       const alike = (addr && contactName?.alike?.(addr)) || "";
       return alike
-        ? { name: contact, alias: [alias, shortAddress(addr)].filter(Boolean).join(" · "), address: addr, isAddress: false, alike }
+        ? { name: contact, alias: [alias, shortAddress(addr)].filter(Boolean).join(" · "), duskAlias: alias, address: addr, isAddress: false, alike }
         : { name: contact, alias, address: addr || null, isAddress: false };
     }
     if (dusk) return { name: dusk, address: addr || null, isAddress: false };

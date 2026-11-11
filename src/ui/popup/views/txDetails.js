@@ -299,7 +299,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
   // account under it. A call's contract is under Technical details.
   const via = desc.via?.address ? desc.via : null;
   const other = via ? via.address : !desc.evm && desc.address && !desc.isAddress ? desc.address : "";
-  const otherAlias = via ? (via.isAddress ? "" : via.name) : desc.alias;
+  // A contact whose name looks like another's: its .dusk name alone before the address, which shows once.
+  const otherAlias = via ? (via.isAddress ? "" : via.name) : desc.alike ? desc.duskAlias : desc.alias;
   // The name's a node the wallet doesn't know's word.
   const nameNote = nameCheckNote(nodeUrl) ? h("p", { class: "tx-hero-note", role: "note", text: nameCheckNote(nodeUrl) }) : null;
   const hero = h("div", { class: "tx-hero" }, [
@@ -316,6 +317,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
           copyButton(other, { label: "Copy address", showToast }),
         ].filter(Boolean))
       : null,
+    // As its row says it.
+    desc.alike ? h("p", { class: "tx-hero-note tx-hero-alike", role: "note", text: desc.alike }) : null,
     tx?.counterpartyName || tx?.toName ? nameNote : null,
     amountEl(desc.amount, hidden, "tx-hero-amount", { exact: true }),
     h("div", { class: `tx-hero-status is-${desc.tone}` }, [

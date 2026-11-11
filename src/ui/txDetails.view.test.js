@@ -481,6 +481,24 @@ describe("transaction details", () => {
     expect(details(send).name).toBe("wallet-both.dusk");
   });
 
+  // Marek's: the row said "Looks like another contact"; its details said nothing of it, and gave the address twice.
+  it("says a contact's name looks like another's, as its row does, with its address once", () => {
+    const from = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+    const other = "26JfWKvhYdVY71bdSPVLNJ51Buy4GjimCT7zcsoxNQtydDbdoH2AwZaH8W7rjcAc9riAu39Vw9Lx1w7yrkBgotSjWmUdkSyQuaTKDZWVCKp9g1GxiEnnksv3W3onToB5NsNi";
+    const received = { kind: TX_KIND.TRANSFER, direction: "in", from, amount: "10000000", status: "executed" };
+    const contacts = [
+      { name: "Alice", address: other },
+      { name: "\u0410lice", address: from },
+    ];
+    const view = details(received, { contacts });
+    expect(view.name).toBe("\u0410lice");
+    expect(visibleText(view.body.querySelector(".tx-hero-addr"))).toBe(`${from.slice(0, 6)}…${from.slice(-6)}`);
+    const mark = view.body.querySelector(".tx-hero-alike");
+    expect([visibleText(mark), mark.getAttribute("role")]).toEqual(["Looks like another contact", "note"]);
+    // A name like no other's says nothing.
+    expect(details(received, { contacts: [{ name: "Alice", address: from }] }).body.querySelector(".tx-hero-alike")).toBeNull();
+  });
+
   it("shows the amount and the fee to the last lux, where a row shows them short, with every Dusk app's labels", () => {
     const send = { kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", feePaid: "1856398", gasSpent: "1856398", gasPrice: "1", gasLimit: "2500000" };
     const view = details(send);
