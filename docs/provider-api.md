@@ -594,8 +594,9 @@ const opened = await dusk.request({
 ```
 
 Throws `-32602` for a link that isn't a request link to the asking web
-wallet's own Send, and `4100` when the browser says the page had no press as
-it asked. A page that offers this itself can turn off the extension's own
+wallet's own Send, or one Send would refuse, as a recipient it can't pay or a
+field said twice, with Send's words for why, and `4100` when the browser says
+the page had no press as it asked. A page that offers this itself can turn off the extension's own
 offer card with `<meta name="dusk-wallet-request-handoff" content="1">` in
 its head.
 
