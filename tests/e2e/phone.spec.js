@@ -55,6 +55,49 @@ test("fills the phone's width, as Chen and Marek's popup didn't", async ({ page 
   expect(panel).toBe(width);
 });
 
+// The wallet's full view on a computer, its top bar a sidebar: the shell full.html has.
+async function fullViewOn(page, over = {}) {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.route("**/phone/full.html", (r) => r.fulfill({
+    contentType: "text/html",
+    body: '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><link rel="stylesheet" href="/ui.css"><body class="page--full"><div class="full-wrap"><div class="panel"><header class="panel-header"><div class="brand"><div class="brand-mark" aria-hidden="true"><img class="brand-mark__glyph" src="/icons/dusk-glyph.svg" alt=""></div><div class="brand-text"><div class="panel-title">Dusk Wallet</div></div><button class="panel-subtitle network-pill" id="network-pill" type="button"><span class="network-pill__label"></span><span class="network-pill__chev" aria-hidden="true">▾</span></button></div><nav class="full-nav" aria-label="Wallet"><button class="full-nav-item" type="button" data-route="home">Dashboard</button><button class="full-nav-item" type="button" data-route="activity">Activity</button></nav><div class="header-actions" id="header-actions"></div></header><main class="panel-content"><div id="app"></div></main></div></div></body>',
+  }));
+  await page.route("**/src/wallet/localBus.js*", (r) => r.fulfill({
+    contentType: "text/javascript",
+    body: "export const localSend = message => window.testSend(message);",
+  }));
+  await page.route(/nodes\.dusk\.network/, (r) => r.abort());
+  await page.goto("/phone/full.html");
+  await page.evaluate(async ({ over, ACCOUNT }) => {
+    window.testSend = async (message) => {
+      if (message.type === "DUSK_UI_OVERVIEW") {
+        return {
+          hasVault: true, isUnlocked: true, networkName: "Testnet", nodeUrl: "https://testnet.nodes.dusk.network",
+          accounts: [ACCOUNT], addresses: [], selectedAccountIndex: 0, accountCount: 1, txs: [],
+          balance: { value: "740900000" }, shieldedBalance: { value: "0", spendable: "0" },
+          ...over,
+        };
+      }
+      return { ok: true, result: null };
+    };
+    const { state } = await import("/src/ui/popup/state.js");
+    Object.assign(state, { route: "home", addressBook: { ...state.addressBook, loaded: true, items: [] } });
+    const { render } = await import("/src/ui/popup/app.js");
+    await render();
+  }, { over, ACCOUNT });
+}
+
+// Astra's: in the full view's sidebar, the line under the network's pill sat over the pill.
+test("puts Can't reach the network under the pill in the full view's sidebar, over nothing", async ({ page }) => {
+  await fullViewOn(page, { networkStatus: { nodeStatus: "offline", nodeUrl: "https://testnet.nodes.dusk.network" } });
+  const words = page.locator(".network-word");
+  await expect(words).toHaveText("Can't reach the network");
+  const [pill, said, nav] = [await page.locator("#network-pill").boundingBox(), await words.boundingBox(), await page.locator(".full-nav").boundingBox()];
+  // Under the pill, clear of it, and above the menu.
+  expect(said.y).toBeGreaterThanOrEqual(pill.y + pill.height);
+  expect(said.y + said.height).toBeLessThanOrEqual(nav.y);
+});
+
 // Amélie's: the word beside the network squeezed her profile's name to "P".
 test("keeps the profile's name whole while the network can't be reached, the words on a line of their own", async ({ page }) => {
   await page.setViewportSize({ width: 380, height: 600 });

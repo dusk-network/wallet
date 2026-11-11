@@ -1621,9 +1621,11 @@ body.page--popup .site-bar-action {
     margin-top: 10px;
   }
 
-  /* In the sidebar, the words sit right under the network's pill. */
+  /* In the sidebar, the words sit right under the network's pill, with the
+     sidebar's own gap between its parts (not the top bar's line gap). */
   body.page--full .panel-header:has(> .network-word) {
     flex-wrap: nowrap;
+    row-gap: 28px;
   }
 
   body.page--full .panel-header:has(> .network-word) > .header-actions {

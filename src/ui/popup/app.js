@@ -875,17 +875,23 @@ let askingNode = false;
 async function askNode() {
   const ov = state.overview;
   if (askingNode || !ov?.isUnlocked || !ov?.nodeUrl || document.visibilityState === "hidden" || globalThis.navigator?.onLine === false) return;
+  // One ask at a time, over once the node answers or the ask gives up: never held by a read.
   askingNode = true;
+  let answer = null;
   try {
-    const answer = (await send({ type: "DUSK_UI_CHECK_NODE" }).catch(() => null))?.networkStatus;
-    const now = state.overview;
-    // About the node shown still, and saying otherwise than it shows.
-    if (!answer?.nodeStatus || !now || answer.nodeUrl !== now.nodeUrl || answer.nodeStatus === now.networkStatus?.nodeStatus) return;
-    now.networkStatus = { ...now.networkStatus, ...answer };
-    await renderForConnection({ forceRefresh: answer.nodeStatus === "online" });
+    answer = (await send({ type: "DUSK_UI_CHECK_NODE" }).catch(() => null))?.networkStatus;
   } finally {
     askingNode = false;
   }
+  const now = state.overview;
+  // About the node shown still, and saying otherwise than it shows.
+  if (!answer?.nodeStatus || !now || answer.nodeUrl !== now.nodeUrl || answer.nodeStatus === now.networkStatus?.nodeStatus) return;
+  now.networkStatus = { ...now.networkStatus, ...answer };
+  // Drawn again from what's read already, as a read under way may never end (a Refresh pressed while the node holds it).
+  if (REVIEW_ROUTES.has(state.route)) renderHeader(now);
+  else await render({ cached: true });
+  // Back: the balance read again, without waiting for it here.
+  if (answer.nodeStatus === "online") renderForConnection({ forceRefresh: true }).catch(() => {});
 }
 
 function scheduleNodeAsk(ov) {
@@ -1245,8 +1251,9 @@ function keepContactsToTheirWallet(ov) {
 }
 
 // --- Main render ----------------------------------------------------------
-export async function render({ forceRefresh = false } = {}) {
-  const overviewRefreshed = await refreshOverview(send, { force: forceRefresh });
+export async function render({ forceRefresh = false, cached = false } = {}) {
+  // `cached`: drawn from the overview read already, asking for none.
+  const overviewRefreshed = cached ? false : await refreshOverview(send, { force: forceRefresh });
   // Deposits to DuskEVM seen there before, for Activity's rows: the wallet's own.
   await loadArrivals(state.overview?.isUnlocked ? state.overview?.accounts?.[0] : "");
   if (overviewRefreshed && state.staking) {

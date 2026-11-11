@@ -202,3 +202,66 @@ describe("a node that stops answering", () => {
     }
   });
 });
+
+describe("a node that stops answering while a Refresh waits on it", () => {
+  it("says so from what was read already, without the read that hangs, and keeps asking", async () => {
+    // Astra's: Refresh pressed as the node went silent left the heartbeat waiting on another read, the warning unsaid
+    // and no more asks.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const dom = installFakeDom({ pathname: "/popup.html" });
+    dom.document.body.innerHTML = "";
+    const pill = dom.document.createElement("button");
+    pill.id = "network-pill";
+    pill.className = "network-pill";
+    const label = dom.document.createElement("span");
+    label.className = "network-pill__label";
+    pill.appendChild(label);
+    const actions = dom.document.createElement("div");
+    actions.id = "header-actions";
+    const app = dom.document.createElement("div");
+    app.id = "app";
+    dom.document.body.append(pill, actions, app);
+
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-US", onLine: true });
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    const NODE = "https://testnet.nodes.dusk.network";
+    let silent = false;
+    const overview = { hasVault: true, isUnlocked: true, networkName: "Testnet", nodeUrl: NODE, accounts: [ACCOUNT], selectedAccountIndex: 0, txs: [], shieldedSync: { state: "done", notes: 1 } };
+    send.mockReset();
+    send.mockImplementation(async (message) => {
+      if (message.type === "DUSK_UI_OVERVIEW") {
+        if (silent) return new Promise(() => {});
+        return { ...overview, balance: { value: "1047700000" }, shieldedBalance: { value: "0", spendable: "0" }, networkStatus: { nodeStatus: "online", nodeUrl: NODE } };
+      }
+      if (message.type === "DUSK_UI_CHECK_NODE") return { ok: true, networkStatus: { nodeStatus: silent ? "offline" : "online", nodeUrl: NODE } };
+      return {};
+    });
+    const asks = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_CHECK_NODE").length;
+    const words = () => {
+      const el = dom.document.querySelector(".network-word");
+      return el && !el.hidden ? el.textContent : "";
+    };
+    try {
+      const { render } = await import("./app.js");
+      await render();
+      await vi.waitFor(() => expect(asks()).toBe(1));
+      await settle();
+
+      // The node goes silent as Refresh is pressed: that read never ends.
+      silent = true;
+      app.querySelector("button.balance-refresh").click();
+      await settle();
+      vi.advanceTimersByTime(15_000);
+      await vi.waitFor(() => expect(words()).toBe("Can't reach the network"));
+      expect(app.textContent).toContain("Your balance may be out of date.");
+      expect(app.querySelector(".balance-amount").textContent).toBe("1.0477 DUSK");
+
+      // Asked again a little on, the read still waiting.
+      vi.advanceTimersByTime(15_000);
+      await vi.waitFor(() => expect(asks()).toBe(3));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
