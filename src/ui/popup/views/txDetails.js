@@ -4,7 +4,7 @@ import { formatDuskExact, formatFee, groupThousands } from "../../../shared/amou
 import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { arrivalUrl, awaitingArrival, depositLux } from "../../../shared/bridgeArrival.js";
-import { chainIdForNode, networkTextOf, nameCheckNote } from "../../../shared/nodeNetwork.js";
+import { chainIdForNode, networkOf, networkTextOf, nameCheckNote } from "../../../shared/nodeNetwork.js";
 import { getTxMeta } from "../../../shared/txStore.js";
 import { activityOwnersOf } from "../../../shared/activityStore.js";
 import { activityNetworkKey } from "../../../shared/activityHistory.js";
@@ -181,8 +181,11 @@ function whereOf(hash, { state, actions }) {
       if (state.txDetailWhere !== read) return;
       if (meta?.nodeUrl) {
         const nodeUrl = String(meta.nodeUrl);
-        const chainId = Number.isInteger(meta.chainId) ? meta.chainId : chainIdForNode(nodeUrl) ?? undefined;
-        read.where = { network: activityNetworkKey(nodeUrl), nodeUrl, chainId, walletId: String(meta.walletId ?? ""), profileIndex: meta.profileIndex };
+        // The chain it was sent on, as its record keeps it: what it stays,
+        // whatever the node signs for now.
+        const recordedChain = Number.isInteger(meta.chainId) ? meta.chainId : null;
+        const chainId = recordedChain ?? chainIdForNode(nodeUrl) ?? undefined;
+        read.where = { network: activityNetworkKey(nodeUrl), nodeUrl, chainId, recordedChain, walletId: String(meta.walletId ?? ""), profileIndex: meta.profileIndex };
       } else if (owners.length) {
         // `network::account`: the account has no "::", a node's origin may.
         const owner = owners[0];
@@ -197,14 +200,28 @@ function whereOf(hash, { state, actions }) {
   return null;
 }
 
-// Whether it's on the network the wallet is on, by the same key.
-const onThisNetwork = (where, ov) => where.network === activityNetworkKey(String(ov?.nodeUrl ?? ""));
+// Whether it's on the network the wallet is on: by the same key, and by the
+// chain its record says, where it says one.
+function onThisNetwork(where, ov) {
+  const nodeUrl = String(ov?.nodeUrl ?? "");
+  if (where.network !== activityNetworkKey(nodeUrl)) return false;
+  const now = Number.isInteger(ov?.chainId) ? ov.chainId : chainIdForNode(nodeUrl);
+  return where.recordedChain == null || now == null || where.recordedChain === now;
+}
+
+// What its network is called: the recorded chain's name, where its node signs
+// for another now, else the node's.
+function networkNameOf(where) {
+  const chain = where.recordedChain;
+  if (chain != null && chain !== chainIdForNode(where.nodeUrl)) return networkOf(chain)?.label ?? `chain ${chain}`;
+  return where.nodeUrl ? networkTextOf(where.nodeUrl) : "";
+}
 
 // What's said of where it is: another network, wallet or profile.
 function elsewhereText(where, ov) {
   if (!where) return "";
   if (!onThisNetwork(where, ov)) {
-    const [there, here] = [where.nodeUrl ? networkTextOf(where.nodeUrl) : "", networkTextOf(String(ov?.nodeUrl ?? ""))];
+    const [there, here] = [networkNameOf(where), networkTextOf(String(ov?.nodeUrl ?? ""))];
     return there && here ? `This transaction is on ${there}. You are on ${here}.` : "This transaction is on another network.";
   }
   const own = (Array.isArray(ov?.accounts) ? ov.accounts : []).map(String);
@@ -257,8 +274,9 @@ export function txDetailsView(ov, { state, actions } = {}) {
     // Where it is, and its explorer is its network's.
     const at = whereOf(hash.toLowerCase(), { state, actions });
     const where = elsewhereText(at, ov);
-    // Another network's explorer, where it has one.
-    const url = at && !onThisNetwork(at, ov) ? explorerTxUrl(at.nodeUrl, hash, at.chainId) : explorerUrl;
+    // Its own network's explorer: the recorded chain's, else another
+    // network's, where it has one.
+    const url = at && (at.recordedChain != null || !onThisNetwork(at, ov)) ? explorerTxUrl(at.nodeUrl, hash, at.chainId) : explorerUrl;
     return [
       nav,
       h("div", { class: "tx-detail" }, [

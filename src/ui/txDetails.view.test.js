@@ -569,6 +569,39 @@ describe("transaction details", () => {
     expect(await shown({ nodeUrl: NODE, accounts: [A] })).toEqual(["This transaction is in Savings.", onTestnet]);
   });
 
+  // Astra's: a node of one's own pinned to Testnet, then to Mainnet: an older send of
+  // another wallet's opened on it went to Mainnet's explorer.
+  it("keeps the chain a send's record says for a node that signs for another now", async () => {
+    const CUSTOM = "https://my-node.example:8443";
+    const A = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(String(k)) ?? null, setItem: (k, v) => kept.set(String(k), String(v)), removeItem: (k) => kept.delete(String(k)) });
+    const { noteChainId } = await import("../shared/nodeNetwork.js");
+    const { putTxMeta } = await import("../shared/txStore.js");
+    const { explorerTxUrl } = await import("../shared/explorer.js");
+    const txHash = "7a".repeat(32);
+    // Sent from another wallet while the node signed for Testnet; it signs for Mainnet now.
+    await putTxMeta(txHash, { walletId: "another wallet", nodeUrl: CUSTOM, chainId: networks.testnet.chainId, profileIndex: 0, kind: TX_KIND.TRANSFER, status: "executed" });
+    noteChainId(CUSTOM, networks.mainnet.chainId);
+    try {
+      dom.window.open = vi.fn(() => ({}));
+      const state = { route: "tx", txDetailHash: txHash, txDetailFrom: "home" };
+      const actions = { render: vi.fn(async () => {}) };
+      const ov = { txs: [], nodeUrl: CUSTOM, chainId: networks.mainnet.chainId, accounts: [A], selectedAccountIndex: 0 };
+      dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
+      await vi.waitFor(() => expect(actions.render).toHaveBeenCalled());
+      dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions }));
+      dom.document.body.querySelector(".tx-explorer-btn").click();
+      await settle();
+      expect([visibleText(dom.document.body.querySelector(".tx-missing")), dom.window.open.mock.lastCall?.[0]]).toEqual([
+        "This transaction is on Testnet. You are on Custom · my-node.example:8443.",
+        explorerTxUrl(NODE, txHash),
+      ]);
+    } finally {
+      noteChainId(CUSTOM, null);
+    }
+  });
+
   // Astra's: Devnet's and other nodes' histories are kept by the node's origin, not by name.
   it.each([
     ["Devnet", "https://devnet.nodes.dusk.network", "This transaction is on Devnet. You are on Mainnet."],
