@@ -86,6 +86,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Refused a link that says a field twice in two letter cases, as To= beside to=, a dusk:shielded- link to a public account or a dusk:public- link to a shielded address, saying which, and a dusk: link with a #.
 - Refused a profile's name that is, or looks like, another profile's own name as well as its .dusk name.
 - Asked whether a contact is someone else when its name and a profile's start the same, as "Lucas (petit-fils)" beside a profile called Lucas, and the same of a profile's name beside a contact's.
+- Said Rewards by year in the web wallet's words, Sozu's by stDUSK's own rates with no rounding remainder, and added each reward's value in your currency when asked, from CoinGecko's prices.
 - Asked for the unlock on a site's approval once the wallet locks, as when Firefox for Android's Keep open tab closes, rather than an Approve that does nothing.
 - Said in the wallet's approval on a phone that a send approved as the signal dropped wasn't sent.
 - Said a send is being looked up again as the wallet comes back, rather than the wait for a block that came.

@@ -683,14 +683,14 @@ const sozuYearsKept = new Map();
  * Rewards by calendar year, in this device's time zone (app-core's
  * rewardsByYear): native rewards claimed, and with Sozu what grew while held
  * and what unstaking took out, from the profile's whole public history and
- * Sozu's status as read now.
+ * Sozu's status as read now; with `price`, what each was worth at its time.
  * @param {object} ov - the overview
- * @param {{ rows: object[], facts?: Map<string, object>, complete: boolean, status?: object | null }} history
+ * @param {{ rows: object[], facts?: Map<string, object>, complete: boolean, status?: object | null, price?: Function }} history
  */
-export function rewardYearsOf(ov, { rows, facts, complete, status }) {
+export function rewardYearsOf(ov, { rows, facts, complete, status, price }) {
   const archive = archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl }));
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return rewardsByYear({ archive, cache: sozuYearsKept, complete, facts, rows, status: status ?? undefined, timeZone });
+  return rewardsByYear({ archive, cache: sozuYearsKept, complete, facts, price, rows, status: status ?? undefined, timeZone });
 }
 
 // What native staking paid lately, as app-core measures it from the chain: read

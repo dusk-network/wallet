@@ -16,7 +16,7 @@ Users may configure their own endpoints. Network operators may be able to observ
 
 Looking up a .dusk name sends the name to your configured node. Showing your profiles' .dusk names sends their public accounts to it, as does showing the name of a public account a site asks you to send to.
 
-Activity's Export, only when you ask for each payment's value in euros, asks CoinGecko for DUSK's price over the period it holds. It sends no account or address.
+Activity's Export and Staking's Rewards by year, only when you ask for each payment's or reward's value in your currency, ask CoinGecko for DUSK's price over the period they hold. They send no account or address.
 
 Activity asks your configured archiver for each profile's public transaction history, which sends it the profile's public account, and asks your node for the .dusk names of the accounts in that history, several at a time through the Multicall for Dusk contract. Once for each profile that has shielded notes, it asks the archiver for the blocks those notes are in, each mixed with four other blocks that hold shielded notes, which makes the profile's blocks harder, though not impossible, to pick out.
 

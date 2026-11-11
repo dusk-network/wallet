@@ -4638,15 +4638,22 @@ input.activity-search {
   padding: 14px;
 }
 
-.activity-export-check {
+.activity-export-check,
+.stake-years-value {
   color: var(--text);
   font-size: 13.5px;
   line-height: 1.4;
 }
 
-.activity-export-check input[type="checkbox"] {
+.activity-export-check input[type="checkbox"],
+.stake-years-value input[type="checkbox"] {
   flex: 0 0 auto;
   accent-color: var(--pill);
+}
+
+/* Rewards by year's values, asked for under the years */
+.stake-years-value {
+  margin: 8px 4px 0;
 }
 
 .activity-export-dates {
@@ -4844,6 +4851,7 @@ p.tx-hero-note.tx-hero-alike {
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
+  text-align: right;
 }
 
 /* The transaction ID opens the explorer */

@@ -1053,12 +1053,37 @@ describe("a stake with Sozu in figures", () => {
     const state = { route: "stake", staking: staking(owner()), sozu: sozu(held), activity: activityOf(overview, history) };
     popup(state, overview);
     const years = () => body.querySelectorAll(".stake-years .kv").map(visibleText);
-    await vi.waitFor(() => expect(years()).toEqual(["20263 DUSK claimed", "202512.5 DUSK claimed"]));
+    await vi.waitFor(() => expect(years()).toEqual(["2026Native staking, claimed: 3 DUSK", "2025Native staking, claimed: 12.5 DUSK"]));
     expect(body.querySelectorAll(".section-head").map((head) => screenReaderText(head))).toContain("Rewards by year");
 
     // Hidden with the other balances.
     popup(state, ov({ hideBalances: true }));
-    expect(years()).toEqual(["2026•••• DUSK claimed", "2025•••• DUSK claimed"]);
+    expect(years()).toEqual(["2026Native staking, claimed: •••• DUSK", "2025Native staking, claimed: •••• DUSK"]);
+  });
+
+  // Lena's and Nandini's: no value in money for a tax return made in it, and other words than the web wallet's.
+  it("adds what each year's rewards were worth at their times in the region's currency, when asked, from CoinGecko's prices", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-US" });
+    const MARCH = Date.UTC(2026, 2, 1, 12);
+    const coingecko = vi.fn(async () => new Response(JSON.stringify({ prices: [[MARCH, 0.07]] }), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", coingecko);
+    const overview = ov();
+    const claim = entryOf({ hash: "c".repeat(64), kind: "withdraw_reward", counterparty: networks.testnet.contracts.stake, direction: "in", payer: true, value: dusk(3), fee: "5000000", blockHeight: HEIGHT + 1, timestamp: MARCH });
+    const state = { route: "stake", staking: staking(owner()), sozu: sozu(held), activity: activityOf(overview, [claim]) };
+    popup(state, overview);
+    const years = () => body.querySelectorAll(".stake-years .kv").map(visibleText);
+    const box = () => body.querySelector("#stake-years-value");
+    await vi.waitFor(() => expect(years()).toEqual(["2026Native staking, claimed: 3 DUSK"]));
+    // Asked for nothing yet: nothing asked of CoinGecko.
+    expect(accessibleName(box())).toBe("Add each reward's value in US dollars, from CoinGecko's prices");
+    expect(coingecko).not.toHaveBeenCalled();
+    box().checked = true;
+    box().dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(years()).toEqual(["2026Native staking, claimed: 3 DUSK · $0.21"]));
+    expect(String(coingecko.mock.calls[0][0])).toContain("vs_currency=usd");
+    // Hidden with the other balances.
+    popup(state, ov({ hideBalances: true }));
+    expect(years()).toEqual(["2026Native staking, claimed: •••• DUSK · ••••"]);
   });
 
   // Lena's: 2026 said 0.0062 DUSK with Sozu, and Sozu "Rewards so far 0.0295".
@@ -1099,7 +1124,7 @@ describe("a stake with Sozu in figures", () => {
       const history = [move(staked, "sozu_stake", "100000000000", 4_800_001, Date.UTC(2026, 2, 1, 12)), move(unstaked, "sozu_unstake", "30300000000", 4_800_002, Date.UTC(2026, 5, 1, 12))];
       popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
       // Held from March at 2 to June at 2.02 (49.875 stDUSK), then on to now at 2.04 (34.875): 0.9975 and 0.6975.
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "1.695 DUSK grown with Sozu while held", "0.3 DUSK taken out of Sozu by unstaking"]]));
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.695 DUSK", "Sozu, taken out by unstaking: 0.3 DUSK"]]));
     });
 
     // Astra's: rewards accrued, the holding worth more for the same stDUSK, and the year's growth stayed as it was.
@@ -1110,12 +1135,12 @@ describe("a stake with Sozu in figures", () => {
       // 49.875 stDUSK that cost 99.75 DUSK, worth 101.745 now.
       const state = { route: "stake", staking: staking(owner()), sozu: holding(49_875_000_000n, 101_745_000_000n), activity: activityOf(overview, [move(staked, "sozu_stake", "100000000000", 4_800_004, Date.UTC(2026, 2, 1, 12))]) };
       const app = popup(state, overview);
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "1.995 DUSK grown with Sozu while held"]]));
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.995 DUSK"]]));
       // Read again, worth 103.74: what grew is 3.99.
       const position = { poolBalanceLux: "103740000000", stDuskBalanceLux: "49875000000" };
       Object.assign(state.sozu, { position, status: { ...state.sozu.status, position } });
       app.draw();
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "3.99 DUSK grown with Sozu while held"]]));
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 3.99 DUSK"]]));
     });
 
     it("says what grew couldn't be read where a new year's rate isn't on the archive yet", async () => {
@@ -1129,8 +1154,8 @@ describe("a stake with Sozu in figures", () => {
       // Held across the new year, whose rate the archive doesn't have: neither year's growth is known.
       await vi.waitFor(() =>
         expect(years()).toEqual([
-          ["2026", "Grown with Sozu while held: couldn't be read"],
-          ["2025", "Grown with Sozu while held: couldn't be read"],
+          ["2026", "Sozu, grown while held: couldn't be read"],
+          ["2025", "Sozu, grown while held: couldn't be read"],
         ])
       );
     });

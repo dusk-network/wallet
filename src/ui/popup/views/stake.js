@@ -34,6 +34,9 @@ import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { sozuHolding, sozuLiquidStakingView, stakingHistory } from "./sozu.js";
 import { keptRatesOf, nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
+import { currencyName } from "../activityExport.js";
+import { duskPrices } from "../duskPrice.js";
+import { defaultCurrency } from "@dusk-network/app-core/amounts";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -410,21 +413,39 @@ function nodeRow(actions) {
   ]);
 }
 
+// What a year's rewards of one kind were worth, as the web wallet says it: in
+// the currency, at least its smallest coin, else "under" it, and how many of
+// them have no price.
+function worthText({ worth, unpriced }, currency) {
+  if (worth === null || worth === undefined) return "";
+  const one = currencyName(currency, 1);
+  if (unpriced && !Number(worth)) return `no ${one} value`;
+  const money = new Intl.NumberFormat(amountLocale(), { currency, style: "currency" });
+  const least = 10 ** -(money.resolvedOptions().maximumFractionDigits ?? 2);
+  const amount = Number(worth);
+  return `${amount > 0 && amount < least ? `under ${money.format(least)}` : money.format(amount)}${unpriced ? `, ${unpriced} with no ${one} value` : ""}`;
+}
+
 // Rewards by calendar year, in this device's time zone, as a tax return asks
 // for them: native rewards claimed, and with Sozu what grew while held and
 // what unstaking took out that year (rewardYearsOf), from the profile's whole
-// public history and Sozu's `status`. Their value in money is in Activity's export.
+// public history and Sozu's `status`, in the web wallet's words. What each
+// was worth in the region's currency, at its time, only when asked, as
+// Activity's export asks: CoinGecko's prices.
 function rewardYears(ov, { state, actions, hidden, status }) {
   const history = stakingHistory(ov, { state, actions });
   if (history.reading || !history.rows.length) return null;
+  const currency = defaultCurrency();
+  const valued = Boolean(state.rewardYearsValued);
   // Read again for a new status, what was said kept meanwhile: what's held
-  // and what it's worth now, which grows as Sozu's rewards come.
+  // and what it's worth now, which grows as Sozu's rewards come; and with
+  // their value once it's asked for.
   const base = `${history.key}|${history.rows.length}|${history.facts?.size ?? 0}`;
   const held = status?.position ?? {};
-  const key = `${base}|${status ? `${held.stDusk ?? held.stDuskBalanceLux ?? ""}/${held.balance ?? held.poolBalanceLux ?? ""}` : "-"}`;
+  const key = `${base}|${status ? `${held.stDusk ?? held.stDuskBalanceLux ?? ""}/${held.balance ?? held.poolBalanceLux ?? ""}` : "-"}|${valued ? currency : ""}`;
   if (state.rewardYears?.key !== key) {
     const kept = (state.rewardYears = { base, key, years: state.rewardYears?.base === base ? state.rewardYears.years : [] });
-    rewardYearsOf(ov, { rows: history.rows, facts: history.facts, complete: Boolean(history.whole), status })
+    rewardYearsOf(ov, { rows: history.rows, facts: history.facts, complete: Boolean(history.whole), status, price: valued ? duskPrices({ currency }) : undefined })
       .then((years) => {
         if (state.rewardYears !== kept) return;
         kept.years = years;
@@ -435,20 +456,35 @@ function rewardYears(ov, { state, actions, hidden, status }) {
   // Sozu's part as it is, or null where it couldn't be read, which is said.
   const years = state.rewardYears.years.filter((year) => year.claimed.lux > 0n || year.sozu?.lux > 0n || year.sozuGrown?.lux > 0n || year.sozu === null || year.sozuGrown === null);
   if (!years.length) return null;
+  const line = (label, sum) => {
+    if (sum === null) return [`${label}: couldn't be read`];
+    if (!(sum?.lux > 0n)) return null;
+    const worth = valued ? worthText(sum, currency) : "";
+    return [`${label}: `, ...amountParts(hidden, sum.lux), worth ? h("span", { class: "kv-muted" }, [" · ", balance(hidden, worth)]) : null].filter(Boolean);
+  };
+  const value = h("label", { class: "checkline stake-years-value", for: "stake-years-value" }, [
+    h("input", {
+      type: "checkbox",
+      id: "stake-years-value",
+      checked: valued,
+      onchange: (e) => {
+        state.rewardYearsValued = Boolean(e?.target?.checked);
+        actions?.render?.()?.catch?.(() => {});
+      },
+    }),
+    h("span", { text: `Add each reward's value in ${currencyName(currency)}, from CoinGecko's prices` }),
+  ]);
   return [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
     h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown }) =>
       kvRow(
         String(year),
-        [
-          claimed.lux > 0n ? [...amountParts(hidden, claimed.lux), " claimed"] : null,
-          sozuGrown === null ? ["Grown with Sozu while held: couldn't be read"] : sozuGrown?.lux > 0n ? [...amountParts(hidden, sozuGrown.lux), " grown with Sozu while held"] : null,
-          sozu === null ? ["Taken out of Sozu by unstaking: couldn't be read"] : sozu?.lux > 0n ? [...amountParts(hidden, sozu.lux), " taken out of Sozu by unstaking"] : null,
-        ]
+        [line("Native staking, claimed", claimed), line("Sozu, grown while held", sozuGrown), line("Sozu, taken out by unstaking", sozu)]
           .filter(Boolean)
           .map((parts) => h("span", { class: "stake-year-part" }, parts))
       )
     )),
+    value,
   ];
 }
 
