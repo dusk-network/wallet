@@ -603,15 +603,39 @@ describe("Activity's Export", () => {
     expect(await firstBytes(1)).toEqual([0xef, 0xbb, 0xbf]);
   });
 
-  // Nandini's: the payout's details said what its migration paid on BNB Smart Chain, to the wei, and the
-  // file left it out without a word.
-  it("books what a migration whose payout it has paid on its own chain, to the wei of the payout's details, and says when that chain can't be read", async () => {
-    page("/full.html");
+  // DUSK this profile sent to BNB Smart Chain, to an EVM address there: the address it knows as the person's.
+  const bridgedTo = (to, timestamp) => {
+    const out = routes(networks.mainnet).find((r) => r.id === "dusk-to-bsc");
+    return { hash: "b0".repeat(32), direction: "out", counterparty: out.account, value: "2000000000", fee: "1850000", memo: to, timestamp, blockHeight: 5_600_000 };
+  };
+
+  // Nandini's: the payout's details said what its migration paid on BNB Smart Chain, to the wei, and the file left
+  // it out without a word. Sofía's and Lena's: a migration someone else sent to the profile, from an EVM address that
+  // isn't theirs, was booked as their cost.
+  it("books what a migration paid on its own chain, to the wei of the payout's details, where it came from an address this profile bridged to, and no one else's", async () => {
     const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
     const { approval, migration, owner, payout } = recordedMigration;
-    const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: payout.at, blockHeight: 5_684_134 }];
+    const paidOut = { hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: payout.at, blockHeight: 5_684_134 };
     const MAINNET = "https://nodes.dusk.network";
-    const { actions, ov } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+    const onMainnet = (entries) => setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+    const paidThere = (lines) => lines.filter((l) => l["Sent Currency"] === "BNB").map((l) => [l.TxHash, l["Sent Amount"], l.Tag, l["Account Name"], l.Account]);
+
+    // Migrated to the profile from an address it never bridged to: the payout alone, and that chain isn't asked.
+    page("/full.html");
+    const chain = vi.fn(recordedEvm(route.chain.rpcUrl).fetch);
+    vi.stubGlobal("fetch", chain);
+    const stranger = onMainnet([paidOut]);
+    button("Export").click();
+    button("Save CSV").click();
+    await vi.waitFor(() => expect(stranger.actions.showToast).toHaveBeenCalled());
+    expect(paidThere(await linesOf())).toEqual([]);
+    expect((await linesOf()).find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
+    expect(chain).not.toHaveBeenCalled();
+    expect(stranger.actions.showToast.mock.calls.at(-1)[0]).not.toContain("couldn't be read");
+
+    // From the address the profile bridged DUSK to before: booked.
+    page("/full.html");
+    const { actions, ov } = onMainnet([bridgedTo(owner, payout.at - 86_400_000), paidOut]);
     const exportAll = async () => {
       button("Export").click();
       button("Save CSV").click();
@@ -620,7 +644,6 @@ describe("Activity's Export", () => {
       actions.showToast.mockClear();
       return { lines: await linesOf(saved.length - 1), toast };
     };
-    const paidThere = (lines) => lines.filter((l) => l["Sent Currency"] === "BNB").map((l) => [l.TxHash, l["Sent Amount"], l.Tag, l["Account Name"], l.Account]);
 
     // BNB Smart Chain's RPC can't be read: the payout alone, and the toast says what's missing.
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
@@ -657,6 +680,15 @@ describe("Activity's Export", () => {
     await vi.waitFor(() => expect(detailFee()).toBeDefined());
     expect(detailFee()).toBe("Fee on BNB Smart Chain0.00000474855 BNB · approval and migration");
     expect(booked).toBe(wei("0.00000474855"));
+
+    // An address the profile sent DUSK to on DuskEVM is the person's too.
+    page("/full.html");
+    const deposit = { hash: "d5".repeat(32), kind: TX_KIND.CONTRACT_CALL, contractId: duskEvmContracts(2).bridge, fnName: "depositETHToWithValue", amount: "0", deposit: "500000000", bridgeTo: owner, status: "executed", submittedAt: payout.at - 86_400_000, profileIndex: 0 };
+    const viaDuskEvm = setup({ entries: [paidOut], ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [deposit] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+    button("Export").click();
+    button("Save CSV").click();
+    await vi.waitFor(() => expect(viaDuskEvm.actions.showToast).toHaveBeenCalled());
+    expect(paidThere(await linesOf()).map(([hash]) => hash)).toEqual([approval, migration]);
   });
 
   it("puts a migration's fees in the period of their own day, though its payout came the day after", async () => {
@@ -666,7 +698,8 @@ describe("Activity's Export", () => {
     const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
     const { approval, migration, owner, payout } = recordedMigration;
     const nextDay = Date.UTC(2026, 10, 6, 0, 30);
-    const entries = [{ hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: nextDay, blockHeight: 5_684_134 }];
+    // Bridged to before the period, the address is the person's in it too.
+    const entries = [bridgedTo(owner, Date.UTC(2026, 9, 20)), { hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: nextDay, blockHeight: 5_684_134 }];
     const MAINNET = "https://nodes.dusk.network";
     const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
     vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
