@@ -4791,6 +4791,16 @@ p.tx-hero-note {
   align-items: flex-start;
 }
 
+/* A year's rewards: each kind on its own line. */
+.stake-years .kv {
+  align-items: flex-start;
+}
+.stake-years .kv-value {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
 /* The transaction ID opens the explorer */
 button.text-btn.tx-id {
   padding: 4px 2px;

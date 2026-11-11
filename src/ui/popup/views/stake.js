@@ -33,8 +33,7 @@ import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/Ne
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { sozuHolding, sozuLiquidStakingView, stakingHistory } from "./sozu.js";
-import { rewardsByYear } from "@dusk-network/app-core/export";
-import { nativeRewardsOf, sozuGrowthOf } from "../activity.js";
+import { nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -412,16 +411,18 @@ function nodeRow(actions) {
 }
 
 // Rewards by calendar year, in this device's time zone, as a tax return asks
-// for them: native rewards claimed, and what Sozu earned that its unstakes
-// took out that year (app-core's rewardsByYear), from the profile's whole
-// public history. Their value in money is in Activity's export.
-function rewardYears(ov, { state, actions, hidden }) {
+// for them: native rewards claimed, and with Sozu what grew while held and
+// what unstaking took out that year (rewardYearsOf), from the profile's whole
+// public history and Sozu's `status`. Their value in money is in Activity's export.
+function rewardYears(ov, { state, actions, hidden, status }) {
   const history = stakingHistory(ov, { state, actions });
   if (history.reading || !history.rows.length) return null;
-  const key = `${history.key}|${history.rows.length}|${history.facts?.size ?? 0}`;
+  // Read again for a new status, what was said kept meanwhile.
+  const base = `${history.key}|${history.rows.length}|${history.facts?.size ?? 0}`;
+  const key = `${base}|${status ? String(status.position?.stDuskBalanceLux ?? "") : "-"}`;
   if (state.rewardYears?.key !== key) {
-    const kept = (state.rewardYears = { key, years: [] });
-    rewardsByYear({ rows: history.rows, facts: history.facts, complete: Boolean(history.whole), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })
+    const kept = (state.rewardYears = { base, key, years: state.rewardYears?.base === base ? state.rewardYears.years : [] });
+    rewardYearsOf(ov, { rows: history.rows, facts: history.facts, complete: Boolean(history.whole), status })
       .then((years) => {
         if (state.rewardYears !== kept) return;
         kept.years = years;
@@ -429,19 +430,20 @@ function rewardYears(ov, { state, actions, hidden }) {
       })
       .catch(() => {});
   }
-  const years = state.rewardYears.years.filter((year) => year.claimed.lux > 0n || year.sozu?.lux > 0n);
+  const years = state.rewardYears.years.filter((year) => year.claimed.lux > 0n || year.sozu?.lux > 0n || year.sozuGrown?.lux > 0n);
   if (!years.length) return null;
   return [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
-    h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu }) =>
+    h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown }) =>
       kvRow(
         String(year),
         [
           claimed.lux > 0n ? [...amountParts(hidden, claimed.lux), " claimed"] : null,
-          sozu?.lux > 0n ? [...amountParts(hidden, sozu.lux), " with Sozu"] : null,
+          sozuGrown?.lux > 0n ? [...amountParts(hidden, sozuGrown.lux), " grown with Sozu while held"] : null,
+          sozu?.lux > 0n ? [...amountParts(hidden, sozu.lux), " taken out of Sozu by unstaking"] : null,
         ]
           .filter(Boolean)
-          .flatMap((part, i) => (i ? [" · ", ...part] : part))
+          .map((parts) => h("span", { class: "stake-year-part" }, parts))
       )
     )),
   ];
@@ -758,7 +760,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
     subnav({ title: "Staking", onBack }),
     statusLine(st),
     summary,
-    ...(rewardYears(ov, { state, actions, hidden }) ?? []),
+    ...(rewardYears(ov, { state, actions, hidden, status: holding.status }) ?? []),
     h("div", { class: "section-head" }, [bracketTitle({ text: "Stake" })]),
     choices,
     available,

@@ -36,6 +36,13 @@ vi.mock("@dusk-network/app-core/sozu", async (importOriginal) => ({
   nativeRewards: vi.fn(async () => nativeMeasure.value),
 }));
 
+// Rewards by year as app-core works them out: its own, unless a test gives what it says.
+const yearsSaid = vi.hoisted(() => ({ value: null }));
+vi.mock("@dusk-network/app-core/export", async (importOriginal) => {
+  const real = await importOriginal();
+  return { ...real, rewardsByYear: vi.fn(async (args) => yearsSaid.value ?? real.rewardsByYear(args)) };
+});
+
 const ACCOUNT =
   "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
 const OTHER =
@@ -130,6 +137,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   archive.query = async () => ({});
   nativeMeasure.value = null;
+  yearsSaid.value = null;
 });
 
 // Draws Staking, its Review and Sent as app.js routes them, and redraws on
@@ -1008,6 +1016,28 @@ describe("a stake with Sozu in figures", () => {
     // Hidden with the other balances.
     popup(state, ov({ hideBalances: true }));
     expect(years()).toEqual(["2026•••• DUSK claimed", "2025•••• DUSK claimed"]);
+  });
+
+  // Lena's: 2026 said 0.0062 DUSK with Sozu, and Sozu "Rewards so far 0.0295".
+  it("says Sozu's part of each year twice, what grew while held and what unstaking took out, from Sozu's status", async () => {
+    const overview = ov();
+    const claim = entryOf({ hash: "3".repeat(64), kind: "withdraw_reward", counterparty: networks.testnet.contracts.stake, direction: "in", payer: true, value: dusk(3), fee: "5000000", blockHeight: HEIGHT, timestamp: Date.UTC(2025, 5, 1) });
+    const state = { route: "stake", staking: staking(owner()), sozu: sozu(held), activity: activityOf(overview, [claim]) };
+    yearsSaid.value = [
+      { year: 2025, claimed: { lux: BigInt(dusk(3)) }, sozu: null, sozuGrown: null },
+      { year: 2026, claimed: { lux: 0n }, sozu: { lux: 6_209_599n }, sozuGrown: { lux: 29_536_859n } },
+    ];
+    popup(state, overview);
+    const years = () => body.querySelectorAll(".stake-years .kv").map((row) => [row.querySelector(".kv-label").textContent, ...row.querySelectorAll(".stake-year-part").map(visibleText)]);
+    await vi.waitFor(() =>
+      expect(years()).toEqual([
+        ["2026", "0.0295 DUSK grown with Sozu while held", "0.0062 DUSK taken out of Sozu by unstaking"],
+        ["2025", "3 DUSK claimed"],
+      ])
+    );
+    // Worked out with Sozu's status as read for this profile, which names its pool.
+    const { rewardsByYear } = await import("@dusk-network/app-core/export");
+    expect(rewardsByYear.mock.lastCall[0].status.contracts.pool).toBe(POOL);
   });
 
   it("says what went in, what came out, what it's worth now and what it brought, and they add up", async () => {
