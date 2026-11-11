@@ -3,7 +3,8 @@
 //! dark bars, the share sheet, a file saved to Downloads under the name
 //! Android gave it, the app put in the background as it is, fingerprint
 //! unlock (android/KeystorePlugin.kt), and arrival notices
-//! (android/NoticesPlugin.kt).
+//! (android/NoticesPlugin.kt), looked for in the background too
+//! (android/ArrivalJob.kt).
 
 use tauri::tao::platform::android::prelude::jni::{
   errors::Error,
@@ -235,9 +236,12 @@ pub fn notices<R: Runtime>() -> TauriPlugin<R> {
     .build()
 }
 
-/// Asks arrival notices' Kotlin `action`: status, ask or notify. Each answers `{ allowed }`.
+/// Asks arrival notices' Kotlin `action`: status, ask, notify, watch (a send
+/// to look for once the app leaves the screen, android/ArrivalJob.kt),
+/// settled (one the page heard of) or opened (the transaction a notice's tap
+/// opened the app on). Each answers `{ allowed }`, opened its `hash` too.
 pub async fn notice<R: Runtime>(app: &AppHandle<R>, action: &str, args: Value) -> Result<Value, String> {
-  if !matches!(action, "status" | "ask" | "notify") {
+  if !matches!(action, "status" | "ask" | "notify" | "watch" | "settled" | "opened") {
     return Err("There's no such thing to ask.".into());
   }
   let Some(notices) = app.try_state::<Notices<R>>() else {

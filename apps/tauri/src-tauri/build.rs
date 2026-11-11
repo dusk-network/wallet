@@ -6,15 +6,21 @@ use std::{
 // What the wallet asks of Android beyond Tauri's own manifest: to hear the
 // network come and go (without it the WebView never tells the page it went
 // offline, so the wallet can't say so), to ask for a fingerprint, for
-// fingerprint unlock (android/KeystorePlugin.kt), and to show arrival notices
+// fingerprint unlock (android/KeystorePlugin.kt), to show arrival notices
 // (android/NoticesPlugin.kt), which Android 13 and later ask about, only when
-// the person taps Tell me when it arrives. The others are normal permissions:
-// Android asks nothing.
-const PERMISSIONS: [&str; 3] = [
+// the person taps Tell me when it arrives, and the camera, for Scan QR, which
+// Android asks about as a scan opens (the WebView asks for it as the page
+// does). The others are normal permissions: Android asks nothing.
+const PERMISSIONS: [&str; 4] = [
   "android.permission.ACCESS_NETWORK_STATE",
   "android.permission.USE_BIOMETRIC",
   "android.permission.POST_NOTIFICATIONS",
+  "android.permission.CAMERA",
 ];
+
+// The camera is the wallet's to use where there is one: a phone without one
+// still gets the app (the permission alone would say it needs one).
+const OPTIONAL_FEATURES: [&str; 1] = ["android.hardware.camera"];
 
 // The Android project `cargo tauri android init` makes, which isn't kept in
 // git: its manifest gets the permissions as the app is built.
@@ -29,8 +35,10 @@ fn ask_for_permissions() {
     return;
   };
   let before = manifest.clone();
-  for permission in PERMISSIONS {
-    if manifest.contains(permission) {
+  let permissions = PERMISSIONS.map(|name| (name, format!("<uses-permission android:name=\"{name}\" />")));
+  let features = OPTIONAL_FEATURES.map(|name| (name, format!("<uses-feature android:name=\"{name}\" android:required=\"false\" />")));
+  for (name, line) in permissions.into_iter().chain(features) {
+    if manifest.contains(&format!("\"{name}\"")) {
       continue;
     }
     // Right after the manifest's opening tag, beside its other permissions.
@@ -40,7 +48,7 @@ fn ask_for_permissions() {
     let Some(end) = manifest[open..].find('>').map(|at| open + at + 1) else {
       return;
     };
-    manifest = format!("{}\n    <uses-permission android:name=\"{permission}\" />{}", &manifest[..end], &manifest[end..]);
+    manifest = format!("{}\n    {line}{}", &manifest[..end], &manifest[end..]);
   }
   if manifest != before {
     fs::write(&path, manifest).expect("failed to add the wallet's permissions to AndroidManifest.xml");
@@ -118,8 +126,40 @@ fn dusk_kotlin() {
   }
 }
 
+// The job that looks a send up with the app in the background
+// (android/ArrivalJob.kt), as JobScheduler runs it: a service only Android
+// may start, in the manifest's application.
+const SERVICES: [&str; 1] = ["ArrivalJob"];
+
+fn declare_services() {
+  let Some(project) = env::var_os("TAURI_ANDROID_PROJECT_PATH").map(PathBuf::from) else {
+    return;
+  };
+  let path = project.join("app/src/main/AndroidManifest.xml");
+  let Ok(mut manifest) = fs::read_to_string(&path) else {
+    return;
+  };
+  let before = manifest.clone();
+  for service in SERVICES {
+    if manifest.contains(&format!("\".{service}\"")) {
+      continue;
+    }
+    let Some(end) = manifest.rfind("</application>") else {
+      return;
+    };
+    let line = format!(
+      "    <service android:name=\".{service}\" android:permission=\"android.permission.BIND_JOB_SERVICE\" android:exported=\"false\" />\n    "
+    );
+    manifest.insert_str(end, &line);
+  }
+  if manifest != before {
+    fs::write(&path, manifest).expect("failed to declare the wallet's services in AndroidManifest.xml");
+  }
+}
+
 fn main() {
   ask_for_permissions();
+  declare_services();
   dusk_icon();
   dusk_kotlin();
   tauri_build::build()

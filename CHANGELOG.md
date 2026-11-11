@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Looked a send up with the Android app in the background, for its notice once the app is left.
 - Added Tell me when it arrives to Sent on a phone, the only place the wallet asks for notices; a no stays a no.
 - Added Immediately to Auto-lock in the Android app, which locks it as you leave it.
 - Added fingerprint unlock to the Android app, offered with a new password and in Settings, with the password as the fallback.
@@ -37,6 +38,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said on a phone's Sent that its notice comes while the wallet stays open.
+- Said "Your payment arrived" in a phone's notices, without the amount, and opened the payment in the wallet from it.
+- Offered Ask again in Firefox for Android once notices are off, in place of the phone's settings.
 - Saved Activity's export and a QR code to the phone's Downloads in the Android app, saying so.
 - Opened the explorer and other sites in the phone's browser from the app, never in the wallet's window.
 - Kept the Android app's screens out of screenshots and the app switcher.
@@ -57,6 +61,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Asked for the camera as Scan QR opens in the Android app, rather than saying it was refused.
+- Kept Memo and Review above the keyboard on Send opened again from its Review.
+- Kept Copy request link above the keyboard with the request's fields.
 - Showed a send's outcome as a notice in Firefox.
 - Looked each send left waiting through a lost signal up again once the signal returns, and said Completed with its fee, or Not sent.
 - Said Not sent for a send that couldn't reach the network.

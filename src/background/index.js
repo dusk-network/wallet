@@ -1227,7 +1227,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
       if (message?.type === "DUSK_UI_NOTICES_ASK") {
-        sendResponse({ ok: true, state: await askPhoneNotices() });
+        sendResponse({ ok: true, state: await askPhoneNotices({ again: message.again === true }) });
         return;
       }
       if (message?.type === "DUSK_UI_NOTICES_SAID") {

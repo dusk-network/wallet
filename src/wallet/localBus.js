@@ -31,10 +31,8 @@ import { engineContactsVault, handleUiCommand } from "./uiCommands.js";
 import { assertSendPassword, sendPasswordLimit } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
-import { askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
-import { appNoticesAllowed, askAppNotices, showAppNotice } from "../platform/notices.js";
-import { networkTextOf } from "../shared/nodeNetwork.js";
-import { shortAddress } from "../ui/lib/strings.js";
+import { arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
+import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, watchAppArrival } from "../platform/notices.js";
 import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
@@ -89,21 +87,32 @@ let chainAskedAt = -Infinity;
 
 // A payment's arrival as a notice, in the app on a phone: once the person
 // asked for notices (phoneNotices.js) and while Android lets the app show
-// them, read each time, and only while they're away from it.
-async function noticeArrival({ hash, ok, nodeUrl }) {
-  if (!isPhone() || globalThis.document?.visibilityState !== "hidden") return;
+// them, read each time, and only while they're away from it. Its lock screen
+// says what came of it, never the amount or whom it was for. Heard here,
+// Android stops looking for it (watchArrival); each send's notice shows once.
+async function noticeArrival({ hash, ok, kind, nodeUrl }) {
+  if (!isPhone()) return;
+  settleAppArrival(hash).catch(() => {});
+  if (globalThis.document?.visibilityState !== "hidden") return;
   if (!(await mayNotify(appNoticesAllowed))) return;
-  const network = nodeUrl ? networkTextOf(nodeUrl) : "";
-  await showAppNotice({
-    title: ok ? "Transaction executed" : "Transaction failed",
-    body: [`Tx: ${shortAddress(hash)}`, network ? `Network: ${network}` : ""].filter(Boolean).join(" · "),
-  }).catch(() => {});
+  const { title, network } = arrivalNotice({ kind, ok, nodeUrl });
+  await showAppNotice({ title, body: network, hash }).catch(() => {});
 }
 
 // However a send's outcome is learned, while the app is away.
 onTxSettled((hash, tx) => {
-  noticeArrival({ hash, ok: tx.status === "executed", nodeUrl: tx.nodeUrl }).catch(() => {});
+  noticeArrival({ hash, ok: tx.status === "executed", kind: tx.kind, nodeUrl: tx.nodeUrl }).catch(() => {});
 });
+
+// A send the person asked to hear of, for Android to look for once the app
+// leaves the screen, when it cuts the page's network (android/ArrivalJob.kt):
+// its notice, for either outcome, comes from there.
+async function watchArrival(hash, { kind, nodeUrl }) {
+  if (!hash || !isPhone() || !(await mayNotify(appNoticesAllowed))) return;
+  const went = arrivalNotice({ kind, ok: true, nodeUrl });
+  const failed = arrivalNotice({ kind, ok: false, nodeUrl });
+  await watchAppArrival({ hash, nodeUrl, title: went.title, failTitle: failed.title, body: went.network });
+}
 
 function tellPage(message) {
   try {
@@ -502,7 +511,13 @@ export async function localSend(message) {
     // Arrival notices on a phone: where they stand, the question Android asks
     // when the person taps Tell me when it arrives, and Sent having said they're off.
     if (message?.type === "DUSK_UI_NOTICES") return { ok: true, state: await noticesState(appNoticesAllowed) };
-    if (message?.type === "DUSK_UI_NOTICES_ASK") return { ok: true, state: await askForNotices(askAppNotices, appNoticesAllowed) };
+    if (message?.type === "DUSK_UI_NOTICES_ASK") {
+      const state = await askForNotices(askAppNotices, appNoticesAllowed);
+      // The send on Sent, on its way as the person asked: looked for once they leave.
+      const meta = message.hash ? await getTxMeta(String(message.hash)).catch(() => null) : null;
+      if (meta && !["executed", "failed", "removed"].includes(meta.status)) await watchArrival(String(message.hash), meta).catch(() => {});
+      return { ok: true, state };
+    }
     if (message?.type === "DUSK_UI_NOTICES_SAID") {
       await saidNoticesOff(appNoticesAllowed);
       return { ok: true };
@@ -577,6 +592,8 @@ export async function localSend(message) {
           const record = submittedTxMeta(baseParams, { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message));
           const { pendingNullifiers } = record;
           await putTxMeta(hash, record, { epoch: txEpoch });
+          // Asked for notices: Android looks for it too, once the app leaves the screen.
+          watchArrival(hash, { kind: baseParams.kind, nodeUrl }).catch(() => {});
 
           // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
           (async () => {

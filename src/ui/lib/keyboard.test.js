@@ -127,6 +127,21 @@ describe("a field typed in on a phone", () => {
     expect(page.scroller.scrollTop).toBe(0);
   });
 
+  // Amélie's: Send opened again from its Review, all of it on screen, its Memo the first box tapped.
+  it("scrolls a screen that fits whole until the keyboard comes, its low box tapped first", async () => {
+    const page = importScreen();
+    const { scroller, dom } = page;
+    // The panel scrolls only what's more than it shows: nothing, but the room under it.
+    dom.window.getComputedStyle = (el) => ({ overflowY: el === scroller ? "auto" : "visible" });
+    const room = () => Number.parseInt(page.room() || "0", 10);
+    Object.defineProperty(scroller, "clientHeight", { value: 720, configurable: true });
+    Object.defineProperty(scroller, "scrollHeight", { get: () => 720 + room(), configurable: true });
+    await page.focus(page.confirm);
+    expect(page.scroller.scrollTop).toBeGreaterThan(0);
+    expect(page.confirm.getBoundingClientRect().top).toBeGreaterThanOrEqual(82);
+    expect(page.button.getBoundingClientRect().bottom).toBeLessThanOrEqual(395);
+  });
+
   it("gives the room back on the next screen", async () => {
     const page = importScreen();
     await page.focus(page.confirm);

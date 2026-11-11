@@ -20,6 +20,8 @@
 // itself, and the question with it (questionGone).
 
 import { getSettings, setSettings } from "./settings.js";
+import { networkTextOf } from "./nodeNetwork.js";
+import { TX_KIND } from "./constants.js";
 
 const STATES = new Set(["asked", "on", "off", "off-said"]);
 
@@ -56,6 +58,18 @@ export async function noticesState(allowedNow) {
 }
 
 /**
+ * A send's notice on a phone, as its lock screen shows it: what came of it,
+ * never its amount or whom it was for, and its network.
+ * @param {{ kind?: string, ok: boolean, nodeUrl?: string }} sent
+ * @returns {{ title: string, network: string }}
+ */
+export function arrivalNotice({ kind, ok, nodeUrl }) {
+  const what = String(kind ?? "") === TX_KIND.TRANSFER ? "payment" : "transaction";
+  const title = ok ? (what === "payment" ? "Your payment arrived" : "Your transaction went through") : `Your ${what} didn't go through`;
+  return { title, network: nodeUrl ? networkTextOf(String(nodeUrl)) : "" };
+}
+
+/**
  * The person tapped Tell me when it arrives: the phone asks, the first time.
  * @param {() => Promise<unknown>} ask - the phone's question
  * @param {() => Promise<boolean>} [allowedNow] - the app's
@@ -68,6 +82,21 @@ export async function askForNotices(ask, allowedNow) {
   });
   if (first) await ask().catch(() => {});
   return noticesState(allowedNow);
+}
+
+/**
+ * Firefox, notices off: the person tapped Ask again, so Firefox asks once
+ * more. Never by itself.
+ * @param {() => Promise<unknown>} ask - Firefox's question: its notice that asks
+ */
+export async function askForNoticesAgain(ask) {
+  const again = await inTurn(async () => {
+    if (!["off", "off-said"].includes(await kept())) return false;
+    await keep("asked");
+    return true;
+  });
+  if (again) await ask().catch(() => {});
+  return noticesState();
 }
 
 /**

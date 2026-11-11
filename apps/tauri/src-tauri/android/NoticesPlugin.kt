@@ -1,6 +1,8 @@
 // Arrival notices on the phone (src/shared/phoneNotices.js): Android's
 // question for leave to show them, asked only when the person taps Tell me
-// when it arrives, and a payment's notice once they may show.
+// when it arrives, a payment's notice once they may show, the sends to look
+// for once the app leaves the screen (ArrivalJob.kt), and the transaction a
+// notice's tap opened the app on.
 //
 // Copied into the generated Android project by build.rs, as the icon is, and
 // registered by src/android.rs as the plugin "dusk-notices". Each command
@@ -9,13 +11,9 @@
 package network.dusk.wallet
 
 import android.app.Activity
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.drawable.Icon
 import android.os.Build
+import android.webkit.WebView
 import app.tauri.PermissionState
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -25,26 +23,27 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
-import android.app.Notification
 
 @InvokeArg
 class NoticeArgs {
   var title: String = ""
   var body: String = ""
+  var hash: String = ""
+}
+
+@InvokeArg
+class WatchArgs {
+  var hash: String = ""
+  var nodeUrl: String = ""
+  var title: String = ""
+  var failTitle: String = ""
+  var body: String = ""
 }
 
 @TauriPlugin(permissions = [Permission(strings = ["android.permission.POST_NOTIFICATIONS"], alias = "notices")])
 class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
-  private val channel = "payments"
-  private val manager: NotificationManager? get() = activity.getSystemService(NotificationManager::class.java)
-
-  // Whether a notice would show: leave given on Android 13 and later, and notices
-  // not turned off for the app in the phone's settings.
-  private fun allowed(): Boolean {
-    val granted = Build.VERSION.SDK_INT < 33 ||
-      activity.checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED
-    return granted && (manager?.areNotificationsEnabled() == true)
-  }
+  // The transaction a notice's tap opened the app on, till the page takes it.
+  private var opened = ""
 
   private fun answer(invoke: Invoke, allowed: Boolean) {
     val out = JSObject()
@@ -52,17 +51,38 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve(out)
   }
 
+  private fun take(intent: Intent?) {
+    val hash = intent?.getStringExtra(Arrivals.EXTRA_TX) ?: return
+    intent.removeExtra(Arrivals.EXTRA_TX)
+    if (hash.isNotEmpty()) opened = hash
+  }
+
+  // Started by a notice's tap, or brought back by one.
+  override fun load(webView: WebView) {
+    take(activity.intent)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    take(intent)
+  }
+
+  // Off the screen: Android cuts the page's network soon, so a send still on
+  // its way is looked for by the job.
+  override fun onStop() {
+    Arrivals.away(activity.applicationContext)
+  }
+
   /** Whether notices may show. */
   @Command
   fun status(invoke: Invoke) {
-    answer(invoke, allowed())
+    answer(invoke, Arrivals.allowed(activity))
   }
 
   /** Android's question, where it has one to ask: Android 13 and later. */
   @Command
   fun ask(invoke: Invoke) {
-    if (allowed() || Build.VERSION.SDK_INT < 33 || getPermissionState("notices") == PermissionState.GRANTED) {
-      answer(invoke, allowed())
+    if (Arrivals.allowed(activity) || Build.VERSION.SDK_INT < 33 || getPermissionState("notices") == PermissionState.GRANTED) {
+      answer(invoke, Arrivals.allowed(activity))
       return
     }
     requestPermissionForAlias("notices", invoke, "asked")
@@ -70,42 +90,39 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
 
   @PermissionCallback
   private fun asked(invoke: Invoke) {
-    answer(invoke, allowed())
+    answer(invoke, Arrivals.allowed(activity))
   }
 
-  /** A payment's notice; tapping it opens the wallet. */
+  /** A payment's notice, once for its transaction (`hash`); tapping it opens the wallet on it. */
   @Command
   fun notify(invoke: Invoke) {
     val args = invoke.parseArgs(NoticeArgs::class.java)
-    val notices = manager
-    if (!allowed() || notices == null) {
-      answer(invoke, false)
-      return
-    }
-    val open = activity.packageManager.getLaunchIntentForPackage(activity.packageName)
-      ?.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-    val tap = open?.let { PendingIntent.getActivity(activity, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
-    // The Dusk mark's shape, as the status bar draws a notice's icon.
-    val mark = activity.resources.getIdentifier("ic_launcher_foreground", "mipmap", activity.packageName)
-    val notice = builder(notices)
-      .setSmallIcon(Icon.createWithResource(activity, if (mark != 0) mark else activity.applicationInfo.icon))
-      .setContentTitle(args.title)
-      .setContentText(args.body)
-      .setAutoCancel(true)
-      .apply { if (tap != null) setContentIntent(tap) }
-      .build()
-    notices.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notice)
-    answer(invoke, true)
+    answer(invoke, Arrivals.post(activity.applicationContext, args.title, args.body, args.hash))
   }
 
-  // Android 8 and later show a notice in a channel, made the first time; the
-  // app runs from Android 7 (minSdk 24), which has none.
-  @Suppress("DEPRECATION")
-  private fun builder(notices: NotificationManager): Notification.Builder {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return Notification.Builder(activity)
-    if (notices.getNotificationChannel(channel) == null) {
-      notices.createNotificationChannel(NotificationChannel(channel, "Payments", NotificationManager.IMPORTANCE_DEFAULT))
-    }
-    return Notification.Builder(activity, channel)
+  /** A send to look for once the app leaves the screen, with its notice for either outcome. */
+  @Command
+  fun watch(invoke: Invoke) {
+    val args = invoke.parseArgs(WatchArgs::class.java)
+    Arrivals.watch(activity.applicationContext, args.hash, args.nodeUrl, args.title, args.failTitle, args.body)
+    answer(invoke, Arrivals.allowed(activity))
+  }
+
+  /** A send the page heard the outcome of: not looked for any more. */
+  @Command
+  fun settled(invoke: Invoke) {
+    val args = invoke.parseArgs(NoticeArgs::class.java)
+    Arrivals.settled(activity.applicationContext, args.hash)
+    answer(invoke, Arrivals.allowed(activity))
+  }
+
+  /** The transaction a notice's tap opened the app on, once: "" for none. */
+  @Command
+  fun opened(invoke: Invoke) {
+    val out = JSObject()
+    out.put("allowed", Arrivals.allowed(activity))
+    out.put("hash", opened)
+    opened = ""
+    invoke.resolve(out)
   }
 }

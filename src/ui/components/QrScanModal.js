@@ -4,6 +4,9 @@ import { iconSvg } from "./ActionIcon.js";
 import { stepAway } from "../../platform/native.js";
 
 const DECODER_FAILED = "The QR scanner couldn't load. Close the wallet and open it again.";
+// The camera refused, by the person (the phone asks as a scan opens), and none to use.
+const CAMERA_REFUSED = "The camera isn't allowed. You can still choose an image.";
+const NO_CAMERA = "Camera not available. You can still choose an image.";
 
 // The QR decoder loads with the first scan, not with the popup. A failed load
 // stays failed in this page, as the browser keeps it: the wallet opened again
@@ -221,7 +224,7 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
     // Camera scanning
     async function startCamera() {
       if (!navigator.mediaDevices?.getUserMedia) {
-        noCamera("Camera not available. You can still choose an image.");
+        noCamera(NO_CAMERA);
         return;
       }
 
@@ -240,7 +243,10 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
             video: { ...baseVideo, facingMode: { exact: "environment" } },
             audio: false,
           });
-        } catch {
+        } catch (error) {
+          // A no is the answer: asked again, the phone would ask twice.
+          if (error?.name === "NotAllowedError") throw error;
+          // No camera on the back: whichever there is.
           stream = await navigator.mediaDevices.getUserMedia({
             video: { ...baseVideo, facingMode: { ideal: "environment" } },
             audio: false,
@@ -260,9 +266,9 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
         }
         videoWrap.hidden = false;
         hintEl.hidden = false;
-      } catch {
+      } catch (error) {
         stopStream(stream);
-        noCamera("Camera permission denied or unavailable. You can still choose an image.");
+        noCamera(error?.name === "NotAllowedError" ? CAMERA_REFUSED : NO_CAMERA);
         return;
       }
 
@@ -322,7 +328,7 @@ export function openQrScanModal({ title = "Scan QR", hint = "Point your camera a
     }
 
     startCamera().catch(() => {
-      noCamera("Camera not available. You can still choose an image.");
+      noCamera(NO_CAMERA);
     });
   });
 }

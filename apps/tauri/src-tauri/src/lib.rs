@@ -48,8 +48,10 @@ async fn fingerprint(app: tauri::AppHandle, action: String, args: serde_json::Va
 }
 
 /// Arrival notices, on Android: `action` status, ask (Android's question for
-/// leave to show them, asked only when the person taps Tell me when it arrives)
-/// or notify (`args` title and body). `{ allowed: false }` elsewhere.
+/// leave to show them, asked only when the person taps Tell me when it arrives),
+/// notify (`args` title, body and the transaction's hash), watch (a send to
+/// look for once the app leaves the screen), settled or opened (the
+/// transaction a notice's tap opened the app on). `{ allowed: false }` elsewhere.
 #[tauri::command]
 async fn notices(app: tauri::AppHandle, action: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
   #[cfg(target_os = "android")]

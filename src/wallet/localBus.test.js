@@ -108,16 +108,25 @@ vi.mock("../shared/walletEngine.js", () => ({
 }));
 
 // The phone's notices, as the app's Kotlin would answer: allowed or not, and what was asked.
-const phoneNotices = vi.hoisted(() => ({ allowed: () => false, asked: [] }));
+const phoneNotices = vi.hoisted(() => ({ allowed: () => false, asked: [], watched: [], settled: [] }));
 vi.mock("../platform/notices.js", () => ({
   appNoticesAllowed: async () => phoneNotices.allowed(),
   askAppNotices: async () => {
     phoneNotices.asked.push("ask");
     return phoneNotices.allowed() ? "on" : "off";
   },
-  showAppNotice: async ({ title }) => {
+  showAppNotice: async ({ title, body, hash }) => {
     phoneNotices.asked.push(`notify: ${title}`);
+    phoneNotices.shown = { title, body, hash };
     return phoneNotices.allowed();
+  },
+  // What Android looks for once the app leaves the screen (android/ArrivalJob.kt).
+  watchAppArrival: async (send) => {
+    phoneNotices.watched.push(send);
+    return phoneNotices.allowed();
+  },
+  settleAppArrival: async (hash) => {
+    phoneNotices.settled.push(hash);
   },
 }));
 
@@ -822,7 +831,7 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
 // a test says, and records what it was asked.
 describe("arrival notices in the app on a phone", () => {
   const phone = ({ allowed }) => {
-    Object.assign(phoneNotices, { allowed, asked: [] });
+    Object.assign(phoneNotices, { allowed, asked: [], watched: [], settled: [], shown: null });
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
     vi.stubGlobal("document", { visibilityState: "hidden" });
     return phoneNotices.asked;
@@ -853,7 +862,9 @@ describe("arrival notices in the app on a phone", () => {
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
     expect(asked).toEqual(["ask"]);
     await sendAndSettle(localSend, "d2".repeat(32));
-    await vi.waitFor(() => expect(asked.at(-1)).toEqual("notify: Transaction executed"));
+    // For the lock screen: what came of it and the network, never the amount or whom it was for.
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual("notify: Your payment arrived"));
+    expect(phoneNotices.shown).toEqual({ title: "Your payment arrived", body: "Mainnet", hash: "d2".repeat(32) });
 
     // Learned another way, as the app looks a send up again: a notice all the same, once.
     const { patchTxMeta, putTxMeta } = await import("../shared/txStore.js");
@@ -879,7 +890,34 @@ describe("arrival notices in the app on a phone", () => {
     allowed = true;
     await expect(localSend({ type: "DUSK_UI_NOTICES" })).resolves.toMatchObject({ state: "on" });
     await sendAndSettle(localSend, "d5".repeat(32));
-    await vi.waitFor(() => expect(asked).toEqual(["ask", "notify: Transaction executed"]));
+    await vi.waitFor(() => expect(asked).toEqual(["ask", "notify: Your payment arrived"]));
+  });
+
+  // Chen's and Sofía's: Android cuts the app's network seconds after it leaves the screen, and the notice never came.
+  it("has Android look for a send the person asked to hear of once the app is left, and stop once the wallet heard it", async () => {
+    const allowed = () => true;
+    phone({ allowed });
+    const { localSend } = await import("./localBus.js");
+    const { putTxMeta } = await import("../shared/txStore.js");
+    // Asked for on Sent, the send on its way: Android looks for it, with its notice for either outcome.
+    await putTxMeta("e1".repeat(32), { status: "submitted", kind: "transfer", nodeUrl: "https://testnet.nodes.dusk.network" });
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK", hash: "e1".repeat(32) })).resolves.toMatchObject({ state: "on" });
+    expect(phoneNotices.watched).toEqual([
+      { hash: "e1".repeat(32), nodeUrl: "https://testnet.nodes.dusk.network", title: "Your payment arrived", failTitle: "Your payment didn't go through", body: "Testnet" },
+    ]);
+    // Notices on, each send after: looked for from the start, and no more once its outcome is heard.
+    await sendAndSettle(localSend, "e2".repeat(32));
+    await settled("e2".repeat(32));
+    expect(phoneNotices.watched.map((w) => w.hash)).toEqual(["e1".repeat(32), "e2".repeat(32)]);
+    await vi.waitFor(() => expect(phoneNotices.settled).toContain("e2".repeat(32)));
+  });
+
+  it("asks Android to look for nothing while the person hasn't asked for notices", async () => {
+    phone({ allowed: () => true });
+    const { localSend } = await import("./localBus.js");
+    await sendAndSettle(localSend, "e3".repeat(32));
+    await settled("e3".repeat(32));
+    expect(phoneNotices.watched).toEqual([]);
   });
 
   // Astra's: notices kept "on" by an earlier build, Android's leave taken back

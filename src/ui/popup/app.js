@@ -29,6 +29,7 @@ import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../.
 import { saveHandedExport } from "./activityExport.js";
 import { requestDraftOf } from "../lib/requestLink.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
+import { openedFromNotice } from "../../platform/notices.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
@@ -1397,7 +1398,27 @@ listenForLinks((url) => {
     .catch(() => {});
 });
 
+// --- A notice tapped in the app ----------------------------------------------
+// Its send's details, as Activity opens them: after the unlock, when the
+// wallet is locked. Asked as the app starts, and each time it's back in front.
+async function openNoticed() {
+  const hash = isTauriRuntime() && isPhone() ? await openedFromNotice().catch(() => "") : "";
+  if (!hash) return;
+  netMenu.close();
+  acctMenu.close();
+  Object.assign(state, { txDetailHash: hash, txDetailFrom: "home", route: "tx" });
+  await render();
+}
+try {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") openNoticed().catch(() => {});
+  });
+} catch {
+  // ignore
+}
+
 export function mountPopup() {
+  openNoticed().catch(() => {});
   render()
     // Sends left on their way while the wallet was closed are looked up now.
     .then(() => resumeWatching())

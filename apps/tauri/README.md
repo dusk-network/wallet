@@ -33,11 +33,13 @@ is in `src-tauri/src/android.rs`, so a new `android init` keeps it; fingerprint
 unlock is Kotlin beside it, `src-tauri/android/KeystorePlugin.kt`: the password
 kept only encrypted under an Android Keystore key that a fresh fingerprint
 opens (Android 11 and later); arrival notices are `src-tauri/android/NoticesPlugin.kt`,
-asked for only when the person taps Tell me when it arrives. As the app is
-built, `src-tauri/build.rs` adds the permissions to hear the network come and
-go, to ask for a fingerprint and to show notices to the project's manifest,
-puts that Kotlin in its sources, and Dusk's icon in its resources from
-`src-tauri/icons/android`. That icon is made from `icons/app-icon.json`:
+asked for only when the person taps Tell me when it arrives, and a send they
+asked about is looked up with the app in the background by a JobScheduler job,
+`src-tauri/android/ArrivalJob.kt`. As the app is built, `src-tauri/build.rs`
+adds the permissions to hear the network come and go, to ask for a fingerprint,
+to show notices and to use the camera for Scan QR to the project's manifest,
+with the job's service, puts that Kotlin in its sources, and Dusk's icon in its
+resources from `src-tauri/icons/android`. That icon is made from `icons/app-icon.json`:
 `cargo tauri icon icons/app-icon.json -o <folder>`, then its `android` folder
 in place of `icons/android`.
 

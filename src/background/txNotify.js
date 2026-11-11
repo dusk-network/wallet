@@ -8,7 +8,7 @@ import { getTxMeta } from "../shared/txStore.js";
 import { shortAddress } from "../ui/lib/strings.js";
 import { isPhone } from "../ui/lib/device.js";
 import { IS_FIREFOX } from "../platform/targets.js";
-import { askForNotices, mayNotify, noticeAnswered, noticesState, questionGone } from "../shared/phoneNotices.js";
+import { arrivalNotice, askForNotices, askForNoticesAgain, mayNotify, noticeAnswered, noticesState, questionGone } from "../shared/phoneNotices.js";
 import { openWalletTab } from "./walletTab.js";
 import {
   getExtensionApi,
@@ -36,16 +36,22 @@ const notifies = () => Boolean(ext?.notifications);
 // phoneNotices.js). Nothing on a phone says a send went out: Sent does.
 const ASK_NOTICE = "dusk_notices_asked";
 
-/** Tell me when it arrives, tapped on a phone: Firefox asks Android, once. */
-export function askPhoneNotices() {
-  return askForNotices(() =>
-    notificationsCreate(ASK_NOTICE, {
-      type: "basic",
-      iconUrl: runtimeGetURL(ICON_PATH),
-      title: "Dusk Wallet",
-      message: "You'll get a notice when your payment arrives.",
-    }),
-  );
+// Firefox's question: the notice that asks Android, saying what comes of it.
+const askNotice = () =>
+  notificationsCreate(ASK_NOTICE, {
+    type: "basic",
+    iconUrl: runtimeGetURL(ICON_PATH),
+    title: "Dusk Wallet",
+    message: "You'll get a notice when your payment arrives, while the wallet stays open.",
+  });
+
+/**
+ * Tell me when it arrives, tapped on a phone: Firefox asks Android, once; with
+ * `again`, after a no, the person's Ask again.
+ * @param {{ again?: boolean }} [opts]
+ */
+export function askPhoneNotices({ again = false } = {}) {
+  return again ? askForNoticesAgain(askNotice) : askForNotices(askNotice);
 }
 
 // Arrivals that came while Firefox's question was on screen, kept for its
@@ -113,7 +119,8 @@ export function registerTxNotificationHandlers() {
     });
 
     // Clicking the notification opens the explorer (when possible), otherwise
-    // falls back to the wallet full view.
+    // falls back to the wallet full view. On a phone it opens the transaction
+    // in the wallet, where its notice said only what came of it.
     ext.notifications.onClicked?.addListener(async (notificationId) => {
       try {
         const id = String(notificationId ?? "");
@@ -123,6 +130,11 @@ export function registerTxNotificationHandlers() {
         const parts = id.split("_");
         const hash = parts?.[2] ?? "";
         const status = parts?.[3] ?? "";
+
+        if (hash && isPhone()) {
+          openWalletTab(`full.html?route=tx&hash=${encodeURIComponent(hash)}`).catch(() => {});
+          return;
+        }
 
         if (hash && (status === "executed" || status === "failed")) {
           const { nodeUrl, chainId } = await sentOn(hash);
@@ -234,6 +246,17 @@ export async function notifyTxExecuted({
     const sent = await sentOn(hash, nodeUrl);
     const networkName = sent.nodeUrl ? networkTextOf(sent.nodeUrl) : "";
     const explorerUrl = explorerTxUrl(sent.nodeUrl, hash, sent.chainId);
+    const id = `dusk_tx_${hash}_${ok ? "executed" : "failed"}_${Date.now()}`;
+
+    // A phone's lock screen shows what came of it, never the amount or whom
+    // it was for; its tap opens the transaction in the wallet.
+    if (isPhone()) {
+      const { title, network } = arrivalNotice({ kind: (await getTxMeta(hash).catch(() => null))?.kind, ok, nodeUrl: sent.nodeUrl });
+      await notificationsCreate(id, { type: "basic", iconUrl: runtimeGetURL(ICON_PATH), title, message: network ? `Dusk Wallet · ${network}` : "Dusk Wallet" });
+      // The arrival takes the place of the notice that asked, once that showed.
+      if ((await noticesState()) === "on") await notificationsClear(ASK_NOTICE).catch(() => {});
+      return;
+    }
 
     const msgLines = [];
     const sh = shortAddress(hash);
@@ -262,11 +285,7 @@ export async function notifyTxExecuted({
       opts.buttons = explorerUrl ? [{ title: "View in Explorer" }, { title: "Open Wallet" }] : [{ title: "Open Wallet" }];
     }
 
-    const id = `dusk_tx_${hash}_${ok ? "executed" : "failed"}_${Date.now()}`;
-
     await notificationsCreate(id, opts);
-    // On a phone, the arrival takes the place of the notice that asked, once that showed.
-    if (isPhone() && (await noticesState()) === "on") await notificationsClear(ASK_NOTICE).catch(() => {});
   } catch {
     // ignore
   }

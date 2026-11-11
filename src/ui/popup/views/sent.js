@@ -405,10 +405,15 @@ const STATE_WORDS = { done: "Done: ", current: "Now: ", failed: "Failed: ", unkn
  * pool's event is read (`sozu`, what app.js reads from its block), and that
  * they're coming till then.
  */
+/** What Sent says once notices will come: a phone's browser stops the wallet once it's left. */
+export const NOTICE_COMES_TEXT = "You'll get a notice when it arrives, while the wallet stays open.";
+
 /**
  * On a phone, while a send is on its way: Tell me when it arrives, which alone
  * has the phone ask for notices (shared/phoneNotices.js), and after that, that
- * one will come. Once they're off, it says so once, and where to turn them on.
+ * one will come. Once they're off, the app says so once, and where to turn
+ * them on; Firefox, whose own question brings them back, offers Ask again,
+ * and asks only when it's tapped.
  * @returns {HTMLElement | null}
  */
 function noticeOffer({ state, actions }) {
@@ -419,27 +424,38 @@ function noticeOffer({ state, actions }) {
   if (state.notices?.for !== state.sent) state.notices = { for: state.sent, state: undefined };
   const notices = state.notices;
   const el = h("div", { class: "sent-notices" });
+  const askButton = (text, again) => {
+    const ask = h("button", {
+      class: "btn-outline sent-notices__ask",
+      type: "button",
+      text,
+      onclick: async () => {
+        ask.disabled = true;
+        // The send it's for, which the app's Android looks for once the wallet's left.
+        const res = await actions?.send?.({ type: "DUSK_UI_NOTICES_ASK", hash: state.sent?.hash || undefined, ...(again ? { again: true } : {}) })?.catch?.(() => null);
+        notices.state = res?.state ?? "asked";
+        draw();
+      },
+    });
+    return ask;
+  };
+  const firefox = !isTauriRuntime();
   const draw = () => {
     if (notices.state === null) {
-      const ask = h("button", {
-        class: "btn-outline sent-notices__ask",
-        type: "button",
-        text: "Tell me when it arrives",
-        onclick: async () => {
-          ask.disabled = true;
-          const res = await actions?.send?.({ type: "DUSK_UI_NOTICES_ASK" })?.catch?.(() => null);
-          notices.state = res?.state ?? "asked";
-          draw();
-        },
-      });
-      el.replaceChildren(ask);
+      el.replaceChildren(askButton("Tell me when it arrives", false));
     } else if (notices.state === "asked" || notices.state === "on") {
-      el.replaceChildren(h("p", { class: "sent-note", text: "You'll get a notice when it arrives." }));
+      el.replaceChildren(h("p", { class: "sent-note", text: NOTICE_COMES_TEXT }));
     } else if (notices.state === "off") {
-      const where = isTauriRuntime() ? "Dusk Wallet" : "Firefox";
-      el.replaceChildren(h("p", { class: "sent-note", text: `Notices are off. To get them, allow notifications for ${where} in your phone's settings.` }));
+      el.replaceChildren(
+        firefox
+          ? h("div", { class: "sent-notices__off" }, [h("p", { class: "sent-note", text: "Notices are off." }), askButton("Ask again", true)])
+          : h("p", { class: "sent-note", text: "Notices are off. To get them, allow notifications for Dusk Wallet in your phone's settings." })
+      );
       // Said, on this send's Sent: the next one's reads that it was.
       notices.said ??= Promise.resolve(actions?.send?.({ type: "DUSK_UI_NOTICES_SAID" })).catch(() => {});
+    } else if (notices.state === "off-said" && firefox) {
+      // Said once: from then on, the tap that asks again, and nothing more.
+      el.replaceChildren(askButton("Tell me when it arrives", true));
     } else {
       el.replaceChildren();
     }

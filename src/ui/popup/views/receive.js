@@ -182,7 +182,9 @@ export function receiveView(ov, { state, actions } = {}) {
       .catch(() => {});
   };
 
-  // The request link's copy, which Enter in the memo presses; on once the QR holds a request.
+  // The request link's copy, which Enter in the memo presses; on once the QR
+  // holds a request. On a phone it stays above the keyboard with the field
+  // being typed in (keyboard.js), as Send's Review does.
   const copyRequestBtn = copyButton({
     value: () => (wantRequest ? curLink : ""),
     label: "Copy request link",
@@ -191,6 +193,7 @@ export function receiveView(ov, { state, actions } = {}) {
     failText: "Copy failed",
     onFail: actions?.showToast,
     onCopied: keepRequest,
+    attrs: { "data-next": "" },
   });
 
   // What the QR asks for, once it holds a request.

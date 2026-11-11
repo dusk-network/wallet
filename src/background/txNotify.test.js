@@ -233,7 +233,7 @@ describe("on a phone", () => {
     await expect(askPhoneNotices()).resolves.toBe("on");
   });
 
-  it("never asks again after a no, and shows nothing more", async () => {
+  it("never asks again after a no by itself, and shows nothing more", async () => {
     const { askPhoneNotices, notifyTxExecuted } = await phone();
     await askPhoneNotices();
     firefox.answer(false);
@@ -242,6 +242,38 @@ describe("on a phone", () => {
     await expect(askPhoneNotices()).resolves.toBe("off");
     expect(ids()).toEqual([ASKED]);
     expect(ext.questions).toEqual([ASKED]);
+  });
+
+  // After a no, the phone's settings didn't bring notices back in Firefox: its own question does, tapped.
+  it("asks Firefox once more when the person taps Ask again after a no, and shows arrivals with a yes", async () => {
+    const { askPhoneNotices, notifyTxExecuted } = await phone();
+    await askPhoneNotices();
+    firefox.answer(false);
+    await expect(askPhoneNotices()).resolves.toBe("off");
+    await expect(askPhoneNotices({ again: true })).resolves.toBe("asked");
+    expect(ext.questions).toEqual([ASKED, ASKED]);
+    firefox.answer(true);
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: NODE });
+    await vi.waitFor(() => expect(tray()).toEqual([`dusk_tx_${HASH}_executed`]));
+    // With notices on, Ask again asks nothing.
+    await expect(askPhoneNotices({ again: true })).resolves.toBe("on");
+    expect(ext.questions).toEqual([ASKED, ASKED]);
+  });
+
+  // Amélie's and Chen's: "Transaction executed · Tx: a2881d…", and a tap that opened the explorer.
+  it("says the payment arrived, without its amount, whom it was for or its ID, and opens it in the wallet when tapped", async () => {
+    ext.meta = { nodeUrl: NODE, chainId: 2, kind: "transfer" };
+    const { askPhoneNotices, notifyTxExecuted } = await phone();
+    await askPhoneNotices();
+    firefox.answer(true);
+    await notifyTxExecuted({ hash: HASH, ok: true, nodeUrl: NODE });
+    await vi.waitFor(() => expect(ids().at(-1)).toBe(`dusk_tx_${HASH}_executed`));
+    expect(ext.created.at(-1).opts).toMatchObject({ title: "Your payment arrived", message: "Dusk Wallet · Custom · my-node.example" });
+    await notifyTxExecuted({ hash: OTHER, ok: false, error: "out of gas", nodeUrl: NODE });
+    expect(ext.created.at(-1).opts).toMatchObject({ title: "Your payment didn't go through", message: "Dusk Wallet · Custom · my-node.example" });
+    ext.open = [{ id: 8, url: "chrome-extension://wallet/full.html?route=home" }];
+    await ext.clicked(ext.created.at(-2).id);
+    await vi.waitFor(() => expect(ext.tabs).toEqual([`8:chrome-extension://wallet/full.html?route=tx&hash=${HASH}`]));
   });
 });
 
