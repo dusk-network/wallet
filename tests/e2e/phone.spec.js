@@ -148,6 +148,28 @@ test("gives the recovery phrase's Reveal and Copy a finger's height, as Amélie'
   }
 });
 
+// Chen's: in the Android app every word typed with a space went in the first box. A phone's keyboard sends a space
+// as text, with no key for it, and composes the word it suggests for before it commits it.
+test("moves on to the next word's box at a space, sent as text, as a key or with a composed word, and spreads words typed together", async ({ page }) => {
+  await popupOn(page, "onboard_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false } }, { hasVault: false, isUnlocked: false });
+  const box = (n) => page.getByLabel(`Word ${n}`, { exact: true });
+  await box(1).focus();
+  await page.keyboard.insertText("kiwi");
+  await page.keyboard.insertText(" ");
+  await expect(box(2)).toBeFocused();
+  await page.keyboard.type("lemon ");
+  await expect(box(3)).toBeFocused();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.imeSetComposition", { text: "apple", selectionStart: 5, selectionEnd: 5 });
+  await cdp.send("Input.insertText", { text: "apple " });
+  await expect(box(4)).toBeFocused();
+  // Several words at once, as voice typing puts them in.
+  await page.keyboard.insertText("pear grape mango ");
+  await expect(box(7)).toBeFocused();
+  const words = await page.locator(".srp-word-input input").evaluateAll((boxes) => boxes.slice(0, 7).map((b) => b.value));
+  expect(words).toEqual(["kiwi", "lemon", "apple", "pear", "grape", "mango", ""]);
+});
+
 test("keeps a contact's address at the field's whole width, its chip on a line above it, as Sofía's squeezed into six letters wasn't", async ({ page }) => {
   await popupOn(page, "send", {
     draft: { to: TO, privacy: "public", amountDusk: "", memo: "" },

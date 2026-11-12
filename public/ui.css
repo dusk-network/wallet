@@ -3063,10 +3063,11 @@ body.page--popup .brand-mark {
   color: color-mix(in oklab, var(--muted-foreground) 75%, transparent);
 }
 
-/* On a phone the words are typed unseen, as a password is, in boxes that are
-   no password boxes, which a browser offers to keep. Each is a password's to
-   the keyboard all the same, so it learns nothing from them: ime-mode is the
-   one way Firefox for Android has to say so of another box. */
+/* On a phone the words are typed unseen, as a password is, in Firefox for
+   Android in boxes that are no password boxes, which it offers to keep. Each
+   is a password's to the keyboard all the same, so it learns nothing from
+   them: ime-mode is the one way Firefox has to say so of another box. (In the
+   Android app they are password boxes: MnemonicInput.js.) */
 .srp-grid--masked .srp-word-input input {
   ime-mode: disabled;
 }

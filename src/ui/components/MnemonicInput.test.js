@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import bip39Vectors from "../../shared/fixtures/bip39-vectors.json";
-import { fakeEvent, installFakeDom, isShown, press, typeInto } from "../testing/fakeDom.js";
+import { compose, fakeEvent, installFakeDom, isShown, press, typeInto, typeKeys } from "../testing/fakeDom.js";
 import { createMnemonicInput } from "./MnemonicInput.js";
 
 // Public BIP39 test phrases only.
@@ -72,11 +72,34 @@ describe("on a phone", () => {
     expect(words()[2]).toBe("zoo");
   });
 
-  it("keeps words in plain boxes elsewhere", () => {
-    const { input } = mount();
-    expect(new Set(input.el.querySelectorAll("input").map((i) => i.getAttribute("type")))).toEqual(new Set(["text"]));
-    expect(input.el.querySelector(".srp-grid").classList.contains("srp-grid--masked")).toBe(false);
-    expect(input.el.querySelectorAll("button").find((b) => b.textContent === "Show words")).toBeUndefined();
+  // In the Android app the words went in text boxes its keyboard learns from: ime-mode is Firefox's alone.
+  it("types each word in the Android app in a password box, which its keyboard learns nothing from, a one-time code's to autofill", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Linux; Android 15; sdk_gphone64_x86_64 Build/AE3A.240806.036; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.7390.122 Mobile Safari/537.36",
+    });
+    dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+    const { input, box, words } = mount();
+    const boxes = () => new Set(input.el.querySelectorAll("input").map((i) => [i.getAttribute("type"), i.getAttribute("autocomplete"), Boolean(i.readOnly)].join()));
+    expect(boxes()).toEqual(new Set(["password,one-time-code,false"]));
+    // A space still moves on, sent as the keyboard sends it.
+    box(1).focus();
+    typeKeys("kiwi lemon ", { as: "text" });
+    expect([words().slice(0, 3), dom.document.activeElement === box(3)]).toEqual([["kiwi", "lemon", ""], true]);
+    // Shown read-only as text; a box pressed to type in hides them as passwords again.
+    input.el.querySelectorAll("button").find((b) => b.textContent === "Show words").click();
+    expect(boxes()).toEqual(new Set(["text,one-time-code,true"]));
+    box(4).dispatchEvent(fakeEvent("pointerdown"));
+    expect(boxes()).toEqual(new Set(["password,one-time-code,false"]));
+  });
+
+  it("keeps words in plain boxes elsewhere, the app on a computer too", () => {
+    for (const app of [false, true]) {
+      if (app) dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+      const { input } = mount();
+      expect(new Set(input.el.querySelectorAll("input").map((i) => i.getAttribute("type"))), String(app)).toEqual(new Set(["text"]));
+      expect(input.el.querySelector(".srp-grid").classList.contains("srp-grid--masked")).toBe(false);
+      expect(input.el.querySelectorAll("button").find((b) => b.textContent === "Show words")).toBeUndefined();
+    }
   });
 
   it("is a form of its own, which Enter never submits", () => {
@@ -194,6 +217,58 @@ describe("the recovery phrase's word boxes", () => {
     typeInto(box(9), OTHER.replace("worth", "wurth"));
     expect(words()).toEqual(OTHER.replace("worth", "wurth").split(" "));
     expect(onCheck).toHaveBeenLastCalledWith("Word 7 isn't a recovery word. Check its spelling.");
+  });
+
+  // Chen's: in the Android app a phone's keyboard sends a space as text, never as a key, and every word went in box 1.
+  it("moves on to the next box at a space after a word, sent as a key or as a phone's keyboard sends it, as text", () => {
+    for (const as of ["keys", "text"]) {
+      const onComplete = vi.fn();
+      const { box, words } = mount({ onComplete });
+      box(1).focus();
+      typeKeys("kiwi lemon apple ", { as });
+      expect([words(), dom.document.activeElement === box(4)], as).toEqual([["kiwi", "lemon", "apple", "", "", "", "", "", "", "", "", ""], true]);
+      // A space in an empty box goes nowhere, and puts nothing in it.
+      typeKeys(" ", { as });
+      expect([words()[3], dom.document.activeElement === box(4)], as).toEqual(["", true]);
+      // After the last box, on to what comes after the words, as Enter goes.
+      box(12).focus();
+      typeKeys("zoo ", { as });
+      expect([words()[11], onComplete.mock.calls.length], as).toEqual(["zoo", 1]);
+    }
+  });
+
+  it("takes any whitespace a keyboard commits for a space", () => {
+    const { box, words } = mount();
+    box(1).focus();
+    typeKeys("kiwi lemon\tapple　", { as: "text" });
+    expect(words().slice(0, 4)).toEqual(["kiwi", "lemon", "apple", ""]);
+    expect(dom.document.activeElement).toBe(box(4));
+  });
+
+  it("puts words a keyboard commits at once in the boxes from there, and with a space after them moves on past the last", () => {
+    const { box, words } = mount();
+    box(3).focus();
+    typeInto(box(3), "kiwi lemon apple ");
+    expect(words()).toEqual(["", "", "kiwi", "lemon", "apple", "", "", "", "", "", "", ""]);
+    expect(dom.document.activeElement).toBe(box(6));
+  });
+
+  // A phone's keyboard composes the word it suggests for, then commits it, a space with it or after it.
+  it("takes a word the keyboard composed once it's done, in Chrome's order of events and Firefox's", () => {
+    for (const order of ["chrome", "firefox"]) {
+      const { box, words, onCheck } = mount();
+      box(1).focus();
+      compose("kiwi", { commit: "kiwi ", order });
+      expect([words()[0], dom.document.activeElement === box(2)], order).toEqual(["kiwi", true]);
+      compose("lemon", { order });
+      expect(dom.document.activeElement, order).toBe(box(2));
+      typeKeys(" ", { as: "text" });
+      expect(dom.document.activeElement, order).toBe(box(3));
+      // Several words at once, as voice typing composes them, put in the boxes from there, and said of after it's done.
+      compose("apple kiwo pear", { order });
+      expect(words().slice(0, 6), order).toEqual(["kiwi", "lemon", "apple", "kiwo", "pear", ""]);
+      expect(onCheck, order).toHaveBeenLastCalledWith("Word 4 isn't a recovery word. Check its spelling.");
+    }
   });
 
   it("keeps the words before an emptied box however often Backspace is pressed in it", () => {
