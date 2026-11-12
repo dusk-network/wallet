@@ -830,6 +830,32 @@ describe("the requests made here", () => {
     expect(shown().map((row) => row.amount)).toEqual(["0.5 DUSK"]);
   });
 
+  // Sofía's: a request paid, then paid again while Receive stayed open: "Paid", with no
+  // Send back, for 65 and 110 seconds, till the popup was opened again.
+  it("looks again every 30 seconds while a paid request shows, and says Paid twice once a second payment comes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    items[KEY] = { [ACCOUNT]: [kept({ id: "p", lux: "5000000", memo: "Factura F-2026-053" })] };
+    const first = paidIn("f1".repeat(32), "5000000", "Factura F-2026-053", T0 + HOUR, 4_700_000);
+    const second = paidIn("f2".repeat(32), "5000000", "Factura F-2026-053", T0 + 2 * HOUR, 4_700_100);
+    let entries = [first];
+    const history = { read: vi.fn(async () => ({ entries, state: null, complete: true })), sync: vi.fn(async () => {}), needsDetails: () => false, fillDetails: vi.fn(async () => {}) };
+    const ov = { ...unlocked };
+    const state = {
+      route: "receive",
+      overview: ov,
+      receive: { tab: "public" },
+      activity: { key: activityKey(ov), walletId: ACCOUNT, nodeUrl: ov.nodeUrl, profileIndex: 0, account: ACCOUNT, entries: [first], loaded: true, limit: 50, history, names: new Map(), checked: new Set(), shielded: [], shieldedAsked: true, shieldedReadAt: Date.now(), send: vi.fn(async () => ({})), epoch: Promise.resolve(1), txEpoch: Promise.resolve(1) },
+    };
+    const actions = { render: vi.fn(async () => dom.document.body.replaceChildren(...receiveView(ov, { state, actions }))), showToast: vi.fn() };
+    await actions.render();
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Paid"]));
+
+    entries = [second, first];
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Paid twice"]));
+    expect(dom.document.body.querySelectorAll(".request-payment button").map(visibleText)).toContain("Send back");
+  });
+
   it("reads the shielded history again as it looks, once the notes synced since, for a request to the shielded address", async () => {
     // Codex's: kept open, Receive read only the public history again.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

@@ -123,7 +123,7 @@ export function sentSteps(sent, ov) {
   }
   if (phase === "sending") {
     return [
-      { label: "Sending", state: "current", sub: "Signing it and handing it to the network" },
+      { label: "Sending", state: "current", sub: offline() ? "No connection. It can't reach the network until you're back online." : "Signing it and handing it to the network" },
       { label: "Sent to the network", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];

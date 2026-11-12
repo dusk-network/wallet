@@ -2178,6 +2178,28 @@ describe("a payment made already", () => {
     expect(note()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
   });
 
+  // Sofía's: a request link paid once, pasted again, said nothing on the form, and on
+  // Review "to Your profile Profile 1".
+  it("is said on the form as a pasted link fills it in, and names another profile of the wallet's by its name", async () => {
+    const at = Date.now() - 60_000;
+    // Profile 2's account, a key a link can pay.
+    const twoProfiles = overview({ accounts: [OWN.account, BOB.account] });
+    const paid = [sentRecord({ to: BOB.account, submittedAt: at })];
+    const state = { route: "send", draft: null, addressBook: { loaded: true, items: [] } };
+    const form = mount(state, { ...twoProfiles, txs: paid });
+    const note = () => {
+      const el = dom.document.body.querySelector(".send-again");
+      return el && isShown(el) ? visibleText(el) : "";
+    };
+    form.to.dispatchEvent(fakeEvent("paste", { clipboardData: { getData: () => `dusk:${BOB.account}?amount=0.013&memo=Order%201044` } }));
+    await settle();
+    expect(form.to.value).toBe(BOB.account);
+    expect(note()).toBe(`You sent 0.013 DUSK to Profile 2 with this memo at ${clockText(at)}.`);
+
+    confirm(draft({ to: BOB.account }), paid, twoProfiles);
+    expect(again()).toBe(`You sent 0.013 DUSK to Profile 2 with this memo at ${clockText(at)}.`);
+  });
+
   it("is said of the same memo whenever it went, and of the same payment without one only moments after", () => {
     const yesterday = Date.now() - 24 * 60 * 60_000;
     confirm(draft(), [sentRecord({ submittedAt: yesterday })]);

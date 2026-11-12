@@ -327,6 +327,21 @@ describe("after Confirm", () => {
     expect(rows().at(-1)).toBe("Network fee0.002136028 DUSK");
   });
 
+  // Amélie's: offline while Sending, nothing said a word of the connection.
+  it("says there's no connection while it's being sent offline, as it does while it waits for its block", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    const sending = await app.confirm();
+    expect(steps()[0]).toEqual(["current", "Sending", "Signing it and handing it to the network"]);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    app.draw();
+    expect(steps()[0]).toEqual(["current", "Sending", "No connection. It can't reach the network until you're back online."]);
+    sending.resolve({ error: { message: "NetworkError when attempting to fetch resource." } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", "Couldn't reach the network. No fee was charged."]);
+  });
+
   it("says there's no connection while a send waits for its block offline, not how long blocks take", async () => {
     const state = reviewState();
     const app = popup(state);

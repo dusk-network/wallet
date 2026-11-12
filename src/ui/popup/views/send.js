@@ -403,6 +403,8 @@ export function sendFormView(ov, { state, actions } = {}) {
     sayRefused();
     sayFilled(nextDraft.filledFrom);
     updateToType();
+    // A request paid already says so as it fills the form, as when it opened Send.
+    sayAgain();
 
     return true;
   };
@@ -1288,7 +1290,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         h(
           "div",
           { class: "callout-title" },
-          sentAgainWords(ov, { lux: safeBigInt(d.amountLux, 0n), masked: Boolean(d.amountMasked), to: toAddr, memo: String(d.memo ?? ""), name: own ? "" : contactName() || duskName?.name || "", time: madeAgain.time })
+          // Another profile of this wallet's by its own name, as the form says it: "to Profile 1".
+          sentAgainWords(ov, { lux: safeBigInt(d.amountLux, 0n), masked: Boolean(d.amountMasked), to: toAddr, memo: String(d.memo ?? ""), name: own ? "" : ownProfileName(ov, toAddr) || contactName() || duskName?.name || "", time: madeAgain.time })
         ),
       ])
     : null;
