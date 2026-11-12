@@ -155,24 +155,36 @@ test("keeps a contact's address at the field's whole width, its chip on a line a
   });
   const chip = page.locator(".to-input-wrap .to-chip");
   await expect(chip).toContainText("Chen Studio Lumen");
-  const to = page.locator(".to-input-wrap textarea");
-  const box = await to.evaluate((el) => {
-    const style = getComputedStyle(el);
-    const field = el.getBoundingClientRect();
-    return {
-      textWidth: el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
-      fieldWidth: field.width,
-      textTop: field.top + parseFloat(style.paddingTop),
-      lines: Math.round((el.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / parseFloat(style.lineHeight)),
-      hidden: el.scrollHeight - el.clientHeight,
-    };
-  });
-  const chipBox = await chip.boundingBox();
-  // The chip over the text, not beside it; the address across the field, on a few lines, all of it in view.
-  expect(chipBox.y + chipBox.height).toBeLessThanOrEqual(box.textTop + 1);
-  expect(box.textWidth).toBeGreaterThan(box.fieldWidth * 0.8);
-  expect(box.lines).toBeLessThanOrEqual(5);
-  expect(box.hidden).toBeLessThanOrEqual(1);
+  await expect(chip).toBeVisible();
+  // Send is drawn again as the history comes in, its field and chip anew: the two are measured together, in the
+  // page, from what's drawn then, and again till that holds. Measured one after the other, the chip could be the
+  // one just taken away.
+  await expect(async () => {
+    const box = await page.evaluate(() => {
+      const el = document.querySelector(".to-input-wrap textarea");
+      const badge = el?.closest(".to-input-wrap")?.querySelector(".to-chip");
+      if (!el || !badge || badge.hidden) return null;
+      const style = getComputedStyle(el);
+      const field = el.getBoundingClientRect();
+      const chipBox = badge.getBoundingClientRect();
+      return {
+        chipBottom: chipBox.bottom,
+        chipHeight: chipBox.height,
+        textWidth: el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        fieldWidth: field.width,
+        textTop: field.top + parseFloat(style.paddingTop),
+        lines: Math.round((el.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / parseFloat(style.lineHeight)),
+        hidden: el.scrollHeight - el.clientHeight,
+      };
+    });
+    expect(box).not.toBeNull();
+    expect(box.chipHeight).toBeGreaterThan(0);
+    // The chip over the text, not beside it; the address across the field, on a few lines, all of it in view.
+    expect(box.chipBottom).toBeLessThanOrEqual(box.textTop + 1);
+    expect(box.textWidth).toBeGreaterThan(box.fieldWidth * 0.8);
+    expect(box.lines).toBeLessThanOrEqual(5);
+    expect(box.hidden).toBeLessThanOrEqual(1);
+  }).toPass();
 });
 
 // Chen's: an x between two digits drawn as a ×, by the font's contextual alternates.
