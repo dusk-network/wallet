@@ -2,9 +2,9 @@
 // device (shared/paymentRequests.js), each marked by what came in after it
 // (app-core's matchRequests) in the words the web wallet uses: Waiting, Paid,
 // Check, or Paid twice, with each payment to open in Activity: read back to
-// the oldest request not paid, past the page Activity shows. While one waits,
+// the oldest request not paid, past the page Activity shows. While they show,
 // the history is read again every 30 seconds, as the web wallet does, the
-// shielded too once its notes synced.
+// shielded too once its notes synced: one paid can be paid again.
 
 import { formatDuskPlain } from "@dusk-network/app-core/amounts";
 import { makePaymentLink } from "@dusk-network/app-core/payment-links";
@@ -305,8 +305,9 @@ export function requestsSection(ov, { state, actions } = {}) {
       .then((list) => requestKept(state, list))
       .catch(() => {});
   }
-  const waiting = mine.filter((request) => matches.get(request.id)?.state !== "paid");
-  if (waiting.length) lookSoon(state, actions, { shielded: waiting.some((request) => address && request.to === address) });
+  // While a request shows, what comes in for it is looked for: one waiting, and
+  // one paid, which can be paid again.
+  if (mine.length) lookSoon(state, actions, { shielded: mine.some((request) => address && request.to === address) });
   const hidden = balancesHidden(ov);
   const refunds = refundsOf(mine, matches, rows);
   // A request's link, as it was copied: on the network it was made on, this one.

@@ -76,6 +76,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Put revokes, and approvals no migration spent, in the export, each once, in the file of the profile its migration paid, as the web wallet does, and said whose network fees on other chains the file has and which it may be short of.
+- Said under Rewards by year, in the web wallet's words, that taken out by unstaking is part of grown while held and how it's counted, and kept a year's figures while a new unstake's are read, rather than couldn't be read.
+- Asked about a profile's name that is a contact's .dusk name, naming that contact, or that starts as another profile's .dusk name, and refused look-alikes in letter pairs, as VVendy for Wendy, with app-core's one check, as the web wallet does.
+- Refused a request link whose amount isn't a plain number, as a hidden character or a # in it, or whose field names hide something or only look like a field's, rather than reading it without a word, and said a memo's line break in the web wallet's words.
+- Asked "Is that 1 or 1000?" of a lone point or comma before three digits in every language, as "1.000" on an English phone, and filled Max with a fourth decimal where three would ask.
+- Booked a transfer to BNB Smart Chain or Ethereum in the export as what reached the other side, with the bridge fee in the fee column.
+- Opened a payment from its notice in the Android app as the notice knew it, in its block, while the app reconnects, with no Not confirmed or Can't reach the network first.
+- Said one thing about notices on a phone's Sent: in Firefox, that the payment goes on if the wallet's closed but its notice comes only while it stays open; in the app, that the notice comes.
+- Opened the Android app on Send again, with what was typed, once unlocked after Android ended it in the background, and kept a draft left with Back through that too.
+- Looked a payment on Sent up by its ID once its watcher had said nothing for 20 seconds, as after a lost signal, so it says Completed when it is, and read a completed payment's fee again until Completed says it.
+- Turned a request shown in Receive to Paid twice, with Send back, as a second payment comes in: Receive looks again every 30 seconds while it shows, paid or not.
+- Said a request was paid already on Send's form as soon as a link fills it in, pasted or opened, not only on Review, and named another profile of the wallet's by its own name there.
+- Said there's no connection on a send's Sending step while the browser is offline.
+- Kept every letter typed in Activity's search and Send's fields on a phone, in their order, by drawing the screen again only once the typing stops.
+- Refused a site's dusk_getPublicBalance for an account or profile it isn't connected to, rather than answering with the connected profile's balance.
+- Opened Home on reloading the extension's tab after a request link was paid or left, rather than the same payment filled in again.
+- Dropped what a link or a QR code filled in once Send is left, rather than bringing it back in the next Send, and its Filled in from line once another recipient is picked in Contacts.
+- Typed a recovery phrase's words on a phone in boxes no browser offers to keep as a password, still unseen and kept from the keyboard's learning, and emptied them, and the passwords beside them, as the screen is left.
+- Kept Firefox's offer of a strong password of its own off the wallet's password fields.
 - Measured native staking's rate over the 30 days to the last whole day of blocks, counting every stake, so it no longer moves from one block to the next and both wallets give the same figure.
 - Said Can't reach the network, and that the balance may be out of date, soon after the node stops answering while the wallet is open.
 - Kept the profile's name whole beside the network while it says Offline or Can't reach the network.

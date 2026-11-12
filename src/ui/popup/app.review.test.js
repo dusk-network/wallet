@@ -546,9 +546,10 @@ describe("a half-typed Send, left with Back", () => {
   });
 });
 
-// Astra's: a Testnet request kept with Back, Send opened again, then Mainnet: it could be paid there.
-describe("a request's Send, left with Back", () => {
-  it("keeps the request's network with it, and is refused on another network as the link is", async () => {
+describe("a request's Send", () => {
+  // Sofía's: a scanned request left with Back came back, 0.03 and its memo, in the next Send.
+  // Astra's: a Testnet request kept that way could be paid on Mainnet.
+  it("isn't kept once left with Back, and leaves nothing to pay on another network", async () => {
     let history;
     const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { history: (win) => (history = pageHistory(win)) });
     const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
@@ -558,23 +559,158 @@ describe("a request's Send, left with Back", () => {
       await flush();
       expect(t.state.route).toBe("send");
     };
-    await openSend();
     const { makePaymentLink } = await import("@dusk-network/app-core/payment-links");
-    field("To").value = makePaymentLink({ amount: "0.02", memo: "satay", network: "testnet", to: B }).dusk;
-    field("To").dispatchEvent(fakeEvent("input", { inputType: "insertFromPaste" }));
+    const pasteLink = async () => {
+      field("To").value = makePaymentLink({ amount: "0.02", memo: "satay", network: "testnet", to: B }).dusk;
+      field("To").dispatchEvent(fakeEvent("input", { inputType: "insertFromPaste" }));
+      await flush();
+      expect(values()).toEqual([B, "0.02", "satay"]);
+    };
+    await openSend();
+    await pasteLink();
+    // Edited, and Review and back, it's still the link's.
+    field("Memo").value = "satay twice";
+    field("Memo").dispatchEvent(fakeEvent("input"));
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Review").click();
     await flush();
-    expect(values()).toEqual([B, "0.02", "satay"]);
+    expect(t.state.route).toBe("confirm");
+    t.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+    await flush();
+    expect(values()).toEqual([B, "0.02", "satay twice"]);
+    expect(t.app.textContent).toContain("Filled in from the link");
     history.back();
     await flush();
+    expect(t.state.route).toBe("home");
     await openSend();
-    expect(values()).toEqual([B, "0.02", "satay"]);
+    expect(values()).toEqual(["", "", ""]);
+    expect(t.app.textContent).not.toContain("Filled in from");
 
+    await pasteLink();
     // Mainnet, the form still open: nothing of the request stays to pay there.
     t.open = { ...t.open, nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" };
     await t.render({ forceRefresh: true });
     await flush();
     expect([t.state.route, ...values()]).toEqual(["send", "", "", ""]);
     expect(t.app.textContent).toContain("This request is for Testnet. You are on Mainnet.");
+  });
+});
+
+// The page's history with each entry's address, as a browser keeps it: an
+// entry pushed takes the address shown, replaceState rewrites the one it's on,
+// Back and go() move with a popstate, and `location` (what a reload opens) is
+// the address of the entry it's on.
+function addressedHistory(win, first) {
+  const entries = [{ state: null, url: first }];
+  let at = 0;
+  const shown = () => new URL(entries[at].url, "moz-extension://wallet");
+  vi.stubGlobal("location", {
+    get pathname() {
+      return shown().pathname;
+    },
+    get search() {
+      return shown().search;
+    },
+  });
+  return {
+    closed: false,
+    get state() {
+      return entries[at].state;
+    },
+    get at() {
+      return at;
+    },
+    get url() {
+      return entries[at].url;
+    },
+    get urls() {
+      return entries.map((entry) => entry.url);
+    },
+    pushState(state, _title, url) {
+      entries.splice(at + 1, Infinity, { state, url: url ?? entries[at].url });
+      at++;
+    },
+    replaceState(state, _title, url) {
+      entries[at] = { state, url: url ?? entries[at].url };
+    },
+    back() {
+      this.go(-1);
+    },
+    go(delta) {
+      if (at + delta < 0) {
+        this.closed = true;
+        return;
+      }
+      at += delta;
+      setTimeout(() => win.dispatchEvent(fakeEvent("popstate", { state: entries[at].state })), 0);
+    },
+  };
+}
+
+// Amélie's: after paying a link and Done, or after Back from its Send, pulling the
+// page down brought the same payment back, filled in: the wallet's entries for
+// the phone's Back kept the link in their address, and Done stepped back onto one.
+describe("a request link the extension's tab opened with", () => {
+  const opened = async () => {
+    const { makePaymentLink } = await import("@dusk-network/app-core/payment-links");
+    const link = makePaymentLink({ amount: "0.02", memo: "Cadeau", network: "testnet", to: B }).https;
+    let history;
+    const t = await popupOn("send", { addressBook: { loaded: true, items: [] } }, undefined, {
+      history: (win) => (history = addressedHistory(win, `/full.html?route=send&link=${encodeURIComponent(link)}`)),
+    });
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.02", "Cadeau"]);
+    return { t, history, button: (text) => t.app.querySelectorAll("button").find((b) => b.textContent === text) };
+  };
+  // Pulling the page down: it opens again at the address it's on.
+  const reloaded = async () => {
+    vi.resetModules();
+    const { state } = await import("./state.js");
+    return [state.route, state.draft];
+  };
+  const settled = async () => {
+    await flush();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flush();
+  };
+
+  it("is off the page's address once it's paid and Done, from every entry it comes back to", async () => {
+    const { t, history, button } = await opened();
+    button("Review").click();
+    await settled();
+    pastClickGuard();
+    button("Confirm").click();
+    await settled();
+    expect(t.state.route).toBe("sent");
+    button("Done").click();
+    await settled();
+
+    expect(t.state.route).toBe("home");
+    expect(history.url).toBe("/full.html");
+    expect(await reloaded()).toEqual(["home", null]);
+  });
+
+  it("is off it once its Send is left with Back, and stays while it's paid", async () => {
+    const { t, history, button } = await opened();
+    // Review and back to the form: still the link's.
+    button("Review").click();
+    await settled();
+    button("← Back").click();
+    await settled();
+    expect(t.state.route).toBe("send");
+    expect(history.url).toContain("link=");
+
+    button("← Back").click();
+    await settled();
+    expect(t.state.route).toBe("home");
+    expect(history.url).toBe("/full.html");
+    expect(await reloaded()).toEqual(["home", null]);
+
+    // Firefox's Forward, onto an entry the wallet put up for Review: no link there either.
+    expect(history.urls.at(-1)).toContain("link=");
+    history.go(history.urls.length - 1 - history.at);
+    await settled();
+    expect(history.url).not.toContain("link=");
+    expect(await reloaded()).toEqual(["home", null]);
   });
 });
 
@@ -613,6 +749,53 @@ describe("coming back to the wallet during a payment", () => {
     await flush();
     expect(t.app.textContent).toContain("In block 4,823,435");
     expect(t.app.textContent).not.toContain("Looking it up again…");
+  });
+
+  // Amélie's, in Firefox for Android: back online, she confirmed again, and Sent said "Waiting
+  // for a block" for 4.5 minutes, the payment long in its block: its watcher never answered.
+  it("looks the payment up by its ID once its watcher has said nothing for 20 seconds", async () => {
+    const HASH = "9d".repeat(32);
+    const t = await popupOn(
+      "sent",
+      { addressBook: { loaded: true, items: [] }, sent: { phase: "sent", status: "submitted", hash: HASH, title: "Send", amountLux: "10000000", feeCapLux: "2500000", sentAt: Date.now() - 21_000, startedAt: Date.now() - 22_000 } },
+      async (message, t) => {
+        if (message.type === "DUSK_UI_RECHECK_TX" && message.hash === HASH) {
+          t.open = { ...t.open, txs: [{ hash: HASH, status: "executed", submittedAt: Date.now() - 21_000, feePaid: "1856521", blockHeight: "4831109" }] };
+          return { ok: true };
+        }
+        return undefined;
+      }
+    );
+    await vi.waitFor(() => expect(t.app.textContent).toContain("In block 4,831,109"));
+    expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH]);
+    expect(t.app.textContent).toContain("0.001856521");
+  });
+
+  // Lena's: Completed, in its block, said "Network fee Up to 0,0025 DUSK" 47 s after the
+  // connection came back: the node hadn't answered with its fee as it completed.
+  it("reads a completed payment's fee again once the connection is back, and says it", async () => {
+    const HASH = "9c".repeat(32);
+    let fee = null;
+    const t = await popupOn(
+      "sent",
+      { addressBook: { loaded: true, items: [] }, sent: { phase: "sent", status: "executed", hash: HASH, title: "Send", amountLux: "10000000", feeCapLux: "2500000", blockHeight: "4833511", sentAt: Date.now(), startedAt: Date.now() } },
+      async (message, t) => {
+        if (message.type === "DUSK_UI_RECHECK_TX" && message.hash === HASH) {
+          fee = "1856956";
+          t.open = { ...t.open, txs: [{ hash: HASH, status: "executed", submittedAt: Date.now() - 30_000, feePaid: fee, blockHeight: "4833511" }] };
+          return { ok: true };
+        }
+        return undefined;
+      }
+    );
+    t.open = { ...t.open, txs: [{ hash: HASH, status: "executed", submittedAt: Date.now() - 30_000, blockHeight: "4833511" }] };
+    await t.render({ forceRefresh: true });
+    expect(t.app.textContent).toContain("Up to 0.0025");
+
+    t.dom.window.dispatchEvent(fakeEvent("online"));
+    await vi.waitFor(() => expect(t.app.textContent).toContain("0.001856956"));
+    expect(t.app.textContent).not.toContain("Up to 0.0025");
+    expect(fee).toBe("1856956");
   });
 
   it("looks the payment up by its ID, and says Completed with its real fee, though nothing was heard while away", async () => {
@@ -659,6 +842,146 @@ function tauriBridge(answers = {}) {
 
 describe("the app on a phone", () => {
   const LINK = `dusk:public-${B}@dusk:2?amount=0.01&memo=Deep+link+test`;
+
+  // Astra's: Android ended the app with a Send a link filled in open. Back, it opened on that Send, and
+  // left with Back, the link's payment came back in the next Send begun by hand, as one typed would.
+  it("opens on a link's Send again after Android ended the app, and keeps none of it for the next Send", async () => {
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k) });
+    const field = (t, name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const values = (t) => ["To", "Amount", "Memo"].map((name) => field(t, name)?.value);
+    const filled = { to: B, amountDusk: "0.01", memo: "Deep link test", requestChainId: "dusk:2", filledFrom: "link", filledIn: true };
+    const open = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: filled }, undefined, { tauri: tauriBridge() });
+    open.dom.document.visibilityState = "hidden";
+    open.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+
+    // Android ends the app; opened again, it's on that Send, as the link filled it in.
+    const back = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    expect(back.state.route).toBe("send");
+    expect(values(back)).toEqual([B, "0.01", "Deep link test"]);
+    expect(back.app.querySelector(".send-filled-note")?.textContent).toContain("Filled in from the link");
+
+    // Left with Back: the next Send, begun by hand on Home, is empty.
+    back.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+    await flush();
+    expect(back.state.route).toBe("home");
+    back.app.querySelectorAll("button.action-btn").find((b) => b.textContent.trim() === "Send").click();
+    await flush();
+    expect(back.state.route).toBe("send");
+    expect(values(back)).toEqual(["", "", ""]);
+  });
+
+  // Lena's: Send half typed, Home, and Android ended the app in the background: back,
+  // it opened on Home with Send empty, 3 times out of 3.
+  it("opens on Send again with what was typed, once unlocked, after Android ended it in the background", async () => {
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k) });
+    const field = (t, name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const values = (t) => ["To", "Amount", "Memo"].map((name) => field(t, name)?.value);
+    const typed = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    for (const [name, value] of [["To", B], ["Amount", "0,02"], ["Memo", "satay"]]) {
+      field(typed, name).value = value;
+      field(typed, name).dispatchEvent(fakeEvent("input"));
+    }
+    typed.dom.document.visibilityState = "hidden";
+    typed.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    expect(JSON.stringify([...kept.values()])).not.toMatch(/password/i);
+
+    // Android ends the app; opened again, it's a new page, on Home.
+    const back = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    expect(back.state.route).toBe("send");
+    expect(values(back)).toEqual([B, "0,02", "satay"]);
+
+    // Left with Back, it's kept for Send, but the app opens on Home after that.
+    back.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+    await flush();
+    const later = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    expect(later.state.route).toBe("home");
+  });
+
+  // Chen's: a tap on "Your payment arrived" showed a red "Can't reach the network", then "Not
+  // confirmed" and "Up to 0.0025", then Completed: the notice knew it had arrived, and its block.
+  it("opens a notice's payment as the notice knew it, and says the network is being checked while it reconnects", async () => {
+    const HASH = "9b".repeat(32);
+    const TOKEN = "c4".repeat(16);
+    const record = { hash: HASH, kind: "transfer", privacy: "public", to: B, amount: "10000000", status: "unknown", submittedAt: Date.now() - 60_000, profileIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network" };
+    let opened = { hash: "" };
+    const bridge = tauriBridge({ notices: (args) => (args?.action === "opened" ? { allowed: true, ...opened } : { allowed: true }) });
+    const answer = async (message, t) => {
+      // The wallet takes a tap as its notice's only with the token it gave that send's notice.
+      if (message.type === "DUSK_UI_TX_NOTICED") {
+        if (message.hash !== HASH || message.token !== TOKEN) return { ok: true, result: null };
+        t.open = { ...t.open, txs: [{ ...record, status: message.status, blockHeight: message.blockHeight }] };
+        return { ok: true, result: { patched: true } };
+      }
+      // The node doesn't answer yet as the app comes back: Android cut its network while away.
+      if (message.type === "DUSK_UI_CHECK_NODE" || message.type === "DUSK_UI_RECHECK_TX") return new Promise(() => {});
+      return undefined;
+    };
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, answer, { tauri: bridge });
+    const make = (tag, props = {}) => Object.assign(t.dom.document.createElement(tag), props);
+    const pill = make("button", { id: "network-pill" });
+    pill.appendChild(make("span", { className: "network-pill__label" }));
+    t.dom.document.body.prepend(pill);
+    // What was read while the app was away: the node offline, the send not heard of.
+    t.open = { ...t.open, txs: [record], networkStatus: { nodeStatus: "offline", nodeUrl: t.open.nodeUrl } };
+    const comeBack = async () => {
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+
+    // Astra's: any app can open the wallet as a tap would, with a send's ID it learned and an outcome of
+    // its own. Without the notice's token, or with another, it opens nothing and says nothing of the send.
+    for (const forged of [{ hash: HASH, outcome: "failed", block: 1 }, { hash: HASH, outcome: "failed", block: 1, token: "d5".repeat(16) }]) {
+      opened = forged;
+      await comeBack();
+      await flush();
+      expect(t.state.route).toBe("home");
+    }
+    expect(t.asked("DUSK_UI_TX_NOTICED")).toEqual([expect.objectContaining({ hash: HASH, token: "d5".repeat(16) })]);
+
+    opened = { hash: HASH, outcome: "executed", block: 4831109, token: TOKEN };
+    await comeBack();
+    await vi.waitFor(() => expect(t.state.route).toBe("tx"));
+    await flush();
+    expect(t.asked("DUSK_UI_TX_NOTICED").at(-1)).toEqual(expect.objectContaining({ hash: HASH, token: TOKEN, status: "executed", blockHeight: "4831109" }));
+    expect(t.app.textContent).not.toContain("Not confirmed");
+    expect(t.app.textContent).not.toContain("stopped waiting");
+    expect(t.dom.document.querySelector(".network-word")?.textContent ?? "").not.toContain("Can't reach the network");
+    opened = { hash: "" };
+  });
+
+  it("opens on Home after it was ended with Send open but sent, or for another profile", async () => {
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k) });
+    const typed = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: { to: B, amountDusk: "0.02", memo: "satay" } }, undefined, { tauri: tauriBridge() });
+    typed.dom.document.visibilityState = "hidden";
+    typed.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    // Opened on another profile: not its Send.
+    const profileTwo = async (message, t) => (message.type === "DUSK_UI_OVERVIEW" ? { ...t.open, selectedAccountIndex: 1 } : undefined);
+    const other = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, profileTwo, { tauri: tauriBridge() });
+    expect(other.state.route).toBe("home");
+
+    // Sent from the Send it opened on: nothing is kept for the next start.
+    const t = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: { to: B, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } }, undefined, { tauri: tauriBridge() });
+    t.state.route = "confirm";
+    await t.render();
+    await flush();
+    t.dom.document.visibilityState = "hidden";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    t.dom.document.visibilityState = "visible";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await flush();
+    pastClickGuard();
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await flush();
+    expect(t.asked("DUSK_UI_SEND_TX")).toHaveLength(1);
+    const after = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    expect(after.state.route).toBe("home");
+  });
 
   // Chen's wish: lock when I leave the app, as phone wallets' Auto-lock: Immediately.
   it("locks as the person leaves it with Auto-lock: Immediately, not for the share sheet, and not otherwise", async () => {
@@ -776,6 +1099,43 @@ describe("the app on a phone", () => {
     expect(["Amount", "Memo"].map((name) => request.querySelectorAll("input").find((f) => accessibleName(f) === name).value)).toEqual(["0.05", "Chicken rice Tue"]);
   });
 
+  // Astra's: with Immediately on, a Send a link filled in came back empty from the lock: its password
+  // was asked on Home, and what the link filled in went as if its Send had been left.
+  it("returns after Immediately's lock to a Send a link filled in, with what the link filled in", async () => {
+    const locks = async (message, t) => {
+      if (message.type === "DUSK_UI_LOCK") {
+        t.open = { ...t.open, isUnlocked: false };
+        t.deliver({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
+        return { ok: true };
+      }
+      if (message.type === "DUSK_UI_UNLOCK") {
+        t.open = { ...t.open, isUnlocked: true };
+        return { ok: true };
+      }
+      return undefined;
+    };
+    const filled = { to: B, amountDusk: "0.01", memo: "Deep link test", requestChainId: "dusk:2", filledFrom: "link", filledIn: true };
+    const t = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: filled }, locks, { tauri: tauriBridge() });
+    t.open = { ...t.open, lockOnLeave: true };
+    await t.render({ forceRefresh: true });
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.01", "Deep link test"]);
+
+    t.dom.document.visibilityState = "hidden";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await flush();
+    t.dom.document.visibilityState = "visible";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await flush();
+    expect(t.asked("DUSK_UI_LOCK")).toHaveLength(1);
+    t.app.querySelector("#unlock-password").value = "the password";
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
+    await flush();
+    expect(t.state.route).toBe("send");
+    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.01", "Deep link test"]);
+    expect(t.app.querySelector(".send-filled-note")?.textContent).toContain("Filled in from the link");
+  });
+
   it("opens Send filled in from a dusk: link it was opened with, and from one opened while it runs", async () => {
     const bridge = tauriBridge({ "plugin:deep-link|get_current": [LINK] });
     const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge });
@@ -866,3 +1226,40 @@ describe("the phone's Back in the app, as Android hands it over", () => {
   });
 });
 
+
+// Chen's, in Firefox for Android: Activity's search typed quickly kept "sa" of
+// "satay": each letter drew the screen again, and a field swapped under a
+// phone's keyboard loses what it's composing. Once, an amount came out "002.".
+describe("a field typed in while the wallet draws its screen again", () => {
+  it("stays the field typed in, with what's typed, till the typing stops; the screen follows then", async () => {
+    const t = await popupOn("activity", { addressBook: { loaded: true, items: [] } });
+    const search = () => t.app.querySelector(".activity-search");
+    const field = search();
+    field.focus();
+    for (const typed of ["s", "sa", "sat", "sata", "satay"]) {
+      field.value = typed;
+      field.dispatchEvent(fakeEvent("input"));
+      // A poll draws the screen again meanwhile, too.
+      await t.render({ forceRefresh: true });
+    }
+    await flush();
+    expect([search(), field.value, t.dom.document.activeElement]).toEqual([field, "satay", field]);
+
+    // Once the typing stops, the screen is drawn from what was typed.
+    await vi.waitFor(() => expect(search()).not.toBe(field), { timeout: 3000 });
+    expect([search().value, t.dom.document.activeElement]).toEqual(["satay", search()]);
+    expect(t.app.textContent).toContain("Nothing in your activity matches that.");
+  });
+
+  it("is drawn again at once on another wallet or a lock, typed in or not", async () => {
+    const t = await popupOn("activity", { addressBook: { loaded: true, items: [] } });
+    const field = t.app.querySelector(".activity-search");
+    field.focus();
+    field.value = "sa";
+    field.dispatchEvent(fakeEvent("input"));
+    t.open = { ...t.open, isUnlocked: false };
+    await t.render({ forceRefresh: true });
+    await flush();
+    expect(t.app.contains(field)).toBe(false);
+  });
+});

@@ -146,7 +146,7 @@ describe("profile names", () => {
       [1, "Profile 2", "Your other profile is called Profile 2. Choose another name."],
       // Sofía's: the first profile by its own name too, and its .dusk name in look-alike letters (a Cyrillic а).
       [2, "Profile 1", "Your other profile is called Profile 1. Choose another name."],
-      [2, "\u0430lice.dusk", "That looks like the name of your other profile alice.dusk. Choose another name."],
+      [2, "\u0430lice.dusk", "That looks like alice.dusk, one of your other profiles. Choose another name."],
       [2, "Marta", "You have a contact called Marta. Choose another name."],
       // A Cyrillic М.
       [2, "\u041carta", "That looks like your contact Marta. Choose another name."],
@@ -163,6 +163,46 @@ describe("profile names", () => {
     label(2).dispatchEvent(fakeEvent("blur"));
     await settle();
     expect([shownError(2), setAccountName.mock.calls.at(-1)]).toEqual(["", [ACCOUNTS[0], 1, "Spending"]]);
+    listAddressBook.mockResolvedValue([]);
+  });
+
+  // Marek's: Profile 2 named alice.dusk, Wendy's .dusk name, was saved, the question naming another
+  // contact; Sofía's: "sofiadesign.dusk cliente" saved without a word, and then read as her;
+  // "VVendy" and "Davicl" passed for Wendy and David. Both wallets now ask app-core the same.
+  it("ask about a name that is a contact's .dusk name or starts as a profile's, naming whose, and refuse look-alikes in letter pairs", async () => {
+    const WENDY = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+    listAddressBook.mockResolvedValue([
+      { id: "w", name: "Wendy", address: WENDY, duskName: "wendy.dusk" },
+      { id: "d", name: "David", address: `${WENDY.slice(0, -1)}U` },
+    ]);
+    setAccountName.mockClear();
+    await settings();
+    const shownError = (n) => {
+      const id = label(n).getAttribute("aria-describedby");
+      return id ? dom.document.getElementById(id).textContent : "";
+    };
+    const question = (n) => label(n).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.textContent);
+    const name = async (n, typed) => {
+      typeInto(label(n), typed);
+      label(n).dispatchEvent(fakeEvent("blur"));
+      await settle();
+    };
+
+    await name(2, "wendy.dusk");
+    expect([question(2), setAccountName.mock.calls.at(-1)]).toEqual([["You have a contact called Wendy, at wendy.dusk. Is this someone else?"], [ACCOUNTS[0], 1, "wendy.dusk"]]);
+    // The first profile goes by its verified .dusk name.
+    await name(2, "alice.dusk cliente");
+    expect([question(2), setAccountName.mock.calls.at(-1)]).toEqual([["Your other profile is called alice.dusk. Is this someone else?"], [ACCOUNTS[0], 1, "alice.dusk cliente"]]);
+
+    setAccountName.mockClear();
+    for (const [typed, said] of [
+      ["VVendy", "That looks like your contact Wendy. Choose another name."],
+      ["Davicl", "That looks like your contact David. Choose another name."],
+    ]) {
+      await name(2, typed);
+      expect(shownError(2), typed).toBe(said);
+    }
+    expect(setAccountName).not.toHaveBeenCalled();
     listAddressBook.mockResolvedValue([]);
   });
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { passwordManagerView } from "./testing/passwordManager.js";
 import {
   onboardingCreateConfirmView,
   onboardingCreatePasswordView,
@@ -543,6 +544,75 @@ describe("removing a wallet, and a new password", () => {
 
 // Fingerprint unlock in the app on Android, as phone wallets have it: the
 // app's `fingerprint` command (android/KeystorePlugin.kt) answers here.
+// Marek's, in Firefox for Android: leaving Import, Firefox offered to keep a
+// recovery word's box as a password; Chen's: its "Use strong password?" came
+// up over Import. And on a computer, a word's box before the password would
+// be the username Firefox keeps it with.
+describe("the recovery words and passwords, as a browser's password manager reads them", () => {
+  const ov = {
+    isUnlocked: true,
+    wallets: [
+      { key: "k1", n: 1, name: "", accounts: ["acct1"], active: true },
+      { key: "k2", n: 2, name: "Savings", accounts: ["acct2"], active: false },
+    ],
+  };
+  const acts = () => ({ send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn() });
+  const onboard = (over = {}) => ({ mode: "import", mnemonic: null, password: "", reveal: false, ...over });
+  const SCREENS = [
+    ["Import", () => onboardingImportView({ state: { route: "onboard_import", onboard: onboard() }, actions: acts() })],
+    ["Add wallet's import", () => onboardingImportView({ state: { route: "wallet_add_import", onboard: onboard({ adding: true }) }, actions: acts(), adding: true, ov: TWO })],
+    ["the restore", () => restoreWalletView({ state: { route: "restore" }, actions: acts() })],
+    ["Create's password", () => onboardingCreatePasswordView({ state: { route: "onboard_create_password", onboard: onboard({ mode: "create" }) }, actions: acts() })],
+    ["Create's words, confirmed", () => onboardingCreateConfirmView({ state: { route: "onboard_create_confirm", onboard: onboard({ mode: "create", mnemonic: MNEMONIC, password: "x".repeat(8) }) }, actions: acts() })],
+    ["Add wallet's new phrase, confirmed", () => onboardingCreateConfirmView({ state: { route: "wallet_add_confirm", onboard: onboard({ mode: "create", mnemonic: MNEMONIC, adding: true }) }, actions: acts(), adding: true })],
+    ["Change password", () => changePasswordView(ov, { state: { route: "change_password" }, actions: acts() })],
+    ["Remove wallet", () => removeWalletView(ov, { state: { route: "wallet_remove", walletRemove: "k2" }, actions: acts() })],
+  ];
+  const DEVICES = [
+    ["Firefox for Android", "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0"],
+    ["Firefox on a computer", "Mozilla/5.0 (X11; Linux x86_64; rv:159.0) Gecko/20100101 Firefox/159.0"],
+  ];
+  const wordBoxes = (body) => body.querySelectorAll(".mnemonic-input input");
+
+  it.each(DEVICES.flatMap(([device, agent]) => SCREENS.map(([screen, view]) => [screen, device, agent, view])))(
+    "%s in %s: no word is a password, or a password's username, and no password field gets a password of the browser's",
+    (_, __, agent, view) => {
+      vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: agent });
+      const body = show(view());
+      MNEMONIC.split(" ").forEach((word, i) => wordBoxes(body)[i] && typeInto(wordBoxes(body)[i], word));
+      for (const pwd of body.querySelectorAll("input[type=password]")) typeInto(pwd, "long enough");
+      // Shown and hidden again on a phone, never a password box either.
+      const show_ = body.querySelectorAll("button").find((b) => b.textContent === "Show words");
+      show_?.click();
+      show_?.click();
+
+      for (const { field: pwd, username, offersPassword } of passwordManagerView(dom.document)) {
+        expect(pwd.closest(".mnemonic-input"), accessibleName(pwd)).toBeNull();
+        expect(username?.closest(".mnemonic-input") ?? null, accessibleName(pwd)).toBeNull();
+        expect(offersPassword, accessibleName(pwd)).toBe(false);
+      }
+      // The words are a form of their own.
+      for (const box of wordBoxes(body)) expect(box.closest("form")?.classList.contains("mnemonic-input")).toBe(true);
+    }
+  );
+
+  // Firefox for Android gives a screen reader nothing inside a box laid out with display: contents: in a password's
+  // form so, the fields, their captions and errors went unread on the phone. The form is a box of its own, a column
+  // with its row's gap, which looks as the fields did without it.
+  it("lays a password's form out as a box of its own that a screen reader reads into", async () => {
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
+    expect(css.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/display:\s*contents/);
+    expect(rule("form.password-form")).toMatch(/display: block;\s*margin: 0;/);
+    expect(rule(".row > form.password-form")).toMatch(/display: flex;\s*flex-direction: column;\s*gap: inherit;/);
+    expect(rule(".row")).toMatch(/display: flex;\s*flex-direction: column;\s*gap: 10px;/);
+    // Each screen's password forms sit in a row of fields.
+    for (const [screen, view] of SCREENS) {
+      for (const form of show(view()).querySelectorAll("form.password-form")) expect(form.parentNode?.classList?.contains("row"), screen).toBe(true);
+    }
+  });
+});
+
 describe("fingerprint unlock", () => {
   const actions = (reply = {}) => ({ send: vi.fn(async () => reply), render: vi.fn(async () => {}), showToast: vi.fn() });
   // The phone: `on` with a fingerprint kept, and what each prompt answers.

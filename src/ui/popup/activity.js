@@ -38,8 +38,9 @@ import { keepMeasure, keptMeasure } from "./keptMeasures.js";
 /** Rows read for the History view at first, and how many more Show more adds. */
 export const ACTIVITY_PAGE = 50;
 // Routes that show Activity, and Receive for what came in for its requests: a sync step redraws only these.
-// The views that show activity; and the Sent screen, which says what a stake with Sozu got once its row comes.
-const ROUTES = new Set(["home", "activity", "tx", "receive", "sent"]);
+// The views that show activity; the Sent screen, which says what a stake with Sozu got once its row comes;
+// and Send, which says a payment was made already as soon as the history has it.
+const ROUTES = new Set(["home", "activity", "tx", "receive", "sent", "send"]);
 // The wait after a transaction went through before the archive is asked for it.
 const AFTER_TX_MS = 10_000;
 

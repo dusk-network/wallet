@@ -37,6 +37,15 @@ import java.net.URL
 object Arrivals {
   /** The intent's extra a notice's tap carries: the transaction to open. */
   const val EXTRA_TX = "network.dusk.wallet.TX"
+  /** And what its notice knew of it: "executed" or "failed", and its block, where it knew. */
+  const val EXTRA_OUTCOME = "network.dusk.wallet.TX_OUTCOME"
+  const val EXTRA_BLOCK = "network.dusk.wallet.TX_BLOCK"
+  /**
+   * And the token the wallet gave its send's notice (src/wallet/localBus.js):
+   * any app can open the wallet with extras of its own, so the page takes a
+   * tap as its notice's only with the token kept with that send.
+   */
+  const val EXTRA_TOKEN = "network.dusk.wallet.TX_TOKEN"
 
   private const val CHANNEL = "payments"
   private const val PREFS = "dusk-wallet-arrivals"
@@ -46,6 +55,11 @@ object Arrivals {
   // Waits between looks: soon, then less often.
   private val DELAYS = longArrayOf(15_000, 30_000, 60_000, 120_000, 300_000, 600_000, 900_000)
   private val HASH = Regex("^[0-9a-f]{64}$")
+  private val TOKEN = Regex("^[0-9a-f]{32}$")
+
+  /** A transaction's ID and a notice's token as the wallet writes them: anything else a tap brings is no notice's. */
+  fun isHash(text: String) = HASH.matches(text)
+  fun isToken(text: String) = TOKEN.matches(text)
 
   private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -80,11 +94,13 @@ object Arrivals {
 
   /**
    * A notice, once for each transaction (`hash`): tapping it opens the wallet
-   * on that transaction, or on its first screen for none. False where it
-   * can't show, or showed already.
+   * on that transaction, or on its first screen for none, with what came of
+   * it (`outcome`, "executed" or "failed") and its block, where known, and
+   * the send's `token`, by which the page knows the tap is this notice's.
+   * False where it can't show, or showed already.
    */
   @Synchronized
-  fun post(context: Context, title: String, body: String, hash: String): Boolean {
+  fun post(context: Context, title: String, body: String, hash: String, outcome: String = "", block: Long = 0L, token: String = ""): Boolean {
     val notices = context.getSystemService(NotificationManager::class.java)
     if (!allowed(context) || notices == null) return false
     val told = list(context, "told")
@@ -93,7 +109,12 @@ object Arrivals {
     }
     val open = context.packageManager.getLaunchIntentForPackage(context.packageName)
       ?.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-      ?.apply { if (hash.isNotEmpty()) putExtra(EXTRA_TX, hash) }
+      ?.apply {
+        if (hash.isNotEmpty()) putExtra(EXTRA_TX, hash)
+        if (hash.isNotEmpty() && (outcome == "executed" || outcome == "failed")) putExtra(EXTRA_OUTCOME, outcome)
+        if (hash.isNotEmpty() && block > 0L) putExtra(EXTRA_BLOCK, block)
+        if (hash.isNotEmpty() && isToken(token)) putExtra(EXTRA_TOKEN, token)
+      }
     val tap = open?.let {
       PendingIntent.getActivity(context, hash.hashCode(), it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
@@ -117,9 +138,9 @@ object Arrivals {
     return true
   }
 
-  /** A send to look for while the app is away: its node, the notice for each outcome, and the wallet it's from. */
+  /** A send to look for while the app is away: its node, the notice for each outcome, the wallet it's from, and its notice's token. */
   @Synchronized
-  fun watch(context: Context, hash: String, nodeUrl: String, title: String, failTitle: String, body: String, wallet: String) {
+  fun watch(context: Context, hash: String, nodeUrl: String, title: String, failTitle: String, body: String, wallet: String, token: String) {
     if (!HASH.matches(hash) || !(nodeUrl.startsWith("https://") || nodeUrl.startsWith("http://"))) return
     val pending = list(context, "pending")
     val next = JSONArray()
@@ -135,6 +156,7 @@ object Arrivals {
         .put("failTitle", failTitle)
         .put("body", body)
         .put("wallet", wallet)
+        .put("token", if (isToken(token)) token else "")
         .put("at", System.currentTimeMillis())
     )
     keep(context, "pending", next)
@@ -205,9 +227,9 @@ object Arrivals {
     }
   }
 
-  // What the node says of `hash`: true in a block and went through, false in
-  // a block and failed, null not in a block (yet) or not heard.
-  private fun outcome(nodeUrl: String, hash: String): Boolean? {
+  // What the node says of `hash`: whether it went through, in a block, and the
+  // block (0 where the node didn't say); null not in a block (yet) or not heard.
+  private fun outcome(nodeUrl: String, hash: String): Pair<Boolean, Long>? {
     var connection: HttpURLConnection? = null
     return try {
       connection = (URL(URL(nodeUrl), "/on/graphql/query").openConnection() as HttpURLConnection).apply {
@@ -217,11 +239,11 @@ object Arrivals {
         doOutput = true
         setRequestProperty("Content-Type", "text/plain")
       }
-      connection.outputStream.use { it.write("query { tx(hash: \"$hash\") { id err } }".toByteArray(Charsets.UTF_8)) }
+      connection.outputStream.use { it.write("query { tx(hash: \"$hash\") { id err blockHeight } }".toByteArray(Charsets.UTF_8)) }
       if (connection.responseCode !in 200..299) return null
       val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
       val tx = json.optJSONObject("tx") ?: return null
-      tx.isNull("err") || tx.optString("err").isEmpty()
+      Pair(tx.isNull("err") || tx.optString("err").isEmpty(), tx.optLong("blockHeight", 0L))
     } catch (_: Exception) {
       null
     } finally {
@@ -243,11 +265,11 @@ object Arrivals {
         drop(context, hash)
         continue
       }
-      val went = outcome(entry.optString("nodeUrl"), hash) ?: continue
+      val (went, block) = outcome(entry.optString("nodeUrl"), hash) ?: continue
       // Forgotten while the node answered (its wallet reset or removed): nothing told.
       synchronized(this) {
         if (watched(context, hash)) {
-          post(context, if (went) entry.optString("title") else entry.optString("failTitle"), entry.optString("body"), hash)
+          post(context, if (went) entry.optString("title") else entry.optString("failTitle"), entry.optString("body"), hash, if (went) "executed" else "failed", block, entry.optString("token"))
           drop(context, hash)
         }
       }

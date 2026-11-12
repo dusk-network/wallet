@@ -274,12 +274,14 @@ The window shows the node's host, and calls a node a network only at the exact a
 
 ### `dusk_getPublicBalance`
 
-Get public balance. Requires connection + unlocked wallet.
+Get the connected profile's public balance. Requires connection + unlocked wallet.
 
 ```js
 const bal = await dusk.request({ method: "dusk_getPublicBalance" });
 // → { nonce: "42", value: "123000000000" }
 ```
+
+Params naming an account (`{ account }`, or the account alone) or a profile (`{ profileId }`) are taken only for the connected profile: any other is rejected with `4100`, never answered with the connected profile's balance.
 
 ---
 

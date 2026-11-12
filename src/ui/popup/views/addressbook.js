@@ -186,8 +186,12 @@ export function addressBookView(ov, { state, actions } = {}) {
   };
 
   // Picks a recipient for the screen Contacts was opened from, and goes back.
+  // Another recipient than a link or a QR code filled in, as one typed: what
+  // that request said of it, its network and "Filled in from…", goes.
   const pick = (address) => {
-    state.draft = { ...(state.draft || {}), to: address };
+    const before = state.draft || {};
+    const other = String(before.to ?? "") !== address;
+    state.draft = { ...before, to: address, ...(other ? { requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: undefined } : {}) };
     state.route = ab.pickReturnRoute || backRoute || "send";
     ab.view = "list";
     rerender();

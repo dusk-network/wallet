@@ -281,6 +281,36 @@ describe("walletReset", () => {
     await expect(txs.getTxEpoch()).resolves.toBe(epoch);
   });
 
+  // Astra's: in the app, Send's draft is kept on the phone, past a restart. A reset, or removing its wallet,
+  // left a payment's recipient, amount and memo there, for the same wallet restored to open Send on again.
+  it("forgets Send's draft with a reset, and with its wallet removed, but not another wallet's", async () => {
+    const { SEND_DRAFT_KEY } = await import("./sendDraftStore.js");
+    const draftOf = (walletId) => JSON.stringify({ owner: `${walletId} 0 https://testnet.nodes.dusk.network`, values: { to: "someone", amountDusk: "0.5", memo: "rent" }, open: true });
+    localStorage.setItem(SEND_DRAFT_KEY, draftOf("kept0"));
+    await expect(reset.forgetWalletData({ walletId: "gone0", accounts: ["gone0"] })).resolves.toBe(true);
+    expect(localStorage.getItem(SEND_DRAFT_KEY)).toBe(draftOf("kept0"));
+    localStorage.setItem(SEND_DRAFT_KEY, draftOf("gone0"));
+    await expect(reset.forgetWalletData({ walletId: "gone0", accounts: ["gone0"] })).resolves.toBe(true);
+    expect(localStorage.getItem(SEND_DRAFT_KEY)).toBeNull();
+    localStorage.setItem(SEND_DRAFT_KEY, draftOf("kept0"));
+    await reset.beginReset();
+    await reset.finishReset();
+    expect(localStorage.getItem(SEND_DRAFT_KEY)).toBeNull();
+  });
+
+  // The tokens of the app's arrival notices go with their wallet, and every one with a reset.
+  it("forgets the notices' tokens with a reset, and with their wallet removed, but not another wallet's", async () => {
+    const tokens = await import("./noticeTokens.js");
+    const [gone, kept] = [await tokens.noticeTokenFor("a1".repeat(32), "gone0"), await tokens.noticeTokenFor("a2".repeat(32), "kept0")];
+    await expect(reset.forgetWalletData({ walletId: "gone0", accounts: ["gone0"] })).resolves.toBe(true);
+    await expect(tokens.takeNoticeToken("a1".repeat(32), gone)).resolves.toBe(false);
+    await expect(tokens.takeNoticeToken("a2".repeat(32), kept)).resolves.toBe(true);
+    const again = await tokens.noticeTokenFor("a2".repeat(32), "kept0");
+    await reset.beginReset();
+    await reset.finishReset();
+    await expect(tokens.takeNoticeToken("a2".repeat(32), again)).resolves.toBe(false);
+  });
+
   it("forgets the wallets' names and the one unlocked last with a reset", async () => {
     const wallets = await import("./wallets.js");
     await wallets.noteActiveWallet("key-1", { walletId: "acct", accounts: ["acct", "acct1"] });

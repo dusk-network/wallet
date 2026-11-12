@@ -701,8 +701,9 @@ describe("send's amount", () => {
     expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
     expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK");
 
+    // Max fills a fourth decimal where three would ask "1 or 1000?", so the field reads it back as it is.
     dom.document.body.querySelector(".amount-avail button").click();
-    expect(form.amount.value).toBe("177.984");
+    expect(form.amount.value).toBe("177.9840");
     expect(form.amountError()).toBe("");
 
     typeInto(form.amount, "500");
@@ -745,7 +746,7 @@ describe("send's amount", () => {
     typeInto(last.amount, "0.0000000001");
     expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
     typeInto(last.amount, "1,234");
-    expect(last.amountError()).toBe("Is that about 1.23 or 1234? Write the one you mean.");
+    expect(last.amountError()).toBe("Is that 1.2340 or 1234? Write the one you mean.");
   });
 
   // Lena's: "1,000" asked and "1.000" didn't. In English the point is the
@@ -810,7 +811,7 @@ describe("send's amount", () => {
     typeInto(form.amount, "177.98");
     expect(form.amountError()).toBe("That's 0.001 DUSK more than your public balance, with the network fee.");
     dom.document.body.querySelector(".amount-avail button").click();
-    expect(form.amount.value).toBe("177.979");
+    expect(form.amount.value).toBe("177.9790");
 
     // Review asks that fee: Max and the fee make up the whole balance.
     form.review.click();
@@ -828,7 +829,7 @@ describe("send's amount", () => {
     // The fee isn't a balance.
     expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK");
     dom.document.body.querySelector(".amount-avail button").click();
-    expect(form.amount.value).toBe("177.984");
+    expect(form.amount.value).toBe("177.9840");
   });
 });
 
@@ -1859,6 +1860,31 @@ describe("a request link", () => {
     expect(again.amount.value).toBe("1,5");
   });
 
+  // Sofía's, in the app: Chen picked from Contacts in place of the link's recipient, and the line stayed.
+  it("stops saying it filled the recipient in once another is picked from Contacts, keeping the amount and memo", async () => {
+    const state = newState();
+    const form = mount(state);
+    paste(form, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    const filled = () => visibleText(dom.document.body.querySelector(".send-filled-note"));
+    expect(filled()).toBe("Filled in from the link, to pay on Testnet. Check it before you send.");
+
+    dom.document.body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Contacts").click();
+    await settle();
+    expect([state.route, state.addressBook.mode]).toEqual(["contacts", "pick"]);
+    Object.assign(state.addressBook, { loaded: true, loading: false, items: [{ id: "c", name: "Chen", address: BOB.account, type: "account" }] });
+    const { addressBookView } = await import("./popup/views/addressbook.js");
+    dom.document.body.replaceChildren(...addressBookView(overview(), { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
+    dom.document.body.querySelectorAll(".contact-row").find((row) => row.textContent.includes("Chen")).click();
+    expect(state.route).toBe("send");
+
+    const picked = mount(state);
+    expect([picked.to.value, picked.amount.value, state.draft.memo]).toEqual([BOB.account, "0.03", "Invoice 2026-120"]);
+    expect(filled()).toBe("");
+    // The link's network went with its recipient, as when one is typed.
+    expect(state.draft.requestChainId).toBeUndefined();
+  });
+
   it("refuses one for another network, and goes as far as Review only with what Send takes", async () => {
     const state = newState();
     const form = mount(state);
@@ -1868,12 +1894,15 @@ describe("a request link", () => {
     expect(note?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
     expect([form.to.value, form.amount.value]).toEqual(["", ""]);
 
-    // An amount in the link that isn't one is said under the field.
-    const typo = mount(newState());
-    paste(typo, httpsLink(`to=${ALICE.account}&amount=lots`));
-    await settle();
-    expect(typo.amountError()).toBe("Enter an amount such as 1 or 0.5.");
-    expect(typo.review.disabled).toBe(true);
+    // Marek's: an amount in the link that isn't a plain number, a hidden character in it
+    // too, fills in nothing, and says why, as app-core's reader does for both wallets.
+    for (const amount of ["lots", "0.0%E2%80%8B1", `0.001%23to=${BOB.account}`]) {
+      const typo = mount(newState());
+      paste(typo, httpsLink(`to=${ALICE.account}&amount=${amount}`));
+      await settle();
+      expect(refusal(), amount).toEqual(["This link's amount can't be read. Ask for a new one."]);
+      expect([typo.to.value, typo.amount.value], amount).toEqual(["", ""]);
+    }
   });
 
   const refusal = () => dom.document.body.querySelectorAll(".field-error").filter((el) => isShown(el)).map((el) => el.textContent);
@@ -1894,6 +1923,25 @@ describe("a request link", () => {
       expect(refusal(), to).toEqual(["This link's address isn't valid. Ask for a new one."]);
       expect([form.to.value, form.amount.value, state.draft.to, visibleText(dom.document.body.querySelector(".send-filled-note"))]).toEqual(["", "", "", ""]);
     }
+  });
+
+  // Marek's: a field whose name hid a character, had a space, or was written in other letters was dropped, and the
+  // link taken without it: on mainnet's wallet, `…&amount=1000&ɴetwork=testnet` filled 1000 DUSK. So was a name
+  // that only looks like a field's.
+  it("refuses a link with a field name that hides something or only looks like a field's, filling in nothing", async () => {
+    for (const fields of ["am%E2%80%8Fount=0.001", "amount%00=0.001", `to%20=${BOB.account}`, "amount=0.001&%C9%B4etwork=mainnet", "amount=0.001&%D0%B0mount=1000", "amountIux=1000", "amount=0.001&Iabel=Rent", `amount=0.001&t0=${BOB.account}`]) {
+      const state = newState();
+      const form = mount(state);
+      paste(form, httpsLink(`to=${ALICE.account}&${fields}`));
+      await settle();
+      expect(refusal(), fields).toEqual(["That link can't be read. Ask for a new one."]);
+      expect([form.to.value, form.amount.value, state.draft.to], fields).toEqual(["", "", ""]);
+    }
+    // A name that's no field's is still left out.
+    const form = mount(newState());
+    paste(form, httpsLink(`to=${ALICE.account}&amount=0.001&utm_source=chat`));
+    await settle();
+    expect([refusal(), form.to.value, form.amount.value]).toEqual([[], ALICE.account, "0.001"]);
   });
 
   // Marek's: a dusk:shielded- link to a public account filled a public send, and what followed a # landed in Amount.
@@ -1972,6 +2020,31 @@ describe("a request link", () => {
     expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the QR code, to pay on Testnet. Check it before you send.");
   });
 
+  // Sofía's, in the app: a request scanned and left with Back came back, its
+  // 0.03 and memo, "Filled in from the QR code", in a Send she started herself.
+  it("keeps nothing of a scanned request once Send is left with Back, a recipient typed over it or not", async () => {
+    const { openQrScanModal } = await import("./components/QrScanModal.js");
+    const { keepSendDraft, keptSendDraft } = await import("./lib/sendDraft.js");
+    const state = newState();
+    const form = mount(state);
+    openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:2?amount=0.03&memo=Invoice+2026-120`);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "0.03"]);
+    typeInto(form.to, BOB.account);
+    dom.document.body.querySelector(".subnav-back").click();
+    expect(state.route).toBe("home");
+    expect(keptSendDraft(overview())).toBeNull();
+
+    // What's typed by hand is still kept for the next Send.
+    keepSendDraft({ to: BOB.account, amountDusk: "0.02", memo: "satay" }, overview());
+    const typed = { ...newState(), draft: keptSendDraft(overview()) };
+    const again = mount(typed);
+    expect([again.to.value, again.amount.value]).toEqual([BOB.account, "0.02"]);
+    dom.document.body.querySelector(".subnav-back").click();
+    expect(keptSendDraft(overview())).toMatchObject({ to: BOB.account, amountDusk: "0.02", memo: "satay" });
+  });
+
   it("is no request when it goes anywhere else, or names no recipient", async () => {
     const form = mount(newState());
     form.to.value = `https://phish.example/wallet/dashboard/send?to=${ALICE.account}&amount=1`;
@@ -2041,7 +2114,7 @@ describe("a request link", () => {
     const form = mount(state);
     paste(form, httpsLink(`to=${ALICE.account}&amount=0.001&memo=line%20one%0Aline%20two`));
     await settle();
-    expect(refusal()).toEqual(["This link's memo has a line break, which Send can't take. Ask for a new one."]);
+    expect(refusal()).toEqual(["This link's memo has a line break. Ask for a new one."]);
     expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
   });
 
@@ -2126,6 +2199,28 @@ describe("a payment made already", () => {
     expect(note()).toBe("");
     typeInto(form.amount, "0.013");
     expect(note()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
+  });
+
+  // Sofía's: a request link paid once, pasted again, said nothing on the form, and on
+  // Review "to Your profile Profile 1".
+  it("is said on the form as a pasted link fills it in, and names another profile of the wallet's by its name", async () => {
+    const at = Date.now() - 60_000;
+    // Profile 2's account, a key a link can pay.
+    const twoProfiles = overview({ accounts: [OWN.account, BOB.account] });
+    const paid = [sentRecord({ to: BOB.account, submittedAt: at })];
+    const state = { route: "send", draft: null, addressBook: { loaded: true, items: [] } };
+    const form = mount(state, { ...twoProfiles, txs: paid });
+    const note = () => {
+      const el = dom.document.body.querySelector(".send-again");
+      return el && isShown(el) ? visibleText(el) : "";
+    };
+    form.to.dispatchEvent(fakeEvent("paste", { clipboardData: { getData: () => `dusk:${BOB.account}?amount=0.013&memo=Order%201044` } }));
+    await settle();
+    expect(form.to.value).toBe(BOB.account);
+    expect(note()).toBe(`You sent 0.013 DUSK to Profile 2 with this memo at ${clockText(at)}.`);
+
+    confirm(draft({ to: BOB.account }), paid, twoProfiles);
+    expect(again()).toBe(`You sent 0.013 DUSK to Profile 2 with this memo at ${clockText(at)}.`);
   });
 
   it("is said of the same memo whenever it went, and of the same payment without one only moments after", () => {

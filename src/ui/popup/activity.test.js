@@ -110,8 +110,16 @@ describe("ensureActivity", () => {
 
   it("redraws only the views that show activity", async () => {
     fakeArchive();
-    const { render } = await popup(overview(), "send");
+    const { render } = await popup(overview(), "options");
     expect(render).not.toHaveBeenCalled();
+  });
+
+  // Amélie's: a paid link opened again said so only on Review: Send was drawn
+  // before the history came, and nothing drew it again.
+  it("redraws Send too, which says a payment was made already once the history has it", async () => {
+    fakeArchive();
+    const { render } = await popup(overview(), "send");
+    await until(() => render.mock.calls.length > 0);
   });
 
   it("redraws the Sent screen too, which says what a stake got once its row comes", async () => {

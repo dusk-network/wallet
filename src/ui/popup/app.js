@@ -28,7 +28,8 @@ import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
 import { siteLastSeen } from "../../shared/siteRecords.js";
-import { requestDraftOf } from "../lib/requestLink.js";
+import { forgetRequestLink, requestDraftOf } from "../lib/requestLink.js";
+import { keepOpenSend, takeOpenSend } from "../lib/sendDraft.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 import { openedFromNotice } from "../../platform/notices.js";
 
@@ -38,7 +39,7 @@ import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { sozuConfirmView } from "./views/sozu.js";
-import { noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentView } from "./views/sent.js";
+import { noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentStatus, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -279,6 +280,55 @@ let mounted = null;
 // may be.
 let keptForm = null;
 
+// The fields that hold a secret: a recovery phrase's words, and passwords.
+const SECRET_FIELDS = '.mnemonic-input input, input[type="password"]';
+
+// The context the screen shown was drawn in (context.js).
+let mountedContext;
+
+// A field being typed in: focused on the screen, typed in moments ago or
+// with a phone's keyboard composing in it. Swapped for its twin under the
+// typing, as a redraw does, a phone's keyboard loses what it's composing:
+// letters go, or come in another order. A redraw of the same screen waits
+// till the typing stops (setApp), and is drawn then from what's read.
+const TYPING_SETTLES_MS = 700;
+let typedAt = 0;
+let composing = false;
+let redrawTimer = null;
+const typingField = (el) =>
+  Boolean(el && app?.contains?.(el)) &&
+  !el.readOnly &&
+  !el.disabled &&
+  (el.localName === "textarea" || (el.localName === "input" && /^(text|search|email|url|tel|password|number)$/.test(String(el.getAttribute?.("type") ?? "text"))));
+function typingNow() {
+  return typingField(document.activeElement) && (composing || Date.now() - typedAt < TYPING_SETTLES_MS);
+}
+function redrawOnceTyped() {
+  clearTimeout(redrawTimer);
+  redrawTimer = setTimeout(() => {
+    redrawTimer = null;
+    if (typingNow()) redrawOnceTyped();
+    else render({ cached: true }).catch(() => {});
+  }, TYPING_SETTLES_MS);
+}
+try {
+  document.addEventListener("input", (e) => {
+    if (typingField(e?.target)) typedAt = Date.now();
+  }, true);
+  document.addEventListener("compositionstart", (e) => {
+    if (typingField(e?.target)) composing = true;
+  }, true);
+  document.addEventListener("compositionend", () => {
+    composing = false;
+    typedAt = Date.now();
+  }, true);
+  document.addEventListener("focusout", () => {
+    composing = false;
+  }, true);
+} catch {
+  // ignore
+}
+
 function wipeForm(form) {
   for (const node of form?.children ?? []) {
     for (const field of node.querySelectorAll?.("input, textarea") ?? []) field.value = "";
@@ -328,6 +378,12 @@ function setApp(children) {
     // A Review's Confirm ignores clicks for a moment once it's up, after an
     // unlock too, whose button sits where Confirm does; never on a redraw.
     const shown = `${state?.overview?.isUnlocked === false ? "locked" : ""}|${screen}`;
+    // The same screen, for the same wallet, profile and network, drawn again
+    // while a field on it is typed in: it's drawn once the typing stops.
+    if (children !== mounted && shown === lastShown && state?.context === mountedContext && typingNow()) {
+      redrawOnceTyped();
+      return;
+    }
     if (shown !== lastShown) {
       lastShown = shown;
       screenShown();
@@ -349,8 +405,12 @@ function setApp(children) {
     // Redrawn in place (a watcher event, a refresh), the screen keeps the
     // focus on the same button or field, and a field its caret.
     const focused = sameScreen ? focusedControl() : null;
-    const password = app.querySelector("#unlock-password");
-    if (password) password.value = "";
+    // A recovery word or a password typed on the screen going goes first,
+    // before the screen does: nothing of it stays in the page. One the new
+    // screen keeps (a kept form) stays as it is.
+    for (const field of app.querySelectorAll(SECRET_FIELDS)) {
+      if (!children.some((child) => child?.contains?.(field))) field.value = "";
+    }
     activeLockedView = null;
     if (keptForm && keptForm.children !== children) {
       wipeForm(keptForm);
@@ -361,9 +421,27 @@ function setApp(children) {
     if (siteBar) app.appendChild(siteBar);
     for (const child of children) app.appendChild(child);
     mounted = children;
+    mountedContext = state?.context;
     if (focused) refocusControl(focused);
   }
+  // Another screen than a request's own: the link the page opened with was
+  // left, or paid, and goes from its address; and what a link or a QR code
+  // filled in goes with it, not the next Send's.
+  if (!onLinksScreens()) {
+    forgetRequestLink();
+    if (state.draft?.filledIn) state.draft = null;
+  }
   systemBack.sync();
+}
+
+// A request's screens: its Send, the Review and Sent after it, and Contacts
+// picking its recipient. A lock leaves the route as it was; one as the app is
+// left (leave) asks the password on Home, to return to the screen left, which
+// is still the request's.
+function onLinksScreens() {
+  const left = state.returnTo?.context === state.context ? state.returnTo.route : null;
+  const requests = (route) => ["send", "confirm", "sent"].includes(route) || (route === "contacts" && state.addressBook?.mode === "pick");
+  return requests(state.route) || requests(left);
 }
 
 // The focused control in #app (a button, a disclosure or a field), by its
@@ -848,7 +926,7 @@ function scheduleBalanceRetry(ov) {
 async function renderForConnection(opts) {
   if (!REVIEW_ROUTES.has(state.route)) return render(opts);
   await refreshOverview(send, { force: Boolean(opts?.forceRefresh) });
-  renderHeader(state.overview);
+  renderHeader(headerOf(state.overview));
 }
 try {
   window.addEventListener("offline", () => renderForConnection().catch(() => {}));
@@ -893,7 +971,8 @@ async function askNode() {
   // place (refreshOverview's overview has its own say).
   if ((was === "offline" || answer.nodeStatus === "offline") && now.balance?.value) now.balanceStale = true;
   // Drawn again from what's read already, as a read under way may never end (a Refresh pressed while the node holds it).
-  if (REVIEW_ROUTES.has(state.route)) renderHeader(now);
+  if (answer.nodeStatus === "online") reconnectingUntil = 0;
+  if (REVIEW_ROUTES.has(state.route)) renderHeader(headerOf(now));
   else await render({ cached: true });
   // Back: the balance read again, without waiting for it here.
   if (answer.nodeStatus === "online") renderForConnection({ forceRefresh: true }).catch(() => {});
@@ -926,11 +1005,16 @@ function sendsOnTheirWay() {
   const ov = state.overview;
   if (!ov?.isUnlocked) return [];
   const hashes = new Set();
-  // The Sent screen's, on its way or handed over without a clear answer.
-  if (state.route === "sent" && state.sent?.hash && (!sentIsFinal(state.sent, ov) || state.sent.phase === "unconfirmed")) hashes.add(String(state.sent.hash));
+  // The Sent screen's, on its way or handed over without a clear answer; or
+  // in its block without its fee read, as when the node didn't answer then.
+  if (state.route === "sent" && state.sent?.hash && (!sentIsFinal(state.sent, ov) || state.sent.phase === "unconfirmed" || sentFeeUnread(state.sent, ov))) {
+    hashes.add(String(state.sent.hash));
+  }
   for (const tx of Array.isArray(ov.txs) ? ov.txs : []) {
     const status = String(tx?.status ?? "").toLowerCase();
-    if (["submitted", "mempool", "unknown"].includes(status) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS) {
+    // In its block without its fee, as a notice's news has it (DUSK_UI_TX_NOTICED): its fee is looked up.
+    const feeUnread = (status === "executed" || status === "failed") && tx?.feePaid == null;
+    if ((["submitted", "mempool", "unknown"].includes(status) || feeUnread) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS) {
       hashes.add(String(tx?.hash ?? ""));
     }
   }
@@ -957,12 +1041,48 @@ function resumeWatching() {
   lookUpSends().catch(() => {});
 }
 
+// A completed send on the Sent screen whose fee isn't read yet.
+function sentFeeUnread(sent, ov) {
+  const { phase, status, feePaid } = sentStatus(sent, ov);
+  return phase === "sent" && (status === "executed" || status === "failed") && feePaid == null;
+}
+
+// The Sent screen's send is followed by the wallet's watcher, which can go
+// quiet when the connection dropped and came back: from 20 seconds after it
+// went, it's looked up by its ID too, every 10 seconds for 3 minutes, till
+// it's in its block with its fee (lookUpSends).
+const SENT_LOOKED_UP_AFTER_MS = 20_000;
+let followedSend = "";
+function followSent() {
+  const sent = state.sent;
+  if (state.route !== "sent" || sent?.phase !== "sent" || !sent.hash || followedSend === sent.hash) return;
+  followedSend = sent.hash;
+  const went = Number(sent.sentAt) || Date.now();
+  resumeUntil = Math.max(resumeUntil, went + RESUME_FOR_MS);
+  if (resumeTimer) return;
+  resumeTimer = setTimeout(() => lookUpSends().catch(() => {}), Math.max(0, went + SENT_LOOKED_UP_AFTER_MS - Date.now()));
+}
+
 // Back in front, the balance and the shielded sync are read again at once, as
 // Refresh does: a send made meanwhile, or a sync the phone stopped, shows as it is.
 function comeBack() {
   state.needsRefresh = true;
+  // A phone cut the page's network while it was away: it reconnects first.
+  reconnectingUntil = Date.now() + RECONNECT_MS;
+  setTimeout(() => askNode().catch(() => {}), 0);
+  setTimeout(() => renderHeader(headerOf(state.overview)), RECONNECT_MS + 50);
   renderForConnection({ forceRefresh: true }).catch(() => {});
   resumeWatching();
+}
+
+// Back in front after a phone cut the page's network, the wallet reconnects:
+// till the node answers, 10 seconds at most, the header says it's checking,
+// never that the network can't be reached, from what was read while away.
+const RECONNECT_MS = 10_000;
+let reconnectingUntil = 0;
+function headerOf(ov) {
+  if (Date.now() >= reconnectingUntil || ov?.networkStatus?.nodeStatus !== "offline" || globalThis.navigator?.onLine === false) return ov;
+  return { ...ov, networkStatus: { ...ov.networkStatus, nodeStatus: "checking" } };
 }
 
 // A send on its way when the wallet is left: the Sent screen says it's looked
@@ -1011,9 +1131,35 @@ function returnAfterUnlock(ov) {
   if (unlockedNow) setTimeout(resumeWatching, 0);
 }
 
+// The app on the way to the background with Send, or its Review, open: what's
+// typed is kept on the phone as Send left open, for Android may end the app
+// meanwhile; the app opens on it again, once unlocked (reopenSend). Back in
+// front, the app wasn't ended: it's a draft as any other again.
+let openSendKept = false;
+function keepSendOpen() {
+  if (!isTauriRuntime() || !state.overview?.isUnlocked || !["send", "confirm"].includes(state.route)) return;
+  keepOpenSend(state.draft, state.overview);
+  openSendKept = true;
+}
+let sendReopened = false;
+function reopenSend(ov) {
+  if (!isTauriRuntime() || !ov?.isUnlocked) return;
+  if (!sendReopened) {
+    sendReopened = true;
+    const values = takeOpenSend(ov);
+    if (values && state.route === "home") Object.assign(state, { route: "send", draft: values });
+    return;
+  }
+  if (openSendKept && document.visibilityState !== "hidden") {
+    openSendKept = false;
+    takeOpenSend(ov);
+  }
+}
+
 try {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
+      keepSendOpen();
       lookingUpOnLeave();
       leave();
       return;
@@ -1275,6 +1421,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   }
   keepContactsToTheirWallet(ov);
   returnAfterUnlock(ov);
+  reopenSend(ov);
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";
   } catch {
@@ -1282,7 +1429,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   }
 
   // Always render header actions based on latest overview
-  renderHeader(ov);
+  renderHeader(headerOf(ov));
   updateFullNav();
 
   // Keep shielded sync progress visible while on the dashboard.
@@ -1310,7 +1457,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
     refresh: onRefresh,
     announce: (text) => toaster.announce(text),
     // The header alone, for a change only it shows, such as a profile's label.
-    renderHeader: () => renderHeader(state.overview),
+    renderHeader: () => renderHeader(headerOf(state.overview)),
   };
   drawn = actions;
 
@@ -1421,6 +1568,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   // After Confirm: the transaction's steps. Without one (a new popup), home.
   if (state.route === "sent") {
     if (state.sent) {
+      followSent();
       // A stake or an unstake with Sozu, completed: what it got or gave back, once its pool's event is read.
       const sozu = state.sent.sozu && state.sent.hash ? sozuFactOfSent(ov, state, state.sent, { render, refresh: () => refreshActivitySoon({ state, render }, 0) }) : undefined;
       setApp(sentView(ov, { state, actions, sozu }));
@@ -1517,13 +1665,21 @@ listenForLinks((url) => {
 // --- A notice tapped in the app ----------------------------------------------
 // Its send's details, as Activity opens them: after the unlock, when the
 // wallet is locked. Asked as the app starts, and each time it's back in front.
+// Any app can open the wallet as a notice's tap would: only a tap with the
+// token the wallet gave its send's notice opens anything (DUSK_UI_TX_NOTICED).
 async function openNoticed() {
-  const hash = isTauriRuntime() && isPhone() ? await openedFromNotice().catch(() => "") : "";
-  if (!hash) return;
+  const noticed = isTauriRuntime() && isPhone() ? await openedFromNotice().catch(() => null) : null;
+  const hash = noticed?.hash ?? "";
+  if (!hash || !noticed.token) return;
+  // What the notice knew of it, in its block, on its record before it shows:
+  // never "Not confirmed" while the app reconnects. Its fee comes with the lookup.
+  const known = await send({ type: "DUSK_UI_TX_NOTICED", hash, token: noticed.token, ...(noticed.status ? { status: noticed.status, blockHeight: noticed.blockHeight } : {}) }).catch(() => null);
+  if (!known?.result) return;
   netMenu.close();
   acctMenu.close();
   Object.assign(state, { txDetailHash: hash, txDetailFrom: "home", route: "tx" });
-  await render();
+  state.needsRefresh = true;
+  await render({ forceRefresh: true });
 }
 try {
   document.addEventListener("visibilitychange", () => {

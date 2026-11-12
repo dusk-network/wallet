@@ -1152,6 +1152,46 @@ describe("a stake with Sozu in figures", () => {
       popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
       // Held from March at 2 to June at 2.02 (49.875 stDUSK), then on to now at 2.04 (34.875): 0.9975 and 0.6975.
       await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.695 DUSK", "Sozu, taken out by unstaking: 0.3 DUSK"]]));
+      // Lena's: the two lines read as two rewards to add. Under them, in both wallets' words, that one is part of the other, and how it's counted.
+      expect(visibleText(body.querySelector(".stake-years-counted"))).toBe(
+        "Taken out by unstaking is part of grown while held: what came back, less what that stDUSK cost at its average price, deposit fees not counted."
+      );
+    });
+
+    // Lena's: opened 10 s after an unstake, both lines said "couldn't be read": the archive
+    // lists an unstake's events a little after its block.
+    it("keeps what it said while a new unstake's facts are read, and reads them again till they come", async () => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      vi.setSystemTime(Date.UTC(2026, 5, 1, 12, 0, 10));
+      const [staked, unstaked] = ["5e".repeat(32), "5f".repeat(32)];
+      const events = {
+        4800005: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }],
+      };
+      archive.query = archiveWith(events);
+      const overview = ov();
+      const history = [move(staked, "sozu_stake", "100000000000", 4_800_005, Date.UTC(2026, 2, 1, 12)), move(unstaked, "sozu_unstake", "30300000000", 4_800_006, Date.UTC(2026, 5, 1, 12))];
+      popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
+      await vi.waitFor(() => expect(years()).toHaveLength(1));
+      expect(years()[0].join(" ")).not.toContain("couldn't be read");
+      expect(years()[0][1]).toMatch(/^Sozu, grown while held: [\d.]+ DUSK$/);
+
+      // Astra's: not on the archive yet 20 s on, nor read 20 s after that, as the archive failed: read again all the same.
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(years()[0].join(" ")).not.toContain("taken out by unstaking");
+      archive.query = async () => {
+        throw new Error("archive down");
+      };
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(years()[0].join(" ")).not.toContain("couldn't be read");
+
+      // The archive has the unstake's events now: read again 20 s on, it's there.
+      events[4800006] = [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }];
+      archive.query = archiveWith(events);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.waitFor(() => expect(years()[0]).toContain("Sozu, taken out by unstaking: 0.3 DUSK"));
+      vi.useRealTimers();
     });
 
     // Astra's: rewards accrued, the holding worth more for the same stDUSK, and the year's growth stayed as it was.

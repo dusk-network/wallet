@@ -91,7 +91,39 @@ export function unlockPasswordField({ onEnter } = {}) {
   const hint = fieldHint(input, "One password unlocks every wallet here.");
   const error = fieldError(input);
   input.addEventListener("input", () => error.show(""));
-  return { input, error, els: [fieldLabel(input, "Password you unlock with"), input, hint, error.el] };
+  return { input, error, els: [passwordForm([fieldLabel(input, "Password you unlock with"), input, hint, error.el])] };
+}
+
+/**
+ * A form of their own for a password's fields, their captions and errors
+ * with them, laid out as if it weren't there (ui.css), in a box of its own
+ * that a screen reader reads into. A browser's password
+ * manager reads a form's fields together: a box before a password is the
+ * password's username to it, and Firefox counts the boxes beside a password
+ * to tell a new one, for which it offers a password of its own. Apart, a
+ * recovery word or an amount is never either. Nothing submits it.
+ * @param {Array<Node | null | undefined>} children
+ * @returns {HTMLFormElement}
+ */
+export function passwordForm(children) {
+  const form = h("form", { class: "password-form", novalidate: "" }, children.filter(Boolean));
+  form.addEventListener("submit", (e) => e.preventDefault());
+  return form;
+}
+
+/**
+ * A field for a new password, and its error under it, captioned as a label
+ * captions a field: but named by its title, not a <label>. Firefox reads a
+ * label's "New" or "Confirm" as a sign-up, and offers a password of its own
+ * over the field, one nobody wrote down.
+ * @param {{ caption: string, placeholder?: string, onEnter?: () => void }} opts
+ * @returns {{ input: HTMLInputElement, error: { el: HTMLElement, show: (text?: string) => void }, els: HTMLElement[] }}
+ */
+export function newPasswordField({ caption, placeholder, onEnter }) {
+  const input = passwordInput({ title: caption, placeholder, autocomplete: NEW_PASSWORD, onEnter });
+  const error = fieldError(input);
+  input.addEventListener("input", () => error.show(""));
+  return { input, error, els: [h("p", { class: "field-caption", text: caption }), input, error.el] };
 }
 
 export function textInput({ numericMode, onEnter, ...attrs } = {}) {

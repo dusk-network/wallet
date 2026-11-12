@@ -3,7 +3,7 @@ import { wordlist } from "@scure/bip39/wordlists/english";
 import { h } from "../../lib/dom.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
-import { NEW_PASSWORD, checkboxInput, fieldError, fieldLabel, groupLabel, passwordInput, stepActions, unlockPasswordField } from "../../components/FormControls.js";
+import { checkboxInput, fieldError, groupLabel, newPasswordField, passwordForm, stepActions, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
@@ -47,28 +47,19 @@ export function srpGridEl(mnemonic, { blurred = false } = {}) {
   return h("div", { class: "box srp-box" }, [grid]);
 }
 
-// A new password and its repeat, each with its error under it. Not marked as
-// a new password: Firefox for Android offers one of its own for that, over
-// the field, and fills in a password nobody wrote down.
+// A new password and its repeat, each with its error under it, in a form of
+// their own: none of them a sign-up's to Firefox for Android, which offers
+// one of its own for that, over the field, and fills in a password nobody
+// wrote down (FormControls.js).
 function newPasswordFields({ onDone, label = "Password" }) {
-  const pwd = passwordInput({
-    placeholder: "At least 8 characters",
-    autocomplete: NEW_PASSWORD,
-    onEnter: () => pwd2.focus(),
-  });
-  const pwd2 = passwordInput({
-    placeholder: "The same password again",
-    autocomplete: NEW_PASSWORD,
-    onEnter: () => onDone?.(),
-  });
-  const pwdError = fieldError(pwd);
-  const pwd2Error = fieldError(pwd2);
-  pwd.addEventListener("input", () => pwdError.show(""));
-  pwd2.addEventListener("input", () => pwd2Error.show(""));
+  const first = newPasswordField({ caption: label, placeholder: "At least 8 characters", onEnter: () => pwd2.focus() });
+  const again = newPasswordField({ caption: "Confirm password", placeholder: "The same password again", onEnter: () => onDone?.() });
+  const { input: pwd, error: pwdError } = first;
+  const { input: pwd2, error: pwd2Error } = again;
   return {
     pwd,
     pwd2,
-    els: [fieldLabel(pwd, label), pwd, pwdError.el, fieldLabel(pwd2, "Confirm password"), pwd2, pwd2Error.el],
+    els: [passwordForm([...first.els, ...again.els])],
     // The password, or null after saying what's wrong with it.
     read() {
       pwdError.show("");

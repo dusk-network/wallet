@@ -115,9 +115,9 @@ vi.mock("../platform/notices.js", () => ({
     phoneNotices.asked.push("ask");
     return phoneNotices.allowed() ? "on" : "off";
   },
-  showAppNotice: async ({ title, body, hash }) => {
+  showAppNotice: async ({ title, body, hash, token }) => {
     phoneNotices.asked.push(`notify: ${title}`);
-    phoneNotices.shown = { title, body, hash };
+    phoneNotices.shown = { title, body, hash, token };
     return phoneNotices.allowed();
   },
   // What Android looks for once the app leaves the screen (android/ArrivalJob.kt).
@@ -199,6 +199,61 @@ describe("local sends", () => {
     await expect(localSend({ type: "DUSK_UI_RECHECK_TX", hash: "f1".repeat(32) })).resolves.toMatchObject({ ok: true, result: { status: "executed" } });
     await expect(getTxMeta("f1".repeat(32))).resolves.toMatchObject({ status: "executed", feePaid: "2135802", blockHeight: "4802949" });
     expect(told.mock.calls.map(([event]) => event.detail)).toEqual([{ type: "DUSK_UI_TX_STATUS", hash: "f1".repeat(32), status: "executed", ok: true, error: "" }]);
+  });
+
+  // Chen's, in the app: a tap on "Your payment arrived" showed "Not confirmed", and the
+  // wallet that "stopped waiting for a result", before Completed: the notice knew it.
+  it("take a notice's news of one in its block, where nothing final is on its record, and the page hears it", async () => {
+    localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://testnet.nodes.dusk.network", chainId: 2 }));
+    const { localSend } = await import("./localBus.js");
+    const { getTxMeta, patchTxMeta } = await import("../shared/txStore.js");
+    engine.sendTransaction.mockResolvedValueOnce({ hash: "f2".repeat(32), nonce: 1n });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1" } });
+    // The watcher gave up while the app was away; its notice carries the token made for it.
+    const { noticeTokenFor } = await import("../shared/noticeTokens.js");
+    const token = await noticeTokenFor("f2".repeat(32), ACCOUNT);
+    expect(token).toMatch(/^[0-9a-f]{32}$/);
+    await patchTxMeta("f2".repeat(32), { status: "unknown" });
+    const told = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent: told });
+
+    // Astra's: any app can open the wallet as a tap would, with a send's ID it learned and an outcome of its own.
+    // Without the notice's token, or with another, nothing goes on the record and nothing opens.
+    for (const forged of [{}, { token: "" }, { token: token === "7b".repeat(16) ? "7c".repeat(16) : "7b".repeat(16) }, { token: token.toUpperCase() }]) {
+      await expect(localSend({ type: "DUSK_UI_TX_NOTICED", hash: "f2".repeat(32), status: "failed", blockHeight: "1", ...forged })).resolves.toMatchObject({ ok: true, result: null });
+    }
+    await expect(getTxMeta("f2".repeat(32))).resolves.toMatchObject({ status: "unknown" });
+    expect((await getTxMeta("f2".repeat(32))).blockHeight).toBeUndefined();
+    expect(told).not.toHaveBeenCalled();
+
+    await expect(localSend({ type: "DUSK_UI_TX_NOTICED", hash: "f2".repeat(32), token, status: "executed", blockHeight: "4831109" })).resolves.toMatchObject({ ok: true, result: { patched: true } });
+    await expect(getTxMeta("f2".repeat(32))).resolves.toMatchObject({ status: "executed", blockHeight: "4831109" });
+    expect(told.mock.calls.map(([event]) => event.detail)).toEqual([{ type: "DUSK_UI_TX_STATUS", hash: "f2".repeat(32), status: "executed", ok: true, blockHeight: "4831109" }]);
+
+    // A tap is taken once: the same again opens nothing.
+    await expect(localSend({ type: "DUSK_UI_TX_NOTICED", hash: "f2".repeat(32), token, status: "executed" })).resolves.toMatchObject({ ok: true, result: null });
+
+    // A record with its final word keeps it; the notice is still its own, which opens it.
+    await patchTxMeta("f2".repeat(32), { status: "failed", error: "out of gas" });
+    const again = await noticeTokenFor("f2".repeat(32), ACCOUNT);
+    await expect(localSend({ type: "DUSK_UI_TX_NOTICED", hash: "f2".repeat(32), token: again, status: "executed" })).resolves.toMatchObject({ ok: true, result: { patched: false } });
+    await expect(getTxMeta("f2".repeat(32))).resolves.toMatchObject({ status: "failed", error: "out of gas" });
+  });
+
+  // Astra's: history synced before the notice was tapped, and its sync forgot the send's record, the token with it:
+  // the notice's own tap opened nothing. The token is kept apart from the record.
+  it("take a notice's tap as its own after history's sync forgot its send's record", async () => {
+    localStorage.setItem("dusk_settings_v1", JSON.stringify({ nodeUrl: "https://testnet.nodes.dusk.network", chainId: 2 }));
+    const { localSend } = await import("./localBus.js");
+    const { forgetTxs, getTxMeta } = await import("../shared/txStore.js");
+    const { noticeTokenFor } = await import("../shared/noticeTokens.js");
+    engine.sendTransaction.mockResolvedValueOnce({ hash: "f3".repeat(32), nonce: 1n });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1" } });
+    const token = await noticeTokenFor("f3".repeat(32), ACCOUNT);
+    await forgetTxs(["f3".repeat(32)]);
+    await expect(getTxMeta("f3".repeat(32))).resolves.toBeNull();
+    await expect(localSend({ type: "DUSK_UI_TX_NOTICED", hash: "f3".repeat(32), token, status: "executed", blockHeight: "4831109" })).resolves.toMatchObject({ ok: true, result: { patched: false } });
+    await expect(getTxMeta("f3".repeat(32))).resolves.toBeNull();
   });
 
   it("keep the network they were sent on, by the chain ID the node's settings keep", async () => {
@@ -886,14 +941,17 @@ describe("arrival notices in the app on a phone", () => {
     await sendAndSettle(localSend, "d2".repeat(32));
     // For the lock screen: what came of it and the network, never the amount or whom it was for.
     await vi.waitFor(() => expect(asked.at(-1)).toEqual("notify: Your payment arrived"));
-    expect(phoneNotices.shown).toEqual({ title: "Your payment arrived", body: "Mainnet", hash: "d2".repeat(32) });
+    // With the token made for its send's notice, by which its tap is known as the notice's.
+    const { noticeTokenFor } = await import("../shared/noticeTokens.js");
+    expect(phoneNotices.shown).toEqual({ title: "Your payment arrived", body: "Mainnet", hash: "d2".repeat(32), token: await noticeTokenFor("d2".repeat(32)) });
+    expect(phoneNotices.shown.token).toMatch(/^[0-9a-f]{32}$/);
 
     // Learned another way, as the app looks a send up again: a notice all the same, once.
     const { patchTxMeta, putTxMeta } = await import("../shared/txStore.js");
     await putTxMeta("d4".repeat(32), { status: "submitted", nodeUrl: "https://testnet.nodes.dusk.network" });
     await patchTxMeta("d4".repeat(32), { status: "executed" });
     await patchTxMeta("d4".repeat(32), { status: "executed" });
-    expect(asked.filter((step) => step.startsWith("notify"))).toHaveLength(2);
+    await vi.waitFor(() => expect(asked.filter((step) => step.startsWith("notify"))).toHaveLength(2));
   });
 
   it("never asks again after a no, and shows arrivals once notices are allowed in the phone's settings", async () => {
@@ -925,12 +983,16 @@ describe("arrival notices in the app on a phone", () => {
     await putTxMeta("e1".repeat(32), { status: "submitted", kind: "transfer", nodeUrl: "https://testnet.nodes.dusk.network", walletId: ACCOUNT });
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK", hash: "e1".repeat(32) })).resolves.toMatchObject({ state: "on" });
     expect(phoneNotices.watched).toEqual([
-      { hash: "e1".repeat(32), nodeUrl: "https://testnet.nodes.dusk.network", title: "Your payment arrived", failTitle: "Your payment didn't go through", body: "Testnet", wallet: ACCOUNT },
+      { hash: "e1".repeat(32), nodeUrl: "https://testnet.nodes.dusk.network", title: "Your payment arrived", failTitle: "Your payment didn't go through", body: "Testnet", wallet: ACCOUNT, token: expect.stringMatching(/^[0-9a-f]{32}$/) },
     ]);
+    // Its notice's token, by which its tap is known as the notice's, kept on the phone.
+    const { noticeTokenFor } = await import("../shared/noticeTokens.js");
+    expect(await noticeTokenFor("e1".repeat(32))).toBe(phoneNotices.watched[0].token);
     // Notices on, each send after: looked for from the start, and no more once its outcome is heard.
     await sendAndSettle(localSend, "e2".repeat(32));
     await settled("e2".repeat(32));
-    expect(phoneNotices.watched.map((w) => w.hash)).toEqual(["e1".repeat(32), "e2".repeat(32)]);
+    await vi.waitFor(() => expect(phoneNotices.watched.map((w) => w.hash)).toEqual(["e1".repeat(32), "e2".repeat(32)]));
+    expect(phoneNotices.watched[1].token).toBe(await noticeTokenFor("e2".repeat(32)));
     await vi.waitFor(() => expect(phoneNotices.settled).toContain("e2".repeat(32)));
   });
 

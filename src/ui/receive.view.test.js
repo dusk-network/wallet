@@ -293,11 +293,11 @@ describe("receive", () => {
     it("says an amount that could be two amounts is that, in the language's own way", async () => {
       inLanguage("nl-NL");
       let view = await receive("public", { state: open({ amountDusk: "1.234" }) });
-      expect(amountError()).toBe("Is that about 1,23 or 1234? Write the one you mean.");
+      expect(amountError()).toBe("Is that 1,2340 or 1234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
       inLanguage("en-US");
       view = await receive("public", { state: open({ amountDusk: "1,234" }) });
-      expect(amountError()).toBe("Is that about 1.23 or 1234? Write the one you mean.");
+      expect(amountError()).toBe("Is that 1.2340 or 1234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
     });
 
@@ -402,9 +402,9 @@ describe("receive", () => {
     // On a Dutch browser, an amount written the Dutch way is the amount it asks for.
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "nl-NL" });
     try {
-      Object.assign(state.receive, { amountDusk: "1,234", memo: "" });
+      Object.assign(state.receive, { amountDusk: "1,25", memo: "" });
       await receive("public", { state });
-      expect(summary()).toBe("Request payment1,234 DUSK");
+      expect(summary()).toBe("Request payment1,25 DUSK");
     } finally {
       vi.unstubAllGlobals();
     }
@@ -828,6 +828,32 @@ describe("the requests made here", () => {
     expect(shown()).toEqual([]);
     await drawOn(42);
     expect(shown().map((row) => row.amount)).toEqual(["0.5 DUSK"]);
+  });
+
+  // Sofía's: a request paid, then paid again while Receive stayed open: "Paid", with no
+  // Send back, for 65 and 110 seconds, till the popup was opened again.
+  it("looks again every 30 seconds while a paid request shows, and says Paid twice once a second payment comes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    items[KEY] = { [ACCOUNT]: [kept({ id: "p", lux: "5000000", memo: "Factura F-2026-053" })] };
+    const first = paidIn("f1".repeat(32), "5000000", "Factura F-2026-053", T0 + HOUR, 4_700_000);
+    const second = paidIn("f2".repeat(32), "5000000", "Factura F-2026-053", T0 + 2 * HOUR, 4_700_100);
+    let entries = [first];
+    const history = { read: vi.fn(async () => ({ entries, state: null, complete: true })), sync: vi.fn(async () => {}), needsDetails: () => false, fillDetails: vi.fn(async () => {}) };
+    const ov = { ...unlocked };
+    const state = {
+      route: "receive",
+      overview: ov,
+      receive: { tab: "public" },
+      activity: { key: activityKey(ov), walletId: ACCOUNT, nodeUrl: ov.nodeUrl, profileIndex: 0, account: ACCOUNT, entries: [first], loaded: true, limit: 50, history, names: new Map(), checked: new Set(), shielded: [], shieldedAsked: true, shieldedReadAt: Date.now(), send: vi.fn(async () => ({})), epoch: Promise.resolve(1), txEpoch: Promise.resolve(1) },
+    };
+    const actions = { render: vi.fn(async () => dom.document.body.replaceChildren(...receiveView(ov, { state, actions }))), showToast: vi.fn() };
+    await actions.render();
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Paid"]));
+
+    entries = [second, first];
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Paid twice"]));
+    expect(dom.document.body.querySelectorAll(".request-payment button").map(visibleText)).toContain("Send back");
   });
 
   it("reads the shielded history again as it looks, once the notes synced since, for a request to the shielded address", async () => {

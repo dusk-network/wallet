@@ -1,4 +1,4 @@
-import { NAME_HIDES, nameHides, nameStarts, profileNameClash } from "@dusk-network/app-core/names";
+import { profileNameCheck } from "@dusk-network/app-core/names";
 import { networks } from "@dusk-network/networks";
 
 import { formatDuskExact, formatFee } from "../../../shared/amount.js";
@@ -26,7 +26,6 @@ import { iconSvg } from "../../components/ActionIcon.js";
 import { setNetworkSwitching } from "../../components/NetworkMenu.js";
 import { fieldLabel, integerInput, passwordInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
-import { contactNameText } from "../../lib/contactNames.js";
 import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
 import { switchContext } from "../context.js";
 import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
@@ -209,12 +208,6 @@ export function optionsView(ov, { state, actions } = {}) {
     contactsRead ??= own ? Promise.resolve(ab.items) : listAddressBook({ walletId }).catch(() => []);
     return contactsRead;
   };
-  const clashText = (clash) => {
-    // The name it takes, as that profile or contact goes by it: a profile by its label or its .dusk name.
-    const name = clash.kind === "contact" ? contactNameText(clash.name) : String(clash.name);
-    if (clash.kind === "profile") return clash.same ? `Your other profile is called ${name}. Choose another name.` : `That looks like the name of your other profile ${name}. Choose another name.`;
-    return clash.same ? `You have a contact called ${name}. Choose another name.` : `That looks like your contact ${name}. Choose another name.`;
-  };
   const labelsEditor =
     ov?.isUnlocked && walletId
       ? h("div", { class: "settings-labels" }, [
@@ -239,7 +232,8 @@ export function optionsView(ov, { state, actions } = {}) {
                 input.removeAttribute("aria-describedby");
               }
             };
-            // A contact's name it starts, or that starts it, word for word, is asked about: the name is saved.
+            // A .dusk name it is or starts as, a contact's or another profile's, or a contact's
+            // name it starts as, word for word, is asked about: the name is saved.
             const question = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
             const ask = (text) => {
               question.textContent = text;
@@ -260,23 +254,19 @@ export function optionsView(ov, { state, actions } = {}) {
                 if (drafts[i] === value) delete drafts[i];
                 return;
               }
-              if (nameHides(label)) {
-                showError(NAME_HIDES);
-                return;
-              }
-              let starts = null;
+              // The one check both wallets make at Save (app-core): refused, said under the
+              // field; asked, saved with the question under it. Each profile by its label and
+              // its verified .dusk name; each contact by its name and the .dusk name it was saved from.
+              let said = null;
               if (label) {
-                // Each profile by its label and by its verified .dusk name, look-alikes of either too.
                 const profiles = displayAccounts.map((account, j) => ({ account: String(account ?? ""), address: String(ov?.addresses?.[j] ?? ""), name: profileLabelOf(ov, j), duskName: verified.get(j) || undefined }));
-                const contacts = await contactsNow();
-                const clash = profileNameClash(label, { profiles, contacts, self: String(acct ?? "") });
-                if (clash) {
-                  showError(clashText(clash));
+                said = profileNameCheck(label, { profiles, contacts: await contactsNow(), self: String(acct ?? "") });
+                if (said?.refused) {
+                  showError(said.words);
                   return;
                 }
-                starts = nameStarts(label, { contacts, self: String(acct ?? "") });
               }
-              ask(starts ? `You have a contact called ${contactNameText(starts.name)}. Is this someone else?` : "");
+              ask(said?.words ?? "");
               const before = saved;
               saved = label;
               try {

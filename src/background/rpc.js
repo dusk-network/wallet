@@ -705,6 +705,17 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
 
       const approvalContext = await captureApprovalContext(perm);
       if (!approvalContext.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      // The connected profile's balance alone: a site that names another
+      // account or profile is refused, never answered with this one's.
+      const asked = Array.isArray(params) ? params[0] : params;
+      const askedAccount = typeof asked === "string" ? asked : asked && typeof asked === "object" ? asked.account : undefined;
+      const askedProfile = asked && typeof asked === "object" ? asked.profileId : undefined;
+      if (
+        (askedAccount !== undefined && String(askedAccount) !== approvalContext.account) ||
+        (askedProfile !== undefined && String(askedProfile) !== approvalContext.permissionProfileId)
+      ) {
+        throw rpcError(ERROR_CODES.UNAUTHORIZED, "Only the connected profile's balance can be read");
+      }
 
       return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         const executionContext = await assertApprovalContext(approvalContext);

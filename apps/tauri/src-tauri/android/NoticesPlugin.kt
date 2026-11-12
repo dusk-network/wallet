@@ -29,6 +29,7 @@ class NoticeArgs {
   var title: String = ""
   var body: String = ""
   var hash: String = ""
+  var token: String = ""
 }
 
 @InvokeArg
@@ -39,6 +40,7 @@ class WatchArgs {
   var failTitle: String = ""
   var body: String = ""
   var wallet: String = ""
+  var token: String = ""
 }
 
 @InvokeArg
@@ -49,8 +51,14 @@ class ForgetArgs {
 
 @TauriPlugin(permissions = [Permission(strings = ["android.permission.POST_NOTIFICATIONS"], alias = "notices")])
 class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
-  // The transaction a notice's tap opened the app on, till the page takes it.
+  // The transaction a notice's tap opened the app on, till the page takes it,
+  // with what its notice knew of it: its outcome and its block, where known,
+  // and its send's token. Any app can open the wallet with these extras: the
+  // page takes them as a notice's only with the token kept with that send.
   private var opened = ""
+  private var openedOutcome = ""
+  private var openedBlock = 0L
+  private var openedToken = ""
 
   private fun answer(invoke: Invoke, allowed: Boolean) {
     val out = JSObject()
@@ -60,8 +68,19 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun take(intent: Intent?) {
     val hash = intent?.getStringExtra(Arrivals.EXTRA_TX) ?: return
+    val outcome = intent.getStringExtra(Arrivals.EXTRA_OUTCOME) ?: ""
+    val block = intent.getLongExtra(Arrivals.EXTRA_BLOCK, 0L)
+    val token = intent.getStringExtra(Arrivals.EXTRA_TOKEN) ?: ""
     intent.removeExtra(Arrivals.EXTRA_TX)
-    if (hash.isNotEmpty()) opened = hash
+    intent.removeExtra(Arrivals.EXTRA_OUTCOME)
+    intent.removeExtra(Arrivals.EXTRA_BLOCK)
+    intent.removeExtra(Arrivals.EXTRA_TOKEN)
+    // No notice's without a transaction's ID and a token as the wallet writes them.
+    if (!Arrivals.isHash(hash) || !Arrivals.isToken(token)) return
+    opened = hash
+    openedOutcome = if (outcome == "executed" || outcome == "failed") outcome else ""
+    openedBlock = if (block > 0L) block else 0L
+    openedToken = token
   }
 
   // Started by a notice's tap, or brought back by one.
@@ -104,14 +123,14 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun notify(invoke: Invoke) {
     val args = invoke.parseArgs(NoticeArgs::class.java)
-    answer(invoke, Arrivals.post(activity.applicationContext, args.title, args.body, args.hash))
+    answer(invoke, Arrivals.post(activity.applicationContext, args.title, args.body, args.hash, token = args.token))
   }
 
   /** A send to look for once the app leaves the screen, with its notice for either outcome. */
   @Command
   fun watch(invoke: Invoke) {
     val args = invoke.parseArgs(WatchArgs::class.java)
-    Arrivals.watch(activity.applicationContext, args.hash, args.nodeUrl, args.title, args.failTitle, args.body, args.wallet)
+    Arrivals.watch(activity.applicationContext, args.hash, args.nodeUrl, args.title, args.failTitle, args.body, args.wallet, args.token)
     answer(invoke, Arrivals.allowed(activity))
   }
 
@@ -131,13 +150,24 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
     answer(invoke, Arrivals.allowed(activity))
   }
 
-  /** The transaction a notice's tap opened the app on, once: "" for none. */
+  /**
+   * The transaction a notice's tap opened the app on, once: "" for none; with
+   * what its notice knew of it, "executed" or "failed" ("" where it didn't
+   * say), its block (0 where it didn't say), and the token it carried, which
+   * the page checks against its send's before it takes any of it.
+   */
   @Command
   fun opened(invoke: Invoke) {
     val out = JSObject()
     out.put("allowed", Arrivals.allowed(activity))
     out.put("hash", opened)
+    out.put("outcome", openedOutcome)
+    out.put("block", openedBlock)
+    out.put("token", openedToken)
     opened = ""
+    openedOutcome = ""
+    openedBlock = 0L
+    openedToken = ""
     invoke.resolve(out)
   }
 }
