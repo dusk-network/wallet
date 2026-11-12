@@ -76,6 +76,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Refused a site's dusk_getPublicBalance for an account or profile it isn't connected to, rather than answering with the connected profile's balance.
 - Opened Home on reloading the extension's tab after a request link was paid or left, rather than the same payment filled in again.
 - Dropped what a link or a QR code filled in once Send is left, rather than bringing it back in the next Send, and its Filled in from line once another recipient is picked in Contacts.
 - Typed a recovery phrase's words on a phone in boxes no browser offers to keep as a password, still unseen and kept from the keyboard's learning, and emptied them, and the passwords beside them, as the screen is left.

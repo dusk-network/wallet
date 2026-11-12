@@ -860,6 +860,25 @@ describe("background rpc handler", () => {
     });
   });
 
+  // Marek's: asked for Profile 2's account, the site got Profile 1's balance, to label as Profile 2's.
+  it("dusk_getPublicBalance answers for the connected profile alone, and refuses any other account or profile", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+    const ask = (params) => handleRpc("https://dapp.example", { method: "dusk_getPublicBalance", params });
+
+    for (const params of [{ account: "acct1" }, ["acct1"], "acct1", { profileId: "account:1:acct1" }, { account: "acct0", profileId: "account:1:acct1" }]) {
+      engineCall.mockClear();
+      await expect(ask(params), JSON.stringify(params)).rejects.toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+      expect(engineCall).not.toHaveBeenCalledWith("dusk_getPublicBalance", expect.anything());
+    }
+    for (const params of [undefined, {}, [], { account: "acct0" }, ["acct0"], { profileId: "account:0:acct0" }]) {
+      await expect(ask(params), JSON.stringify(params)).resolves.toMatchObject({ __params: { profileIndex: 0, _approvalContext: { account: "acct0" } } });
+    }
+  });
+
   it("does not read a replacement wallet balance after context capture", async () => {
     vi.resetModules();
     const [{ handleRpc }, { WALLET_LIFECYCLE_LOCK, withStorageLock }] = await Promise.all([
