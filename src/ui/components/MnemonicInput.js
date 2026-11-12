@@ -65,10 +65,13 @@ function phraseProblem(words, { pasted = 0 } = {}) {
  *   nothing), after a paste and when the focus leaves the boxes, and "" again
  *   as soon as something's typed. `problem()` says the same on asking.
  * - `hint`: a line above the boxes, which describes them.
- * - `masked`, on a phone: each box a password box, the one kind of field a
- *   phone's keyboard learns nothing from in Firefox for Android, which passes
- *   no other field's "don't learn" on. Show words shows them read-only; a
- *   box pressed to type in hides them again.
+ * - `masked`, on a phone: the words typed unseen, as a password is, Show words
+ *   showing them read-only and a box pressed to type in hiding them again; and
+ *   each box a password's to the keyboard, so it learns nothing from them
+ *   (ui.css: Firefox for Android passes no other field's "don't learn" on).
+ * - No box is ever a password box, and the boxes are a form of their own: a
+ *   browser's password manager offers to keep a password box's text, and takes
+ *   a box before a password for its username.
  */
 export function createMnemonicInput({
   initialMnemonic = "",
@@ -259,10 +262,8 @@ export function createMnemonicInput({
   const showBtn = masked ? h("button", { class: "text-btn srp-show", type: "button", text: "Show words", "aria-pressed": "false" }) : null;
   function setShown(next) {
     shown = Boolean(next) && masked;
-    for (const input of inputs) {
-      input.setAttribute("type", shown ? "text" : "password");
-      input.readOnly = shown;
-    }
+    grid.classList.toggle("is-hidden", masked && !shown);
+    for (const input of inputs) input.readOnly = shown;
     if (showBtn) {
       showBtn.textContent = shown ? "Hide words" : "Show words";
       showBtn.setAttribute("aria-pressed", String(shown));
@@ -271,13 +272,12 @@ export function createMnemonicInput({
 
   const grid = h(
     "div",
-    { class: "srp-grid srp-grid--input" },
+    { class: ["srp-grid srp-grid--input", masked ? "srp-grid--masked is-hidden" : ""].filter(Boolean).join(" ") },
     Array.from({ length: MAX }, (_, i) => {
       const input = h("input", {
-        type: masked ? "password" : "text",
+        type: "text",
         inputmode: "text",
-        // A password box no browser offers a password for, or keeps one from.
-        autocomplete: masked ? "one-time-code" : "off",
+        autocomplete: "off",
         autocorrect: "off",
         autocapitalize: "none",
         spellcheck: "false",
@@ -309,7 +309,9 @@ export function createMnemonicInput({
   const box = h("div", { class: "box srp-box" }, [grid]);
   const hintEl = hint ? h("p", { class: "srp-hint", id: `srp-hint-${++hintIds}`, text: hint }) : null;
   if (showBtn) showBtn.onclick = () => setShown(!shown);
-  const root = h("div", { class: "mnemonic-input" }, [toggleRow, hintEl, box, showBtn].filter(Boolean));
+  const root = h("form", { class: "mnemonic-input", novalidate: "" }, [toggleRow, hintEl, box, showBtn].filter(Boolean));
+  // Nothing submits it: Enter moves on to the next word, or completes them.
+  root.addEventListener("submit", (e) => e.preventDefault());
   if (hintEl) root.setAttribute("aria-describedby", hintEl.id);
 
   // A box left: its word marked if it isn't one. The words left for

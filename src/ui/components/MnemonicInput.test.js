@@ -38,24 +38,36 @@ const paste = (field, text) => field.dispatchEvent(fakeEvent("paste", { clipboar
 const leave = (field, to = null) => field.dispatchEvent(fakeEvent("focusout", { relatedTarget: to }));
 
 describe("on a phone", () => {
-  // Marek's: Firefox for Android told the keyboard nothing of "don't learn" for these boxes.
-  it("types each word in a password box no browser offers or keeps a password for, shown read-only on asking", () => {
+  // The rule ui.css has for `selector`, its declarations.
+  const cssRule = async (selector) => {
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    return css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
+  };
+
+  // Marek's: Firefox for Android told the keyboard nothing of "don't learn" for these boxes;
+  // then, typed in password boxes, Firefox offered to keep a word as a password.
+  it("types each word unseen in a box that's no password box, a password's to the keyboard, shown read-only on asking", async () => {
     vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
     const { input, box, words } = mount();
-    const types = () => input.el.querySelectorAll("input").map((i) => [i.getAttribute("type"), Boolean(i.readOnly)]);
-    expect(new Set(types().map(String))).toEqual(new Set(["password,false"]));
-    expect(box(1).getAttribute("autocomplete")).toBe("one-time-code");
+    const grid = input.el.querySelector(".srp-grid");
+    const boxes = () => input.el.querySelectorAll("input").map((i) => [i.getAttribute("type"), Boolean(i.readOnly)]);
+    const hidden = () => grid.classList.contains("srp-grid--masked") && grid.classList.contains("is-hidden");
+    expect([new Set(boxes().map(String)), hidden()]).toEqual([new Set(["text,false"]), true]);
+    // Hidden as a password's dots, and a password's to the keyboard (Firefox's ime-mode).
+    expect(await cssRule(".srp-grid--masked.is-hidden .srp-word-input input")).toContain("-webkit-text-security: disc;");
+    expect(await cssRule(".srp-grid--masked .srp-word-input input")).toContain("ime-mode: disabled;");
+    expect(box(1).getAttribute("autocomplete")).toBe("off");
     paste(box(1), TWELVE);
     expect(words()).toEqual(TWELVE.split(" "));
     expect(input.getMnemonic()).toBe(TWELVE);
 
     const show = input.el.querySelectorAll("button").find((b) => b.textContent === "Show words");
     show.click();
-    expect(new Set(types().map(String))).toEqual(new Set(["text,true"]));
+    expect([new Set(boxes().map(String)), hidden()]).toEqual([new Set(["text,true"]), false]);
     expect(show.textContent).toBe("Hide words");
     // Pressed to type in, a box hides them again, and takes what's typed.
     box(3).dispatchEvent(fakeEvent("pointerdown"));
-    expect(new Set(types().map(String))).toEqual(new Set(["password,false"]));
+    expect([new Set(boxes().map(String)), hidden()]).toEqual([new Set(["text,false"]), true]);
     typeInto(box(3), "zoo");
     expect(words()[2]).toBe("zoo");
   });
@@ -63,7 +75,16 @@ describe("on a phone", () => {
   it("keeps words in plain boxes elsewhere", () => {
     const { input } = mount();
     expect(new Set(input.el.querySelectorAll("input").map((i) => i.getAttribute("type")))).toEqual(new Set(["text"]));
+    expect(input.el.querySelector(".srp-grid").classList.contains("srp-grid--masked")).toBe(false);
     expect(input.el.querySelectorAll("button").find((b) => b.textContent === "Show words")).toBeUndefined();
+  });
+
+  it("is a form of its own, which Enter never submits", () => {
+    const { input, box } = mount();
+    expect(input.el.localName).toBe("form");
+    const submit = fakeEvent("submit");
+    box(1).dispatchEvent(submit);
+    expect(submit.defaultPrevented).toBe(true);
   });
 });
 

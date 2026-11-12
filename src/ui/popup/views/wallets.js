@@ -6,7 +6,7 @@ import { formatLuxForInput, parseDuskToLux, amountForInput } from "../../../shar
 import { walletLabel } from "../../../shared/wallets.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
-import { NEW_PASSWORD, decimalInput, fieldError, fieldLabel, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
+import { decimalInput, fieldError, fieldLabel, newPasswordField, passwordForm, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
 import { srpGridEl } from "./onboarding.js";
 import { subnav } from "../../components/Subnav.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
@@ -317,8 +317,9 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
 /** A new password for every wallet here: the current one, then the new one twice. */
 export function changePasswordView(ov, { state, actions } = {}) {
   const current = passwordField({ label: "Current password", placeholder: "The password you unlock with", onEnter: () => next.input.focus() });
-  const next = passwordField({ label: "New password", placeholder: "At least 8 characters", autocomplete: NEW_PASSWORD, onEnter: () => again.input.focus() });
-  const again = passwordField({ label: "Confirm password", placeholder: "The same password again", autocomplete: NEW_PASSWORD, onEnter: () => btn.click() });
+  // The new one, twice, apart from the current one (FormControls.js).
+  const next = newPasswordField({ caption: "New password", placeholder: "At least 8 characters", onEnter: () => again.input.focus() });
+  const again = newPasswordField({ caption: "Confirm password", placeholder: "The same password again", onEnter: () => btn.click() });
   const err = formError();
   const fields = [current, next, again];
 
@@ -383,7 +384,8 @@ export function changePasswordView(ov, { state, actions } = {}) {
     subnav({ title: "Change password", onBack: () => backToSettings(state, actions) }),
     h("div", { class: "row onboard-form" }, [
       h("p", { class: "auth-lead", text: "Every recovery phrase here is encrypted again with the new password." }),
-      ...fields.flatMap((f) => f.els),
+      passwordForm(current.els),
+      passwordForm([...next.els, ...again.els]),
       err.el,
       btn,
     ]),

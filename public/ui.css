@@ -572,11 +572,32 @@ code {
   grid-column: 1 / -1;
 }
 
-label {
+label,
+p.field-caption {
   font-size: 13px;
   font-weight: 500;
   line-height: 1.35;
   color: var(--text-muted);
+}
+
+/* A new password's caption, which looks as a label does (FormControls.js). */
+p.field-caption {
+  margin: 0;
+}
+
+/* A password's fields in a form of their own, laid out as if it weren't
+   there: in a row of fields, a column of its own with the row's gap. Never
+   display: contents, whose fields Firefox for Android gives a screen reader
+   nothing of. */
+form.password-form {
+  display: block;
+  margin: 0;
+}
+
+.row > form.password-form {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
 }
 
 /* ---- Inputs ---- */
@@ -3040,6 +3061,18 @@ body.page--popup .brand-mark {
 
 .srp-word-input input::placeholder {
   color: color-mix(in oklab, var(--muted-foreground) 75%, transparent);
+}
+
+/* On a phone the words are typed unseen, as a password is, in boxes that are
+   no password boxes, which a browser offers to keep. Each is a password's to
+   the keyboard all the same, so it learns nothing from them: ime-mode is the
+   one way Firefox for Android has to say so of another box. */
+.srp-grid--masked .srp-word-input input {
+  ime-mode: disabled;
+}
+
+.srp-grid--masked.is-hidden .srp-word-input input {
+  -webkit-text-security: disc;
 }
 
 .srp-word.is-invalid {

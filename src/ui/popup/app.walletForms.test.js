@@ -127,6 +127,21 @@ describe("a wallet form being filled in", () => {
     expect(fieldsOf(t.app, names)).toEqual([]);
   });
 
+  // Marek's: a browser read a word's box on Import as the screen went; nothing typed stays in the page.
+  it("empties the restore's words and passwords as it's left, before the screen goes", async () => {
+    const t = await popupAt("restore", {}, async () => ({}), { isUnlocked: false });
+    const fields = t.app.querySelectorAll("input").filter((f) => f.closest(".mnemonic-input") || f.getAttribute("type") === "password");
+    expect(fields.length).toBeGreaterThan(12);
+    typeAll(fields);
+    button(t.app, "← Back").click();
+    await flush();
+    document.querySelectorAll("button").find((b) => b.textContent === "Go back").click();
+    await flush();
+    expect(t.state.route).toBe("home");
+    expect(fields.some((f) => t.app.contains(f))).toBe(false);
+    expect(fields.map((f) => f.value).filter(Boolean)).toEqual([]);
+  });
+
   it("says on Add wallet's import which wallet the phrase becomes, by the wallets here as they change", async () => {
     const t = await popupAt("wallet_add_import", FORMS[2][2]);
     const landing = () => t.app.querySelector(".wallet-landing").textContent;

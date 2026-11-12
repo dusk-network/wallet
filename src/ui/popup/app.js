@@ -279,6 +279,9 @@ let mounted = null;
 // may be.
 let keptForm = null;
 
+// The fields that hold a secret: a recovery phrase's words, and passwords.
+const SECRET_FIELDS = '.mnemonic-input input, input[type="password"]';
+
 function wipeForm(form) {
   for (const node of form?.children ?? []) {
     for (const field of node.querySelectorAll?.("input, textarea") ?? []) field.value = "";
@@ -349,8 +352,12 @@ function setApp(children) {
     // Redrawn in place (a watcher event, a refresh), the screen keeps the
     // focus on the same button or field, and a field its caret.
     const focused = sameScreen ? focusedControl() : null;
-    const password = app.querySelector("#unlock-password");
-    if (password) password.value = "";
+    // A recovery word or a password typed on the screen going goes first,
+    // before the screen does: nothing of it stays in the page. One the new
+    // screen keeps (a kept form) stays as it is.
+    for (const field of app.querySelectorAll(SECRET_FIELDS)) {
+      if (!children.some((child) => child?.contains?.(field))) field.value = "";
+    }
     activeLockedView = null;
     if (keptForm && keptForm.children !== children) {
       wipeForm(keptForm);
