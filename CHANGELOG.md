@@ -76,6 +76,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said under Rewards by year, in the web wallet's words, that taken out by unstaking is part of grown while held and how it's counted, and kept a year's figures while a new unstake's are read, rather than couldn't be read.
 - Asked about a profile's name that is a contact's .dusk name, naming that contact, or that starts as another profile's .dusk name, and refused look-alikes in letter pairs, as VVendy for Wendy, with app-core's one check, as the web wallet does.
 - Refused a request link whose amount isn't a plain number, as a hidden character or a # in it, or whose field names hide something or only look like a field's, rather than reading it without a word, and said a memo's line break in the web wallet's words.
 - Asked "Is that 1 or 1000?" of a lone point or comma before three digits in every language, as "1.000" on an English phone, and filled Max with a fourth decimal where three would ask.

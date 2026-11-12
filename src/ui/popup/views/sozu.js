@@ -416,6 +416,35 @@ export function stakingHistory(ov, { state, actions }) {
   return sozuHistory(ov, sozuState(state), { state, actions });
 }
 
+/** How long Sozu's facts wait before they're read again, while some aren't on the archive. */
+export const FACTS_AGAIN_MS = 20_000;
+
+/**
+ * A stake's or an unstake's facts come from the archive a little after its
+ * block: while rewards by year wait on some (app-core's `reading`), they're
+ * read again 20 seconds on, one read at a time, and the screen drawn again
+ * after each read, what came or not (`factsRead`): rewards by year are worked
+ * out again, and while some are still read, read again 20 seconds on.
+ */
+export function readSozuFactsAgain(ov, { state, actions }) {
+  const st = sozuState(state);
+  const history = st.history;
+  if (!history || history.reading || history.againTimer) return;
+  history.againTimer = setTimeout(() => {
+    sozuFactsOf(ov, history.rows)
+      .then((facts) => {
+        if (st.history === history && facts) history.facts = facts;
+      })
+      .catch(() => {})
+      .finally(() => {
+        history.againTimer = null;
+        if (st.history !== history) return;
+        history.factsRead = (history.factsRead ?? 0) + 1;
+        actions?.render?.()?.catch?.(() => {});
+      });
+  }, FACTS_AGAIN_MS);
+}
+
 /**
  * Native staking's rate, and what the working under Sozu's says is made of:
  * asked once a popup and node, and drawn again when they come. The rate as the

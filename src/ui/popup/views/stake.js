@@ -32,11 +32,12 @@ import { fieldLabel, reviewActions, submitOnGasEnter } from "../../components/Fo
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { sozuHolding, sozuLiquidStakingView, stakingHistory } from "./sozu.js";
+import { readSozuFactsAgain, sozuHolding, sozuLiquidStakingView, stakingHistory } from "./sozu.js";
 import { keptRatesOf, nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
 import { currencyName } from "../activityExport.js";
 import { duskPrices } from "../duskPrice.js";
 import { defaultCurrency } from "@dusk-network/app-core/amounts";
+import { REWARDS_COUNTED, REWARD_WORDS } from "@dusk-network/app-core/export";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -438,17 +439,21 @@ function rewardYears(ov, { state, actions, hidden, status }) {
   const currency = defaultCurrency();
   const valued = Boolean(state.rewardYearsValued);
   // Read again for a new status, what was said kept meanwhile: what's held
-  // and what it's worth now, which grows as Sozu's rewards come; and with
-  // their value once it's asked for.
-  const base = `${history.key}|${history.rows.length}|${history.facts?.size ?? 0}`;
+  // and what it's worth now, which grows as Sozu's rewards come; with their
+  // value once it's asked for; and after each read of Sozu's facts again.
+  const base = `${history.key}|${history.rows.length}|${history.facts?.size ?? 0}|${history.factsRead ?? 0}`;
   const held = status?.position ?? {};
   const key = `${base}|${status ? `${held.stDusk ?? held.stDuskBalanceLux ?? ""}/${held.balance ?? held.poolBalanceLux ?? ""}` : "-"}|${valued ? currency : ""}`;
   if (state.rewardYears?.key !== key) {
-    const kept = (state.rewardYears = { base, key, years: state.rewardYears?.base === base ? state.rewardYears.years : [] });
+    // What was said stays while it's read again, for the same profile: a new
+    // stake's or unstake's facts come from the archive a little after its block.
+    const kept = (state.rewardYears = { base, key, of: history.key, years: state.rewardYears?.of === history.key ? state.rewardYears.years : [] });
     rewardYearsOf(ov, { rows: history.rows, facts: history.facts, complete: Boolean(history.whole), status, price: valued ? duskPrices({ currency }) : undefined })
       .then((years) => {
         if (state.rewardYears !== kept) return;
         kept.years = years;
+        // Some of it still read: its facts asked again a moment on.
+        if (years.some((year) => year.reading > 0)) readSozuFactsAgain(ov, { state, actions });
         actions?.render?.()?.catch?.(() => {});
       })
       .catch(() => {});
@@ -474,18 +479,21 @@ function rewardYears(ov, { state, actions, hidden, status }) {
     }),
     h("span", { text: `Add each reward's value in ${currencyName(currency)}, from CoinGecko's prices` }),
   ]);
+  // Sozu's two lines, how they're counted, in both wallets' words (app-core).
+  const sozuShown = years.some(({ sozu, sozuGrown }) => sozu === null || sozuGrown === null || sozu?.lux > 0n || sozuGrown?.lux > 0n);
   return [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
     h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown }) =>
       kvRow(
         String(year),
-        [line("Native staking, claimed", claimed), line("Sozu, grown while held", sozuGrown), line("Sozu, taken out by unstaking", sozu)]
+        [line(REWARD_WORDS.claimed, claimed), line(REWARD_WORDS.sozuGrown, sozuGrown), line(REWARD_WORDS.sozu, sozu)]
           .filter(Boolean)
           .map((parts) => h("span", { class: "stake-year-part" }, parts))
       )
     )),
+    sozuShown ? h("p", { class: "settings-note stake-years-counted", text: REWARDS_COUNTED }) : null,
     value,
-  ];
+  ].filter(Boolean);
 }
 
 function kvRow(label, value) {
