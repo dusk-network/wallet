@@ -59,6 +59,10 @@ function phraseProblem(words, { pasted = 0 } = {}) {
  * - A whole phrase (12 words or more) pasted or typed into any box fills the
  *   boxes from the first, in order, and sets 12 or 24 by its length; a few
  *   words go where they're put.
+ * - A space after a word, or any whitespace, moves on to the next box, as
+ *   Enter does, however the keyboard sends it: as a key, or as text, as a
+ *   phone's keyboard commits it, with no space key at all. A word the keyboard
+ *   is composing is taken once it's done.
  * - A word that isn't a recovery word is marked once a paste puts it in or
  *   its box is left, never while it's typed; it clears once it's a word.
  * - `onCheck` hears what's wrong with the words, in one plain sentence ("" for
@@ -149,10 +153,18 @@ export function createMnemonicInput({
     inputs[i].select?.();
   }
 
+  // On from box `i`, as Enter goes: to the next box, or from the last one to
+  // what comes after the words.
+  function moveOn(i) {
+    if (i >= count - 1) onComplete?.();
+    else focusIndex(i + 1);
+  }
+
   const shownWords = () => inputs.slice(0, count).map((i) => String(i.value ?? "").trim().toLowerCase());
   const problem = () => phraseProblem(shownWords(), { pasted: overflow });
 
-  function applyWords(startIdx, words) {
+  // `focus`: on to the first box left empty, if any.
+  function applyWords(startIdx, words, { focus = true } = {}) {
     if (!words?.length) return;
     const needed = startIdx + words.length;
     if (count === 12 && needed > 12) setCount(24);
@@ -162,6 +174,7 @@ export function createMnemonicInput({
       inputs[idx].value = String(words[j] ?? "").trim().toLowerCase();
       validateIndex(idx);
     }
+    if (!focus) return;
 
     // Focus the next empty field (or the last visible field)
     const empty = firstEmptyIndex(inputs, count);
@@ -181,14 +194,15 @@ export function createMnemonicInput({
   }
 
   // Words that came at once, by a paste or typed with spaces, into box `i`.
-  function placeWords(i, words) {
+  // `focus`, for a few: on to the first box left empty.
+  function placeWords(i, words, { focus = true } = {}) {
     if (words.length >= 12) {
       applyPhrase(words);
       onCheck?.(problem());
       return;
     }
     overflow = 0;
-    applyWords(i, words);
+    applyWords(i, words, { focus });
     // A few words: only words that aren't recovery words, said now.
     const unknown = shownWords().some((w) => w && !WORDSET.has(w));
     onCheck?.(unknown ? problem() : "");
@@ -211,44 +225,71 @@ export function createMnemonicInput({
     placeWords(i, words);
   }
 
-  function onInput(i) {
-    const raw = String(inputs[i].value ?? "");
-    // If user pasted/typed multiple words into one input, distribute them.
-    if (/\s/.test(raw)) {
-      const words = parseWords(raw);
-      if (words.length >= 12) {
-        placeWords(i, words);
-        return;
-      }
-      inputs[i].value = (words[0] ?? "").toLowerCase();
-      validateIndex(i);
-      overflow = 0;
-      if (words.length > 1) {
-        placeWords(i + 1, words.slice(1));
-        return;
-      }
-      onCheck?.("");
-      return;
-    }
-
-    inputs[i].value = raw.toLowerCase();
+  // Something typed in box `i`: what was said of the words goes, and the
+  // word's mark, if it has one, once it's a word; a new one waits for the box
+  // to be left.
+  function noteTyping(i) {
     overflow = 0;
-    // A word typed: its mark, if it has one, goes once it's a word; a new
-    // one waits for the box to be left.
     if (cells[i].classList.contains("is-invalid")) validateIndex(i);
     onCheck?.("");
   }
 
+  // What box `i` holds once the keyboard has put the typing in, as keys or
+  // as text. Whitespace ends a word: the box keeps its first word, the words
+  // after it fill the boxes after it (a whole phrase every box, as a paste
+  // does), and whitespace after the last word moves on from its box.
+  function takeTyped(i) {
+    const raw = String(inputs[i].value ?? "");
+    if (!/\s/.test(raw)) {
+      inputs[i].value = raw.toLowerCase();
+      noteTyping(i);
+      return;
+    }
+    const words = parseWords(raw);
+    if (words.length >= 12) {
+      placeWords(i, words);
+      return;
+    }
+    const [first = "", ...rest] = words;
+    const ended = Boolean(first) && /\s$/.test(raw);
+    inputs[i].value = first;
+    validateIndex(i);
+    overflow = 0;
+    if (rest.length) placeWords(i + 1, rest, { focus: !ended });
+    else onCheck?.("");
+    if (ended) moveOn(i + rest.length);
+  }
+
+  // The box and the word compositionend took in, which the input event
+  // Firefox sends after it brings again (Chrome's comes before it).
+  let composed = null;
+
+  function onInput(i, e) {
+    // A word the keyboard is still composing, as a phone's does the word it
+    // suggests for: taken once it's done.
+    if (e?.isComposing) {
+      noteTyping(i);
+      return;
+    }
+    const taken = composed?.i === i && composed.value === inputs[i].value;
+    composed = null;
+    if (!taken) takeTyped(i);
+  }
+
+  function onCompositionEnd(i) {
+    takeTyped(i);
+    composed = { i, value: inputs[i].value };
+  }
+
   function onKeyDown(i, e) {
-    if (!e) return;
+    // A key the keyboard keeps for itself (229), as a phone's keyboard does
+    // each key, or one it composes with, isn't the page's: its text comes as
+    // input.
+    if (!e || e.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" || e.key === " ") {
       if (String(inputs[i].value ?? "").trim()) {
         e.preventDefault();
-        if (i >= count - 1) {
-          onComplete?.();
-        } else {
-          focusIndex(i + 1);
-        }
+        moveOn(i);
       }
       return;
     }
@@ -285,7 +326,8 @@ export function createMnemonicInput({
         "aria-label": `Word ${i + 1}`,
       });
       input.addEventListener("paste", (e) => onPaste(i, e));
-      input.addEventListener("input", () => onInput(i));
+      input.addEventListener("input", (e) => onInput(i, e));
+      input.addEventListener("compositionend", () => onCompositionEnd(i));
       input.addEventListener("keydown", (e) => onKeyDown(i, e));
       // Shown words are read only: pressed to type in, they hide again first.
       input.addEventListener("pointerdown", () => {

@@ -76,6 +76,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Moved on to the next box at a space typed after a recovery word on a phone, as Enter does, rather than running every word into the first box.
 - Put revokes, and approvals no migration spent, in the export, each once, in the file of the profile its migration paid, as the web wallet does, and said whose network fees on other chains the file has and which it may be short of.
 - Said under Rewards by year, in the web wallet's words, that taken out by unstaking is part of grown while held and how it's counted, and kept a year's figures while a new unstake's are read, rather than couldn't be read.
 - Asked about a profile's name that is a contact's .dusk name, naming that contact, or that starts as another profile's .dusk name, and refused look-alikes in letter pairs, as VVendy for Wendy, with app-core's one check, as the web wallet does.

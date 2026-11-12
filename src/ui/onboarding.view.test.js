@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, typeKeys, visibleText } from "./testing/fakeDom.js";
 import { passwordManagerView } from "./testing/passwordManager.js";
 import {
   onboardingCreateConfirmView,
@@ -146,6 +146,25 @@ describe("setting up and unlocking", () => {
     expect(errorOf(group)).toBe("");
     expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_CREATE_WALLET", mnemonic: MNEMONIC, password: "long enough" });
     expect(state.route).toBe("home");
+  });
+
+  // Chen's: typed a word at a time on the Android app's keyboard, every word went in box 1 and Import blamed word 1.
+  it("imports a phrase typed a word at a time with spaces, as a phone's keyboard sends them and as a computer's", async () => {
+    for (const as of ["text", "keys"]) {
+      const state = { route: "onboard_import", onboard: onboard() };
+      const acts = actions();
+      const body = show(onboardingImportView({ state, actions: acts }));
+      field(body, "Word 1").focus();
+      typeKeys(`${MNEMONIC} `, { as });
+      // The space after the last word goes on to the password.
+      expect(dom.document.activeElement === field(body, "Password"), as).toBe(true);
+      typeInto(field(body, "Password"), "long enough");
+      typeInto(field(body, "Confirm password"), "long enough");
+      button(body, "Import wallet").click();
+      await settle();
+      expect(errorOf(body.querySelector("[role=group]")), as).toBe("");
+      expect(acts.send, as).toHaveBeenCalledWith({ type: "DUSK_UI_CREATE_WALLET", mnemonic: MNEMONIC, password: "long enough" });
+    }
   });
 
   it("says a misspelled word by Import wallet too, where a phone shows it, not only above the words", async () => {

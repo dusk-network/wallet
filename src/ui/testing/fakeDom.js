@@ -657,6 +657,57 @@ export function press(el, key) {
   return el.dispatchEvent(fakeEvent("keydown", { key }));
 }
 
+/**
+ * Types `text` where the focus is, a character at a time, as a browser hands
+ * typing to the page: a computer's keyboard as keys, each a keydown whose
+ * default puts its character in; a phone's (`as: "text"`) as the text its
+ * keyboard commits, after a keydown that names no key (229), so no space key
+ * ever comes. Each character goes in at the end of the field the focus is in
+ * by then.
+ * @param {string} text
+ * @param {{ as?: "keys" | "text" }} [opts]
+ */
+export function typeKeys(text, { as = "keys" } = {}) {
+  for (const ch of text) {
+    const field = globalThis.document.activeElement;
+    const down = as === "text" ? { key: "Unidentified", keyCode: 229 } : { key: ch };
+    if (!field.dispatchEvent(fakeEvent("keydown", down)) || field.readOnly || field.disabled) continue;
+    if (!field.dispatchEvent(fakeEvent("beforeinput", { inputType: "insertText", data: ch }))) continue;
+    field.value += ch;
+    field.dispatchEvent(fakeEvent("input", { inputType: "insertText", data: ch, isComposing: false }));
+  }
+}
+
+/**
+ * Composes `text` where the focus is, as a phone's keyboard composes the word
+ * it suggests for: a letter at a time, each an input event while composing.
+ * Then commits `commit` (`text` itself by default) in its place, in Chrome's
+ * order, its last input event still composing and compositionend after it, or
+ * in Firefox's (`order: "firefox"`), compositionend first and then an input
+ * event that isn't composing.
+ * @param {string} text
+ * @param {{ commit?: string, order?: "chrome" | "firefox" }} [opts]
+ */
+export function compose(text, { commit = text, order = "chrome" } = {}) {
+  const field = globalThis.document.activeElement;
+  const before = field.value;
+  const update = (data) => {
+    field.dispatchEvent(fakeEvent("keydown", { key: "Unidentified", keyCode: 229, isComposing: true }));
+    field.value = before + data;
+    field.dispatchEvent(fakeEvent("input", { inputType: "insertCompositionText", data, isComposing: true }));
+  };
+  field.dispatchEvent(fakeEvent("compositionstart", { data: "" }));
+  for (let n = 1; n <= text.length; n++) update(text.slice(0, n));
+  if (order === "firefox") {
+    field.value = before + commit;
+    field.dispatchEvent(fakeEvent("compositionend", { data: commit }));
+    field.dispatchEvent(fakeEvent("input", { inputType: "insertCompositionText", data: commit, isComposing: false }));
+  } else {
+    update(commit);
+    field.dispatchEvent(fakeEvent("compositionend", { data: commit }));
+  }
+}
+
 /** Lets queued promise jobs and timers run, as they do before the next paint. */
 export const settle = () => new Promise((resolve) => setTimeout(resolve));
 
