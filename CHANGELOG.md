@@ -76,6 +76,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Opened Home on reloading the extension's tab after a request link was paid or left, rather than the same payment filled in again.
+- Dropped what a link or a QR code filled in once Send is left, rather than bringing it back in the next Send, and its Filled in from line once another recipient is picked in Contacts.
 - Typed a recovery phrase's words on a phone in boxes no browser offers to keep as a password, still unseen and kept from the keyboard's learning, and emptied them, and the passwords beside them, as the screen is left.
 - Kept Firefox's offer of a strong password of its own off the wallet's password fields.
 - Measured native staking's rate over the 30 days to the last whole day of blocks, counting every stake, so it no longer moves from one block to the next and both wallets give the same figure.

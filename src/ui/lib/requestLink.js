@@ -33,31 +33,47 @@ export function readRequestLink(text, nodeUrl) {
  * Send refuses for another network. One that can't be read fills in nothing and says
  * why. Null for no link, or what isn't one.
  * @param {string} search - the page's query
- * @returns {{ to: string, amountDusk: string, memo: string, requestChainId?: string, refusedProblem?: string, filledFrom?: "link" } | null}
+ * @returns {{ to: string, amountDusk: string, memo: string, requestChainId?: string, refusedProblem?: string, filledFrom?: "link", filledIn?: true } | null}
  */
 export function requestDraftOf(search) {
   const read = readRequestLink(new URLSearchParams(search).get("link") ?? "");
   if (!read) return null;
   if (!read.link) return { to: "", amountDusk: "", memo: "", refusedProblem: read.problem };
   const { link } = read;
-  return { to: link.to, amountDusk: amountForInput(link.amountDusk), memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link" };
+  return { to: link.to, amountDusk: amountForInput(link.amountDusk), memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link", filledIn: true };
 }
+
+// The pages whose request link went, paid or left (forgetRequestLink).
+const linkGone = new WeakSet();
 
 /**
  * Takes the request link the page was opened with off its address, once it's
- * paid: a reload, or Firefox for Android bringing the tab back, opens the
- * wallet, not the same payment ready to send again.
- * @param {{ location?: Location, history?: History }} [page]
+ * paid or left: a reload, or Firefox for Android bringing the tab back, opens
+ * the wallet, not the same payment ready to send again. Off each entry of the
+ * page's history it comes to from then on too: the entries the wallet puts up
+ * for a phone's Back (systemBack.js) carry the address the page opened with,
+ * and Done or Back steps back onto them.
+ * @param {Window} [win] - the page
  */
-export function forgetPaidLink({ location: where = globalThis.location, history = globalThis.history ?? globalThis.window?.history } = {}) {
-  try {
-    const params = new URLSearchParams(where?.search ?? "");
-    if (!params.has("link")) return;
-    params.delete("link");
-    params.delete("route");
-    const query = params.toString();
-    history?.replaceState?.(history.state ?? null, "", `${where.pathname}${query ? `?${query}` : ""}`);
-  } catch {
-    // An address that can't change stays as it is.
-  }
+export function forgetRequestLink(win = globalThis.window ?? globalThis) {
+  // Whether the address on now had the link.
+  const strip = () => {
+    try {
+      const where = win?.location ?? globalThis.location;
+      const history = win?.history ?? globalThis.history;
+      const params = new URLSearchParams(where?.search ?? "");
+      if (!params.has("link")) return false;
+      params.delete("link");
+      params.delete("route");
+      const query = params.toString();
+      history?.replaceState?.(history.state ?? null, "", `${where.pathname}${query ? `?${query}` : ""}`);
+      return true;
+    } catch {
+      // An address that can't change stays as it is.
+      return false;
+    }
+  };
+  if (!strip() || !win || linkGone.has(win)) return;
+  linkGone.add(win);
+  win.addEventListener?.("popstate", strip);
 }

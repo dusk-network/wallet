@@ -1859,6 +1859,31 @@ describe("a request link", () => {
     expect(again.amount.value).toBe("1,5");
   });
 
+  // Sofía's, in the app: Chen picked from Contacts in place of the link's recipient, and the line stayed.
+  it("stops saying it filled the recipient in once another is picked from Contacts, keeping the amount and memo", async () => {
+    const state = newState();
+    const form = mount(state);
+    paste(form, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    const filled = () => visibleText(dom.document.body.querySelector(".send-filled-note"));
+    expect(filled()).toBe("Filled in from the link, to pay on Testnet. Check it before you send.");
+
+    dom.document.body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Contacts").click();
+    await settle();
+    expect([state.route, state.addressBook.mode]).toEqual(["contacts", "pick"]);
+    Object.assign(state.addressBook, { loaded: true, loading: false, items: [{ id: "c", name: "Chen", address: BOB.account, type: "account" }] });
+    const { addressBookView } = await import("./popup/views/addressbook.js");
+    dom.document.body.replaceChildren(...addressBookView(overview(), { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
+    dom.document.body.querySelectorAll(".contact-row").find((row) => row.textContent.includes("Chen")).click();
+    expect(state.route).toBe("send");
+
+    const picked = mount(state);
+    expect([picked.to.value, picked.amount.value, state.draft.memo]).toEqual([BOB.account, "0.03", "Invoice 2026-120"]);
+    expect(filled()).toBe("");
+    // The link's network went with its recipient, as when one is typed.
+    expect(state.draft.requestChainId).toBeUndefined();
+  });
+
   it("refuses one for another network, and goes as far as Review only with what Send takes", async () => {
     const state = newState();
     const form = mount(state);
@@ -1970,6 +1995,31 @@ describe("a request link", () => {
     expect(form.to.value).toBe(BOB.account);
     expect(refusal()).toEqual([]);
     expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the QR code, to pay on Testnet. Check it before you send.");
+  });
+
+  // Sofía's, in the app: a request scanned and left with Back came back, its
+  // 0.03 and memo, "Filled in from the QR code", in a Send she started herself.
+  it("keeps nothing of a scanned request once Send is left with Back, a recipient typed over it or not", async () => {
+    const { openQrScanModal } = await import("./components/QrScanModal.js");
+    const { keepSendDraft, keptSendDraft } = await import("./lib/sendDraft.js");
+    const state = newState();
+    const form = mount(state);
+    openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:2?amount=0.03&memo=Invoice+2026-120`);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "0.03"]);
+    typeInto(form.to, BOB.account);
+    dom.document.body.querySelector(".subnav-back").click();
+    expect(state.route).toBe("home");
+    expect(keptSendDraft(overview())).toBeNull();
+
+    // What's typed by hand is still kept for the next Send.
+    keepSendDraft({ to: BOB.account, amountDusk: "0.02", memo: "satay" }, overview());
+    const typed = { ...newState(), draft: keptSendDraft(overview()) };
+    const again = mount(typed);
+    expect([again.to.value, again.amount.value]).toEqual([BOB.account, "0.02"]);
+    dom.document.body.querySelector(".subnav-back").click();
+    expect(keptSendDraft(overview())).toMatchObject({ to: BOB.account, amountDusk: "0.02", memo: "satay" });
   });
 
   it("is no request when it goes anywhere else, or names no recipient", async () => {

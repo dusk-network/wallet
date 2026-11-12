@@ -546,9 +546,10 @@ describe("a half-typed Send, left with Back", () => {
   });
 });
 
-// Astra's: a Testnet request kept with Back, Send opened again, then Mainnet: it could be paid there.
-describe("a request's Send, left with Back", () => {
-  it("keeps the request's network with it, and is refused on another network as the link is", async () => {
+describe("a request's Send", () => {
+  // Sofía's: a scanned request left with Back came back, 0.03 and its memo, in the next Send.
+  // Astra's: a Testnet request kept that way could be paid on Mainnet.
+  it("isn't kept once left with Back, and leaves nothing to pay on another network", async () => {
     let history;
     const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { history: (win) => (history = pageHistory(win)) });
     const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
@@ -558,23 +559,158 @@ describe("a request's Send, left with Back", () => {
       await flush();
       expect(t.state.route).toBe("send");
     };
-    await openSend();
     const { makePaymentLink } = await import("@dusk-network/app-core/payment-links");
-    field("To").value = makePaymentLink({ amount: "0.02", memo: "satay", network: "testnet", to: B }).dusk;
-    field("To").dispatchEvent(fakeEvent("input", { inputType: "insertFromPaste" }));
+    const pasteLink = async () => {
+      field("To").value = makePaymentLink({ amount: "0.02", memo: "satay", network: "testnet", to: B }).dusk;
+      field("To").dispatchEvent(fakeEvent("input", { inputType: "insertFromPaste" }));
+      await flush();
+      expect(values()).toEqual([B, "0.02", "satay"]);
+    };
+    await openSend();
+    await pasteLink();
+    // Edited, and Review and back, it's still the link's.
+    field("Memo").value = "satay twice";
+    field("Memo").dispatchEvent(fakeEvent("input"));
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Review").click();
     await flush();
-    expect(values()).toEqual([B, "0.02", "satay"]);
+    expect(t.state.route).toBe("confirm");
+    t.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+    await flush();
+    expect(values()).toEqual([B, "0.02", "satay twice"]);
+    expect(t.app.textContent).toContain("Filled in from the link");
     history.back();
     await flush();
+    expect(t.state.route).toBe("home");
     await openSend();
-    expect(values()).toEqual([B, "0.02", "satay"]);
+    expect(values()).toEqual(["", "", ""]);
+    expect(t.app.textContent).not.toContain("Filled in from");
 
+    await pasteLink();
     // Mainnet, the form still open: nothing of the request stays to pay there.
     t.open = { ...t.open, nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" };
     await t.render({ forceRefresh: true });
     await flush();
     expect([t.state.route, ...values()]).toEqual(["send", "", "", ""]);
     expect(t.app.textContent).toContain("This request is for Testnet. You are on Mainnet.");
+  });
+});
+
+// The page's history with each entry's address, as a browser keeps it: an
+// entry pushed takes the address shown, replaceState rewrites the one it's on,
+// Back and go() move with a popstate, and `location` (what a reload opens) is
+// the address of the entry it's on.
+function addressedHistory(win, first) {
+  const entries = [{ state: null, url: first }];
+  let at = 0;
+  const shown = () => new URL(entries[at].url, "moz-extension://wallet");
+  vi.stubGlobal("location", {
+    get pathname() {
+      return shown().pathname;
+    },
+    get search() {
+      return shown().search;
+    },
+  });
+  return {
+    closed: false,
+    get state() {
+      return entries[at].state;
+    },
+    get at() {
+      return at;
+    },
+    get url() {
+      return entries[at].url;
+    },
+    get urls() {
+      return entries.map((entry) => entry.url);
+    },
+    pushState(state, _title, url) {
+      entries.splice(at + 1, Infinity, { state, url: url ?? entries[at].url });
+      at++;
+    },
+    replaceState(state, _title, url) {
+      entries[at] = { state, url: url ?? entries[at].url };
+    },
+    back() {
+      this.go(-1);
+    },
+    go(delta) {
+      if (at + delta < 0) {
+        this.closed = true;
+        return;
+      }
+      at += delta;
+      setTimeout(() => win.dispatchEvent(fakeEvent("popstate", { state: entries[at].state })), 0);
+    },
+  };
+}
+
+// Amélie's: after paying a link and Done, or after Back from its Send, pulling the
+// page down brought the same payment back, filled in: the wallet's entries for
+// the phone's Back kept the link in their address, and Done stepped back onto one.
+describe("a request link the extension's tab opened with", () => {
+  const opened = async () => {
+    const { makePaymentLink } = await import("@dusk-network/app-core/payment-links");
+    const link = makePaymentLink({ amount: "0.02", memo: "Cadeau", network: "testnet", to: B }).https;
+    let history;
+    const t = await popupOn("send", { addressBook: { loaded: true, items: [] } }, undefined, {
+      history: (win) => (history = addressedHistory(win, `/full.html?route=send&link=${encodeURIComponent(link)}`)),
+    });
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.02", "Cadeau"]);
+    return { t, history, button: (text) => t.app.querySelectorAll("button").find((b) => b.textContent === text) };
+  };
+  // Pulling the page down: it opens again at the address it's on.
+  const reloaded = async () => {
+    vi.resetModules();
+    const { state } = await import("./state.js");
+    return [state.route, state.draft];
+  };
+  const settled = async () => {
+    await flush();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flush();
+  };
+
+  it("is off the page's address once it's paid and Done, from every entry it comes back to", async () => {
+    const { t, history, button } = await opened();
+    button("Review").click();
+    await settled();
+    pastClickGuard();
+    button("Confirm").click();
+    await settled();
+    expect(t.state.route).toBe("sent");
+    button("Done").click();
+    await settled();
+
+    expect(t.state.route).toBe("home");
+    expect(history.url).toBe("/full.html");
+    expect(await reloaded()).toEqual(["home", null]);
+  });
+
+  it("is off it once its Send is left with Back, and stays while it's paid", async () => {
+    const { t, history, button } = await opened();
+    // Review and back to the form: still the link's.
+    button("Review").click();
+    await settled();
+    button("← Back").click();
+    await settled();
+    expect(t.state.route).toBe("send");
+    expect(history.url).toContain("link=");
+
+    button("← Back").click();
+    await settled();
+    expect(t.state.route).toBe("home");
+    expect(history.url).toBe("/full.html");
+    expect(await reloaded()).toEqual(["home", null]);
+
+    // Firefox's Forward, onto an entry the wallet put up for Review: no link there either.
+    expect(history.urls.at(-1)).toContain("link=");
+    history.go(history.urls.length - 1 - history.at);
+    await settled();
+    expect(history.url).not.toContain("link=");
+    expect(await reloaded()).toEqual(["home", null]);
   });
 });
 
@@ -774,6 +910,43 @@ describe("the app on a phone", () => {
     expect(t.state.route).toBe("receive");
     const request = t.app.querySelector(".receive-request");
     expect(["Amount", "Memo"].map((name) => request.querySelectorAll("input").find((f) => accessibleName(f) === name).value)).toEqual(["0.05", "Chicken rice Tue"]);
+  });
+
+  // Astra's: with Immediately on, a Send a link filled in came back empty from the lock: its password
+  // was asked on Home, and what the link filled in went as if its Send had been left.
+  it("returns after Immediately's lock to a Send a link filled in, with what the link filled in", async () => {
+    const locks = async (message, t) => {
+      if (message.type === "DUSK_UI_LOCK") {
+        t.open = { ...t.open, isUnlocked: false };
+        t.deliver({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
+        return { ok: true };
+      }
+      if (message.type === "DUSK_UI_UNLOCK") {
+        t.open = { ...t.open, isUnlocked: true };
+        return { ok: true };
+      }
+      return undefined;
+    };
+    const filled = { to: B, amountDusk: "0.01", memo: "Deep link test", requestChainId: "dusk:2", filledFrom: "link", filledIn: true };
+    const t = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: filled }, locks, { tauri: tauriBridge() });
+    t.open = { ...t.open, lockOnLeave: true };
+    await t.render({ forceRefresh: true });
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.01", "Deep link test"]);
+
+    t.dom.document.visibilityState = "hidden";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await flush();
+    t.dom.document.visibilityState = "visible";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await flush();
+    expect(t.asked("DUSK_UI_LOCK")).toHaveLength(1);
+    t.app.querySelector("#unlock-password").value = "the password";
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
+    await flush();
+    expect(t.state.route).toBe("send");
+    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.01", "Deep link test"]);
+    expect(t.app.querySelector(".send-filled-note")?.textContent).toContain("Filled in from the link");
   });
 
   it("opens Send filled in from a dusk: link it was opened with, and from one opened while it runs", async () => {

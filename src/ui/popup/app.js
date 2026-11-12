@@ -28,7 +28,7 @@ import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
 import { siteLastSeen } from "../../shared/siteRecords.js";
-import { requestDraftOf } from "../lib/requestLink.js";
+import { forgetRequestLink, requestDraftOf } from "../lib/requestLink.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 import { openedFromNotice } from "../../platform/notices.js";
 
@@ -370,7 +370,24 @@ function setApp(children) {
     mounted = children;
     if (focused) refocusControl(focused);
   }
+  // Another screen than a request's own: the link the page opened with was
+  // left, or paid, and goes from its address; and what a link or a QR code
+  // filled in goes with it, not the next Send's.
+  if (!onLinksScreens()) {
+    forgetRequestLink();
+    if (state.draft?.filledIn) state.draft = null;
+  }
   systemBack.sync();
+}
+
+// A request's screens: its Send, the Review and Sent after it, and Contacts
+// picking its recipient. A lock leaves the route as it was; one as the app is
+// left (leave) asks the password on Home, to return to the screen left, which
+// is still the request's.
+function onLinksScreens() {
+  const left = state.returnTo?.context === state.context ? state.returnTo.route : null;
+  const requests = (route) => ["send", "confirm", "sent"].includes(route) || (route === "contacts" && state.addressBook?.mode === "pick");
+  return requests(state.route) || requests(left);
 }
 
 // The focused control in #app (a button, a disclosure or a field), by its

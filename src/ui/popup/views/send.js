@@ -49,7 +49,7 @@ import {
 } from "../../../shared/duskNames.js";
 
 import { openQrScanModal } from "../../components/QrScanModal.js";
-import { forgetPaidLink, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
+import { forgetRequestLink, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
 import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
@@ -397,6 +397,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     nextDraft.refusedChainId = undefined;
     nextDraft.refusedProblem = undefined;
     nextDraft.filledFrom = source === "qr" ? "qr" : "link";
+    nextDraft.filledIn = true;
     state.draft = nextDraft;
 
     sayRefused();
@@ -416,7 +417,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     if (read) return applyRequest(read, { source });
     if (source !== "qr") return false;
     to.value = s;
-    state.draft = { ...(state.draft || {}), to: s, duskName: undefined, requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: "qr" };
+    state.draft = { ...(state.draft || {}), to: s, duskName: undefined, requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: "qr", filledIn: true };
     sayRefused();
     sayFilled("qr");
     updateToType();
@@ -1092,8 +1093,11 @@ export function sendFormView(ov, { state, actions } = {}) {
           amountMasked: field.isMasked(),
           memo: memoVal,
           gas: prevGas,
-          // A request link's network, for Review to say so when it isn't this one.
+          // A request link's network, for Review to say so when it isn't this
+          // one; and what a link or a QR code filled in, as Back to the form has it.
           requestChainId: state.draft?.requestChainId,
+          filledFrom: state.draft?.filledFrom,
+          filledIn: state.draft?.filledIn,
           reviewedFor: reviewedFor(ov),
         };
         state.route = "confirm";
@@ -1122,7 +1126,10 @@ export function sendFormView(ov, { state, actions } = {}) {
       title: "Send",
       onBack: () => {
         // Kept for Send's next opening: Back on a phone is pressed by the way.
-        keepSendDraft(state.draft, ov);
+        // Not what a link or a QR code filled in, edited since or not: it
+        // isn't the next payment's.
+        if (state.draft?.filledIn) forgetSendDraft();
+        else keepSendDraft(state.draft, ov);
         state.route = "home";
         state.draft = null;
         actions?.render?.().catch(() => {});
@@ -1421,7 +1428,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         if (state.draft === d) state.draft = null;
         forgetSendDraft();
         // Paid: the link the page opened with goes from its address.
-        forgetPaidLink();
+        forgetRequestLink();
       },
     });
     pay.draw();
