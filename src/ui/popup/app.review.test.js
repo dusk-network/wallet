@@ -1039,3 +1039,40 @@ describe("the phone's Back in the app, as Android hands it over", () => {
   });
 });
 
+
+// Chen's, in Firefox for Android: Activity's search typed quickly kept "sa" of
+// "satay": each letter drew the screen again, and a field swapped under a
+// phone's keyboard loses what it's composing. Once, an amount came out "002.".
+describe("a field typed in while the wallet draws its screen again", () => {
+  it("stays the field typed in, with what's typed, till the typing stops; the screen follows then", async () => {
+    const t = await popupOn("activity", { addressBook: { loaded: true, items: [] } });
+    const search = () => t.app.querySelector(".activity-search");
+    const field = search();
+    field.focus();
+    for (const typed of ["s", "sa", "sat", "sata", "satay"]) {
+      field.value = typed;
+      field.dispatchEvent(fakeEvent("input"));
+      // A poll draws the screen again meanwhile, too.
+      await t.render({ forceRefresh: true });
+    }
+    await flush();
+    expect([search(), field.value, t.dom.document.activeElement]).toEqual([field, "satay", field]);
+
+    // Once the typing stops, the screen is drawn from what was typed.
+    await vi.waitFor(() => expect(search()).not.toBe(field), { timeout: 3000 });
+    expect([search().value, t.dom.document.activeElement]).toEqual(["satay", search()]);
+    expect(t.app.textContent).toContain("Nothing in your activity matches that.");
+  });
+
+  it("is drawn again at once on another wallet or a lock, typed in or not", async () => {
+    const t = await popupOn("activity", { addressBook: { loaded: true, items: [] } });
+    const field = t.app.querySelector(".activity-search");
+    field.focus();
+    field.value = "sa";
+    field.dispatchEvent(fakeEvent("input"));
+    t.open = { ...t.open, isUnlocked: false };
+    await t.render({ forceRefresh: true });
+    await flush();
+    expect(t.app.contains(field)).toBe(false);
+  });
+});

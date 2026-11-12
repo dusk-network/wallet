@@ -76,6 +76,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept every letter typed in Activity's search and Send's fields on a phone, in their order, by drawing the screen again only once the typing stops.
 - Refused a site's dusk_getPublicBalance for an account or profile it isn't connected to, rather than answering with the connected profile's balance.
 - Opened Home on reloading the extension's tab after a request link was paid or left, rather than the same payment filled in again.
 - Dropped what a link or a QR code filled in once Send is left, rather than bringing it back in the next Send, and its Filled in from line once another recipient is picked in Contacts.

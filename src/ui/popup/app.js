@@ -282,6 +282,52 @@ let keptForm = null;
 // The fields that hold a secret: a recovery phrase's words, and passwords.
 const SECRET_FIELDS = '.mnemonic-input input, input[type="password"]';
 
+// The context the screen shown was drawn in (context.js).
+let mountedContext;
+
+// A field being typed in: focused on the screen, typed in moments ago or
+// with a phone's keyboard composing in it. Swapped for its twin under the
+// typing, as a redraw does, a phone's keyboard loses what it's composing:
+// letters go, or come in another order. A redraw of the same screen waits
+// till the typing stops (setApp), and is drawn then from what's read.
+const TYPING_SETTLES_MS = 700;
+let typedAt = 0;
+let composing = false;
+let redrawTimer = null;
+const typingField = (el) =>
+  Boolean(el && app?.contains?.(el)) &&
+  !el.readOnly &&
+  !el.disabled &&
+  (el.localName === "textarea" || (el.localName === "input" && /^(text|search|email|url|tel|password|number)$/.test(String(el.getAttribute?.("type") ?? "text"))));
+function typingNow() {
+  return typingField(document.activeElement) && (composing || Date.now() - typedAt < TYPING_SETTLES_MS);
+}
+function redrawOnceTyped() {
+  clearTimeout(redrawTimer);
+  redrawTimer = setTimeout(() => {
+    redrawTimer = null;
+    if (typingNow()) redrawOnceTyped();
+    else render({ cached: true }).catch(() => {});
+  }, TYPING_SETTLES_MS);
+}
+try {
+  document.addEventListener("input", (e) => {
+    if (typingField(e?.target)) typedAt = Date.now();
+  }, true);
+  document.addEventListener("compositionstart", (e) => {
+    if (typingField(e?.target)) composing = true;
+  }, true);
+  document.addEventListener("compositionend", () => {
+    composing = false;
+    typedAt = Date.now();
+  }, true);
+  document.addEventListener("focusout", () => {
+    composing = false;
+  }, true);
+} catch {
+  // ignore
+}
+
 function wipeForm(form) {
   for (const node of form?.children ?? []) {
     for (const field of node.querySelectorAll?.("input, textarea") ?? []) field.value = "";
@@ -331,6 +377,12 @@ function setApp(children) {
     // A Review's Confirm ignores clicks for a moment once it's up, after an
     // unlock too, whose button sits where Confirm does; never on a redraw.
     const shown = `${state?.overview?.isUnlocked === false ? "locked" : ""}|${screen}`;
+    // The same screen, for the same wallet, profile and network, drawn again
+    // while a field on it is typed in: it's drawn once the typing stops.
+    if (children !== mounted && shown === lastShown && state?.context === mountedContext && typingNow()) {
+      redrawOnceTyped();
+      return;
+    }
     if (shown !== lastShown) {
       lastShown = shown;
       screenShown();
@@ -368,6 +420,7 @@ function setApp(children) {
     if (siteBar) app.appendChild(siteBar);
     for (const child of children) app.appendChild(child);
     mounted = children;
+    mountedContext = state?.context;
     if (focused) refocusControl(focused);
   }
   // Another screen than a request's own: the link the page opened with was
