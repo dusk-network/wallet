@@ -80,11 +80,20 @@ const WHOLE = [
 
 let dom;
 let saved;
+// An EVM chain's RPC with nothing for the person: its head, and no logs.
+const rpc = vi.fn(async (_url, init) => {
+  const { id, method } = JSON.parse(String(init?.body ?? "{}"));
+  const result = method === "eth_blockNumber" ? "0x100" : method === "eth_getLogs" ? [] : null;
+  return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), { headers: { "content-type": "application/json" } });
+});
 function page(pathname) {
   dom = installFakeDom({ pathname });
   dom.document.body.className = pathname === "/popup.html" ? "page--popup" : "page--full";
   vi.stubGlobal("history", { state: null, replaceState: vi.fn() });
   vi.stubGlobal("close", vi.fn());
+  // The bridge's chains, as app-core reads a migration's side and the person's
+  // approvals there for the EVM addresses bridged to: nothing on them here.
+  vi.stubGlobal("fetch", rpc);
   // What a download saves: the link's file name and the file.
   saved = [];
   vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
@@ -515,7 +524,9 @@ describe("Activity's Export", () => {
     const asked = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url) => {
+      vi.fn(async (url, init) => {
+        // The bridge's chains, read for the DuskEVM address the profile bridged to.
+        if (init?.body) return rpc(url, init);
         asked.push(String(url));
         // Hourly prices of the 88 days this asks for, with one payment's hour missing.
         const from = Number(new URL(url).searchParams.get("from")) * 1000;
@@ -572,7 +583,8 @@ describe("Activity's Export", () => {
     const asked = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url) => {
+      vi.fn(async (url, init) => {
+        if (init?.body) return rpc(url, init);
         asked.push(String(url));
         return { ok: false, status: 429, json: async () => ({}) };
       })
@@ -604,10 +616,17 @@ describe("Activity's Export", () => {
   });
 
   // DUSK this profile sent to BNB Smart Chain, to an EVM address there: the address it knows as the person's.
-  const bridgedTo = (to, timestamp) => {
+  const bridgedTo = (to, timestamp, hash = "b0".repeat(32)) => {
     const out = routes(networks.mainnet).find((r) => r.id === "dusk-to-bsc");
-    return { hash: "b0".repeat(32), direction: "out", counterparty: out.account, value: "2000000000", fee: "1850000", memo: to, timestamp, blockHeight: 5_600_000 };
+    return { hash, direction: "out", counterparty: out.account, value: "2000000000", fee: "1850000", memo: to, timestamp, blockHeight: 5_600_000 };
   };
+  // The bridge's chains, as app-core reads a migration's side and the person's approvals there: BNB Smart Chain's as
+  // recorded, and Ethereum's with nothing for the person.
+  const onChains = (url, recorded) => {
+    const bsc = recordedEvm(url, recorded);
+    return async (input, init) => (String(input?.url ?? input) === url ? bsc.fetch(input, init) : rpc(input, init));
+  };
+  const paidThere = (lines) => lines.filter((l) => l["Sent Currency"] === "BNB").map((l) => [l.TxHash, l["Sent Amount"], l.Tag, l["Account Name"], l.Account]);
 
   // Nandini's: the payout's details said what its migration paid on BNB Smart Chain, to the wei, and the file left
   // it out without a word. Sofía's and Lena's: a migration someone else sent to the profile, from an EVM address that
@@ -618,7 +637,6 @@ describe("Activity's Export", () => {
     const paidOut = { hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: payout.at, blockHeight: 5_684_134 };
     const MAINNET = "https://nodes.dusk.network";
     const onMainnet = (entries) => setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
-    const paidThere = (lines) => lines.filter((l) => l["Sent Currency"] === "BNB").map((l) => [l.TxHash, l["Sent Amount"], l.Tag, l["Account Name"], l.Account]);
 
     // Migrated to the profile from an address it never bridged to: the payout alone, and that chain isn't asked.
     page("/full.html");
@@ -631,7 +649,7 @@ describe("Activity's Export", () => {
     expect(paidThere(await linesOf())).toEqual([]);
     expect((await linesOf()).find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
     expect(chain).not.toHaveBeenCalled();
-    expect(stranger.actions.showToast.mock.calls.at(-1)[0]).not.toContain("couldn't be read");
+    expect(stranger.actions.showToast.mock.calls.at(-1)[0]).toBe("CSV saved: 1 line.");
 
     // From the address the profile bridged DUSK to before: booked.
     page("/full.html");
@@ -651,15 +669,19 @@ describe("Activity's Export", () => {
     expect(paidThere(down.lines)).toEqual([]);
     expect(down.lines.find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
     expect(down.toast).toContain("1 migration's fee on BNB Smart Chain couldn't be read: export again to add it.");
+    // Nor its approvals and revokes there, or on Ethereum.
+    expect(down.toast).toContain("Some network fees may be in another profile's file, or couldn't be read: export again to add them.");
 
     // Read: the approval and the migration, each a cost of its own, in BNB, from the address that paid it.
-    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
+    vi.stubGlobal("fetch", onChains(route.chain.rpcUrl));
     const up = await exportAll();
     expect(paidThere(up.lines)).toEqual([
       [approval, "0.0000023109", "cost", "BNB Smart Chain", owner],
       [migration, "0.00000243765", "cost", "BNB Smart Chain", owner],
     ]);
     expect(up.toast).not.toContain("couldn't be read");
+    // Nandini's: it named none of the EVM addresses whose fees it has. And how far back its approvals were read.
+    expect(up.toast).toContain("The file has the network fees paid from 0x4E4B…FF46. Network fees on BNB Smart Chain from before block ");
 
     // Together, to the wei, what the payout's details say it paid there.
     const wei = (text) => {
@@ -683,12 +705,34 @@ describe("Activity's Export", () => {
 
     // An address the profile sent DUSK to on DuskEVM is the person's too.
     page("/full.html");
+    vi.stubGlobal("fetch", onChains(route.chain.rpcUrl));
     const deposit = { hash: "d5".repeat(32), kind: TX_KIND.CONTRACT_CALL, contractId: duskEvmContracts(2).bridge, fnName: "depositETHToWithValue", amount: "0", deposit: "500000000", bridgeTo: owner, status: "executed", submittedAt: payout.at - 86_400_000, profileIndex: 0 };
     const viaDuskEvm = setup({ entries: [paidOut], ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [deposit] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
     button("Export").click();
     button("Save CSV").click();
     await vi.waitFor(() => expect(viaDuskEvm.actions.showToast).toHaveBeenCalled());
     expect(paidThere(await linesOf()).map(([hash]) => hash)).toEqual([approval, migration]);
+  });
+
+  // In the web wallet's words: a wallet with no other profile has no other profile's file for fees to be in.
+  it("says fees it couldn't read on their chains are just that, where the wallet has no other profile", async () => {
+    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
+    const { migration, owner, payout } = recordedMigration;
+    const MAINNET = "https://nodes.dusk.network";
+    const paidOut = { hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: payout.at, blockHeight: 5_684_134 };
+    const toastWith = async (accounts) => {
+      page("/full.html");
+      vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+      const { actions } = setup({ entries: [bridgedTo(owner, payout.at - 86_400_000), paidOut], ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [], accounts }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+      button("Export").click();
+      button("Save CSV").click();
+      await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+      return actions.showToast.mock.calls.at(-1)[0];
+    };
+    const alone = await toastWith([ACCOUNT]);
+    expect(alone).toContain("Some network fees couldn't be read: export again to add them.");
+    expect(alone).not.toContain("another profile");
+    expect(await toastWith([ACCOUNT, SAVINGS])).toContain("Some network fees may be in another profile's file, or couldn't be read: export again to add them.");
   });
 
   it("puts a migration's fees in the period of their own day, though its payout came the day after", async () => {
@@ -702,7 +746,7 @@ describe("Activity's Export", () => {
     const entries = [bridgedTo(owner, Date.UTC(2026, 9, 20)), { hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: nextDay, blockHeight: 5_684_134 }];
     const MAINNET = "https://nodes.dusk.network";
     const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
-    vi.stubGlobal("fetch", recordedEvm(route.chain.rpcUrl).fetch);
+    vi.stubGlobal("fetch", onChains(route.chain.rpcUrl));
     button("Export").click();
     pickPeriod("dates");
     for (const id of ["activity-export-from", "activity-export-to"]) {
@@ -717,6 +761,103 @@ describe("Activity's Export", () => {
       [approval, "BNB", owner],
       [migration, "BNB", owner],
     ]);
+  });
+
+  // Nandini's: the extension's file left out every revoke, and every approval no migration spent, that the web
+  // wallet's had, 140 lines against 160. Both book each once, in the file of the profile its migration paid; one of an
+  // address that never migrated, in the file of the profile that bridged DUSK to it first, as the archive says.
+  it("books a revoke and an approval no migration spent, and an address's that never migrated where the archive says it was bridged to first", async () => {
+    const route = routes(networks.mainnet).find((r) => r.id === "bsc-to-dusk");
+    const service = routes(networks.mainnet).find((r) => r.id === "dusk-to-bsc");
+    const { approval, migration, owner, payout } = recordedMigration;
+    const [{ address: token, topics: [approvalTopic, , spender] }] = recordedMigration.logs;
+    const other = "0x5a17a4f8c6a3b16a9d9e0f2c3b4d5e6f7a8b9c0d";
+    const [revoke, unused, othersApproval] = ["e1", "e2", "e3"].map((byte) => `0x${byte.repeat(32)}`);
+    // After the migration, on BNB Smart Chain: the owner revokes the contract's approval, and approves it again; the
+    // other address approves it, and never migrates.
+    const recorded = structuredClone(recordedMigration);
+    const migrated = 0x7dbaa77;
+    for (const [hash, from, block, allowance] of [
+      [revoke, owner, migrated + 0x40, 0n],
+      [unused, owner, migrated + 0x80, 10n ** 21n],
+      [othersApproval, other, migrated + 0xc0, 10n ** 21n],
+    ]) {
+      const blockNumber = `0x${block.toString(16)}`;
+      const blockTimestamp = `0x${(0x6aec991c + block - migrated).toString(16)}`;
+      const log = { address: token, topics: [approvalTopic, `0x${from.slice(2).padStart(64, "0")}`, spender], data: `0x${allowance.toString(16).padStart(64, "0")}`, blockNumber, blockTimestamp, transactionHash: hash, logIndex: "0x1", removed: false };
+      recorded.logs.push(log);
+      recorded.receipts[hash] = { blockNumber, from, to: token, gasUsed: "0xb48a", effectiveGasPrice: "0x2faf080", logs: [log], status: "0x1", transactionHash: hash };
+      recorded.transactions[hash] = { blockNumber, from, hash, to: token, value: "0x0" };
+      recorded.blocks[blockNumber] = { number: blockNumber, timestamp: blockTimestamp };
+    }
+    const paidOut = { hash: payout.hash, direction: "in", counterparty: route.payoutAccount, payer: false, value: payout.value, memo: migration, timestamp: payout.at, blockHeight: 5_684_134 };
+    const toOther = bridgedTo(other, payout.at - 43_200_000, "b2".repeat(32));
+    // The archive's memo index: the transfers out to BNB Smart Chain that named the other address, by whom.
+    const hex = (text) => [...new TextEncoder().encode(text)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const memoIndex = (answer) =>
+      archive.query.mockImplementation(async (query) => {
+        if (!query.includes("transactionsByMemo")) return {};
+        if (answer instanceof Error) throw answer;
+        const json = answer.map(([origin, sender, block_height]) => ({ origin, block_height, events: [{ target: networks.mainnet.contracts.transfer, topic: "moonlight", data: { sender, receiver: service.account, memo: hex(other) } }] }));
+        return Object.fromEntries([...query.matchAll(/(m\d+): transactionsByMemo/g)].map(([, alias]) => [alias, { json }]));
+      });
+    const MAINNET = "https://nodes.dusk.network";
+    const exportOnce = async () => {
+      page("/full.html");
+      vi.stubGlobal("fetch", onChains(route.chain.rpcUrl, recorded));
+      const { actions } = setup({ entries: [bridgedTo(owner, payout.at - 86_400_000), toOther, paidOut], ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+      button("Export").click();
+      button("Save CSV").click();
+      await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+      const lines = await linesOf();
+      return { lines: paidThere(lines), byHash: Object.fromEntries(lines.map((l) => [l.TxHash, l])), toast: actions.showToast.mock.calls.at(-1)[0] };
+    };
+    const owners = [
+      [approval, "0.0000023109", "cost", "BNB Smart Chain", owner],
+      [migration, "0.00000243765", "cost", "BNB Smart Chain", owner],
+      [revoke, "0.0000023109", "cost", "BNB Smart Chain", owner],
+      [unused, "0.0000023109", "cost", "BNB Smart Chain", owner],
+    ];
+
+    // This profile bridged to the other address first, Profile 2 after: its approval is this file's.
+    memoIndex([
+      [toOther.hash, ACCOUNT, 5_600_000],
+      ["b9".repeat(32), SAVINGS, 5_600_100],
+    ]);
+    const first = await exportOnce();
+    expect(first.lines).toEqual([...owners, [othersApproval, "0.0000023109", "cost", "BNB Smart Chain", other]]);
+    expect([first.byHash[revoke].Description, first.byHash[unused].Description]).toEqual(["Network fee on BNB Smart Chain: approval for migrations to Dusk revoked", "Network fee on BNB Smart Chain: approval for a migration to Dusk, not used yet"]);
+    // A transfer out to BNB Smart Chain sends what reached it there, and pays the bridge's fee with the network's.
+    expect(first.byHash[toOther.hash]).toMatchObject({ "Sent Amount": "1", "Sent Currency": "DUSK", "Fee Amount": "1.00185", Description: `To BNB Smart Chain, bridge fee 1 DUSK · ${other}` });
+    expect(first.toast).toContain("The file has the network fees paid from 0x4E4B…FF46 and 0x5A17…9c0d.");
+
+    // Profile 2 bridged to it first: Profile 2's file has it, and this one doesn't.
+    memoIndex([
+      ["b8".repeat(32), SAVINGS, 5_599_000],
+      [toOther.hash, ACCOUNT, 5_600_000],
+    ]);
+    const second = await exportOnce();
+    expect(second.lines).toEqual(owners);
+    expect(second.toast).toContain("The file has the network fees paid from 0x4E4B…FF46.");
+
+    // Whose it is can't be read: in no file, and the toast says so.
+    memoIndex(new Error("archive down"));
+    const unread = await exportOnce();
+    expect(unread.lines).toEqual(owners);
+    expect(unread.toast).toContain("Some network fees on BNB Smart Chain may be in another profile's file, or couldn't be read: export again to add them.");
+
+    // Known here only by a deposit to DuskEVM, which the memo index doesn't list: the first profile by its account,
+    // Profile 2, may be the one to book it, and the toast says so.
+    memoIndex([]);
+    const deposit = { hash: "d6".repeat(32), kind: TX_KIND.CONTRACT_CALL, contractId: duskEvmContracts(2).bridge, fnName: "depositETHToWithValue", amount: "0", deposit: "500000000", bridgeTo: other, status: "executed", submittedAt: payout.at - 43_200_000, profileIndex: 0 };
+    page("/full.html");
+    vi.stubGlobal("fetch", onChains(route.chain.rpcUrl, recorded));
+    const viaDuskEvm = setup({ entries: [bridgedTo(owner, payout.at - 86_400_000), paidOut], ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [deposit] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
+    button("Export").click();
+    button("Save CSV").click();
+    await vi.waitFor(() => expect(viaDuskEvm.actions.showToast).toHaveBeenCalled());
+    expect(paidThere(await linesOf())).toEqual(owners);
+    expect(viaDuskEvm.actions.showToast.mock.calls.at(-1)[0]).toContain("Some network fees on BNB Smart Chain may be in another profile's file, or couldn't be read: export again to add them.");
   });
 
   it("makes a stake with Sozu a trade of DUSK for stDUSK, with its deposit fee, as the pool's event says it", async () => {

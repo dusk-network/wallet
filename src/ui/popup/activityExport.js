@@ -21,7 +21,10 @@ import { saveToDownloads } from "../../platform/native.js";
 import { stamped } from "../lib/fileNames.js";
 import { ActivityChangedError, activityRows, assertActivityOpen, selected, sozuFactsOf, wholeActivity } from "./activity.js";
 import { duskPrices } from "./duskPrice.js";
-import { migrationFactsOf } from "./migrationFacts.js";
+import { migrationChainCache } from "./migrationFacts.js";
+import { archiveAt, historyArchiverUrl } from "../../shared/activityHistory.js";
+import { networkForNode } from "../../shared/nodeNetwork.js";
+import { shortEvmAddress } from "../lib/strings.js";
 import { defaultCurrency } from "@dusk-network/app-core/amounts";
 
 /**
@@ -100,32 +103,6 @@ async function exportContactNames(state, walletId) {
   return (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? "";
 }
 
-const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
-
-/**
- * The EVM addresses this profile bridged DUSK to, as its own rows say them:
- * the address a transfer to BNB Smart Chain or Ethereum pays (its memo, as
- * text), and the one a deposit to DuskEVM pays, of any that didn't fail. The
- * extension connects no EVM wallet: these are the ones it knows as the
- * person's, as the web wallet knows those it connected or migrated from.
- * @param {object[]} rows - the profile's activity rows
- * @returns {string[]}
- */
-function bridgedToOf(rows) {
-  const out = new Set();
-  for (const row of rows ?? []) {
-    if (row?.dropped || row?.status === "failed") continue;
-    const to =
-      row?.route?.kind === "service" && row.direction === "out" && row.entry?.memoBinary !== true
-        ? String(row.memo ?? "").trim()
-        : row?.bridge?.step === "deposit"
-          ? String(row.bridge.to ?? "")
-          : "";
-    if (EVM_ADDRESS.test(to)) out.add(to.toLowerCase());
-  }
-  return [...out];
-}
-
 // The person's other profiles, this wallet's and any other wallet's here: what
 // moves between them is a transfer, not income.
 function otherProfiles(ov, profileIndex) {
@@ -184,47 +161,75 @@ export async function makeExport(ov, choices, { state }) {
   const { account, profileIndex } = selected(ov);
   // A stake whose stDUSK can't be read yet says so in its line.
   const facts = await sozuFactsOf(ov, rows);
-  // What each migration whose payout is here paid on its own chain, its
-  // approval too, to the wei, as the payout's details say: each on a line of
-  // its own, in the period of its own time. A payout after the period can have
-  // fees in it, one before it can't. Booked only where it came from an EVM
-  // address this profile bridged to: anyone can migrate to an account, and
-  // another's gas is no cost of the person's.
-  const bridgedTo = bridgedToOf(rows);
-  const evm = bridgedTo.length ? await migrationFactsOf(ov, period ? rows.filter((row) => row.time >= period.from) : rows) : new Map();
+  // What each migration whose payout is here paid on its own chain, and the
+  // person's approvals and revokes there, to the wei, each once, in the file
+  // of the profile its migration paid: app-core reads them for the EVM
+  // addresses this profile bridged DUSK to, as the web wallet's export does,
+  // so both make the same file. One of an address that never migrated goes
+  // in the file of the profile that bridged to it first, as the archive's
+  // memo index says, of all the person's profiles here. Anyone can migrate to
+  // an account: another's gas is no cost of the person's.
+  const network = networkForNode(String(ov?.nodeUrl ?? ""));
+  const bridge = network && { network, cache: migrationChainCache, archive: archiveAt(historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl })) };
+  const profiles = otherProfiles(ov, profileIndex);
   const made = await accountingCsv({
     rows,
     profile: { name: await profileNameOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
-    profiles: otherProfiles(ov, profileIndex),
+    profiles,
     period,
     price: choices.fiat ? duskPrices({ currency }) : undefined,
     currency,
     facts,
-    evm,
-    evmAddresses: bridgedTo,
+    ...(bridge ? { bridge } : {}),
     contactName,
     network: ov?.networkName,
     bom: Boolean(choices.excel),
   });
   // The file is of what was open as it began: with anything else open now, there's none.
   await assertActivityOpen(ov, { state });
-  // A migration whose side there couldn't be read has no fee there in the file, and the toast says so:
-  // read, it may be from one of those addresses.
-  const evmUnread = [...evm.values()].filter((fact) => fact.state === "pending" || fact.state === "error");
-  const evmChains = [...new Set(evmUnread.map((fact) => rows.find((row) => row.route?.id === fact.route)?.route.chain?.name ?? "its chain"))];
-  return { ...made, currency, evmUnread: { count: evmUnread.length, chain: evmChains.length === 1 ? evmChains[0] : "their chains" }, shieldedWaiting: whole.shieldedWaiting };
+  return { ...made, currency, soleProfile: !profiles.length, shieldedWaiting: whole.shieldedWaiting };
+}
+
+const listed = (items) => new Intl.ListFormat("en", { type: "conjunction" }).format(items);
+
+/**
+ * What the file says of the bridge's other chains, as the web wallet's export
+ * says it: the EVM addresses whose network fees it has, the migrations whose
+ * fee there couldn't be read, and the approvals and revokes it couldn't all
+ * read, for now or before a block, or whose file it can't tell: one of an
+ * address only this profile knows may be the first profile's to book, where
+ * the wallets here have another profile (`soleProfile` false).
+ * Nothing goes out short without a word.
+ * @param {{ booked?: string[], unread?: { chain: string }[], approvalsUnread?: { chain: string, state: string, from: number | null }[] }} [evm]
+ * @param {{ soleProfile?: boolean }} [opts]
+ * @returns {string[]}
+ */
+function evmWords({ booked = [], unread = [], approvalsUnread = [] } = {}, { soleProfile = false } = {}) {
+  const chains = [...new Set(unread.map(({ chain }) => chain || "its chain"))];
+  const failed = [...new Set(approvalsUnread.filter(({ state }) => state === "error").map(({ chain }) => chain))];
+  const before = new Map(
+    approvalsUnread.filter(({ state, from }) => state !== "error" && from !== null).map(({ chain, from }) => [`${chain}\n${from}`, { chain, from }])
+  );
+  return [
+    booked.length ? `The file has the network fees paid from ${listed(booked.map(shortEvmAddress))}.` : "",
+    unread.length
+      ? `${unread.length === 1 ? "1 migration's fee" : `${unread.length} migrations' fees`} on ${chains.length === 1 ? chains[0] : "their chains"} couldn't be read: export again to add ${unread.length === 1 ? "it" : "them"}.`
+      : "",
+    failed.length ? `Some network fees${failed.length === 1 && failed[0] ? ` on ${failed[0]}` : ""} ${soleProfile ? "" : "may be in another profile's file, or "}couldn't be read: export again to add them.` : "",
+    ...[...before.values()].map(({ chain, from }) => `Network fees on ${chain || "its chain"} from before block ${Number(from).toLocaleString("en")} aren't in the file.`),
+  ];
 }
 
 // What the file holds, and what it doesn't, once it's saved; where, when the
 // phone's Downloads has it, by the name Android gave it there.
-function savedText({ count, currency, evmUnread, left, unpriced, shieldedWaiting }, { savedAs = "" } = {}) {
+function savedText({ count, currency, evm, soleProfile, left, unpriced, shieldedWaiting }, { savedAs = "" } = {}) {
   const out = [left.pending ? `${left.pending} on its way` : "", left.notRead ? `${left.notRead} not read yet` : ""].filter(Boolean);
   const lines = count === 1 ? "1 line" : `${count} lines`;
   return [
     savedAs ? `CSV saved to Downloads as ${savedAs}: ${lines}.` : `CSV saved: ${lines}.`,
     out.length ? `Left out: ${out.join(", ")}.` : "",
     unpriced ? `${unpriced === 1 ? "1 line has" : `${unpriced} lines have`} no ${currencyName(currency, 1)} value.` : "",
-    evmUnread?.count ? `${evmUnread.count === 1 ? "1 migration's fee" : `${evmUnread.count} migrations' fees`} on ${evmUnread.chain} couldn't be read: export again to add ${evmUnread.count === 1 ? "it" : "them"}.` : "",
+    ...evmWords(evm, { soleProfile }),
     shieldedWaiting ? "Your shielded activity is still syncing: export again once it's done." : "",
   ]
     .filter(Boolean)
