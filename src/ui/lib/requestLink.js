@@ -10,21 +10,17 @@ import { chainIdForNode } from "../../shared/nodeNetwork.js";
  */
 export const walletChainOf = (nodeUrl) => chainIdForNode(String(nodeUrl ?? "")) ?? chainIdFromNodeUrl(String(nodeUrl ?? ""));
 
-/** Why Send fills in nothing from a link whose memo is on more lines than its field holds. */
-export const MEMO_LINE_BREAK_TEXT = "This link's memo has a line break, which Send can't take. Ask for a new one.";
-
 /**
  * A request link as Send reads it on the wallet's network, pasted, scanned or
- * opened alike (app-core's readPaymentLink): what it fills in, or why it fills
- * in nothing. Null for what isn't a link, which Send takes as a recipient.
- * Send's memo is one line: a link whose memo has a line break is refused, as
- * it would go on one line and match no request made with it.
+ * opened alike (app-core's readPaymentLink, as the web wallet reads it): what
+ * it fills in, or why it fills in nothing, a memo with a line break too, which
+ * would go on one line and match no request made with it. Null for what isn't
+ * a link, which Send takes as a recipient.
  * @param {string} text
  * @param {string} [nodeUrl] - the wallet's node; without one, any network's
  */
 export function readRequestLink(text, nodeUrl) {
-  const read = readPaymentLink(text, nodeUrl === undefined ? {} : { network: walletChainOf(nodeUrl) });
-  return read?.link && /[\r\n\u2028\u2029]/.test(read.link.memo) ? { ...read, link: null, problem: MEMO_LINE_BREAK_TEXT, reason: "unreadable" } : read;
+  return readPaymentLink(text, nodeUrl === undefined ? {} : { network: walletChainOf(nodeUrl) });
 }
 
 /**

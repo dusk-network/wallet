@@ -701,8 +701,9 @@ describe("send's amount", () => {
     expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
     expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK");
 
+    // Max fills a fourth decimal where three would ask "1 or 1000?", so the field reads it back as it is.
     dom.document.body.querySelector(".amount-avail button").click();
-    expect(form.amount.value).toBe("177.984");
+    expect(form.amount.value).toBe("177.9840");
     expect(form.amountError()).toBe("");
 
     typeInto(form.amount, "500");
@@ -745,7 +746,7 @@ describe("send's amount", () => {
     typeInto(last.amount, "0.0000000001");
     expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
     typeInto(last.amount, "1,234");
-    expect(last.amountError()).toBe("Is that about 1.23 or 1234? Write the one you mean.");
+    expect(last.amountError()).toBe("Is that 1.2340 or 1234? Write the one you mean.");
   });
 
   // Lena's: "1,000" asked and "1.000" didn't. In English the point is the
@@ -810,7 +811,7 @@ describe("send's amount", () => {
     typeInto(form.amount, "177.98");
     expect(form.amountError()).toBe("That's 0.001 DUSK more than your public balance, with the network fee.");
     dom.document.body.querySelector(".amount-avail button").click();
-    expect(form.amount.value).toBe("177.979");
+    expect(form.amount.value).toBe("177.9790");
 
     // Review asks that fee: Max and the fee make up the whole balance.
     form.review.click();
@@ -828,7 +829,7 @@ describe("send's amount", () => {
     // The fee isn't a balance.
     expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK");
     dom.document.body.querySelector(".amount-avail button").click();
-    expect(form.amount.value).toBe("177.984");
+    expect(form.amount.value).toBe("177.9840");
   });
 });
 
@@ -1893,12 +1894,15 @@ describe("a request link", () => {
     expect(note?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
     expect([form.to.value, form.amount.value]).toEqual(["", ""]);
 
-    // An amount in the link that isn't one is said under the field.
-    const typo = mount(newState());
-    paste(typo, httpsLink(`to=${ALICE.account}&amount=lots`));
-    await settle();
-    expect(typo.amountError()).toBe("Enter an amount such as 1 or 0.5.");
-    expect(typo.review.disabled).toBe(true);
+    // Marek's: an amount in the link that isn't a plain number, a hidden character in it
+    // too, fills in nothing, and says why, as app-core's reader does for both wallets.
+    for (const amount of ["lots", "0.0%E2%80%8B1", `0.001%23to=${BOB.account}`]) {
+      const typo = mount(newState());
+      paste(typo, httpsLink(`to=${ALICE.account}&amount=${amount}`));
+      await settle();
+      expect(refusal(), amount).toEqual(["This link's amount can't be read. Ask for a new one."]);
+      expect([typo.to.value, typo.amount.value], amount).toEqual(["", ""]);
+    }
   });
 
   const refusal = () => dom.document.body.querySelectorAll(".field-error").filter((el) => isShown(el)).map((el) => el.textContent);
@@ -1919,6 +1923,25 @@ describe("a request link", () => {
       expect(refusal(), to).toEqual(["This link's address isn't valid. Ask for a new one."]);
       expect([form.to.value, form.amount.value, state.draft.to, visibleText(dom.document.body.querySelector(".send-filled-note"))]).toEqual(["", "", "", ""]);
     }
+  });
+
+  // Marek's: a field whose name hid a character, had a space, or was written in other letters was dropped, and the
+  // link taken without it: on mainnet's wallet, `…&amount=1000&ɴetwork=testnet` filled 1000 DUSK. So was a name
+  // that only looks like a field's.
+  it("refuses a link with a field name that hides something or only looks like a field's, filling in nothing", async () => {
+    for (const fields of ["am%E2%80%8Fount=0.001", "amount%00=0.001", `to%20=${BOB.account}`, "amount=0.001&%C9%B4etwork=mainnet", "amount=0.001&%D0%B0mount=1000", "amountIux=1000", "amount=0.001&Iabel=Rent", `amount=0.001&t0=${BOB.account}`]) {
+      const state = newState();
+      const form = mount(state);
+      paste(form, httpsLink(`to=${ALICE.account}&${fields}`));
+      await settle();
+      expect(refusal(), fields).toEqual(["That link can't be read. Ask for a new one."]);
+      expect([form.to.value, form.amount.value, state.draft.to], fields).toEqual(["", "", ""]);
+    }
+    // A name that's no field's is still left out.
+    const form = mount(newState());
+    paste(form, httpsLink(`to=${ALICE.account}&amount=0.001&utm_source=chat`));
+    await settle();
+    expect([refusal(), form.to.value, form.amount.value]).toEqual([[], ALICE.account, "0.001"]);
   });
 
   // Marek's: a dusk:shielded- link to a public account filled a public send, and what followed a # landed in Amount.
@@ -2091,7 +2114,7 @@ describe("a request link", () => {
     const form = mount(state);
     paste(form, httpsLink(`to=${ALICE.account}&amount=0.001&memo=line%20one%0Aline%20two`));
     await settle();
-    expect(refusal()).toEqual(["This link's memo has a line break, which Send can't take. Ask for a new one."]);
+    expect(refusal()).toEqual(["This link's memo has a line break. Ask for a new one."]);
     expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
   });
 

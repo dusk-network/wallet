@@ -293,11 +293,11 @@ describe("receive", () => {
     it("says an amount that could be two amounts is that, in the language's own way", async () => {
       inLanguage("nl-NL");
       let view = await receive("public", { state: open({ amountDusk: "1.234" }) });
-      expect(amountError()).toBe("Is that about 1,23 or 1234? Write the one you mean.");
+      expect(amountError()).toBe("Is that 1,2340 or 1234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
       inLanguage("en-US");
       view = await receive("public", { state: open({ amountDusk: "1,234" }) });
-      expect(amountError()).toBe("Is that about 1.23 or 1234? Write the one you mean.");
+      expect(amountError()).toBe("Is that 1.2340 or 1234? Write the one you mean.");
       expect(view.button("Copy request link").disabled).toBe(true);
     });
 
@@ -402,9 +402,9 @@ describe("receive", () => {
     // On a Dutch browser, an amount written the Dutch way is the amount it asks for.
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "nl-NL" });
     try {
-      Object.assign(state.receive, { amountDusk: "1,234", memo: "" });
+      Object.assign(state.receive, { amountDusk: "1,25", memo: "" });
       await receive("public", { state });
-      expect(summary()).toBe("Request payment1,234 DUSK");
+      expect(summary()).toBe("Request payment1,25 DUSK");
     } finally {
       vi.unstubAllGlobals();
     }

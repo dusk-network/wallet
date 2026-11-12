@@ -250,22 +250,20 @@ describe("amounts in the browser's language", () => {
     }
   });
 
-  it("refuse a point before three digits where a point groups, as it could mean a thousand or one", () => {
-    inLanguage("nl-NL");
+  // Lena's: "1.000" on an English phone was one DUSK without a word; "1,000" asked.
+  it("refuse a lone point or comma before three digits in every language, as it could mean a thousand or one", () => {
+    for (const language of ["nl-NL", "en-US"]) {
+      inLanguage(language);
 
-    expect(() => parseDuskToLux("1.001")).toThrow();
-    expect(() => parseDuskToLux("12.500")).toThrow();
-    expect(parseDuskToLux("1,5")).toBe("1500000000");
-    expect(parseDuskToLux("1,001")).toBe("1001000000");
+      for (const unclear of ["1.001", "12.500", "1,001", "1.000", "1,000"]) expect(() => parseDuskToLux(unclear), `${language} ${unclear}`).toThrow();
+      expect(parseDuskToLux("0.125")).toBe("125000000");
+      expect(parseDuskToLux("0,125")).toBe("125000000");
+      expect(parseDuskToLux("1.25")).toBe("1250000000");
+      expect(parseDuskToLux("1,25")).toBe("1250000000");
+    }
+    inLanguage("nl-NL");
     expect(parseDuskToLux("1.001,5")).toBe("1001500000000");
     expect(parseDuskToLux("1.000.000")).toBe("1000000000000000");
-    expect(parseDuskToLux("1.5")).toBe("1500000000");
-    expect(parseDuskToLux("0.125")).toBe("125000000");
-
-    inLanguage("en-US");
-
-    expect(parseDuskToLux("1.001")).toBe("1001000000");
-    expect(() => parseDuskToLux("1,001")).toThrow();
   });
 
   it("fill a field in a form the same language reads back as that amount", () => {

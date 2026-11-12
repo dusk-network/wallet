@@ -76,6 +76,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Refused a request link whose amount isn't a plain number, as a hidden character or a # in it, or whose field names hide something or only look like a field's, rather than reading it without a word, and said a memo's line break in the web wallet's words.
+- Asked "Is that 1 or 1000?" of a lone point or comma before three digits in every language, as "1.000" on an English phone, and filled Max with a fourth decimal where three would ask.
+- Booked a transfer to BNB Smart Chain or Ethereum in the export as what reached the other side, with the bridge fee in the fee column.
 - Opened a payment from its notice in the Android app as the notice knew it, in its block, while the app reconnects, with no Not confirmed or Can't reach the network first.
 - Said one thing about notices on a phone's Sent: in Firefox, that the payment goes on if the wallet's closed but its notice comes only while it stays open; in the app, that the notice comes.
 - Opened the Android app on Send again, with what was typed, once unlocked after Android ended it in the background, and kept a draft left with Back through that too.
