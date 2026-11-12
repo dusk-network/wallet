@@ -1,5 +1,6 @@
 import { validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
+import { isTauriRuntime } from "../../platform/runtime.js";
 import { h } from "../lib/dom.js";
 import { isPhone } from "../lib/device.js";
 import { normalizeMnemonic } from "../lib/strings.js";
@@ -73,9 +74,13 @@ function phraseProblem(words, { pasted = 0 } = {}) {
  *   showing them read-only and a box pressed to type in hiding them again; and
  *   each box a password's to the keyboard, so it learns nothing from them
  *   (ui.css: Firefox for Android passes no other field's "don't learn" on).
- * - No box is ever a password box, and the boxes are a form of their own: a
- *   browser's password manager offers to keep a password box's text, and takes
- *   a box before a password for its username.
+ * - In a browser no box is ever a password box, and the boxes are a form of
+ *   their own: a browser's password manager offers to keep a password box's
+ *   text, and takes a box before a password for its username.
+ * - `passwordBoxes`, in the Android app: each box a password box all the same,
+ *   the one box its keyboard learns nothing from and suggests nothing in, as
+ *   its WebView has no ime-mode; the app has no browser's password manager, and
+ *   to Android's autofill each is a one-time code's, no password it keeps.
  */
 export function createMnemonicInput({
   initialMnemonic = "",
@@ -85,6 +90,7 @@ export function createMnemonicInput({
   label24 = "24 words",
   hint = "",
   masked = isPhone(),
+  passwordBoxes = masked && isTauriRuntime(),
   onComplete,
   onCheck,
 } = {}) {
@@ -304,7 +310,11 @@ export function createMnemonicInput({
   function setShown(next) {
     shown = Boolean(next) && masked;
     grid.classList.toggle("is-hidden", masked && !shown);
-    for (const input of inputs) input.readOnly = shown;
+    for (const input of inputs) {
+      input.readOnly = shown;
+      // A password box shows its word only as a text box.
+      if (passwordBoxes) input.setAttribute("type", shown ? "text" : "password");
+    }
     if (showBtn) {
       showBtn.textContent = shown ? "Hide words" : "Show words";
       showBtn.setAttribute("aria-pressed", String(shown));
@@ -316,9 +326,9 @@ export function createMnemonicInput({
     { class: ["srp-grid srp-grid--input", masked ? "srp-grid--masked is-hidden" : ""].filter(Boolean).join(" ") },
     Array.from({ length: MAX }, (_, i) => {
       const input = h("input", {
-        type: "text",
+        type: passwordBoxes ? "password" : "text",
         inputmode: "text",
-        autocomplete: "off",
+        autocomplete: passwordBoxes ? "one-time-code" : "off",
         autocorrect: "off",
         autocapitalize: "none",
         spellcheck: "false",

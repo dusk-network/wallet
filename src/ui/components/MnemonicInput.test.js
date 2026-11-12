@@ -72,11 +72,34 @@ describe("on a phone", () => {
     expect(words()[2]).toBe("zoo");
   });
 
-  it("keeps words in plain boxes elsewhere", () => {
-    const { input } = mount();
-    expect(new Set(input.el.querySelectorAll("input").map((i) => i.getAttribute("type")))).toEqual(new Set(["text"]));
-    expect(input.el.querySelector(".srp-grid").classList.contains("srp-grid--masked")).toBe(false);
-    expect(input.el.querySelectorAll("button").find((b) => b.textContent === "Show words")).toBeUndefined();
+  // In the Android app the words went in text boxes its keyboard learns from: ime-mode is Firefox's alone.
+  it("types each word in the Android app in a password box, which its keyboard learns nothing from, a one-time code's to autofill", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Linux; Android 15; sdk_gphone64_x86_64 Build/AE3A.240806.036; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.7390.122 Mobile Safari/537.36",
+    });
+    dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+    const { input, box, words } = mount();
+    const boxes = () => new Set(input.el.querySelectorAll("input").map((i) => [i.getAttribute("type"), i.getAttribute("autocomplete"), Boolean(i.readOnly)].join()));
+    expect(boxes()).toEqual(new Set(["password,one-time-code,false"]));
+    // A space still moves on, sent as the keyboard sends it.
+    box(1).focus();
+    typeKeys("kiwi lemon ", { as: "text" });
+    expect([words().slice(0, 3), dom.document.activeElement === box(3)]).toEqual([["kiwi", "lemon", ""], true]);
+    // Shown read-only as text; a box pressed to type in hides them as passwords again.
+    input.el.querySelectorAll("button").find((b) => b.textContent === "Show words").click();
+    expect(boxes()).toEqual(new Set(["text,one-time-code,true"]));
+    box(4).dispatchEvent(fakeEvent("pointerdown"));
+    expect(boxes()).toEqual(new Set(["password,one-time-code,false"]));
+  });
+
+  it("keeps words in plain boxes elsewhere, the app on a computer too", () => {
+    for (const app of [false, true]) {
+      if (app) dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+      const { input } = mount();
+      expect(new Set(input.el.querySelectorAll("input").map((i) => i.getAttribute("type"))), String(app)).toEqual(new Set(["text"]));
+      expect(input.el.querySelector(".srp-grid").classList.contains("srp-grid--masked")).toBe(false);
+      expect(input.el.querySelectorAll("button").find((b) => b.textContent === "Show words")).toBeUndefined();
+    }
   });
 
   it("is a form of its own, which Enter never submits", () => {
