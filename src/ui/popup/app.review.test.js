@@ -751,6 +751,53 @@ describe("coming back to the wallet during a payment", () => {
     expect(t.app.textContent).not.toContain("Looking it up again…");
   });
 
+  // Amélie's, in Firefox for Android: back online, she confirmed again, and Sent said "Waiting
+  // for a block" for 4.5 minutes, the payment long in its block: its watcher never answered.
+  it("looks the payment up by its ID once its watcher has said nothing for 20 seconds", async () => {
+    const HASH = "9d".repeat(32);
+    const t = await popupOn(
+      "sent",
+      { addressBook: { loaded: true, items: [] }, sent: { phase: "sent", status: "submitted", hash: HASH, title: "Send", amountLux: "10000000", feeCapLux: "2500000", sentAt: Date.now() - 21_000, startedAt: Date.now() - 22_000 } },
+      async (message, t) => {
+        if (message.type === "DUSK_UI_RECHECK_TX" && message.hash === HASH) {
+          t.open = { ...t.open, txs: [{ hash: HASH, status: "executed", submittedAt: Date.now() - 21_000, feePaid: "1856521", blockHeight: "4831109" }] };
+          return { ok: true };
+        }
+        return undefined;
+      }
+    );
+    await vi.waitFor(() => expect(t.app.textContent).toContain("In block 4,831,109"));
+    expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH]);
+    expect(t.app.textContent).toContain("0.001856521");
+  });
+
+  // Lena's: Completed, in its block, said "Network fee Up to 0,0025 DUSK" 47 s after the
+  // connection came back: the node hadn't answered with its fee as it completed.
+  it("reads a completed payment's fee again once the connection is back, and says it", async () => {
+    const HASH = "9c".repeat(32);
+    let fee = null;
+    const t = await popupOn(
+      "sent",
+      { addressBook: { loaded: true, items: [] }, sent: { phase: "sent", status: "executed", hash: HASH, title: "Send", amountLux: "10000000", feeCapLux: "2500000", blockHeight: "4833511", sentAt: Date.now(), startedAt: Date.now() } },
+      async (message, t) => {
+        if (message.type === "DUSK_UI_RECHECK_TX" && message.hash === HASH) {
+          fee = "1856956";
+          t.open = { ...t.open, txs: [{ hash: HASH, status: "executed", submittedAt: Date.now() - 30_000, feePaid: fee, blockHeight: "4833511" }] };
+          return { ok: true };
+        }
+        return undefined;
+      }
+    );
+    t.open = { ...t.open, txs: [{ hash: HASH, status: "executed", submittedAt: Date.now() - 30_000, blockHeight: "4833511" }] };
+    await t.render({ forceRefresh: true });
+    expect(t.app.textContent).toContain("Up to 0.0025");
+
+    t.dom.window.dispatchEvent(fakeEvent("online"));
+    await vi.waitFor(() => expect(t.app.textContent).toContain("0.001856956"));
+    expect(t.app.textContent).not.toContain("Up to 0.0025");
+    expect(fee).toBe("1856956");
+  });
+
   it("looks the payment up by its ID, and says Completed with its real fee, though nothing was heard while away", async () => {
     const HASH = "9f".repeat(32);
     const t = await popupOn(

@@ -76,6 +76,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Looked a payment on Sent up by its ID once its watcher had said nothing for 20 seconds, as after a lost signal, so it says Completed when it is, and read a completed payment's fee again until Completed says it.
 - Turned a request shown in Receive to Paid twice, with Send back, as a second payment comes in: Receive looks again every 30 seconds while it shows, paid or not.
 - Said a request was paid already on Send's form as soon as a link fills it in, pasted or opened, not only on Review, and named another profile of the wallet's by its own name there.
 - Said there's no connection on a send's Sending step while the browser is offline.

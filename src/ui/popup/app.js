@@ -38,7 +38,7 @@ import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { sozuConfirmView } from "./views/sozu.js";
-import { noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentView } from "./views/sent.js";
+import { noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentStatus, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -1003,8 +1003,11 @@ function sendsOnTheirWay() {
   const ov = state.overview;
   if (!ov?.isUnlocked) return [];
   const hashes = new Set();
-  // The Sent screen's, on its way or handed over without a clear answer.
-  if (state.route === "sent" && state.sent?.hash && (!sentIsFinal(state.sent, ov) || state.sent.phase === "unconfirmed")) hashes.add(String(state.sent.hash));
+  // The Sent screen's, on its way or handed over without a clear answer; or
+  // in its block without its fee read, as when the node didn't answer then.
+  if (state.route === "sent" && state.sent?.hash && (!sentIsFinal(state.sent, ov) || state.sent.phase === "unconfirmed" || sentFeeUnread(state.sent, ov))) {
+    hashes.add(String(state.sent.hash));
+  }
   for (const tx of Array.isArray(ov.txs) ? ov.txs : []) {
     const status = String(tx?.status ?? "").toLowerCase();
     if (["submitted", "mempool", "unknown"].includes(status) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS) {
@@ -1032,6 +1035,28 @@ async function lookUpSends() {
 function resumeWatching() {
   resumeUntil = Date.now() + RESUME_FOR_MS;
   lookUpSends().catch(() => {});
+}
+
+// A completed send on the Sent screen whose fee isn't read yet.
+function sentFeeUnread(sent, ov) {
+  const { phase, status, feePaid } = sentStatus(sent, ov);
+  return phase === "sent" && (status === "executed" || status === "failed") && feePaid == null;
+}
+
+// The Sent screen's send is followed by the wallet's watcher, which can go
+// quiet when the connection dropped and came back: from 20 seconds after it
+// went, it's looked up by its ID too, every 10 seconds for 3 minutes, till
+// it's in its block with its fee (lookUpSends).
+const SENT_LOOKED_UP_AFTER_MS = 20_000;
+let followedSend = "";
+function followSent() {
+  const sent = state.sent;
+  if (state.route !== "sent" || sent?.phase !== "sent" || !sent.hash || followedSend === sent.hash) return;
+  followedSend = sent.hash;
+  const went = Number(sent.sentAt) || Date.now();
+  resumeUntil = Math.max(resumeUntil, went + RESUME_FOR_MS);
+  if (resumeTimer) return;
+  resumeTimer = setTimeout(() => lookUpSends().catch(() => {}), Math.max(0, went + SENT_LOOKED_UP_AFTER_MS - Date.now()));
 }
 
 // Back in front, the balance and the shielded sync are read again at once, as
@@ -1498,6 +1523,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   // After Confirm: the transaction's steps. Without one (a new popup), home.
   if (state.route === "sent") {
     if (state.sent) {
+      followSent();
       // A stake or an unstake with Sozu, completed: what it got or gave back, once its pool's event is read.
       const sozu = state.sent.sozu && state.sent.hash ? sozuFactOfSent(ov, state, state.sent, { render, refresh: () => refreshActivitySoon({ state, render }, 0) }) : undefined;
       setApp(sentView(ov, { state, actions, sozu }));
