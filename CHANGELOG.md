@@ -76,6 +76,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Opened a payment from its notice in the Android app as the notice knew it, in its block, while the app reconnects, with no Not confirmed or Can't reach the network first.
+- Said one thing about notices on a phone's Sent: in Firefox, that the payment goes on if the wallet's closed but its notice comes only while it stays open; in the app, that the notice comes.
 - Opened the Android app on Send again, with what was typed, once unlocked after Android ended it in the background, and kept a draft left with Back through that too.
 - Looked a payment on Sent up by its ID once its watcher had said nothing for 20 seconds, as after a lost signal, so it says Completed when it is, and read a completed payment's fee again until Completed says it.
 - Turned a request shown in Receive to Paid twice, with Send back, as a second payment comes in: Receive looks again every 30 seconds while it shows, paid or not.

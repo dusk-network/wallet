@@ -26,13 +26,14 @@ import {
   waitForTxExecution,
 } from "../shared/txExecution.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
-import { recheckTx } from "../shared/txReconcile.js";
+import { isShieldedTxMeta, recheckTx } from "../shared/txReconcile.js";
 import { engineContactsVault, handleUiCommand } from "./uiCommands.js";
 import { assertSendPassword, sendPasswordLimit } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
 import { arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
 import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, watchAppArrival } from "../platform/notices.js";
+import { noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
 import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
@@ -85,23 +86,30 @@ import {
 let askingChain = null;
 let chainAskedAt = -Infinity;
 
+// A notice's tap is anyone's to send: Android opens the app for any other
+// app, with what it likes in the tap. The wallet's own notice carries a token
+// made for its send and kept on the phone (shared/noticeTokens.js): only a
+// tap with it opens the send, and only its news goes on the send's record
+// (DUSK_UI_TX_NOTICED). One token a send, whichever notice asks first.
+const noticeTokenOf = (hash, walletId) => noticeTokenFor(hash, String(walletId ?? "")).catch(() => "");
+
 // A payment's arrival as a notice, in the app on a phone: once the person
 // asked for notices (phoneNotices.js) and while Android lets the app show
 // them, read each time, and only while they're away from it. Its lock screen
 // says what came of it, never the amount or whom it was for. Heard here,
 // Android stops looking for it (watchArrival); each send's notice shows once.
-async function noticeArrival({ hash, ok, kind, nodeUrl }) {
+async function noticeArrival({ hash, ok, kind, nodeUrl, walletId }) {
   if (!isPhone()) return;
   settleAppArrival(hash).catch(() => {});
   if (globalThis.document?.visibilityState !== "hidden") return;
   if (!(await mayNotify(appNoticesAllowed))) return;
   const { title, network } = arrivalNotice({ kind, ok, nodeUrl });
-  await showAppNotice({ title, body: network, hash }).catch(() => {});
+  await showAppNotice({ title, body: network, hash, token: await noticeTokenOf(hash, walletId) }).catch(() => {});
 }
 
 // However a send's outcome is learned, while the app is away.
 onTxSettled((hash, tx) => {
-  noticeArrival({ hash, ok: tx.status === "executed", kind: tx.kind, nodeUrl: tx.nodeUrl }).catch(() => {});
+  noticeArrival({ hash, ok: tx.status === "executed", kind: tx.kind, nodeUrl: tx.nodeUrl, walletId: tx.walletId }).catch(() => {});
 });
 
 // A send the person asked to hear of, for Android to look for once the app
@@ -111,7 +119,7 @@ async function watchArrival(hash, { kind, nodeUrl, walletId }) {
   if (!hash || !isPhone() || !(await mayNotify(appNoticesAllowed))) return;
   const went = arrivalNotice({ kind, ok: true, nodeUrl });
   const failed = arrivalNotice({ kind, ok: false, nodeUrl });
-  await watchAppArrival({ hash, nodeUrl, title: went.title, failTitle: failed.title, body: went.network, wallet: String(walletId ?? "") });
+  await watchAppArrival({ hash, nodeUrl, title: went.title, failTitle: failed.title, body: went.network, wallet: String(walletId ?? ""), token: await noticeTokenOf(hash, walletId) });
 }
 
 // Auto-lock in the app, as the extension's background does it: the wallet
@@ -582,6 +590,35 @@ export async function localSend(message) {
 
     // A page that shows asks whether the node answers, now and then.
     if (message?.type === "DUSK_UI_CHECK_NODE") return { ok: true, networkStatus: await checkNode((await getSettings()).nodeUrl) };
+
+    // A notice's tap opened the app on its send: a tap is anyone's to send,
+    // so it's the notice's only with the token made for that send's notice
+    // (noticeTokenOf), taken once, and else nothing (null). The notice's news,
+    // what Android heard of it in its block (android/ArrivalJob.kt), goes on
+    // its record as the background's watcher's news would, where the record
+    // has no final word yet, and is still kept: history's sync forgets one
+    // it has, and history says what came of it. The page shows it while the
+    // app reconnects; the lookup after brings the fee.
+    if (message?.type === "DUSK_UI_TX_NOTICED") {
+      const hash = String(message.hash ?? "").trim();
+      const token = String(message.token ?? "");
+      if (!hash) throw rpcError(ERROR_CODES.INVALID_PARAMS, "hash is required");
+      if (!(await takeNoticeToken(hash, token).catch(() => false))) return { ok: true, result: null };
+      const meta = await getTxMeta(hash).catch(() => null);
+      const status = message.status === "executed" || message.status === "failed" ? message.status : "";
+      if (!meta || !status || meta.status === "executed" || meta.status === "failed") return { ok: true, result: { patched: false } };
+      const blockHeight = /^[1-9]\d*$/.test(String(message.blockHeight ?? "")) ? String(message.blockHeight) : undefined;
+      const now = Date.now();
+      await patchTxMeta(hash, {
+        status,
+        executedAt: now,
+        ...(blockHeight ? { blockHeight } : {}),
+        reservationStatus: isShieldedTxMeta(meta) ? "spent" : meta.reservationStatus,
+        reservationUpdatedAt: isShieldedTxMeta(meta) ? now : meta.reservationUpdatedAt,
+      });
+      tellPage({ type: "DUSK_UI_TX_STATUS", hash, status, ok: status === "executed", ...(blockHeight ? { blockHeight } : {}) });
+      return { ok: true, result: { patched: true } };
+    }
 
     // A send looked up again by its ID, as the extension's background does:
     // the page hears what came of it.

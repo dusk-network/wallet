@@ -25,19 +25,20 @@ export const askAppNotices = async () => ((await ask("ask")).allowed === true ? 
 
 /**
  * A notice on the phone, once for its transaction; tapping it opens the
- * wallet on that transaction.
- * @param {{ title: string, body: string, hash?: string }} notice
+ * wallet on that transaction, which the tap shows by its send's `token`.
+ * @param {{ title: string, body: string, hash?: string, token?: string }} notice
  */
-export const showAppNotice = async ({ title, body, hash = "" }) =>
-  (await ask("notify", { title: String(title ?? ""), body: String(body ?? ""), hash: String(hash ?? "") })).allowed === true;
+export const showAppNotice = async ({ title, body, hash = "", token = "" }) =>
+  (await ask("notify", { title: String(title ?? ""), body: String(body ?? ""), hash: String(hash ?? ""), token: String(token ?? "") })).allowed === true;
 
 /**
  * A send for Android to look for once the app leaves the screen, and the
  * notice it shows when it's in a block, for either outcome; `wallet`, the
- * wallet it's from, whose removal forgets it.
- * @param {{ hash: string, nodeUrl: string, title: string, failTitle: string, body: string, wallet?: string }} send
+ * wallet it's from, whose removal forgets it; `token`, its notice's, which
+ * the notice's tap brings back.
+ * @param {{ hash: string, nodeUrl: string, title: string, failTitle: string, body: string, wallet?: string, token?: string }} send
  */
-export const watchAppArrival = async ({ hash, nodeUrl, title, failTitle, body, wallet = "" }) =>
+export const watchAppArrival = async ({ hash, nodeUrl, title, failTitle, body, wallet = "", token = "" }) =>
   (
     await ask("watch", {
       hash: String(hash ?? ""),
@@ -46,6 +47,7 @@ export const watchAppArrival = async ({ hash, nodeUrl, title, failTitle, body, w
       failTitle: String(failTitle ?? ""),
       body: String(body ?? ""),
       wallet: String(wallet ?? ""),
+      token: String(token ?? ""),
     })
   ).allowed === true;
 
@@ -67,8 +69,20 @@ export const settleAppArrival = async (hash) => {
   await ask("settled", { hash: String(hash ?? "") });
 };
 
-/** The transaction a notice's tap opened the app on, once: "" for none. */
+/**
+ * The transaction a notice's tap opened the app on, once, with what its
+ * notice knew of it: `status` "executed" or "failed", or "" where it didn't
+ * say, and its block; and the `token` the tap carried. Any app can open the
+ * wallet with these: none of it is the notice's till the token is checked
+ * against its send's (DUSK_UI_TX_NOTICED). `hash` "" for none.
+ * @returns {Promise<{ hash: string, token: string, status: "" | "executed" | "failed", blockHeight: string }>}
+ */
 export const openedFromNotice = async () => {
-  const hash = (await ask("opened")).hash;
-  return typeof hash === "string" ? hash : "";
+  const { hash, outcome, block, token } = await ask("opened");
+  return {
+    hash: typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash) ? hash : "",
+    token: typeof token === "string" && /^[0-9a-f]{32}$/.test(token) ? token : "",
+    status: outcome === "executed" || outcome === "failed" ? outcome : "",
+    blockHeight: /^[1-9]\d*$/.test(String(block ?? "")) ? String(block) : "",
+  };
 };

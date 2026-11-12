@@ -615,7 +615,10 @@ describe("the steps", () => {
 // Hein's: arrival notices on a phone, asked for by the person, never by the wallet.
 describe("Tell me when it arrives, on a phone", () => {
   const ANDROID = "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0";
-  const COMES = "You'll get a notice when it arrives, while the wallet stays open.";
+  // Marek's: "You can close the wallet; this continues in the background." right above
+  // "You'll get a notice when it arrives, while the wallet stays open.": one line now.
+  const COMES = "It goes on if you close the wallet; its notice comes only while the wallet stays open.";
+  const CLOSE = "You can close the wallet; this continues in the background.";
   const draw = async (states, { phone = true, app = false, sent = {} } = {}) => {
     if (phone) vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: ANDROID });
     // The app on Android: Tauri's bridge to its wrapper.
@@ -640,15 +643,17 @@ describe("Tell me when it arrives, on a phone", () => {
     };
     await show();
     const offer = () => visibleText(dom.document.body.querySelector(".sent-notices") ?? dom.document.createElement("div"));
+    // What Sent says of the send and its notice, all of it.
+    const said = () => dom.document.body.querySelectorAll(".sent-note").map(visibleText);
     const tap = (text) => dom.document.body.querySelectorAll("button").find((b) => b.textContent === text);
     const ask = () => tap("Tell me when it arrives");
-    return { state, asked, messages, show, offer, ask, tap };
+    return { state, asked, messages, show, offer, said, ask, tap };
   };
 
   // Chen's, Sofía's and Marek's: promised, and nothing came once they left Firefox or the app.
   it("offers it, asks the phone nothing until it's tapped, and says the notice comes while the wallet stays open", async () => {
     const shown = await draw([null]);
-    expect(shown.offer()).toBe("Tell me when it arrives");
+    expect(shown.offer()).toBe(`${CLOSE}Tell me when it arrives`);
     expect(shown.asked).toEqual(["DUSK_UI_NOTICES"]);
     shown.ask().click();
     await settle();
@@ -656,6 +661,21 @@ describe("Tell me when it arrives, on a phone", () => {
     // For the send on screen, which the app's Android looks for once the wallet's left.
     expect(shown.messages.at(-1)).toMatchObject({ type: "DUSK_UI_NOTICES_ASK", hash: HASH });
     expect(shown.offer()).toBe(COMES);
+    expect(shown.said()).toEqual([COMES]);
+  });
+
+  // Chen's, in the app: told "while the wallet stays open", the notice came with the app put away, both times.
+  it("says in the app that the notice comes, as Android looks for the send once the app's left", async () => {
+    isExtensionRuntime.mockReturnValue(false);
+    try {
+      const shown = await draw([null], { app: true });
+      expect(shown.said()).toEqual(["You can leave this screen; this continues in the background."]);
+      shown.ask().click();
+      await settle();
+      expect(shown.said()).toEqual(["You can leave this screen; this continues in the background.", "You'll get a notice when it arrives."]);
+    } finally {
+      isExtensionRuntime.mockReturnValue(true);
+    }
   });
 
   // After a no in Firefox, the phone's settings didn't bring them back: Firefox's own question does, when tapped.
@@ -663,11 +683,11 @@ describe("Tell me when it arrives, on a phone", () => {
     const shown = await draw([null, "off", "asked"]);
     shown.ask().click();
     await settle();
-    expect(shown.offer()).toBe("Notices are off.Ask again");
+    expect(shown.offer()).toBe(`${CLOSE}Notices are off.Ask again`);
     expect(shown.asked).toContain("DUSK_UI_NOTICES_SAID");
     // Drawn again, the same send's Sent still says it, and has asked nothing more.
     await shown.show();
-    expect(shown.offer()).toBe("Notices are off.Ask again");
+    expect(shown.offer()).toBe(`${CLOSE}Notices are off.Ask again`);
     expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES_ASK")).toHaveLength(1);
     shown.tap("Ask again").click();
     await settle();
@@ -675,7 +695,7 @@ describe("Tell me when it arrives, on a phone", () => {
     expect(shown.offer()).toBe(COMES);
     // A new window's, where the wallet says it was said: the tap, and nothing asked by itself.
     const later = await draw(["off-said"]);
-    expect(later.offer()).toBe("Tell me when it arrives");
+    expect(later.offer()).toBe(`${CLOSE}Tell me when it arrives`);
     expect(later.asked).toEqual(["DUSK_UI_NOTICES"]);
     later.ask().click();
     await settle();
@@ -698,11 +718,11 @@ describe("Tell me when it arrives, on a phone", () => {
   // Seen on Firefox for Android: said as the send went out, and gone as its hash came, so never seen.
   it("says notices are off for the whole of a send's Sent, its hash coming", async () => {
     const shown = await draw(["off", "off-said"], { sent: { phase: "sending", hash: "", status: "", sentAt: 0 } });
-    expect(shown.offer()).toBe("Notices are off.Ask again");
+    expect(shown.offer()).toBe(`${CLOSE}Notices are off.Ask again`);
     // The network took it: the same send, now with its hash.
     Object.assign(shown.state.sent, { phase: "sent", hash: HASH, status: "submitted", sentAt: Date.now() });
     await shown.show();
-    expect(shown.offer()).toBe("Notices are off.Ask again");
+    expect(shown.offer()).toBe(`${CLOSE}Notices are off.Ask again`);
     expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES")).toHaveLength(1);
   });
 
@@ -714,7 +734,7 @@ describe("Tell me when it arrives, on a phone", () => {
     expect(shown.offer()).toBe(COMES);
     shown.state.sent = { ...shown.state.sent, hash: "78".repeat(32), sentAt: Date.now() };
     await shown.show();
-    expect(shown.offer()).toBe("Notices are off.Ask again");
+    expect(shown.offer()).toBe(`${CLOSE}Notices are off.Ask again`);
   });
 
   it("offers nothing on a computer, which shows notices as it always did", async () => {

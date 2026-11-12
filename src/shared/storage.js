@@ -34,4 +34,5 @@ export const STORAGE_KEYS = {
   RESET_PENDING: "dusk_reset_pending_v1", // { at }: a wallet reset that hasn't cleared all the old wallet's data
   WORKER_RELOAD: "dusk_worker_reload_v1", // version: the last one the pages reloaded for an old worker
   WALLETS: "dusk_wallets_v1", // { active: key, wallets: { [key]: { walletId, accounts, name? } } }: what the switcher shows of each wallet (wallets.js)
+  NOTICE_TOKENS: "dusk_notice_tokens_v1", // { [hash]: { token, wallet, at } }: the app's arrival notices' tokens, each taken once (noticeTokens.js)
 };

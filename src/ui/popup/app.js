@@ -926,7 +926,7 @@ function scheduleBalanceRetry(ov) {
 async function renderForConnection(opts) {
   if (!REVIEW_ROUTES.has(state.route)) return render(opts);
   await refreshOverview(send, { force: Boolean(opts?.forceRefresh) });
-  renderHeader(state.overview);
+  renderHeader(headerOf(state.overview));
 }
 try {
   window.addEventListener("offline", () => renderForConnection().catch(() => {}));
@@ -971,7 +971,8 @@ async function askNode() {
   // place (refreshOverview's overview has its own say).
   if ((was === "offline" || answer.nodeStatus === "offline") && now.balance?.value) now.balanceStale = true;
   // Drawn again from what's read already, as a read under way may never end (a Refresh pressed while the node holds it).
-  if (REVIEW_ROUTES.has(state.route)) renderHeader(now);
+  if (answer.nodeStatus === "online") reconnectingUntil = 0;
+  if (REVIEW_ROUTES.has(state.route)) renderHeader(headerOf(now));
   else await render({ cached: true });
   // Back: the balance read again, without waiting for it here.
   if (answer.nodeStatus === "online") renderForConnection({ forceRefresh: true }).catch(() => {});
@@ -1011,7 +1012,9 @@ function sendsOnTheirWay() {
   }
   for (const tx of Array.isArray(ov.txs) ? ov.txs : []) {
     const status = String(tx?.status ?? "").toLowerCase();
-    if (["submitted", "mempool", "unknown"].includes(status) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS) {
+    // In its block without its fee, as a notice's news has it (DUSK_UI_TX_NOTICED): its fee is looked up.
+    const feeUnread = (status === "executed" || status === "failed") && tx?.feePaid == null;
+    if ((["submitted", "mempool", "unknown"].includes(status) || feeUnread) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS) {
       hashes.add(String(tx?.hash ?? ""));
     }
   }
@@ -1064,8 +1067,22 @@ function followSent() {
 // Refresh does: a send made meanwhile, or a sync the phone stopped, shows as it is.
 function comeBack() {
   state.needsRefresh = true;
+  // A phone cut the page's network while it was away: it reconnects first.
+  reconnectingUntil = Date.now() + RECONNECT_MS;
+  setTimeout(() => askNode().catch(() => {}), 0);
+  setTimeout(() => renderHeader(headerOf(state.overview)), RECONNECT_MS + 50);
   renderForConnection({ forceRefresh: true }).catch(() => {});
   resumeWatching();
+}
+
+// Back in front after a phone cut the page's network, the wallet reconnects:
+// till the node answers, 10 seconds at most, the header says it's checking,
+// never that the network can't be reached, from what was read while away.
+const RECONNECT_MS = 10_000;
+let reconnectingUntil = 0;
+function headerOf(ov) {
+  if (Date.now() >= reconnectingUntil || ov?.networkStatus?.nodeStatus !== "offline" || globalThis.navigator?.onLine === false) return ov;
+  return { ...ov, networkStatus: { ...ov.networkStatus, nodeStatus: "checking" } };
 }
 
 // A send on its way when the wallet is left: the Sent screen says it's looked
@@ -1412,7 +1429,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   }
 
   // Always render header actions based on latest overview
-  renderHeader(ov);
+  renderHeader(headerOf(ov));
   updateFullNav();
 
   // Keep shielded sync progress visible while on the dashboard.
@@ -1440,7 +1457,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
     refresh: onRefresh,
     announce: (text) => toaster.announce(text),
     // The header alone, for a change only it shows, such as a profile's label.
-    renderHeader: () => renderHeader(state.overview),
+    renderHeader: () => renderHeader(headerOf(state.overview)),
   };
   drawn = actions;
 
@@ -1648,13 +1665,21 @@ listenForLinks((url) => {
 // --- A notice tapped in the app ----------------------------------------------
 // Its send's details, as Activity opens them: after the unlock, when the
 // wallet is locked. Asked as the app starts, and each time it's back in front.
+// Any app can open the wallet as a notice's tap would: only a tap with the
+// token the wallet gave its send's notice opens anything (DUSK_UI_TX_NOTICED).
 async function openNoticed() {
-  const hash = isTauriRuntime() && isPhone() ? await openedFromNotice().catch(() => "") : "";
-  if (!hash) return;
+  const noticed = isTauriRuntime() && isPhone() ? await openedFromNotice().catch(() => null) : null;
+  const hash = noticed?.hash ?? "";
+  if (!hash || !noticed.token) return;
+  // What the notice knew of it, in its block, on its record before it shows:
+  // never "Not confirmed" while the app reconnects. Its fee comes with the lookup.
+  const known = await send({ type: "DUSK_UI_TX_NOTICED", hash, token: noticed.token, ...(noticed.status ? { status: noticed.status, blockHeight: noticed.blockHeight } : {}) }).catch(() => null);
+  if (!known?.result) return;
   netMenu.close();
   acctMenu.close();
   Object.assign(state, { txDetailHash: hash, txDetailFrom: "home", route: "tx" });
-  await render();
+  state.needsRefresh = true;
+  await render({ forceRefresh: true });
 }
 try {
   document.addEventListener("visibilitychange", () => {

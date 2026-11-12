@@ -33,6 +33,7 @@ import { clearWallets } from "./wallets.js";
 import { forgetWalletRequests, keepOnlyRequestsOf } from "./paymentRequests.js";
 import { forgetAppArrivals } from "../platform/notices.js";
 import { forgetSendDrafts } from "./sendDraftStore.js";
+import { forgetNoticeTokens } from "./noticeTokens.js";
 
 /**
  * Note that a reset began, before anything is cleared: for a restore, with
@@ -63,8 +64,9 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     clearWallets(),
     clearSettings(),
     clearSiteRecords(),
-    // The sends the app on Android looks for while it's away, and their notices.
+    // The sends the app on Android looks for while it's away, and their notices and their tokens.
     forgetAppArrivals(),
+    forgetNoticeTokens(),
     // A payment typed in Send, kept by the page: in the app, past a restart.
     forgetSendDrafts(),
     // Names checked and rates read, kept by account or by node, and the password on big sends.
@@ -129,6 +131,7 @@ export async function forgetWalletData({ walletId, accounts }) {
     forgetWalletRequests(id),
     forgetWalletActivity({ walletId: id, accounts }),
     forgetAppArrivals(id),
+    forgetNoticeTokens(id),
     forgetSendDrafts(id),
   ]);
   return results.every((r) => r.status === "fulfilled");

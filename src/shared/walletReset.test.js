@@ -298,6 +298,19 @@ describe("walletReset", () => {
     expect(localStorage.getItem(SEND_DRAFT_KEY)).toBeNull();
   });
 
+  // The tokens of the app's arrival notices go with their wallet, and every one with a reset.
+  it("forgets the notices' tokens with a reset, and with their wallet removed, but not another wallet's", async () => {
+    const tokens = await import("./noticeTokens.js");
+    const [gone, kept] = [await tokens.noticeTokenFor("a1".repeat(32), "gone0"), await tokens.noticeTokenFor("a2".repeat(32), "kept0")];
+    await expect(reset.forgetWalletData({ walletId: "gone0", accounts: ["gone0"] })).resolves.toBe(true);
+    await expect(tokens.takeNoticeToken("a1".repeat(32), gone)).resolves.toBe(false);
+    await expect(tokens.takeNoticeToken("a2".repeat(32), kept)).resolves.toBe(true);
+    const again = await tokens.noticeTokenFor("a2".repeat(32), "kept0");
+    await reset.beginReset();
+    await reset.finishReset();
+    await expect(tokens.takeNoticeToken("a2".repeat(32), again)).resolves.toBe(false);
+  });
+
   it("forgets the wallets' names and the one unlocked last with a reset", async () => {
     const wallets = await import("./wallets.js");
     await wallets.noteActiveWallet("key-1", { walletId: "acct", accounts: ["acct", "acct1"] });

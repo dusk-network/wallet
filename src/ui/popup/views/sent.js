@@ -407,8 +407,17 @@ const STATE_WORDS = { done: "Done: ", current: "Now: ", failed: "Failed: ", unkn
  * pool's event is read (`sozu`, what app.js reads from its block), and that
  * they're coming till then.
  */
-/** What Sent says once notices will come: a phone's browser stops the wallet once it's left. */
-export const NOTICE_COMES_TEXT = "You'll get a notice when it arrives, while the wallet stays open.";
+/** What Sent says once notices will come, in the app: Android looks for the send once the app's left. */
+export const NOTICE_COMES_TEXT = "You'll get a notice when it arrives.";
+
+/**
+ * What Sent says once notices will come in Firefox on a phone, which stops
+ * the wallet once Firefox is left: one line for the send and its notice.
+ */
+export const FIREFOX_NOTICE_COMES_TEXT = "It goes on if you close the wallet; its notice comes only while the wallet stays open.";
+
+// That the send goes on with the wallet closed: in the extension.
+const CLOSE_WALLET_TEXT = "You can close the wallet; this continues in the background.";
 
 /**
  * On a phone, while a send is on its way: Tell me when it arrives, which alone
@@ -442,13 +451,17 @@ function noticeOffer({ state, actions }) {
     return ask;
   };
   const firefox = !isTauriRuntime();
+  // In Firefox, that the send goes on with the wallet closed is said here,
+  // with the notice: once notices come, in one line that says both.
+  const closing = () => (firefox ? [h("p", { class: "sent-note", text: CLOSE_WALLET_TEXT })] : []);
   const draw = () => {
     if (notices.state === null) {
-      el.replaceChildren(askButton("Tell me when it arrives", false));
+      el.replaceChildren(...closing(), askButton("Tell me when it arrives", false));
     } else if (notices.state === "asked" || notices.state === "on") {
-      el.replaceChildren(h("p", { class: "sent-note", text: NOTICE_COMES_TEXT }));
+      el.replaceChildren(h("p", { class: "sent-note", text: firefox ? FIREFOX_NOTICE_COMES_TEXT : NOTICE_COMES_TEXT }));
     } else if (notices.state === "off") {
       el.replaceChildren(
+        ...closing(),
         firefox
           ? h("div", { class: "sent-notices__off" }, [h("p", { class: "sent-note", text: "Notices are off." }), askButton("Ask again", true)])
           : h("p", { class: "sent-note", text: "Notices are off. To get them, allow notifications for Dusk Wallet in your phone's settings." })
@@ -457,9 +470,9 @@ function noticeOffer({ state, actions }) {
       notices.said ??= Promise.resolve(actions?.send?.({ type: "DUSK_UI_NOTICES_SAID" })).catch(() => {});
     } else if (notices.state === "off-said" && firefox) {
       // Said once: from then on, the tap that asks again, and nothing more.
-      el.replaceChildren(askButton("Tell me when it arrives", true));
+      el.replaceChildren(...closing(), askButton("Tell me when it arrives", true));
     } else {
-      el.replaceChildren();
+      el.replaceChildren(...closing());
     }
   };
   if (notices.state === undefined) {
@@ -610,13 +623,12 @@ export function sentView(ov, { state, actions, sozu } = {}) {
       )
     : null;
 
-  const note = final
+  // That it goes on: in Firefox on a phone with what's said of its notice (noticeOffer).
+  const note = final || (isPhone() && !isTauriRuntime())
     ? null
     : h("p", {
         class: "sent-note",
-        text: isExtensionRuntime()
-          ? "You can close the wallet; this continues in the background."
-          : "You can leave this screen; this continues in the background.",
+        text: isExtensionRuntime() ? CLOSE_WALLET_TEXT : "You can leave this screen; this continues in the background.",
       });
 
   return [

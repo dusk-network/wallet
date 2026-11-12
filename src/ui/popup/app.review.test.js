@@ -899,6 +899,61 @@ describe("the app on a phone", () => {
     expect(later.state.route).toBe("home");
   });
 
+  // Chen's: a tap on "Your payment arrived" showed a red "Can't reach the network", then "Not
+  // confirmed" and "Up to 0.0025", then Completed: the notice knew it had arrived, and its block.
+  it("opens a notice's payment as the notice knew it, and says the network is being checked while it reconnects", async () => {
+    const HASH = "9b".repeat(32);
+    const TOKEN = "c4".repeat(16);
+    const record = { hash: HASH, kind: "transfer", privacy: "public", to: B, amount: "10000000", status: "unknown", submittedAt: Date.now() - 60_000, profileIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network" };
+    let opened = { hash: "" };
+    const bridge = tauriBridge({ notices: (args) => (args?.action === "opened" ? { allowed: true, ...opened } : { allowed: true }) });
+    const answer = async (message, t) => {
+      // The wallet takes a tap as its notice's only with the token it gave that send's notice.
+      if (message.type === "DUSK_UI_TX_NOTICED") {
+        if (message.hash !== HASH || message.token !== TOKEN) return { ok: true, result: null };
+        t.open = { ...t.open, txs: [{ ...record, status: message.status, blockHeight: message.blockHeight }] };
+        return { ok: true, result: { patched: true } };
+      }
+      // The node doesn't answer yet as the app comes back: Android cut its network while away.
+      if (message.type === "DUSK_UI_CHECK_NODE" || message.type === "DUSK_UI_RECHECK_TX") return new Promise(() => {});
+      return undefined;
+    };
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, answer, { tauri: bridge });
+    const make = (tag, props = {}) => Object.assign(t.dom.document.createElement(tag), props);
+    const pill = make("button", { id: "network-pill" });
+    pill.appendChild(make("span", { className: "network-pill__label" }));
+    t.dom.document.body.prepend(pill);
+    // What was read while the app was away: the node offline, the send not heard of.
+    t.open = { ...t.open, txs: [record], networkStatus: { nodeStatus: "offline", nodeUrl: t.open.nodeUrl } };
+    const comeBack = async () => {
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+
+    // Astra's: any app can open the wallet as a tap would, with a send's ID it learned and an outcome of
+    // its own. Without the notice's token, or with another, it opens nothing and says nothing of the send.
+    for (const forged of [{ hash: HASH, outcome: "failed", block: 1 }, { hash: HASH, outcome: "failed", block: 1, token: "d5".repeat(16) }]) {
+      opened = forged;
+      await comeBack();
+      await flush();
+      expect(t.state.route).toBe("home");
+    }
+    expect(t.asked("DUSK_UI_TX_NOTICED")).toEqual([expect.objectContaining({ hash: HASH, token: "d5".repeat(16) })]);
+
+    opened = { hash: HASH, outcome: "executed", block: 4831109, token: TOKEN };
+    await comeBack();
+    await vi.waitFor(() => expect(t.state.route).toBe("tx"));
+    await flush();
+    expect(t.asked("DUSK_UI_TX_NOTICED").at(-1)).toEqual(expect.objectContaining({ hash: HASH, token: TOKEN, status: "executed", blockHeight: "4831109" }));
+    expect(t.app.textContent).not.toContain("Not confirmed");
+    expect(t.app.textContent).not.toContain("stopped waiting");
+    expect(t.dom.document.querySelector(".network-word")?.textContent ?? "").not.toContain("Can't reach the network");
+    opened = { hash: "" };
+  });
+
   it("opens on Home after it was ended with Send open but sent, or for another profile", async () => {
     const kept = new Map();
     vi.stubGlobal("localStorage", { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k) });
