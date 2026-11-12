@@ -29,6 +29,7 @@ import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../.
 import { saveHandedExport } from "./activityExport.js";
 import { siteLastSeen } from "../../shared/siteRecords.js";
 import { forgetRequestLink, requestDraftOf } from "../lib/requestLink.js";
+import { keepOpenSend, takeOpenSend } from "../lib/sendDraft.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 import { openedFromNotice } from "../../platform/notices.js";
 
@@ -1113,9 +1114,35 @@ function returnAfterUnlock(ov) {
   if (unlockedNow) setTimeout(resumeWatching, 0);
 }
 
+// The app on the way to the background with Send, or its Review, open: what's
+// typed is kept on the phone as Send left open, for Android may end the app
+// meanwhile; the app opens on it again, once unlocked (reopenSend). Back in
+// front, the app wasn't ended: it's a draft as any other again.
+let openSendKept = false;
+function keepSendOpen() {
+  if (!isTauriRuntime() || !state.overview?.isUnlocked || !["send", "confirm"].includes(state.route)) return;
+  keepOpenSend(state.draft, state.overview);
+  openSendKept = true;
+}
+let sendReopened = false;
+function reopenSend(ov) {
+  if (!isTauriRuntime() || !ov?.isUnlocked) return;
+  if (!sendReopened) {
+    sendReopened = true;
+    const values = takeOpenSend(ov);
+    if (values && state.route === "home") Object.assign(state, { route: "send", draft: values });
+    return;
+  }
+  if (openSendKept && document.visibilityState !== "hidden") {
+    openSendKept = false;
+    takeOpenSend(ov);
+  }
+}
+
 try {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
+      keepSendOpen();
       lookingUpOnLeave();
       leave();
       return;
@@ -1377,6 +1404,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   }
   keepContactsToTheirWallet(ov);
   returnAfterUnlock(ov);
+  reopenSend(ov);
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";
   } catch {

@@ -76,6 +76,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Opened the Android app on Send again, with what was typed, once unlocked after Android ended it in the background, and kept a draft left with Back through that too.
 - Looked a payment on Sent up by its ID once its watcher had said nothing for 20 seconds, as after a lost signal, so it says Completed when it is, and read a completed payment's fee again until Completed says it.
 - Turned a request shown in Receive to Paid twice, with Send back, as a second payment comes in: Receive looks again every 30 seconds while it shows, paid or not.
 - Said a request was paid already on Send's form as soon as a link fills it in, pasted or opened, not only on Review, and named another profile of the wallet's by its own name there.

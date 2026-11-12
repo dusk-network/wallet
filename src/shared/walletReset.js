@@ -1,9 +1,10 @@
 // What a wallet reset clears besides the vault and the site permissions: every
 // wallet's transactions, shielded notes, history, deposits' arrivals on
 // DuskEVM, contacts, profile labels and tokens, the wallets' names, what sites
-// asked, the sends the app on Android looks for while it's away, and the
-// settings, so the network is Mainnet's own node again and no address stays.
-// And what removing one wallet clears of it alone (forgetWalletData).
+// asked, the sends the app on Android looks for while it's away, Send's draft
+// kept by the page, and the settings, so the network is Mainnet's own node
+// again and no address stays. And what removing one wallet clears of it alone
+// (forgetWalletData).
 //
 // A reset is noted before the vault goes. If any of these can't be cleared,
 // the reset fails and stays noted, and no new wallet is made until another
@@ -31,6 +32,7 @@ import { clearTxs, forgetWalletTxs } from "./txStore.js";
 import { clearWallets } from "./wallets.js";
 import { forgetWalletRequests, keepOnlyRequestsOf } from "./paymentRequests.js";
 import { forgetAppArrivals } from "../platform/notices.js";
+import { forgetSendDrafts } from "./sendDraftStore.js";
 
 /**
  * Note that a reset began, before anything is cleared: for a restore, with
@@ -63,6 +65,8 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     clearSiteRecords(),
     // The sends the app on Android looks for while it's away, and their notices.
     forgetAppArrivals(),
+    // A payment typed in Send, kept by the page: in the app, past a restart.
+    forgetSendDrafts(),
     // Names checked and rates read, kept by account or by node, and the password on big sends.
     storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES, STORAGE_KEYS.MEASURED_RATES, STORAGE_KEYS.SEND_PASSWORD]),
   ]);
@@ -103,7 +107,8 @@ export async function finishPendingReset() {
 
 /**
  * Forget a removed wallet's data, and nothing of another's: its sites and
- * what they asked, transactions, arrivals, labels, tokens, contacts, notes and history. Every
+ * what they asked, transactions, arrivals, labels, tokens, contacts, notes,
+ * history, and a payment typed in Send for it. Every
  * store is tried; one that can't be cleared keeps that wallet's data, which
  * no other wallet reads.
  * @param {{ walletId: string, accounts: string[] }} wallet - its first public account, and its profiles' accounts
@@ -124,6 +129,7 @@ export async function forgetWalletData({ walletId, accounts }) {
     forgetWalletRequests(id),
     forgetWalletActivity({ walletId: id, accounts }),
     forgetAppArrivals(id),
+    forgetSendDrafts(id),
   ]);
   return results.every((r) => r.status === "fulfilled");
 }

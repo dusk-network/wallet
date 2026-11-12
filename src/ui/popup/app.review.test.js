@@ -843,6 +843,91 @@ function tauriBridge(answers = {}) {
 describe("the app on a phone", () => {
   const LINK = `dusk:public-${B}@dusk:2?amount=0.01&memo=Deep+link+test`;
 
+  // Astra's: Android ended the app with a Send a link filled in open. Back, it opened on that Send, and
+  // left with Back, the link's payment came back in the next Send begun by hand, as one typed would.
+  it("opens on a link's Send again after Android ended the app, and keeps none of it for the next Send", async () => {
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k) });
+    const field = (t, name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const values = (t) => ["To", "Amount", "Memo"].map((name) => field(t, name)?.value);
+    const filled = { to: B, amountDusk: "0.01", memo: "Deep link test", requestChainId: "dusk:2", filledFrom: "link", filledIn: true };
+    const open = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: filled }, undefined, { tauri: tauriBridge() });
+    open.dom.document.visibilityState = "hidden";
+    open.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+
+    // Android ends the app; opened again, it's on that Send, as the link filled it in.
+    const back = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    expect(back.state.route).toBe("send");
+    expect(values(back)).toEqual([B, "0.01", "Deep link test"]);
+    expect(back.app.querySelector(".send-filled-note")?.textContent).toContain("Filled in from the link");
+
+    // Left with Back: the next Send, begun by hand on Home, is empty.
+    back.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+    await flush();
+    expect(back.state.route).toBe("home");
+    back.app.querySelectorAll("button.action-btn").find((b) => b.textContent.trim() === "Send").click();
+    await flush();
+    expect(back.state.route).toBe("send");
+    expect(values(back)).toEqual(["", "", ""]);
+  });
+
+  // Lena's: Send half typed, Home, and Android ended the app in the background: back,
+  // it opened on Home with Send empty, 3 times out of 3.
+  it("opens on Send again with what was typed, once unlocked, after Android ended it in the background", async () => {
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k) });
+    const field = (t, name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const values = (t) => ["To", "Amount", "Memo"].map((name) => field(t, name)?.value);
+    const typed = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    for (const [name, value] of [["To", B], ["Amount", "0,02"], ["Memo", "satay"]]) {
+      field(typed, name).value = value;
+      field(typed, name).dispatchEvent(fakeEvent("input"));
+    }
+    typed.dom.document.visibilityState = "hidden";
+    typed.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    expect(JSON.stringify([...kept.values()])).not.toMatch(/password/i);
+
+    // Android ends the app; opened again, it's a new page, on Home.
+    const back = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    expect(back.state.route).toBe("send");
+    expect(values(back)).toEqual([B, "0,02", "satay"]);
+
+    // Left with Back, it's kept for Send, but the app opens on Home after that.
+    back.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+    await flush();
+    const later = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    expect(later.state.route).toBe("home");
+  });
+
+  it("opens on Home after it was ended with Send open but sent, or for another profile", async () => {
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k) });
+    const typed = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: { to: B, amountDusk: "0.02", memo: "satay" } }, undefined, { tauri: tauriBridge() });
+    typed.dom.document.visibilityState = "hidden";
+    typed.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    // Opened on another profile: not its Send.
+    const profileTwo = async (message, t) => (message.type === "DUSK_UI_OVERVIEW" ? { ...t.open, selectedAccountIndex: 1 } : undefined);
+    const other = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, profileTwo, { tauri: tauriBridge() });
+    expect(other.state.route).toBe("home");
+
+    // Sent from the Send it opened on: nothing is kept for the next start.
+    const t = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: { to: B, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } }, undefined, { tauri: tauriBridge() });
+    t.state.route = "confirm";
+    await t.render();
+    await flush();
+    t.dom.document.visibilityState = "hidden";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    t.dom.document.visibilityState = "visible";
+    t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await flush();
+    pastClickGuard();
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await flush();
+    expect(t.asked("DUSK_UI_SEND_TX")).toHaveLength(1);
+    const after = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
+    expect(after.state.route).toBe("home");
+  });
+
   // Chen's wish: lock when I leave the app, as phone wallets' Auto-lock: Immediately.
   it("locks as the person leaves it with Auto-lock: Immediately, not for the share sheet, and not otherwise", async () => {
     const bridge = tauriBridge();
