@@ -814,6 +814,8 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
       const {
         profileIndex: _ignoredProfileIndex,
         accountIndex: _ignoredAccountIndex,
+        // The wallet's own Send's, to call one off: never a site's.
+        sendId: _ignoredSendId,
         ...safeNormalizedParams
       } = normalizedParams;
       const baseParams = applyTxDefaultsForRpc(safeNormalizedParams, { dynamicPrice });

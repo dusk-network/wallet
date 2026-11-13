@@ -27,6 +27,7 @@ import {
   openContactsRecords,
   sealContactsRecord,
   sendTransaction,
+  cancelSend,
   selectAccountIndex,
   signAuth,
   signMessage,
@@ -45,6 +46,7 @@ import {
   walletIdOf,
   preloadProtocolDriver,
   setEngineDebugHook,
+  setHandOverHook,
 } from "../shared/walletEngine.js";
 
 import { ERROR_CODES } from "../shared/errors.js";
@@ -168,6 +170,14 @@ async function watchTxExecuted(hash, epoch) {
     activeTxWatches.delete(hash);
   }
 }
+
+// A payment that waited for the network is kept with its transaction's ID in
+// the background before it's handed to the node (waitingSends.js): nothing
+// is handed over without the background's word that it's kept.
+setHandOverHook(async ({ sendId, hash }) => {
+  const kept = await runtimeSendMessage({ type: "DUSK_ENGINE_HANDING_OVER", sendId, hash });
+  if (kept?.ok !== true) throw new Error("Not kept");
+});
 
 // Chrome's offscreen document has no storage, so the background keeps the
 // engine's .dusk name checks, from Firefox's engine page too.
@@ -459,6 +469,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           // Fire-and-forget: wait for EXECUTED and notify background so it can
           // show a final notification + explorer link.
           watchTxExecuted(result?.hash, Number.isInteger(txEpoch) ? txEpoch : undefined).catch(() => {});
+          return;
+        }
+
+        // Cancel on a payment from Send: called off unless it was handed over (waitingSends.js).
+        case "dusk_cancelSend": {
+          sendResponse({ id, result: cancelSend(params ?? {}) });
           return;
         }
 

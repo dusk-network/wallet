@@ -1190,6 +1190,10 @@ describe("review", () => {
       type: "DUSK_UI_SEND_TX",
       params: expect.objectContaining({ to: ALICE.account, privacy: "public", gas: { limit: "2500000", price: "1" } }),
       walletId: overview().accounts[0],
+      // A payment that can wait for the network, called off by its ID, with the most its fee costs.
+      sendId: expect.stringMatching(/^[\w-]{8,64}$/),
+      feeCapLux: "2500000",
+      toName: undefined,
     });
   });
 
@@ -1467,11 +1471,13 @@ describe("a name and the recipient Contacts sets", () => {
 
     dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
     await settle();
-    expect(review.actions.send).toHaveBeenCalledWith({
-      type: "DUSK_UI_SEND_TX",
-      params: expect.objectContaining({ privacy: "public", to: BOB.account }),
-      walletId: overview().accounts[0],
-    });
+    expect(review.actions.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "DUSK_UI_SEND_TX",
+        params: expect.objectContaining({ privacy: "public", to: BOB.account }),
+        walletId: overview().accounts[0],
+      })
+    );
   });
 });
 
@@ -2160,6 +2166,52 @@ describe("a request link", () => {
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent("https://phish.example/x")}` });
     vi.resetModules();
     expect((await import("./popup/state.js")).state.draft).toBeNull();
+  });
+});
+
+describe("a payment waiting to go out, as the network didn't answer", () => {
+  // Marek's: the same send made again while the first waited offline got no word on Review. Chen's: Max and
+  // Available ignored the send that waited.
+  const waiting = (over = {}) => ({ sendId: "s1", profileIndex: 0, privacy: "public", to: ALICE.account, lux: "13000000", feeLux: "2500000", memo: "Order 1044", at: Date.now() - 60_000, waiting: true, waits: true, ...over });
+  const draft = (over = {}) => ({ to: ALICE.account, privacy: "public", amountDusk: "0.013", amountLux: "13000000", memo: "Order 1044", ...over });
+  const contacts = { loaded: true, items: [{ name: "Alice", address: ALICE.account }] };
+  const text = (selector) => {
+    const el = dom.document.body.querySelector(selector);
+    return el && isShown(el) ? visibleText(el) : "";
+  };
+
+  it("is said on Review, and on the form, when the same one is made again, and Review's button says it sends it again", () => {
+    const at = Date.now() - 60_000;
+    const ov = overview({ waitingSends: [waiting({ at })] });
+    mount({ route: "confirm", addressBook: contacts, draft: draft() }, ov);
+    expect(text(".review-again")).toBe(`The same payment is waiting to go out: 0.013 DUSK to Alice with this memo, made at ${clockText(at)}.`);
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again")).toBeTruthy();
+
+    const form = mount({ route: "send", addressBook: contacts, draft: draft() }, ov);
+    expect(text(".send-again")).toBe(`The same payment is waiting to go out: 0.013 DUSK to Alice with this memo, made at ${clockText(at)}.`);
+    // Another memo is another payment.
+    typeInto(dom.document.body.querySelector(".row > input"), "Order 1045");
+    expect(text(".send-again")).toBe("");
+    void form;
+
+    // One the wallet stopped waiting for won't go out: nothing to say.
+    mount({ route: "confirm", addressBook: contacts, draft: draft() }, overview({ waitingSends: [waiting({ waiting: false, waits: false, ended: "closed" })] }));
+    expect(text(".review-again")).toBe("");
+  });
+
+  it("is left out of Available and Max, with its fee, which say so", () => {
+    // 177.9865 DUSK public, the fee cap 0.0025: 0.013 and its fee wait.
+    const form = mount(newState(), overview({ waitingSends: [waiting()] }));
+    typeInto(form.to, ALICE.account);
+    expect(form.balanceLine()).toBe("Available after fees 177.9685 DUSK");
+    expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK · After the payments waiting to go out");
+    dom.document.body.querySelector(".amount-avail button").click();
+    expect(form.amount.value).toBe("177.9685");
+
+    // Another profile's, or one not waiting any more, takes nothing.
+    const other = mount(newState(), overview({ waitingSends: [waiting({ profileIndex: 1 }), waiting({ sendId: "s2", waiting: false, ended: "locked" })] }));
+    typeInto(other.to, ALICE.account);
+    expect(other.balanceLine()).toBe("Available after fees 177.984 DUSK");
   });
 });
 

@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   bindPendingWallet: vi.fn(() => true),
   alarmListeners: [],
   alarmsCreate: vi.fn(),
+  // Whether the node answers when it's asked whether it does.
+  nodeAnswers: true,
 }));
 
 function makeLocalStorage() {
@@ -62,6 +64,10 @@ vi.mock("../background/engineHost.js", () => ({
   })),
   invalidateEngineConfig: vi.fn(() => {}),
   handleEngineReady: vi.fn(() => {}),
+  // Firefox's engine tab closing: the background's listener, for a test to close it.
+  onEngineClosed: vi.fn((listener) => {
+    mocks.engineClosed = listener;
+  }),
 }));
 
 // The waiting requests themselves, and how they end, as pending.js keeps them.
@@ -123,6 +129,7 @@ vi.mock("../shared/networkStatus.js", async (importOriginal) => ({
   isStatusStale: vi.fn(() => false),
   chainIdForChoice: vi.fn(async () => null),
   statusChainRefusal: vi.fn(() => ""),
+  checkNode: vi.fn(async (nodeUrl) => ({ nodeStatus: mocks.nodeAnswers ? "online" : "offline", nodeUrl })),
 }));
 
 vi.mock("../platform/extensionApi.js", () => ({
@@ -1006,6 +1013,66 @@ describe("background Phoenix tx lifecycle flow", () => {
       expect(sends()).toHaveLength(1);
     });
 
+    // Astra's: a payment above the amount that waited for the network failed "It waits for your password" as it
+    // went, its ticket spent on the try the network didn't answer.
+    it("goes out once the network answers on the password given for it once, however many tries it takes", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      engineCall.mockImplementation(async (method) => {
+        if (method === "dusk_getCachedGasPrice") return { median: "1" };
+        if (method !== "dusk_sendTransaction") return true;
+        if (sends().length === 1) throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+        return { hash: "0xwaited" };
+      });
+      const proved = await sendBackgroundMessage({ type: "DUSK_UI_SEND_PASSWORD_PROVE", params, password: "the password" }, fromPage);
+      mocks.nodeAnswers = false;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const response = new Promise((resolve) =>
+          mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-pass-1", params, sendTicket: proved.result }, {}, resolve)
+        );
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-pass-1", waits: true }));
+        mocks.nodeAnswers = true;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "0xwaited" } });
+        expect(sends()).toHaveLength(2);
+      } finally {
+        mocks.nodeAnswers = true;
+        vi.useRealTimers();
+      }
+    });
+
+    // Astra's: two payments above the amount, each given the password, three minutes offline: the second, which
+    // waited behind the first, failed "It waits for your password", its ticket gone stale unchecked.
+    it("checks each payment's password as it's taken, so one waiting behind another goes out on it, however long", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      engineCall.mockImplementation(async (method) => {
+        if (method === "dusk_getCachedGasPrice") return { median: "1" };
+        if (method !== "dusk_sendTransaction") return true;
+        if (sends().length === 1) throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+        return { hash: `0xqueued${sends().length}` };
+      });
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      try {
+        const first = await sendBackgroundMessage({ type: "DUSK_UI_SEND_PASSWORD_PROVE", params, password: "the password" }, fromPage);
+        const second = await sendBackgroundMessage({ type: "DUSK_UI_SEND_PASSWORD_PROVE", params, password: "the password" }, fromPage);
+        mocks.nodeAnswers = false;
+        const one = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-pass-a", params, sendTicket: first.result }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-pass-a", waits: true }));
+        const two = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-pass-b", params, sendTicket: second.result }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-pass-b", waits: true }));
+        // Three minutes with no network: past either ticket's two.
+        await vi.advanceTimersByTimeAsync(3 * 60_000);
+        mocks.nodeAnswers = true;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await expect(one).resolves.toMatchObject({ ok: true });
+        await expect(two).resolves.toMatchObject({ ok: true });
+        expect(sends().map(([, sent]) => sent.sendId)).toEqual(["send-pass-a", "send-pass-a", "send-pass-b"]);
+      } finally {
+        mocks.nodeAnswers = true;
+        vi.useRealTimers();
+      }
+    });
+
     it("says nothing's asked up to the amount, and sends with no password", async () => {
       const small = { ...params, amount: "1" };
       await expect(sendBackgroundMessage({ type: "DUSK_UI_SEND_PASSWORD_ASKS", params: small }, fromPage)).resolves.toEqual({ ok: true, result: null });
@@ -1052,6 +1119,146 @@ describe("background Phoenix tx lifecycle flow", () => {
       const response = await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct9", params });
       expect(response).toMatchObject({ error: { message: "The wallet changed while you reviewed it." } });
       expect(engineCall).not.toHaveBeenCalledWith("dusk_sendTransaction", expect.anything());
+    });
+
+    // Amélie's: the Wi-Fi off at Confirm, the popup said "Not sent" a second later and never waited.
+    it("waits for the network where a payment from Send couldn't reach it before it went out, and goes out once it answers", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const sends = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction");
+      const offline = Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+      engineCall.mockImplementation(async (method) => {
+        if (method !== "dusk_sendTransaction") return true;
+        if (sends().length === 1) throw offline;
+        return { hash: "0xwaited" };
+      });
+      mocks.nodeAnswers = false;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const response = new Promise((resolve) =>
+          mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-0001", feeCapLux: "2500000", params: { ...params, memo: "Hors ligne un" } }, {}, resolve)
+        );
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0001", waits: true }));
+        const overview = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_OVERVIEW" }, {}, resolve));
+        await vi.advanceTimersByTimeAsync(0);
+        expect((await overview).waitingSends).toEqual([expect.objectContaining({ sendId: "send-0001", memo: "Hors ligne un", waiting: true, waits: true })]);
+
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(sends()).toHaveLength(1);
+        mocks.nodeAnswers = true;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "0xwaited" } });
+        expect(sends()).toHaveLength(2);
+        expect(sends()[1][1]).toMatchObject({ sendId: "send-0001", memo: "Hors ligne un" });
+      } finally {
+        mocks.nodeAnswers = true;
+        vi.useRealTimers();
+      }
+    });
+
+    // Astra's: Firefox's engine tab closed with a payment waiting, the wallet unlocked again before the network came
+    // back, and the payment went out by itself.
+    it("ends a payment waiting for the network as the engine's tab closes, said not sent, never going out by itself", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const sends = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction");
+      engineCall.mockImplementation(async (method) => {
+        if (method !== "dusk_sendTransaction") return true;
+        throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+      });
+      mocks.nodeAnswers = false;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const response = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-gone-1", params: { ...params, memo: "Onglet fermé" } }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-gone-1", waits: true }));
+        expect(mocks.engineClosed).toBeTypeOf("function");
+        mocks.engineClosed();
+        await expect(response).resolves.toMatchObject({ error: { message: "The wallet closed before the network answered, so nothing was sent.", data: { sent: false } } });
+
+        // Unlocked again, the network back: it never goes out by itself, and Home says it wasn't sent.
+        mocks.nodeAnswers = true;
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(sends()).toHaveLength(1);
+        const overview = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_OVERVIEW" }, {}, resolve));
+        await vi.advanceTimersByTimeAsync(0);
+        expect((await overview).waitingSends).toEqual([expect.objectContaining({ sendId: "send-gone-1", memo: "Onglet fermé", waiting: false, ended: "closed" })]);
+      } finally {
+        mocks.nodeAnswers = true;
+        vi.useRealTimers();
+      }
+    });
+
+    // Astra's: a payment waiting on one profile, another picked meanwhile, failed "Wallet changed while awaiting
+    // approval" as it went.
+    it("goes out from the profile its Review was for, whichever is picked as it waits", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const sends = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction");
+      engineCall.mockImplementation(async (method) => {
+        if (method !== "dusk_sendTransaction") return true;
+        if (sends().length === 1) throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+        return { hash: "0xprofile" };
+      });
+      const reviewed = { ...params, _approvalContext: { walletId: "acct0", profileIndex: 1, account: "acct1", nodeUrl: "https://testnet.nodes.dusk.network" } };
+      mocks.nodeAnswers = false;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const response = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-prof-1", params: reviewed }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-prof-1", waits: true }));
+        const overview = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_OVERVIEW" }, {}, resolve));
+        await vi.advanceTimersByTimeAsync(0);
+        expect((await overview).waitingSends).toEqual([expect.objectContaining({ sendId: "send-prof-1", profileIndex: 1 })]);
+        mocks.nodeAnswers = true;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "0xprofile" } });
+        expect(sends().map(([, sent]) => sent.profileIndex)).toEqual([1, 1]);
+        // Its second try, which waited, is told of before it's handed over.
+        expect(sends()[1][1]).toMatchObject({ sendId: "send-prof-1", sendKept: true });
+        expect(sends()[0][1].sendKept).toBeUndefined();
+      } finally {
+        mocks.nodeAnswers = true;
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps a waiting payment with its transaction's ID as the engine hands it over, for the engine's page alone", async () => {
+      const { getTxMeta } = await import("../shared/txStore.js");
+      // Kept by a background that stopped during its try: the engine still hands it over.
+      localStorage.setItem(
+        "dusk_waiting_sends_v1",
+        JSON.stringify({ "send-kept-1": { sendId: "send-kept-1", walletId: "acct0", nodeUrl: "https://testnet.nodes.dusk.network", profileIndex: 0, privacy: "public", to: "acct1", lux: "1", feeLux: "0", memo: "Gardé", at: 1 } })
+      );
+      const handing = { type: "DUSK_ENGINE_HANDING_OVER", sendId: "send-kept-1", hash: "0xkept" };
+      await expect(sendBackgroundMessage(handing, { url: "https://site.example/" })).resolves.toEqual({ ok: false });
+      await expect(sendBackgroundMessage(handing, { url: "chrome-extension://wallet/offscreen.html" })).resolves.toEqual({ ok: true });
+      // Nothing here waits on it: followed by its ID, never said not sent.
+      const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
+      expect(overview.waitingSends).toEqual([]);
+      await expect(getTxMeta("0xkept")).resolves.toMatchObject({ status: "unknown", recoveryReason: "handover_unclear", to: "acct1", amount: "1", walletId: "acct0" });
+    });
+
+    it("calls off a payment from Send waiting for the network, from a wallet page only, and sends nothing", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const sends = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction");
+      engineCall.mockImplementation(async (method) => {
+        if (method === "dusk_cancelSend") return { cancelled: true };
+        if (method !== "dusk_sendTransaction") return true;
+        throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+      });
+      mocks.nodeAnswers = false;
+      try {
+        const response = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-0002", params }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0002", waits: true }));
+        // Not from a site's page.
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_CANCEL_SEND", sendId: "send-0002" }, { url: "https://site.example/" })).resolves.toMatchObject({
+          error: { message: "Only the wallet can do that" },
+        });
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_CANCEL_SEND", sendId: "send-0002" }, { url: "chrome-extension://wallet/popup.html" })).resolves.toEqual({
+          ok: true,
+          result: { cancelled: true },
+        });
+        await expect(response).resolves.toMatchObject({ error: { message: "You cancelled it, so nothing was sent.", data: { sent: false, cancelled: true } } });
+        expect(sends()).toHaveLength(1);
+      } finally {
+        mocks.nodeAnswers = true;
+      }
     });
 
     it("goes from the wallet it was reviewed on, and a switch waits for it", async () => {

@@ -327,19 +327,77 @@ describe("after Confirm", () => {
     expect(rows().at(-1)).toBe("Network fee0.002136028 DUSK");
   });
 
-  // Amélie's: offline while Sending, nothing said a word of the connection.
-  it("says there's no connection while it's being sent offline, as it does while it waits for its block", async () => {
+  // Amélie's: offline while Sending, nothing said a word of the connection; and later, the Wi-Fi off at Confirm said
+  // "until you're back online", then "Not sent" a second on, and never waited as the web wallet does.
+  it("says a payment from Send waits for the network while it's offline, nothing gone out yet, with Cancel", async () => {
     const state = reviewState();
     const app = popup(state);
     await settle();
     const sending = await app.confirm();
     expect(steps()[0]).toEqual(["current", "Sending", "Signing it and handing it to the network"]);
+    expect(button("Cancel")).toBeUndefined();
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
     app.draw();
-    expect(steps()[0]).toEqual(["current", "Sending", "No connection. It can't reach the network until you're back online."]);
+    expect(steps()[0]).toEqual(["current", "Sending", "You're offline. Nothing has left your wallet yet. It goes out once the network answers."]);
+    expect(button("Cancel")).toBeTruthy();
+    // Where the wallet couldn't wait for it, it says it wasn't sent.
     sending.resolve({ error: { message: "NetworkError when attempting to fetch resource." } });
     await settle();
     expect(steps()[0]).toEqual(["failed", "Not sent", "Couldn't reach the network. No fee was charged."]);
+  });
+
+  it("says a payment that waits for the network does, and Cancel calls it off: not sent, no fee", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    const sending = await app.confirm();
+    // Sent with its own ID, by which it's called off, and the most its fee costs.
+    const [asked] = app.actions.send.mock.calls.find(([m]) => m.type === "DUSK_UI_SEND_TX");
+    expect(asked).toMatchObject({ sendId: state.sent.sendId, feeCapLux: "2500000" });
+    expect(state.sent.sendId).toMatch(/^[\w-]{8,64}$/);
+
+    // The wallet says it waits: online, the node silent.
+    state.sent.waits = true;
+    app.draw();
+    expect(steps()[0]).toEqual(["current", "Sending", "The network isn't answering. Nothing has left your wallet yet. It goes out once the network answers."]);
+    expect(body.querySelectorAll(".sent-actions button").map(visibleText)).toEqual(["Cancel", "Done"]);
+
+    app.actions.send.mockImplementation(async (message) => (message.type === "DUSK_UI_CANCEL_SEND" ? { ok: true, result: { cancelled: true } } : {}));
+    button("Cancel").click();
+    await settle();
+    expect(app.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_CANCEL_SEND", sendId: state.sent.sendId });
+    sending.resolve({ error: { message: "You cancelled it, so nothing was sent.", data: { sent: false, cancelled: true } } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", "You cancelled it, so nothing was sent. No fee was charged."]);
+    expect(rows().at(-1)).toBe("Network feeNone charged");
+  });
+
+  it("says a payment that went out already can't be cancelled, and follows it as it goes", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    const sending = await app.confirm();
+    state.sent.waits = true;
+    app.draw();
+    app.actions.send.mockImplementation(async (message) => (message.type === "DUSK_UI_CANCEL_SEND" ? { ok: true, result: { cancelled: false } } : {}));
+    button("Cancel").click();
+    await settle();
+    expect(app.actions.showToast).toHaveBeenCalledWith("It went out already, so it can't be cancelled.");
+    sending.resolve({ ok: true, result: { hash: HASH } });
+    await settle();
+    expect(steps()[1]).toEqual(["current", "Sent to the network", "Waiting for a block, usually about 10 seconds"]);
+    expect(button("Cancel")).toBeUndefined();
+  });
+
+  it("says a send other than a payment from Send can't reach the network offline, never that it waits", async () => {
+    const state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountDusk: "2", amountLux: dusk(2) } };
+    const app = popup(state, overview(), convertConfirmView);
+    await settle();
+    await app.confirm();
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    app.draw();
+    expect(steps()[0]).toEqual(["current", "Sending", "You're offline, so it can't reach the network."]);
+    expect(button("Cancel")).toBeUndefined();
   });
 
   it("says there's no connection while a send waits for its block offline, not how long blocks take", async () => {

@@ -205,6 +205,97 @@ describe("a send that fails, and whether it went out", () => {
   });
 });
 
+describe("a payment from Send, called off", () => {
+  // Amélie's: the extension gave up on a send it couldn't get out, where the web wallet waits with Cancel. Cancel
+  // and the hand-over are settled here, where the transaction is handed over: never both.
+  const payment = (sendId) => ({ ...KINDS["a public transfer"](), sendId });
+
+  it("never reaches the node once called off, also as the node is checking it, and says nothing was sent", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    // Called off as the node checks it: the hand-over after is refused.
+    const fetch = node.fetch;
+    vi.stubGlobal("fetch", async (input, init) => {
+      if (String(input).endsWith("/preverify")) expect(engine.cancelSend({ sendId: "send-checking" })).toEqual({ cancelled: true });
+      return fetch(input, init);
+    });
+    const error = await engine.sendTransaction(payment("send-checking")).catch((e) => e);
+    expect(error.data).toMatchObject({ sent: false, cancelled: true });
+    expect(error.message).toBe("You cancelled it, so nothing was sent.");
+    // Checked, never handed over.
+    expect(node.signed).toHaveLength(1);
+
+    // Called off before its try came: refused as it comes, nothing signed.
+    expect(engine.cancelSend({ sendId: "send-early" })).toEqual({ cancelled: true });
+    await expect(engine.sendTransaction(payment("send-early"))).rejects.toMatchObject({ data: { sent: false, cancelled: true } });
+    expect(node.signed).toHaveLength(1);
+  });
+
+  it("goes on once handed over, which Cancel can't undo, and is never handed over twice", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const sent = await engine.sendTransaction(payment("send-out"));
+    expect(sent.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(engine.cancelSend({ sendId: "send-out" })).toEqual({ cancelled: false });
+    const handedOver = node.signed.length;
+    await expect(engine.sendTransaction(payment("send-out"))).rejects.toMatchObject({ data: { sent: "unknown" } });
+    expect(node.signed).toHaveLength(handedOver);
+  });
+});
+
+describe("a payment from Send that waited for the network", () => {
+  const payment = (sendId, waited = false) => ({ ...KINDS["a public transfer"](), sendId, ...(waited ? { sendKept: true } : {}) });
+
+  // Astra's: a payment that waited and reached the node as the wallet stopped was said not sent once it was back.
+  it("is told of with its ID before it's handed over, which waits for it; one that can't be told of isn't handed over", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const asked = [];
+    const fetch = node.fetch;
+    vi.stubGlobal("fetch", async (input, init) => {
+      asked.push(new URL(String(input), "https://wallet.invalid").pathname);
+      return fetch(input, init);
+    });
+    const handedOver = () => asked.filter((path) => path.endsWith("/propagate")).length;
+    const told = [];
+    engine.setHandOverHook(async (sent) => told.push({ ...sent, handedOver: handedOver() }));
+
+    const sent = await engine.sendTransaction(payment("send-waited", true));
+    expect(told).toEqual([{ sendId: "send-waited", hash: sent.hash, handedOver: 0 }]);
+    expect(handedOver()).toBe(1);
+
+    // A first try, which waited for nothing, isn't told of.
+    await engine.sendTransaction(payment("send-first"));
+    expect([told.length, handedOver()]).toEqual([1, 2]);
+
+    // Not told, as when what's kept can't be written: never handed over, and nothing went out.
+    engine.setHandOverHook(async () => {
+      throw new Error("Storage is full");
+    });
+    const error = await engine.sendTransaction(payment("send-untold", true)).catch((e) => e);
+    expect(error.data).toMatchObject({ sent: false });
+    expect(handedOver()).toBe(2);
+    engine.setHandOverHook(null);
+  });
+});
+
+describe("a prover out of reach", () => {
+  // Astra's: a shielded payment proved as the network went failed, the engine's words for that read as no network.
+  it("is the network out of reach, as the engine marks it", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const network = await engine.ensureNetwork();
+    const fetch = node.fetch;
+    vi.stubGlobal("fetch", async (input, init) => {
+      if (String(input).includes("/on/prover/prove")) throw new TypeError("Failed to fetch");
+      return fetch(input, init);
+    });
+    const error = await network.prove(new Uint8Array(8)).catch((e) => e);
+    expect(error.message).toMatch(/^Could not reach prover \(/);
+    expect(error.data).toEqual({ unreachable: true });
+  });
+});
+
 describe("a known network's own node", () => {
   it("gets its chain ID from the networks file, whatever it says or doesn't", async () => {
     const kept = await addNode(TESTNET);

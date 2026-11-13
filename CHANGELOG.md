@@ -76,6 +76,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Sent a payment that couldn't reach the network at Confirm once the network answers, as the web wallet does, with Cancel on its screen and on Home until then, and payments that waited one at a time, in their order.
+- Said on Home that a payment waiting for the network wasn't sent once the wallet closed or locked before it went, with Send it now and Drop, never sending it by itself.
+- Listed each payment waiting for the network on Home with its amount, recipient, memo and time, and said on Send and Review when the same payment is waiting already.
+- Left payments waiting for the network out of Send's Available and Max.
 - Showed money that came in on Home and in Activity by itself while the wallet shows, read again every 30 seconds, and had Refresh read Activity too.
 - Moved on to the next box at a space typed after a recovery word on a phone, as Enter does, rather than running every word into the first box.
 - Put revokes, and approvals no migration spent, in the export, each once, in the file of the profile its migration paid, as the web wallet does, and said whose network fees on other chains the file has and which it may be short of.

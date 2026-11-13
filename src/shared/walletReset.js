@@ -2,7 +2,8 @@
 // wallet's transactions, shielded notes, history, deposits' arrivals on
 // DuskEVM, contacts, profile labels and tokens, the wallets' names, what sites
 // asked, the sends the app on Android looks for while it's away, Send's draft
-// kept by the page, and the settings, so the network is Mainnet's own node
+// kept by the page, payments from Send that waited for the network and
+// weren't sent, and the settings, so the network is Mainnet's own node
 // again and no address stays. And what removing one wallet clears of it alone
 // (forgetWalletData).
 //
@@ -29,6 +30,7 @@ import { clearSiteRecords, forgetWalletSiteRecords } from "./siteRecords.js";
 import { clearShieldedStore, forgetWalletNotes } from "./shieldedStore.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { clearTxs, forgetWalletTxs } from "./txStore.js";
+import { clearWaitingSends, forgetWalletUnsent } from "./waitingSends.js";
 import { clearWallets } from "./wallets.js";
 import { forgetWalletRequests, keepOnlyRequestsOf } from "./paymentRequests.js";
 import { forgetAppArrivals } from "../platform/notices.js";
@@ -69,6 +71,8 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     forgetNoticeTokens(),
     // A payment typed in Send, kept by the page: in the app, past a restart.
     forgetSendDrafts(),
+    // Payments from Send that waited for the network, or weren't sent.
+    clearWaitingSends(),
     // Names checked and rates read, kept by account or by node, and the password on big sends.
     storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES, STORAGE_KEYS.MEASURED_RATES, STORAGE_KEYS.SEND_PASSWORD]),
   ]);
@@ -133,6 +137,7 @@ export async function forgetWalletData({ walletId, accounts }) {
     forgetAppArrivals(id),
     forgetNoticeTokens(id),
     forgetSendDrafts(id),
+    forgetWalletUnsent(id),
   ]);
   return results.every((r) => r.status === "fulfilled");
 }

@@ -3098,6 +3098,51 @@ body.page--popup .brand-mark {
   margin-bottom: 6px;
 }
 
+/* Payments from Send waiting for the network, or not sent, on Home: each
+   says what it pays, to whom, its memo and when it was made, with its
+   buttons under it. */
+.wallet-dashboard > .home-waiting-list {
+  grid-column: 1;
+  order: 2;
+}
+
+.home-waiting-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.home-waiting .callout-title {
+  font-size: 13px;
+  margin-bottom: 2px;
+  overflow-wrap: anywhere;
+}
+
+.home-waiting__made {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.home-waiting__note {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.home-waiting__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.home-waiting__actions .home-waiting__btn {
+  width: auto;
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
 /* -------------------------------------------------------
    Fee / Gas compact rows
    ------------------------------------------------------- */

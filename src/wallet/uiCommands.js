@@ -101,7 +101,7 @@ function serializeResult(type, result) {
 }
 
 // The transaction as it would go: with the gas it goes with, as the send does it.
-async function sendParams(message, { engineCall, ensureEngineConfigured }) {
+export async function sendParams(message, { engineCall, ensureEngineConfigured }) {
   await ensureEngineConfigured();
   const stats = await engineCall("dusk_getCachedGasPrice").catch(() => null);
   return applyTxDefaults(message.params ?? {}, { dynamicPrice: stats?.median });

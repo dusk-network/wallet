@@ -35,4 +35,5 @@ export const STORAGE_KEYS = {
   WORKER_RELOAD: "dusk_worker_reload_v1", // version: the last one the pages reloaded for an old worker
   WALLETS: "dusk_wallets_v1", // { active: key, wallets: { [key]: { walletId, accounts, name? } } }: what the switcher shows of each wallet (wallets.js)
   NOTICE_TOKENS: "dusk_notice_tokens_v1", // { [hash]: { token, wallet, at } }: the app's arrival notices' tokens, each taken once (noticeTokens.js)
+  WAITING_SENDS: "dusk_waiting_sends_v1", // { [sendId]: { walletId, nodeUrl, profileIndex, privacy, to, toName?, lux, feeLux, memo, at, ended?, error? } }: payments from Send waiting for the network, or not sent (waitingSends.js)
 };

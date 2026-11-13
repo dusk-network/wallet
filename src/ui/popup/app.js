@@ -804,6 +804,23 @@ function installTxStatusListener() {
           return;
         }
 
+        // A payment from Send waits for the network, or is tried again as it
+        // answers: its Sent screen says so, with Cancel while it waits, and
+        // Home lists it.
+        if (msg?.type === "DUSK_UI_SEND_WAITING") {
+          const sent = state.sent;
+          if (sent?.sendId && sent.sendId === msg.sendId && sent.phase === "sending" && sent.waits !== Boolean(msg.waits)) {
+            sent.waits = Boolean(msg.waits);
+            if (state.route === "sent") {
+              toaster.announce(sentAnnouncement(sent, state.overview));
+              render({ cached: true }).catch(() => {});
+            }
+          }
+          state.needsRefresh = true;
+          if (state.route === "home") render({ forceRefresh: true }).catch(() => {});
+          return;
+        }
+
         if (msg?.type === "DUSK_UI_SHIELDED_STATUS") {
           const nextKey = shieldedStatusKey(msg.status);
           if (nextKey && nextKey === lastShieldedStatusKey) return;

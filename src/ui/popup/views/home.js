@@ -1,4 +1,4 @@
-import { formatDusk, formatDuskExact, groupThousands, safeBigInt } from "../../../shared/amount.js";
+import { formatDusk, formatDuskExact, formatLuxForInput, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { h } from "../../lib/dom.js";
 import { assetsSectionsView } from "./assets.js";
@@ -9,6 +9,14 @@ import { bracketTitle } from "../../components/BracketTitle.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { keptSendDraft } from "../../lib/sendDraft.js";
+import { shortAddress } from "../../lib/strings.js";
+import { contactNameText } from "../../lib/contactNames.js";
+import { unsentOf, waitingOf } from "../../lib/waiting.js";
+import { safeTextEl } from "../../components/SafeText.js";
+import { ownProfileName } from "../../components/ProfileName.js";
+import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
+import { whenAtText } from "./txRow.js";
+import { reasonText } from "./sent.js";
 
 // In the wallet's words: what a node says of it is that node's to choose.
 const BALANCE_UNREAD = "Couldn't read your balance from this node. Try again in a moment.";
@@ -284,11 +292,108 @@ export function homeView(ov, { state, actions } = {}) {
         bracketTitle({ class: "dashboard-section-label", text: "Actions" }),
         actionBar,
       ]),
+      // Payments from Send waiting for the network, and those that weren't sent.
+      waitingSection(ov, { state, actions }),
       // Activity first, then the assets, as on a bank app's home.
       recentActivitySection(ov, { state, actions }),
       ...(getStarted ? [getStarted] : assetsSectionsView(ov, { state, actions })),
     ]),
   ];
+}
+
+/**
+ * The payments from Send that wait for the network, each with what it pays,
+ * to whom, its memo and when it was made, to tell them apart, and Cancel; and
+ * those that stopped waiting without going out, said plainly, with Send it
+ * now, which takes it to Review again, and Drop. None goes out by itself once
+ * it's said not sent.
+ * @returns {HTMLElement | null}
+ */
+function waitingSection(ov, { state, actions } = {}) {
+  const waiting = waitingOf(ov);
+  const unsent = unsentOf(ov);
+  if (!waiting.length && !unsent.length) return null;
+  const hidden = balancesHidden(ov);
+  const contacts = Array.isArray(state?.addressBook?.items) ? state.addressBook.items : [];
+  // To whom: a contact's name, your own profile's, the .dusk name it was sent to, or the address.
+  const toText = (send) => {
+    const key = String(send.to ?? "").toLowerCase();
+    const contact = contactNameText(contacts.find((c) => String(c?.address ?? "").toLowerCase() === key)?.name);
+    const own = ownProfileName(ov, send.to);
+    return contact || (own ? `your ${own}` : "") || String(send.toName ?? "") || shortAddress(String(send.to ?? ""));
+  };
+  // "0.01 DUSK to Lucas", its amount hidden with the balances.
+  const what = (send) => [balance(hidden, formatDuskExact(send.lux)), ` DUSK to ${toText(send)}`];
+  // Its memo and when it was made: "“Hors ligne un” · made at 02:34".
+  const madeLine = (send) =>
+    h("div", { class: "muted home-waiting__made" }, [
+      ...(String(send.memo ?? "").trim() ? ["“", safeTextEl(send.memo), "” · "] : []),
+      `made ${whenAtText(Number(send.at) || Date.now())}`,
+    ]);
+  const refresh = () => {
+    state.needsRefresh = true;
+    actions?.render?.({ forceRefresh: true })?.catch?.(() => {});
+  };
+  const said = (send) => `${hidden ? "••••" : formatDuskExact(send.lux)} DUSK to ${toText(send)}`;
+  const button = (text, onclick, className = "btn-outline") =>
+    h("button", {
+      class: `${className} home-waiting__btn`,
+      type: "button",
+      text,
+      onclick: async (event) => {
+        if (event?.currentTarget) event.currentTarget.disabled = true;
+        await onclick();
+      },
+    });
+
+  const waitingBox = (send) =>
+    h("div", { class: "callout home-waiting", role: "status" }, [
+      h("div", { class: "callout-title" }, ["Not sent yet: ", ...what(send)]),
+      madeLine(send),
+      h("p", { class: "muted home-waiting__note", text: send.waits ? "It goes out once the network answers." : "It's being sent." }),
+      h("div", { class: "home-waiting__actions" }, [
+        button("Cancel", async () => {
+          const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null);
+          actions?.showToast?.(
+            res?.result?.cancelled
+              ? { text: `Not sent: ${said(send)}. Nothing was sent and no fee was charged.`, tone: "ok" }
+              : res?.error
+                ? "Couldn't cancel it. Try again."
+                : "It went out already, so it can't be cancelled."
+          );
+          refresh();
+        }),
+      ]),
+    ]);
+
+  const unsentBox = (send) =>
+    h("div", { class: "callout warn home-waiting home-waiting--unsent", role: "status" }, [
+      h("div", { class: "callout-title" }, ["Not sent: ", ...what(send)]),
+      madeLine(send),
+      h("p", {
+        class: "muted home-waiting__note",
+        text: NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "Nothing was sent and no fee was charged."].filter(Boolean).join(" "),
+      }),
+      h("div", { class: "home-waiting__actions" }, [
+        // To Review again, through Send, with what it paid filled in.
+        button(
+          "Send it now",
+          async () => {
+            await Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: send.sendId })).catch(() => {});
+            state.route = "send";
+            state.draft = { to: String(send.to ?? ""), amountDusk: formatLuxForInput(safeBigInt(send.lux, 0n)), amountMasked: hidden, memo: String(send.memo ?? "") };
+            actions?.render?.()?.catch?.(() => {});
+          },
+          "btn-primary"
+        ),
+        button("Drop", async () => {
+          await Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: send.sendId })).catch(() => {});
+          refresh();
+        }),
+      ]),
+    ]);
+
+  return h("div", { class: "home-waiting-list" }, [...waiting.map(waitingBox), ...unsent.map(unsentBox)]);
 }
 
 /**

@@ -158,6 +158,7 @@ vi.mock("./engineHost.js", () => ({
   getEngineStatusStrict: mocks.getEngineStatus,
   invalidateEngineConfig: vi.fn(() => {}),
   handleEngineReady: vi.fn(() => {}),
+  onEngineClosed: vi.fn(),
 }));
 
 vi.mock("./rpc.js", () => ({
